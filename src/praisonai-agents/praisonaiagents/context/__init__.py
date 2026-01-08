@@ -83,6 +83,23 @@ __all__ = [
     "redact_sensitive",
     "format_human_snapshot",
     "format_json_snapshot",
+    "validate_monitor_path",
+    "should_include_content",
+    "load_ignore_patterns",
+    # Manager Facade (NEW)
+    "ContextManager",
+    "MultiAgentContextManager",
+    "create_context_manager",
+    "ManagerConfig",
+    "ContextPolicy",
+    "EstimationMode",
+    "ContextShareMode",
+    "ToolShareMode",
+    "OptimizationEvent",
+    "OptimizationEventType",
+    "EstimationMetrics",
+    "PerToolBudget",
+    "SnapshotHookData",
     # Fast Context (legacy)
     "FastContext",
     "FastContextResult",
@@ -130,9 +147,18 @@ def __getattr__(name: str):
     
     # Monitoring
     if name in ("ContextMonitor", "MultiAgentMonitor", "redact_sensitive",
-                "format_human_snapshot", "format_json_snapshot"):
+                "format_human_snapshot", "format_json_snapshot",
+                "validate_monitor_path", "should_include_content", "load_ignore_patterns"):
         from . import monitor
         return getattr(monitor, name)
+    
+    # Manager Facade
+    if name in ("ContextManager", "MultiAgentContextManager", "create_context_manager",
+                "ManagerConfig", "ContextPolicy", "EstimationMode", "ContextShareMode",
+                "ToolShareMode", "OptimizationEvent", "OptimizationEventType",
+                "EstimationMetrics", "PerToolBudget", "SnapshotHookData"):
+        from . import manager
+        return getattr(manager, name)
     
     # Fast Context (legacy)
     if name == "FastContext":

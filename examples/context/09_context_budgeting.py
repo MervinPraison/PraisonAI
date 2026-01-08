@@ -2,16 +2,52 @@
 """
 Context Budgeting Example
 
-Demonstrates how to use the ContextBudgeter to allocate token budgets
-across different context segments for various models.
+Demonstrates how to use context budgeting with Agent via context= param,
+and also shows low-level ContextBudgeter usage for advanced scenarios.
+
+Agent-Centric Quick Start:
+    from praisonaiagents import Agent
+    from praisonaiagents.context import ManagerConfig
+    
+    agent = Agent(
+        instructions="You are helpful.",
+        context=ManagerConfig(output_reserve=16000),  # Custom output reserve
+    )
 """
 
+from praisonaiagents import Agent
 from praisonaiagents.context import (
+    ManagerConfig,
     ContextBudgeter,
     BudgetAllocation,
     get_model_limit,
     get_output_reserve,
 )
+
+
+def agent_centric_example():
+    """Agent-centric usage - recommended approach."""
+    print("=" * 60)
+    print("Agent-Centric Context Budgeting")
+    print("=" * 60)
+    
+    # Simple: Enable context management with defaults
+    agent = Agent(
+        instructions="You are a helpful assistant.",
+        context=True,
+    )
+    print(f"Agent with context=True created")
+    print(f"Context manager: {agent.context_manager is not None}")
+    
+    # Custom: Specify output reserve
+    agent2 = Agent(
+        instructions="You are a code assistant.",
+        context=ManagerConfig(output_reserve=16000),
+    )
+    print(f"Agent with custom output_reserve created")
+    if agent2.context_manager:
+        stats = agent2.context_manager.get_stats()
+        print(f"Output reserve: {stats.get('output_reserve', 'N/A')}")
 
 
 def main():

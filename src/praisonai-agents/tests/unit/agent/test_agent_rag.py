@@ -22,7 +22,10 @@ class TestAgentRAGConfig:
             rag_config={"include_citations": True, "top_k": 5}
         )
         
-        assert agent._rag_config == {"include_citations": True, "top_k": 5}
+        # rag_config is merged into _retrieval_config
+        assert agent._retrieval_config is not None
+        assert agent._retrieval_config.top_k == 5
+        assert agent._retrieval_config.citations is True
     
     def test_agent_without_rag_config(self):
         """Test that Agent works without rag_config."""
@@ -34,7 +37,8 @@ class TestAgentRAGConfig:
             knowledge=["test.txt"]
         )
         
-        assert agent._rag_config is None
+        # Default retrieval config is created for knowledge
+        assert agent._retrieval_config is not None
     
     def test_agent_without_knowledge_has_no_rag_config(self):
         """Test that Agent without knowledge has no rag_config."""
@@ -45,7 +49,7 @@ class TestAgentRAGConfig:
             instructions="Test agent"
         )
         
-        assert agent._rag_config is None
+        # No knowledge means no retrieval config needed
         assert agent._rag_instance is None
 
 
@@ -164,7 +168,7 @@ class TestAgentKnowledgeContext:
 
 
 class TestAgentRAGIntegration:
-    """Integration tests for Agent + RAG."""
+    """Tests for Agent RAG integration."""
     
     def test_agent_rag_config_passed_to_rag_instance(self):
         """Test that rag_config is passed to RAG instance."""
@@ -181,7 +185,7 @@ class TestAgentRAGIntegration:
             }
         )
         
-        # Verify config is stored
-        assert agent._rag_config["include_citations"] is True
-        assert agent._rag_config["top_k"] == 10
-        assert agent._rag_config["min_score"] == 0.5
+        # Verify config is stored in _retrieval_config
+        assert agent._retrieval_config.citations is True
+        assert agent._retrieval_config.top_k == 10
+        assert agent._retrieval_config.min_score == 0.5

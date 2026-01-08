@@ -26,12 +26,36 @@ _LAZY_IMPORTS = {
     "ContextPack": ("praisonaiagents.rag.models", "ContextPack"),
     "RAGResult": ("praisonaiagents.rag.models", "RAGResult"),
     "RAGConfig": ("praisonaiagents.rag.models", "RAGConfig"),
-    "RetrievalStrategy": ("praisonaiagents.rag.models", "RetrievalStrategy"),
     # Unified retrieval config (Agent-first)
     "RetrievalConfig": ("praisonaiagents.rag.retrieval_config", "RetrievalConfig"),
     "RetrievalPolicy": ("praisonaiagents.rag.retrieval_config", "RetrievalPolicy"),
     "CitationsMode": ("praisonaiagents.rag.retrieval_config", "CitationsMode"),
     "create_retrieval_config": ("praisonaiagents.rag.retrieval_config", "create_retrieval_config"),
+    # Token Budget (Phase 1)
+    "TokenBudget": ("praisonaiagents.rag.budget", "TokenBudget"),
+    "get_model_context_window": ("praisonaiagents.rag.budget", "get_model_context_window"),
+    "BudgetEnforcerProtocol": ("praisonaiagents.rag.budget", "BudgetEnforcerProtocol"),
+    "DefaultBudgetEnforcer": ("praisonaiagents.rag.budget", "DefaultBudgetEnforcer"),
+    "estimate_tokens": ("praisonaiagents.rag.budget", "estimate_tokens"),
+    # Strategy Selection (Phase 3) - RetrievalStrategy now from strategy module
+    "RetrievalStrategy": ("praisonaiagents.rag.strategy", "RetrievalStrategy"),
+    "select_strategy": ("praisonaiagents.rag.strategy", "select_strategy"),
+    "get_strategy_description": ("praisonaiagents.rag.strategy", "get_strategy_description"),
+    "STRATEGY_THRESHOLDS": ("praisonaiagents.rag.strategy", "STRATEGY_THRESHOLDS"),
+    # SmartRetriever (Phase 4)
+    "SmartRetriever": ("praisonaiagents.rag.retriever", "SmartRetriever"),
+    "RetrievalResult": ("praisonaiagents.rag.retriever", "RetrievalResult"),
+    "SimpleReranker": ("praisonaiagents.rag.retriever", "SimpleReranker"),
+    "RetrieverProtocol": ("praisonaiagents.rag.retriever", "RetrieverProtocol"),
+    "RerankerProtocol": ("praisonaiagents.rag.retriever", "RerankerProtocol"),
+    # Compressor (Phase 5)
+    "ContextCompressor": ("praisonaiagents.rag.compressor", "ContextCompressor"),
+    "CompressionResult": ("praisonaiagents.rag.compressor", "CompressionResult"),
+    "CompressorProtocol": ("praisonaiagents.rag.compressor", "CompressorProtocol"),
+    # Summarizer (Phase 6)
+    "HierarchicalSummarizer": ("praisonaiagents.rag.summarizer", "HierarchicalSummarizer"),
+    "SummaryNode": ("praisonaiagents.rag.summarizer", "SummaryNode"),
+    "HierarchyResult": ("praisonaiagents.rag.summarizer", "HierarchyResult"),
     # Protocols
     "ContextBuilderProtocol": ("praisonaiagents.rag.protocols", "ContextBuilderProtocol"),
     "CitationFormatterProtocol": ("praisonaiagents.rag.protocols", "CitationFormatterProtocol"),

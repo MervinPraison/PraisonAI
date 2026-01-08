@@ -683,7 +683,7 @@ class Knowledge:
         return self._process_single_input(file_path, user_id, agent_id, run_id, metadata)
 
     def _process_single_input(self, input_path, user_id=None, agent_id=None, run_id=None, metadata=None):
-        """Process a single input which can be a file path or URL."""
+        """Process a single input which can be a file path, directory, or URL."""
         try:
             # Define supported file extensions
             DOCUMENT_EXTENSIONS = {
@@ -692,11 +692,44 @@ class Knowledge:
                 'text': ('.txt', '.csv', '.json', '.xml', '.md', '.html', '.htm'),
                 'archive': '.zip'
             }
+            
+            # Get all supported extensions as a flat tuple
+            all_extensions = []
+            for exts in DOCUMENT_EXTENSIONS.values():
+                if isinstance(exts, tuple):
+                    all_extensions.extend(exts)
+                else:
+                    all_extensions.append(exts)
+            all_extensions = tuple(all_extensions)
 
             # Check if input is URL
             if isinstance(input_path, str) and (input_path.startswith('http://') or input_path.startswith('https://')):
                 self._log(f"Processing URL: {input_path}")
                 raise NotImplementedError("URL processing not yet implemented")
+            
+            # CRITICAL FIX: Check if input is a directory - recursively process all files
+            if os.path.isdir(input_path):
+                self._log(f"Processing directory: {input_path}")
+                all_results = []
+                
+                # Walk through directory and process all supported files
+                for root, dirs, files in os.walk(input_path):
+                    for filename in files:
+                        file_path = os.path.join(root, filename)
+                        # Only process files with supported extensions
+                        if filename.lower().endswith(all_extensions):
+                            try:
+                                result = self._process_single_input(
+                                    file_path, user_id, agent_id, run_id, metadata
+                                )
+                                all_results.extend(result.get('results', []))
+                            except Exception as e:
+                                logger.warning(f"Failed to process file {file_path}: {e}")
+                
+                if not all_results:
+                    logger.warning(f"No supported files found in directory: {input_path}")
+                
+                return {'results': all_results, 'relations': []}
 
             # Check if input ends with any supported extension
             is_supported_file = any(input_path.lower().endswith(ext) 
@@ -771,3 +804,157 @@ class Knowledge:
         except Exception as e:
             logger.error(f"Error processing input {input_path}: {str(e)}", exc_info=True)
             raise
+    
+    def index(
+        self,
+        path: str,
+        incremental: bool = True,
+        force: bool = False,
+        include_glob: list = None,
+        exclude_glob: list = None,
+        user_id: str = None,
+        agent_id: str = None,
+        run_id: str = None,
+    ):
+        """
+        Index a directory or file for knowledge retrieval.
+        
+        Supports incremental indexing - only changed files are re-indexed.
+        
+        Args:
+            path: Directory or file path to index
+            incremental: If True, only index changed files (default: True)
+            force: If True, re-index all files regardless of changes
+            include_glob: List of glob patterns to include (e.g., ["*.py", "*.md"])
+            exclude_glob: List of glob patterns to exclude (e.g., ["*.log", "test_*"])
+            user_id: Optional user ID for scoping
+            agent_id: Optional agent ID for scoping
+            run_id: Optional run ID for scoping
+            
+        Returns:
+            IndexResult with indexing statistics
+        """
+        from .indexing import IndexResult, CorpusStats, IgnoreMatcher, FileTracker
+        import time as time_module
+        import fnmatch as fnmatch_module
+        
+        start_time = time_module.time()
+        
+        result = IndexResult()
+        
+        # Initialize file tracker for incremental indexing
+        state_dir = os.path.join(os.path.dirname(path) if os.path.isfile(path) else path, ".praison")
+        os.makedirs(state_dir, exist_ok=True)
+        state_file = os.path.join(state_dir, ".index_state.json")
+        
+        tracker = FileTracker(state_file=state_file)
+        if incremental and not force:
+            tracker.load()
+        
+        # Initialize ignore matcher
+        ignore_matcher = IgnoreMatcher.from_directory(path if os.path.isdir(path) else os.path.dirname(path))
+        
+        # Collect files to index
+        files_to_index = []
+        
+        if os.path.isfile(path):
+            files_to_index = [path]
+        else:
+            for root, dirs, files in os.walk(path):
+                # Skip hidden directories
+                dirs[:] = [d for d in dirs if not d.startswith('.')]
+                
+                for filename in files:
+                    filepath = os.path.join(root, filename)
+                    rel_path = os.path.relpath(filepath, path)
+                    
+                    # Check ignore patterns
+                    if ignore_matcher.should_ignore(rel_path):
+                        continue
+                    
+                    # Check include patterns
+                    if include_glob:
+                        matched = False
+                        for pattern in include_glob:
+                            if fnmatch_module.fnmatch(filename, pattern):
+                                matched = True
+                                break
+                        if not matched:
+                            continue
+                    
+                    # Check exclude patterns
+                    if exclude_glob:
+                        excluded = False
+                        for pattern in exclude_glob:
+                            if fnmatch_module.fnmatch(filename, pattern) or fnmatch_module.fnmatch(rel_path, pattern):
+                                excluded = True
+                                break
+                        if excluded:
+                            continue
+                    
+                    files_to_index.append(filepath)
+        
+        # Index files
+        total_chunks = 0
+        for filepath in files_to_index:
+            try:
+                # Check if file has changed (for incremental indexing)
+                if incremental and not force and not tracker.has_changed(filepath):
+                    result.files_skipped += 1
+                    continue
+                
+                # Index the file
+                add_result = self.add(
+                    filepath,
+                    user_id=user_id,
+                    agent_id=agent_id,
+                    run_id=run_id,
+                )
+                
+                # Count chunks
+                if add_result and isinstance(add_result, dict):
+                    chunks = len(add_result.get('results', []))
+                    total_chunks += chunks
+                
+                # Mark as indexed
+                file_info = tracker.get_file_info(filepath)
+                tracker.mark_indexed(filepath, file_info)
+                
+                result.files_indexed += 1
+                
+            except Exception as e:
+                result.errors.append(f"{filepath}: {str(e)}")
+        
+        # Save tracker state
+        if incremental:
+            tracker.save()
+        
+        # Calculate stats
+        result.chunks_created = total_chunks
+        result.duration_seconds = time_module.time() - start_time
+        result.corpus_stats = CorpusStats(
+            file_count=result.files_indexed + result.files_skipped,
+            chunk_count=total_chunks,
+            path=path,
+            indexed_at=datetime.now().isoformat(),
+        )
+        
+        # Store corpus stats for later retrieval
+        self._corpus_stats = result.corpus_stats
+        
+        return result
+    
+    def get_corpus_stats(self):
+        """
+        Get statistics about the indexed corpus.
+        
+        Returns:
+            CorpusStats with file count, chunk count, and strategy recommendation
+        """
+        from .indexing import CorpusStats
+        
+        if hasattr(self, '_corpus_stats') and self._corpus_stats:
+            return self._corpus_stats
+        
+        # Return empty stats if not indexed
+        return CorpusStats()

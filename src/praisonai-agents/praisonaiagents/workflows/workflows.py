@@ -299,6 +299,11 @@ class Workflow:
     status: str = "not_started"  # not_started, running, completed, failed
     step_statuses: Dict[str, str] = field(default_factory=dict)  # {step_name: status}
     
+    # Context management (single param for all context features)
+    context: Optional[Any] = False  # False=disabled, True=defaults, ManagerConfig, or ContextManager
+    _context_manager: Optional[Any] = field(default=None, repr=False)
+    _context_manager_initialized: bool = field(default=False, repr=False)
+    
     def to_dict(self) -> Dict[str, Any]:
         return {
             "name": self.name,

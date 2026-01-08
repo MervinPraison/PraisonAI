@@ -2,11 +2,25 @@
 """
 Context Optimization Example
 
-Demonstrates how to use various optimization strategies to reduce
-context size when approaching model limits.
+Demonstrates how to use context optimization with Agent via context= param,
+and also shows low-level optimizer usage for advanced scenarios.
+
+Agent-Centric Quick Start:
+    from praisonaiagents import Agent
+    from praisonaiagents.context import ManagerConfig
+    
+    agent = Agent(
+        instructions="You are helpful.",
+        context=ManagerConfig(
+            auto_compact=True,
+            strategy="smart",  # truncate, sliding_window, summarize, smart
+        ),
+    )
 """
 
+from praisonaiagents import Agent
 from praisonaiagents.context import (
+    ManagerConfig,
     get_optimizer,
     OptimizerStrategy,
     TruncateOptimizer,
@@ -15,6 +29,27 @@ from praisonaiagents.context import (
     SmartOptimizer,
     estimate_messages_tokens,
 )
+
+
+def agent_centric_example():
+    """Agent-centric usage - recommended approach."""
+    print("=" * 60)
+    print("Agent-Centric Context Optimization")
+    print("=" * 60)
+    
+    # Enable auto-compaction with smart strategy
+    agent = Agent(
+        instructions="You are a helpful assistant.",
+        context=ManagerConfig(
+            auto_compact=True,
+            compact_threshold=0.8,
+            strategy="smart",
+        ),
+    )
+    print("Agent with auto-compaction enabled")
+    print(f"Strategy: smart")
+    print(f"Threshold: 0.8 (80% of context budget)")
+    print(f"Context manager: {agent.context_manager is not None}")
 
 
 def main():

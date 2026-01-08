@@ -17,38 +17,40 @@ from typing import Dict, Any, List
 # ============================================================================
 
 class TestAutoSummarization:
-    """Tests for automatic conversation summarization."""
+    """Tests for automatic conversation summarization.
     
-    def test_summarization_config_defaults(self):
-        """Test default summarization configuration."""
-        from praisonaiagents.agent import Agent
-        agent = Agent(instructions="Test agent")
-        
-        # Should have auto_summarize disabled by default
-        assert hasattr(agent, 'auto_summarize')
-        assert agent.auto_summarize == False
-        
-    def test_summarization_config_enabled(self):
-        """Test enabling auto-summarization."""
-        from praisonaiagents.agent import Agent
-        agent = Agent(
-            instructions="Test agent",
-            auto_summarize=True,
-            summarize_threshold=0.8
-        )
-        
-        assert agent.auto_summarize == True
-        assert agent.summarize_threshold == 0.8
-        
-    def test_summarization_threshold_validation(self):
-        """Test threshold must be between 0 and 1."""
+    Note: auto_summarize and summarize_threshold params have been removed from Agent.
+    Summarization is now controlled via context=ManagerConfig(auto_compact=True, compact_threshold=0.8).
+    These tests verify the old params are rejected.
+    """
+    
+    def test_old_summarization_params_rejected(self):
+        """Test that old auto_summarize params are rejected."""
         from praisonaiagents.agent import Agent
         
-        with pytest.raises(ValueError):
-            Agent(instructions="Test", auto_summarize=True, summarize_threshold=1.5)
+        # Old params should raise TypeError (unexpected keyword argument)
+        with pytest.raises(TypeError):
+            Agent(instructions="Test agent", auto_summarize=True)
             
-        with pytest.raises(ValueError):
-            Agent(instructions="Test", auto_summarize=True, summarize_threshold=-0.1)
+        with pytest.raises(TypeError):
+            Agent(instructions="Test agent", summarize_threshold=0.8)
+    
+    def test_summarization_via_context_param(self):
+        """Test summarization is now controlled via context= param."""
+        from praisonaiagents.agent import Agent
+        from praisonaiagents.context import ManagerConfig
+        
+        # New way: use context= param with ManagerConfig
+        config = ManagerConfig(
+            auto_compact=True,
+            compact_threshold=0.8,
+        )
+        agent = Agent(instructions="Test agent", context=config)
+        
+        # Verify context manager is configured
+        assert agent.context_manager is not None
+        assert agent.context_manager.config.auto_compact == True
+        assert agent.context_manager.config.compact_threshold == 0.8
     
     def test_token_tracking_for_summarization(self):
         """Test that token tracking works for summarization decisions."""

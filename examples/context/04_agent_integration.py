@@ -1,103 +1,98 @@
 """
-Example 4: Agent Integration with Fast Context
+Example 4: Agent Integration with Context Management
 
-This example shows how to use Fast Context integrated with the Agent class
-for automatic code search delegation.
+This example shows how to use context management with the Agent class.
+Context management is now unified via the context= parameter.
 
 Benefits:
 - Seamless integration with existing Agent workflows
-- Automatic context injection for code-related queries
-- Configurable via Agent parameters or environment variables
+- Automatic token tracking and optimization
+- Configurable via context= parameter with ManagerConfig
 """
 
 from praisonaiagents import Agent
+from praisonaiagents.context import ManagerConfig
 
 WORKSPACE = "/Users/praison/praisonai-package/src/praisonai-agents"
 
 
 def main():
     print("=" * 70)
-    print("Agent Integration with Fast Context")
+    print("Agent Integration with Context Management")
     print("=" * 70)
     
-    # Create an agent with Fast Context enabled
-    print("\n1. Creating Agent with Fast Context")
+    # Create an agent with context management enabled
+    print("\n1. Creating Agent with Context Management")
     print("-" * 40)
+    
+    config = ManagerConfig(
+        auto_compact=True,
+        compact_threshold=0.8,
+        strategy="smart",
+        monitor_enabled=True,
+        monitor_path="./context_debug.txt",
+    )
     
     agent = Agent(
         name="CodeAssistant",
-        instructions="You are a helpful code assistant that can search and analyze code.",
-        fast_context=True,
-        fast_context_path=WORKSPACE,
-        fast_context_model="gpt-4o-mini",
-        fast_context_max_turns=4,
-        fast_context_parallelism=8,
-        fast_context_timeout=30.0,
+        instructions="You are a helpful code assistant.",
+        context=config,
         verbose=False
     )
     
     print(f"   Agent name: {agent.name}")
-    print(f"   Fast Context enabled: {agent.fast_context_enabled}")
-    print(f"   Fast Context path: {agent.fast_context_path}")
-    print(f"   Fast Context model: {agent.fast_context_model}")
-    print(f"   Max turns: {agent.fast_context_max_turns}")
-    print(f"   Parallelism: {agent.fast_context_parallelism}")
+    print(f"   Context manager: {agent.context_manager is not None}")
+    if agent.context_manager:
+        print(f"   Auto-compact: {agent.context_manager.config.auto_compact}")
+        print(f"   Threshold: {agent.context_manager.config.compact_threshold}")
+        print(f"   Strategy: {agent.context_manager.config.strategy}")
     
-    # Use delegate_to_fast_context for code search
-    print("\n2. Delegating Code Search to Fast Context")
+    # For FastContext code search, use the module directly
+    print("\n2. Using FastContext for Code Search")
     print("-" * 40)
     
-    queries = [
-        "find the Agent class definition",
-        "search for authentication handlers",
-        "locate memory management code",
-    ]
-    
-    for query in queries:
-        print(f"\n   Query: '{query}'")
-        context = agent.delegate_to_fast_context(query)
+    try:
+        from praisonaiagents.context.fast import FastContext
         
-        if context:
-            # Show preview of context
-            lines = context.split('\n')
-            preview_lines = lines[:5]
-            print(f"   Found context ({len(context)} chars):")
-            for line in preview_lines:
-                print(f"      {line[:60]}{'...' if len(line) > 60 else ''}")
-            if len(lines) > 5:
-                print(f"      ... and {len(lines) - 5} more lines")
-        else:
-            print("   No relevant code found")
-    
-    # Access the FastContext instance directly
-    print("\n3. Direct FastContext Access")
-    print("-" * 40)
-    
-    fc = agent.fast_context
-    if fc:
-        result = fc.search("def chat")
-        print(f"   Direct search for 'def chat':")
-        print(f"   Files found: {result.total_files}")
-        print(f"   Search time: {result.search_time_ms}ms")
+        fc = FastContext(
+            workspace_path=WORKSPACE,
+            model="gpt-4o-mini",
+            max_turns=4,
+            max_parallel=8,
+            timeout=30.0,
+        )
         
-        for f in result.files[:3]:
-            print(f"   - {f.path}")
+        queries = [
+            "find the Agent class definition",
+            "search for chat method",
+        ]
+        
+        for query in queries:
+            print(f"\n   Query: '{query}'")
+            result = fc.search(query)
+            print(f"   Files found: {result.total_files}")
+            print(f"   Search time: {result.search_time_ms}ms")
+            
+    except ImportError:
+        print("   FastContext not available (optional feature)")
+    except Exception as e:
+        print(f"   FastContext error: {e}")
     
     # Show configuration options
-    print("\n4. Configuration Options")
+    print("\n3. Configuration Options")
     print("-" * 40)
     
-    print("   Agent parameters:")
-    print("   - fast_context=True              # Enable Fast Context")
-    print("   - fast_context_path='.'          # Workspace path")
-    print("   - fast_context_model='gpt-4o-mini'  # Search model")
-    print("   - fast_context_max_turns=4       # Max search turns")
-    print("   - fast_context_parallelism=8     # Parallel calls")
-    print("   - fast_context_timeout=30.0      # Timeout (seconds)")
+    print("   Agent context= parameter:")
+    print("   - context=True                   # Enable with defaults")
+    print("   - context=ManagerConfig(...)     # Custom configuration")
+    print("   - context=False                  # Disabled (default)")
     
-    print("\n   Environment variables:")
-    print("   - FAST_CONTEXT_MODEL")
-    print("   - FAST_CONTEXT_MAX_TURNS")
+    print("\n   ManagerConfig options:")
+    print("   - auto_compact=True              # Auto-optimize context")
+    print("   - compact_threshold=0.8          # Trigger at 80%")
+    print("   - strategy='smart'               # Optimization strategy")
+    print("   - monitor_enabled=True           # Write snapshots")
+    print("   - monitor_path='./context.txt'   # Snapshot path")
     print("   - FAST_CONTEXT_PARALLELISM")
     print("   - FAST_CONTEXT_TIMEOUT")
     print("   - FAST_CONTEXT_CACHE")

@@ -56,7 +56,6 @@ class AutoAgents(PraisonAIAgents):
         min_reflect: int = 1,
         llm: Optional[str] = None,
         function_calling_llm: Optional[str] = None,
-        respect_context_window: bool = True,
         code_execution_mode: str = "safe",
         embedder_config: Optional[Dict[str, Any]] = None,
         knowledge_sources: Optional[List[Any]] = None,
@@ -94,7 +93,6 @@ class AutoAgents(PraisonAIAgents):
         self.min_reflect = min_reflect
         self.llm = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-5-nano')
         self.function_calling_llm = function_calling_llm
-        self.respect_context_window = respect_context_window
         self.code_execution_mode = code_execution_mode
         self.embedder_config = embedder_config
         self.knowledge_sources = knowledge_sources
@@ -446,7 +444,6 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
                 min_reflect=self.min_reflect,
                 llm=self.llm,
                 function_calling_llm=self.function_calling_llm,
-                respect_context_window=self.respect_context_window,
                 code_execution_mode=self.code_execution_mode,
                 embedder_config=self.embedder_config,
                 knowledge=self.knowledge_sources,

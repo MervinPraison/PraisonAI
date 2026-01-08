@@ -16,6 +16,18 @@ from praisonaiagents.knowledge.chunking import Chunking
 
 # Lazy loading for protocols and registries to avoid import overhead
 _LAZY_IMPORTS = {
+    # Models and Protocols (new)
+    "SearchResultItem": ("praisonaiagents.knowledge.models", "SearchResultItem"),
+    "SearchResult": ("praisonaiagents.knowledge.models", "SearchResult"),
+    "AddResult": ("praisonaiagents.knowledge.models", "AddResult"),
+    "normalize_search_item": ("praisonaiagents.knowledge.models", "normalize_search_item"),
+    "normalize_search_result": ("praisonaiagents.knowledge.models", "normalize_search_result"),
+    "normalize_to_dict": ("praisonaiagents.knowledge.models", "normalize_to_dict"),
+    "KnowledgeStoreProtocol": ("praisonaiagents.knowledge.protocols", "KnowledgeStoreProtocol"),
+    "KnowledgeBackendError": ("praisonaiagents.knowledge.protocols", "KnowledgeBackendError"),
+    "ScopeRequiredError": ("praisonaiagents.knowledge.protocols", "ScopeRequiredError"),
+    "BackendNotAvailableError": ("praisonaiagents.knowledge.protocols", "BackendNotAvailableError"),
+    
     # Readers
     "Document": ("praisonaiagents.knowledge.readers", "Document"),
     "ReaderProtocol": ("praisonaiagents.knowledge.readers", "ReaderProtocol"),
@@ -85,6 +97,17 @@ __all__ = [
     # Core
     "Knowledge",
     "Chunking",
+    # Models and Protocols
+    "SearchResultItem",
+    "SearchResult",
+    "AddResult",
+    "normalize_search_item",
+    "normalize_search_result",
+    "normalize_to_dict",
+    "KnowledgeStoreProtocol",
+    "KnowledgeBackendError",
+    "ScopeRequiredError",
+    "BackendNotAvailableError",
     # Readers
     "Document",
     "ReaderProtocol",

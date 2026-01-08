@@ -127,7 +127,7 @@ def process_task_context(context_item, verbose=0, user_id=None):
         return str(context_item)  # Fallback for unknown types
 
 class PraisonAIAgents:
-    def __init__(self, agents, tasks=None, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None, memory=False, memory_config=None, embedder=None, user_id=None, max_iter=10, stream=True, name: Optional[str] = None, planning: bool = False, planning_llm: Optional[str] = None, auto_approve_plan: bool = False, planning_tools: Optional[List] = None, planning_reasoning: bool = False, on_task_start: Optional[Callable] = None, on_task_complete: Optional[Callable] = None, variables: Optional[Dict[str, Any]] = None):
+    def __init__(self, agents, tasks=None, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None, memory=False, memory_config=None, embedder=None, user_id=None, max_iter=10, stream=True, name: Optional[str] = None, planning: bool = False, planning_llm: Optional[str] = None, auto_approve_plan: bool = False, planning_tools: Optional[List] = None, planning_reasoning: bool = False, on_task_start: Optional[Callable] = None, on_task_complete: Optional[Callable] = None, variables: Optional[Dict[str, Any]] = None, context: Optional[Any] = False):
         # Add check at the start if memory is requested
         if memory:
             try:
@@ -218,6 +218,11 @@ class PraisonAIAgents:
         
         self._state = {}  # Add state storage at PraisonAIAgents level
         
+        # Context management (single param for all context features)
+        self._context_param = context  # Store raw param for lazy init
+        self._context_manager = None  # Lazy initialized on first use
+        self._context_manager_initialized = False
+        
         # Initialize planning mode
         self.planning = planning
         self.planning_llm = planning_llm or "gpt-4o-mini"
@@ -295,6 +300,51 @@ class PraisonAIAgents:
         if cleaned.endswith("```"):
             cleaned = cleaned[:-3].strip()
         return cleaned
+
+    @property
+    def context_manager(self):
+        """
+        ContextManager instance for unified context management across all agents.
+        
+        Lazy initialized on first access when context=True or context=ManagerConfig.
+        Returns None when context=False (zero overhead).
+        
+        For multi-agent scenarios, uses MultiAgentContextManager for per-agent isolation.
+        """
+        if self._context_manager_initialized:
+            return self._context_manager
+        
+        # Initialize based on context param type
+        if self._context_param is False or self._context_param is None:
+            # Zero overhead - no context management
+            self._context_manager = None
+            self._context_manager_initialized = True
+            return None
+        
+        # Lazy import to avoid overhead when not used
+        try:
+            from ..context import MultiAgentContextManager, ManagerConfig
+        except ImportError:
+            # Context module not available
+            self._context_manager = None
+            self._context_manager_initialized = True
+            return None
+        
+        if self._context_param is True:
+            # Enable with safe defaults for multi-agent
+            self._context_manager = MultiAgentContextManager()
+        elif isinstance(self._context_param, ManagerConfig):
+            # Use provided config for all agents
+            self._context_manager = MultiAgentContextManager(config=self._context_param)
+        elif hasattr(self._context_param, 'get_agent_manager'):
+            # Already a MultiAgentContextManager instance
+            self._context_manager = self._context_param
+        else:
+            # Unknown type, disable
+            self._context_manager = None
+        
+        self._context_manager_initialized = True
+        return self._context_manager
 
     def default_completion_checker(self, task, agent_output):
         if task.output_json and task.result and task.result.json_dict:

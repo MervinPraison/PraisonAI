@@ -2,7 +2,7 @@
 FastContext - High-level API for fast parallel code search.
 
 This module provides the main FastContext class that can be used
-standalone or integrated with the main Agent class.
+standalone or integrated with the main Agent class via context= param.
 
 Example usage:
     # Standalone usage
@@ -12,13 +12,13 @@ Example usage:
     result = fc.search("find authentication handlers")
     print(result.to_context_string())
     
-    # With Agent integration
+    # With Agent integration via context= param
     from praisonaiagents import Agent
+    from praisonaiagents.context import ManagerConfig
     
     agent = Agent(
         name="CodeAssistant",
-        fast_context=True,
-        fast_context_path="/path/to/project"
+        context=True,  # Enable context management
     )
 """
 

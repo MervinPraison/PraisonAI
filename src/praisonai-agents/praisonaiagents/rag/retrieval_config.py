@@ -71,6 +71,23 @@ class RetrievalConfig:
     citations: bool = True
     citations_mode: CitationsMode = CitationsMode.APPEND
     
+    # Token budget settings (Phase 1)
+    model_context_window: Optional[int] = None  # Auto-detect if None
+    reserved_response_tokens: int = 4096
+    dynamic_budget: bool = True  # Use dynamic budget calculation
+    
+    # Strategy selection (Phase 3)
+    strategy: str = "auto"  # auto, direct, basic, hybrid, reranked, compressed, hierarchical
+    
+    # Compression settings (Phase 5)
+    compress: bool = False
+    compression_ratio: float = 0.5  # Target compression ratio
+    
+    # Filtering settings (Phase 4)
+    include_glob: Optional[list] = None  # Glob patterns to include
+    exclude_glob: Optional[list] = None  # Glob patterns to exclude
+    path_filter: Optional[str] = None  # Regex for path filtering
+    
     # Vector store configuration
     vector_store_provider: str = "chroma"
     vector_store_config: Dict[str, Any] = field(default_factory=dict)
@@ -96,6 +113,54 @@ class RetrievalConfig:
 </retrieved_context>"""
     system_separation: bool = True  # Use system prompt separation for safety
     
+    def get_token_budget(self, model_name: Optional[str] = None):
+        """
+        Get TokenBudget instance for this config.
+        
+        Args:
+            model_name: Optional model name for context window detection
+            
+        Returns:
+            TokenBudget configured for this retrieval config
+        """
+        from .budget import TokenBudget, get_model_context_window
+        
+        # Use configured context window or auto-detect from model
+        if self.model_context_window is not None:
+            context_window = self.model_context_window
+        elif model_name:
+            context_window = get_model_context_window(model_name)
+        else:
+            context_window = 128000  # Default fallback
+        
+        return TokenBudget(
+            model_max_tokens=context_window,
+            reserved_response_tokens=self.reserved_response_tokens,
+        )
+    
+    def get_strategy(self, corpus_stats=None):
+        """
+        Get retrieval strategy based on config and corpus stats.
+        
+        Args:
+            corpus_stats: Optional CorpusStats for auto-selection
+            
+        Returns:
+            RetrievalStrategy enum value
+        """
+        from .strategy import select_strategy, RetrievalStrategy
+        
+        if corpus_stats is None:
+            # No stats, use explicit strategy or default
+            if self.strategy and self.strategy != "auto":
+                try:
+                    return RetrievalStrategy(self.strategy.lower())
+                except ValueError:
+                    pass
+            return RetrievalStrategy.BASIC
+        
+        return select_strategy(corpus_stats, override=self.strategy)
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -108,6 +173,15 @@ class RetrievalConfig:
             "hybrid": self.hybrid,
             "citations": self.citations,
             "citations_mode": self.citations_mode.value if isinstance(self.citations_mode, CitationsMode) else self.citations_mode,
+            "model_context_window": self.model_context_window,
+            "reserved_response_tokens": self.reserved_response_tokens,
+            "dynamic_budget": self.dynamic_budget,
+            "strategy": self.strategy,
+            "compress": self.compress,
+            "compression_ratio": self.compression_ratio,
+            "include_glob": self.include_glob,
+            "exclude_glob": self.exclude_glob,
+            "path_filter": self.path_filter,
             "vector_store_provider": self.vector_store_provider,
             "vector_store_config": self.vector_store_config,
             "collection_name": self.collection_name,
@@ -147,6 +221,15 @@ class RetrievalConfig:
             hybrid=data.get("hybrid", False),
             citations=data.get("citations", True),
             citations_mode=citations_mode,
+            model_context_window=data.get("model_context_window"),
+            reserved_response_tokens=data.get("reserved_response_tokens", 4096),
+            dynamic_budget=data.get("dynamic_budget", True),
+            strategy=data.get("strategy", "auto"),
+            compress=data.get("compress", False),
+            compression_ratio=data.get("compression_ratio", 0.5),
+            include_glob=data.get("include_glob"),
+            exclude_glob=data.get("exclude_glob"),
+            path_filter=data.get("path_filter"),
             vector_store_provider=data.get("vector_store_provider", "chroma"),
             vector_store_config=data.get("vector_store_config", {}),
             collection_name=data.get("collection_name"),

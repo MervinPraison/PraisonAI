@@ -33,7 +33,8 @@ class DefaultCitationFormatter:
         for i, result in enumerate(results):
             # Handle different result formats
             text = result.get("text") or result.get("memory", "")
-            metadata = result.get("metadata", {})
+            # CRITICAL: Handle metadata=None from mem0 - ensure always dict
+            metadata = result.get("metadata") or {}
             score = result.get("score", 0.0)
             
             # Extract source info

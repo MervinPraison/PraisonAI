@@ -57,7 +57,9 @@ def deduplicate_chunks(
             continue
         # Handle different result formats
         text = result.get("text") or result.get("memory", "")
-        source = result.get("metadata", {}).get("source", "")
+        # CRITICAL: Handle metadata=None from mem0 - ensure always dict
+        metadata = result.get("metadata") or {}
+        source = metadata.get("source", "")
         
         chunk_id = _chunk_hash(text, source)
         
@@ -146,8 +148,10 @@ def build_context(
         
         # Build chunk text with optional source
         if include_source:
-            source = result.get("metadata", {}).get("source", "")
-            filename = result.get("metadata", {}).get("filename", "")
+            # CRITICAL: Handle metadata=None from mem0 - ensure always dict
+            metadata = result.get("metadata") or {}
+            source = metadata.get("source", "")
+            filename = metadata.get("filename", "")
             source_label = filename or source or f"Source {i + 1}"
             chunk_text = f"[{source_label}]\n{text}"
         else:

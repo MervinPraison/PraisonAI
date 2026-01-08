@@ -2,31 +2,29 @@
 """
 Basic Thinking Budgets Example for PraisonAI Agents.
 
-This example demonstrates how to use thinking budgets to:
-1. Configure token budgets for extended thinking
+This example demonstrates how to use thinking budgets with Agent:
+1. Create an Agent with thinking budget
 2. Use predefined budget levels
 3. Track thinking usage
-4. Adapt budgets based on complexity
 
 Usage:
     python basic_thinking.py
 """
 
-from praisonaiagents.thinking import (
-    ThinkingBudget, ThinkingConfig, ThinkingUsage, ThinkingTracker
-)
+from praisonaiagents import Agent
+from praisonaiagents.thinking import ThinkingBudget, ThinkingTracker
 from praisonaiagents.thinking.budget import BudgetLevel
 
 
 def main():
     print("=" * 60)
-    print("Thinking Budgets Demo")
+    print("Agent-Centric Thinking Budgets Demo")
     print("=" * 60)
     
     # ==========================================================================
     # Budget Levels
     # ==========================================================================
-    print("\n--- Budget Levels ---")
+    print("\n--- Available Budget Levels ---")
     
     levels = [
         ("Minimal", ThinkingBudget.minimal()),
@@ -40,9 +38,24 @@ def main():
         print(f"  {name}: {budget.max_tokens:,} tokens")
     
     # ==========================================================================
+    # Agent with Thinking Budget
+    # ==========================================================================
+    print("\n--- Creating Agent with Thinking Budget ---")
+    
+    agent = Agent(
+        name="DeepThinker",
+        instructions="You are a problem-solving assistant that thinks step by step.",
+        thinking_budget=ThinkingBudget.high()  # 16,000 tokens for reasoning
+    )
+    
+    print(f"Agent: {agent.name}")
+    print(f"Thinking budget: {agent.thinking_budget.max_tokens:,} tokens")
+    print(f"Adaptive: {agent.thinking_budget.adaptive}")
+    
+    # ==========================================================================
     # Custom Budget
     # ==========================================================================
-    print("\n--- Custom Budget ---")
+    print("\n--- Custom Thinking Budget ---")
     
     custom_budget = ThinkingBudget(
         max_tokens=12000,
@@ -50,22 +63,24 @@ def main():
         adaptive=True,
         max_time_seconds=120.0
     )
-    print(f"  Max tokens: {custom_budget.max_tokens:,}")
-    print(f"  Min tokens: {custom_budget.min_tokens:,}")
-    print(f"  Adaptive: {custom_budget.adaptive}")
-    print(f"  Time limit: {custom_budget.max_time_seconds}s")
+    
+    agent_custom = Agent(
+        name="CustomThinker",
+        instructions="You solve complex problems.",
+        thinking_budget=custom_budget
+    )
+    
+    print(f"Agent: {agent_custom.name}")
+    print(f"Max tokens: {agent_custom.thinking_budget.max_tokens:,}")
+    print(f"Min tokens: {agent_custom.thinking_budget.min_tokens:,}")
+    print(f"Time limit: {agent_custom.thinking_budget.max_time_seconds}s")
     
     # ==========================================================================
     # Complexity-Based Scaling
     # ==========================================================================
     print("\n--- Complexity-Based Token Allocation ---")
     
-    budget = ThinkingBudget(
-        max_tokens=16000,
-        min_tokens=2000,
-        adaptive=True
-    )
-    
+    budget = agent.thinking_budget
     complexities = [0.0, 0.25, 0.5, 0.75, 1.0]
     for complexity in complexities:
         tokens = budget.get_tokens_for_complexity(complexity)
@@ -75,34 +90,15 @@ def main():
     # ==========================================================================
     # Usage Tracking
     # ==========================================================================
-    print("\n--- Usage Tracking ---")
-    
-    usage = ThinkingUsage(
-        budget_tokens=8000,
-        tokens_used=5000,
-        time_seconds=30.0,
-        budget_time=60.0
-    )
-    
-    print(f"  Tokens used: {usage.tokens_used:,} / {usage.budget_tokens:,}")
-    print(f"  Tokens remaining: {usage.tokens_remaining:,}")
-    print(f"  Utilization: {usage.token_utilization:.1%}")
-    print(f"  Over budget: {usage.is_over_budget}")
-    print(f"  Time remaining: {usage.time_remaining}s")
-    
-    # ==========================================================================
-    # Session Tracking
-    # ==========================================================================
     print("\n--- Session Tracking ---")
     
     tracker = ThinkingTracker()
     
-    # Simulate multiple thinking sessions
+    # Simulate thinking sessions
     sessions = [
         (8000, 4000, 20.0),
         (8000, 6000, 35.0),
         (16000, 12000, 60.0),
-        (8000, 9000, 45.0),  # Over budget
     ]
     
     for budget_tokens, tokens_used, time_seconds in sessions:
@@ -112,21 +108,7 @@ def main():
     summary = tracker.get_summary()
     print(f"  Total sessions: {summary['session_count']}")
     print(f"  Total tokens used: {summary['total_tokens_used']:,}")
-    print(f"  Average tokens/session: {summary['average_tokens_per_session']:,.0f}")
     print(f"  Average utilization: {summary['average_utilization']:.1%}")
-    print(f"  Over-budget sessions: {summary['over_budget_count']}")
-    
-    # ==========================================================================
-    # Serialization
-    # ==========================================================================
-    print("\n--- Serialization ---")
-    
-    budget = ThinkingBudget.from_level(BudgetLevel.HIGH)
-    data = budget.to_dict()
-    print(f"  Serialized: level={data['level']}, max_tokens={data['max_tokens']}")
-    
-    restored = ThinkingBudget.from_dict(data)
-    print(f"  Restored: {restored.max_tokens:,} tokens")
     
     print("\n" + "=" * 60)
     print("Demo Complete!")

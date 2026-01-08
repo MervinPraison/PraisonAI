@@ -2,140 +2,114 @@
 """
 Basic Context Compaction Example for PraisonAI Agents.
 
-This example demonstrates how to use context compaction to:
-1. Manage conversation context length
-2. Use different compaction strategies
-3. Track compaction results
-4. Preserve important messages
+This example demonstrates how to use context compaction with Agent:
+1. Create an Agent with context= parameter for compaction
+2. Use different compaction strategies via ManagerConfig
+3. Monitor compaction results
 
 Usage:
     python basic_compaction.py
 """
 
-from praisonaiagents.compaction import (
-    ContextCompactor, CompactionConfig, CompactionStrategy, CompactionResult
-)
+from praisonaiagents import Agent
+from praisonaiagents.context import ManagerConfig
 
 
 def main():
     print("=" * 60)
-    print("Context Compaction Demo")
+    print("Agent-Centric Context Compaction Demo")
     print("=" * 60)
     
     # ==========================================================================
-    # Sample Messages
+    # Available Strategies
     # ==========================================================================
-    messages = [
-        {"role": "system", "content": "You are a helpful AI assistant."},
-        {"role": "user", "content": "Hello! Can you help me with Python?"},
-        {"role": "assistant", "content": "Of course! I'd be happy to help you with Python. What would you like to know?"},
-        {"role": "user", "content": "How do I read a file in Python?"},
-        {"role": "assistant", "content": "To read a file in Python, you can use the built-in open() function. Here's an example:\n\nwith open('filename.txt', 'r') as f:\n    content = f.read()\n\nThis opens the file, reads its content, and automatically closes it."},
-        {"role": "user", "content": "What about writing to a file?"},
-        {"role": "assistant", "content": "To write to a file, use the 'w' mode:\n\nwith open('filename.txt', 'w') as f:\n    f.write('Hello, World!')\n\nUse 'a' mode to append instead of overwriting."},
-        {"role": "user", "content": "Can you explain list comprehensions?"},
-        {"role": "assistant", "content": "List comprehensions are a concise way to create lists. Instead of:\n\nresult = []\nfor x in range(10):\n    result.append(x * 2)\n\nYou can write:\n\nresult = [x * 2 for x in range(10)]"},
+    print("\n--- Available Compaction Strategies ---")
+    
+    strategies = [
+        ("truncate", "Remove oldest messages first"),
+        ("sliding_window", "Keep most recent messages within limit"),
+        ("summarize", "Replace old messages with summary"),
+        ("smart", "Intelligently select messages to keep"),
     ]
     
-    print(f"\n--- Original Messages ---")
-    print(f"  Message count: {len(messages)}")
+    for name, desc in strategies:
+        print(f"  {name}: {desc}")
     
     # ==========================================================================
-    # Basic Compaction
+    # Agent with Context Compaction via context= param
     # ==========================================================================
-    print("\n--- Basic Compaction (Truncate Strategy) ---")
+    print("\n--- Creating Agent with Context Compaction ---")
     
-    compactor = ContextCompactor(
-        max_tokens=50,  # Low limit to trigger compaction
-        strategy=CompactionStrategy.TRUNCATE,
-        preserve_system=True,
-        preserve_recent=2
+    # Use context= parameter with ManagerConfig for compaction
+    agent = Agent(
+        name="LongChat",
+        instructions="You are a helpful assistant for extended conversations.",
+        context=ManagerConfig(
+            auto_compact=True,
+            compact_threshold=0.8,
+            strategy="sliding_window",
+        )
     )
     
-    # Check stats before
-    stats = compactor.get_stats(messages)
-    print(f"  Total tokens: {stats['total_tokens']}")
-    print(f"  Max tokens: {stats['max_tokens']}")
-    print(f"  Needs compaction: {stats['needs_compaction']}")
-    
-    # Compact
-    compacted, result = compactor.compact(messages)
-    
-    print(f"\n  After compaction:")
-    print(f"    Messages: {len(messages)} -> {len(compacted)}")
-    print(f"    Tokens: {result.original_tokens} -> {result.compacted_tokens}")
-    print(f"    Saved: {result.tokens_saved} tokens")
-    print(f"    Compression: {result.compression_ratio:.1%}")
+    print(f"Agent: {agent.name}")
+    print(f"Context manager: {agent.context_manager is not None}")
+    if agent.context_manager:
+        print(f"Auto-compact: {agent.context_manager.config.auto_compact}")
+        print(f"Threshold: {agent.context_manager.config.compact_threshold}")
+        print(f"Strategy: {agent.context_manager.config.strategy}")
     
     # ==========================================================================
-    # Sliding Window Strategy
+    # Different Strategy Examples via context= param
     # ==========================================================================
-    print("\n--- Sliding Window Strategy ---")
+    print("\n--- Strategy Examples ---")
     
-    compactor = ContextCompactor(
-        max_tokens=50,
-        strategy=CompactionStrategy.SLIDING,
-        preserve_system=True,
-        preserve_recent=3
+    # Sliding window strategy
+    sliding_agent = Agent(
+        name="SlidingAgent",
+        instructions="You are helpful.",
+        context=ManagerConfig(
+            auto_compact=True,
+            strategy="sliding_window",
+        )
     )
+    print(f"  Sliding: strategy={sliding_agent.context_manager.config.strategy}")
     
-    compacted, result = compactor.compact(messages)
-    
-    print(f"  Messages kept: {result.messages_kept}")
-    print(f"  Messages removed: {result.messages_removed}")
-    print(f"  Strategy: {result.strategy_used.value}")
-    
-    # ==========================================================================
-    # Summarize Strategy
-    # ==========================================================================
-    print("\n--- Summarize Strategy ---")
-    
-    compactor = ContextCompactor(
-        max_tokens=50,
-        strategy=CompactionStrategy.SUMMARIZE,
-        preserve_system=True,
-        preserve_recent=2
+    # Summarize strategy
+    summarize_agent = Agent(
+        name="SummarizeAgent",
+        instructions="You are helpful.",
+        context=ManagerConfig(
+            auto_compact=True,
+            strategy="summarize",
+        )
     )
+    print(f"  Summarize: strategy={summarize_agent.context_manager.config.strategy}")
     
-    compacted, result = compactor.compact(messages)
-    
-    print(f"  Messages kept: {result.messages_kept}")
-    print(f"  Strategy: {result.strategy_used.value}")
-    
-    # Show what messages remain
-    print(f"\n  Remaining message roles:")
-    for msg in compacted:
-        role = msg.get("role", "unknown")
-        content_preview = msg.get("content", "")[:50]
-        print(f"    [{role}] {content_preview}...")
-    
-    # ==========================================================================
-    # No Compaction Needed
-    # ==========================================================================
-    print("\n--- No Compaction Needed ---")
-    
-    compactor = ContextCompactor(
-        max_tokens=10000,  # High limit
-        strategy=CompactionStrategy.TRUNCATE
+    # Smart strategy
+    smart_agent = Agent(
+        name="SmartAgent",
+        instructions="You are helpful.",
+        context=ManagerConfig(
+            auto_compact=True,
+            strategy="smart",
+        )
     )
-    
-    compacted, result = compactor.compact(messages)
-    
-    print(f"  Was compacted: {result.was_compacted}")
-    print(f"  Messages unchanged: {len(compacted) == len(messages)}")
+    print(f"  Smart: strategy={smart_agent.context_manager.config.strategy}")
     
     # ==========================================================================
-    # Result Serialization
+    # Context Manager Stats Demo
     # ==========================================================================
-    print("\n--- Result Serialization ---")
+    print("\n--- Context Manager Stats Demo ---")
     
-    compactor = ContextCompactor(max_tokens=50)
-    _, result = compactor.compact(messages)
-    
-    data = result.to_dict()
-    print(f"  Original tokens: {data['original_tokens']}")
-    print(f"  Compacted tokens: {data['compacted_tokens']}")
-    print(f"  Compression ratio: {data['compression_ratio']:.2f}")
+    # Access context manager stats
+    if agent.context_manager:
+        stats = agent.context_manager.get_stats()
+        print(f"  Model: {stats.get('model', 'N/A')}")
+        print(f"  Model limit: {stats.get('model_limit', 'N/A')}")
+        print(f"  Output reserve: {stats.get('output_reserve', 'N/A')}")
+        print(f"  Usable budget: {stats.get('usable_budget', 'N/A')}")
+    else:
+        print("  Context manager not initialized")
     
     print("\n" + "=" * 60)
     print("Demo Complete!")

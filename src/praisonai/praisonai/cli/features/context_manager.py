@@ -3,198 +3,116 @@ Context Management CLI Feature for PraisonAI.
 
 Provides CLI commands and integration for context budgeting,
 optimization, and monitoring.
+
+This module uses the SDK ContextManager facade to ensure DRY
+and CLI/SDK parity.
 """
 
-import os
-from typing import Dict, List, Any, Optional, Literal
-from dataclasses import dataclass
+from typing import Dict, List, Any, Optional
 
 
-@dataclass
-class ContextManagerConfig:
-    """Configuration for context management."""
-    # Auto-compaction
-    auto_compact: bool = True
-    compact_threshold: float = 0.8
-    strategy: str = "smart"
-    
-    # Output reserve
-    output_reserve: int = 8000
-    
-    # Monitoring
-    monitor_enabled: bool = False
-    monitor_path: str = "./context.txt"
-    monitor_format: Literal["human", "json"] = "human"
-    monitor_frequency: Literal["turn", "tool_call", "manual", "overflow"] = "turn"
-    redact_sensitive: bool = True
-    
-    @classmethod
-    def from_env(cls) -> "ContextManagerConfig":
-        """Load config from environment variables."""
-        return cls(
-            auto_compact=os.getenv("PRAISONAI_CONTEXT_AUTO_COMPACT", "true").lower() == "true",
-            compact_threshold=float(os.getenv("PRAISONAI_CONTEXT_THRESHOLD", "0.8")),
-            strategy=os.getenv("PRAISONAI_CONTEXT_STRATEGY", "smart"),
-            output_reserve=int(os.getenv("PRAISONAI_CONTEXT_OUTPUT_RESERVE", "8000")),
-            monitor_enabled=os.getenv("PRAISONAI_CONTEXT_MONITOR", "false").lower() == "true",
-            monitor_path=os.getenv("PRAISONAI_CONTEXT_MONITOR_PATH", "./context.txt"),
-            monitor_format=os.getenv("PRAISONAI_CONTEXT_MONITOR_FORMAT", "human"),
-            monitor_frequency=os.getenv("PRAISONAI_CONTEXT_MONITOR_FREQUENCY", "turn"),
-            redact_sensitive=os.getenv("PRAISONAI_CONTEXT_REDACT", "true").lower() == "true",
-        )
-    
-    def merge_cli_args(
-        self,
-        auto_compact: Optional[bool] = None,
-        strategy: Optional[str] = None,
-        threshold: Optional[float] = None,
-        monitor: Optional[bool] = None,
-        monitor_path: Optional[str] = None,
-        monitor_format: Optional[str] = None,
-        monitor_frequency: Optional[str] = None,
-        redact: Optional[bool] = None,
-        output_reserve: Optional[int] = None,
-    ) -> "ContextManagerConfig":
-        """Merge CLI arguments (highest precedence)."""
-        return ContextManagerConfig(
-            auto_compact=auto_compact if auto_compact is not None else self.auto_compact,
-            compact_threshold=threshold if threshold is not None else self.compact_threshold,
-            strategy=strategy if strategy is not None else self.strategy,
-            output_reserve=output_reserve if output_reserve is not None else self.output_reserve,
-            monitor_enabled=monitor if monitor is not None else self.monitor_enabled,
-            monitor_path=monitor_path if monitor_path is not None else self.monitor_path,
-            monitor_format=monitor_format if monitor_format is not None else self.monitor_format,
-            monitor_frequency=monitor_frequency if monitor_frequency is not None else self.monitor_frequency,
-            redact_sensitive=redact if redact is not None else self.redact_sensitive,
-        )
+# Lazy import SDK components to avoid import overhead
+def _get_sdk_manager():
+    """Lazy import SDK ContextManager."""
+    from praisonaiagents.context import ContextManager
+    return ContextManager
+
+
+def _get_sdk_config():
+    """Lazy import SDK ManagerConfig."""
+    from praisonaiagents.context import ManagerConfig
+    return ManagerConfig
+
+
+def _get_create_manager():
+    """Lazy import create_context_manager factory."""
+    from praisonaiagents.context import create_context_manager
+    return create_context_manager
 
 
 class ContextManagerHandler:
     """
     Handles context management for interactive CLI sessions.
     
-    Integrates budgeting, composition, optimization, and monitoring.
+    This is a thin wrapper around the SDK ContextManager facade.
+    All core logic is in the SDK to ensure DRY and parity.
     """
     
     def __init__(
         self,
-        config: Optional[ContextManagerConfig] = None,
         model: str = "gpt-4o-mini",
         session_id: str = "",
         agent_name: str = "Assistant",
+        config_file: Optional[str] = None,
+        cli_overrides: Optional[Dict[str, Any]] = None,
     ):
         """
-        Initialize context manager.
+        Initialize context manager handler.
         
         Args:
-            config: Context management configuration
             model: Model name for budget calculation
             session_id: Session identifier
             agent_name: Agent name for monitoring
+            config_file: Path to config.yaml
+            cli_overrides: CLI argument overrides
         """
-        self.config = config or ContextManagerConfig.from_env()
+        # Use SDK factory with proper precedence
+        create_manager = _get_create_manager()
+        self._manager = create_manager(
+            model=model,
+            session_id=session_id,
+            agent_name=agent_name,
+            config_file=config_file,
+            cli_overrides=cli_overrides,
+        )
+        
+        # Expose model for compatibility
         self.model = model
         self.session_id = session_id
         self.agent_name = agent_name
-        
-        # Lazy-loaded components
-        self._budgeter = None
-        self._composer = None
-        self._monitor = None
-        self._ledger = None
     
     @property
-    def budgeter(self):
-        """Get or create budgeter."""
-        if self._budgeter is None:
-            from praisonaiagents.context import ContextBudgeter
-            self._budgeter = ContextBudgeter(
-                model=self.model,
-                output_reserve=self.config.output_reserve,
-            )
-        return self._budgeter
-    
-    @property
-    def composer(self):
-        """Get or create composer."""
-        if self._composer is None:
-            from praisonaiagents.context import ContextComposer
-            self._composer = ContextComposer(
-                budget=self.budgeter.allocate(),
-            )
-        return self._composer
-    
-    @property
-    def monitor(self):
-        """Get or create monitor."""
-        if self._monitor is None:
-            from praisonaiagents.context import ContextMonitor
-            self._monitor = ContextMonitor(
-                enabled=self.config.monitor_enabled,
-                path=self.config.monitor_path,
-                format=self.config.monitor_format,
-                frequency=self.config.monitor_frequency,
-                redact_sensitive=self.config.redact_sensitive,
-            )
-        return self._monitor
-    
-    @property
-    def ledger(self):
-        """Get or create ledger manager."""
-        if self._ledger is None:
-            from praisonaiagents.context import ContextLedgerManager
-            self._ledger = ContextLedgerManager(agent_id=self.agent_name)
-            self._ledger.set_budget(self.budgeter.allocate())
-        return self._ledger
+    def config(self):
+        """Get SDK config for compatibility."""
+        return self._manager.config
     
     def set_model(self, model: str) -> None:
-        """Update model and reset budgeter."""
+        """Update model and reset manager."""
         self.model = model
-        self._budgeter = None
-        self._composer = None
+        create_manager = _get_create_manager()
+        self._manager = create_manager(
+            model=model,
+            session_id=self.session_id,
+            agent_name=self.agent_name,
+        )
     
     def get_stats(self) -> Dict[str, Any]:
         """Get current context statistics."""
-        budget = self.budgeter.allocate()
-        ledger_data = self.ledger.to_dict()
-        
-        return {
-            "model": self.model,
-            "model_limit": budget.model_limit,
-            "output_reserve": budget.output_reserve,
-            "usable": budget.usable,
-            "total_tokens": self.ledger.get_total(),
-            "utilization": self.ledger.get_utilization(),
-            "turn_count": self.ledger.get_ledger().turn_count,
-            "message_count": self.ledger.get_ledger().message_count,
-            "segments": ledger_data.get("segments", {}),
-            "warnings": self.ledger.get_warnings(),
-            "auto_compact": self.config.auto_compact,
-            "monitor_enabled": self.config.monitor_enabled,
-        }
+        stats = self._manager.get_stats()
+        # Add CLI-specific fields for compatibility
+        stats["auto_compact"] = self._manager.config.auto_compact
+        stats["monitor_enabled"] = self._manager.config.monitor_enabled
+        return stats
     
     def track_history(self, messages: List[Dict[str, Any]]) -> int:
         """Track conversation history tokens."""
-        return self.ledger.track_history(messages)
+        return self._manager._ledger.track_history(messages)
     
     def track_system_prompt(self, content: str) -> int:
         """Track system prompt tokens."""
-        return self.ledger.track_system_prompt(content)
+        return self._manager._ledger.track_system_prompt(content)
     
     def track_tools(self, tools: List[Dict[str, Any]]) -> int:
         """Track tool schema tokens."""
-        return self.ledger.track_tools(tools)
+        return self._manager._ledger.track_tools(tools)
     
     def check_overflow(self) -> bool:
         """Check if context is approaching limit."""
-        return self.budgeter.check_overflow(
-            self.ledger.get_total(),
-            threshold=self.config.compact_threshold,
-        )
+        return self._manager._ledger.get_utilization() >= self._manager.config.compact_threshold
     
     def should_auto_compact(self) -> bool:
         """Check if auto-compaction should trigger."""
-        return self.config.auto_compact and self.check_overflow()
+        return self._manager.config.auto_compact and self.check_overflow()
     
     def optimize(
         self,
@@ -213,35 +131,43 @@ class ContextManagerHandler:
         """
         from praisonaiagents.context import get_optimizer, OptimizerStrategy
         
-        strategy_name = strategy or self.config.strategy
+        strategy_name = strategy or self._manager.config.strategy.value
         try:
             strategy_enum = OptimizerStrategy(strategy_name)
         except ValueError:
             strategy_enum = OptimizerStrategy.SMART
         
         optimizer = get_optimizer(strategy_enum)
-        target = int(self.budgeter.usable * self.config.compact_threshold)
+        target = int(self._manager._budget.usable * self._manager.config.compact_threshold)
         
-        return optimizer.optimize(messages, target, self.ledger.get_ledger())
+        return optimizer.optimize(messages, target, self._manager._ledger.get_ledger())
+    
+    def process(
+        self,
+        messages: List[Dict[str, Any]],
+        system_prompt: str = "",
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Process messages through context pipeline.
+        
+        Uses SDK ContextManager.process() for full pipeline.
+        """
+        return self._manager.process(
+            messages=messages,
+            system_prompt=system_prompt,
+            tools=tools,
+        )
     
     def write_snapshot(
         self,
         messages: List[Dict[str, Any]],
         trigger: str = "manual",
     ) -> Optional[str]:
-        """
-        Write context snapshot to disk.
-        
-        Args:
-            messages: Current messages
-            trigger: What triggered the snapshot
-            
-        Returns:
-            Path to written file, or None
-        """
-        return self.monitor.snapshot(
-            ledger=self.ledger.get_ledger(),
-            budget=self.budgeter.allocate(),
+        """Write context snapshot to disk."""
+        return self._manager._monitor.snapshot(
+            ledger=self._manager._ledger.get_ledger(),
+            budget=self._manager._budget,
             messages=messages,
             session_id=self.session_id,
             agent_name=self.agent_name,
@@ -251,28 +177,60 @@ class ContextManagerHandler:
     
     def enable_monitor(self) -> None:
         """Enable context monitoring."""
-        self.config.monitor_enabled = True
-        self.monitor.enable()
+        self._manager.config.monitor_enabled = True
+        self._manager._monitor.enable()
     
     def disable_monitor(self) -> None:
         """Disable context monitoring."""
-        self.config.monitor_enabled = False
-        self.monitor.disable()
+        self._manager.config.monitor_enabled = False
+        self._manager._monitor.disable()
     
     def set_monitor_path(self, path: str) -> None:
         """Set monitor output path."""
-        self.config.monitor_path = path
-        self.monitor.set_path(path)
+        self._manager.config.monitor_path = path
+        self._manager._monitor.set_path(path)
     
     def set_monitor_format(self, format: str) -> None:
         """Set monitor output format."""
-        self.config.monitor_format = format
-        self.monitor.set_format(format)
+        self._manager.config.monitor_format = format
+        self._manager._monitor.set_format(format)
     
     def set_monitor_frequency(self, frequency: str) -> None:
         """Set monitor update frequency."""
-        self.config.monitor_frequency = frequency
-        self.monitor.set_frequency(frequency)
+        self._manager.config.monitor_frequency = frequency
+        self._manager._monitor.set_frequency(frequency)
+    
+    def get_history(self) -> List[Dict[str, Any]]:
+        """Get optimization history."""
+        return self._manager.get_history()
+    
+    def get_resolved_config(self) -> Dict[str, Any]:
+        """Get resolved configuration with precedence info."""
+        return self._manager.get_resolved_config()
+    
+    def capture_llm_boundary(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+    ):
+        """Capture exact state at LLM call boundary."""
+        return self._manager.capture_llm_boundary(messages, tools)
+    
+    # Compatibility properties for legacy code
+    @property
+    def budgeter(self):
+        """Get budgeter for compatibility."""
+        return self._manager._budgeter
+    
+    @property
+    def ledger(self):
+        """Get ledger for compatibility."""
+        return self._manager._ledger
+    
+    @property
+    def monitor(self):
+        """Get monitor for compatibility."""
+        return self._manager._monitor
 
 
 def handle_context_command(
@@ -296,6 +254,8 @@ def handle_context_command(
         /context format <fmt> - Set format (human/json)
         /context frequency <f>- Set frequency
         /context compact      - Trigger optimization
+        /context history      - Show optimization history
+        /context config       - Show resolved configuration
     """
     args = args.strip().lower() if args else ""
     parts = args.split(maxsplit=1)
@@ -352,8 +312,12 @@ def handle_context_command(
             console.print(f"[yellow]Frequency must be one of: {', '.join(valid)}[/yellow]")
     elif subcommand == "compact":
         _compact_context(console, context_manager, session_state)
+    elif subcommand == "history":
+        _show_optimization_history(console, context_manager)
+    elif subcommand == "config":
+        _show_resolved_config(console, context_manager)
     else:
-        console.print("[yellow]Unknown subcommand. Use: show, stats, budget, dump, on, off, path, format, frequency, compact[/yellow]")
+        console.print("[yellow]Unknown subcommand. Use: show, stats, budget, dump, on, off, path, format, frequency, compact, history, config[/yellow]")
 
 
 def _show_context_summary(console, manager: ContextManagerHandler) -> None:
@@ -458,6 +422,79 @@ def _compact_context(console, manager: ContextManagerHandler, session_state: Dic
         console.print("[yellow]No optimization needed[/yellow]")
 
 
+def _show_optimization_history(console, manager: ContextManagerHandler) -> None:
+    """Show optimization history."""
+    history = manager.get_history()
+    
+    if not history:
+        console.print("[dim]No optimization events recorded yet.[/dim]")
+        return
+    
+    console.print("\n[bold cyan]Optimization History[/bold cyan]")
+    console.print(f"{'Time':<24} {'Event':<20} {'Tokens':>12} {'Saved':>10}")
+    console.print("-" * 70)
+    
+    for event in history[-20:]:  # Show last 20 events
+        timestamp = event.get("timestamp", "")[:19]  # Trim to datetime
+        event_type = event.get("event_type", "unknown")
+        tokens_before = event.get("tokens_before", 0)
+        tokens_saved = event.get("tokens_saved", 0)
+        
+        tokens_str = f"{tokens_before:,}" if tokens_before else "-"
+        saved_str = f"-{tokens_saved:,}" if tokens_saved else "-"
+        
+        console.print(f"{timestamp:<24} {event_type:<20} {tokens_str:>12} {saved_str:>10}")
+    
+    console.print("")
+    console.print(f"[dim]Showing last {min(20, len(history))} of {len(history)} events[/dim]")
+
+
+def _show_resolved_config(console, manager: ContextManagerHandler) -> None:
+    """Show resolved configuration with precedence info."""
+    resolved = manager.get_resolved_config()
+    config = resolved.get("config", {})
+    
+    console.print("\n[bold cyan]Resolved Configuration[/bold cyan]")
+    console.print(f"[dim]Precedence: {resolved.get('precedence', 'CLI > ENV > config.yaml > defaults')}[/dim]")
+    console.print(f"[dim]Source: {config.get('source', 'defaults')}[/dim]")
+    console.print("")
+    
+    console.print("[bold]Auto-Compaction:[/bold]")
+    console.print(f"  auto_compact:           {config.get('auto_compact', True)}")
+    console.print(f"  compact_threshold:      {config.get('compact_threshold', 0.8)}")
+    console.print(f"  strategy:               {config.get('strategy', 'smart')}")
+    console.print(f"  compression_min_gain:   {config.get('compression_min_gain_pct', 5.0)}%")
+    console.print("")
+    
+    console.print("[bold]Budget:[/bold]")
+    console.print(f"  output_reserve:         {config.get('output_reserve', 8000):,}")
+    console.print(f"  default_tool_max:       {config.get('default_tool_output_max', 10000):,}")
+    console.print("")
+    
+    console.print("[bold]Estimation:[/bold]")
+    console.print(f"  estimation_mode:        {config.get('estimation_mode', 'heuristic')}")
+    console.print(f"  log_mismatch:           {config.get('log_estimation_mismatch', False)}")
+    console.print("")
+    
+    console.print("[bold]Monitoring:[/bold]")
+    console.print(f"  monitor_enabled:        {config.get('monitor_enabled', False)}")
+    console.print(f"  monitor_path:           {config.get('monitor_path', './context.txt')}")
+    console.print(f"  monitor_format:         {config.get('monitor_format', 'human')}")
+    console.print(f"  monitor_frequency:      {config.get('monitor_frequency', 'turn')}")
+    console.print(f"  monitor_write_mode:     {config.get('monitor_write_mode', 'sync')}")
+    console.print(f"  redact_sensitive:       {config.get('redact_sensitive', True)}")
+    console.print("")
+    
+    # Show effective budget
+    budget = resolved.get("effective_budget", {})
+    if budget:
+        console.print("[bold]Effective Budget:[/bold]")
+        console.print(f"  model_limit:            {budget.get('model_limit', 0):,}")
+        console.print(f"  usable:                 {budget.get('usable', 0):,}")
+        console.print(f"  history_budget:         {budget.get('history_budget', 0):,}")
+    console.print("")
+
+
 # CLI argument definitions for argparse integration
 CONTEXT_CLI_ARGS = [
     {
@@ -521,5 +558,40 @@ CONTEXT_CLI_ARGS = [
         "type": int,
         "default": None,
         "help": "Output token reserve",
+    },
+    {
+        "flags": ["--context-estimation-mode"],
+        "dest": "context_estimation_mode",
+        "choices": ["heuristic", "accurate", "validated"],
+        "default": None,
+        "help": "Token estimation mode",
+    },
+    {
+        "flags": ["--context-log-mismatch"],
+        "dest": "context_log_mismatch",
+        "action": "store_true",
+        "default": None,
+        "help": "Log token estimation mismatches",
+    },
+    {
+        "flags": ["--context-snapshot-timing"],
+        "dest": "context_snapshot_timing",
+        "choices": ["pre_optimization", "post_optimization", "both"],
+        "default": None,
+        "help": "When to capture context snapshots",
+    },
+    {
+        "flags": ["--context-write-mode"],
+        "dest": "context_write_mode",
+        "choices": ["sync", "async"],
+        "default": None,
+        "help": "Monitor write mode (sync or async)",
+    },
+    {
+        "flags": ["--context-show-config"],
+        "dest": "context_show_config",
+        "action": "store_true",
+        "default": False,
+        "help": "Show resolved context configuration and exit",
     },
 ]

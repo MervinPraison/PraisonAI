@@ -122,6 +122,10 @@ def knowledge_profiler(enabled: bool, profile_out: Optional[Path], profile_top: 
 def knowledge_index(
     sources: List[str] = typer.Argument(..., help="Source files, directories, or URLs to index"),
     collection: str = typer.Option("default", "--collection", "-c", help="Collection/knowledge base name"),
+    user_id: Optional[str] = typer.Option(None, "--user-id", "-u", help="User ID for scoping (required for mem0 backend)"),
+    agent_id: Optional[str] = typer.Option(None, "--agent-id", "-a", help="Agent ID for scoping"),
+    run_id: Optional[str] = typer.Option(None, "--run-id", "-r", help="Run ID for scoping"),
+    backend: str = typer.Option("mem0", "--backend", "-b", help="Knowledge backend: mem0, chroma, internal"),
     config: Optional[Path] = typer.Option(None, "--config", "-f", help="Config file path"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     profile: bool = typer.Option(False, "--profile", help="Enable performance profiling"),
@@ -135,9 +139,9 @@ def knowledge_index(
     Use `praisonai rag query` to answer questions using the indexed knowledge.
     
     Examples:
-        praisonai knowledge index ./docs
-        praisonai knowledge index paper.pdf --collection research
-        praisonai knowledge index ./data --profile --profile-out ./profile.json
+        praisonai knowledge index ./docs --user-id myuser
+        praisonai knowledge index paper.pdf --collection research --agent-id research_agent
+        praisonai knowledge index ./data --backend chroma --profile
     """
     from rich.console import Console
     from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -149,16 +153,34 @@ def knowledge_index(
             # Lazy import to avoid startup cost
             from praisonaiagents.knowledge import Knowledge
             
-            # Build config
-            knowledge_config = {
-                "vector_store": {
-                    "provider": "chroma",
-                    "config": {
-                        "collection_name": collection,
-                        "path": f"./.praison/knowledge/{collection}",
+            # Validate scope for mem0 backend
+            if backend == "mem0" and not any([user_id, agent_id, run_id]):
+                console.print("[yellow]Warning:[/yellow] mem0 backend requires at least one scope identifier.")
+                console.print("Use --user-id, --agent-id, or --run-id to scope your knowledge.")
+                console.print("Defaulting to user_id='default_user'")
+                user_id = "default_user"
+            
+            # Build config based on backend
+            if backend == "chroma":
+                knowledge_config = {
+                    "vector_store": {
+                        "provider": "chroma",
+                        "config": {
+                            "collection_name": collection,
+                            "path": f"./.praison/knowledge/{collection}",
+                        }
                     }
                 }
-            }
+            else:
+                # mem0 or internal backend
+                knowledge_config = {
+                    "vector_store": {
+                        "provider": "qdrant",
+                        "config": {
+                            "collection_name": collection,
+                        }
+                    }
+                }
             
             # Load config file if provided
             if config and config.exists():
@@ -171,7 +193,7 @@ def knowledge_index(
             # Initialize Knowledge
             knowledge = Knowledge(config=knowledge_config, verbose=verbose)
             
-            # Index sources
+            # Index sources with scope identifiers
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
@@ -181,7 +203,12 @@ def knowledge_index(
                 for source in sources:
                     task = progress.add_task(f"Indexing {source}...", total=None)
                     try:
-                        result = knowledge.add(source)
+                        result = knowledge.add(
+                            source,
+                            user_id=user_id,
+                            agent_id=agent_id,
+                            run_id=run_id,
+                        )
                         count = len(result.get("results", [])) if isinstance(result, dict) else 0
                         console.print(f"[green]✓[/green] Indexed {source}: {count} chunks")
                     except Exception as e:
@@ -207,6 +234,10 @@ def knowledge_index(
 def knowledge_search(
     query: str = typer.Argument(..., help="Search query"),
     collection: str = typer.Option("default", "--collection", "-c", help="Collection to search"),
+    user_id: Optional[str] = typer.Option(None, "--user-id", "-u", help="User ID for scoping (required for mem0 backend)"),
+    agent_id: Optional[str] = typer.Option(None, "--agent-id", "-a", help="Agent ID for scoping"),
+    run_id: Optional[str] = typer.Option(None, "--run-id", "-r", help="Run ID for scoping"),
+    backend: str = typer.Option("mem0", "--backend", "-b", help="Knowledge backend: mem0, chroma, internal"),
     top_k: int = typer.Option(5, "--top-k", "-k", help="Number of results to retrieve"),
     hybrid: bool = typer.Option(False, "--hybrid", help="Use hybrid retrieval (dense + BM25)"),
     config: Optional[Path] = typer.Option(None, "--config", "-f", help="Config file path"),
@@ -222,9 +253,9 @@ def knowledge_search(
     For answers with citations, use `praisonai rag query`.
     
     Examples:
-        praisonai knowledge search "capital of France"
+        praisonai knowledge search "capital of France" --user-id myuser
         praisonai knowledge search "main findings" --collection research --top-k 10
-        praisonai knowledge search "Python tutorial" --hybrid
+        praisonai knowledge search "Python tutorial" --hybrid --backend chroma
     """
     from rich.console import Console
     from rich.table import Table
@@ -235,16 +266,34 @@ def knowledge_search(
         try:
             from praisonaiagents.knowledge import Knowledge
             
-            # Build config
-            knowledge_config = {
-                "vector_store": {
-                    "provider": "chroma",
-                    "config": {
-                        "collection_name": collection,
-                        "path": f"./.praison/knowledge/{collection}",
+            # Validate scope for mem0 backend
+            if backend == "mem0" and not any([user_id, agent_id, run_id]):
+                console.print("[yellow]Warning:[/yellow] mem0 backend requires at least one scope identifier.")
+                console.print("Use --user-id, --agent-id, or --run-id to scope your search.")
+                console.print("Defaulting to user_id='default_user'")
+                user_id = "default_user"
+            
+            # Build config based on backend
+            if backend == "chroma":
+                knowledge_config = {
+                    "vector_store": {
+                        "provider": "chroma",
+                        "config": {
+                            "collection_name": collection,
+                            "path": f"./.praison/knowledge/{collection}",
+                        }
                     }
                 }
-            }
+            else:
+                # mem0 or internal backend
+                knowledge_config = {
+                    "vector_store": {
+                        "provider": "qdrant",
+                        "config": {
+                            "collection_name": collection,
+                        }
+                    }
+                }
             
             # Add hybrid retrieval config if enabled
             if hybrid:
@@ -263,13 +312,19 @@ def knowledge_search(
             # Initialize and search
             knowledge = Knowledge(config=knowledge_config, verbose=verbose)
             
-            # Use hybrid search if enabled
+            # Use hybrid search if enabled, pass scope identifiers
             if hybrid:
                 if verbose:
                     console.print("[dim]Using hybrid retrieval (dense + BM25)...[/dim]")
-                results = knowledge.search(query, limit=top_k, hybrid=True)
+                results = knowledge.search(
+                    query, limit=top_k, hybrid=True,
+                    user_id=user_id, agent_id=agent_id, run_id=run_id,
+                )
             else:
-                results = knowledge.search(query, limit=top_k)
+                results = knowledge.search(
+                    query, limit=top_k,
+                    user_id=user_id, agent_id=agent_id, run_id=run_id,
+                )
             
             if not results:
                 console.print("[yellow]No results found.[/yellow]")
@@ -286,7 +341,9 @@ def knowledge_search(
             for i, result in enumerate(result_list[:top_k], 1):
                 if isinstance(result, dict):
                     score = f"{result.get('score', 0):.3f}" if result.get('score') else "-"
-                    source = result.get('metadata', {}).get('filename', result.get('metadata', {}).get('source', '-'))
+                    # CRITICAL: Handle metadata=None from mem0
+                    metadata = result.get('metadata') or {}
+                    source = metadata.get('filename', metadata.get('source', '-'))
                     content = result.get('memory', result.get('text', ''))[:100] + "..."
                 else:
                     score = "-"

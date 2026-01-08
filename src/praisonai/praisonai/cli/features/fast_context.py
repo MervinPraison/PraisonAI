@@ -388,8 +388,9 @@ If the query mentions a folder name that exists, include files from that folder.
             Modified configuration
         """
         if flag_value:
-            config['fast_context'] = True
-            config['fast_context_path'] = flag_value
+            # Note: fast_context params removed from Agent - FastContext is now accessed
+            # via the context module directly. This flag enables CLI-level fast context.
+            config['_fast_context_path'] = flag_value  # Internal CLI flag
         return config
     
     def execute(self, query: str = None, path: str = None, **kwargs) -> str:
