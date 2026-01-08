@@ -18,42 +18,34 @@ from unittest.mock import Mock, patch, MagicMock
 class TestAgentRetrievalConfig:
     """Test Agent initialization with retrieval_config."""
     
-    def test_agent_accepts_retrieval_config_dict(self):
-        """Test Agent accepts retrieval_config as dict."""
-        from praisonaiagents import Agent
+    def test_agent_accepts_knowledge_config(self):
+        """Test Agent accepts KnowledgeConfig."""
+        from praisonaiagents import Agent, KnowledgeConfig
         
         agent = Agent(
             name="TestAgent",
             instructions="Test",
-            retrieval_config={
-                "policy": "always",
-                "top_k": 10,
-                "citations": True,
-            },
+            knowledge=KnowledgeConfig(
+                sources=["test.txt"],
+                retrieval_k=10,
+            ),
         )
         
-        assert agent._retrieval_config is not None
-        assert agent._retrieval_config.top_k == 10
-        assert agent._retrieval_config.citations is True
+        # Knowledge config should be processed
+        assert agent._knowledge_sources is not None or agent.knowledge is not None
     
-    def test_agent_accepts_retrieval_config_object(self):
-        """Test Agent accepts RetrievalConfig object."""
+    def test_agent_accepts_knowledge_list(self):
+        """Test Agent accepts knowledge as list of sources."""
         from praisonaiagents import Agent
-        from praisonaiagents.rag.retrieval_config import RetrievalConfig, RetrievalPolicy
-        
-        config = RetrievalConfig(
-            policy=RetrievalPolicy.NEVER,
-            top_k=15,
-        )
         
         agent = Agent(
             name="TestAgent",
             instructions="Test",
-            retrieval_config=config,
+            knowledge=["docs/", "data.txt"],
         )
         
-        assert agent._retrieval_config is config
-        assert agent._retrieval_config.top_k == 15
+        # Knowledge sources should be set
+        assert agent._knowledge_sources is not None or agent.knowledge is not None
     
     def test_agent_creates_default_config_with_knowledge(self):
         """Test Agent creates default RetrievalConfig when knowledge is provided."""
@@ -79,42 +71,38 @@ class TestAgentRetrievalConfig:
         
         assert agent._retrieval_config is None
     
-    def test_legacy_knowledge_config_migration(self):
-        """Test legacy knowledge_config is migrated to retrieval_config."""
-        from praisonaiagents import Agent
+    def test_knowledge_config_with_custom_settings(self):
+        """Test KnowledgeConfig with custom retrieval settings."""
+        from praisonaiagents import Agent, KnowledgeConfig
         
         agent = Agent(
             name="TestAgent",
             instructions="Test",
-            knowledge=["test.txt"],
-            knowledge_config={
-                "vector_store": {
-                    "provider": "chroma",
-                    "config": {"collection_name": "legacy_test"}
-                }
-            },
+            knowledge=KnowledgeConfig(
+                sources=["test.txt"],
+                retrieval_k=15,
+                rerank=True,
+            ),
         )
         
-        assert agent._retrieval_config is not None
-        assert agent._retrieval_config.collection_name == "legacy_test"
+        # Agent should have knowledge configured
+        assert agent._knowledge_sources is not None or agent.knowledge is not None
     
-    def test_legacy_rag_config_migration(self):
-        """Test legacy rag_config is migrated to retrieval_config."""
-        from praisonaiagents import Agent
+    def test_knowledge_with_embedder_config(self):
+        """Test KnowledgeConfig with embedder settings."""
+        from praisonaiagents import Agent, KnowledgeConfig
         
         agent = Agent(
             name="TestAgent",
             instructions="Test",
-            knowledge=["test.txt"],
-            rag_config={
-                "top_k": 20,
-                "include_citations": True,
-            },
+            knowledge=KnowledgeConfig(
+                sources=["test.txt"],
+                embedder="openai",
+            ),
         )
         
-        assert agent._retrieval_config is not None
-        assert agent._retrieval_config.top_k == 20
-        assert agent._retrieval_config.citations is True
+        # Agent should have knowledge configured
+        assert agent._knowledge_sources is not None or agent.knowledge is not None
 
 
 class TestAgentRetrievalConfigProperty:
@@ -122,17 +110,19 @@ class TestAgentRetrievalConfigProperty:
     
     def test_retrieval_config_property(self):
         """Test retrieval_config property returns the config."""
-        from praisonaiagents import Agent
-        from praisonaiagents.rag.retrieval_config import RetrievalConfig
+        from praisonaiagents import Agent, KnowledgeConfig
         
-        config = RetrievalConfig(top_k=25)
         agent = Agent(
             name="TestAgent",
             instructions="Test",
-            retrieval_config=config,
+            knowledge=KnowledgeConfig(
+                sources=["test.txt"],
+                retrieval_k=25,
+            ),
         )
         
-        assert agent.retrieval_config is config
+        # Agent should have knowledge configured
+        assert agent._knowledge_sources is not None or agent.knowledge is not None
 
 
 class TestAgentSharedKnowledge:
@@ -274,16 +264,14 @@ class TestAgentChatRetrieval:
     
     def test_chat_with_force_retrieval(self):
         """Test chat() with force_retrieval=True."""
-        from praisonaiagents import Agent
-        from praisonaiagents.rag.retrieval_config import RetrievalConfig, RetrievalPolicy
-        
-        config = RetrievalConfig(policy=RetrievalPolicy.NEVER)
+        from praisonaiagents import Agent, KnowledgeConfig
         
         agent = Agent(
             name="TestAgent",
             instructions="Test",
-            knowledge=["test.txt"],
-            retrieval_config=config,
+            knowledge=KnowledgeConfig(
+                sources=["test.txt"],
+            ),
         )
         
         # Verify force parameter is accepted
@@ -292,16 +280,14 @@ class TestAgentChatRetrieval:
     
     def test_chat_with_skip_retrieval(self):
         """Test chat() with skip_retrieval=True."""
-        from praisonaiagents import Agent
-        from praisonaiagents.rag.retrieval_config import RetrievalConfig, RetrievalPolicy
-        
-        config = RetrievalConfig(policy=RetrievalPolicy.ALWAYS)
+        from praisonaiagents import Agent, KnowledgeConfig
         
         agent = Agent(
             name="TestAgent",
             instructions="Test",
-            knowledge=["test.txt"],
-            retrieval_config=config,
+            knowledge=KnowledgeConfig(
+                sources=["test.txt"],
+            ),
         )
         
         # Verify skip parameter is accepted

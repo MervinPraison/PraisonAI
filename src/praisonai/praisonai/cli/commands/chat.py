@@ -27,6 +27,7 @@ def chat_main(
     workspace: Optional[str] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     no_acp: bool = typer.Option(False, "--no-acp", help="Disable ACP tools"),
     no_lsp: bool = typer.Option(False, "--no-lsp", help="Disable LSP tools"),
+    autonomy: bool = typer.Option(True, "--autonomy/--no-autonomy", help="Enable agent autonomy for complex tasks"),
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
 ):
@@ -81,6 +82,7 @@ def chat_main(
             verbose=verbose,
             memory=memory,
             files=list(file) if file else [],
+            autonomy=autonomy,
         )
         
         core = InteractiveCore(config=config)

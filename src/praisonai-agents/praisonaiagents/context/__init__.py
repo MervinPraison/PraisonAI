@@ -125,6 +125,33 @@ __all__ = [
     "EstimationMetrics",
     "PerToolBudget",
     "SnapshotHookData",
+    # Protocols (NEW)
+    "ContextView",
+    "ContextMutator",
+    "ContextMessage",
+    "MessageMetadata",
+    "MessageRole",
+    "validate_message_schema",
+    "get_effective_history",
+    "cleanup_orphaned_parents",
+    # Store (NEW)
+    "ContextStoreImpl",
+    "ContextViewImpl",
+    "ContextMutatorImpl",
+    "AgentBudget",
+    "get_global_store",
+    "reset_global_store",
+    # Instrumentation (NEW)
+    "ContextMetrics",
+    "get_metrics",
+    "reset_metrics",
+    "context_operation",
+    "timed_section",
+    "log_context_size",
+    "log_optimization_event",
+    "run_benchmark",
+    "BenchmarkResult",
+    "format_benchmark_results",
     # Fast Context (legacy)
     "FastContext",
     "FastContextResult",
@@ -166,7 +193,7 @@ def __getattr__(name: str):
     # Optimization
     if name in ("BaseOptimizer", "TruncateOptimizer", "SlidingWindowOptimizer",
                 "PruneToolsOptimizer", "NonDestructiveOptimizer", "SummarizeOptimizer",
-                "SmartOptimizer", "get_optimizer", "get_effective_history"):
+                "SmartOptimizer", "get_optimizer"):
         from . import optimizer
         return getattr(optimizer, name)
     
@@ -184,6 +211,32 @@ def __getattr__(name: str):
                 "EstimationMetrics", "PerToolBudget", "SnapshotHookData"):
         from . import manager
         return getattr(manager, name)
+    
+    # Protocols
+    if name in ("ContextView", "ContextMutator", "ContextMessage",
+                "MessageMetadata", "MessageRole", "validate_message_schema",
+                "cleanup_orphaned_parents"):
+        from . import protocols
+        return getattr(protocols, name)
+    
+    # get_effective_history from protocols (not optimizer)
+    if name == "get_effective_history":
+        from .protocols import get_effective_history
+        return get_effective_history
+    
+    # Store
+    if name in ("ContextStoreImpl", "ContextViewImpl", "ContextMutatorImpl",
+                "AgentBudget", "get_global_store", "reset_global_store"):
+        from . import store
+        return getattr(store, name)
+    
+    # Instrumentation
+    if name in ("ContextMetrics", "get_metrics", "reset_metrics",
+                "context_operation", "timed_section", "log_context_size",
+                "log_optimization_event", "run_benchmark", "BenchmarkResult",
+                "format_benchmark_results"):
+        from . import instrumentation
+        return getattr(instrumentation, name)
     
     # Fast Context (legacy)
     if name == "FastContext":

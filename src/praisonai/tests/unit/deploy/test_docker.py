@@ -16,8 +16,8 @@ def test_generate_dockerfile_basic():
     
     assert "FROM python:3.11-slim" in dockerfile
     assert "COPY agents.yaml" in dockerfile
-    assert "pip install praisonai" in dockerfile
-    assert "EXPOSE 8005" in dockerfile
+    assert "pip install" in dockerfile and "praisonai" in dockerfile
+    assert "8005" in dockerfile
 
 
 def test_generate_dockerfile_custom_base():

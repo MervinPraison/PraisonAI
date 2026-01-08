@@ -17,7 +17,15 @@ def test_deploy_command_api(mock_deploy_class):
     mock_deploy_class.return_value = mock_deploy
     
     handler = DeployHandler()
-    args = Mock(type="api", file="agents.yaml", json=False, background=False)
+    # Properly configure Mock with spec to avoid Pydantic validation issues
+    args = Mock()
+    args.type = "api"
+    args.file = "agents.yaml"
+    args.json = False
+    args.background = False
+    args.host = "0.0.0.0"
+    args.port = 8005
+    args.workers = 1
     
     handler.handle_deploy(args)
     
@@ -35,7 +43,15 @@ def test_deploy_command_docker(mock_deploy_class):
     mock_deploy_class.return_value = mock_deploy
     
     handler = DeployHandler()
-    args = Mock(type="docker", file="agents.yaml", json=False, background=False)
+    args = Mock()
+    args.type = "docker"
+    args.file = "agents.yaml"
+    args.json = False
+    args.background = False
+    args.image_name = "praisonai"
+    args.tag = "latest"
+    args.registry = ""
+    args.push = False
     
     handler.handle_deploy(args)
     
@@ -53,7 +69,17 @@ def test_deploy_command_cloud_aws(mock_deploy_class):
     mock_deploy_class.return_value = mock_deploy
     
     handler = DeployHandler()
-    args = Mock(type="cloud", provider="aws", file="agents.yaml", json=False, background=False)
+    args = Mock()
+    args.type = "cloud"
+    args.provider = "aws"
+    args.file = "agents.yaml"
+    args.json = False
+    args.background = False
+    args.region = "us-east-1"
+    args.service_name = "praisonai-service"
+    args.resource_group = ""
+    args.subscription_id = ""
+    args.project_id = ""
     
     handler.handle_deploy(args)
     

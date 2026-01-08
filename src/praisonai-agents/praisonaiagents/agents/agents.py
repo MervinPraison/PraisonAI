@@ -131,35 +131,149 @@ class Agents:
         self,
         agents,
         tasks=None,
-        verbose=0,
-        completion_checker=None,
-        max_retries=5,
         process="sequential",
         manager_llm=None,
-        # Consolidated feature params (agent-centric API)
-        memory: Optional[Any] = False,  # Union[bool, MemoryConfig]
-        planning: Optional[Any] = False,  # Union[bool, PlanningConfig]
-        context: Optional[Any] = False,  # Union[bool, ManagerConfig, ContextManager]
-        # Legacy params (kept for backward compatibility)
-        memory_config=None,
-        embedder=None,
-        user_id=None,
-        max_iter=10,
-        stream=True,
         name: Optional[str] = None,
-        planning_llm: Optional[str] = None,
-        auto_approve_plan: bool = False,
-        planning_tools: Optional[List] = None,
-        planning_reasoning: bool = False,
-        on_task_start: Optional[Callable] = None,
-        on_task_complete: Optional[Callable] = None,
         variables: Optional[Dict[str, Any]] = None,
+        # Consolidated feature params (agent-centric API)
+        memory: Optional[Any] = False,  # Union[bool, MultiAgentMemoryConfig]
+        planning: Optional[Any] = False,  # Union[bool, MultiAgentPlanningConfig]
+        context: Optional[Any] = False,  # Union[bool, ManagerConfig, ContextManager]
+        output: Optional[Any] = None,  # Union[str, MultiAgentOutputConfig]
+        execution: Optional[Any] = None,  # Union[str, MultiAgentExecutionConfig]
+        hooks: Optional[Any] = None,  # MultiAgentHooksConfig
     ):
-        # Add check at the start if memory is requested
+        """
+        Initialize PraisonAIAgents with consolidated feature parameters.
+        
+        Args:
+            agents: List of Agent instances
+            tasks: Optional list of Task instances (auto-generated from agents if None)
+            process: Execution process type ("sequential", "parallel", "hierarchical")
+            manager_llm: LLM model for manager agent
+            name: Name for this agent collection
+            variables: Global variables for substitution
+            memory: Memory configuration (bool | MultiAgentMemoryConfig)
+            planning: Planning configuration (bool | MultiAgentPlanningConfig)
+            context: Context management (bool | ManagerConfig | ContextManager)
+            output: Output configuration (str | MultiAgentOutputConfig)
+            execution: Execution configuration (str | MultiAgentExecutionConfig)
+            hooks: Hooks configuration (MultiAgentHooksConfig)
+        """
+        # ─────────────────────────────────────────────────────────────────────
+        # Extract values from consolidated params
+        # ─────────────────────────────────────────────────────────────────────
+        
+        # Import config classes for type checking
+        try:
+            from ..config.feature_configs import (
+                MultiAgentMemoryConfig, MultiAgentPlanningConfig,
+                MultiAgentOutputConfig, MultiAgentExecutionConfig,
+                MultiAgentHooksConfig
+            )
+        except ImportError:
+            MultiAgentMemoryConfig = None
+            MultiAgentPlanningConfig = None
+            MultiAgentOutputConfig = None
+            MultiAgentExecutionConfig = None
+            MultiAgentHooksConfig = None
+        
+        # Extract output params
+        _verbose = 0
+        _stream = True
+        if output is None:
+            pass  # Use defaults
+        elif isinstance(output, str):
+            # Preset handling
+            if output == "verbose":
+                _verbose = 2
+            elif output == "minimal":
+                _verbose = 1
+            elif output == "silent":
+                _verbose = 0
+        elif MultiAgentOutputConfig and isinstance(output, MultiAgentOutputConfig):
+            _verbose = output.verbose
+            _stream = output.stream
+        elif isinstance(output, dict):
+            _verbose = output.get("verbose", 0)
+            _stream = output.get("stream", True)
+        
+        # Extract execution params
+        _max_iter = 10
+        _max_retries = 5
+        if execution is None:
+            pass  # Use defaults
+        elif isinstance(execution, str):
+            # Preset handling
+            if execution == "fast":
+                _max_iter = 5
+                _max_retries = 2
+            elif execution == "thorough":
+                _max_iter = 20
+                _max_retries = 5
+            elif execution == "unlimited":
+                _max_iter = 100
+                _max_retries = 10
+        elif MultiAgentExecutionConfig and isinstance(execution, MultiAgentExecutionConfig):
+            _max_iter = execution.max_iter
+            _max_retries = execution.max_retries
+        elif isinstance(execution, dict):
+            _max_iter = execution.get("max_iter", 10)
+            _max_retries = execution.get("max_retries", 5)
+        
+        # Extract hooks params
+        _completion_checker = None
+        _on_task_start = None
+        _on_task_complete = None
+        if hooks is not None:
+            if MultiAgentHooksConfig and isinstance(hooks, MultiAgentHooksConfig):
+                _completion_checker = hooks.completion_checker
+                _on_task_start = hooks.on_task_start
+                _on_task_complete = hooks.on_task_complete
+            elif isinstance(hooks, dict):
+                _completion_checker = hooks.get("completion_checker")
+                _on_task_start = hooks.get("on_task_start")
+                _on_task_complete = hooks.get("on_task_complete")
+        
+        # Extract memory params
+        _user_id = "praison"
+        _memory_config = None
+        _embedder = None
+        if memory is True:
+            pass  # Use defaults
+        elif MultiAgentMemoryConfig and isinstance(memory, MultiAgentMemoryConfig):
+            _user_id = memory.user_id or "praison"
+            _memory_config = memory.config
+            _embedder = memory.embedder
+        elif isinstance(memory, dict):
+            _user_id = memory.get("user_id", "praison")
+            _memory_config = memory.get("config")
+            _embedder = memory.get("embedder")
+        
+        # Extract planning params
+        _planning_llm = "gpt-4o-mini"
+        _auto_approve_plan = False
+        _planning_tools = None
+        _planning_reasoning = False
+        if planning is True:
+            pass  # Use defaults
+        elif MultiAgentPlanningConfig and isinstance(planning, MultiAgentPlanningConfig):
+            _planning_llm = planning.llm or "gpt-4o-mini"
+            _auto_approve_plan = planning.auto_approve
+            _planning_tools = planning.tools
+            _planning_reasoning = planning.reasoning
+        elif isinstance(planning, dict):
+            _planning_llm = planning.get("llm", "gpt-4o-mini")
+            _auto_approve_plan = planning.get("auto_approve", False)
+            _planning_tools = planning.get("tools")
+            _planning_reasoning = planning.get("reasoning", False)
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # Memory dependency check
+        # ─────────────────────────────────────────────────────────────────────
         if memory:
             try:
                 from ..memory.memory import Memory
-                MEMORY_AVAILABLE = True
             except ImportError:
                 raise ImportError(
                     "Memory features requested but memory dependencies not installed. "
@@ -169,9 +283,12 @@ class Agents:
         if not agents:
             raise ValueError("At least one agent must be provided")
         
-        self.run_id = str(uuid.uuid4())  # Auto-generate run_id
-        self.user_id = user_id or "praison"  # Optional user_id
-        self.max_iter = max_iter  # Add max_iter parameter
+        # ─────────────────────────────────────────────────────────────────────
+        # Core initialization
+        # ─────────────────────────────────────────────────────────────────────
+        self.run_id = str(uuid.uuid4())
+        self.user_id = _user_id
+        self.max_iter = _max_iter
 
         # Pass user_id to each agent
         for agent in agents:
@@ -179,29 +296,29 @@ class Agents:
 
         self.agents: List[Agent] = agents
         self.tasks: Dict[int, Task] = {}
-        if max_retries < 3:
-            max_retries = 3
-        self.completion_checker = completion_checker if completion_checker else self.default_completion_checker
+        if _max_retries < 3:
+            _max_retries = 3
+        self.completion_checker = _completion_checker if _completion_checker else self.default_completion_checker
         self.task_id_counter = 0
-        self.verbose = verbose
-        self.max_retries = max_retries
+        self.verbose = _verbose
+        self.max_retries = _max_retries
         self.process = process
-        self.stream = stream
-        self.name = name  # Store the name for the Agents collection
+        self.stream = _stream
+        self.name = name
         
         # Callbacks for workflow execution
-        self.on_task_start = on_task_start  # Called before each task
-        self.on_task_complete = on_task_complete  # Called after each task
-        self.variables = variables if variables else {}  # Global variables for substitution
+        self.on_task_start = _on_task_start
+        self.on_task_complete = _on_task_complete
+        self.variables = variables if variables else {}
         
         # Check for manager_llm in environment variable if not provided
         self.manager_llm = manager_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-5-nano')
         
         # Set logger level based on verbose
-        if verbose >= 5:
-            logger.setLevel(logging.INFO)      # keep everything ≥INFO
-        elif verbose >= 3:
-            logger.setLevel(logging.DEBUG)     # surface DEBUG when user asks for it
+        if _verbose >= 5:
+            logger.setLevel(logging.INFO)
+        elif _verbose >= 3:
+            logger.setLevel(logging.DEBUG)
         else:
             logger.setLevel(logging.WARNING)
             
@@ -222,7 +339,6 @@ class Agents:
                 tasks.append(task)
             logger.info(f"Auto-generated {len(tasks)} tasks from agents")
         else:
-            # Validate tasks for backward compatibility
             if not tasks:
                 raise ValueError("If tasks are provided, at least one task must be present")
             logger.info(f"Using {len(tasks)} provided tasks")
@@ -232,45 +348,41 @@ class Agents:
             self.add_task(task)
             task.status = "not started"
             
-        # If tasks were auto-generated from agents or process is sequential, set up sequential flow
+        # Set up sequential flow if needed
         if len(tasks) > 1 and (process == "sequential" or all(task.next_tasks == [] for task in tasks)):
             for i in range(len(tasks) - 1):
-                # Set up next task relationship
                 tasks[i].next_tasks = [tasks[i + 1].name]
-                # Set up context for the next task to include the current task
                 if tasks[i + 1].context is None:
                     tasks[i + 1].context = []
                 tasks[i + 1].context.append(tasks[i])
             logger.info("Set up sequential flow with automatic context passing")
         
-        self._state = {}  # Add state storage at Agents level
+        self._state = {}
         
-        # Context management (single param for all context features)
-        self._context_param = context  # Store raw param for lazy init
-        self._context_manager = None  # Lazy initialized on first use
+        # Context management
+        self._context_param = context
+        self._context_manager = None
         self._context_manager_initialized = False
         
-        # Initialize planning mode
+        # Planning mode
         self.planning = planning
-        self.planning_llm = planning_llm or "gpt-4o-mini"
-        self.auto_approve_plan = auto_approve_plan
-        self.planning_tools = planning_tools
-        self.planning_reasoning = planning_reasoning
+        self.planning_llm = _planning_llm
+        self.auto_approve_plan = _auto_approve_plan
+        self.planning_tools = _planning_tools
+        self.planning_reasoning = _planning_reasoning
         self._current_plan = None
         self._todo_list = None
         self._planning_agent = None
         
-        # Initialize memory system
+        # Memory system
         self.shared_memory = None
         if memory:
             try:
                 from ..memory.memory import Memory
                 
-                # Get memory config from parameter or first task
-                mem_cfg = memory_config
+                mem_cfg = _memory_config
                 if not mem_cfg:
                     mem_cfg = next((t.config.get('memory_config') for t in tasks if hasattr(t, 'config') and t.config), None)
-                # Set default memory config if none provided
                 if not mem_cfg:
                     mem_cfg = {
                         "provider": "rag",
@@ -281,30 +393,26 @@ class Agents:
                         },
                         "rag_db_path": "./.praison/chroma_db"
                     }
-                # Add embedder config if provided
-                if embedder:
-                    if isinstance(embedder, dict):
+                if _embedder:
+                    if isinstance(_embedder, dict):
                         mem_cfg = mem_cfg or {}
-                        mem_cfg["embedder"] = embedder
+                        mem_cfg["embedder"] = _embedder
                     else:
-                        # Handle direct embedder function
                         mem_cfg = mem_cfg or {}
-                        mem_cfg["embedder_function"] = embedder
+                        mem_cfg["embedder_function"] = _embedder
 
                 if mem_cfg:
-                    # Pass verbose level to Memory
-                    self.shared_memory = Memory(config=mem_cfg, verbose=verbose)
-                    if verbose >= 5:
+                    self.shared_memory = Memory(config=mem_cfg, verbose=_verbose)
+                    if _verbose >= 5:
                         logger.info("Initialized shared memory for Agents")
-                    # Distribute memory to tasks
                     for task in tasks:
                         if not task.memory:
                             task.memory = self.shared_memory
-                            if verbose >= 5:
+                            if _verbose >= 5:
                                 logger.info(f"Assigned shared memory to task {task.id}")
             except Exception as e:
                 logger.error(f"Failed to initialize shared memory: {e}")
-        # Update tasks with shared memory
+        
         if self.shared_memory:
             for task in tasks:
                 if not task.memory:

@@ -306,7 +306,6 @@ class InteractiveCore:
             "role": "Assistant",
             "goal": "Help the user with their request",
             "backstory": "You are a helpful AI assistant",
-            "verbose": self.config.verbose,
             "tools": self.get_tools(),
         }
         
@@ -315,6 +314,13 @@ class InteractiveCore:
         
         if self.config.memory:
             agent_config["memory"] = True
+        
+        # Enable autonomy for intelligent task handling (agent-centric)
+        if self.config.autonomy:
+            if self.config.autonomy_config:
+                agent_config["autonomy"] = self.config.autonomy_config
+            else:
+                agent_config["autonomy"] = True
         
         # Create agent and execute
         agent = Agent(**agent_config)

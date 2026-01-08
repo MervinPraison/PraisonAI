@@ -1273,6 +1273,31 @@ class PraisonAI:
                 exit_code = handle_eval_command(unknown_args)
                 sys.exit(exit_code)
             
+            elif args.command == 'audit':
+                # Audit command - agent-centric compliance auditing
+                from .commands.audit import audit as audit_cli
+                import click
+                # Parse subcommand and args
+                if unknown_args and unknown_args[0] == 'agent-centric':
+                    # Build click args
+                    click_args = unknown_args[1:]
+                    try:
+                        audit_cli.main(['agent-centric'] + click_args, standalone_mode=False)
+                    except click.exceptions.Exit as e:
+                        sys.exit(e.exit_code)
+                    except SystemExit as e:
+                        sys.exit(e.code if e.code else 0)
+                else:
+                    print("Usage: praisonai audit agent-centric [--scan|--fix|--check] PATH")
+                    print("\nOptions:")
+                    print("  --scan PATH      Scan path for compliance")
+                    print("  --fix PATH       Fix non-compliant files")
+                    print("  --check PATH     Check and fail if non-compliant")
+                    print("  --json           Output as JSON")
+                    print("  --line-limit N   Line limit for header scan (default: 40)")
+                    print("  --verbose, -v    Verbose output")
+                sys.exit(0)
+            
             elif args.command == 'templates':
                 # Templates command - manage and run templates/recipes
                 from .features.templates import handle_templates_command

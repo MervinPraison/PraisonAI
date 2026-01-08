@@ -118,8 +118,7 @@ class TestContextBuilderUsesText:
             name='TestAgent',
             instructions='Answer based on knowledge.',
             knowledge=[temp_knowledge_dir],
-            user_id='test_user',
-            verbose=False,
+            output='silent',
         )
         
         # Ensure knowledge is processed

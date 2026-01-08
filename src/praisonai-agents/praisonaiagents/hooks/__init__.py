@@ -82,6 +82,9 @@ __all__ = [
     "MiddlewareChain",
     "AsyncMiddlewareChain",
     "MiddlewareManager",
+    # Verification hooks (protocols)
+    "VerificationHook",
+    "VerificationResult",
 ]
 
 
@@ -132,6 +135,11 @@ def __getattr__(name: str):
     # Middleware utilities
     if name in ("MiddlewareChain", "AsyncMiddlewareChain", "MiddlewareManager"):
         from .middleware import MiddlewareChain, AsyncMiddlewareChain, MiddlewareManager
+        return locals()[name]
+    
+    # Verification hooks (protocols for autonomy)
+    if name in ("VerificationHook", "VerificationResult"):
+        from .verification import VerificationHook, VerificationResult
         return locals()[name]
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

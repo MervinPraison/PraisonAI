@@ -72,7 +72,8 @@ class AutoAgents(Agents):
         reflect_llm: Optional[str] = None,
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
-        max_agents: int = 3  # New parameter for maximum number of agents
+        max_agents: int = 3,  # Maximum number of agents
+        autonomy: Optional[Any] = None,  # Union[bool, dict, AutonomyConfig] - Enable autonomy for all agents
     ):
         """Initialize AutoAgents with configuration for automatic agent and task creation."""
         if max_agents < 1:
@@ -109,6 +110,7 @@ class AutoAgents(Agents):
         self.reflect_llm = reflect_llm
         self.base_url = base_url
         self.api_key = api_key
+        self.autonomy = autonomy  # Store autonomy config for agents
         
         # Display initial instruction
         if self.verbose:
@@ -459,7 +461,8 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
                 max_iter=self.max_iter,
                 reflect_llm=self.reflect_llm,
                 base_url=self.base_url,
-                api_key=self.api_key
+                api_key=self.api_key,
+                autonomy=self.autonomy  # Pass autonomy config to agents
             )
             agents.append(agent)
             
