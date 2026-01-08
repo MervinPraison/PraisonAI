@@ -9,7 +9,7 @@ agent = Agent(
     goal="Search for information from multiple sources",
     backstory="I am an AI assistant that can search YouTube and Wikipedia.",
     tools=[YouTubeSearchTool, WikipediaAPIWrapper],
-    self_reflect=False
+    reflection=False
 )
 
 # Create tasks to demonstrate both tools

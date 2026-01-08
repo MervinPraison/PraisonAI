@@ -32,9 +32,9 @@ code_writer = Agent(
     goal="Write clean, efficient, and well-documented Python code",
     backstory="You are a senior Python developer with 10+ years of experience in writing production-quality code.",
     instructions="Write Python code that follows PEP 8 standards, includes proper error handling, and has clear documentation.",
-    self_reflect=True,
-    min_reflect=2,
-    max_reflect=5
+    reflection=True,
+    
+    
 )
 
 code_reviewer = Agent(
@@ -108,9 +108,9 @@ general_code_agent = Agent(
 4. Refactor code for better performance
 5. Add tests and documentation""",
     tools=[code_interpreter, analyze_code_complexity],
-    self_reflect=True,
-    min_reflect=1,
-    max_reflect=3
+    reflection=True,
+    
+    
 )
 
 if __name__ == "__main__":

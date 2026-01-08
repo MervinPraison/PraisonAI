@@ -87,7 +87,7 @@ def main():
         and technology. You provide concise, accurate summaries of important news.""",
         tools=[search_tool],
         verbose=True,
-        self_reflect=False  # Disable reflection for faster execution
+        reflection=False  # Disable reflection for faster execution
     )
     
     # Define the task

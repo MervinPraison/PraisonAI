@@ -27,9 +27,9 @@ pdf_agent = Agent(
     instructions="Read the provided PDF document and answer questions about its content. Be specific and cite relevant sections when possible.",
     knowledge=["document.pdf"],  # Replace with your PDF file path
     knowledge_config=config,
-    self_reflect=True,
-    min_reflect=1,
-    max_reflect=3
+    reflection=True,
+    
+    
 )
 
 # Example usage

@@ -53,8 +53,7 @@ web_scraper_agent = Agent(
     role="Web Scraper",
     goal="Extract URLs from https://news.ycombinator.com/",
     backstory="An expert in data extraction from websites, adept at navigating and retrieving detailed information and saving it to a file. and just check if the file is created using run_terminal_command tool",
-    min_reflect=3,
-    max_reflect=5,
+    reflection=True,
     tools=[code_interpret, save_to_file, run_terminal_command],
     llm="gpt-5-nano"
 )

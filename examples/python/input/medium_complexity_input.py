@@ -19,7 +19,7 @@ search_agent = Agent(
     goal=f"Find {num_results} relevant results about {topic}",
     backstory="Expert in internet research and data collection",
     tools=[duckduckgo],
-    self_reflect=False
+    reflection=False
 )
 
 # Create analysis agent

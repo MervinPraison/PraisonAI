@@ -17,10 +17,10 @@ reflection_agent = Agent(
     goal="Demonstrate self-reflection and iterative improvement patterns",
     backstory="Expert researcher with strong self-reflection and continuous improvement capabilities",
     tools=[internet_search],
-    self_reflect=True,
-    min_reflect=2,
-    max_reflect=4,
-    reflect_llm="gpt-5-nano",
+    reflection=True,
+    
+    
+    
     verbose=True
 )
 

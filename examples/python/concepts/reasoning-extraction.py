@@ -49,9 +49,9 @@ cot_agent = Agent(
 6. Assess your confidence level
 
 Always make your thinking process explicit and transparent.""",
-    self_reflect=True,
-    min_reflect=2,
-    max_reflect=3
+    reflection=True,
+    
+    
 )
 
 # Example 2: Reasoning Extractor Agent
@@ -224,7 +224,7 @@ pattern_reasoning_agent = Agent(
 3. Counterfactual: Explore what-if scenarios
 4. Systems thinking: Consider interconnections
 5. Probabilistic: Assess likelihoods""",
-    self_reflect=True
+    reflection=True
 )
 
 # Example 8: Interactive Reasoning Extraction

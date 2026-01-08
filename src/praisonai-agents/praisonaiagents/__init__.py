@@ -372,6 +372,26 @@ def __getattr__(name):
         except ImportError:
             return None
     
+    # Feature Config classes (agent-centric API)
+    elif name in ("MemoryConfig", "KnowledgeConfig", "PlanningConfig", 
+                  "ReflectionConfig", "GuardrailConfig", "WebConfig",
+                  "MemoryBackend", "ChunkingStrategy", "GuardrailAction", 
+                  "WebSearchProvider"):
+        from .config import feature_configs
+        result = getattr(feature_configs, name)
+        _lazy_cache[name] = result
+        return result
+    
+    # Context management config (already exists)
+    elif name == "ManagerConfig":
+        from .context.manager import ManagerConfig
+        _lazy_cache[name] = ManagerConfig
+        return ManagerConfig
+    elif name == "ContextManager":
+        from .context.manager import ContextManager
+        _lazy_cache[name] = ContextManager
+        return ContextManager
+    
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -527,4 +547,18 @@ __all__ = [
     'RAGConfig',
     'RAGResult',
     'RAGCitation',
+    # Feature Configs (agent-centric API)
+    'MemoryConfig',
+    'KnowledgeConfig',
+    'PlanningConfig',
+    'ReflectionConfig',
+    'GuardrailConfig',
+    'WebConfig',
+    'MemoryBackend',
+    'ChunkingStrategy',
+    'GuardrailAction',
+    'WebSearchProvider',
+    # Context Management
+    'ManagerConfig',
+    'ContextManager',
 ]

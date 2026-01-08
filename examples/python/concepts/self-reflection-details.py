@@ -24,9 +24,9 @@ basic_reflection_agent = Agent(
 3. Identify areas for improvement
 4. Revise and enhance
 5. Repeat until satisfied""",
-    self_reflect=True,  # Enable self-reflection
-    min_reflect=1,      # Minimum 1 reflection iteration
-    max_reflect=3       # Maximum 3 reflection iterations
+    reflection=True,  # Enable self-reflection
+          # Minimum 1 reflection iteration
+           # Maximum 3 reflection iterations
 )
 
 # Example 2: Advanced Reflection with Different Strategies
@@ -41,9 +41,9 @@ quality_focused_agent = Agent(
 - Clarity of presentation
 - Logical flow
 - Supporting evidence""",
-    self_reflect=True,
-    min_reflect=3,  # Higher minimum for quality
-    max_reflect=5   # Allow more iterations
+    reflection=True,
+      # Higher minimum for quality
+       # Allow more iterations
 )
 
 efficiency_balanced_agent = Agent(
@@ -52,9 +52,9 @@ efficiency_balanced_agent = Agent(
     goal="Achieve good quality with reasonable reflection time",
     backstory="You balance quality with efficiency, knowing when good enough is sufficient.",
     instructions="Create good content with 1-2 rounds of improvement.",
-    self_reflect=True,
-    min_reflect=1,
-    max_reflect=2  # Limit iterations for efficiency
+    reflection=True,
+    
+      # Limit iterations for efficiency
 )
 
 # Example 3: No Reflection for Comparison
@@ -64,7 +64,7 @@ no_reflection_agent = Agent(
     goal="Provide immediate responses without reflection",
     backstory="You provide quick, first-draft responses.",
     instructions="Respond immediately with your first thought.",
-    self_reflect=False  # Disable reflection
+    reflection=False  # Disable reflection
 )
 
 # Demonstration function to show reflection in action
@@ -113,9 +113,9 @@ def reflection_workflow_example():
         role="Initial content creator",
         goal="Create first draft with self-improvement",
         backstory="You create initial drafts and refine them through reflection.",
-        self_reflect=True,
-        min_reflect=2,
-        max_reflect=3
+        reflection=True,
+        
+        
     )
     
     # Reviewer without reflection (provides feedback)
@@ -124,7 +124,7 @@ def reflection_workflow_example():
         role="Content reviewer",
         goal="Provide constructive feedback",
         backstory="You review content and provide specific improvement suggestions.",
-        self_reflect=False  # No reflection needed for reviewing
+        reflection=False  # No reflection needed for reviewing
     )
     
     # Final polisher with reflection
@@ -133,9 +133,9 @@ def reflection_workflow_example():
         role="Final content polisher",
         goal="Perfect the content based on feedback",
         backstory="You take feedback and create the final, polished version.",
-        self_reflect=True,
-        min_reflect=1,
-        max_reflect=2
+        reflection=True,
+        
+        
     )
     
     # Workflow tasks
@@ -202,9 +202,9 @@ custom_reflection_agent = Agent(
     backstory="You adapt your reflection process based on content quality.",
     instructions="""Create content and reflect on it.
 Continue improving until quality standards are met or maximum iterations reached.""",
-    self_reflect=True,
-    min_reflect=1,
-    max_reflect=5
+    reflection=True,
+    
+    
 )
 
 # Example 6: Reflection Impact Analysis

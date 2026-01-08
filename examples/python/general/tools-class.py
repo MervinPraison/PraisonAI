@@ -94,7 +94,7 @@ agent = Agent(
     goal="Search for information about 'AI Agents Framework'",
     backstory="I am an AI assistant that can search GitHub.",
     tools=[EXASearchTool],
-    self_reflect=False
+    reflection=False
 )
 
 # Create tasks to demonstrate both tools

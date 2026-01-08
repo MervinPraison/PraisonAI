@@ -129,9 +129,9 @@ def main():
         tools=[internet_search_tool],
         llm="gpt-5-nano",
         markdown=True,
-        reflect_llm="gpt-5-nano",
-        min_reflect=2,
-        max_reflect=4
+        
+        
+        
     )
     
     writer = Agent(

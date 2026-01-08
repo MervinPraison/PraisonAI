@@ -127,7 +127,34 @@ def process_task_context(context_item, verbose=0, user_id=None):
         return str(context_item)  # Fallback for unknown types
 
 class PraisonAIAgents:
-    def __init__(self, agents, tasks=None, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None, memory=False, memory_config=None, embedder=None, user_id=None, max_iter=10, stream=True, name: Optional[str] = None, planning: bool = False, planning_llm: Optional[str] = None, auto_approve_plan: bool = False, planning_tools: Optional[List] = None, planning_reasoning: bool = False, on_task_start: Optional[Callable] = None, on_task_complete: Optional[Callable] = None, variables: Optional[Dict[str, Any]] = None, context: Optional[Any] = False):
+    def __init__(
+        self,
+        agents,
+        tasks=None,
+        verbose=0,
+        completion_checker=None,
+        max_retries=5,
+        process="sequential",
+        manager_llm=None,
+        # Consolidated feature params (agent-centric API)
+        memory: Optional[Any] = False,  # Union[bool, MemoryConfig]
+        planning: Optional[Any] = False,  # Union[bool, PlanningConfig]
+        context: Optional[Any] = False,  # Union[bool, ManagerConfig, ContextManager]
+        # Legacy params (kept for backward compatibility)
+        memory_config=None,
+        embedder=None,
+        user_id=None,
+        max_iter=10,
+        stream=True,
+        name: Optional[str] = None,
+        planning_llm: Optional[str] = None,
+        auto_approve_plan: bool = False,
+        planning_tools: Optional[List] = None,
+        planning_reasoning: bool = False,
+        on_task_start: Optional[Callable] = None,
+        on_task_complete: Optional[Callable] = None,
+        variables: Optional[Dict[str, Any]] = None,
+    ):
         # Add check at the start if memory is requested
         if memory:
             try:
