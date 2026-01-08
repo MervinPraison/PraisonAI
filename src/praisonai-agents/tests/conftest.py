@@ -4,10 +4,48 @@ Pytest configuration for PraisonAI Agents tests.
 Provides fixtures and markers for testing, including:
 - live: Tests that require real API keys (opt-in)
 - slow: Tests that take longer to run
+- asyncio: Async test support (works with or without pytest-asyncio)
 """
 
+import asyncio
+import inspect
 import os
 import pytest
+
+# Check if pytest-asyncio is installed (without importing it)
+import importlib.util
+_PYTEST_ASYNCIO_INSTALLED = importlib.util.find_spec("pytest_asyncio") is not None
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_pyfunc_call(pyfuncitem):
+    """
+    Run async test functions using asyncio.run() when pytest-asyncio is not installed.
+    This allows async tests to work in minimal environments without pytest-asyncio.
+    When pytest-asyncio IS installed, defer to it by returning None.
+    """
+    if _PYTEST_ASYNCIO_INSTALLED:
+        # Let pytest-asyncio handle it
+        return None
+    
+    # Check if this is an async function
+    if inspect.iscoroutinefunction(pyfuncitem.obj):
+        # Get the function and its arguments
+        testfunction = pyfuncitem.obj
+        funcargs = pyfuncitem.funcargs
+        
+        # Filter to only include parameters the function accepts
+        sig = inspect.signature(testfunction)
+        filtered_args = {
+            k: v for k, v in funcargs.items() 
+            if k in sig.parameters
+        }
+        
+        # Run the async function
+        asyncio.run(testfunction(**filtered_args))
+        return True
+    
+    return None
 
 
 def pytest_configure(config):
@@ -17,6 +55,9 @@ def pytest_configure(config):
     )
     config.addinivalue_line(
         "markers", "slow: mark test as slow running"
+    )
+    config.addinivalue_line(
+        "markers", "asyncio: mark test as async (handled by local plugin when pytest-asyncio not installed)"
     )
 
 
