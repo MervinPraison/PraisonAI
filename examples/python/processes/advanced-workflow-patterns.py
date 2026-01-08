@@ -215,7 +215,7 @@ for request in sample_requests:
             finalization_task
         ],
         process="workflow",  # Use workflow process for conditional execution
-        verbose=True
+        output="verbose"
     )
     
     print(f"Executing advanced workflow for {request['id']}...")

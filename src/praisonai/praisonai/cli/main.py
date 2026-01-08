@@ -3584,12 +3584,12 @@ Provide ONLY the commit message, no explanations."""
                 "backstory": "You are a helpful AI assistant"
             }
             
-            # Set verbose=False by default, only enable with --verbose flag
-            # This shows minimal "Generating..." status instead of full Agent Info panels
+            # Set output mode based on --verbose flag
+            # Uses consolidated 'output' param instead of deprecated 'verbose'
             if hasattr(self, 'args') and getattr(self.args, 'verbose', False):
-                agent_config["verbose"] = True
+                agent_config["output"] = "verbose"
             else:
-                agent_config["verbose"] = False
+                agent_config["output"] = "minimal"
             
             # Load default tools (same as interactive mode) unless --no-tools is set
             if not getattr(self.args, 'no_tools', False):
@@ -4383,8 +4383,7 @@ Now, {final_instruction.lower()}:"""
                     goal=agent_config.get('goal', ''),
                     backstory=agent_config.get('backstory', ''),
                     instructions=agent_config.get('instructions', ''),
-                    llm=agent_config.get('llm', 'gpt-4o-mini'),
-                    verbose=False
+                    llm=agent_config.get('llm', 'gpt-4o-mini'), output="minimal"
                 )
                 agents_dict[agent_id] = agent
                 agents_list.append(agent)
@@ -4787,8 +4786,7 @@ Now, {final_instruction.lower()}:"""
                     goal="Gather relevant information using available tools",
                     backstory="You are an expert at using tools to gather information for research.",
                     tools=tools_list,
-                    llm="gpt-4o-mini",
-                    verbose=False
+                    llm="gpt-4o-mini", output="minimal"
                 )
                 
                 # Create task to gather initial information
@@ -5655,7 +5653,7 @@ Provide a concise summary (max 200 words):"""
                 role="Conversation Summarizer",
                 goal="Create concise summaries of conversations",
                 backstory="You summarize conversations while preserving key information.",
-                verbose=False,
+                output="minimal",
                 llm=session_state['current_model']
             )
             
@@ -5933,7 +5931,7 @@ Provide a concise summary (max 200 words):"""
                                 goal="Help the user with their tasks",
                                 backstory=backstory,
                                 tools=tools_list if tools_list else None,
-                                verbose=False,
+                                output="minimal",
                                 llm=model
                             )
                             
@@ -6076,7 +6074,7 @@ Provide a concise summary (max 200 words):"""
                     goal="Help the user with their tasks",
                     backstory="You are a helpful AI assistant with access to tools for file operations, shell commands, and web search. Use tools when needed to complete tasks.",
                     tools=tools_list if tools_list else None,
-                    verbose=False,  # Suppress verbose panels
+                    output="minimal",  # Suppress verbose panels
                     llm=model
                 )
             timings['agent_create_end'] = time.time()

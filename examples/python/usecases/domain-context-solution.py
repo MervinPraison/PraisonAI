@@ -161,8 +161,7 @@ manager_agent = Agent(
     Your primary responsibility is to ensure all agents maintain focus on {domain} throughout the workflow.
     """,
     tools=[],
-    verbose=True,
-    llm="gpt-5-nano",
+    llm="gpt-4o-mini",
     markdown=True,
     memory={"short_term": {"target_domain": domain}, "long_term": qdrant_client},
 )
@@ -185,8 +184,7 @@ tool_agent = Agent(
     Remember: You are a specialist for {domain} only. No generic examples or other domains.
     """,
     tools=domain_tools,  # Use domain-aware tools
-    verbose=True,
-    llm="gpt-5-nano",
+    llm="gpt-4o-mini",
     markdown=True,
     memory={"short_term": {"target_domain": domain}, "long_term": qdrant_client},
 )
@@ -208,8 +206,7 @@ sr_pentester_agent = Agent(
     Your expertise is domain-specific to {domain}. All analysis must be relevant to this domain only.
     """,
     tools=[],
-    verbose=True,
-    llm="gpt-5-nano",
+    llm="gpt-4o-mini",
     markdown=True,
     memory={"short_term": {"target_domain": domain}, "long_term": qdrant_client},
 )
@@ -231,8 +228,7 @@ ciso_agent = Agent(
     Your strategic insights must be domain-specific to {domain}. No generic recommendations.
     """,
     tools=[],
-    verbose=True,
-    llm="gpt-5-nano",
+    llm="gpt-4o-mini",
     markdown=True,
     memory={"short_term": {"target_domain": domain}, "long_term": qdrant_client},
 )
@@ -266,9 +262,8 @@ ciso_review_task = Task(
 agents = Agents(
     agents=[manager_agent, tool_agent, sr_pentester_agent, ciso_agent],
     tasks=[tool_query_task, pentester_analysis_task, ciso_review_task],
-    verbose=True,
     process="hierarchical",
-    manager_llm="gpt-5-nano",
+    manager_llm="gpt-4o-mini",
     memory=True,  # Enable shared memory for domain context
     memory_config={
         "provider": "rag",

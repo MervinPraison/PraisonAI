@@ -531,7 +531,7 @@ class BenchmarkHandler(FlagHandler):
         profiler.enable()
         
         try:
-            agent = Agent(instructions="You are helpful", llm=self.DEFAULT_MODEL, verbose=False)
+            agent = Agent(instructions="You are helpful", llm=self.DEFAULT_MODEL, output="minimal")
             t_init = time.perf_counter()
             init_ms = (t_init - t_import) * 1000
             
@@ -720,7 +720,7 @@ t0 = time.perf_counter()
 from praisonaiagents import Agent
 t_import = time.perf_counter()
 
-agent = Agent(instructions="You are helpful", llm="{self.DEFAULT_MODEL}", verbose=False)
+agent = Agent(instructions="You are helpful", llm="{self.DEFAULT_MODEL}", output="minimal")
 t_init = time.perf_counter()
 
 result = agent.start("{prompt}")
@@ -795,7 +795,7 @@ t0 = time.perf_counter()
 from praisonaiagents import Agent, Task, Agents
 t_import = time.perf_counter()
 
-agent = Agent(name="Helper", instructions="You are helpful", llm="{self.DEFAULT_MODEL}", verbose=False)
+agent = Agent(name="Helper", instructions="You are helpful", llm="{self.DEFAULT_MODEL}", output="minimal")
 task = Task(name="respond", description="{prompt}", expected_output="response", agent=agent)
 agents = Agents(agents=[agent], tasks=[task], verbose=0)
 t_init = time.perf_counter()
@@ -841,8 +841,8 @@ t0 = time.perf_counter()
 from praisonaiagents import Agent, Task, Agents
 t_import = time.perf_counter()
 
-agent1 = Agent(name="Analyzer", instructions="Analyze the request", llm="{self.DEFAULT_MODEL}", verbose=False)
-agent2 = Agent(name="Responder", instructions="Provide a response", llm="{self.DEFAULT_MODEL}", verbose=False)
+agent1 = Agent(name="Analyzer", instructions="Analyze the request", llm="{self.DEFAULT_MODEL}", output="minimal")
+agent2 = Agent(name="Responder", instructions="Provide a response", llm="{self.DEFAULT_MODEL}", output="minimal")
 task1 = Task(name="analyze", description="Analyze: {prompt}", expected_output="analysis", agent=agent1)
 task2 = Task(name="respond", description="Respond based on analysis", expected_output="response", agent=agent2)
 agents = Agents(agents=[agent1, agent2], tasks=[task1, task2], verbose=0)
@@ -889,7 +889,7 @@ t0 = time.perf_counter()
 from praisonaiagents import Agent
 t_import = time.perf_counter()
 
-agent = Agent(instructions="You are helpful", llm="openai/{self.DEFAULT_MODEL}", verbose=False)
+agent = Agent(instructions="You are helpful", llm="openai/{self.DEFAULT_MODEL}", output="minimal")
 t_init = time.perf_counter()
 
 result = agent.start("{prompt}")

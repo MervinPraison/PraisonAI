@@ -49,13 +49,13 @@ if __name__ == "__main__":
     print("=== Testing Routing Workflow ===\n")
     
     # Test 1: Urgent request
-    result = workflow.start("This is an URGENT matter!", verbose=True)
+    result = workflow.start("This is an URGENT matter!")
     print(f"Result: {result['output']}\n")
     
     # Test 2: Support request
-    result = workflow.start("I have a question about my account", verbose=True)
+    result = workflow.start("I have a question about my account")
     print(f"Result: {result['output']}\n")
     
     # Test 3: Normal request
-    result = workflow.start("Please process my order", verbose=True)
+    result = workflow.start("Please process my order")
     print(f"Result: {result['output']}")

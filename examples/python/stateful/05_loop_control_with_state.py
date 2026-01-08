@@ -265,7 +265,7 @@ batch_processor = Agent(
     goal="Process all batches successfully with retry logic",
     backstory="A batch processing expert",
     tools=[process_batch, process_retry_batch],
-    llm="gpt-5-nano",
+    llm="gpt-4o-mini",
     verbose=True
 )
 
@@ -275,7 +275,7 @@ data_collector = Agent(
     goal="Collect all data from paginated source",
     backstory="A data collection specialist",
     tools=[collect_paginated_data],
-    llm="gpt-5-nano",
+    llm="gpt-4o-mini",
     verbose=True
 )
 
@@ -285,7 +285,7 @@ validator = Agent(
     goal="Validate all collected items in batches",
     backstory="A data validation expert",
     tools=[validate_collected_items],
-    llm="gpt-5-nano",
+    llm="gpt-4o-mini",
     verbose=True
 )
 
@@ -295,7 +295,7 @@ reporter = Agent(
     goal="Create comprehensive reports on loop operations",
     backstory="A reporting specialist",
     tools=[generate_loop_report],
-    llm="gpt-5-nano",
+    llm="gpt-4o-mini",
     verbose=True
 )
 
@@ -366,7 +366,6 @@ report_task = Task(
 workflow = Agents(
     agents=[batch_processor, data_collector, validator, reporter],
     tasks=[batch_loop_task, retry_loop_task, pagination_loop_task, validation_loop_task, report_task],
-    verbose=True,
     process="sequential"
 )
 

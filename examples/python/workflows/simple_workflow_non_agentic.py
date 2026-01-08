@@ -30,7 +30,7 @@ workflow = Workflow(
 
 if __name__ == "__main__":
     # Run the workflow - PraisonAI style uses .start()
-    result = workflow.start("Hello, World!", verbose=True)
+    result = workflow.start("Hello, World!")
     
     print(f"\nFinal output: {result['output']}")
     print(f"Steps completed: {len(result['steps'])}")

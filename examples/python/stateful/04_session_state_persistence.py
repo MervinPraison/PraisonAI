@@ -155,7 +155,7 @@ data_processor = Agent(
     goal="Process all customer data efficiently",
     backstory="A data processing specialist",
     tools=[process_customer_data],
-    llm="gpt-5-nano",
+    llm="gpt-4o-mini",
     verbose=True
 )
 
@@ -165,7 +165,7 @@ status_monitor = Agent(
     goal="Track and report processing progress",
     backstory="A monitoring specialist",
     tools=[check_processing_status, save_checkpoint],
-    llm="gpt-5-nano",
+    llm="gpt-4o-mini",
     verbose=True
 )
 
@@ -175,7 +175,7 @@ task_runner = Agent(
     goal="Execute tasks that may span multiple sessions",
     backstory="A task execution specialist",
     tools=[simulate_long_task],
-    llm="gpt-5-nano",
+    llm="gpt-4o-mini",
     verbose=True
 )
 
@@ -185,7 +185,7 @@ report_generator = Agent(
     goal="Create comprehensive session reports",
     backstory="A reporting specialist",
     tools=[generate_session_report],
-    llm="gpt-5-nano",
+    llm="gpt-4o-mini",
     verbose=True
 )
 
@@ -239,7 +239,6 @@ initial_tasks = [
 workflow = Agents(
     agents=[data_processor, status_monitor, task_runner, report_generator],
     tasks=initial_tasks,
-    verbose=True,
     process="sequential",
     memory=True  # Enable memory for persistence
 )
@@ -312,7 +311,6 @@ resumed_tasks = [
 resumed_workflow = Agents(
     agents=[data_processor, status_monitor, task_runner, report_generator],
     tasks=resumed_tasks,
-    verbose=True,
     process="sequential",
     memory=True
 )

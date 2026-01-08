@@ -89,8 +89,7 @@ strategy_task = Task(
 workflow = Agents(
     agents=[monitor_agent, impact_analyzer, strategy_generator],
     tasks=[monitoring_task, impact_task, strategy_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 def main():

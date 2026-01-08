@@ -55,7 +55,7 @@ web_scraper_agent = Agent(
     backstory="An expert in data extraction from websites, adept at navigating and retrieving detailed information and saving it to a file. and just check if the file is created using run_terminal_command tool",
     reflection=True,
     tools=[code_interpret, save_to_file, run_terminal_command],
-    llm="gpt-5-nano"
+    llm="gpt-4o-mini"
 )
 
 task = Task(

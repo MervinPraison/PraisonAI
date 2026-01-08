@@ -156,8 +156,7 @@ workflow = Agents(
             failure_predictor, maintenance_scheduler],
     tasks=[sensor_task, performance_task, anomaly_task,
            prediction_task, scheduling_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 async def main():

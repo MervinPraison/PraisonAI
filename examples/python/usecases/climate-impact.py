@@ -191,8 +191,7 @@ workflow = Agents(
             impact_predictor, strategy_generator],
     tasks=[monitoring_task, urban_task, modeling_task,
            prediction_task, strategy_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 async def main():

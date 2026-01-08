@@ -56,10 +56,10 @@ if __name__ == "__main__":
     
     # Test 1: Technical question
     print("--- Technical Request ---")
-    result = workflow.start("How does machine learning work?", verbose=True)
+    result = workflow.start("How does machine learning work?")
     print(f"Result: {result['output'][:200]}...\n")
     
     # Test 2: Creative request
     print("--- Creative Request ---")
-    result = workflow.start("Write a poem about the ocean", verbose=True)
+    result = workflow.start("Write a poem about the ocean")
     print(f"Result: {result['output'][:200]}...")

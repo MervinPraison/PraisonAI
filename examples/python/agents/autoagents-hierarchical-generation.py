@@ -61,8 +61,7 @@ execution_task = Task(
 agents_system = Agents(
     agents=[manager_agent, research_agent],
     tasks=[planning_task, execution_task],
-    process="sequential",
-    verbose=True
+    process="sequential", output="verbose"
 )
 
 print("Starting hierarchical agent generation...")

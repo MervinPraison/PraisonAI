@@ -13,8 +13,7 @@ def main():
         role="Senior Market Research Analyst", 
         goal="Conduct comprehensive market research",
         backstory="You are a seasoned market researcher with 10+ years of experience.",
-        verbose=True,
-        llm="gpt-5-nano",
+        llm="gpt-4o-mini",
         metrics=True  # 🎯 Enable automatic metrics tracking
     )
     
@@ -23,8 +22,7 @@ def main():
         role="Strategic Business Consultant",
         goal="Develop actionable business strategies",
         backstory="You are a strategic consultant who translates research into business plans.",
-        verbose=True,
-        llm="gpt-5-nano",
+        llm="gpt-4o-mini",
         metrics=True  # 🎯 Enable automatic metrics tracking
     )
     
@@ -60,8 +58,7 @@ def main():
     # Initialize and run
     agents = Agents(
         agents=[research_agent, strategy_agent],
-        tasks=[research_task, strategy_task],
-        verbose=True
+        tasks=[research_task, strategy_task], output="verbose"
     )
     
     print("🚀 Running cost analysis workflow...")

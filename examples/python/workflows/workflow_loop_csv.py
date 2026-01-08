@@ -51,7 +51,7 @@ if __name__ == "__main__":
             ]
         )
         
-        result = workflow.start("Analyze these AI topics", verbose=True)
+        result = workflow.start("Analyze these AI topics")
         
         print(f"\nFinal Summary:\n{result['output']}")
         

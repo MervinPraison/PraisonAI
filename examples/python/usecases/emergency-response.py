@@ -108,8 +108,7 @@ coordinate_task = Task(
 workflow = Agents(
     agents=[router, dispatcher, monitor, synthesizer],
     tasks=[assessment_task, dispatch_task, monitor_task, coordinate_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 def main():

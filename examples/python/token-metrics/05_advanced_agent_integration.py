@@ -149,8 +149,7 @@ def main():
         role="Senior Research Analyst", 
         goal="Conduct thorough research and analysis",
         backstory="You are a meticulous researcher who produces comprehensive reports.",
-        verbose=True,
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     summarizer_agent = Agent(
@@ -158,8 +157,7 @@ def main():
         role="Information Synthesis Expert",
         goal="Create concise, accurate summaries",
         backstory="You excel at distilling complex information into clear, actionable insights.",
-        verbose=True,
-        llm="gpt-5-nano"  # Same model for fair comparison
+        llm="gpt-4o-mini"  # Same model for fair comparison
     )
     
     optimizer_agent = Agent(
@@ -167,8 +165,7 @@ def main():
         role="Efficiency Consultant",
         goal="Optimize workflows and processes",
         backstory="You identify inefficiencies and recommend improvements.",
-        verbose=True,
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     # Create tasks with varying complexity
@@ -202,8 +199,7 @@ def main():
     # Initialize agents system
     agents = Agents(
         agents=[researcher_agent, summarizer_agent, optimizer_agent],
-        tasks=[research_task, summary_task, optimization_task],
-        verbose=True
+        tasks=[research_task, summary_task, optimization_task], output="verbose"
     )
     
     print("🚀 Starting advanced token tracking demo...")

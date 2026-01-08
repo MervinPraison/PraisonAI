@@ -68,7 +68,7 @@ workflow = Agents(
     agents=[agent1, agent2, agent3],
     tasks=[initial_task, analysis_task, final_task],
     process="workflow",  # Use workflow process type
-    verbose=True
+    output="verbose"
 )
 
 # Run the workflow

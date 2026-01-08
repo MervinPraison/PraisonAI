@@ -65,8 +65,7 @@ research_task1 = Task(
 agents_session1 = Agents(
     agents=[research_agent],
     tasks=[research_task1],
-    session=session1,
-    verbose=True
+    session=session1, output="verbose"
 )
 
 # Execute first session
@@ -105,8 +104,7 @@ analysis_task = Task(
 agents_session2 = Agents(
     agents=[analysis_agent],
     tasks=[analysis_task], 
-    session=session2,
-    verbose=True
+    session=session2, output="verbose"
 )
 
 print("Starting analysis session with previous context...")
@@ -156,8 +154,7 @@ synthesis_task = Task(
 agents_recovery = Agents(
     agents=[synthesis_agent],
     tasks=[synthesis_task],
-    session=recovery_session,
-    verbose=True
+    session=recovery_session, output="verbose"
 )
 
 print("Starting recovery session with full context from previous sessions...")
@@ -207,8 +204,7 @@ review_task = Task(
 agents_reviewer = Agents(
     agents=[review_agent],
     tasks=[review_task],
-    session=reviewer_session,
-    verbose=True
+    session=reviewer_session, output="verbose"
 )
 
 print("Starting peer review session by different user...")

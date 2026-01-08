@@ -100,8 +100,7 @@ def main():
         role="Data Processing Specialist",
         goal="Process and analyze data efficiently",
         backstory="You specialize in data processing with focus on accuracy and efficiency.",
-        verbose=True,
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     monitor_agent = Agent(
@@ -109,8 +108,7 @@ def main():
         role="System Performance Analyst",
         goal="Monitor and optimize system performance",
         backstory="You analyze system metrics and provide optimization recommendations.",
-        verbose=True,
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     # Create tasks that generate trackable metrics
@@ -130,8 +128,7 @@ def main():
     # Initialize with telemetry awareness
     agents = Agents(
         agents=[data_agent, monitor_agent],
-        tasks=[processing_task, monitoring_task],
-        verbose=True
+        tasks=[processing_task, monitoring_task], output="verbose"
     )
     
     print("🚀 Running telemetry-enabled workflow...")

@@ -41,7 +41,7 @@ def main():
             "llm": {
                 "provider": "openai",
                 "config": {
-                    "model": "gpt-5-nano"
+                    "model": "gpt-4o-mini"
                 }
             }
         }
@@ -69,7 +69,7 @@ def main():
             "llm": {
                 "provider": "openai",
                 "config": {
-                    "model": "gpt-5-nano"
+                    "model": "gpt-4o-mini"
                 }
             }
         }
@@ -102,7 +102,6 @@ def main():
         backstory="""You are an expert at identifying relationships between concepts, 
         people, technologies, and ideas. You excel at creating structured knowledge 
         that captures complex interconnections.""",
-        verbose=True,
         memory=True
     )
     

@@ -45,7 +45,7 @@ workflow = Workflow(
 if __name__ == "__main__":
     print("=== Testing Loop with List ===\n")
     
-    result = workflow.start("Process all fruits", verbose=True)
+    result = workflow.start("Process all fruits")
     
     print(f"\nFinal Output:\n{result['output']}")
     print(f"\nLoop outputs count: {len(result['variables']['loop_outputs'])}")

@@ -68,8 +68,7 @@ finalize_task = Task(
 agents_system = Agents(
     agents=[state_agent],
     tasks=[init_task, continue_task, finalize_task],
-    memory=True,
-    verbose=True
+    memory=True, output="verbose"
 )
 
 print("Starting state management demonstration...")

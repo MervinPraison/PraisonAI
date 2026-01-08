@@ -310,8 +310,7 @@ class JobExecutor:
         
         # Create agent
         agent = Agent(
-            instructions="You are a helpful AI assistant.",
-            verbose=False
+            instructions="You are a helpful AI assistant.", output="minimal"
         )
         
         # Update job with agent info

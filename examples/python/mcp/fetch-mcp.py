@@ -6,7 +6,7 @@ import os
 fetch_agent = Agent(
     instructions="""You are a helpful assistant that can fetch and process web content.
     Use the available tools when relevant to retrieve and convert web pages to markdown.""",
-    llm="gpt-5-nano",
+    llm="gpt-4o-mini",
     tools=MCP("python -m mcp_server_fetch")
 )
 

@@ -36,10 +36,9 @@ researcher = Agent(
     goal="Uncover cutting-edge developments in AI and data science",
     backstory="""You are an expert at a technology research group, 
     skilled in identifying trends and analyzing complex data.""",
-    verbose=True,
     allow_delegation=False,
     tools=[internet_search_tool],
-    llm="gpt-5-nano",
+    llm="gpt-4o-mini",
     markdown=True,
     
     
@@ -51,9 +50,8 @@ writer = Agent(
     goal="Craft compelling content on tech advancements",
     backstory="""You are a content strategist known for 
     making complex tech topics interesting and easy to understand.""",
-    verbose=True,
     allow_delegation=True,
-    llm="gpt-5-nano",
+    llm="gpt-4o-mini",
     tools=[],
     markdown=True
 )
@@ -104,7 +102,7 @@ agents = Agents(
     tasks=[task1, task2, task3, task4],
     verbose=False,
     process="sequential",  # "sequential" or "hierarchical"
-    manager_llm="gpt-5-nano"
+    manager_llm="gpt-4o-mini"
 )
 
 result = agents.start()

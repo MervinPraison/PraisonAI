@@ -173,8 +173,7 @@ workflow = Agents(
             benchmarker, validator],
     tasks=[analysis_task, optimization_task, optimization_execution_task,
            benchmark_task, validation_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 async def main():

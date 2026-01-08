@@ -112,8 +112,7 @@ alert_task = Task(
 workflow = Agents(
     agents=[transaction_analyzer, pattern_checker, identity_verifier, alert_generator],
     tasks=[analysis_task, pattern_task, verification_task, alert_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 async def main():

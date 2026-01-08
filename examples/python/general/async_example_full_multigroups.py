@@ -61,7 +61,6 @@ async_agent = Agent(
     backstory="Expert in parallel search operations and data retrieval",
     tools=[async_search_tool],
     reflection=False,
-    verbose=True,
     markdown=True
 )
 
@@ -73,7 +72,6 @@ summary_agent = Agent(
 Skilled at identifying patterns, trends, and connections between different topics.
 Specializes in creating clear, structured summaries that highlight key insights.""",
     reflection=True,  # Enable self-reflection for better summary quality
-    verbose=True,
     markdown=True
 )
 

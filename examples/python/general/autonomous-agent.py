@@ -89,8 +89,7 @@ feedback_task = Task(
 workflow = Agents(
     agents=[llm_caller, action_agent, feedback_agent],
     tasks=[monitor_task, action_task, feedback_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 def main():

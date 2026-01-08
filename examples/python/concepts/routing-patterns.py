@@ -80,8 +80,7 @@ def conditional_routing_example():
     workflow = Agents(
         agents=[analyzer_agent, processor_agent],
         tasks=[analysis_task, premium_task, standard_task, basic_task],
-        process="workflow",
-        verbose=True
+        process="workflow", output="verbose"
     )
     
     return workflow.start()
@@ -113,8 +112,7 @@ def loop_pattern_example():
     workflow = Agents(
         agents=[processor_agent, validator_agent],
         tasks=[process_task, finalize_task],
-        process="workflow",
-        verbose=True
+        process="workflow", output="verbose"
     )
     
     return workflow.start()
@@ -188,8 +186,7 @@ def decision_tree_example():
     workflow = Agents(
         agents=[analyzer_agent, processor_agent],
         tasks=all_tasks,
-        process="workflow",
-        verbose=True
+        process="workflow", output="verbose"
     )
     
     return workflow.start()
@@ -275,8 +272,7 @@ def dynamic_routing_example():
     workflow = Agents(
         agents=[dynamic_router, processor_agent],
         tasks=[route_task, escalate_task, automate_task, review_task, standard_task],
-        process="workflow",
-        verbose=True
+        process="workflow", output="verbose"
     )
     
     return workflow.start()

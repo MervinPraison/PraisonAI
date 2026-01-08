@@ -137,8 +137,7 @@ workflow = Agents(
             content_adapter, quality_assessor],
     tasks=[generation_task, translation_task, cultural_task, 
            adaptation_task, quality_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 def main():

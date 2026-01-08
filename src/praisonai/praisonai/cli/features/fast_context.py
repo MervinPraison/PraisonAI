@@ -160,8 +160,7 @@ class FastContextHandler(FlagHandler):
                 role="Search Query Analyzer",
                 goal="Extract file search keywords from natural language",
                 backstory="Expert at understanding code search queries",
-                llm="gpt-4o-mini",
-                verbose=False
+                llm="gpt-4o-mini", output="minimal"
             )
             
             prompt = f"""Given this folder structure:

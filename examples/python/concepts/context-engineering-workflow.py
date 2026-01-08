@@ -34,7 +34,7 @@ class ContextEngineeringWorkflow:
     to achieve higher success rates in AI-driven development tasks.
     """
     
-    def __init__(self, project_path: str, llm: str = "gpt-5-nano"):
+    def __init__(self, project_path: str, llm: str = "gpt-4o-mini"):
         self.project_path = project_path
         self.llm = llm
         self.context_data = {}
@@ -325,8 +325,7 @@ class ContextEngineeringWorkflow:
                 implementation_task,
                 qa_task
             ],
-            process="sequential",
-            verbose=True
+            process="sequential", output="verbose"
         )
         
         # Execute workflow
@@ -382,7 +381,7 @@ def run_example_workflow():
     project_path = str(project_root)
     workflow = ContextEngineeringWorkflow(
         project_path=project_path,
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     # Example feature request
@@ -446,7 +445,7 @@ if __name__ == "__main__":
     print("(Note: Full execution requires complete environment setup)")
     
     project_path = str(project_root)
-    workflow = ContextEngineeringWorkflow(project_path, "gpt-5-nano")
+    workflow = ContextEngineeringWorkflow(project_path, "gpt-4o-mini")
     
     print(f"\n✅ Workflow Setup Complete:")
     print(f"   • Project path: {project_path}")
