@@ -351,12 +351,12 @@ class TestLegacyCompatibility:
         """Test legacy invocation detection."""
         from praisonai.cli.legacy import is_legacy_invocation
         
-        # Legacy patterns
+        # Legacy patterns (flags that trigger legacy mode)
         assert is_legacy_invocation(["--framework", "crewai"])
         assert is_legacy_invocation(["--auto", "test"])
-        assert is_legacy_invocation(["chat"])  # Legacy command
         
-        # Typer patterns
+        # Typer patterns (commands now in TYPER_COMMANDS)
+        assert not is_legacy_invocation(["chat"])  # Now a Typer command
         assert not is_legacy_invocation(["config", "list"])
         assert not is_legacy_invocation(["version", "show"])
     
