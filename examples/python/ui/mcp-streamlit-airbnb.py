@@ -22,8 +22,8 @@ with st.sidebar:
     llm_model = st.selectbox(
         "Choose LLM Model",
         options=[
-            "gpt-5-nano",
-            "gpt-5-nano", 
+            "gpt-4o-mini",
+            "gpt-4o-mini", 
             "gpt-3.5-turbo",
             "claude-3-5-sonnet-20241022",
             "claude-3-5-haiku-20241022"
@@ -116,7 +116,7 @@ if st.session_state.init_error:
         2. **LLM Model Issues:**
            - Make sure you have API keys set as environment variables
            - Avoid provider/model formats (e.g., "ollama/llama3.2") in Streamlit
-           - Use standard model names (e.g., "gpt-5-nano")
+           - Use standard model names (e.g., "gpt-4o-mini")
         
         3. **Network/Timeout Issues:**
            - Check your internet connection

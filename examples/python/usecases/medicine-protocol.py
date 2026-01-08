@@ -193,8 +193,7 @@ workflow = Agents(
             protocol_generator, effectiveness_simulator],
     tasks=[genetic_task, history_task, interaction_task,
            protocol_task, simulation_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 async def main():

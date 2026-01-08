@@ -16,7 +16,7 @@ class DynamicAgentSystem:
     def __init__(self):
         self.user_preferences = {}
         self.llm_config = {
-            "model": os.getenv("LLM_MODEL", "gpt-5-nano"),
+            "model": os.getenv("LLM_MODEL", "gpt-4o-mini"),
             "temperature": 0.7
         }
     

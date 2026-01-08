@@ -99,7 +99,6 @@ sync_agent = Agent(
     backstory="Expert in sync operations and data organization",
     tools=[sync_search_tool],
     reflection=False,
-    verbose=True,
     markdown=True
 )
 
@@ -110,7 +109,6 @@ async_agent = Agent(
     backstory="Expert in async operations and data organization",
     tools=[async_search_tool],
     reflection=False,
-    verbose=True,
     markdown=True
 )
 

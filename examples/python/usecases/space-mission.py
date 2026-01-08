@@ -207,8 +207,7 @@ workflow = Agents(
             resource_optimizer, scenario_simulator],
     tasks=[mission_task, resource_task, contingency_task,
            optimization_task, simulation_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 async def main():

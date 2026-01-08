@@ -162,8 +162,7 @@ workflow = Agents(
             implementation_agent, feedback_monitor],
     tasks=[monitoring_task, pattern_task, optimization_task, 
            implementation_task, feedback_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 def main():

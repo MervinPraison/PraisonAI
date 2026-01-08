@@ -140,8 +140,7 @@ workflow = Agents(
     agents=[symptom_analyzer, lab_processor, history_analyzer, 
             diagnosis_generator, treatment_recommender],
     tasks=[symptom_task, lab_task, history_task, diagnosis_task, treatment_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 def main():

@@ -96,8 +96,7 @@ synthesize_task = Task(
 workflow = Agents(
     agents=[router, worker1, worker2, worker3, synthesizer],
     tasks=[router_task, worker1_task, worker2_task, worker3_task, synthesize_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 # Run orchestrated workflow

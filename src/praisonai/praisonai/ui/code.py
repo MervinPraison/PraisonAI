@@ -458,7 +458,7 @@ When helping with code:
 Trust mode is enabled - tool executions are auto-approved for efficiency.""",
         llm=model_name,
         tools=tools if tools else None,
-        verbose=False,
+        output="minimal",
     )
     
     # Cache the agent

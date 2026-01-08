@@ -53,16 +53,16 @@ workflow = Workflow(
 if __name__ == "__main__":
     # Test 1: Normal content (skips compliance)
     print("=== Test 1: Normal content ===")
-    result = workflow.start("Hello world", verbose=True)
+    result = workflow.start("Hello world")
     print(f"Output: {result['output']}\n")
     
     # Test 2: Sensitive content (runs compliance)
     print("=== Test 2: Legal content ===")
-    result = workflow.start("Review this legal document", verbose=True)
+    result = workflow.start("Review this legal document")
     print(f"Output: {result['output']}\n")
     
     # Test 3: Non-English content (runs translation)
     print("=== Test 3: Non-English content ===")
     workflow.variables = {"language": "es"}
-    result = workflow.start("Hola mundo", verbose=True)
+    result = workflow.start("Hola mundo")
     print(f"Output: {result['output']}")

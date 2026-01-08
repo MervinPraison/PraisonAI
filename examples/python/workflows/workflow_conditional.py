@@ -69,15 +69,15 @@ workflow = Workflow(
 if __name__ == "__main__":
     # Test 1: Technical content
     print("=== Test 1: Technical Content ===")
-    result = workflow.start("Review this Python code for best practices", verbose=True)
+    result = workflow.start("Review this Python code for best practices")
     print(f"Output: {result['output'][:200]}...\n")
     
     # Test 2: Creative content
     print("=== Test 2: Creative Content ===")
-    result = workflow.start("Write a short story about a robot", verbose=True)
+    result = workflow.start("Write a short story about a robot")
     print(f"Output: {result['output'][:200]}...\n")
     
     # Test 3: General content (neither technical nor creative)
     print("=== Test 3: General Content ===")
-    result = workflow.start("What is the weather like today?", verbose=True)
+    result = workflow.start("What is the weather like today?")
     print(f"Output: {result['output'][:200]}...")

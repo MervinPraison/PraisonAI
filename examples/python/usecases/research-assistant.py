@@ -168,8 +168,7 @@ workflow = Agents(
             methodology_validator, impact_predictor],
     tasks=[analysis_task, gap_task, design_task,
            validation_task, prediction_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 async def main():

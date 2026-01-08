@@ -532,8 +532,7 @@ Format your response as:
                 role="Skill Content Generator",
                 goal="Generate high-quality Agent Skill content",
                 instructions="You are an expert at creating Agent Skills. Generate comprehensive, practical skill content.",
-                llm=os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini"),
-                verbose=False
+                llm=os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini"), output="minimal"
             )
             
             result = agent.start(prompt)

@@ -23,8 +23,7 @@ task = Task(
 # Create and start the workflow
 agents = Agents(
     agents=[agent],
-    tasks=[task],
-    verbose=True
+    tasks=[task], output="verbose"
 )
 
 agents.start()

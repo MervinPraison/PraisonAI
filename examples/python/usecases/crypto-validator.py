@@ -209,8 +209,7 @@ workflow = Agents(
             implementation_assessor, compliance_validator],
     tasks=[analysis_task, attack_task, benchmark_task,
            assessment_task, compliance_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 async def main():

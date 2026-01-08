@@ -45,7 +45,7 @@ if __name__ == "__main__":
             steps=[loop(process_task, from_csv=csv_path)]
         )
         
-        result = workflow.start("Process all tasks", verbose=True)
+        result = workflow.start("Process all tasks")
         
         print(f"\nAll outputs:\n{result['output']}")
         print(f"\nProcessed {len(result['variables']['loop_outputs'])} items")

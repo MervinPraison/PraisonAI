@@ -178,8 +178,7 @@ workflow = Agents(
             performance_estimator, deployment_optimizer],
     tasks=[hardware_task, architecture_task, hyperparameter_task,
            performance_task, deployment_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 async def main():

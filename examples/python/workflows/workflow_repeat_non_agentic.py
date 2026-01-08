@@ -59,7 +59,7 @@ workflow = Workflow(
 if __name__ == "__main__":
     print("=== Testing Repeat (Evaluator-Optimizer) Pattern ===\n")
     
-    result = workflow.start("Generate comprehensive content", verbose=True)
+    result = workflow.start("Generate comprehensive content")
     
     print(f"\nFinal output: {result['output']}")
     print(f"Total iterations: {result['variables']['repeat_iterations']}")

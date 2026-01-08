@@ -42,7 +42,7 @@ class ContinuousCameraMonitor:
             role="Security Camera Analyst",
             goal="Monitor camera feeds for activities and security events",
             backstory="Expert security analyst with computer vision skills specialized in real-time monitoring",
-            llm="gpt-5-nano"
+            llm="gpt-4o-mini"
         )
     
     def capture_frame(self, cap):

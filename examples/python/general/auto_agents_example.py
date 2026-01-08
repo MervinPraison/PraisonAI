@@ -22,7 +22,6 @@ agents = AutoAgents(
     instructions="Search for information about AI Agents",
     tools=[duckduckgo],
     process="sequential",  # or "hierarchical"
-    verbose=True,
     max_agents=3  # Maximum number of agents to create
 )
 

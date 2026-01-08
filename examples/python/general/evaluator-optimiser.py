@@ -56,8 +56,7 @@ evaluate_task = Task(
 workflow = Agents(
     agents=[generator, evaluator],
     tasks=[generate_task, evaluate_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 # Run optimization workflow

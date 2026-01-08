@@ -13,7 +13,7 @@ async def main():
         workspace=".",
         output_format="json",
         force=True,
-        model="gpt-5",
+        model="gpt-4o",
         stream_partial=True
     )
     

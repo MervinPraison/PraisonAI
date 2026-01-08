@@ -45,7 +45,7 @@ if __name__ == "__main__":
     print("=== Testing Parallel Workflow ===\n")
     
     start_time = time.time()
-    result = workflow.start("Analyze the business landscape", verbose=True)
+    result = workflow.start("Analyze the business landscape")
     elapsed = time.time() - start_time
     
     print(f"\nFinal Output:\n{result['output']}")

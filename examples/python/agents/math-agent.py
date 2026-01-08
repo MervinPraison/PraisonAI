@@ -126,8 +126,7 @@ def solve_math_problem_workflow():
     workflow = Agents(
         agents=[problem_solver_agent, calculation_agent, math_tutor_agent],
         tasks=[understand_task, solve_task, verify_task],
-        process="sequential",
-        verbose=True
+        process="sequential", output="verbose"
     )
     
     return workflow.start()

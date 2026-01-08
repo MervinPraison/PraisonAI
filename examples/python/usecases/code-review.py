@@ -84,8 +84,7 @@ fix_task = Task(
 workflow = Agents(
     agents=[analyzer, fix_suggester, fix_applier],
     tasks=[analysis_task, suggestion_task, fix_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 def main():

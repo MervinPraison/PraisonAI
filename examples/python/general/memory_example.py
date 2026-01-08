@@ -33,14 +33,14 @@ def main():
         role="Research Analyst",
         goal="Research and document key information about topics",
         backstory="Expert at analyzing and storing information in memory",
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     retriever = Agent(
         role="Information Retriever",
         goal="Retrieve and verify stored information from memory",
         backstory="Specialist in searching and validating information from memory",
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
 
     # Task 1: Process the facts
@@ -103,8 +103,7 @@ def main():
     # Initialize Agents with memory configuration
     agents = Agents(
         agents=[researcher, retriever],
-        tasks=[store_task, verify_task, query_task, query_both_task],
-        verbose=True,  # Use same verbose level as memory
+        tasks=[store_task, verify_task, query_task, query_both_task],  # Use same verbose level as memory
         memory=True,
         embedder={
             "provider": "openai",
@@ -117,7 +116,7 @@ def main():
     # agents = Agents(
     #     agents=[researcher, retriever],
     #     tasks=[store_task, verify_task, query_task, query_both_task],
-    #     verbose=True,  # Use same verbose level as memory
+    #     # Use same verbose level as memory
     #     memory=True
     # )
     

@@ -115,8 +115,7 @@ optimization_task = Task(
 workflow = Agents(
     agents=[classifier, handler, evaluator, optimizer],
     tasks=[classification_task, handling_task, evaluation_task, optimization_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 def main():

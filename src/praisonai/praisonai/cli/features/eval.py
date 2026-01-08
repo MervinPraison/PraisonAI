@@ -67,8 +67,7 @@ class EvalHandler:
                     role="Assistant",
                     goal="Complete the given task",
                     backstory="You are a helpful assistant.",
-                    llm=llm or model or "gpt-4o-mini",
-                    verbose=False
+                    llm=llm or model or "gpt-4o-mini", output="minimal"
                 )
                 # Use prompt as input if input_text not provided
                 if not input_text:

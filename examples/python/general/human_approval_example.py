@@ -113,8 +113,7 @@ def main():
     # Create and run process
     process = Agents(
         agents=[agent],
-        tasks=tasks,
-        verbose=True
+        tasks=tasks, output="verbose"
     )
     
     print("\n🚀 Starting process with approval-required operations...")
@@ -173,8 +172,7 @@ async def async_demo():
     
     process = Agents(
         agents=[agent],
-        tasks=[task],
-        verbose=True
+        tasks=[task], output="verbose"
     )
     
     try:

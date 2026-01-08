@@ -47,7 +47,6 @@ def main():
     result = run_profile_suite(
         output_dir="./profile_results",
         scenarios=scenarios,
-        verbose=True,
     )
     
     # Print summary

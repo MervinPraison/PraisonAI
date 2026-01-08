@@ -165,8 +165,7 @@ def reflection_workflow_example():
     workflow = Agents(
         agents=[creator_agent, reviewer_agent, polisher_agent],
         tasks=[create_task, review_task, polish_task],
-        process="sequential",
-        verbose=True
+        process="sequential", output="verbose"
     )
     
     return workflow.start()

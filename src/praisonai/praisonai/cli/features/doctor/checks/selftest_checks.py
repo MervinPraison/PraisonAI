@@ -64,7 +64,7 @@ def check_selftest_agent_create(config: DoctorConfig) -> CheckResult:
             name="DoctorTestAgent",
             instructions="You are a test agent.",
             llm="gpt-4o-mini",  # Default model
-            verbose=False,
+            output="minimal",
         )
         
         return CheckResult(
@@ -165,7 +165,7 @@ def check_selftest_mock_chat(config: DoctorConfig) -> CheckResult:
             name="MockTestAgent",
             instructions="You are a test agent. Always respond with 'OK'.",
             llm="gpt-4o-mini",
-            verbose=False,
+            output="minimal",
         )
         
         # Verify agent is properly configured
@@ -234,7 +234,7 @@ def check_selftest_live_chat(config: DoctorConfig) -> CheckResult:
             name="LiveTestAgent",
             instructions="You are a test agent. Respond with exactly: 'Doctor test OK'",
             llm=model,
-            verbose=False,
+            output="minimal",
         )
         
         # Make a simple API call
@@ -291,7 +291,7 @@ def check_selftest_tools_wiring(config: DoctorConfig) -> CheckResult:
             instructions="You are a test agent with tools.",
             tools=[test_tool],
             llm="gpt-4o-mini",
-            verbose=False,
+            output="minimal",
         )
         
         # Check tools are registered

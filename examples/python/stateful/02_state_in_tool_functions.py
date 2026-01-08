@@ -189,7 +189,7 @@ progress_tracker = Agent(
     goal="Monitor workflow progress using state",
     backstory="A meticulous tracker who monitors every task",
     tools=[track_progress, generate_report],
-    llm="gpt-5-nano",
+    llm="gpt-4o-mini",
     verbose=True
 )
 
@@ -199,7 +199,7 @@ data_processor = Agent(
     goal="Efficiently process all data batches",
     backstory="A data processing specialist",
     tools=[process_data_batch],
-    llm="gpt-5-nano",
+    llm="gpt-4o-mini",
     verbose=True
 )
 
@@ -209,7 +209,7 @@ error_handler = Agent(
     goal="Track all errors and maintain error logs",
     backstory="An error handling expert",
     tools=[log_error],
-    llm="gpt-5-nano",
+    llm="gpt-4o-mini",
     verbose=True
 )
 
@@ -219,7 +219,7 @@ config_manager = Agent(
     goal="Update and track configuration changes",
     backstory="A configuration management specialist",
     tools=[update_configuration],
-    llm="gpt-5-nano",
+    llm="gpt-4o-mini",
     verbose=True
 )
 
@@ -276,7 +276,6 @@ task6 = Task(
 workflow = Agents(
     agents=[progress_tracker, data_processor, error_handler, config_manager],
     tasks=[task1, task2, task3, task4, task5, task6],
-    verbose=True,
     process="sequential"
 )
 

@@ -108,8 +108,7 @@ adaptation_task = Task(
 workflow = Agents(
     agents=[assessor, generator, evaluator, adapter],
     tasks=[assessment_task, generation_task, evaluation_task, adaptation_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 def main():

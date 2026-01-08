@@ -86,7 +86,6 @@ def main():
         with the latest developments in artificial intelligence, machine learning, 
         and technology. You provide concise, accurate summaries of important news.""",
         tools=[search_tool],
-        verbose=True,
         reflection=False  # Disable reflection for faster execution
     )
     

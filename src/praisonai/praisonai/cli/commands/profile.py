@@ -333,7 +333,7 @@ def profile_snapshot(
         result = run_profile_suite(
             output_dir="/tmp/praisonai_snapshot_compare",
             scenarios=scenarios,
-            verbose=False,
+            output="minimal",
         )
         
         current_snap = create_snapshot_from_suite(result, name)

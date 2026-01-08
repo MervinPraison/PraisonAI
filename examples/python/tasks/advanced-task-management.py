@@ -207,7 +207,7 @@ workflow = Agents(
         final_report
     ],
     process="workflow",  # Use workflow process for conditional execution
-    verbose=True
+    output="verbose"
 )
 
 print("="*80)

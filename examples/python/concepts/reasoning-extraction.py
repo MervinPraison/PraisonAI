@@ -103,8 +103,7 @@ def demonstrate_reasoning_extraction():
     workflow = Agents(
         agents=[cot_agent, reasoning_extractor],
         tasks=[problem_task, extract_task],
-        process="sequential",
-        verbose=True
+        process="sequential", output="verbose"
     )
     
     return workflow.start()
@@ -187,8 +186,7 @@ def advanced_reasoning_patterns():
     workflow = Agents(
         agents=[cot_agent, reasoning_validator],
         tasks=[deductive_task, inductive_task, abductive_task, validation_task],
-        process="sequential",
-        verbose=True
+        process="sequential", output="verbose"
     )
     
     return workflow.start()

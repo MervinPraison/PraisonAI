@@ -51,6 +51,6 @@ if __name__ == "__main__":
     print("=== Testing Agentic Parallel Workflow ===\n")
     
     # Run workflow - all researchers work in parallel, then aggregator summarizes
-    result = workflow.start("Research the AI industry", verbose=True)
+    result = workflow.start("Research the AI industry")
     
     print(f"\nFinal Summary:\n{result['output']}")

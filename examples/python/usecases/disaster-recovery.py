@@ -388,8 +388,7 @@ workflow = Agents(
     tasks=[network_task, emergency_task, resource_task,
            priority_task, planning_task, execution_task,
            monitoring_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 async def main():

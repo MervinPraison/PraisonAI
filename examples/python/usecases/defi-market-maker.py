@@ -195,8 +195,7 @@ workflow = Agents(
             risk_assessor, trade_executor],
     tasks=[market_task, arbitrage_task, liquidity_task,
            risk_task, execution_task],
-    process="workflow",
-    verbose=True
+    process="workflow", output="verbose"
 )
 
 async def main():

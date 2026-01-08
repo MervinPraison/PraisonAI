@@ -21,7 +21,7 @@ def example_auto_routing():
         role="Adaptive Research Assistant",
         goal="Research topics using the most appropriate AI model",
         backstory="I analyze task complexity and route to the best model",
-        models=["gpt-5-nano", "gpt-5-nano", "claude-3-5-sonnet-20241022"],
+        models=["gpt-4o-mini", "gpt-4o-mini", "claude-3-5-sonnet-20241022"],
         routing_strategy="auto",  # Automatic model selection
         verbose=True
     )
@@ -52,8 +52,7 @@ def example_auto_routing():
     agents = Agents(
         agents=[research_agent],
         tasks=[simple_task, moderate_task, complex_task],
-        process="sequential",
-        verbose=True
+        process="sequential", output="verbose"
     )
     
     results = agents.start()
@@ -81,7 +80,7 @@ def example_cost_optimized_workflow():
         goal="Analyze data efficiently while minimizing costs",
         models={
             "gemini/gemini-1.5-flash": {},
-            "gpt-5-nano": {},
+            "gpt-4o-mini": {},
             "deepseek-chat": {}
         },
         model_router=cost_router,
@@ -95,7 +94,7 @@ def example_cost_optimized_workflow():
         goal="Create high-quality content",
         models={
             "claude-3-5-sonnet-20241022": {},
-            "gpt-5-nano": {}
+            "gpt-4o-mini": {}
         },
         routing_strategy="performance-optimized",  # Prefer better models
         verbose=True
@@ -121,8 +120,7 @@ def example_cost_optimized_workflow():
     workflow = Agents(
         agents=[analyzer, writer],
         tasks=[analysis_task, writing_task],
-        process="sequential",
-        verbose=True
+        process="sequential", output="verbose"
     )
     
     results = workflow.start()
@@ -144,8 +142,8 @@ def example_auto_agents_multi_provider():
     auto_agents = AutoAgents(
         instructions="Create a market research report on electric vehicles. Include data analysis, competitor analysis, and future projections.",
         max_agents=3,
-        llm="gpt-5-nano",  # Default model for agent generation
-        verbose=True
+        llm="gpt-4o-mini",  # Default model for agent generation
+        output="verbose"
     )
     
     # After agents are created, upgrade them to multi-model agents
@@ -158,7 +156,7 @@ def example_auto_agents_multi_provider():
             goal=agent.goal,
             backstory=agent.backstory,
             tools=agent.tools,
-            models=["gpt-5-nano", "gemini/gemini-1.5-flash", "claude-3-haiku-20240307", "gpt-5-nano"],
+            models=["gpt-4o-mini", "gemini/gemini-1.5-flash", "claude-3-haiku-20240307", "gpt-4o-mini"],
             routing_strategy="auto",
             verbose=True
         )
@@ -192,7 +190,7 @@ def example_custom_routing():
     # Create custom model profiles for specific use cases
     custom_models = [
         ModelProfile(
-            name="gpt-5-nano",
+            name="gpt-4o-mini",
             provider="openai",
             complexity_range=(TaskComplexity.SIMPLE, TaskComplexity.VERY_COMPLEX),
             cost_per_1k_tokens=0.0075,
@@ -252,8 +250,7 @@ def example_custom_routing():
     agents = Agents(
         agents=[coder],
         tasks=tasks,
-        process="sequential",
-        verbose=True
+        process="sequential", output="verbose"
     )
     
     results = agents.start()

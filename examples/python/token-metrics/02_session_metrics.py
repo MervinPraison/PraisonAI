@@ -13,8 +13,7 @@ def main():
         role="Senior Data Analyst",
         goal="Analyze data and provide insights",
         backstory="You are an experienced data analyst with expertise in market research.",
-        verbose=True,
-        llm="gpt-5-nano",
+        llm="gpt-4o-mini",
         metrics=True  # 🎯 Enable metrics tracking
     )
     
@@ -23,8 +22,7 @@ def main():
         role="Technical Writer",
         goal="Create well-structured content",
         backstory="You are a skilled technical writer who creates clear, engaging content.",
-        verbose=True,
-        llm="gpt-5-nano",
+        llm="gpt-4o-mini",
         metrics=True  # 🎯 Enable metrics tracking
     )
     
@@ -45,8 +43,7 @@ def main():
     # Initialize the agents system
     agents = Agents(
         agents=[analyst_agent, writer_agent],
-        tasks=[analysis_task, writing_task],
-        verbose=True
+        tasks=[analysis_task, writing_task], output="verbose"
     )
     
     print("🚀 Running multi-agent workflow...")

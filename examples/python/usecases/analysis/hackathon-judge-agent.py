@@ -27,7 +27,7 @@ hackathon_judge = Agent(
     backstory="""You are an experienced hackathon judge and technical expert.
     You excel at evaluating innovation, technical implementation, and presentation quality.
     You provide constructive feedback and identify both strengths and areas for improvement.""",
-    llm="gpt-5-nano",  # Using vision-capable model
+    llm="gpt-4o-mini",  # Using vision-capable model
     reflection=False,
     knowledge=""
 )
@@ -67,8 +67,7 @@ def evaluate_project(video_path: str) -> ProjectEvaluation:
     agents = Agents(
         agents=[hackathon_judge],
         tasks=[evaluation_task],
-        process="sequential",
-        verbose=True
+        process="sequential", output="verbose"
     )
     
     response = agents.start()

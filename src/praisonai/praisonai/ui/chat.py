@@ -434,7 +434,7 @@ Use tools when needed to help the user. For file modifications, use the ACP tool
 Always be helpful, accurate, and concise.""",
         llm=model_name,
         tools=tools if tools else None,
-        verbose=False,
+        output="minimal",
     )
     
     # Cache the agent
