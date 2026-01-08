@@ -244,8 +244,7 @@ class TestRealAPIIntegration:
             name="TestAgent",
             role="Calculator",
             goal="Answer simple math questions",
-            llm=model,
-            verbose=True
+            llm=model
         )
         
         # Run simple task
@@ -277,8 +276,7 @@ class TestRealAPIIntegration:
             name="TestAgent",
             role="Geography Expert",
             goal="Answer geography questions",
-            llm=model,
-            verbose=True
+            llm=model
         )
         
         # Run task

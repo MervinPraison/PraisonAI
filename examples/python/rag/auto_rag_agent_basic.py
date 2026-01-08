@@ -46,7 +46,7 @@ agent = Agent(
     knowledge=[sample_doc],
     user_id="example_user",  # Required for RAG retrieval
     llm="openai/gpt-4o-mini",
-    verbose=False,
+    output="minimal",
 )
 
 # Wrap with AutoRagAgent (default: auto policy)

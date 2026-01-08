@@ -17,9 +17,7 @@ manager_agent = Agent(
     goal="Coordinate hierarchical task execution and manage team workflow",
     backstory="Experienced manager who excels at breaking down complex projects and coordinating teams",
     tools=[internet_search],
-    allow_delegation=True,
-    verbose=True
-)
+    allow_delegation=True)
 
 # Create specialist agent for execution
 research_agent = Agent(
@@ -27,9 +25,7 @@ research_agent = Agent(
     role="Market Research Analyst",
     goal="Conduct thorough market research and analysis",
     backstory="Expert researcher skilled in market analysis and competitive intelligence",
-    tools=[internet_search],
-    verbose=True
-)
+    tools=[internet_search])
 
 # Hierarchical task structure
 planning_task = Task(

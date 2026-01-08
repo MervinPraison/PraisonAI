@@ -29,9 +29,7 @@ code_analyzer = Agent(
     role="Code Analysis Expert",
     goal="Provide comprehensive code evaluation and recommendations",
     backstory="""Expert code analyst specializing in architecture review, 
-    best practices, and technical debt assessment.""",
-    verbose=True
-)
+    best practices, and technical debt assessment.""")
 
 code_analysis_task = Task(
     description="""Analyze code repository and provide structured evaluation:

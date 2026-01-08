@@ -61,8 +61,7 @@ test_agent = Agent(
     goal="Test various tool formats and edge cases",
     backstory="Expert at using different types of tools",
     tools=[search_web, dict_tool, string_tool, MockMCPTool()],
-    llm={"model": "gemini/gemini-1.5-flash-8b"},
-    verbose=True
+    llm={"model": "gemini/gemini-1.5-flash-8b"}
 )
 
 # Create test task
@@ -84,7 +83,7 @@ def test_improved_implementation():
         workflow = Agents(
             agents=[test_agent],
             tasks=[test_task],
-            verbose=True
+            output="verbose"
         )
         
         # Execute

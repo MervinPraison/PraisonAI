@@ -100,7 +100,7 @@ task4 = Task(
 agents = Agents(
     agents=[researcher, writer],
     tasks=[task1, task2, task3, task4],
-    verbose=False,
+    output="minimal",
     process="sequential",  # "sequential" or "hierarchical"
     manager_llm="gpt-4o-mini"
 )

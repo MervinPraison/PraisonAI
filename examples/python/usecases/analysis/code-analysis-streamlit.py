@@ -36,9 +36,7 @@ def analyze_code(code_source: str) -> CodeAnalysisReport:
         role="Code Analysis Expert",
         goal="Provide comprehensive code evaluation and recommendations",
         backstory="""Expert code analyst specializing in architecture review, 
-        best practices, and technical debt assessment.""",
-        verbose=True
-    )
+        best practices, and technical debt assessment.""")
 
     # Create analysis task
     code_analysis_task = Task(

@@ -82,9 +82,7 @@ def main():
         name="Security Demo Agent",
         role="System Administrator",
         goal="Demonstrate human approval for dangerous operations",
-        tools=[python_tools, file_tools, shell_tools],
-        verbose=True
-    )
+        tools=[python_tools, file_tools, shell_tools])
     
     # Define tasks that will trigger approval prompts
     tasks = [
@@ -159,9 +157,7 @@ async def async_demo():
         name="Async Demo Agent",
         role="Async Operations Specialist", 
         goal="Demonstrate async approval workflow",
-        tools=[python_tools],
-        verbose=True
-    )
+        tools=[python_tools])
     
     # This would trigger approval in async context
     task = Task(

@@ -40,7 +40,7 @@ agent = Agent(
     knowledge=[sample_doc],
     user_id="policy_user",
     llm="openai/gpt-4o-mini",
-    verbose=False,
+    output="minimal",
 )
 
 print("=" * 60)

@@ -53,9 +53,7 @@ def create_market_research_agents(config: MarketResearchConfig):
         Focus on current market conditions and future projections.
         Provide quantitative data where possible and cite reliable sources.
         """,
-        tools=[Tools.internet_search],
-        verbose=True
-    )
+        tools=[Tools.internet_search])
     
     # Competitive Intelligence Agent  
     competitive_agent = Agent(
@@ -68,9 +66,7 @@ def create_market_research_agents(config: MarketResearchConfig):
         Identify key competitors, market share, competitive advantages, and positioning.
         Analyze competitor strategies, strengths, weaknesses, and market positioning.
         """,
-        tools=[Tools.internet_search],
-        verbose=True
-    )
+        tools=[Tools.internet_search])
     
     # Financial Performance Agent
     financial_agent = Agent(
@@ -83,9 +79,7 @@ def create_market_research_agents(config: MarketResearchConfig):
         key financial metrics, and compare with industry benchmarks.
         Focus on recent financial data and performance indicators.
         """,
-        tools=[Tools.internet_search],
-        verbose=True
-    )
+        tools=[Tools.internet_search])
     
     # Growth Opportunities Agent
     growth_agent = Agent(
@@ -98,9 +92,7 @@ def create_market_research_agents(config: MarketResearchConfig):
         new product/service opportunities, and strategic growth vectors for {config.company}.
         Consider technological trends, regulatory changes, and market evolution.
         """,
-        tools=[Tools.internet_search],
-        verbose=True
-    )
+        tools=[Tools.internet_search])
     
     # Risk Assessment Agent
     risk_agent = Agent(
@@ -113,9 +105,7 @@ def create_market_research_agents(config: MarketResearchConfig):
         in {config.geography}. Consider regulatory, competitive, technological, 
         economic, and operational risks.
         """,
-        tools=[Tools.internet_search],
-        verbose=True
-    )
+        tools=[Tools.internet_search])
     
     # Report Synthesizer Agent
     synthesizer_agent = Agent(
@@ -138,9 +128,7 @@ def create_market_research_agents(config: MarketResearchConfig):
         
         Use clear headings, bullet points, and structured formatting.
         Include key insights and actionable recommendations.
-        """,
-        verbose=True
-    )
+        """)
     
     return {
         "market_overview": market_overview_agent,
@@ -283,9 +271,7 @@ async def run_market_research(config: MarketResearchConfig) -> Dict[str, Any]:
     workflow = Agents(
         agents=list(agents.values()),
         tasks=tasks,
-        process="workflow",
-        verbose=True
-    )
+        process="workflow")
     
     # Execute research
     results = await workflow.astart()

@@ -22,8 +22,7 @@ def example_auto_routing():
         goal="Research topics using the most appropriate AI model",
         backstory="I analyze task complexity and route to the best model",
         models=["gpt-4o-mini", "gpt-4o-mini", "claude-3-5-sonnet-20241022"],
-        routing_strategy="auto",  # Automatic model selection
-        verbose=True
+        routing_strategy="auto"  # Automatic model selection
     )
     
     # Create tasks with different complexity levels
@@ -84,9 +83,7 @@ def example_cost_optimized_workflow():
             "deepseek-chat": {}
         },
         model_router=cost_router,
-        routing_strategy="cost-optimized",
-        verbose=True
-    )
+        routing_strategy="cost-optimized")
     
     writer = RouterAgent(
         name="Quality Writer",
@@ -96,8 +93,7 @@ def example_cost_optimized_workflow():
             "claude-3-5-sonnet-20241022": {},
             "gpt-4o-mini": {}
         },
-        routing_strategy="performance-optimized",  # Prefer better models
-        verbose=True
+        routing_strategy="performance-optimized"  # Prefer better models
     )
     
     # Create workflow tasks
@@ -157,9 +153,7 @@ def example_auto_agents_multi_provider():
             backstory=agent.backstory,
             tools=agent.tools,
             models=["gpt-4o-mini", "gemini/gemini-1.5-flash", "claude-3-haiku-20240307", "gpt-4o-mini"],
-            routing_strategy="auto",
-            verbose=True
-        )
+            routing_strategy="auto")
         multi_model_agents.append(multi_agent)
     
     # Update the agents in the AutoAgents instance
@@ -225,9 +219,7 @@ def example_custom_routing():
         backstory="I'm an expert coder who knows when to use different AI models",
         model_router=custom_router,
         routing_strategy="auto",
-        tools=[search_web],
-        verbose=True
-    )
+        tools=[search_web])
     
     # Create coding tasks
     tasks = [

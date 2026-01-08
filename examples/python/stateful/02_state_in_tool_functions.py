@@ -189,9 +189,7 @@ progress_tracker = Agent(
     goal="Monitor workflow progress using state",
     backstory="A meticulous tracker who monitors every task",
     tools=[track_progress, generate_report],
-    llm="gpt-4o-mini",
-    verbose=True
-)
+    llm="gpt-4o-mini")
 
 data_processor = Agent(
     name="DataProcessor",
@@ -199,9 +197,7 @@ data_processor = Agent(
     goal="Efficiently process all data batches",
     backstory="A data processing specialist",
     tools=[process_data_batch],
-    llm="gpt-4o-mini",
-    verbose=True
-)
+    llm="gpt-4o-mini")
 
 error_handler = Agent(
     name="ErrorHandler",
@@ -209,9 +205,7 @@ error_handler = Agent(
     goal="Track all errors and maintain error logs",
     backstory="An error handling expert",
     tools=[log_error],
-    llm="gpt-4o-mini",
-    verbose=True
-)
+    llm="gpt-4o-mini")
 
 config_manager = Agent(
     name="ConfigManager",
@@ -219,9 +213,7 @@ config_manager = Agent(
     goal="Update and track configuration changes",
     backstory="A configuration management specialist",
     tools=[update_configuration],
-    llm="gpt-4o-mini",
-    verbose=True
-)
+    llm="gpt-4o-mini")
 
 # Create tasks
 task1 = Task(

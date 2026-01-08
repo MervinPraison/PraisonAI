@@ -1516,26 +1516,80 @@ Your Goal: {self.goal}
                 error=str(e),
             )
     
-    def delegate(
+    def handoff_to(
         self,
-        task: str,
-        profile: str = "general",
-        timeout_seconds: float = 300.0,
+        target_agent: 'Agent',
+        prompt: str,
         context: Optional[Dict[str, Any]] = None,
-    ) -> Any:
-        """Delegate a task to a subagent.
+        config: Optional['HandoffConfig'] = None,
+    ) -> 'HandoffResult':
+        """
+        Programmatically hand off a task to another agent.
+        
+        This is the unified programmatic handoff API that replaces delegate().
+        It uses the same Handoff mechanism as LLM-driven handoffs but can be
+        called directly from code.
         
         Args:
-            task: Task description for the subagent
-            profile: Agent profile to use (explorer, coder, tester, etc.)
-            timeout_seconds: Timeout for the delegated task
-            context: Additional context to pass to subagent
+            target_agent: The agent to hand off to
+            prompt: The task/prompt to pass to target agent
+            context: Optional additional context dictionary
+            config: Optional HandoffConfig for advanced settings
             
         Returns:
-            Result from the subagent
+            HandoffResult with response or error
+            
+        Example:
+            ```python
+            result = agent_a.handoff_to(agent_b, "Complete this analysis")
+            if result.success:
+                print(result.response)
+            ```
         """
-        subagent = self._create_subagent(profile, context)
-        return subagent.chat(task)
+        from .handoff import Handoff, HandoffConfig, HandoffResult
+        
+        handoff_obj = Handoff(
+            agent=target_agent,
+            config=config or HandoffConfig(),
+        )
+        return handoff_obj.execute_programmatic(self, prompt, context)
+    
+    async def handoff_to_async(
+        self,
+        target_agent: 'Agent',
+        prompt: str,
+        context: Optional[Dict[str, Any]] = None,
+        config: Optional['HandoffConfig'] = None,
+    ) -> 'HandoffResult':
+        """
+        Asynchronously hand off a task to another agent.
+        
+        This is the async version of handoff_to() with concurrency control
+        and timeout support.
+        
+        Args:
+            target_agent: The agent to hand off to
+            prompt: The task/prompt to pass to target agent
+            context: Optional additional context dictionary
+            config: Optional HandoffConfig for advanced settings
+            
+        Returns:
+            HandoffResult with response or error
+            
+        Example:
+            ```python
+            result = await agent_a.handoff_to_async(agent_b, "Complete this analysis")
+            if result.success:
+                print(result.response)
+            ```
+        """
+        from .handoff import Handoff, HandoffConfig, HandoffResult
+        
+        handoff_obj = Handoff(
+            agent=target_agent,
+            config=config or HandoffConfig(),
+        )
+        return await handoff_obj.execute_async(self, prompt, context)
     
     def _create_subagent(
         self,

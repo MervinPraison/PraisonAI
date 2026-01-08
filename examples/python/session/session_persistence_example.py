@@ -29,7 +29,7 @@ def example_basic_persistence():
         name="Assistant",
         instructions="You are a helpful assistant. Be very brief.",
         session_id=session_id,
-        verbose=False,
+        output="minimal",
     )
     
     # First message
@@ -60,7 +60,7 @@ def example_session_restoration():
         name="MemoryBot",
         instructions="You are a helpful assistant. Be very brief.",
         session_id=session_id,
-        verbose=False,
+        output="minimal",
     )
     
     print("[User]: Remember that my pet's name is Max.")
@@ -73,7 +73,7 @@ def example_session_restoration():
         name="MemoryBot",
         instructions="You are a helpful assistant. Be very brief.",
         session_id=session_id,
-        verbose=False,
+        output="minimal",
     )
     
     print("[User]: What is my pet's name?")
@@ -96,7 +96,7 @@ def example_in_memory_only():
     agent = Agent(
         name="TempBot",
         instructions="You are a helpful assistant. Be very brief.",
-        verbose=False,
+        output="minimal",
     )
     
     print("\n[User]: My name is Alice.")

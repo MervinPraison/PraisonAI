@@ -39,9 +39,7 @@ research_agent = Agent(
     role="Information Researcher",
     goal="Research topics and demonstrate callback monitoring",
     backstory="Expert researcher that demonstrates callback functionality",
-    tools=[internet_search],
-    verbose=True
-)
+    tools=[internet_search])
 
 # Create a simple task
 research_task = Task(

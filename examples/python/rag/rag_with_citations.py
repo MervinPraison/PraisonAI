@@ -46,7 +46,7 @@ agent = Agent(
     knowledge=[doc1, doc2],
     user_id="citation_user",
     llm="openai/gpt-4o-mini",
-    verbose=False,
+    output="minimal",
 )
 
 print("=" * 60)

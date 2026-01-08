@@ -31,8 +31,6 @@ workflow = Workflow(
 if __name__ == "__main__":
     # Run workflow - agents process sequentially
     result = workflow.start(
-        "What are the key benefits of AI agents?",
-        verbose=True
-    )
+        "What are the key benefits of AI agents?")
     
     print(f"\nFinal output:\n{result['output']}")

@@ -38,8 +38,6 @@ workflow = Workflow(
 if __name__ == "__main__":
     # Run the workflow
     result = workflow.start(
-        "Write a short paragraph about artificial intelligence",
-        verbose=True
-    )
+        "Write a short paragraph about artificial intelligence")
     
     print(f"\nFinal output:\n{result['output']}")

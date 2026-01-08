@@ -115,8 +115,7 @@ def create_market_research_agents(config: MarketResearchConfig):
             Analyze market size, trends, growth drivers, and overall market dynamics for 
             {config.industry} in {config.geography}. Provide quantitative data and cite sources.
             """,
-            tools=[Tools.internet_search],
-            verbose=False
+            tools=[Tools.internet_search], output="minimal"
         )
     
     if "competitive_analysis" in config.sections:
@@ -128,8 +127,7 @@ def create_market_research_agents(config: MarketResearchConfig):
             Analyze {config.company}'s competitive position in {config.industry} within {config.geography}.
             Identify key competitors, market share, and competitive advantages.
             """,
-            tools=[Tools.internet_search],
-            verbose=False
+            tools=[Tools.internet_search], output="minimal"
         )
     
     if "financial_performance" in config.sections:
@@ -141,8 +139,7 @@ def create_market_research_agents(config: MarketResearchConfig):
             Research {config.company}'s financial performance, revenue trends, profitability,
             and compare with industry benchmarks.
             """,
-            tools=[Tools.internet_search],
-            verbose=False
+            tools=[Tools.internet_search], output="minimal"
         )
     
     if "growth_opportunities" in config.sections:
@@ -154,8 +151,7 @@ def create_market_research_agents(config: MarketResearchConfig):
             Identify emerging opportunities, market gaps, expansion possibilities for {config.company}
             in {config.industry} within {config.geography}.
             """,
-            tools=[Tools.internet_search],
-            verbose=False
+            tools=[Tools.internet_search], output="minimal"
         )
     
     if "risk_assessment" in config.sections:
@@ -167,8 +163,7 @@ def create_market_research_agents(config: MarketResearchConfig):
             Identify and analyze potential risks, challenges, and threats facing {config.company}
             in {config.geography}. Consider regulatory, competitive, and market risks.
             """,
-            tools=[Tools.internet_search],
-            verbose=False
+            tools=[Tools.internet_search], output="minimal"
         )
     
     # Always include synthesizer
@@ -179,8 +174,7 @@ def create_market_research_agents(config: MarketResearchConfig):
         instructions=f"""
         Create a professional secondary market research report for {config.company} 
         in {config.industry} with clear structure, insights, and recommendations.
-        """,
-        verbose=False
+        """, output="minimal"
     )
     
     return agents
@@ -269,8 +263,7 @@ async def generate_market_research_report(job_id: str, config: MarketResearchCon
         workflow = Agents(
             agents=list(agents.values()),
             tasks=tasks,
-            process="sequential",
-            verbose=False
+            process="sequential", output="minimal"
         )
         
         job_status[job_id]["progress"] = 30

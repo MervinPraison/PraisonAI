@@ -460,9 +460,7 @@ state_manager = Agent(
     goal="Demonstrate advanced state management techniques",
     backstory="An expert in state management",
     tools=[manage_nested_state, handle_state_transactions, manage_state_versioning],
-    llm="gpt-4o-mini",
-    verbose=True
-)
+    llm="gpt-4o-mini")
 
 cache_manager = Agent(
     name="CacheManager",
@@ -470,9 +468,7 @@ cache_manager = Agent(
     goal="Optimize performance with intelligent caching",
     backstory="A caching specialist",
     tools=[implement_state_cache],
-    llm="gpt-4o-mini",
-    verbose=True
-)
+    llm="gpt-4o-mini")
 
 metrics_calculator = Agent(
     name="MetricsCalculator",
@@ -480,9 +476,7 @@ metrics_calculator = Agent(
     goal="Provide insights through metric calculations",
     backstory="A data analytics expert",
     tools=[calculate_derived_metrics, aggregate_distributed_state],
-    llm="gpt-4o-mini",
-    verbose=True
-)
+    llm="gpt-4o-mini")
 
 report_generator = Agent(
     name="ReportGenerator",
@@ -490,9 +484,7 @@ report_generator = Agent(
     goal="Document all advanced state operations",
     backstory="A reporting specialist",
     tools=[generate_advanced_report],
-    llm="gpt-4o-mini",
-    verbose=True
-)
+    llm="gpt-4o-mini")
 
 # Create tasks
 tasks = [

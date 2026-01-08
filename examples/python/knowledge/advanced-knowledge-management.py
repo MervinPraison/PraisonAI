@@ -105,10 +105,7 @@ knowledge_agent = Agent(
     instructions="""You are an expert in healthcare AI. Use the knowledge base to provide 
     comprehensive, accurate answers. Always cite specific information from the documents 
     when possible. If the knowledge base doesn't contain sufficient information, clearly 
-    state this and provide general guidance based on your training.""",
-    
-    verbose=True
-)
+    state this and provide general guidance based on your training.""")
 
 # Test advanced knowledge retrieval with various question types
 

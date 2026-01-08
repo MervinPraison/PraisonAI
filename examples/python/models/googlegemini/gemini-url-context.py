@@ -31,10 +31,7 @@ def main():
         llm="gemini/gemini-2.0-flash",
         
         # Enable URL Context internal tool
-        tools=[{"urlContext": {}}],
-        
-        verbose=True
-    )
+        tools=[{"urlContext": {}}])
     
     # Example URLs for analysis
     url_tasks = [

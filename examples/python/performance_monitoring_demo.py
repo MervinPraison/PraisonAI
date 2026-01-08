@@ -200,7 +200,7 @@ research_agent = Agent(
     goal="Research and analyze performance topics quickly",
     backstory="You are an expert at researching performance optimization topics.",
     tools=[duckduckgo],
-    verbose=False  # Reduce output for cleaner demo
+    output="minimal"  # Reduce output for cleaner demo
 )
 
 # Monitor agent operations
@@ -215,8 +215,7 @@ def execute_monitored_task(agent, task_description):
     
     agents_workflow = Agents(
         agents=[agent],
-        tasks=[task],
-        verbose=False
+        tasks=[task], output="minimal"
     )
     
     # Simulate API calls during agent execution
