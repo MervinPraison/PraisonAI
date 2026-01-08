@@ -78,26 +78,29 @@ def example_get_context_for_agent():
 # =============================================
 
 def example_agent_with_fast_context():
-    """Use FastContext with an Agent."""
+    """Use FastContext with an Agent via context= param."""
     from praisonaiagents import Agent
+    from praisonaiagents.context.fast import FastContext
     
-    # Create agent with FastContext enabled
+    # Create FastContext instance
+    fc = FastContext(workspace_path=".")
+    
+    # Search for code context
+    result = fc.search("find authentication code")
+    context = result.to_context_string() if result.files else None
+    
+    # Create agent with context management enabled
     agent = Agent(
         name="CodeAssistant",
         instructions="You are a helpful code assistant.",
-        fast_context=True,
-        fast_context_path=".",  # Current directory
-        fast_context_model="gpt-4o-mini",
-        fast_context_max_turns=4,
-        fast_context_parallelism=8
+        context=True,  # Enable context management
     )
-    
-    # Use delegate_to_fast_context for code search
-    context = agent.delegate_to_fast_context("find authentication code")
     
     if context:
         print("Found relevant code context:")
         print(context[:300] + "...")
+        # Use the context in a chat
+        print(agent.chat(f"Based on this code:\n{context}\n\nExplain the authentication flow."))
     else:
         print("No relevant code found")
 

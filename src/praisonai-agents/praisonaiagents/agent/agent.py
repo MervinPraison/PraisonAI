@@ -267,7 +267,6 @@ class Agent:
         response_template: Optional[str] = None,
         allow_code_execution: Optional[bool] = False,
         max_retry_limit: int = 2,
-        respect_context_window: bool = True,
         code_execution_mode: Literal["safe", "unsafe"] = "safe",
         embedder_config: Optional[Dict[str, Any]] = None,
         knowledge: Optional[Union[List[str], Any]] = None,
@@ -298,13 +297,6 @@ class Agent:
         planning: bool = False,
         planning_tools: Optional[List[Any]] = None,
         planning_reasoning: bool = False,
-        fast_context: bool = False,
-        fast_context_path: Optional[str] = None,
-        fast_context_model: str = "gpt-4o-mini",
-        fast_context_max_turns: int = 4,
-        fast_context_parallelism: int = 8,
-        fast_context_timeout: float = 30.0,
-        history_in_context: Optional[int] = None,
         auto_save: Optional[str] = None,
         skills: Optional[List[str]] = None,
         skills_dirs: Optional[List[str]] = None,
@@ -313,8 +305,15 @@ class Agent:
         hooks: Optional[List[Any]] = None,
         llm_config: Optional[Dict[str, Any]] = None,
         rate_limiter: Optional[Any] = None,
-        auto_summarize: bool = False,
-        summarize_threshold: float = 0.8
+        # Agent-centric feature parameters (lazy loaded)
+        auto_memory: Optional[Any] = None,
+        policy: Optional[Any] = None,
+        background: Optional[Any] = None,
+        checkpoints: Optional[Any] = None,
+        output_style: Optional[Any] = None,
+        thinking_budget: Optional[Any] = None,
+        # Context management (single param for all context features)
+        context: Optional[Union[bool, Any]] = False
     ):
         """Initialize an Agent instance.
 
@@ -363,8 +362,6 @@ class Agent:
                 snippets during task completion. Use with caution for security. Defaults to False.
             max_retry_limit (int, optional): Maximum number of retry attempts for failed operations
                 before giving up. Helps handle transient errors. Defaults to 2.
-            respect_context_window (bool, optional): Automatically manage context window size
-                to prevent token limit errors with large conversations. Defaults to True.
             code_execution_mode (Literal["safe", "unsafe"], optional): Safety mode for code execution.
                 "safe" restricts dangerous operations, "unsafe" allows full code execution. Defaults to "safe".
             embedder_config (Optional[Dict[str, Any]], optional): Configuration dictionary for
@@ -465,12 +462,6 @@ class Agent:
         
         # Store rate limiter (optional, zero overhead when None)
         self._rate_limiter = rate_limiter
-        
-        # Auto-summarization configuration
-        if auto_summarize and not (0.0 < summarize_threshold <= 1.0):
-            raise ValueError("summarize_threshold must be between 0.0 and 1.0")
-        self.auto_summarize = auto_summarize
-        self.summarize_threshold = summarize_threshold
         
         # Store OpenAI client parameters for lazy initialization
         self._openai_api_key = api_key
@@ -587,7 +578,6 @@ class Agent:
         self.response_template = response_template
         self.allow_code_execution = allow_code_execution
         self.max_retry_limit = max_retry_limit
-        self.respect_context_window = respect_context_window
         self.code_execution_mode = code_execution_mode
         self.embedder_config = embedder_config
         self.knowledge = knowledge
@@ -628,7 +618,6 @@ Your Goal: {self.goal}
         self.claude_memory = claude_memory
         
         # Session management
-        self.history_in_context = history_in_context  # Number of past sessions to include
         self.auto_save = auto_save  # Session name for auto-saving
         
         # Initialize rules manager for persistent context (like Cursor/Windsurf)
@@ -709,15 +698,6 @@ Your Goal: {self.goal}
                 from ..rag.retrieval_config import RetrievalConfig
                 self._retrieval_config = RetrievalConfig()
 
-        # Fast Context configuration (lazy loaded)
-        self.fast_context_enabled = fast_context
-        self._fast_context_path = fast_context_path  # Store raw, resolve lazily
-        self.fast_context_model = fast_context_model
-        self.fast_context_max_turns = fast_context_max_turns
-        self.fast_context_parallelism = fast_context_parallelism
-        self.fast_context_timeout = fast_context_timeout
-        self._fast_context_instance = None  # Lazy loaded
-
         # Agent Skills configuration (lazy loaded for zero performance impact)
         self._skills = skills
         self._skills_dirs = skills_dirs
@@ -734,6 +714,135 @@ Your Goal: {self.goal}
         self._session_store = None
         self._session_store_initialized = False
 
+        # Agent-centric feature instances (lazy loaded for zero performance impact)
+        self._auto_memory = auto_memory
+        self._policy = policy
+        self._background = background
+        self._checkpoints = checkpoints
+        self._output_style = output_style
+        self._thinking_budget = thinking_budget
+        
+        # Context management (lazy loaded for zero overhead when disabled)
+        self._context_param = context  # Store raw param for lazy init
+        self._context_manager = None  # Lazy initialized on first use
+        self._context_manager_initialized = False
+
+    @property
+    def auto_memory(self):
+        """AutoMemory instance for automatic memory extraction."""
+        return self._auto_memory
+    
+    @auto_memory.setter
+    def auto_memory(self, value):
+        self._auto_memory = value
+
+    @property
+    def policy(self):
+        """PolicyEngine instance for execution control."""
+        return self._policy
+    
+    @policy.setter
+    def policy(self, value):
+        self._policy = value
+
+    @property
+    def background(self):
+        """BackgroundRunner instance for async task execution."""
+        return self._background
+    
+    @background.setter
+    def background(self, value):
+        self._background = value
+
+    @property
+    def checkpoints(self):
+        """CheckpointService instance for file-level undo/restore."""
+        return self._checkpoints
+    
+    @checkpoints.setter
+    def checkpoints(self, value):
+        self._checkpoints = value
+
+    @property
+    def output_style(self):
+        """OutputStyle instance for response formatting."""
+        return self._output_style
+    
+    @output_style.setter
+    def output_style(self, value):
+        self._output_style = value
+
+    @property
+    def thinking_budget(self):
+        """ThinkingBudget instance for extended thinking control."""
+        return self._thinking_budget
+    
+    @thinking_budget.setter
+    def thinking_budget(self, value):
+        self._thinking_budget = value
+
+    @property
+    def context_manager(self):
+        """
+        ContextManager instance for unified context management.
+        
+        Lazy initialized on first access when context=True or context=ManagerConfig.
+        Returns None when context=False (zero overhead).
+        
+        Example:
+            agent = Agent(instructions="...", context=True)
+            # Access manager for advanced operations
+            if agent.context_manager:
+                stats = agent.context_manager.get_stats()
+        """
+        if self._context_manager_initialized:
+            return self._context_manager
+        
+        # Initialize based on context param type
+        if self._context_param is False or self._context_param is None:
+            # Zero overhead - no context management
+            self._context_manager = None
+            self._context_manager_initialized = True
+            return None
+        
+        # Lazy import to avoid overhead when not used
+        try:
+            from ..context import ContextManager, ManagerConfig
+        except ImportError:
+            # Context module not available
+            self._context_manager = None
+            self._context_manager_initialized = True
+            return None
+        
+        if self._context_param is True:
+            # Enable with safe defaults
+            self._context_manager = ContextManager(
+                model=self.llm if isinstance(self.llm, str) else "gpt-4o-mini",
+                agent_name=self.name or "Agent",
+            )
+        elif isinstance(self._context_param, ManagerConfig):
+            # Use provided config
+            self._context_manager = ContextManager(
+                model=self.llm if isinstance(self.llm, str) else "gpt-4o-mini",
+                config=self._context_param,
+                agent_name=self.name or "Agent",
+            )
+        elif hasattr(self._context_param, 'process'):
+            # Already a ContextManager instance
+            self._context_manager = self._context_param
+        else:
+            # Unknown type, disable
+            self._context_manager = None
+        
+        self._context_manager_initialized = True
+        return self._context_manager
+    
+    @context_manager.setter
+    def context_manager(self, value):
+        """Set context manager directly."""
+        self._context_manager = value
+        self._context_manager_initialized = True
+
     @property
     def console(self):
         """Lazily initialize Rich Console only when needed."""
@@ -741,17 +850,6 @@ Your Goal: {self.goal}
             from rich.console import Console
             self._console = Console()
         return self._console
-    
-    @property
-    def fast_context_path(self):
-        """Lazily resolve fast_context_path - avoids os.getcwd() on every init."""
-        if self._fast_context_path is None:
-            self._fast_context_path = os.getcwd()
-        return self._fast_context_path
-    
-    @fast_context_path.setter
-    def fast_context_path(self, value):
-        self._fast_context_path = value
     
     @property
     def skill_manager(self):
@@ -938,57 +1036,6 @@ Your Goal: {self.goal}
             model_name = "gpt-4o-mini"
         
         return supports_prompt_caching(model_name)
-    
-    @property
-    def fast_context(self):
-        """Lazily initialize FastContext instance when needed.
-        
-        Returns:
-            FastContext instance or None if not enabled
-        """
-        if not self.fast_context_enabled:
-            return None
-        
-        if self._fast_context_instance is None:
-            try:
-                from ..context.fast import FastContext
-                self._fast_context_instance = FastContext(
-                    workspace_path=self.fast_context_path,
-                    model=self.fast_context_model,
-                    max_turns=self.fast_context_max_turns,
-                    max_parallel=self.fast_context_parallelism,
-                    timeout=self.fast_context_timeout,
-                    verbose=self.verbose
-                )
-            except ImportError:
-                logging.warning("FastContext not available")
-                return None
-        
-        return self._fast_context_instance
-    
-    def delegate_to_fast_context(self, query: str) -> Optional[str]:
-        """Delegate a code search query to FastContext subagent.
-        
-        This method uses the FastContext subagent to rapidly search
-        the codebase and return relevant context.
-        
-        Args:
-            query: Natural language search query
-            
-        Returns:
-            Formatted context string or None if FastContext not available
-        """
-        if not self.fast_context_enabled or self.fast_context is None:
-            return None
-        
-        try:
-            result = self.fast_context.search(query)
-            if result.total_files > 0:
-                return self.fast_context.get_context_for_agent(query)
-            return None
-        except Exception as e:
-            logging.warning(f"FastContext search failed: {e}")
-            return None
     
     @property
     def rules_manager(self):
@@ -1358,7 +1405,14 @@ Your Goal: {self.goal}
                 return "", None
             
             if isinstance(search_results, dict) and 'results' in search_results:
-                knowledge_content = "\n".join([result['memory'] for result in search_results['results']])
+                # CRITICAL: Handle None results and get 'memory' field safely
+                parts = []
+                for result in search_results['results']:
+                    if result is not None:
+                        memory = result.get('memory', '') or ''
+                        if memory:
+                            parts.append(memory)
+                knowledge_content = "\n".join(parts)
             else:
                 knowledge_content = "\n".join(search_results) if isinstance(search_results, list) else str(search_results)
             
@@ -3504,7 +3558,7 @@ Write the complete compiled report:"""
 
     def start(self, prompt: str, **kwargs):
         """Start the agent with a prompt. This is a convenience method that wraps chat()."""
-        # Load history from past sessions if history_in_context is set
+        # Load history from past sessions (now handled via context= param)
         self._load_history_context()
         
         # Check if planning mode is enabled
@@ -3524,37 +3578,13 @@ Write the complete compiled report:"""
         return result
     
     def _load_history_context(self):
-        """Load history from past sessions into context if history_in_context is set."""
-        if not self.history_in_context or not self._memory_instance:
-            return
+        """Load history from past sessions into context.
         
-        try:
-            sessions = self._memory_instance.list_sessions()
-            if not sessions:
-                return
-            
-            # Get the last N sessions
-            sessions_to_load = sessions[:self.history_in_context]
-            
-            for session_info in reversed(sessions_to_load):
-                try:
-                    session_data = self._memory_instance.resume_session(session_info["name"])
-                    history = session_data.get("conversation_history", [])
-                    
-                    # Add history to chat_history with a marker
-                    for msg in history:
-                        if msg not in self.chat_history:
-                            # Mark as from history to avoid duplication
-                            msg_copy = msg.copy()
-                            msg_copy["_from_history"] = True
-                            self.chat_history.append(msg_copy)
-                except Exception:
-                    continue
-                    
-            if sessions_to_load:
-                logging.debug(f"Loaded history from {len(sessions_to_load)} past session(s)")
-        except Exception as e:
-            logging.debug(f"Error loading history context: {e}")
+        Note: This functionality is now handled via context= param with ManagerConfig.
+        This method is kept for backward compatibility but is a no-op.
+        Use context=ManagerConfig(history_sessions=N) to load past sessions.
+        """
+        pass
     
     def _auto_save_session(self):
         """Auto-save session if auto_save is enabled."""

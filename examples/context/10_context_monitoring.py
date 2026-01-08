@@ -2,13 +2,27 @@
 """
 Context Monitoring Example
 
-Demonstrates how to use the ContextMonitor to write runtime context
-snapshots to disk for debugging and analysis.
+Demonstrates how to use context monitoring with Agent via context= param,
+and also shows low-level ContextMonitor usage for advanced scenarios.
+
+Agent-Centric Quick Start:
+    from praisonaiagents import Agent
+    from praisonaiagents.context import ManagerConfig
+    
+    agent = Agent(
+        instructions="You are helpful.",
+        context=ManagerConfig(
+            monitor_enabled=True,
+            monitor_path="./debug/context.json",
+        ),
+    )
 """
 
 import os
 import tempfile
+from praisonaiagents import Agent
 from praisonaiagents.context import (
+    ManagerConfig,
     ContextMonitor,
     ContextLedger,
     BudgetAllocation,
@@ -17,6 +31,28 @@ from praisonaiagents.context import (
     redact_sensitive,
     ContextSnapshot,
 )
+
+
+def agent_centric_example():
+    """Agent-centric usage - recommended approach."""
+    print("=" * 60)
+    print("Agent-Centric Context Monitoring")
+    print("=" * 60)
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monitor_path = os.path.join(tmpdir, "context.json")
+        
+        agent = Agent(
+            instructions="You are a helpful assistant.",
+            context=ManagerConfig(
+                monitor_enabled=True,
+                monitor_path=monitor_path,
+                monitor_format="json",
+            ),
+        )
+        print(f"Agent with monitoring enabled")
+        print(f"Monitor path: {monitor_path}")
+        print(f"Context manager: {agent.context_manager is not None}")
 
 
 def main():

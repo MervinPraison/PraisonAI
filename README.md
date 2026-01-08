@@ -1930,11 +1930,11 @@ agent = Agent(
     auto_save="my-project"
 )
 
-# Load history from last 5 sessions
+# Load history from past sessions via context management
 agent = Agent(
     name="Assistant",
     memory=True,
-    history_in_context=5
+    context=True,  # Enable context management for history
 )
 ```
 

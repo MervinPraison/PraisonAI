@@ -3648,7 +3648,7 @@ Provide ONLY the commit message, no explanations."""
                 
                 if getattr(self.args, 'history', None):
                     agent_config["memory"] = True  # History requires memory
-                    agent_config["history_in_context"] = self.args.history
+                    # Note: history_in_context param removed - history loading now via context= param
                     print(f"[bold cyan]History enabled - loading context from last {self.args.history} session(s)[/bold cyan]")
                 
                 # Claude Memory Tool (Anthropic only)

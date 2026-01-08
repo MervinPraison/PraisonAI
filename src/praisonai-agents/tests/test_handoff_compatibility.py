@@ -179,7 +179,6 @@ def test_all_agent_parameters():
         response_template="Test response",
         allow_code_execution=True,
         max_retry_limit=5,
-        respect_context_window=False,
         code_execution_mode="unsafe",
         embedder_config={"test": "config"},
         knowledge=None,

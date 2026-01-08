@@ -4,7 +4,7 @@ Context Monitor for PraisonAI Agents.
 Writes runtime context to disk for inspection and debugging.
 """
 
-from typing import Dict, List, Any, Optional, Literal
+from typing import Dict, List, Any, Optional, Literal, Tuple
 from pathlib import Path
 from datetime import datetime
 import json
@@ -17,14 +17,30 @@ from .models import (
 
 # Sensitive patterns for redaction
 SENSITIVE_PATTERNS = [
-    r'sk-[a-zA-Z0-9]{20,}',  # OpenAI API keys
-    r'sk-proj-[a-zA-Z0-9_-]+',  # OpenAI project keys
+    # OpenAI API keys
+    r'sk-[a-zA-Z0-9]{20,}',
+    r'sk-proj-[a-zA-Z0-9_-]+',
+    # Anthropic API keys
+    r'sk-ant-[a-zA-Z0-9_-]+',
+    r'sk-ant-api\d+-[a-zA-Z0-9_-]+',
+    # Google API keys and tokens
+    r'AIza[a-zA-Z0-9_-]{30,}',  # Google API keys (30+ chars after prefix)
+    r'ya29\.[a-zA-Z0-9_-]+',  # Google OAuth tokens
+    r'goog-[a-zA-Z0-9_-]{20,}',  # Google service tokens
+    # AWS credentials
     r'AKIA[0-9A-Z]{16}',  # AWS access keys
-    r'[a-zA-Z0-9]{32,}',  # Generic long tokens (conservative)
+    r'ASIA[0-9A-Z]{16}',  # AWS temporary access keys
+    r'aws_secret_access_key["\s:=]+["\']?[^"\'\s]+',
+    # Azure credentials
+    r'[a-zA-Z0-9]{8}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{12}',  # Azure GUIDs
+    # Generic patterns
+    r'[a-zA-Z0-9]{40,}',  # Generic long tokens (conservative)
     r'password["\s:=]+["\']?[^"\'\s]+',  # Password patterns
     r'secret["\s:=]+["\']?[^"\'\s]+',  # Secret patterns
     r'token["\s:=]+["\']?[^"\'\s]+',  # Token patterns
     r'api[_-]?key["\s:=]+["\']?[^"\'\s]+',  # API key patterns
+    r'bearer\s+[a-zA-Z0-9_-]+',  # Bearer tokens
+    r'authorization["\s:=]+["\']?[^"\'\s]+',  # Authorization headers
 ]
 
 
@@ -42,6 +58,153 @@ def redact_sensitive(text: str) -> str:
     for pattern in SENSITIVE_PATTERNS:
         result = re.sub(pattern, '[REDACTED]', result, flags=re.IGNORECASE)
     return result
+
+
+def validate_monitor_path(
+    path: str,
+    allow_absolute: bool = False,
+    base_dir: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """
+    Validate monitor output path for security.
+    
+    Prevents path traversal attacks and enforces path restrictions.
+    
+    Args:
+        path: Path to validate
+        allow_absolute: Whether to allow absolute paths
+        base_dir: Base directory for relative paths
+        
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    from pathlib import Path as PathLib
+    
+    path_obj = PathLib(path)
+    
+    # Check for path traversal attempts
+    if '..' in path_obj.parts:
+        return False, "Path traversal (..) not allowed"
+    
+    # Check absolute path restriction
+    if path_obj.is_absolute() and not allow_absolute:
+        return False, "Absolute paths not allowed (set allow_absolute_paths=True to override)"
+    
+    # If base_dir specified, ensure path stays within it
+    if base_dir:
+        base = PathLib(base_dir).resolve()
+        try:
+            # For relative paths, resolve against base
+            if not path_obj.is_absolute():
+                full_path = (base / path_obj).resolve()
+            else:
+                full_path = path_obj.resolve()
+            
+            # Check if resolved path is under base
+            if not str(full_path).startswith(str(base)):
+                return False, f"Path must be within {base_dir}"
+        except Exception as e:
+            return False, f"Path validation error: {e}"
+    
+    # Check for suspicious patterns
+    suspicious = ['/etc/', '/var/', '/usr/', '/root/', '/home/', '~']
+    path_str = str(path_obj).lower()
+    for pattern in suspicious:
+        if pattern in path_str and not allow_absolute:
+            return False, f"Suspicious path pattern: {pattern}"
+    
+    return True, ""
+
+
+def should_include_content(
+    file_path: str,
+    ignore_patterns: Optional[List[str]] = None,
+    include_patterns: Optional[List[str]] = None,
+) -> bool:
+    """
+    Check if file content should be included based on ignore/include patterns.
+    
+    Respects .praisonignore and .praisoninclude rules.
+    
+    Args:
+        file_path: Path to check
+        ignore_patterns: Patterns to ignore (glob-style)
+        include_patterns: Patterns to include (glob-style)
+        
+    Returns:
+        True if content should be included
+    """
+    import fnmatch
+    from pathlib import Path as PathLib
+    
+    path = PathLib(file_path)
+    name = path.name
+    
+    # Default: include everything
+    if not ignore_patterns and not include_patterns:
+        return True
+    
+    # Check include patterns first (whitelist)
+    if include_patterns:
+        included = False
+        for pattern in include_patterns:
+            if fnmatch.fnmatch(name, pattern) or fnmatch.fnmatch(str(path), pattern):
+                included = True
+                break
+        if not included:
+            return False
+    
+    # Check ignore patterns (blacklist)
+    if ignore_patterns:
+        for pattern in ignore_patterns:
+            if fnmatch.fnmatch(name, pattern) or fnmatch.fnmatch(str(path), pattern):
+                return False
+    
+    return True
+
+
+def load_ignore_patterns(base_dir: str = ".") -> Tuple[List[str], List[str]]:
+    """
+    Load ignore and include patterns from .praisonignore and .praisoninclude files.
+    
+    Args:
+        base_dir: Directory to search for pattern files
+        
+    Returns:
+        Tuple of (ignore_patterns, include_patterns)
+    """
+    from pathlib import Path as PathLib
+    
+    ignore_patterns = []
+    include_patterns = []
+    
+    base = PathLib(base_dir)
+    
+    # Load .praisonignore
+    ignore_file = base / ".praisonignore"
+    if ignore_file.exists():
+        try:
+            content = ignore_file.read_text()
+            for line in content.splitlines():
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    ignore_patterns.append(line)
+        except Exception:
+            pass
+    
+    # Load .praisoninclude
+    include_file = base / ".praisoninclude"
+    if include_file.exists():
+        try:
+            content = include_file.read_text()
+            for line in content.splitlines():
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    include_patterns.append(line)
+        except Exception:
+            pass
+    
+    return ignore_patterns, include_patterns
 
 
 def format_human_snapshot(snapshot: ContextSnapshot, redact: bool = True) -> str:

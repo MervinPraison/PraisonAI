@@ -2,10 +2,10 @@
 """
 Basic Checkpoints Example for PraisonAI Agents.
 
-This example demonstrates how to use the shadow git checkpointing system to:
-1. Save checkpoints before making changes
-2. List available checkpoints
-3. View diffs between checkpoints
+This example demonstrates how to use the shadow git checkpointing system with Agent:
+1. Create an Agent with checkpoint support
+2. Save checkpoints before making changes
+3. List available checkpoints
 4. Restore to a previous checkpoint
 
 Usage:
@@ -16,6 +16,7 @@ import asyncio
 import tempfile
 from pathlib import Path
 
+from praisonaiagents import Agent
 from praisonaiagents.checkpoints import CheckpointService
 
 
@@ -23,7 +24,7 @@ async def main():
     # Create a temporary workspace for demonstration
     with tempfile.TemporaryDirectory() as workspace:
         print("=" * 60)
-        print("Shadow Git Checkpointing Demo")
+        print("Agent-Centric Checkpointing Demo")
         print("=" * 60)
         print(f"\nWorkspace: {workspace}")
         
@@ -32,24 +33,35 @@ async def main():
         test_file.write_text("# Initial content\nprint('Hello, World!')\n")
         print(f"\n✅ Created initial file: {test_file.name}")
         
-        # Initialize the checkpoint service
-        service = CheckpointService(workspace_dir=workspace)
+        # Create checkpoint service
+        checkpoints = CheckpointService(workspace_dir=workspace)
+        
+        # Create an Agent with checkpoint support
+        agent = Agent(
+            name="RefactorBot",
+            instructions="You are a code refactoring assistant.",
+            checkpoints=checkpoints
+        )
+        
+        print("\n--- Agent with Checkpoint Support Created ---")
+        print(f"Agent: {agent.name}")
+        print(f"Checkpoints enabled: {agent.checkpoints is not None}")
         
         try:
             # Initialize the shadow git repository
             print("\n--- Initializing Checkpoint Service ---")
-            await service.initialize()
+            await agent.checkpoints.initialize()
             print("✅ Shadow git repository initialized")
             
             # Save first checkpoint
             print("\n--- Saving Checkpoint 1: Initial State ---")
-            result1 = await service.save("Initial state")
+            result1 = await agent.checkpoints.save("Initial state")
             print(f"✅ Checkpoint saved: {result1.checkpoint.id[:8]}")
             print(f"   Message: {result1.checkpoint.message}")
             
-            # Make some changes
-            print("\n--- Making Changes ---")
-            test_file.write_text("# Modified content\nprint('Hello, PraisonAI!')\nprint('Checkpoints are awesome!')\n")
+            # Make some changes (simulating agent modifications)
+            print("\n--- Simulating Agent Changes ---")
+            test_file.write_text("# Refactored content\nprint('Hello, PraisonAI!')\nprint('Checkpoints are awesome!')\n")
             print("✅ Modified example.py")
             
             # Create a new file
@@ -58,38 +70,32 @@ async def main():
             print("✅ Created utils.py")
             
             # Save second checkpoint
-            print("\n--- Saving Checkpoint 2: After Changes ---")
-            result2 = await service.save("Added features")
+            print("\n--- Saving Checkpoint 2: After Refactoring ---")
+            result2 = await agent.checkpoints.save("Added features")
             print(f"✅ Checkpoint saved: {result2.checkpoint.id[:8]}")
             
             # List all checkpoints
             print("\n--- Listing All Checkpoints ---")
-            checkpoints = await service.list_checkpoints()
-            for i, cp in enumerate(checkpoints, 1):
-                print(f"  {i}. [{cp.id[:8]}] {cp.message} ({cp.timestamp})")
+            checkpoints_list = await agent.checkpoints.list_checkpoints()
+            for i, cp in enumerate(checkpoints_list, 1):
+                print(f"  {i}. [{cp.id[:8]}] {cp.message}")
             
             # Show diff
-            print("\n--- Current Diff (uncommitted changes) ---")
-            diff = await service.diff()
+            print("\n--- Current Diff ---")
+            diff = await agent.checkpoints.diff()
             if diff.files:
                 for f in diff.files:
                     print(f"  {f.status}: {f.path}")
             else:
                 print("  No uncommitted changes")
             
-            # Make more changes to show diff
-            test_file.write_text("# Even more changes\nprint('This will be reverted')\n")
-            print("\n✅ Made more changes to example.py")
-            
-            diff = await service.diff()
-            print("\n--- New Diff ---")
-            if diff.files:
-                for f in diff.files:
-                    print(f"  {f.status}: {f.path}")
+            # Make more changes
+            test_file.write_text("# Bad changes\nprint('This will be reverted')\n")
+            print("\n✅ Made problematic changes to example.py")
             
             # Restore to checkpoint 2
             print(f"\n--- Restoring to Checkpoint: {result2.checkpoint.id[:8]} ---")
-            await service.restore(result2.checkpoint.id)
+            await agent.checkpoints.restore(result2.checkpoint.id)
             print("✅ Restored successfully!")
             
             # Verify restoration
