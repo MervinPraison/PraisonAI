@@ -323,8 +323,9 @@ class YAMLWorkflowParser:
             if 'tools' in role_config:
                 agent['tools'] = [t for t in role_config['tools'] if t]
             
-            if 'verbose' in role_config:
-                agent['verbose'] = role_config['verbose']
+            # Skip verbose - Agent no longer accepts it
+            # if 'verbose' in role_config:
+            #     agent['verbose'] = role_config['verbose']
             
             if 'max_iter' in role_config:
                 agent['max_iter'] = role_config['max_iter']
@@ -401,7 +402,7 @@ class YAMLWorkflowParser:
         prompt_template = config.get('prompt_template')
         response_template = config.get('response_template')
         
-        # Create agent
+        # Create agent (verbose parameter removed - Agent no longer accepts it)
         agent = Agent(
             name=name,
             role=role,
@@ -410,7 +411,6 @@ class YAMLWorkflowParser:
             backstory=backstory,
             llm=llm,
             tools=tools if tools else None,
-            verbose=verbose,
         )
         
         # Store additional attributes for later use

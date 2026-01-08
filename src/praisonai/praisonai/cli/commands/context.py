@@ -1,10 +1,13 @@
 """
 Context command group for PraisonAI CLI.
 
-Provides context management commands.
+Provides context management commands:
+- stats: Show context statistics
+- compact: Manually trigger context compaction
+- export: Export context to file
+- show: Show current context
+- clear: Clear current context
 """
-
-from typing import Optional
 
 import typer
 
@@ -75,3 +78,149 @@ def context_add(
         pass
     finally:
         sys.argv = original_argv
+
+
+@app.command("stats")
+def context_stats(
+    agent: str = typer.Option("", "--agent", "-a", help="Agent name to show stats for"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """
+    Show context management statistics.
+    
+    Displays token usage, utilization, cache stats, and optimization history.
+    """
+    try:
+        from praisonaiagents.context import get_metrics
+        import json
+        
+        # Get global metrics
+        metrics = get_metrics()
+        stats = metrics.to_dict()
+        
+        if json_output:
+            print(json.dumps(stats, indent=2))
+        else:
+            from rich.console import Console
+            from rich.table import Table
+            
+            console = Console()
+            
+            # Timing table
+            timing_table = Table(title="Context Operation Timing")
+            timing_table.add_column("Operation", style="cyan")
+            timing_table.add_column("Calls", justify="right")
+            timing_table.add_column("Avg (ms)", justify="right")
+            timing_table.add_column("Max (ms)", justify="right")
+            
+            for op, data in stats["timing"].items():
+                timing_table.add_row(
+                    op,
+                    str(data["calls"]),
+                    f"{data['avg_ms']:.2f}",
+                    f"{data['max_ms']:.2f}",
+                )
+            
+            console.print(timing_table)
+            
+            # Token stats
+            console.print("\n[bold]Token Statistics:[/bold]")
+            console.print(f"  Processed: {stats['tokens']['processed']:,}")
+            console.print(f"  Saved: {stats['tokens']['saved']:,}")
+            console.print(f"  Compactions: {stats['tokens']['compactions']}")
+            
+            # Cache stats
+            console.print("\n[bold]Cache Statistics:[/bold]")
+            console.print(f"  Hits: {stats['cache']['hits']:,}")
+            console.print(f"  Misses: {stats['cache']['misses']:,}")
+            console.print(f"  Hit Rate: {stats['cache']['hit_rate']:.1%}")
+            
+    except ImportError as e:
+        typer.echo(f"Error: Context module not available: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@app.command("compact")
+def context_compact(
+    agent: str = typer.Option("", "--agent", "-a", help="Agent name to compact"),
+    threshold: float = typer.Option(0.8, "--threshold", "-t", help="Compaction threshold (0.0-1.0)"),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Show what would be compacted without doing it"),
+):
+    """
+    Manually trigger context compaction.
+    
+    Compacts context when utilization exceeds threshold.
+    """
+    try:
+        from praisonaiagents.context import get_global_store
+        
+        store = get_global_store()
+        stats = store.get_stats()
+        
+        if dry_run:
+            typer.echo("[Dry Run] Current store stats:")
+            typer.echo(f"  Agents: {stats['agent_count']}")
+            typer.echo(f"  Total messages: {stats['total_messages']}")
+            for agent_id, agent_stats in stats.get("agents", {}).items():
+                typer.echo(f"  {agent_id}: {agent_stats['message_count']} messages, {agent_stats['effective_count']} effective")
+        else:
+            # Cleanup orphaned parents for all agents
+            for agent_id in stats.get("agents", {}).keys():
+                if agent and agent_id != agent:
+                    continue
+                store.cleanup_agent(agent_id)
+                typer.echo(f"Cleaned up agent: {agent_id}")
+            
+            typer.echo("Compaction complete.")
+            
+    except ImportError as e:
+        typer.echo(f"Error: Context module not available: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@app.command("export")
+def context_export(
+    output: str = typer.Argument("context_export.json", help="Output file path"),
+    agent: str = typer.Option("", "--agent", "-a", help="Agent name to export"),
+    format: str = typer.Option("json", "--format", "-f", help="Export format (json, txt)"),
+):
+    """
+    Export context to a file.
+    
+    Exports the current context store state for debugging or backup.
+    """
+    try:
+        from praisonaiagents.context import get_global_store
+        from pathlib import Path
+        
+        store = get_global_store()
+        
+        if format == "json":
+            data = store.snapshot()
+            output_path = Path(output)
+            output_path.write_bytes(data)
+            typer.echo(f"Exported context to: {output_path}")
+        else:
+            # Text format
+            stats = store.get_stats()
+            output_path = Path(output)
+            
+            lines = ["# Context Export", ""]
+            lines.append(f"Agents: {stats['agent_count']}")
+            lines.append(f"Total Messages: {stats['total_messages']}")
+            lines.append("")
+            
+            for agent_id, agent_stats in stats.get("agents", {}).items():
+                if agent and agent_id != agent:
+                    continue
+                lines.append(f"## Agent: {agent_id}")
+                lines.append(f"Messages: {agent_stats['message_count']}")
+                lines.append(f"Effective: {agent_stats['effective_count']}")
+                lines.append("")
+            
+            output_path.write_text("\n".join(lines))
+            typer.echo(f"Exported context to: {output_path}")
+            
+    except ImportError as e:
+        typer.echo(f"Error: Context module not available: {e}", err=True)
+        raise typer.Exit(1)

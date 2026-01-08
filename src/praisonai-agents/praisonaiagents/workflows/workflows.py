@@ -604,7 +604,7 @@ class Workflow:
                             goal=config.get("goal", "Complete the task"),
                             llm=config.get("llm", model),
                             tools=step_tools if step_tools else None,
-                            verbose=verbose,
+                            # verbose parameter removed - Agent no longer accepts it
                             reasoning=self.reasoning,
                             stream=stream
                         )
@@ -954,7 +954,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                     role=config.get("role", "Assistant"),
                     goal=config.get("goal", "Complete the task"),
                     llm=config.get("llm", model),
-                    verbose=verbose,
+                    # verbose parameter removed - Agent no longer accepts it
                     stream=stream
                 )
                 action = normalized.action
@@ -1914,7 +1914,7 @@ class WorkflowManager:
                             default_llm=default_llm,
                             memory=memory,
                             planning=planning,
-                            verbose=verbose,
+                            # verbose parameter removed - Agent no longer accepts it
                             on_step=on_step,
                             on_result=on_result
                         )
@@ -1956,7 +1956,7 @@ class WorkflowManager:
                 default_llm=default_llm,
                 memory=memory,
                 planning=planning,
-                verbose=verbose,
+                # verbose parameter removed - Agent no longer accepts it
                 on_step=None,  # Already called above
                 on_result=on_result
             )
@@ -2367,9 +2367,11 @@ class WorkflowManager:
                 from ..agent.agent import Agent
                 
                 config = step.agent_config.copy()
+                # Remove verbose as Agent no longer accepts it
+                config.pop("verbose", None)
                 config.setdefault("name", f"{step.name}Agent")
                 config.setdefault("llm", default_llm)
-                config.setdefault("verbose", verbose)
+                # config.setdefault("verbose", verbose)  # Agent no longer accepts verbose
                 config.setdefault("planning", planning)
                 
                 if step.tools:

@@ -246,66 +246,46 @@ class Agent:
 
     def __init__(
         self,
+        # Core identity
         name: Optional[str] = None,
         role: Optional[str] = None,
         goal: Optional[str] = None,
         backstory: Optional[str] = None,
         instructions: Optional[str] = None,
+        # LLM configuration
         llm: Optional[Union[str, Any]] = None,
-        tools: Optional[List[Any]] = None,
         function_calling_llm: Optional[Any] = None,
-        max_iter: int = 20,
-        max_rpm: Optional[int] = None,
-        max_execution_time: Optional[int] = None,
-        memory: Optional[Any] = None,
-        verbose: bool = True,
-        allow_delegation: bool = False,
-        step_callback: Optional[Any] = None,
-        cache: bool = True,
-        system_template: Optional[str] = None,
-        prompt_template: Optional[str] = None,
-        response_template: Optional[str] = None,
-        allow_code_execution: Optional[bool] = False,
-        max_retry_limit: int = 2,
-        code_execution_mode: Literal["safe", "unsafe"] = "safe",
-        knowledge: Optional[Union[bool, List[str], Any]] = None,
-        retrieval_config: Optional[Union[Dict[str, Any], Any]] = None,
-        knowledge_config: Optional[Dict[str, Any]] = None,
-        rag_config: Optional[Dict[str, Any]] = None,
-        embedder_config: Optional[Dict[str, Any]] = None,
-        user_id: Optional[str] = None,
-        use_system_prompt: Optional[bool] = True,
-        markdown: bool = True,
-        stream: bool = False,
-        metrics: bool = False,
-        reasoning_steps: bool = False,
-        handoffs: Optional[List[Union['Agent', 'Handoff']]] = None,
+        llm_config: Optional[Dict[str, Any]] = None,
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
-        prompt_caching: Optional[bool] = None,
-        planning: Optional[Union[bool, Any]] = False,
+        # Tools
+        tools: Optional[List[Any]] = None,
+        allow_delegation: bool = False,
+        allow_code_execution: Optional[bool] = False,
+        code_execution_mode: Literal["safe", "unsafe"] = "safe",
+        handoffs: Optional[List[Union['Agent', 'Handoff']]] = None,
+        # Session management
         auto_save: Optional[str] = None,
-        skills: Optional[List[str]] = None,
-        skills_dirs: Optional[List[str]] = None,
-        db: Optional[Any] = None,
-        session_id: Optional[str] = None,
-        hooks: Optional[List[Any]] = None,
-        llm_config: Optional[Dict[str, Any]] = None,
         rate_limiter: Optional[Any] = None,
-        # Agent-centric feature parameters (lazy loaded)
-        auto_memory: Optional[Any] = None,
-        policy: Optional[Any] = None,
-        background: Optional[Any] = None,
-        checkpoints: Optional[Any] = None,
-        output_style: Optional[Any] = None,
-        thinking_budget: Optional[Any] = None,
-        # Context management (single param for all context features)
-        context: Optional[Union[bool, Any]] = False,
-        # NEW: Consolidated feature params (agent-centric API)
-        # These take precedence over individual params when provided
+        # ============================================================
+        # CONSOLIDATED FEATURE PARAMS (agent-centric API)
+        # Each follows: False=disabled, True=defaults, Config=custom
+        # ============================================================
+        memory: Optional[Any] = None,  # Union[bool, MemoryConfig, MemoryManager]
+        knowledge: Optional[Union[bool, List[str], Any]] = None,  # Union[bool, list, KnowledgeConfig, Knowledge]
+        planning: Optional[Union[bool, Any]] = False,  # Union[bool, PlanningConfig]
         reflection: Optional[Union[bool, Any]] = None,  # Union[bool, ReflectionConfig]
         guardrails: Optional[Union[bool, Callable, Any]] = None,  # Union[bool, Callable, GuardrailConfig]
         web: Optional[Union[bool, Any]] = None,  # Union[bool, WebConfig]
+        context: Optional[Union[bool, Any]] = False,  # Union[bool, ManagerConfig, ContextManager]
+        autonomy: Optional[Union[bool, Dict[str, Any], Any]] = None,  # Union[bool, dict, AutonomyConfig]
+        verification_hooks: Optional[List[Any]] = None,  # List of VerificationHook instances
+        output: Optional[Union[str, Any]] = None,  # Union[str preset, OutputConfig]
+        execution: Optional[Union[str, Any]] = None,  # Union[str preset, ExecutionConfig]
+        templates: Optional[Any] = None,  # TemplateConfig
+        caching: Optional[Union[bool, Any]] = None,  # Union[bool, CachingConfig]
+        hooks: Optional[Union[List[Any], Any]] = None,  # Union[list, HooksConfig]
+        skills: Optional[Union[List[str], Any]] = None,  # Union[list, SkillsConfig]
     ):
         """Initialize an Agent instance.
 
@@ -428,6 +408,10 @@ class Agent:
         # ============================================================
         
         # Initialize removed params with defaults (these were removed from signature)
+        user_id = None
+        session_id = None
+        db = None
+        auto_memory = None
         claude_memory = None
         self_reflect = False
         max_reflect = 3
@@ -441,14 +425,180 @@ class Agent:
         plan_mode = False
         planning_tools = None
         planning_reasoning = False
+        # Note: retrieval_config, embedder_config, knowledge_config, rag_config
+        # are now passed as params for backward compat, so don't reset them here
+        policy = None
+        background = None
+        checkpoints = None
+        output_style = None
+        thinking_budget = None
+        skills_dirs = None
+        
+        # Extract output settings from consolidated 'output' param
+        # output can be: None, str preset, or OutputConfig
+        # Initialize with defaults (legacy params removed from signature)
+        _verbose = True
+        _markdown = True
+        _stream = False
+        _metrics = False
+        _reasoning_steps = False
+        
+        if output is not None:
+            if isinstance(output, str):
+                # It's a preset name
+                if output == "minimal":
+                    _verbose = False
+                    _markdown = False
+                    _stream = False
+                    _metrics = False
+                elif output == "verbose":
+                    _verbose = True
+                    _markdown = True
+                    _stream = False
+                    _metrics = True
+                    _reasoning_steps = True
+                elif output == "debug":
+                    _verbose = True
+                    _markdown = True
+                    _stream = False
+                    _metrics = True
+                    _reasoning_steps = True
+                elif output == "silent":
+                    _verbose = False
+                    _markdown = False
+                    _stream = False
+                    _metrics = False
+                # "normal" uses defaults
+            elif hasattr(output, 'verbose'):
+                # It's an OutputConfig
+                _verbose = output.verbose
+                _markdown = output.markdown
+                _stream = output.stream
+                _metrics = output.metrics
+                _reasoning_steps = output.reasoning_steps
+                output_style = output.style
+        
+        # Apply final output values
+        verbose = _verbose
+        markdown = _markdown
+        stream = _stream
+        metrics = _metrics
+        reasoning_steps = _reasoning_steps
+        
+        # Extract execution settings from consolidated 'execution' param
+        # execution can be: None, str preset, or ExecutionConfig
+        # Initialize with defaults (legacy params removed from signature)
+        _max_iter = 20
+        _max_rpm = None
+        _max_execution_time = None
+        _max_retry_limit = 2
+        
+        if execution is not None:
+            if isinstance(execution, str):
+                # It's a preset name
+                if execution == "fast":
+                    _max_iter = 10
+                    _max_retry_limit = 1
+                elif execution == "thorough":
+                    _max_iter = 50
+                    _max_retry_limit = 5
+                elif execution == "unlimited":
+                    _max_iter = 1000
+                    _max_retry_limit = 10
+                # "balanced" uses defaults
+            elif hasattr(execution, 'max_iter'):
+                # It's an ExecutionConfig
+                _max_iter = execution.max_iter
+                _max_rpm = execution.max_rpm
+                _max_execution_time = execution.max_execution_time
+                _max_retry_limit = execution.max_retry_limit
+        
+        # Apply final execution values
+        max_iter = _max_iter
+        max_rpm = _max_rpm
+        max_execution_time = _max_execution_time
+        max_retry_limit = _max_retry_limit
+        
+        # Extract template settings from consolidated 'templates' param
+        # Initialize with defaults (legacy params removed from signature)
+        _system_template = None
+        _prompt_template = None
+        _response_template = None
+        _use_system_prompt = True
+        
+        if templates is not None:
+            if hasattr(templates, 'system'):
+                # It's a TemplateConfig
+                _system_template = templates.system
+                _prompt_template = templates.prompt
+                _response_template = templates.response
+                _use_system_prompt = templates.use_system_prompt
+        
+        # Apply final template values
+        system_template = _system_template
+        prompt_template = _prompt_template
+        response_template = _response_template
+        use_system_prompt = _use_system_prompt
+        
+        # Extract caching settings from consolidated 'caching' param
+        # Initialize with defaults (legacy params removed from signature)
+        _cache = True
+        _prompt_caching = None
+        
+        if caching is not None:
+            if caching is True:
+                _cache = True
+            elif caching is False:
+                _cache = False
+            elif hasattr(caching, 'enabled'):
+                # It's a CachingConfig
+                _cache = caching.enabled
+                _prompt_caching = caching.prompt_caching
+        
+        # Apply final caching values
+        cache = _cache
+        prompt_caching = _prompt_caching
+        
+        # Extract hooks settings from consolidated 'hooks' param
+        # Initialize with defaults (legacy params removed from signature)
+        _step_callback = None
+        _hooks_list = []
+        
+        if hooks is not None:
+            if isinstance(hooks, list):
+                _hooks_list = hooks
+            elif hasattr(hooks, 'on_step'):
+                # It's a HooksConfig
+                _step_callback = hooks.on_step
+                _hooks_list = hooks.middleware
+        
+        # Apply final hooks values
+        step_callback = _step_callback
+        
+        # Extract skills settings from consolidated 'skills' param
+        # Initialize with defaults (legacy params removed from signature)
+        _skills = None
+        _skills_dirs = None
+        
+        if skills is not None:
+            if isinstance(skills, list):
+                _skills = skills
+            elif hasattr(skills, 'paths'):
+                # It's a SkillsConfig
+                _skills = skills.paths
+                _skills_dirs = skills.dirs
+        
+        # Apply final skills values
+        skills_dirs = _skills_dirs
         
         # Extract memory settings from consolidated 'memory' param
         # memory can be: False, True, MemoryConfig, or MemoryManager instance
-        _memory_user_id = user_id  # Default from param
-        _memory_session_id = session_id  # Default from param
-        _memory_db = db  # Default from param
-        _memory_auto_memory = auto_memory  # Default from param
-        _memory_claude_memory = claude_memory  # Default from param
+        # Initialize with defaults (legacy params removed from signature)
+        _memory_user_id = None
+        _memory_session_id = None
+        _memory_db = None
+        _memory_auto_memory = None
+        _memory_claude_memory = None
         
         if memory is not None and memory is not False:
             if hasattr(memory, 'user_id') and hasattr(memory, 'backend'):
@@ -479,9 +629,10 @@ class Agent:
         
         # Extract knowledge settings from consolidated 'knowledge' param
         # knowledge can be: False, True, List[str], KnowledgeConfig, or KnowledgeBase instance
+        # Initialize with defaults (legacy params removed from signature)
         _knowledge_sources = None
-        _knowledge_retrieval_config = retrieval_config
-        _knowledge_embedder_config = embedder_config
+        _knowledge_retrieval_config = None
+        _knowledge_embedder_config = None
         
         if knowledge is not None and knowledge is not False:
             if isinstance(knowledge, list):
@@ -494,7 +645,7 @@ class Agent:
             elif hasattr(knowledge, 'sources') and hasattr(knowledge, 'embedder'):
                 # It's a KnowledgeConfig (has sources list and embedder string)
                 _knowledge_sources = knowledge.sources
-                _knowledge_embedder_config = knowledge.embedder_config or embedder_config
+                _knowledge_embedder_config = knowledge.embedder_config
                 # Build retrieval config from KnowledgeConfig
                 if knowledge.config:
                     _knowledge_retrieval_config = knowledge.config
@@ -592,6 +743,9 @@ class Agent:
         # ============================================================
         # END CONSOLIDATED PARAMS EXTRACTION
         # ============================================================
+        
+        # Initialize autonomy features (agent-centric escalation/doom-loop)
+        self._init_autonomy(autonomy, verification_hooks=verification_hooks)
 
         # If instructions are provided, use them to set role, goal, and backstory
         if instructions:
@@ -617,7 +771,7 @@ class Agent:
         self._final_display_shown = False
         
         # Store hooks for middleware system (zero overhead when empty)
-        self._hooks = hooks or []
+        self._hooks = _hooks_list if _hooks_list else []
         self._middleware_manager = None  # Lazy init
         
         # Store llm_config for configurable model switching
@@ -821,21 +975,14 @@ Your Goal: {self.goal}
         self._process_handoffs()
 
         # Initialize unified retrieval configuration
-        # retrieval_config is the SINGLE configuration surface (replaces knowledge_config + rag_config)
+        # retrieval_config is the SINGLE configuration surface (extracted from knowledge= param)
         self._retrieval_config = None
         if retrieval_config is not None:
-            from ..rag.retrieval_config import RetrievalConfig, create_retrieval_config
+            from ..rag.retrieval_config import RetrievalConfig
             if isinstance(retrieval_config, RetrievalConfig):
                 self._retrieval_config = retrieval_config
             elif isinstance(retrieval_config, dict):
                 self._retrieval_config = RetrievalConfig.from_dict(retrieval_config)
-        elif knowledge_config is not None or rag_config is not None:
-            # Legacy support: merge old configs into unified config
-            from ..rag.retrieval_config import create_retrieval_config
-            self._retrieval_config = create_retrieval_config(
-                knowledge_config=knowledge_config,
-                rag_config=rag_config,
-            )
         
         # Check if knowledge parameter has any values
         if not knowledge:
@@ -863,7 +1010,7 @@ Your Goal: {self.goal}
                 self._retrieval_config = RetrievalConfig()
 
         # Agent Skills configuration (lazy loaded for zero performance impact)
-        self._skills = skills
+        self._skills = _skills
         self._skills_dirs = skills_dirs
         self._skill_manager = None  # Lazy loaded
         self._skills_initialized = False
@@ -1107,6 +1254,344 @@ Your Goal: {self.goal}
             self._agent_id = str(uuid.uuid4())
         return self._agent_id
     
+    def _init_autonomy(self, autonomy: Any, verification_hooks: Optional[List[Any]] = None) -> None:
+        """Initialize autonomy features (agent-centric escalation/doom-loop).
+        
+        Args:
+            autonomy: True, False, dict config, or AutonomyConfig
+            verification_hooks: Optional list of verification hooks
+        """
+        # Initialize verification hooks (always available, even without autonomy)
+        self._verification_hooks = verification_hooks or []
+        
+        if autonomy is None or autonomy is False:
+            self.autonomy_enabled = False
+            self.autonomy_config = {}
+            self._autonomy_trigger = None
+            self._doom_loop_tracker = None
+            return
+        
+        self.autonomy_enabled = True
+        
+        # Lazy import to avoid overhead when not used
+        from .autonomy import AutonomyConfig, AutonomyTrigger, DoomLoopTracker
+        
+        if autonomy is True:
+            self.autonomy_config = {}
+            config = AutonomyConfig()
+        elif isinstance(autonomy, dict):
+            self.autonomy_config = autonomy.copy()
+            config = AutonomyConfig.from_dict(autonomy)
+            # Extract verification_hooks from dict if provided
+            if "verification_hooks" in autonomy and not verification_hooks:
+                self._verification_hooks = autonomy.get("verification_hooks", [])
+        elif isinstance(autonomy, AutonomyConfig):
+            self.autonomy_config = {
+                "max_iterations": autonomy.max_iterations,
+                "doom_loop_threshold": autonomy.doom_loop_threshold,
+                "auto_escalate": autonomy.auto_escalate,
+            }
+            config = autonomy
+        else:
+            self.autonomy_enabled = False
+            self.autonomy_config = {}
+            self._autonomy_trigger = None
+            self._doom_loop_tracker = None
+            return
+        
+        self._autonomy_trigger = AutonomyTrigger()
+        self._doom_loop_tracker = DoomLoopTracker(threshold=config.doom_loop_threshold)
+    
+    def analyze_prompt(self, prompt: str) -> set:
+        """Analyze prompt for autonomy signals.
+        
+        Args:
+            prompt: The user prompt
+            
+        Returns:
+            Set of detected signal names
+        """
+        if not self.autonomy_enabled or self._autonomy_trigger is None:
+            return set()
+        return self._autonomy_trigger.analyze(prompt)
+    
+    def get_recommended_stage(self, prompt: str) -> str:
+        """Get recommended execution stage for prompt.
+        
+        Args:
+            prompt: The user prompt
+            
+        Returns:
+            Stage name as string (direct, heuristic, planned, autonomous)
+        """
+        if not self.autonomy_enabled or self._autonomy_trigger is None:
+            return "direct"
+        
+        signals = self._autonomy_trigger.analyze(prompt)
+        stage = self._autonomy_trigger.recommend_stage(signals)
+        return stage.value
+    
+    def _record_action(self, action_type: str, args: dict, result: Any, success: bool) -> None:
+        """Record an action for doom loop tracking.
+        
+        Args:
+            action_type: Type of action
+            args: Action arguments
+            result: Action result
+            success: Whether action succeeded
+        """
+        if self._doom_loop_tracker is not None:
+            self._doom_loop_tracker.record(action_type, args, result, success)
+    
+    def _is_doom_loop(self) -> bool:
+        """Check if we're in a doom loop.
+        
+        Returns:
+            True if doom loop detected
+        """
+        if self._doom_loop_tracker is None:
+            return False
+        return self._doom_loop_tracker.is_doom_loop()
+    
+    def _reset_doom_loop(self) -> None:
+        """Reset doom loop tracking."""
+        if self._doom_loop_tracker is not None:
+            self._doom_loop_tracker.reset()
+    
+    def run_autonomous(
+        self,
+        prompt: str,
+        max_iterations: Optional[int] = None,
+        timeout_seconds: Optional[float] = None,
+    ):
+        """Run an autonomous task execution loop.
+        
+        This method executes a task autonomously, using the agent's tools
+        and capabilities to complete the task. It handles:
+        - Progressive escalation based on task complexity
+        - Doom loop detection and recovery
+        - Iteration limits and timeouts
+        - Completion detection
+        
+        Args:
+            prompt: The task to execute
+            max_iterations: Override max iterations (default from config)
+            timeout_seconds: Timeout in seconds (default: no timeout)
+            
+        Returns:
+            AutonomyResult with success status, output, and metadata
+            
+        Raises:
+            ValueError: If autonomy is not enabled
+            
+        Example:
+            agent = Agent(instructions="...", autonomy=True)
+            result = agent.run_autonomous("Refactor the auth module")
+            if result.success:
+                print(result.output)
+        """
+        from .autonomy import AutonomyResult
+        import time as time_module
+        
+        if not self.autonomy_enabled:
+            raise ValueError(
+                "Autonomy must be enabled to use run_autonomous(). "
+                "Create agent with autonomy=True or autonomy={...}"
+            )
+        
+        start_time = time_module.time()
+        iterations = 0
+        actions_taken = []
+        
+        # Get config values
+        config_max_iter = self.autonomy_config.get("max_iterations", 20)
+        effective_max_iter = max_iterations if max_iterations is not None else config_max_iter
+        
+        # Analyze prompt and get recommended stage
+        stage = self.get_recommended_stage(prompt)
+        
+        # Reset doom loop tracker for new task
+        self._reset_doom_loop()
+        
+        try:
+            # Execute the autonomous loop
+            while iterations < effective_max_iter:
+                iterations += 1
+                
+                # Check timeout
+                if timeout_seconds and (time_module.time() - start_time) > timeout_seconds:
+                    return AutonomyResult(
+                        success=False,
+                        output="Task timed out",
+                        completion_reason="timeout",
+                        iterations=iterations,
+                        stage=stage,
+                        actions=actions_taken,
+                        duration_seconds=time_module.time() - start_time,
+                    )
+                
+                # Check doom loop
+                if self._is_doom_loop():
+                    return AutonomyResult(
+                        success=False,
+                        output="Task stopped due to repeated actions (doom loop)",
+                        completion_reason="doom_loop",
+                        iterations=iterations,
+                        stage=stage,
+                        actions=actions_taken,
+                        duration_seconds=time_module.time() - start_time,
+                    )
+                
+                # Execute one turn using the agent's chat method
+                try:
+                    response = self.chat(prompt if iterations == 1 else "Continue with the task")
+                except Exception as e:
+                    return AutonomyResult(
+                        success=False,
+                        output=str(e),
+                        completion_reason="error",
+                        iterations=iterations,
+                        stage=stage,
+                        actions=actions_taken,
+                        duration_seconds=time_module.time() - start_time,
+                        error=str(e),
+                    )
+                
+                # Record the action
+                actions_taken.append({
+                    "iteration": iterations,
+                    "response": str(response)[:500],
+                })
+                
+                # Check for completion signals in response
+                response_lower = str(response).lower()
+                completion_signals = [
+                    "task completed", "task complete", "done",
+                    "finished", "completed successfully",
+                ]
+                
+                if any(signal in response_lower for signal in completion_signals):
+                    return AutonomyResult(
+                        success=True,
+                        output=str(response),
+                        completion_reason="goal",
+                        iterations=iterations,
+                        stage=stage,
+                        actions=actions_taken,
+                        duration_seconds=time_module.time() - start_time,
+                    )
+                
+                # For DIRECT stage, complete after first response
+                if stage == "direct":
+                    return AutonomyResult(
+                        success=True,
+                        output=str(response),
+                        completion_reason="goal",
+                        iterations=iterations,
+                        stage=stage,
+                        actions=actions_taken,
+                        duration_seconds=time_module.time() - start_time,
+                    )
+            
+            # Max iterations reached
+            return AutonomyResult(
+                success=False,
+                output="Max iterations reached",
+                completion_reason="max_iterations",
+                iterations=iterations,
+                stage=stage,
+                actions=actions_taken,
+                duration_seconds=time_module.time() - start_time,
+            )
+            
+        except Exception as e:
+            return AutonomyResult(
+                success=False,
+                output=str(e),
+                completion_reason="error",
+                iterations=iterations,
+                stage=stage,
+                actions=actions_taken,
+                duration_seconds=time_module.time() - start_time,
+                error=str(e),
+            )
+    
+    def delegate(
+        self,
+        task: str,
+        profile: str = "general",
+        timeout_seconds: float = 300.0,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        """Delegate a task to a subagent.
+        
+        Args:
+            task: Task description for the subagent
+            profile: Agent profile to use (explorer, coder, tester, etc.)
+            timeout_seconds: Timeout for the delegated task
+            context: Additional context to pass to subagent
+            
+        Returns:
+            Result from the subagent
+        """
+        subagent = self._create_subagent(profile, context)
+        return subagent.chat(task)
+    
+    def _create_subagent(
+        self,
+        profile: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> 'Agent':
+        """Create a subagent with the specified profile.
+        
+        Args:
+            profile: Agent profile name
+            context: Additional context
+            
+        Returns:
+            Configured Agent instance
+        """
+        from ..agents.profiles import get_profile, BUILTIN_PROFILES
+        
+        # Get profile config
+        profile_config = get_profile(profile) if profile in BUILTIN_PROFILES else None
+        
+        if profile_config:
+            return Agent(
+                name=f"subagent_{profile}",
+                instructions=profile_config.system_prompt,
+            )
+        else:
+            # Default subagent
+            return Agent(
+                name=f"subagent_{profile}",
+                instructions=f"You are a {profile} assistant.",
+            )
+    
+    def _run_verification_hooks(self) -> List[Dict[str, Any]]:
+        """Run all registered verification hooks.
+        
+        Returns:
+            List of verification results
+        """
+        results = []
+        if hasattr(self, '_verification_hooks') and self._verification_hooks:
+            for hook in self._verification_hooks:
+                try:
+                    result = hook.run()
+                    results.append({
+                        "hook": hook.name,
+                        "success": result.get("success", False) if isinstance(result, dict) else getattr(result, 'success', False),
+                        "output": result.get("output", "") if isinstance(result, dict) else getattr(result, 'output', ""),
+                    })
+                except Exception as e:
+                    results.append({
+                        "hook": getattr(hook, 'name', 'unknown'),
+                        "success": False,
+                        "error": str(e),
+                    })
+        return results
+
     def get_available_tools(self) -> List[Any]:
         """
         Get tools available to this agent, filtered by plan_mode if enabled.
@@ -2616,6 +3101,77 @@ Your Goal: {self.goal}"""
         #         expand=False
         #     )
 
+    def _apply_context_management(
+        self,
+        messages: list,
+        system_prompt: str = "",
+        tools: list = None,
+    ) -> tuple:
+        """
+        Apply context management before LLM call.
+        
+        Handles auto-compaction when context exceeds threshold.
+        Zero overhead when context=False.
+        
+        Args:
+            messages: Current chat history
+            system_prompt: System prompt content
+            tools: Tool schemas
+            
+        Returns:
+            Tuple of (processed_messages, context_result_dict)
+            context_result_dict contains optimization metadata if applied
+        """
+        # Fast path: no context management
+        if not self.context_manager:
+            return messages, None
+        
+        try:
+            # Process through context manager
+            result = self.context_manager.process(
+                messages=messages,
+                system_prompt=system_prompt,
+                tools=tools or [],
+                trigger="turn",
+            )
+            
+            # Log if optimization occurred
+            if result.get("optimized"):
+                logging.debug(
+                    f"[{self.name}] Context optimized: "
+                    f"{result.get('tokens_before', 0)} -> {result.get('tokens_after', 0)} tokens "
+                    f"(saved {result.get('tokens_saved', 0)})"
+                )
+            
+            return result.get("messages", messages), result
+            
+        except Exception as e:
+            # Context management should never break the chat flow
+            logging.warning(f"Context management error (continuing without): {e}")
+            return messages, None
+
+    def _truncate_tool_output(self, tool_name: str, output: str) -> str:
+        """
+        Truncate tool output according to configured budget.
+        
+        Zero overhead when context=False.
+        
+        Args:
+            tool_name: Name of the tool
+            output: Raw tool output
+            
+        Returns:
+            Truncated output if over budget, otherwise original
+        """
+        if not self.context_manager:
+            return output
+        
+        try:
+            return self.context_manager.truncate_tool_output(tool_name, output)
+        except Exception as e:
+            logging.warning(f"Tool output truncation error: {e}")
+            return output
+
     def _init_db_session(self):
         """Initialize DB session if db adapter is provided (lazy, first chat only)."""
         if self._db is None or self._db_initialized:
@@ -2902,11 +3458,20 @@ Your Goal: {self.goal}"""
                     self._persist_message("user", normalized_content)
                 
                 try:
+                    # Apply context management before LLM call (auto-compaction)
+                    # Zero overhead when context=False
+                    system_prompt_for_llm = self._build_system_prompt(tools)
+                    processed_history, context_result = self._apply_context_management(
+                        messages=self.chat_history,
+                        system_prompt=system_prompt_for_llm,
+                        tools=tool_param,
+                    )
+                    
                     # Pass everything to LLM class
                     response_text = self.llm_instance.get_response(
                     prompt=prompt,
-                    system_prompt=self._build_system_prompt(tools),
-                    chat_history=self.chat_history,
+                    system_prompt=system_prompt_for_llm,
+                    chat_history=processed_history,
                     temperature=temperature,
                     tools=tool_param,
                     output_json=output_json,
@@ -2980,6 +3545,17 @@ Your Goal: {self.goal}"""
 
             reflection_count = 0
             start_time = time.time()
+            
+            # Apply context management before LLM call (auto-compaction)
+            # Zero overhead when context=False
+            system_prompt_content = messages[0].get("content", "") if messages and messages[0].get("role") == "system" else ""
+            processed_messages, context_result = self._apply_context_management(
+                messages=messages,
+                system_prompt=system_prompt_content,
+                tools=tools,
+            )
+            # Use processed messages for the LLM call
+            messages = processed_messages
             
             # Wrap entire while loop in try-except for rollback on any failure
             try:

@@ -46,6 +46,10 @@ class InteractiveConfig:
     verbose: bool = False
     memory: bool = False
     
+    # Autonomy configuration (agent-centric)
+    autonomy: bool = True  # Enable autonomy by default for complex tasks
+    autonomy_config: Optional[dict] = None  # Custom autonomy config
+    
     # Approval mode
     approval_mode: Union[str, ApprovalMode] = "prompt"
     
@@ -69,6 +73,7 @@ class InteractiveConfig:
             enable_lsp=os.environ.get("PRAISON_DISABLE_LSP", "").lower() != "true",
             verbose=os.environ.get("PRAISON_VERBOSE", "").lower() == "true",
             memory=os.environ.get("PRAISON_MEMORY", "").lower() == "true",
+            autonomy=os.environ.get("PRAISON_AUTONOMY", "true").lower() != "false",
         )
     
     @classmethod
@@ -86,6 +91,7 @@ class InteractiveConfig:
             files=getattr(args, "file", []) or [],
             share=getattr(args, "share", False),
             variant=getattr(args, "variant", None),
+            autonomy=getattr(args, "autonomy", True),
         )
     
     def merge(self, other: "InteractiveConfig") -> "InteractiveConfig":

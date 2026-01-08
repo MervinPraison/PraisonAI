@@ -375,8 +375,14 @@ def __getattr__(name):
     # Feature Config classes (agent-centric API)
     elif name in ("MemoryConfig", "KnowledgeConfig", "PlanningConfig", 
                   "ReflectionConfig", "GuardrailConfig", "WebConfig",
+                  "OutputConfig", "ExecutionConfig", "TemplateConfig",
+                  "CachingConfig", "HooksConfig", "SkillsConfig", "AutonomyConfig",
                   "MemoryBackend", "ChunkingStrategy", "GuardrailAction", 
-                  "WebSearchProvider"):
+                  "WebSearchProvider", "OutputPreset", "ExecutionPreset", "AutonomyLevel",
+                  # Multi-Agent config classes
+                  "MultiAgentHooksConfig", "MultiAgentOutputConfig", 
+                  "MultiAgentExecutionConfig", "MultiAgentPlanningConfig",
+                  "MultiAgentMemoryConfig"):
         from .config import feature_configs
         result = getattr(feature_configs, name)
         _lazy_cache[name] = result
@@ -554,10 +560,26 @@ __all__ = [
     'ReflectionConfig',
     'GuardrailConfig',
     'WebConfig',
+    'OutputConfig',
+    'ExecutionConfig',
+    'TemplateConfig',
+    'CachingConfig',
+    'HooksConfig',
+    'SkillsConfig',
+    'AutonomyConfig',
     'MemoryBackend',
     'ChunkingStrategy',
     'GuardrailAction',
     'WebSearchProvider',
+    'OutputPreset',
+    'ExecutionPreset',
+    'AutonomyLevel',
+    # Multi-Agent Feature Configs
+    'MultiAgentHooksConfig',
+    'MultiAgentOutputConfig',
+    'MultiAgentExecutionConfig',
+    'MultiAgentPlanningConfig',
+    'MultiAgentMemoryConfig',
     # Context Management
     'ManagerConfig',
     'ContextManager',

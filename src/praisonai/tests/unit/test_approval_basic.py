@@ -194,8 +194,7 @@ def test_agent_integration():
             name="Test Agent",
             role="Tester",
             goal="Test approval integration",
-            tools=[ShellTools()],
-            verbose=False
+            tools=[ShellTools()]
         )
         
         print("✅ Agent created with dangerous tools")

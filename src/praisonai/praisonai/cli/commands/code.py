@@ -25,6 +25,7 @@ def code_main(
     no_lsp: bool = typer.Option(False, "--no-lsp", help="Disable LSP tools (code intelligence)"),
     session_id: Optional[str] = typer.Option(None, "--session", "-s", help="Session ID to resume"),
     continue_session: bool = typer.Option(False, "--continue", "-c", help="Continue last session"),
+    autonomy: bool = typer.Option(True, "--autonomy/--no-autonomy", help="Enable agent autonomy for complex tasks"),
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
 ):

@@ -1,23 +1,18 @@
 """
 ImageAgent - A specialized agent class for generating images using AI models.
-
 This class extends the base Agent class to provide specific functionality for image generation,
 including support for different image models, sizes, and quality settings.
 """
-
 from typing import Optional, Any, Dict, Union, List
 from ..agent.agent import Agent
 from pydantic import BaseModel, Field
 import logging
 import warnings
-
 # Filter out Pydantic warning about fields
 warnings.filterwarnings("ignore", "Valid config keys have changed in V2", UserWarning)
-
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
-
 class ImageGenerationConfig(BaseModel):
     """Configuration for image generation settings."""
     style: str = Field(default="natural", description="Style of the generated image")
@@ -26,7 +21,6 @@ class ImageGenerationConfig(BaseModel):
     api_base: Optional[str] = Field(default=None, description="Optional API base URL")
     api_key: Optional[str] = Field(default=None, description="Optional API key")
     api_version: Optional[str] = Field(default=None, description="Optional API version (required for Azure dall-e-3)")
-
 class ImageAgent(Agent):
     """
     A specialized agent for generating images using AI models.
@@ -57,7 +51,6 @@ class ImageAgent(Agent):
         role = role or "Image Generation Assistant"
         goal = goal or "Generate high-quality images based on text descriptions"
         backstory = backstory or "I am an AI assistant specialized in generating images from textual descriptions"
-
         # Initialize the base agent
         super().__init__(
             name=name,
@@ -66,10 +59,8 @@ class ImageAgent(Agent):
             backstory=backstory,
             instructions=instructions,
             llm=llm,
-            verbose=verbose,
             **kwargs
         )
-
         # Store image generation configuration
         self.image_config = ImageGenerationConfig(
             style=style,
@@ -82,10 +73,8 @@ class ImageAgent(Agent):
         
         # Lazy load litellm
         self._litellm = None
-
         # Configure logging based on verbose level
         self._configure_logging(verbose)
-
     def _configure_logging(self, verbose: Union[bool, int]) -> None:
         """Configure logging levels based on verbose setting."""
         # Only suppress logs if not in debug mode
@@ -115,7 +104,6 @@ class ImageAgent(Agent):
             warnings.filterwarnings("ignore", category=RuntimeWarning)
             warnings.filterwarnings("ignore", category=UserWarning)
             warnings.filterwarnings("ignore", category=DeprecationWarning)
-
     @property
     def litellm(self):
         """Lazy load litellm module when needed."""
@@ -137,7 +125,6 @@ class ImageAgent(Agent):
                     "Please install it with: pip install litellm"
                 )
         return self._litellm
-
     def generate_image(self, prompt: str, **kwargs) -> Dict[str, Any]:
         """Generate an image based on the provided prompt."""
         # Merge default config with any provided kwargs
@@ -150,7 +137,6 @@ class ImageAgent(Agent):
         
         # Use the model name in config
         config['model'] = model_name
-
         # Filter parameters based on the provider to avoid unsupported parameter errors
         custom_llm_provider = None
         try:
@@ -169,7 +155,6 @@ class ImageAgent(Agent):
             # Gemini provider doesn't support response_format parameter
             # Apply this filter if provider is explicitly 'gemini' or as fallback for gemini models
             config.pop('response_format', None)
-
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -189,18 +174,15 @@ class ImageAgent(Agent):
                 # Mark task as complete
                 progress.update(task, completed=True)
                 return response
-
             except Exception as e:
                 error_msg = f"Error generating image: {str(e)}"
                 if self.verbose:
                     self.console.print(f"[red]{error_msg}[/red]")
                 logging.error(error_msg)
                 raise
-
     async def agenerate_image(self, prompt: str, **kwargs) -> Dict[str, Any]:
         """Async wrapper for generate_image."""
         return self.generate_image(prompt, **kwargs)
-
     def chat(self, prompt: str, **kwargs) -> Dict[str, Any]:
         """Generate an image from the prompt."""
         try:
@@ -213,7 +195,6 @@ class ImageAgent(Agent):
             if self.verbose:
                 self.console.print(f"[red]{error_msg}[/red]")
             return {"error": str(e)}
-
     async def achat(
         self,
         prompt: str,

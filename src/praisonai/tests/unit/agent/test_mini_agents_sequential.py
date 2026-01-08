@@ -97,7 +97,7 @@ def test_mini_agents_sequential_data_passing(mock_litellm):
     agent2 = Agent(instructions="Take the input number and multiply it by 2. Only return the result number, nothing else.", llm={'model': 'gpt-3.5-turbo'})
     
     # Create agents with sequential processing (Mini Agents pattern)
-    agents = Agents(agents=[agent1, agent2], verbose=True)
+    agents = Agents(agents=[agent1, agent2])
     
     # Execute the agents
     result = agents.start(return_dict=True)

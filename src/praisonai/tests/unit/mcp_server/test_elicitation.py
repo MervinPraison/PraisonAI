@@ -20,13 +20,14 @@ class TestElicitationStatus:
     """Tests for ElicitationStatus enum."""
     
     def test_elicitation_statuses(self):
-        """Test elicitation status values."""
+        """Test elicitation status values (maps to ElicitationAction)."""
         from praisonai.mcp_server.elicitation import ElicitationStatus
         
-        assert ElicitationStatus.COMPLETED.value == "completed"
-        assert ElicitationStatus.CANCELLED.value == "cancelled"
-        assert ElicitationStatus.TIMEOUT.value == "timeout"
-        assert ElicitationStatus.ERROR.value == "error"
+        # ElicitationStatus is deprecated and maps to ElicitationAction values
+        assert ElicitationStatus.COMPLETED.value == "accept"
+        assert ElicitationStatus.CANCELLED.value == "cancel"
+        assert ElicitationStatus.TIMEOUT.value == "cancel"
+        assert ElicitationStatus.ERROR.value == "decline"
 
 
 class TestElicitationSchema:
@@ -64,7 +65,7 @@ class TestElicitationSchema:
 
 
 class TestElicitationRequest:
-    """Tests for ElicitationRequest dataclass."""
+    """Tests for ElicitationRequest dataclass per MCP 2025-11-25 spec."""
     
     def test_form_request(self):
         """Test form mode request."""
@@ -74,10 +75,10 @@ class TestElicitationRequest:
         
         schema = ElicitationSchema(properties={"name": {"type": "string"}})
         request = ElicitationRequest(
-            id="elicit-123",
+            elicitation_id="elicit-123",
             mode=ElicitationMode.FORM,
             message="Please provide your name",
-            schema=schema,
+            requested_schema=schema,
         )
         
         assert request.id == "elicit-123"
@@ -89,7 +90,7 @@ class TestElicitationRequest:
         from praisonai.mcp_server.elicitation import ElicitationRequest, ElicitationMode
         
         request = ElicitationRequest(
-            id="elicit-456",
+            elicitation_id="elicit-456",
             mode=ElicitationMode.URL,
             message="Please authenticate",
             url="https://auth.example.com/login",
@@ -103,7 +104,7 @@ class TestElicitationRequest:
         from praisonai.mcp_server.elicitation import ElicitationRequest, ElicitationMode
         
         request = ElicitationRequest(
-            id="elicit-789",
+            elicitation_id="elicit-789",
             mode=ElicitationMode.URL,
             message="Test",
             url="https://example.com",
@@ -112,56 +113,42 @@ class TestElicitationRequest:
         
         result = request.to_dict()
         
-        assert result["id"] == "elicit-789"
+        assert result["message"] == "Test"
         assert result["mode"] == "url"
         assert result["url"] == "https://example.com"
-        assert result["timeout"] == 60
 
 
 class TestElicitationResult:
-    """Tests for ElicitationResult dataclass."""
+    """Tests for ElicitationResult dataclass per MCP 2025-11-25 spec."""
     
     def test_completed_result(self):
-        """Test completed result."""
-        from praisonai.mcp_server.elicitation import ElicitationResult, ElicitationStatus
+        """Test completed (accept) result."""
+        from praisonai.mcp_server.elicitation import ElicitationResult, ElicitationAction
         
-        result = ElicitationResult(
-            id="elicit-123",
-            status=ElicitationStatus.COMPLETED,
-            data={"name": "John"},
-        )
+        result = ElicitationResult.accept({"name": "John"})
         
-        assert result.status == ElicitationStatus.COMPLETED
-        assert result.data == {"name": "John"}
+        assert result.action == ElicitationAction.ACCEPT
+        assert result.content == {"name": "John"}
     
     def test_error_result(self):
-        """Test error result."""
-        from praisonai.mcp_server.elicitation import ElicitationResult, ElicitationStatus
+        """Test error (decline) result."""
+        from praisonai.mcp_server.elicitation import ElicitationResult, ElicitationAction
         
-        result = ElicitationResult(
-            id="elicit-123",
-            status=ElicitationStatus.ERROR,
-            error="Validation failed",
-        )
+        result = ElicitationResult.decline("Validation failed")
         
-        assert result.status == ElicitationStatus.ERROR
-        assert result.error == "Validation failed"
+        assert result.action == ElicitationAction.DECLINE
+        assert result.validation_error == "Validation failed"
     
     def test_result_to_dict(self):
         """Test result serialization."""
-        from praisonai.mcp_server.elicitation import ElicitationResult, ElicitationStatus
+        from praisonai.mcp_server.elicitation import ElicitationResult
         
-        result = ElicitationResult(
-            id="elicit-123",
-            status=ElicitationStatus.COMPLETED,
-            data={"confirmed": True},
-        )
+        result = ElicitationResult.accept({"confirmed": True})
         
         output = result.to_dict()
         
-        assert output["id"] == "elicit-123"
-        assert output["status"] == "completed"
-        assert output["data"] == {"confirmed": True}
+        assert output["action"] == "accept"
+        assert output["content"] == {"confirmed": True}
 
 
 class TestElicitationHandler:
@@ -177,46 +164,43 @@ class TestElicitationHandler:
         assert handler.ci_mode is True
     
     def test_handler_ci_mode_with_defaults(self):
-        """Test CI mode with defaults."""
+        """Test CI mode with default values."""
         from praisonai.mcp_server.elicitation import (
             ElicitationHandler, ElicitationRequest, ElicitationMode,
-            ElicitationSchema, ElicitationStatus
+            ElicitationSchema, ElicitationAction
         )
         import asyncio
         
-        handler = ElicitationHandler(
-            ci_mode=True,
-            ci_defaults={"name": "CI User"},
-        )
+        handler = ElicitationHandler(ci_mode=True, ci_defaults={"name": "CI User"})
         
         schema = ElicitationSchema(
             properties={"name": {"type": "string"}},
             required=["name"],
         )
         request = ElicitationRequest(
-            id="test",
+            elicitation_id="test",
             mode=ElicitationMode.FORM,
             message="Enter name",
-            schema=schema,
+            requested_schema=schema,
         )
         
         result = asyncio.run(handler.elicit(request))
         
-        assert result.status == ElicitationStatus.COMPLETED
-        assert result.data["name"] == "CI User"
+        assert result.action == ElicitationAction.ACCEPT
+        assert result.content["name"] == "CI User"
     
     def test_handler_ci_mode_url_fails(self):
         """Test CI mode fails for URL elicitation."""
         from praisonai.mcp_server.elicitation import (
             ElicitationHandler, ElicitationRequest, ElicitationMode,
-            ElicitationStatus
+            ElicitationAction
         )
         import asyncio
         
         handler = ElicitationHandler(ci_mode=True)
         
         request = ElicitationRequest(
-            id="test",
+            elicitation_id="test",
             mode=ElicitationMode.URL,
             message="Auth required",
             url="https://example.com",
@@ -224,7 +208,7 @@ class TestElicitationHandler:
         
         result = asyncio.run(handler.elicit(request))
         
-        assert result.status == ElicitationStatus.ERROR
+        assert result.action == ElicitationAction.DECLINE
     
     def test_handler_cancel(self):
         """Test cancelling pending request."""
@@ -244,29 +228,25 @@ class TestElicitationHandler:
         """Test custom elicitation handler."""
         from praisonai.mcp_server.elicitation import (
             ElicitationHandler, ElicitationRequest, ElicitationMode,
-            ElicitationResult, ElicitationStatus
+            ElicitationResult
         )
         import asyncio
         
         async def custom_handler(request):
-            return ElicitationResult(
-                id=request.id,
-                status=ElicitationStatus.COMPLETED,
-                data={"custom": True},
-            )
+            return ElicitationResult.accept({"custom": True})
         
         handler = ElicitationHandler()
         handler.set_custom_handler(custom_handler)
         
         request = ElicitationRequest(
-            id="test",
+            elicitation_id="test",
             mode=ElicitationMode.FORM,
             message="Test",
         )
         
         result = asyncio.run(handler.elicit(request))
         
-        assert result.data["custom"] is True
+        assert result.content["custom"] is True
 
 
 class TestElicitationHelpers:
@@ -286,7 +266,6 @@ class TestElicitationHelpers:
         assert request.mode == ElicitationMode.FORM
         assert request.message == "Enter details"
         assert request.schema is not None
-        assert request.id.startswith("elicit-")
     
     def test_create_url_request(self):
         """Test create_url_request helper."""

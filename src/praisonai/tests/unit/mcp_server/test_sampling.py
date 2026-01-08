@@ -8,16 +8,16 @@ import asyncio
 
 
 class TestToolChoiceType:
-    """Tests for ToolChoiceType enum."""
+    """Tests for ToolChoiceType (ToolChoiceMode) enum."""
     
     def test_tool_choice_types(self):
-        """Test tool choice type values."""
+        """Test tool choice type values per MCP 2025-11-25 spec."""
         from praisonai.mcp_server.sampling import ToolChoiceType
         
         assert ToolChoiceType.AUTO.value == "auto"
         assert ToolChoiceType.NONE.value == "none"
-        assert ToolChoiceType.REQUIRED.value == "required"
-        assert ToolChoiceType.SPECIFIC.value == "specific"
+        assert ToolChoiceType.ANY.value == "any"
+        assert ToolChoiceType.TOOL.value == "tool"
 
 
 class TestToolDefinition:
@@ -59,19 +59,19 @@ class TestToolChoice:
         """Test auto tool choice."""
         from praisonai.mcp_server.sampling import ToolChoice, ToolChoiceType
         
-        choice = ToolChoice(type=ToolChoiceType.AUTO)
+        choice = ToolChoice.auto()
         result = choice.to_dict()
         
-        assert result["type"] == "auto"
+        assert result["mode"] == "auto"
     
     def test_tool_choice_specific(self):
-        """Test specific tool choice."""
+        """Test specific tool choice (TOOL mode)."""
         from praisonai.mcp_server.sampling import ToolChoice, ToolChoiceType
         
-        choice = ToolChoice(type=ToolChoiceType.SPECIFIC, tool_name="search")
+        choice = ToolChoice.tool("search")
         result = choice.to_dict()
         
-        assert result["type"] == "specific"
+        assert result["mode"] == "tool"
         assert result["name"] == "search"
 
 
@@ -152,11 +152,11 @@ class TestSamplingRequest:
         request = SamplingRequest(
             messages=[SamplingMessage(role="user", content="Search for AI")],
             tools=[ToolDefinition(name="search", description="Search", input_schema={})],
-            tool_choice=ToolChoice(type=ToolChoiceType.AUTO),
+            tool_choice=ToolChoice.auto(),
         )
         
         assert len(request.tools) == 1
-        assert request.tool_choice.type == ToolChoiceType.AUTO
+        assert request.tool_choice.mode == ToolChoiceType.AUTO
     
     def test_request_to_dict(self):
         """Test request serialization."""
@@ -352,8 +352,8 @@ class TestSamplingHelpers:
             tool_choice="search",
         )
         
-        assert request.tool_choice.type == ToolChoiceType.SPECIFIC
-        assert request.tool_choice.tool_name == "search"
+        assert request.tool_choice.mode == ToolChoiceType.TOOL
+        assert request.tool_choice.name == "search"
 
 
 class TestGlobalSamplingHandler:
