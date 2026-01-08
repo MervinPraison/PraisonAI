@@ -28,7 +28,6 @@ def main():
         name="CodeAssistant",
         instructions="You are a helpful code assistant.",
         context=True,  # Enable context management with defaults
-        verbose=False
     )
     
     print("\n✓ Agent created with context management enabled")

@@ -22,19 +22,18 @@ async def main():
     print("Agent-Centric Background Tasks Demo")
     print("=" * 60)
     
-    # Create a background runner with config
+    # Create a background runner with config (used standalone, not passed to Agent)
     runner = BackgroundRunner(config=BackgroundConfig(max_concurrent_tasks=3))
     
-    # Create an Agent with background task support
+    # Create an Agent
     agent = Agent(
         name="AsyncAssistant",
         instructions="You are a helpful research assistant.",
-        background=runner
     )
     
     print("\n--- Agent with Background Support Created ---")
     print(f"Agent: {agent.name}")
-    print(f"Background runner: {agent.background is not None}")
+    print(f"Background runner: {runner is not None}")
     
     # Define some example tasks
     async def research_task(topic: str) -> str:
@@ -49,17 +48,17 @@ async def main():
         await asyncio.sleep(1.0)
         return f"Analysis complete: {data}"
     
-    # Submit tasks via agent's background runner
+    # Submit tasks via background runner
     print("\n--- Submitting Background Tasks ---")
     
-    task1 = await agent.background.submit(
+    task1 = await runner.submit(
         research_task, 
         args=("AI trends 2025",), 
         name="research_ai"
     )
     print(f"✅ Submitted research task: {task1.id[:8]}")
     
-    task2 = await agent.background.submit(
+    task2 = await runner.submit(
         analysis_task, 
         args=("market data",), 
         name="analyze_market"
@@ -68,7 +67,7 @@ async def main():
     
     # List all tasks
     print("\n--- Task Status ---")
-    for task in agent.background.tasks:
+    for task in runner.tasks:
         print(f"  [{task.id[:8]}] {task.status.value}")
     
     # Wait for tasks to complete
@@ -83,7 +82,7 @@ async def main():
         print(f"  {status} {task.result}")
     
     # Cleanup
-    agent.background.clear_completed()
+    runner.clear_completed()
     print("\n✅ Cleared completed tasks")
     
     print("\n" + "=" * 60)

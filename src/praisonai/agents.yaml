@@ -1,49 +1,27 @@
-# Movie Script Workflow - Cat in Mars
-# Uses the modern agents + steps format
-
-name: Create Movie Script About Cat in Mars
-description: A sequential workflow to research, design narrative, and write a movie script
 framework: praisonai
-
-workflow:
-  verbose: true
-
-agents:
-  researcher:
-    name: Researcher
-    role: Research Analyst
-    goal: Gather information about Mars and cats
-    backstory: Skilled in research, with a focus on gathering accurate and relevant information.
-    instructions: |
-      Research about Mars, its environment, and the feasibility of a cat being on Mars.
-      Also, research about cat behavior and characteristics.
+topic: --help
+roles:
+  file_reader:
+    backstory: A diligent agent skilled in parsing and extracting data from various
+      file types.
+    goal: Extract relevant information from the input file
+    role: File Reader
+    tasks:
+      read_task:
+        description: Read the contents of a specified file to retrieve necessary information.
+        expected_output: Extracted content from the file ready for processing.
     tools:
-      - search_tool
-
-  narrative_designer:
-    name: Narrative Designer
-    role: Story Concept Developer
-    goal: Create a story concept for a movie about a cat in Mars
-    backstory: Skilled in narrative development, with a focus on creating engaging stories.
-    instructions: |
-      Use the research findings to craft a unique story concept for a movie about a cat in Mars.
-      Create narrative arcs, character bios, and settings.
-
-  scriptwriter:
-    name: Scriptwriter
-    role: Script Writer
-    goal: Write a movie script about a cat in Mars
-    backstory: Expert in dialogue and script structure, translating concepts into scripts.
-    instructions: |
-      Turn the story concept into a production-ready movie script,
-      including dialogue and scene details.
-
-steps:
-  - agent: researcher
-    action: "Research about Mars environment and cat behavior for the movie concept"
-
-  - agent: narrative_designer
-    action: "Create story concept based on research: {{previous_output}}"
-
-  - agent: scriptwriter
-    action: "Write the final movie script based on the story concept: {{previous_output}}"
+    - read_file
+  command_executor:
+    backstory: An experienced agent with expertise in command execution and automation.
+    goal: Execute commands based on the information gathered
+    role: Command Executor
+    tasks:
+      execute_task:
+        description: Take the extracted information and execute relevant commands,
+          logging outputs to a file.
+        expected_output: Execution results written to the output file.
+    tools:
+    - execute_command
+    - write_file
+dependencies: []

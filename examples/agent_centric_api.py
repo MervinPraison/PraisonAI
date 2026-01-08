@@ -134,7 +134,6 @@ def example_real_chat():
         instructions="You are a helpful math tutor. Be concise.",
         reflection=False,
         web=False,
-        verbose=False,
     )
     
     response = agent.start("What is the square root of 144?")
