@@ -41,7 +41,32 @@ Usage:
     monitor.snapshot(ledger=result.ledger, budget=budget, messages=result.messages)
 """
 
+def format_percent(value: float) -> str:
+    """
+    Smart percentage formatting for context utilization display.
+    
+    - For values < 0.1%: shows "<0.1%"
+    - For values < 1%: shows 2 decimal places (e.g., "0.02%")
+    - For values >= 1%: shows 1 decimal place (e.g., "5.3%")
+    
+    Args:
+        value: A ratio (0.0 to 1.0+), NOT already multiplied by 100
+        
+    Returns:
+        Formatted percentage string
+    """
+    pct = value * 100
+    if pct < 0.1 and pct > 0:
+        return "<0.1%"
+    elif pct < 1.0:
+        return f"{pct:.2f}%"
+    else:
+        return f"{pct:.1f}%"
+
+
 __all__ = [
+    # Utilities
+    "format_percent",
     # Models
     "ContextSegment",
     "ContextLedger",

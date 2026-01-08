@@ -15,6 +15,16 @@ from .models import (
 )
 
 
+def _format_pct(value: float) -> str:
+    """Smart percentage formatting: <0.1% for tiny, 2 decimals for <1%, 1 decimal otherwise."""
+    if value < 0.1 and value > 0:
+        return "<0.1%"
+    elif value < 1.0:
+        return f"{value:.2f}%"
+    else:
+        return f"{value:.1f}%"
+
+
 # Sensitive patterns for redaction
 SENSITIVE_PATTERNS = [
     # OpenAI API keys
@@ -258,10 +268,10 @@ def format_human_snapshot(snapshot: ContextSnapshot, redact: bool = True) -> str
             tokens = snapshot.ledger.get_segment(seg)
             budget = snapshot.budget.get_segment_budget(seg)
             pct = (tokens / budget * 100) if budget > 0 else 0
-            lines.append(f"{name:<20} | {tokens:>10,} | {budget:>10,} | {pct:>7.1f}%")
+            lines.append(f"{name:<20} | {tokens:>10,} | {budget:>10,} | {_format_pct(pct):>8}")
         
         lines.append("-" * 20 + "-+-" + "-" * 10 + "-+-" + "-" * 10 + "-+-" + "-" * 8)
-        lines.append(f"{'TOTAL':<20} | {snapshot.ledger.total:>10,} | {snapshot.budget.usable:>10,} | {snapshot.utilization * 100:>7.1f}%")
+        lines.append(f"{'TOTAL':<20} | {snapshot.ledger.total:>10,} | {snapshot.budget.usable:>10,} | {_format_pct(snapshot.utilization * 100):>8}")
     
     lines.append("")
     
@@ -528,17 +538,17 @@ class ContextMonitor:
         utilization = ledger.total / budget.usable if budget.usable > 0 else 0
         
         if utilization >= 1.0:
-            warnings.append(f"CRITICAL: Context overflow! {utilization*100:.1f}% of usable budget")
+            warnings.append(f"CRITICAL: Context overflow! {_format_pct(utilization*100)} of usable budget")
         elif utilization >= 0.9:
-            warnings.append(f"WARNING: Context at {utilization*100:.1f}% of usable budget")
+            warnings.append(f"WARNING: Context at {_format_pct(utilization*100)} of usable budget")
         elif utilization >= 0.8:
-            warnings.append(f"NOTICE: Context at {utilization*100:.1f}% of usable budget")
+            warnings.append(f"NOTICE: Context at {_format_pct(utilization*100)} of usable budget")
         
         # Check individual segments
         if budget.tool_outputs > 0:
             tool_util = ledger.tool_outputs / budget.tool_outputs
             if tool_util >= 0.9:
-                warnings.append(f"Tool outputs at {tool_util*100:.1f}% of budget")
+                warnings.append(f"Tool outputs at {_format_pct(tool_util*100)} of budget")
         
         return warnings
     

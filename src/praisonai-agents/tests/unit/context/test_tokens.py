@@ -182,3 +182,43 @@ class TestTokenEstimationAccuracy:
         long_tokens = estimate_tokens_heuristic(long)
         
         assert long_tokens > short_tokens * 50
+
+
+class TestFormatPercent:
+    """Tests for format_percent utility function."""
+    
+    def test_format_percent_zero(self):
+        """Test zero value."""
+        from praisonaiagents.context import format_percent
+        assert format_percent(0) == "0.00%"
+    
+    def test_format_percent_tiny(self):
+        """Test tiny values show <0.1%."""
+        from praisonaiagents.context import format_percent
+        # 0.0002 = 0.02% which is < 0.1%
+        assert format_percent(0.0002) == "<0.1%"
+        assert format_percent(0.0005) == "<0.1%"
+        assert format_percent(0.0009) == "<0.1%"
+    
+    def test_format_percent_small(self):
+        """Test small values show 2 decimals."""
+        from praisonaiagents.context import format_percent
+        # 0.002 = 0.2% which is < 1%
+        assert format_percent(0.002) == "0.20%"
+        assert format_percent(0.005) == "0.50%"
+        assert format_percent(0.009) == "0.90%"
+    
+    def test_format_percent_normal(self):
+        """Test normal values show 1 decimal."""
+        from praisonaiagents.context import format_percent
+        # 0.05 = 5%
+        assert format_percent(0.05) == "5.0%"
+        assert format_percent(0.5) == "50.0%"
+        assert format_percent(0.8) == "80.0%"
+        assert format_percent(1.0) == "100.0%"
+    
+    def test_format_percent_overflow(self):
+        """Test overflow values."""
+        from praisonaiagents.context import format_percent
+        assert format_percent(1.1) == "110.0%"
+        assert format_percent(1.5) == "150.0%"
