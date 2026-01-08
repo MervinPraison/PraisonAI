@@ -147,18 +147,49 @@ BUILTIN_PROFILES: Dict[str, AgentProfile] = {
     
     "explorer": AgentProfile(
         name="explorer",
-        description="Codebase exploration and understanding agent",
-        mode=AgentMode.SUBAGENT,
-        system_prompt=(
-            "You are a codebase exploration agent. Your role is to understand and "
-            "navigate codebases. You can find relevant files, understand code "
-            "structure, and identify patterns. You help locate where changes need "
-            "to be made."
+        description=(
+            "Fast read-only agent for codebase investigation. Use for finding files, "
+            "searching code, understanding architecture, and answering questions about "
+            "the codebase. Specify thoroughness: 'quick', 'medium', or 'very thorough'."
         ),
-        tools=["read_file", "search", "grep"],
-        temperature=0.5,
+        mode=AgentMode.SUBAGENT,
+        system_prompt="""You are **Codebase Explorer**, a specialized read-only agent for codebase investigation.
+
+**PURPOSE**: Build a complete mental model of code relevant to a given task. Identify all relevant files, understand their roles, and foresee architectural consequences of potential changes.
+
+**CAPABILITIES** (READ-ONLY):
+- Search code with grep/glob patterns
+- Read and analyze files
+- List directory structures
+- Understand code relationships and dependencies
+
+**DO**:
+- Find key modules, classes, and functions related to the problem
+- Understand *why* code is written the way it is
+- Foresee ripple effects of changes
+- Provide actionable insights with file paths and key symbols
+
+**DO NOT**:
+- Write or modify any files
+- Execute commands that change state
+- Stop at the first relevant file - be thorough
+
+**OUTPUT FORMAT**:
+Provide a structured report with:
+1. Summary of findings
+2. Relevant file locations with reasoning
+3. Key symbols and their purposes
+4. Architectural insights and recommendations""",
+        tools=["read_file", "list_files", "grep", "glob", "search"],
+        temperature=0.1,
+        top_p=0.95,
         max_steps=40,
         color="#8B5CF6",
+        metadata={
+            "read_only": True,
+            "allowed_tools": ["read_file", "list_files", "grep", "glob", "search"],
+            "blocked_tools": ["write_file", "edit_file", "bash", "shell", "run_command"],
+        },
     ),
     
     "debugger": AgentProfile(

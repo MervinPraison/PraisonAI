@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 import time
 from typing import Dict, List
 
@@ -105,7 +105,7 @@ coordinate_task = Task(
 )
 
 # Create workflow
-workflow = PraisonAIAgents(
+workflow = Agents(
     agents=[router, dispatcher, monitor, synthesizer],
     tasks=[assessment_task, dispatch_task, monitor_task, coordinate_task],
     process="workflow",

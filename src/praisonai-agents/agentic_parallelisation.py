@@ -1,5 +1,5 @@
 import asyncio
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 
 # Example tools (replace with real implementations as needed)
 def fetch_favorite_article():
@@ -88,7 +88,7 @@ aggregate_task = Task(
 )
 
 async def main():
-    workflow = PraisonAIAgents(
+    workflow = Agents(
         agents=[article_agent, news_agent, twitter_agent, aggregator],
         tasks=[article_task, news_task, twitter_task, aggregate_task],
         process="workflow",

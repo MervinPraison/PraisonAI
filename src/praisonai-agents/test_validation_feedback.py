@@ -5,7 +5,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src/praisonai-agents'))
 
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 
 def test_example_one():
     """Test the philosopher quotes example"""
@@ -54,7 +54,7 @@ def test_example_one():
     )
 
     # Workflow
-    agents = PraisonAIAgents(
+    agents = Agents(
         agents=[quote_agent, validator_agent],
         tasks=[collect_task, validate_task],
         verbose=1,
@@ -126,7 +126,7 @@ def test_example_two():
     )
 
     # Workflow
-    agents = PraisonAIAgents(
+    agents = Agents(
         agents=[web_search_agent, agent],
         tasks=[collect_task, validate_task],
         verbose=1,

@@ -19,7 +19,7 @@ Features demonstrated:
 """
 
 import os
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 from praisonaiagents.tools import mongodb_tools
 
 # Ensure OpenAI API key is set
@@ -113,7 +113,7 @@ def main():
     print("🚀 Starting MongoDB Tools Demo System...")
     print("=" * 60)
     
-    mongodb_system = PraisonAIAgents(
+    mongodb_system = Agents(
         agents=[db_agent, analysis_agent],
         tasks=mongodb_tasks,
         verbose=True

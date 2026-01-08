@@ -25,7 +25,7 @@ from praisonaiagents.ui.agui.streaming import (
 from praisonaiagents.ui.agui.encoder import EventEncoder
 
 if TYPE_CHECKING:
-    from praisonaiagents import Agent, PraisonAIAgents
+    from praisonaiagents import Agent, Agents
     from fastapi import APIRouter
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ class AGUI:
     """
     AG-UI Interface for PraisonAI Agents.
     
-    Exposes a PraisonAI Agent or PraisonAIAgents workflow via the AG-UI protocol,
+    Exposes a PraisonAI Agent or Agents workflow via the AG-UI protocol,
     enabling integration with CopilotKit and other AG-UI compatible frontends.
     
     Usage:
@@ -51,7 +51,7 @@ class AGUI:
     
     Args:
         agent: Single PraisonAI Agent instance
-        agents: PraisonAIAgents instance for multi-agent workflows
+        agents: Agents instance for multi-agent workflows
         name: Name for the AG-UI endpoint (defaults to agent name)
         description: Description of the agent
         prefix: URL prefix for the router (e.g., "/api/v1")
@@ -61,7 +61,7 @@ class AGUI:
     def __init__(
         self,
         agent: Optional["Agent"] = None,
-        agents: Optional["PraisonAIAgents"] = None,
+        agents: Optional["Agents"] = None,
         name: Optional[str] = None,
         description: Optional[str] = None,
         prefix: str = "",

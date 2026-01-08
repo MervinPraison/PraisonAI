@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 import time
 from typing import Dict, List
 import asyncio
@@ -186,7 +186,7 @@ strategy_task = Task(
 )
 
 # Create workflow
-workflow = PraisonAIAgents(
+workflow = Agents(
     agents=[environmental_monitor, urban_analyzer, climate_modeler,
             impact_predictor, strategy_generator],
     tasks=[monitoring_task, urban_task, modeling_task,

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Test to verify the self-reflection fix works with tools"""
 
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 
 # Define calculator tool locally to avoid import issues
 def calculator(expression: str) -> str:
@@ -46,7 +46,7 @@ def test_self_reflection_fix_verification():
     )
 
     # Create and run the agents
-    agents = PraisonAIAgents(
+    agents = Agents(
         agents=[agent],
         tasks=[task],
         process="sequential"

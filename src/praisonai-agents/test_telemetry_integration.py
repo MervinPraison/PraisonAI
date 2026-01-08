@@ -83,7 +83,7 @@ print("  ✓ Manual flush called - events sent to PostHog")
 
 # Test 6: Workflow integration
 print("\n7. Testing workflow integration:")
-from praisonaiagents import PraisonAIAgents
+from praisonaiagents import Agents
 
 agents = [
     Agent(name="Agent1", role="First", goal="Do first task", backstory="I'm first"),
@@ -95,7 +95,7 @@ tasks = [
     Task(description="Task 2", expected_output="Output 2", agent=agents[1])
 ]
 
-workflow = PraisonAIAgents(
+workflow = Agents(
     agents=agents,
     tasks=tasks,
     process="sequential"
@@ -105,7 +105,7 @@ print(f"  Workflow has telemetry integration: {hasattr(workflow.start, '__wrappe
 
 print("\n=== Summary of Issues ===")
 print("\n1. No automatic integration:")
-print("   - Agent and PraisonAIAgents classes don't automatically use telemetry")
+print("   - Agent and Agents classes don't automatically use telemetry")
 print("   - Need to manually call instrument_agent() or auto_instrument_all()")
 
 print("\n2. No automatic flush:")
@@ -116,11 +116,11 @@ print("   - No automatic flush on program exit or periodic flush")
 print("\n3. Missing integration points:")
 print("   - Agent.__init__ doesn't initialize telemetry")
 print("   - Agent.execute() doesn't track execution")
-print("   - PraisonAIAgents doesn't track workflow execution")
+print("   - Agents doesn't track workflow execution")
 print("   - No atexit handler to flush on program termination")
 
 print("\n=== Recommendations ===")
-print("\n1. Add automatic integration in Agent.__init__ and PraisonAIAgents.__init__")
+print("\n1. Add automatic integration in Agent.__init__ and Agents.__init__")
 print("2. Add atexit handler to flush telemetry on program exit")
 print("3. Add periodic flush (e.g., every 100 events or 60 seconds)")
 print("4. Document telemetry behavior clearly for users")

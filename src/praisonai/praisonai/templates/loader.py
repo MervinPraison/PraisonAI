@@ -538,16 +538,16 @@ def create_agents_from_template(
     **agents_kwargs
 ):
     """
-    Create a PraisonAIAgents team from a template.
+    Create a Agents team from a template.
     
     Args:
         uri: Template URI
         config: Optional config overrides
         offline: If True, only use cache
-        **agents_kwargs: Additional PraisonAIAgents constructor arguments
+        **agents_kwargs: Additional Agents constructor arguments
         
     Returns:
-        Configured PraisonAIAgents instance
+        Configured Agents instance
     """
     loader = TemplateLoader(offline=offline)
     template = loader.load(uri, config=config, offline=offline)
@@ -555,10 +555,10 @@ def create_agents_from_template(
     # Load workflow config (contains agents and tasks)
     workflow_config = loader.load_workflow_config(template)
     
-    # Import PraisonAIAgents lazily
-    from praisonaiagents import PraisonAIAgents
+    # Import Agents lazily
+    from praisonaiagents import Agents
     
     # Merge with kwargs
     final_config = {**workflow_config, **agents_kwargs}
     
-    return PraisonAIAgents(**final_config)
+    return Agents(**final_config)

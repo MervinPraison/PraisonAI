@@ -4,7 +4,7 @@ Test-Driven Development tests for Planning Mode with Tools Support.
 This module contains tests for:
 - PlanningAgent with tools parameter
 - PlanningAgent with reasoning mode
-- PraisonAIAgents with planning_tools parameter
+- Agents with planning_tools parameter
 - Research-enabled planning
 """
 
@@ -177,15 +177,15 @@ class TestPlanningAgentCreatePlanWithTools:
 
 
 # =============================================================================
-# SECTION 4: PraisonAIAgents planning_tools Parameter Tests
+# SECTION 4: Agents planning_tools Parameter Tests
 # =============================================================================
 
-class TestPraisonAIAgentsPlanningTools:
-    """Tests for PraisonAIAgents planning_tools parameter."""
+class TestAgentsPlanningTools:
+    """Tests for Agents planning_tools parameter."""
     
     def test_praisonaiagents_accepts_planning_tools(self):
-        """Test that PraisonAIAgents accepts planning_tools parameter."""
-        from praisonaiagents import Agent, Task, PraisonAIAgents
+        """Test that Agents accepts planning_tools parameter."""
+        from praisonaiagents import Agent, Task, Agents
         
         def search_tool(query: str) -> str:
             return "results"
@@ -193,7 +193,7 @@ class TestPraisonAIAgentsPlanningTools:
         agent = Agent(name="Test", role="Tester")
         task = Task(description="Test task", agent=agent)
         
-        agents = PraisonAIAgents(
+        agents = Agents(
             agents=[agent],
             tasks=[task],
             planning=True,
@@ -205,12 +205,12 @@ class TestPraisonAIAgentsPlanningTools:
         
     def test_praisonaiagents_planning_tools_default_none(self):
         """Test that planning_tools defaults to None."""
-        from praisonaiagents import Agent, Task, PraisonAIAgents
+        from praisonaiagents import Agent, Task, Agents
         
         agent = Agent(name="Test", role="Tester")
         task = Task(description="Test task", agent=agent)
         
-        agents = PraisonAIAgents(
+        agents = Agents(
             agents=[agent],
             tasks=[task],
             planning=True
@@ -220,7 +220,7 @@ class TestPraisonAIAgentsPlanningTools:
         
     def test_praisonaiagents_passes_tools_to_planning_agent(self):
         """Test that planning_tools are passed to PlanningAgent."""
-        from praisonaiagents import Agent, Task, PraisonAIAgents
+        from praisonaiagents import Agent, Task, Agents
         
         def search_tool(query: str) -> str:
             return "results"
@@ -228,7 +228,7 @@ class TestPraisonAIAgentsPlanningTools:
         agent = Agent(name="Test", role="Tester")
         task = Task(description="Test task", agent=agent)
         
-        agents = PraisonAIAgents(
+        agents = Agents(
             agents=[agent],
             tasks=[task],
             planning=True,
@@ -284,20 +284,20 @@ class TestPlanningAgentReasoningMode:
 
 
 # =============================================================================
-# SECTION 6: PraisonAIAgents planning_reasoning Parameter Tests
+# SECTION 6: Agents planning_reasoning Parameter Tests
 # =============================================================================
 
-class TestPraisonAIAgentsPlanningReasoning:
-    """Tests for PraisonAIAgents planning_reasoning parameter."""
+class TestAgentsPlanningReasoning:
+    """Tests for Agents planning_reasoning parameter."""
     
     def test_praisonaiagents_accepts_planning_reasoning(self):
-        """Test that PraisonAIAgents accepts planning_reasoning parameter."""
-        from praisonaiagents import Agent, Task, PraisonAIAgents
+        """Test that Agents accepts planning_reasoning parameter."""
+        from praisonaiagents import Agent, Task, Agents
         
         agent = Agent(name="Test", role="Tester")
         task = Task(description="Test task", agent=agent)
         
-        agents = PraisonAIAgents(
+        agents = Agents(
             agents=[agent],
             tasks=[task],
             planning=True,
@@ -308,12 +308,12 @@ class TestPraisonAIAgentsPlanningReasoning:
         
     def test_praisonaiagents_planning_reasoning_default_false(self):
         """Test that planning_reasoning defaults to False."""
-        from praisonaiagents import Agent, Task, PraisonAIAgents
+        from praisonaiagents import Agent, Task, Agents
         
         agent = Agent(name="Test", role="Tester")
         task = Task(description="Test task", agent=agent)
         
-        agents = PraisonAIAgents(
+        agents = Agents(
             agents=[agent],
             tasks=[task],
             planning=True
@@ -323,12 +323,12 @@ class TestPraisonAIAgentsPlanningReasoning:
         
     def test_praisonaiagents_passes_reasoning_to_planning_agent(self):
         """Test that planning_reasoning is passed to PlanningAgent."""
-        from praisonaiagents import Agent, Task, PraisonAIAgents
+        from praisonaiagents import Agent, Task, Agents
         
         agent = Agent(name="Test", role="Tester")
         task = Task(description="Test task", agent=agent)
         
-        agents = PraisonAIAgents(
+        agents = Agents(
             agents=[agent],
             tasks=[task],
             planning=True,
@@ -349,7 +349,7 @@ class TestPlanningToolsIntegration:
     
     def test_planning_with_tools_and_reasoning(self):
         """Test planning with both tools and reasoning enabled."""
-        from praisonaiagents import Agent, Task, PraisonAIAgents
+        from praisonaiagents import Agent, Task, Agents
         
         def search_tool(query: str) -> str:
             return "search results"
@@ -357,7 +357,7 @@ class TestPlanningToolsIntegration:
         agent = Agent(name="Researcher", role="Research Analyst")
         task = Task(description="Research AI trends", agent=agent)
         
-        agents = PraisonAIAgents(
+        agents = Agents(
             agents=[agent],
             tasks=[task],
             planning=True,

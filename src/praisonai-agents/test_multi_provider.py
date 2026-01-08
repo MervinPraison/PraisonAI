@@ -7,7 +7,7 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 from praisonaiagents.agent import RouterAgent
 from praisonaiagents.llm import ModelRouter, TaskComplexity
 
@@ -78,7 +78,7 @@ def test_router_agent():
 
 
 def test_integration():
-    """Test integration with PraisonAIAgents"""
+    """Test integration with Agents"""
     print("\n=== Testing Integration ===\n")
     
     # Create a simple router agent
@@ -100,14 +100,14 @@ def test_integration():
     )
     
     # Create agents system
-    agents_system = PraisonAIAgents(
+    agents_system = Agents(
         agents=[agent],
         tasks=[task],
         process="sequential",
         verbose=False
     )
     
-    print("Created PraisonAIAgents with RouterAgent")
+    print("Created Agents with RouterAgent")
     print("✓ Integration test setup completed")
     
     # Note: Actual execution would require API keys
@@ -127,7 +127,7 @@ def main():
         print("- ModelRouter can analyze task complexity")
         print("- ModelRouter can select appropriate models")
         print("- RouterAgent can be created and configured")
-        print("- Integration with PraisonAIAgents works")
+        print("- Integration with Agents works")
         print("\n🎉 Multi-provider support is ready to use!")
         
     except Exception as e:

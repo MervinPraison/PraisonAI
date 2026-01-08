@@ -286,7 +286,7 @@ class Workflow:
     planning_llm: Optional[str] = None  # LLM for planning
     reasoning: bool = False  # Enable chain-of-thought reasoning
     verbose: bool = False  # Enable verbose output
-    stream: bool = True  # Enable streaming responses (default True like PraisonAIAgents)
+    stream: bool = True  # Enable streaming responses (default True like Agents)
     
     # Callbacks (like process="workflow")
     on_workflow_start: Optional[Callable[['Workflow', str], None]] = None  # (workflow, input)
@@ -1180,7 +1180,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         return {"steps": results, "output": output, "variables": all_variables}
     
     def start(self, input: str = "", **kwargs) -> Dict[str, Any]:
-        """Alias for run() for consistency with PraisonAIAgents."""
+        """Alias for run() for consistency with Agents."""
         return self.run(input, **kwargs)
 
 

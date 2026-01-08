@@ -5,7 +5,7 @@ This example shows how agents now properly use tools instead of saying
 "I do not have access to the internet".
 """
 import logging
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 
 # Enable debug logging to see tool processing
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -48,7 +48,7 @@ def test_tool_usage():
     print("=" * 60)
     
     # Create workflow
-    workflow = PraisonAIAgents(
+    workflow = Agents(
         agents=[search_agent],
         tasks=[search_task],
         verbose=True

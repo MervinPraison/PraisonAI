@@ -3,7 +3,7 @@ Test AG-UI Integration - TDD Tests for End-to-End Integration
 
 Phase 7: Integration Tests
 - Test full flow with single Agent
-- Test full flow with PraisonAIAgents
+- Test full flow with Agents
 - Test tool calling flow
 - Test error recovery
 - Test state persistence
@@ -55,13 +55,13 @@ class TestSingleAgentIntegration:
 
 
 class TestMultiAgentIntegration:
-    """Test integration with PraisonAIAgents."""
+    """Test integration with Agents."""
     
     def test_multi_agent_workflow_flow(self):
         """Test complete workflow with multiple agents."""
         from fastapi.testclient import TestClient
         from praisonaiagents.ui.agui import AGUI
-        from praisonaiagents import Agent, Task, PraisonAIAgents
+        from praisonaiagents import Agent, Task, Agents
         from fastapi import FastAPI
         import json
         
@@ -91,8 +91,8 @@ class TestMultiAgentIntegration:
             agent=writer
         )
         
-        # Create PraisonAIAgents
-        agents = PraisonAIAgents(
+        # Create Agents
+        agents = Agents(
             agents=[researcher, writer],
             tasks=[research_task, write_task]
         )

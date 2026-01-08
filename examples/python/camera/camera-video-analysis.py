@@ -18,7 +18,7 @@ import cv2
 import os
 import time
 from datetime import datetime
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 
 
 class CameraVideoAnalyzer:
@@ -131,7 +131,7 @@ class CameraVideoAnalyzer:
             images=[video_path]  # PraisonAI supports video files in images parameter
         )
         
-        agents = PraisonAIAgents(
+        agents = Agents(
             agents=[self.video_agent],
             tasks=[task],
             process="sequential",

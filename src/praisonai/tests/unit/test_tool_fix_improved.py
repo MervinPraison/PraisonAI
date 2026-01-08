@@ -3,7 +3,7 @@ Enhanced test example demonstrating the improved tool call fix for Gemini models
 This test includes edge cases and error handling scenarios.
 """
 import logging
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 
 # Enable info logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -81,7 +81,7 @@ def test_improved_implementation():
     
     try:
         # Create workflow
-        workflow = PraisonAIAgents(
+        workflow = Agents(
             agents=[test_agent],
             tasks=[test_task],
             verbose=True

@@ -2,7 +2,7 @@
 # coding: utf-8
 
 """
-News and Podcast Aggregator Agent using PraisonAIAgents
+News and Podcast Aggregator Agent using Agents
 
 This script summarizes news articles and generates podcast-style discussion points.
 It is CI-friendly: it uses dummy data if API keys are not set.

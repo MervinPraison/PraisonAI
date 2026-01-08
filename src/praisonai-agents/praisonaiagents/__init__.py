@@ -165,17 +165,17 @@ def __getattr__(name):
         _lazy_cache[name] = ExpandResult
         return ExpandResult
     
-    # PraisonAIAgents and Agents alias
-    elif name == "PraisonAIAgents":
-        from .agents.agents import PraisonAIAgents
-        _lazy_cache[name] = PraisonAIAgents
-        _lazy_cache["Agents"] = PraisonAIAgents  # Also cache alias
-        return PraisonAIAgents
+    # Agents (canonical) and PraisonAIAgents (backward-compatible alias)
     elif name == "Agents":
-        from .agents.agents import PraisonAIAgents
-        _lazy_cache["PraisonAIAgents"] = PraisonAIAgents
-        _lazy_cache[name] = PraisonAIAgents
-        return PraisonAIAgents
+        from .agents.agents import Agents
+        _lazy_cache[name] = Agents
+        _lazy_cache["PraisonAIAgents"] = Agents  # Also cache alias
+        return Agents
+    elif name == "PraisonAIAgents":
+        from .agents.agents import Agents
+        _lazy_cache["Agents"] = Agents
+        _lazy_cache[name] = Agents
+        return Agents
     
     # Task
     elif name == "Task":

@@ -2,7 +2,7 @@
 """Test the issue fix with a simple callback that expects task_name."""
 
 import asyncio
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 
 # Simple callback that expects task_name - this would trigger the error before the fix
 def test_callback(**kwargs):
@@ -40,7 +40,7 @@ async def main():
     print("Testing the fix...")
     
     # This should work without the "name 'task_name' is not defined" error
-    workflow = PraisonAIAgents(
+    workflow = Agents(
         agents=[test_agent],
         tasks=[test_task],
         process="sequential",

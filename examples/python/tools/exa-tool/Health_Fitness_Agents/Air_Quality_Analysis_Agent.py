@@ -2,7 +2,7 @@
 # coding: utf-8
 
 """
-Air Quality Analysis Agent using PraisonAIAgents
+Air Quality Analysis Agent using Agents
 
 This script retrieves real-time air quality data for a specified location, analyzes the results, and provides actionable health recommendations.
 It uses only praisonaiagents and is CI-friendly: it uses dummy data if API keys are not set.

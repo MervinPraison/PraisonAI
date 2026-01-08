@@ -179,7 +179,7 @@ class MultiAgentHandler:
             Execution result
         """
         try:
-            from praisonaiagents import Agent, Task, PraisonAIAgents
+            from praisonaiagents import Agent, Task, Agents
             
             # Create Agent objects
             agents = []
@@ -217,7 +217,7 @@ class MultiAgentHandler:
                     print(f"  - {agent.name}: {agent.role}")
                 print()
             
-            praison_agents = PraisonAIAgents(
+            praison_agents = Agents(
                 agents=agents,
                 tasks=tasks,
                 process=process,

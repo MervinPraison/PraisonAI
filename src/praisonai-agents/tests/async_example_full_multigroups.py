@@ -1,7 +1,7 @@
 import asyncio
 import time
 from typing import List, Dict
-from praisonaiagents import Agent, Task, PraisonAIAgents, TaskOutput
+from praisonaiagents import Agent, Task, Agents, TaskOutput
 from duckduckgo_search import DDGS
 from pydantic import BaseModel
 
@@ -103,7 +103,7 @@ async_task = Task(
 async def run_single_task():
     """Run single async task"""
     print("\nRunning Single Async Task...")
-    agents = PraisonAIAgents(
+    agents = Agents(
         agents=[async_agent],
         tasks=[async_task],
         verbose=1,
@@ -187,7 +187,7 @@ Present the summary in a clear, structured format with sections for findings, pa
     )
     
     # First run parallel search tasks
-    agents = PraisonAIAgents(
+    agents = Agents(
         agents=[async_agent],
         tasks=parallel_tasks,  # Only run search tasks first
         verbose=1,
@@ -212,7 +212,7 @@ Present the summary in a clear, structured format with sections for findings, pa
     summary_task.context = completed_tasks
     
     # Run summarization task with summary agent
-    summary_agents = PraisonAIAgents(
+    summary_agents = Agents(
         agents=[summary_agent],  # Use summary agent for synthesis
         tasks=[summary_task],
         verbose=1,

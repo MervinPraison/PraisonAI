@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Test for issue #950: Convert praisonaiagents to praisonai imports
-The goal is to enable: from PraisonAI import Agent instead of from PraisonAIAgents import Agent
+The goal is to enable: from PraisonAI import Agent instead of from Agents import Agent
 """
 
 import sys
@@ -31,14 +31,14 @@ def test_issue_950_goal():
         print(f"✅ Agent class is properly available: {Agent}")
         
         # Test that we can also import other common classes mentioned in the issue
-        from praisonai import Task, PraisonAIAgents
-        print("✅ SUCCESS: `from praisonai import Task, PraisonAIAgents` works!")
+        from praisonai import Task, Agents
+        print("✅ SUCCESS: `from praisonai import Task, Agents` works!")
         
         assert Task is not None, "Task class should be available"
-        assert PraisonAIAgents is not None, "PraisonAIAgents class should be available"
+        assert Agents is not None, "Agents class should be available"
         
         print(f"✅ Task class: {Task}")
-        print(f"✅ PraisonAIAgents class: {PraisonAIAgents}")
+        print(f"✅ Agents class: {Agents}")
         
         return True
         

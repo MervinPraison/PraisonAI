@@ -17,7 +17,7 @@ agent = Agent(
 )
 agent.start("What is Praison AI?")
 
-from praisonaiagents import Agent, PraisonAIAgents
+from praisonaiagents import Agent, Agents
 from praisonaiagents.tools import internet_search
 
 
@@ -32,6 +32,6 @@ editor_agent = Agent(
     llm="anthropic/claude-3-7-sonnet-20250219"
 )
 
-agents = PraisonAIAgents(agents=[research_agent, editor_agent])
+agents = Agents(agents=[research_agent, editor_agent])
 result = agents.start()
 print(result)

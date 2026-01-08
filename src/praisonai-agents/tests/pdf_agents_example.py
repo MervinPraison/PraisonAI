@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 
 # Create PDF Analysis Agent
 pdf_agent = Agent(
@@ -29,8 +29,8 @@ task2 = Task(
     input=["document.pdf"] 
 )
 
-# Create PraisonAIAgents instance
-agents = PraisonAIAgents(
+# Create Agents instance
+agents = Agents(
     agents=[pdf_agent],
     tasks=[task1, task2],
     process="sequential",

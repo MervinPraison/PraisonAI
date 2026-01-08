@@ -13,7 +13,7 @@ from .results import CriteriaResult, CriteriaScore
 
 if TYPE_CHECKING:
     from ..agent.agent import Agent
-    from ..agents.agents import PraisonAIAgents
+    from ..agents.agents import Agents
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class CriteriaEvaluator(BaseEvaluator):
     def __init__(
         self,
         criteria: str,
-        agent: Optional[Union["Agent", "PraisonAIAgents"]] = None,
+        agent: Optional[Union["Agent", "Agents"]] = None,
         func: Optional[Callable[..., str]] = None,
         input_text: str = "",
         scoring_type: Literal["numeric", "binary"] = "numeric",
@@ -46,7 +46,7 @@ class CriteriaEvaluator(BaseEvaluator):
         
         Args:
             criteria: The criteria to evaluate against (e.g., "Response is helpful and accurate")
-            agent: Agent or PraisonAIAgents instance to evaluate
+            agent: Agent or Agents instance to evaluate
             func: Alternative callable that returns output string
             input_text: Input to provide to the agent/function
             scoring_type: "numeric" (1-10 scale) or "binary" (pass/fail)

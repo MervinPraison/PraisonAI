@@ -792,12 +792,12 @@ import sys
 sys.path.insert(0, "{self._get_project_root()}/src/praisonai")
 
 t0 = time.perf_counter()
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 t_import = time.perf_counter()
 
 agent = Agent(name="Helper", instructions="You are helpful", llm="{self.DEFAULT_MODEL}", verbose=False)
 task = Task(name="respond", description="{prompt}", expected_output="response", agent=agent)
-agents = PraisonAIAgents(agents=[agent], tasks=[task], verbose=0)
+agents = Agents(agents=[agent], tasks=[task], verbose=0)
 t_init = time.perf_counter()
 
 result = agents.start()
@@ -838,14 +838,14 @@ import sys
 sys.path.insert(0, "{self._get_project_root()}/src/praisonai")
 
 t0 = time.perf_counter()
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 t_import = time.perf_counter()
 
 agent1 = Agent(name="Analyzer", instructions="Analyze the request", llm="{self.DEFAULT_MODEL}", verbose=False)
 agent2 = Agent(name="Responder", instructions="Provide a response", llm="{self.DEFAULT_MODEL}", verbose=False)
 task1 = Task(name="analyze", description="Analyze: {prompt}", expected_output="analysis", agent=agent1)
 task2 = Task(name="respond", description="Respond based on analysis", expected_output="response", agent=agent2)
-agents = PraisonAIAgents(agents=[agent1, agent2], tasks=[task1, task2], verbose=0)
+agents = Agents(agents=[agent1, agent2], tasks=[task1, task2], verbose=0)
 t_init = time.perf_counter()
 
 result = agents.start()

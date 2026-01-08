@@ -17,9 +17,9 @@ Features:
 - Read-only mode for safe research
 
 Usage:
-    from praisonaiagents import Agent, Task, PraisonAIAgents
+    from praisonaiagents import Agent, Task, Agents
     
-    agents = PraisonAIAgents(
+    agents = Agents(
         agents=[agent1, agent2],
         tasks=[task1, task2],
         planning=True,           # Enable planning mode

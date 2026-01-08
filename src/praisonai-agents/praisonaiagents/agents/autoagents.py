@@ -5,7 +5,7 @@ This class provides a simplified interface for creating and running AI agents wi
 It automatically handles agent creation, task setup, and execution flow.
 """
 
-from .agents import PraisonAIAgents
+from .agents import Agents
 from ..agent.agent import Agent
 from ..task.task import Task
 from typing import List, Any, Optional, Dict, Tuple
@@ -38,7 +38,7 @@ class AutoAgentsConfig(BaseModel):
     process_type: str
     agents: List[AgentConfig]
 
-class AutoAgents(PraisonAIAgents):
+class AutoAgents(Agents):
     def __init__(
         self,
         instructions: str,

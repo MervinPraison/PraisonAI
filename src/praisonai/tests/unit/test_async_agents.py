@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch, AsyncMock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'praisonai-agents'))
 
 try:
-    from praisonaiagents import Agent, Task, PraisonAIAgents
+    from praisonaiagents import Agent, Task, Agents
 except ImportError as e:
     pytest.skip(f"Could not import required modules: {e}", allow_module_level=True)
 
@@ -80,7 +80,7 @@ class TestAsyncAgents:
             **sample_task_config
         )
         
-        agents = PraisonAIAgents(
+        agents = Agents(
             agents=[agent],
             tasks=[task],
             process="sequential"
@@ -112,7 +112,7 @@ class TestAsyncAgents:
             **{k: v for k, v in sample_task_config.items() if k != 'name'}
         )
         
-        agents = PraisonAIAgents(
+        agents = Agents(
             agents=[sync_agent, async_agent],
             tasks=[sync_task, async_task],
             process="sequential"
@@ -147,7 +147,7 @@ class TestAsyncAgents:
             async_execution=True
         )
         
-        agents = PraisonAIAgents(
+        agents = Agents(
             agents=[agent1, agent2],
             tasks=[task1, task2],
             process="workflow"

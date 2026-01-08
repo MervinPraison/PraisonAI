@@ -1,5 +1,5 @@
 """
-Unit tests for the context= parameter in Agent, Workflow, and PraisonAIAgents.
+Unit tests for the context= parameter in Agent, Workflow, and Agents.
 
 Tests cover:
 - Parameter types (False, True, ManagerConfig, ContextManager)
@@ -148,30 +148,30 @@ class TestWorkflowContextParam:
         assert workflow.context is True
 
 
-class TestPraisonAIAgentsContextParam:
-    """Tests for PraisonAIAgents context= parameter."""
+class TestAgentsContextParam:
+    """Tests for Agents context= parameter."""
     
     def test_agents_context_false_default(self):
-        """PraisonAIAgents context=False should have zero overhead."""
-        from praisonaiagents import Agent, PraisonAIAgents, Task
+        """Agents context=False should have zero overhead."""
+        from praisonaiagents import Agent, Agents, Task
         
         agent = Agent(instructions="Test agent")
         task = Task(description="Test task", agent=agent)
         
-        agents = PraisonAIAgents(agents=[agent], tasks=[task], context=False)
+        agents = Agents(agents=[agent], tasks=[task], context=False)
         
         assert agents._context_param is False
         assert agents._context_manager is None
         assert agents._context_manager_initialized is False
     
     def test_agents_context_true_lazy_init(self):
-        """PraisonAIAgents context=True should lazy-init MultiAgentContextManager."""
-        from praisonaiagents import Agent, PraisonAIAgents, Task
+        """Agents context=True should lazy-init MultiAgentContextManager."""
+        from praisonaiagents import Agent, Agents, Task
         
         agent = Agent(instructions="Test agent")
         task = Task(description="Test task", agent=agent)
         
-        agents = PraisonAIAgents(agents=[agent], tasks=[task], context=True)
+        agents = Agents(agents=[agent], tasks=[task], context=True)
         
         # Not initialized until first access
         assert agents._context_manager_initialized is False
@@ -182,8 +182,8 @@ class TestPraisonAIAgentsContextParam:
         assert manager is not None
     
     def test_agents_context_manager_config(self):
-        """PraisonAIAgents context=ManagerConfig should use provided config."""
-        from praisonaiagents import Agent, PraisonAIAgents, Task
+        """Agents context=ManagerConfig should use provided config."""
+        from praisonaiagents import Agent, Agents, Task
         from praisonaiagents.context import ManagerConfig
         
         config = ManagerConfig(
@@ -194,7 +194,7 @@ class TestPraisonAIAgentsContextParam:
         agent = Agent(instructions="Test agent")
         task = Task(description="Test task", agent=agent)
         
-        agents = PraisonAIAgents(agents=[agent], tasks=[task], context=config)
+        agents = Agents(agents=[agent], tasks=[task], context=config)
         
         manager = agents.context_manager
         assert manager is not None

@@ -10,7 +10,7 @@ from praisonaiagents import (
     register_display_callback,
     Agent, 
     Task, 
-    PraisonAIAgents
+    Agents
 )
 
 def enhanced_callback(message=None, response=None, agent_name=None, agent_role=None, agent_tools=None, task_name=None, task_description=None, task_id=None, **kwargs):
@@ -56,7 +56,7 @@ def test_callback_enhancement():
 
     # Run the agents
     try:
-        agents = PraisonAIAgents(
+        agents = Agents(
             agents=[agent],
             tasks=[task],
             verbose=True

@@ -50,7 +50,7 @@ class ACPServer:
         Args:
             config: ACP configuration
             agent: Optional pre-configured Agent instance
-            agents: Optional pre-configured PraisonAIAgents instance
+            agents: Optional pre-configured Agents instance
         """
         self.config = config or ACPConfig()
         self._agent = agent

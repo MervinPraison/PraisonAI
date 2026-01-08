@@ -12,7 +12,7 @@ Features demonstrated:
 - Quality assurance workflows
 """
 
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 from praisonaiagents.task import TaskOutput
 from praisonaiagents.tools import duckduckgo
 from typing import Tuple, Any
@@ -195,7 +195,7 @@ final_report = Task(
 )
 
 # Create workflow with conditional execution
-workflow = PraisonAIAgents(
+workflow = Agents(
     agents=[research_agent, quality_checker, analyst, decision_maker, report_writer],
     tasks=[
         initial_research, 

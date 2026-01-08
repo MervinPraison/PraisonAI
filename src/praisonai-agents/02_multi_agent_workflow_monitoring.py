@@ -10,7 +10,7 @@ Demonstrates performance monitoring in a multi-agent workflow:
 Shows how to monitor complex multi-agent systems.
 """
 
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 from praisonaiagents.telemetry import (
     monitor_function, track_api_call, get_function_stats, 
     analyze_function_flow, generate_comprehensive_report
@@ -101,7 +101,7 @@ def main():
     with track_api_call("multi_agent_workflow"):
         print("\n🚀 Starting multi-agent workflow...")
         
-        workflow = PraisonAIAgents(
+        workflow = Agents(
             agents=[researcher, analyst, writer],
             tasks=[research_task, analysis_task, report_task], 
             process="sequential",

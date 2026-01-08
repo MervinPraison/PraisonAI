@@ -64,7 +64,7 @@ def demo_multi_agent_launch():
     print("\n--- Multi-Agent Launch ---")
     
     try:
-        from praisonaiagents import Agent, PraisonAIAgents
+        from praisonaiagents import Agent, Agents
     except ImportError:
         print("Error: praisonaiagents not installed")
         return False
@@ -83,7 +83,7 @@ def demo_multi_agent_launch():
         llm="gpt-4o-mini"
     )
     
-    agents = PraisonAIAgents(agents=[researcher, writer])
+    agents = Agents(agents=[researcher, writer])
     
     print(f"Agents: {[researcher.name, writer.name]}")
     print("Launching as HTTP API on port 8000...")

@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from .telemetry import MinimalTelemetry
     from ..agent.agent import Agent
     from ..task.task import Task
-    from ..agents.agents import PraisonAIAgents
+    from ..agents.agents import Agents
 
 # Performance mode flag for auto-instrumentation (define early to avoid NameError)
 _performance_mode_enabled = False
@@ -351,12 +351,12 @@ def instrument_agent(agent: 'Agent', telemetry: Optional['MinimalTelemetry'] = N
     return agent
 
 
-def instrument_workflow(workflow: 'PraisonAIAgents', telemetry: Optional['MinimalTelemetry'] = None, performance_mode: bool = False):
+def instrument_workflow(workflow: 'Agents', telemetry: Optional['MinimalTelemetry'] = None, performance_mode: bool = False):
     """
-    Instrument a PraisonAIAgents workflow with performance-optimized telemetry.
+    Instrument a Agents workflow with performance-optimized telemetry.
     
     Args:
-        workflow: The PraisonAIAgents instance to instrument
+        workflow: The Agents instance to instrument
         telemetry: Optional telemetry instance (uses global if not provided)
         performance_mode: If True, uses minimal overhead tracking
     """
@@ -479,7 +479,7 @@ def instrument_workflow(workflow: 'PraisonAIAgents', telemetry: Optional['Minima
 # Auto-instrumentation helper
 def auto_instrument_all(telemetry: Optional['MinimalTelemetry'] = None, performance_mode: bool = False):
     """
-    Automatically instrument all new instances of Agent and PraisonAIAgents with optimized telemetry.
+    Automatically instrument all new instances of Agent and Agents with optimized telemetry.
     This should be called after enabling telemetry.
     
     Args:
@@ -527,11 +527,11 @@ def auto_instrument_all(telemetry: Optional['MinimalTelemetry'] = None, performa
     try:
         # Import the classes
         from ..agent.agent import Agent
-        from ..agents.agents import PraisonAIAgents
+        from ..agents.agents import Agents
         
         # Store original __init__ methods
         original_agent_init = Agent.__init__
-        original_workflow_init = PraisonAIAgents.__init__
+        original_workflow_init = Agents.__init__
         
         # Wrap Agent.__init__
         @wraps(original_agent_init)
@@ -539,7 +539,7 @@ def auto_instrument_all(telemetry: Optional['MinimalTelemetry'] = None, performa
             original_agent_init(self, *args, **kwargs)
             instrument_agent(self, telemetry, performance_mode)
         
-        # Wrap PraisonAIAgents.__init__
+        # Wrap Agents.__init__
         @wraps(original_workflow_init)
         def workflow_init_wrapper(self, *args, **kwargs):
             original_workflow_init(self, *args, **kwargs)
@@ -547,7 +547,7 @@ def auto_instrument_all(telemetry: Optional['MinimalTelemetry'] = None, performa
         
         # Apply wrapped constructors
         Agent.__init__ = agent_init_wrapper
-        PraisonAIAgents.__init__ = workflow_init_wrapper
+        Agents.__init__ = workflow_init_wrapper
         
     except ImportError:
         # Classes not available, skip auto-instrumentation

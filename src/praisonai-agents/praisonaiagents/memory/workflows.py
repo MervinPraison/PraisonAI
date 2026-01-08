@@ -775,7 +775,7 @@ class Workflow:
         return {"steps": results, "output": output, "variables": all_variables}
     
     def start(self, input: str = "", **kwargs) -> Dict[str, Any]:
-        """Alias for run() for consistency with PraisonAIAgents."""
+        """Alias for run() for consistency with Agents."""
         return self.run(input, **kwargs)
 
 

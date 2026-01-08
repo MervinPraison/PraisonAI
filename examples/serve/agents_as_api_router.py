@@ -35,7 +35,7 @@ def main():
     print("=" * 60)
     
     try:
-        from praisonaiagents import Agent, PraisonAIAgents
+        from praisonaiagents import Agent, Agents
     except ImportError:
         print("Error: praisonaiagents not installed")
         print("Install with: pip install praisonaiagents")
@@ -71,7 +71,7 @@ def main():
     print(f"Agents: {[a.name for a in agents]}")
     
     # Create multi-agent system
-    praison = PraisonAIAgents(agents=agents)
+    praison = Agents(agents=agents)
     
     print("\nLaunching multi-agent router as HTTP API...")
     print("Endpoints:")

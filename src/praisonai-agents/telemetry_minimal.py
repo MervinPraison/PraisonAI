@@ -7,7 +7,7 @@ import os
 # Uncomment to disable telemetry
 # os.environ['PRAISONAI_TELEMETRY_DISABLED'] = 'true'
 
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 from praisonaiagents.telemetry import get_telemetry
 
 # Create a simple agent
@@ -26,7 +26,7 @@ task = Task(
 )
 
 # Create and run workflow
-workflow = PraisonAIAgents(
+workflow = Agents(
     agents=[agent],
     tasks=[task],
     process="sequential"

@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch, MagicMock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'praisonai-agents'))
 
 try:
-    from praisonaiagents import Agent, Task, PraisonAIAgents
+    from praisonaiagents import Agent, Task, Agents
     from praisonaiagents.llm.llm import LLM
 except ImportError as e:
     pytest.skip(f"Could not import required modules: {e}", allow_module_level=True)
@@ -148,15 +148,15 @@ class TestTask:
         assert task.async_execution is True
 
 
-class TestPraisonAIAgents:
-    """Test PraisonAIAgents orchestration."""
+class TestAgents:
+    """Test Agents orchestration."""
     
     def test_agents_creation(self, sample_agent_config, sample_task_config):
-        """Test PraisonAIAgents creation."""
+        """Test Agents creation."""
         agent = Agent(**sample_agent_config)
         task = Task(agent=agent, **sample_task_config)
         
-        agents = PraisonAIAgents(
+        agents = Agents(
             agents=[agent],
             tasks=[task],
             process="sequential"
@@ -174,7 +174,7 @@ class TestPraisonAIAgents:
         agent = Agent(**sample_agent_config)
         task = Task(agent=agent, **sample_task_config)
         
-        agents = PraisonAIAgents(
+        agents = Agents(
             agents=[agent],
             tasks=[task],
             process="sequential"
@@ -194,7 +194,7 @@ class TestPraisonAIAgents:
         task1 = Task(agent=agent1, name="task1", **{k: v for k, v in sample_task_config.items() if k != 'name'})
         task2 = Task(agent=agent2, name="task2", **{k: v for k, v in sample_task_config.items() if k != 'name'})
         
-        agents = PraisonAIAgents(
+        agents = Agents(
             agents=[agent1, agent2],
             tasks=[task1, task2],
             process="hierarchical"

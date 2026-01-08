@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, PraisonAIAgents, error_logs
+from praisonaiagents import Agent, Task, Agents, error_logs
 import json
 from e2b_code_interpreter import Sandbox
 
@@ -83,7 +83,7 @@ blog_writing_task = Task(
 )
 
 # 3) Create and run Agents manager
-agents_manager = PraisonAIAgents(
+agents_manager = Agents(
     agents=[web_scraper_agent, url_data_extractor_agent, blog_writer_agent],
     tasks=[task_url_extraction, task_data_extraction, blog_writing_task],
     verbose=True,

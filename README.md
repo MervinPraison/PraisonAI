@@ -538,11 +538,11 @@ python app.py
 
 Create app.py file and add the code below:
 ```python
-from praisonaiagents import Agent, PraisonAIAgents
+from praisonaiagents import Agent, Agents
 
 research_agent = Agent(instructions="Research about AI")
 summarise_agent = Agent(instructions="Summarise research agent's findings")
-agents = PraisonAIAgents(agents=[research_agent, summarise_agent])
+agents = Agents(agents=[research_agent, summarise_agent])
 agents.start()
 ```
 
@@ -3380,11 +3380,11 @@ See [Agent Memory](#6-agent-memory-zero-dependencies) for more options.
 <summary><strong>How do I run multiple agents together?</strong></summary>
 
 ```python
-from praisonaiagents import Agent, PraisonAIAgents
+from praisonaiagents import Agent, Agents
 
 agent1 = Agent(instructions="Research topics")
 agent2 = Agent(instructions="Summarize findings")
-agents = PraisonAIAgents(agents=[agent1, agent2])
+agents = Agents(agents=[agent1, agent2])
 agents.start()
 ```
 

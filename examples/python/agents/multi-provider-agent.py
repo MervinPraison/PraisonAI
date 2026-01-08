@@ -6,7 +6,7 @@ agent-based selection for cost optimization and performance.
 """
 
 import os
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 from praisonaiagents.agent import RouterAgent
 from praisonaiagents.llm.model_router import ModelRouter, ModelProfile, TaskComplexity
 
@@ -49,7 +49,7 @@ def example_auto_routing():
     )
     
     # Run the tasks
-    agents = PraisonAIAgents(
+    agents = Agents(
         agents=[research_agent],
         tasks=[simple_task, moderate_task, complex_task],
         process="sequential",
@@ -118,7 +118,7 @@ def example_cost_optimized_workflow():
     )
     
     # Run workflow
-    workflow = PraisonAIAgents(
+    workflow = Agents(
         agents=[analyzer, writer],
         tasks=[analysis_task, writing_task],
         process="sequential",
@@ -249,7 +249,7 @@ def example_custom_routing():
     ]
     
     # Run tasks
-    agents = PraisonAIAgents(
+    agents = Agents(
         agents=[coder],
         tasks=tasks,
         process="sequential",

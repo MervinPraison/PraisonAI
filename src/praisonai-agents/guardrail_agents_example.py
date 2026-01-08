@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, TaskOutput, PraisonAIAgents
+from praisonaiagents import Agent, Task, TaskOutput, Agents
 from typing import Tuple, Any
 
 def validate_content(task_output: TaskOutput) -> Tuple[bool, Any]:
@@ -16,6 +16,6 @@ task = Task(
     agent=agent
 )
 
-praison_agents = PraisonAIAgents(agents=[agent], tasks=[task])
+praison_agents = Agents(agents=[agent], tasks=[task])
 
 praison_agents.start()

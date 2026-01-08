@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, PraisonAIAgents
+from praisonaiagents import Agent, Agents
 from langchain_community.tools import JinaSearch
 import os 
 
@@ -15,5 +15,5 @@ def invoke_jina_search(query: str):
 
 data_agent = Agent(instructions="Find 10 websites where I can learn coding for free", tools=[invoke_jina_search])
 editor_agent = Agent(instructions="write a listicle blog ranking the best websites. The blog should contain a proper intro and conclusion")
-agents = PraisonAIAgents(agents=[data_agent, editor_agent], process='hierarchical')
+agents = Agents(agents=[data_agent, editor_agent], process='hierarchical')
 agents.start()

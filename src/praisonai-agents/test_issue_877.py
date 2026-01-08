@@ -11,7 +11,7 @@ from praisonaiagents import (
     register_display_callback,
     Agent, 
     Task, 
-    PraisonAIAgents
+    Agents
 )
 
 # Track callback execution
@@ -61,7 +61,7 @@ task1 = Task(
 )
 
 try:
-    agents1 = PraisonAIAgents(
+    agents1 = Agents(
         agents=[agent1],
         tasks=[task1]
     )
@@ -99,7 +99,7 @@ task2 = Task(
 )
 
 try:
-    agents2 = PraisonAIAgents(
+    agents2 = Agents(
         agents=[agent2],
         tasks=[task2]
     )

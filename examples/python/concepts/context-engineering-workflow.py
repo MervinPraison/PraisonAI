@@ -24,7 +24,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent.parent / "src" / "praisonai-agents"
 sys.path.insert(0, str(project_root))
 
-from praisonaiagents import Agent, Task, PraisonAIAgents, create_context_agent
+from praisonaiagents import Agent, Task, Agents, create_context_agent
 
 class ContextEngineeringWorkflow:
     """
@@ -312,7 +312,7 @@ class ContextEngineeringWorkflow:
         print("\n⚙️ Executing Context Engineering Workflow")
         print("-" * 50)
         
-        agents_workflow = PraisonAIAgents(
+        agents_workflow = Agents(
             agents=[
                 self.product_manager,
                 self.architect, 

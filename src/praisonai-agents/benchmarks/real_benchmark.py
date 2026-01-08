@@ -119,7 +119,7 @@ def benchmark_praisonai_single(iterations: int = 3) -> ExecutionResult:
 
 def benchmark_praisonai_two_agents(iterations: int = 3) -> ExecutionResult:
     """Benchmark 2 PraisonAI agents working together."""
-    from praisonaiagents import Agent, PraisonAIAgents
+    from praisonaiagents import Agent, Agents
     
     result = ExecutionResult()
     
@@ -145,7 +145,7 @@ def benchmark_praisonai_two_agents(iterations: int = 3) -> ExecutionResult:
             verbose=False
         )
         
-        agents = PraisonAIAgents(
+        agents = Agents(
             agents=[researcher, reporter],
             process="sequential",
             verbose=False
@@ -163,7 +163,7 @@ def benchmark_praisonai_two_agents(iterations: int = 3) -> ExecutionResult:
 
 def benchmark_praisonai_three_agents(iterations: int = 3) -> ExecutionResult:
     """Benchmark 3 PraisonAI agents working together."""
-    from praisonaiagents import Agent, PraisonAIAgents
+    from praisonaiagents import Agent, Agents
     
     result = ExecutionResult()
     
@@ -199,7 +199,7 @@ def benchmark_praisonai_three_agents(iterations: int = 3) -> ExecutionResult:
             verbose=False
         )
         
-        agents = PraisonAIAgents(
+        agents = Agents(
             agents=[weather_agent, time_agent, summarizer],
             process="sequential",
             verbose=False

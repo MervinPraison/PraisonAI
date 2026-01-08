@@ -2,7 +2,7 @@
 # coding: utf-8
 
 """
-Game Playing Agent (Tic Tac Toe) using PraisonAIAgents
+Game Playing Agent (Tic Tac Toe) using Agents
 
 Two AI agents play against each other, coordinated by a referee agent.
 This script is CI-friendly: it uses dummy moves if API keys are not set.

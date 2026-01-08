@@ -319,10 +319,10 @@ async def async_stream_agents_response(
     session_state: Optional[Dict[str, Any]] = None
 ) -> AsyncIterator[BaseEvent]:
     """
-    Stream a PraisonAIAgents workflow response as AG-UI events.
+    Stream a Agents workflow response as AG-UI events.
     
     Args:
-        agents: PraisonAIAgents instance
+        agents: Agents instance
         user_input: User input string
         thread_id: Thread ID
         run_id: Run ID

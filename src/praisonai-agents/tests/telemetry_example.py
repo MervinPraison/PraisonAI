@@ -10,7 +10,7 @@ This example shows how to:
 
 import os
 from praisonaiagents import (
-    Agent, Task, PraisonAIAgents,
+    Agent, Task, Agents,
     enable_telemetry, disable_telemetry, get_telemetry_collector
 )
 from praisonaiagents.tools import DuckDuckGoSearchTool
@@ -72,7 +72,7 @@ def basic_telemetry_example():
     )
     
     # Create workflow
-    workflow = PraisonAIAgents(
+    workflow = Agents(
         agents=[researcher, writer],
         tasks=[research_task, writing_task],
         process="sequential",

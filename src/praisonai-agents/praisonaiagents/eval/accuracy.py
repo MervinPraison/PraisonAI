@@ -13,7 +13,7 @@ from .results import AccuracyResult, EvaluationScore
 
 if TYPE_CHECKING:
     from ..agent.agent import Agent
-    from ..agents.agents import PraisonAIAgents
+    from ..agents.agents import Agents
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class AccuracyEvaluator(BaseEvaluator):
     
     def __init__(
         self,
-        agent: Optional[Union["Agent", "PraisonAIAgents"]] = None,
+        agent: Optional[Union["Agent", "Agents"]] = None,
         func: Optional[Callable[..., str]] = None,
         input_text: str = "",
         expected_output: str = "",
@@ -41,7 +41,7 @@ class AccuracyEvaluator(BaseEvaluator):
         Initialize the accuracy evaluator.
         
         Args:
-            agent: Agent or PraisonAIAgents instance to evaluate
+            agent: Agent or Agents instance to evaluate
             func: Alternative callable that returns output string
             input_text: Input to provide to the agent/function
             expected_output: Expected output to compare against

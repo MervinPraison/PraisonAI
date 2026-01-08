@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 import time
 from typing import Dict, List
 import asyncio
@@ -202,7 +202,7 @@ simulation_task = Task(
 )
 
 # Create workflow
-workflow = PraisonAIAgents(
+workflow = Agents(
     agents=[mission_analyzer, resource_calculator, contingency_planner,
             resource_optimizer, scenario_simulator],
     tasks=[mission_task, resource_task, contingency_task,

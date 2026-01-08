@@ -136,7 +136,7 @@ class TestEnhancedYAMLGeneration:
         assert any('search' in name.lower() for name in tool_names)
 
 
-class TestIntegrationWithPraisonAIAgentsTools:
+class TestIntegrationWithAgentsTools:
     """Tests for integration with praisonaiagents.tools."""
     
     def test_can_import_praisonaiagents_tools(self):

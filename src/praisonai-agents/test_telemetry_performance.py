@@ -15,7 +15,7 @@ def test_optimized_telemetry():
     print("Testing optimized telemetry performance...")
     
     try:
-        from praisonaiagents import Agent, Task, PraisonAIAgents
+        from praisonaiagents import Agent, Task, Agents
         from praisonaiagents.telemetry import get_telemetry, enable_performance_mode, disable_performance_mode
         
         # Enable telemetry for testing
