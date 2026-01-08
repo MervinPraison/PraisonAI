@@ -32,6 +32,8 @@ def test_start_api_server_background(mock_popen):
     config = APIConfig(host="0.0.0.0", port=8080)
     mock_process = Mock()
     mock_process.pid = 12345
+    mock_process.poll.return_value = None  # Process is still running
+    mock_process.stderr.read.return_value = ""  # No error output
     mock_popen.return_value = mock_process
     
     result = start_api_server("agents.yaml", config, background=True)
