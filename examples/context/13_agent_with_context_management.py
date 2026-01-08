@@ -13,10 +13,10 @@ from praisonaiagents import Agent
 from praisonaiagents.context import (
     ContextBudgeter,
     ContextLedgerManager,
-    ContextMonitor,
     get_optimizer,
     OptimizerStrategy,
     estimate_messages_tokens,
+    format_percent,
 )
 
 
@@ -37,7 +37,7 @@ def main():
     
     # Get budget info
     budget = budgeter.allocate()
-    print(f"\nModel: gpt-4o-mini")
+    print("\nModel: gpt-4o-mini")
     print(f"Context budget: {budget.usable:,} tokens")
     print(f"Output reserve: {budget.output_reserve:,} tokens")
     
@@ -76,7 +76,7 @@ def main():
         current_tokens = ledger.get_total()
         utilization = budgeter.get_utilization(current_tokens)
         
-        print(f"[Context: {current_tokens} tokens, {utilization:.1%} used]")
+        print(f"[Context: {current_tokens} tokens, {format_percent(utilization)} used]")
         
         # Check if optimization needed
         if utilization > 0.8:
@@ -101,7 +101,7 @@ def main():
     final_utilization = budgeter.get_utilization(final_tokens)
     
     print(f"Total tokens used: {final_tokens:,}")
-    print(f"Context utilization: {final_utilization:.1%}")
+    print(f"Context utilization: {format_percent(final_utilization)}")
     print(f"Messages in conversation: {len(conversation)}")
     print(f"Remaining capacity: {budgeter.get_remaining(final_tokens):,} tokens")
     

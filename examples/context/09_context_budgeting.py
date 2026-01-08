@@ -128,6 +128,78 @@ def main():
     budget_dict = budgeter.to_dict()
     print(f"Budget as dict: {budget_dict}")
     
+    # Example 6: Overflow handling strategies overview
+    print("\n6. Overflow Handling Strategies")
+    print("-" * 40)
+    strategies = [
+        ("truncate", "Remove oldest messages first", "Fast, simple", "Loses early context"),
+        ("sliding_window", "Keep N most recent messages", "Preserves recent", "Loses early context"),
+        ("prune_tools", "Truncate old tool outputs", "Keeps messages", "May lose tool details"),
+        ("summarize", "Replace old messages with summary", "Preserves meaning", "Slower, uses API"),
+        ("smart", "Combine strategies intelligently", "Best balance", "More complex"),
+    ]
+    print(f"{'Strategy':<15} | {'Description':<30} | {'Pros':<18} | {'Cons'}")
+    print("-" * 90)
+    for name, desc, pros, cons in strategies:
+        print(f"{name:<15} | {desc:<30} | {pros:<18} | {cons}")
+    
+    # Example 7: Simulated overflow playbook
+    print("\n7. Overflow Playbook (Thresholds → Actions)")
+    print("-" * 40)
+    playbook = [
+        (0.70, "INFO", "Monitor usage, no action needed"),
+        (0.80, "NOTICE", "Consider optimization soon"),
+        (0.90, "WARNING", "Trigger auto-compact if enabled"),
+        (0.95, "CRITICAL", "Aggressive optimization required"),
+        (1.00, "OVERFLOW", "Immediate truncation to prevent API error"),
+    ]
+    print(f"{'Usage':<8} | {'Level':<10} | {'Action'}")
+    print("-" * 60)
+    for threshold, level, action in playbook:
+        print(f"{threshold:>6.0%}   | {level:<10} | {action}")
+    
+    # Example 8: Strategy comparison table
+    print("\n8. Strategy Comparison")
+    print("-" * 40)
+    print("Strategy         | Preserves      | Loses          | Best For")
+    print("-" * 70)
+    print("truncate         | Recent msgs    | Old msgs       | Simple chats")
+    print("sliding_window   | Last N msgs    | Earlier msgs   | Long conversations")
+    print("prune_tools      | All messages   | Tool details   | Tool-heavy agents")
+    print("summarize        | Context meaning| Exact wording  | Important history")
+    print("smart            | Balanced       | Minimal        | Production use")
+    
+    # Example 9: Default strategy for interactive mode
+    print("\n9. Default Strategy: Interactive Mode")
+    print("-" * 40)
+    print("Interactive mode default: context=False (zero overhead)")
+    print("To enable context management in interactive mode:")
+    print("  praisonai chat --context  # Enable with defaults")
+    print("  Or in code:")
+    print("    agent = Agent(instructions='...', context=True)")
+    print("")
+    print("When enabled, defaults are:")
+    print("  - auto_compact: True")
+    print("  - compact_threshold: 0.8 (80% usage)")
+    print("  - strategy: smart")
+    print("  - output_reserve: model-specific (8K-16K)")
+    
+    # Example 10: Default strategy for auto-agents mode
+    print("\n10. Default Strategy: Auto-Agents Mode")
+    print("-" * 40)
+    print("Auto-agents mode default: context=False (zero overhead)")
+    print("To enable for multi-agent workflows:")
+    print("    from praisonaiagents import PraisonAIAgents")
+    print("    agents = PraisonAIAgents(agents=[...], context=True)")
+    print("")
+    print("Recommended config for long tasks:")
+    print("    context=ManagerConfig(")
+    print("        auto_compact=True,")
+    print("        compact_threshold=0.7,  # Earlier trigger for safety")
+    print("        strategy='smart',")
+    print("        output_reserve=16384,   # Larger reserve for complex outputs")
+    print("    )")
+    
     print("\n" + "=" * 60)
     print("✓ Context budgeting examples complete!")
     print("=" * 60)
