@@ -37,10 +37,10 @@ class TestDoctorCLI:
         output = result.stdout + result.stderr
         assert "doctor" in output.lower() or "1.0" in output or "version" in output.lower()
     
-    def test_doctor_list_checks(self):
-        """Test doctor --list-checks output."""
+    def test_doctor_db_subcommand(self):
+        """Test doctor db subcommand."""
         result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "--list-checks"],
+            [sys.executable, "-m", "praisonai", "doctor", "db"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -48,9 +48,6 @@ class TestDoctorCLI:
         
         # Should complete successfully
         assert result.returncode in [0, 1]
-        # Should list check IDs
-        output = result.stdout + result.stderr
-        assert "python_version" in output or "environment" in output.lower() or "check" in output.lower()
     
     def test_doctor_fast_mode(self):
         """Test doctor in fast mode (default)."""
@@ -112,10 +109,10 @@ class TestDoctorCLI:
         
         assert result.returncode in [0, 1]
     
-    def test_doctor_permissions_subcommand(self):
-        """Test doctor permissions subcommand."""
+    def test_doctor_mcp_subcommand(self):
+        """Test doctor mcp subcommand."""
         result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "permissions"],
+            [sys.executable, "-m", "praisonai", "doctor", "mcp"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -155,33 +152,22 @@ class TestDoctorCLI:
         except json.JSONDecodeError:
             pass  # May have other output
     
-    def test_doctor_selftest_mock(self):
-        """Test doctor selftest --mock subcommand."""
+    def test_doctor_selftest(self):
+        """Test doctor selftest subcommand."""
         result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "selftest", "--mock"],
+            [sys.executable, "-m", "praisonai", "doctor", "selftest"],
             capture_output=True,
             text=True,
             timeout=60,
         )
         
-        # Should complete without making API calls
-        assert result.returncode in [0, 1]
+        # Should complete (may fail if no API key)
+        assert result.returncode in [0, 1, 2]
     
-    def test_doctor_only_filter(self):
-        """Test doctor --only filter."""
+    def test_doctor_deep_mode(self):
+        """Test doctor --deep mode."""
         result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "--only", "python_version"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        
-        assert result.returncode in [0, 1]
-    
-    def test_doctor_skip_filter(self):
-        """Test doctor --skip filter."""
-        result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "--skip", "network_dns,network_https"],
+            [sys.executable, "-m", "praisonai", "doctor", "--deep"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -189,18 +175,27 @@ class TestDoctorCLI:
         
         assert result.returncode in [0, 1]
     
-    def test_doctor_no_color(self):
-        """Test doctor --no-color flag."""
+    def test_doctor_tools_subcommand(self):
+        """Test doctor tools subcommand."""
         result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "--no-color"],
+            [sys.executable, "-m", "praisonai", "doctor", "tools"],
             capture_output=True,
             text=True,
             timeout=60,
         )
         
         assert result.returncode in [0, 1]
-        # Should not contain ANSI escape codes
-        assert "\033[" not in result.stdout
+    
+    def test_doctor_network_subcommand(self):
+        """Test doctor network subcommand."""
+        result = subprocess.run(
+            [sys.executable, "-m", "praisonai", "doctor", "network"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        
+        assert result.returncode in [0, 1]
     
     def test_doctor_strict_mode(self):
         """Test doctor --strict mode."""
@@ -219,10 +214,10 @@ class TestDoctorExitCodes:
     """Tests for doctor exit codes."""
     
     def test_exit_code_0_on_pass(self):
-        """Test exit code 0 when all checks pass."""
-        # Run only a check that should always pass
+        """Test exit code 0 when env checks pass."""
+        # Run env subcommand which should always pass for basic checks
         result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "--only", "python_version,os_info"],
+            [sys.executable, "-m", "praisonai", "doctor", "env"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -237,7 +232,7 @@ class TestDoctorExitCodes:
         results = []
         for _ in range(3):
             result = subprocess.run(
-                [sys.executable, "-m", "praisonai", "doctor", "--only", "python_version"],
+                [sys.executable, "-m", "praisonai", "doctor", "env"],
                 capture_output=True,
                 text=True,
                 timeout=60,

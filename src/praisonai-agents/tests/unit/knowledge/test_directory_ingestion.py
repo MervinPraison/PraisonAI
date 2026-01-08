@@ -5,9 +5,18 @@ and file contents (not paths) are stored.
 import os
 import tempfile
 import shutil
+import importlib.util
 import pytest
 
+# Check if knowledge dependencies are installed
+_KNOWLEDGE_DEPS_INSTALLED = importlib.util.find_spec("chromadb") is not None
+requires_knowledge = pytest.mark.skipif(
+    not _KNOWLEDGE_DEPS_INSTALLED,
+    reason="Knowledge dependencies not installed. Install with: pip install praisonaiagents[knowledge]"
+)
 
+
+@requires_knowledge
 class TestDirectoryIngestion:
     """Test that directories are properly processed and file contents stored."""
     
@@ -85,6 +94,7 @@ class TestDirectoryIngestion:
             assert metadata['filename'] == 'policy.txt'
 
 
+@requires_knowledge
 class TestContextBuilderUsesText:
     """Test that context builder injects text, not paths."""
     
