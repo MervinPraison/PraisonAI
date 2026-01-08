@@ -1,7 +1,7 @@
 from praisonaiagents import (
     Agent, 
     Task, 
-    PraisonAIAgents, 
+    Agents, 
     error_logs, 
     register_display_callback,
     sync_display_callbacks,
@@ -190,7 +190,7 @@ def main():
     )
 
     # Create and run agents manager
-    agents = PraisonAIAgents(
+    agents = Agents(
         agents=[researcher, writer],
         tasks=[task1, task2, task3, task4],
         verbose=True,

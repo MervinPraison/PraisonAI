@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 import os
 import importlib
 import inspect
@@ -421,7 +421,7 @@ async def ui_run_praisonai(config, topic, tools_dict):
 
         # Create and run the PraisonAI agents
         if config.get('process') == 'hierarchical':
-            crew = PraisonAIAgents(
+            crew = Agents(
                 agents=list(agents.values()),
                 tasks=tasks,
                 verbose=True,
@@ -429,7 +429,7 @@ async def ui_run_praisonai(config, topic, tools_dict):
                 manager_llm=config.get('manager_llm', 'gpt-5-nano')
             )
         else:
-            crew = PraisonAIAgents(
+            crew = Agents(
                 agents=list(agents.values()),
                 tasks=tasks,
                 verbose=2

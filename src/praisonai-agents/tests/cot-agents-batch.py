@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 from praisonaiagents.tools import cot_save, cot_upload_to_huggingface
 
 # Create a COT agent for generating and managing chain of thought solutions
@@ -63,7 +63,7 @@ for i in range(0, len(qa_pairs), batch_size):
     )
 
     # Initialize and run the agent
-    agents = PraisonAIAgents(
+    agents = Agents(
         agents=[cot_agent, save_to_huggingface_agent],
         tasks=[cot_task, save_to_huggingface_task]
     )

@@ -10,7 +10,7 @@ Run this example:
     python 02_state_in_tool_functions.py
 """
 
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 import time
 import json
 from typing import Dict, Any
@@ -273,7 +273,7 @@ task6 = Task(
 )
 
 # Create workflow (global variable for state access in tools)
-workflow = PraisonAIAgents(
+workflow = Agents(
     agents=[progress_tracker, data_processor, error_handler, config_manager],
     tasks=[task1, task2, task3, task4, task5, task6],
     verbose=True,

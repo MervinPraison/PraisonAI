@@ -1,6 +1,6 @@
 from typing import List, Dict
 from pydantic import BaseModel
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 from praisonaiagents.main import TaskOutput
 
 # Pydantic models for structured output
@@ -73,7 +73,7 @@ outline_task = Task(
 )
 
 # Create initial workflow for outline
-outline_workflow = PraisonAIAgents(
+outline_workflow = Agents(
     agents=[planner_agent],
     tasks=[outline_task],
     verbose=True,
@@ -111,7 +111,7 @@ for chapter in story_outline.chapters:
     chapter_tasks.append(chapter_task)
 
 # Create sequential workflow for chapters
-chapter_workflow = PraisonAIAgents(
+chapter_workflow = Agents(
     agents=[writer_agent],
     tasks=chapter_tasks,
     verbose=True,

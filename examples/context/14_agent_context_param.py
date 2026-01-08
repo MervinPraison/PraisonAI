@@ -156,7 +156,7 @@ def example_5_multi_agent():
     print("Example 5: Multi-Agent Context Management")
     print("=" * 60)
     
-    from praisonaiagents import PraisonAIAgents, Task
+    from praisonaiagents import Agents, Task
     
     config = ManagerConfig(
         auto_compact=True,
@@ -181,7 +181,7 @@ def example_5_multi_agent():
     task2 = Task(description="Write a summary", agent=writer)
     
     # Create multi-agent system with context management
-    agents = PraisonAIAgents(
+    agents = Agents(
         agents=[researcher, writer],
         tasks=[task1, task2],
         context=config,  # Shared context config

@@ -4,7 +4,7 @@ Test that telemetry works automatically without manual instrumentation.
 """
 
 # NO manual telemetry setup - it should work automatically!
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 
 # Create a simple agent
 agent = Agent(
@@ -22,7 +22,7 @@ task = Task(
 )
 
 # Create and run workflow
-workflow = PraisonAIAgents(
+workflow = Agents(
     agents=[agent],
     tasks=[task],
     process="sequential"

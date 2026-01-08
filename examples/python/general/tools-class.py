@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 import os
 import requests
 from typing import Any, Dict, List, Optional
@@ -106,7 +106,7 @@ task = Task(
 )
 
 # Create and start the workflow
-agents = PraisonAIAgents(
+agents = Agents(
     agents=[agent],
     tasks=[task],
     verbose=True

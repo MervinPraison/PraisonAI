@@ -7,7 +7,7 @@ import asyncio
 import logging
 import os
 import pytest
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 from typing import Dict, Any
 
 # Enable debug logging
@@ -53,7 +53,7 @@ async def _test_model_async_helper(model_name: str):
     )
     
     # Create and run the workflow
-    workflow = PraisonAIAgents(
+    workflow = Agents(
         agents=[agent],
         tasks=[task],
         verbose=True
@@ -105,7 +105,7 @@ def _test_model_sync_helper(model_name: str):
     )
     
     # Create and run the workflow
-    workflow = PraisonAIAgents(
+    workflow = Agents(
         agents=[agent],
         tasks=[task],
         verbose=True

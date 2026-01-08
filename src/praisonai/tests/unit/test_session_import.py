@@ -15,8 +15,8 @@ try:
     print('Session class found:', Session)
     
     # This was the failing import chain
-    from praisonaiagents.agents.agents import Agent, Task, PraisonAIAgents
-    print('SUCCESS: Agent, Task, PraisonAIAgents import works correctly')
+    from praisonaiagents.agents.agents import Agent, Task, Agents
+    print('SUCCESS: Agent, Task, Agents import works correctly')
     
 except ImportError as e:
     print('ERROR:', e)

@@ -3,7 +3,7 @@
 Test manual instrumentation to verify it works.
 """
 
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 from praisonaiagents.telemetry import get_telemetry
 from praisonaiagents.telemetry.integration import auto_instrument_all
 
@@ -26,7 +26,7 @@ task = Task(
 )
 
 print("\n3. Creating workflow...")
-workflow = PraisonAIAgents(
+workflow = Agents(
     agents=[agent],
     tasks=[task],
     process="sequential"

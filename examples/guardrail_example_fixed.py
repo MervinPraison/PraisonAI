@@ -4,7 +4,7 @@ Fixed example demonstrating proper guardrail usage with PraisonAI Agents.
 This addresses the issues reported in issue #875.
 """
 
-from praisonaiagents import Agent, Task, GuardrailResult, PraisonAIAgents, TaskOutput
+from praisonaiagents import Agent, Task, GuardrailResult, Agents, TaskOutput
 from typing import Tuple, Any
 import trafilatura
 
@@ -103,7 +103,7 @@ task_with_llm_guardrail = Task(
 
 # Run with GuardrailResult example
 print("=== Running with GuardrailResult guardrail ===")
-agents_gr = PraisonAIAgents(
+agents_gr = Agents(
     agents=[agent],
     tasks=[task_with_guardrailresult]
 )
@@ -113,7 +113,7 @@ agents_gr = PraisonAIAgents(
 
 # Run with Tuple example
 print("\n=== Running with Tuple[bool, Any] guardrail ===")
-agents_tuple = PraisonAIAgents(
+agents_tuple = Agents(
     agents=[agent],
     tasks=[task_with_tuple]
 )
@@ -123,7 +123,7 @@ agents_tuple = PraisonAIAgents(
 
 # Run with LLM guardrail example
 print("\n=== Running with LLM-based guardrail ===")
-agents_llm = PraisonAIAgents(
+agents_llm = Agents(
     agents=[agent],
     tasks=[task_with_llm_guardrail]
 )

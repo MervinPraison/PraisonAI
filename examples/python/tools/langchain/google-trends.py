@@ -3,7 +3,7 @@
 # export OPENAI_API_KEY=your_api_key_here
 
 from langchain_community.utilities.google_trends import GoogleTrendsAPIWrapper
-from praisonaiagents import Agent, PraisonAIAgents
+from praisonaiagents import Agent, Agents
 
 research_agent = Agent(
     instructions="Research trending topics related to AI",
@@ -14,5 +14,5 @@ summarise_agent = Agent(
     instructions="Summarise findings from the research agent",
 )
 
-agents = PraisonAIAgents(agents=[research_agent, summarise_agent])
+agents = Agents(agents=[research_agent, summarise_agent])
 agents.start()

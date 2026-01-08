@@ -126,7 +126,7 @@ def process_task_context(context_item, verbose=0, user_id=None):
     else:
         return str(context_item)  # Fallback for unknown types
 
-class PraisonAIAgents:
+class Agents:
     def __init__(
         self,
         agents,
@@ -243,7 +243,7 @@ class PraisonAIAgents:
                 tasks[i + 1].context.append(tasks[i])
             logger.info("Set up sequential flow with automatic context passing")
         
-        self._state = {}  # Add state storage at PraisonAIAgents level
+        self._state = {}  # Add state storage at Agents level
         
         # Context management (single param for all context features)
         self._context_param = context  # Store raw param for lazy init
@@ -295,7 +295,7 @@ class PraisonAIAgents:
                     # Pass verbose level to Memory
                     self.shared_memory = Memory(config=mem_cfg, verbose=verbose)
                     if verbose >= 5:
-                        logger.info("Initialized shared memory for PraisonAIAgents")
+                        logger.info("Initialized shared memory for Agents")
                     # Distribute memory to tasks
                     for task in tasks:
                         if not task.memory:
@@ -1661,7 +1661,7 @@ Context:
                 ],
             )
 
-            print(f"🚀 PraisonAIAgents MCP Workflow server starting on http://{host}:{port}")
+            print(f"🚀 Agents MCP Workflow server starting on http://{host}:{port}")
             print(f"📡 MCP SSE endpoint available at {sse_mcp_path}")
             print(f"📢 MCP messages post to {messages_mcp_path_prefix}")
             # Instead of trying to extract tool names, hardcode the known tool name
@@ -1674,8 +1674,8 @@ Context:
                 try:
                     uvicorn.run(starlette_mcp_app, host=host, port=port, log_level="debug" if debug else "info")
                 except Exception as e:
-                    logging.error(f"Error starting PraisonAIAgents MCP server: {str(e)}", exc_info=True)
-                    print(f"❌ Error starting PraisonAIAgents MCP server: {str(e)}")
+                    logging.error(f"Error starting Agents MCP server: {str(e)}", exc_info=True)
+                    print(f"❌ Error starting Agents MCP server: {str(e)}")
 
             mcp_server_thread = threading.Thread(target=run_praison_mcp_server, daemon=True)
             mcp_server_thread.start()
@@ -1696,19 +1696,19 @@ Context:
                             break
                     if not has_more_launches:
                         try:
-                            print("\nPraisonAIAgents MCP server running. Press Ctrl+C to stop.")
+                            print("\nAgents MCP server running. Press Ctrl+C to stop.")
                             while True:
                                 time.sleep(1)
                         except KeyboardInterrupt:
-                            print("\nPraisonAIAgents MCP Server stopped")
+                            print("\nAgents MCP Server stopped")
                 except Exception as e:
-                    logging.error(f"Error in PraisonAIAgents MCP launch detection: {e}")
+                    logging.error(f"Error in Agents MCP launch detection: {e}")
                     try:
-                        print("\nKeeping PraisonAIAgents MCP server alive. Press Ctrl+C to stop.")
+                        print("\nKeeping Agents MCP server alive. Press Ctrl+C to stop.")
                         while True:
                             time.sleep(1)
                     except KeyboardInterrupt:
-                        print("\nPraisonAIAgents MCP Server stopped")
+                        print("\nAgents MCP Server stopped")
             return None
         else:
             display_error(f"Invalid protocol: {protocol}. Choose 'http' or 'mcp'.")
@@ -2087,3 +2087,8 @@ Context:
         # Restore original tasks reference for result retrieval
         self._plan_tasks = self.tasks.copy()
         # Keep plan tasks for results but note original tasks are preserved in _plan_tasks
+
+
+# Backward compatibility alias - Agents points to Agents
+Agents = Agents
+PraisonAIAgents = Agents

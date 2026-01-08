@@ -2,14 +2,14 @@
 """
 Multi-Agent Context Isolation Example
 
-Demonstrates how to use multi-agent context with PraisonAIAgents via context= param,
+Demonstrates how to use multi-agent context with Agents via context= param,
 and also shows low-level MultiAgentLedger usage for advanced scenarios.
 
 Agent-Centric Quick Start:
-    from praisonaiagents import Agent, PraisonAIAgents
+    from praisonaiagents import Agent, Agents
     from praisonaiagents.context import ManagerConfig
     
-    agents = PraisonAIAgents(
+    agents = Agents(
         agents=[agent1, agent2],
         context=ManagerConfig(policy="isolated"),  # or "shared"
     )
@@ -17,7 +17,7 @@ Agent-Centric Quick Start:
 
 import os
 import tempfile
-from praisonaiagents import Agent, PraisonAIAgents
+from praisonaiagents import Agent, Agents
 from praisonaiagents.context import (
     ManagerConfig,
     MultiAgentLedger,
@@ -49,7 +49,7 @@ def agent_centric_example():
     # Multi-agent setup with isolated context policy
     # (each agent maintains its own context)
     print("Created agents with context=True")
-    print("Use PraisonAIAgents(agents=[...], context=ManagerConfig(policy='isolated'))")
+    print("Use Agents(agents=[...], context=ManagerConfig(policy='isolated'))")
     print("for multi-agent context isolation")
 
 

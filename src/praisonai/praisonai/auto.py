@@ -15,7 +15,7 @@ PRAISONAI_TOOLS_AVAILABLE = False
 PRAISONAI_AVAILABLE = False
 
 try:
-    from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, PraisonAIAgents
+    from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, Agents
     PRAISONAI_AVAILABLE = True
 except ImportError:
     pass

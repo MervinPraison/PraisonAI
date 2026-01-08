@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 import time
 
 def get_time_check():
@@ -61,7 +61,7 @@ final_task = Task(
 )
 
 # Create the workflow manager
-workflow = PraisonAIAgents(
+workflow = Agents(
     agents=[agent1, agent2, agent3],
     tasks=[initial_task, analysis_task, final_task],
     process="workflow",  # Use workflow process type

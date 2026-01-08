@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, PraisonAIAgents, Tools
+from praisonaiagents import Agent, Task, Agents, Tools
 from pydantic import BaseModel
 
 class AnalysisReport(BaseModel):
@@ -46,7 +46,7 @@ analysis_task = Task(
 )
 
 # Initialize and run agents
-agents = PraisonAIAgents(
+agents = Agents(
     agents=[researcher, analyst],
     tasks=[research_task, analysis_task],
     process="sequential",

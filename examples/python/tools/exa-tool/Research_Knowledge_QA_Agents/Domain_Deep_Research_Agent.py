@@ -2,7 +2,7 @@
 # coding: utf-8
 
 """
-Domain Deep Research Agent using PraisonAIAgents
+Domain Deep Research Agent using Agents
 
 This script performs deep research on a given topic and provides a structured report.
 It is CI-friendly: it uses dummy data if API keys are not set.

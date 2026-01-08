@@ -12,7 +12,7 @@ from praisonaiagents.ui.a2a.agent_card import generate_agent_card
 from praisonaiagents.ui.a2a.task_store import TaskStore
 
 if TYPE_CHECKING:
-    from praisonaiagents import Agent, PraisonAIAgents
+    from praisonaiagents import Agent, Agents
     from fastapi import APIRouter
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ class A2A:
     """
     A2A Interface for PraisonAI Agents.
     
-    Exposes a PraisonAI Agent or PraisonAIAgents workflow via the A2A protocol,
+    Exposes a PraisonAI Agent or Agents workflow via the A2A protocol,
     enabling agent-to-agent communication with other A2A-compatible systems.
     
     Usage:
@@ -41,7 +41,7 @@ class A2A:
     
     Args:
         agent: Single PraisonAI Agent instance
-        agents: PraisonAIAgents instance for multi-agent workflows
+        agents: Agents instance for multi-agent workflows
         name: Name for the A2A endpoint (defaults to agent name)
         description: Description of the agent
         url: URL where the A2A endpoint is hosted
@@ -53,7 +53,7 @@ class A2A:
     def __init__(
         self,
         agent: Optional["Agent"] = None,
-        agents: Optional["PraisonAIAgents"] = None,
+        agents: Optional["Agents"] = None,
         name: Optional[str] = None,
         description: Optional[str] = None,
         url: str = "http://localhost:8000/a2a",

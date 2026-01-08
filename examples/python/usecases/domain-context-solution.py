@@ -19,7 +19,7 @@ import json
 import base64
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient
-from praisonaiagents import Agent, Task, PraisonAIAgents, Memory
+from praisonaiagents import Agent, Task, Agents, Memory
 
 # Load environment variables from .env.local
 if not load_dotenv(dotenv_path=".env.local"):
@@ -263,7 +263,7 @@ ciso_review_task = Task(
 )
 
 # SOLUTION 4: Agents with Shared Memory Configuration
-agents = PraisonAIAgents(
+agents = Agents(
     agents=[manager_agent, tool_agent, sr_pentester_agent, ciso_agent],
     tasks=[tool_query_task, pentester_analysis_task, ciso_review_task],
     verbose=True,

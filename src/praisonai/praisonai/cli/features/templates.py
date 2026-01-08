@@ -591,8 +591,8 @@ class TemplatesHandler:
             
             # Run workflow - determine which class to use based on config structure
             if "agents" in workflow_config and "tasks" in workflow_config:
-                # PraisonAIAgents format (agents + tasks)
-                from praisonaiagents import Agent, Task, PraisonAIAgents
+                # Agents format (agents + tasks)
+                from praisonaiagents import Agent, Task, Agents
                 
                 # Build agents
                 agents_config = workflow_config.get("agents", [])
@@ -637,7 +637,7 @@ class TemplatesHandler:
                     tasks.append(task)
                 
                 # Run
-                praison_agents = PraisonAIAgents(
+                praison_agents = Agents(
                     agents=agents,
                     tasks=tasks,
                     process=workflow_config.get("process", "sequential"),

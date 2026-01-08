@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 from langchain_community.tools import YouTubeSearchTool
 from langchain_community.utilities import WikipediaAPIWrapper
 
@@ -21,7 +21,7 @@ task = Task(
 )
 
 # Create and start the workflow
-agents = PraisonAIAgents(
+agents = Agents(
     agents=[agent],
     tasks=[task],
     verbose=True

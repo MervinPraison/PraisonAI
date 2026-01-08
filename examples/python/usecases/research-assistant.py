@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 import time
 from typing import Dict, List
 import asyncio
@@ -163,7 +163,7 @@ prediction_task = Task(
 )
 
 # Create workflow
-workflow = PraisonAIAgents(
+workflow = Agents(
     agents=[paper_analyzer, gap_identifier, experiment_designer,
             methodology_validator, impact_predictor],
     tasks=[analysis_task, gap_task, design_task,

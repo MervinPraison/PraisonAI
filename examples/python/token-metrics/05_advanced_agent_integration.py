@@ -8,7 +8,7 @@ This example demonstrates advanced token tracking features including:
 - Token budget enforcement
 """
 
-from praisonaiagents import PraisonAIAgents, Agent, Task
+from praisonaiagents import Agents, Agent, Task
 import time
 
 class TokenBudgetManager:
@@ -200,7 +200,7 @@ def main():
     )
     
     # Initialize agents system
-    agents = PraisonAIAgents(
+    agents = Agents(
         agents=[researcher_agent, summarizer_agent, optimizer_agent],
         tasks=[research_task, summary_task, optimization_task],
         verbose=True

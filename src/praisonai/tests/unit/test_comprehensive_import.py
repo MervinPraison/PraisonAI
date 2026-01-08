@@ -14,8 +14,8 @@ def test_original_failing_import():
     """Test the exact import that was failing in the GitHub issue"""
     print("=== Testing Original Failing Import ===")
     try:
-        from praisonaiagents.agents.agents import Agent, Task, PraisonAIAgents
-        print('✅ SUCCESS: from praisonaiagents.agents.agents import Agent, Task, PraisonAIAgents')
+        from praisonaiagents.agents.agents import Agent, Task, Agents
+        print('✅ SUCCESS: from praisonaiagents.agents.agents import Agent, Task, Agents')
         return True
     except ImportError as e:
         print(f'❌ ERROR: {e}')

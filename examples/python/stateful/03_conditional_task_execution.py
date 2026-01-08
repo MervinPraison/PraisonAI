@@ -10,7 +10,7 @@ Run this example:
     python 03_conditional_task_execution.py
 """
 
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 import json
 from typing import Dict, Any
 
@@ -376,7 +376,7 @@ report_task = Task(
 )
 
 # Create workflow
-workflow = PraisonAIAgents(
+workflow = Agents(
     agents=[finance_agent, cost_manager, development_agent, performance_agent, report_agent],
     tasks=[
         budget_decision_task,

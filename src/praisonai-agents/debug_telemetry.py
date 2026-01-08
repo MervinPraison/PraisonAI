@@ -9,7 +9,7 @@ if 'PRAISONAI_TELEMETRY_DISABLED' in os.environ:
     del os.environ['PRAISONAI_TELEMETRY_DISABLED']
 
 print("1. Importing modules...")
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 from praisonaiagents.telemetry import get_telemetry
 
 print("\n2. Checking telemetry status...")
@@ -41,7 +41,7 @@ task = Task(
 )
 
 print("\n6. Creating workflow...")
-workflow = PraisonAIAgents(
+workflow = Agents(
     agents=[agent],
     tasks=[task],
     process="sequential"

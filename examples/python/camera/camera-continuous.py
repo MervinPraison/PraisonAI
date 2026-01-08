@@ -18,7 +18,7 @@ import cv2
 import time
 import os
 from datetime import datetime
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 
 
 class ContinuousCameraMonitor:
@@ -71,7 +71,7 @@ class ContinuousCameraMonitor:
             images=[image_path]
         )
         
-        agents = PraisonAIAgents(
+        agents = Agents(
             agents=[self.vision_agent],
             tasks=[task],
             process="sequential",

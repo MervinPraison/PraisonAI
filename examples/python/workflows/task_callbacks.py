@@ -2,10 +2,10 @@
 Task Callbacks Example
 
 Demonstrates using on_task_start and on_task_complete callbacks
-with PraisonAIAgents for workflow monitoring and logging.
+with Agents for workflow monitoring and logging.
 """
 
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 
 # Create an agent
 researcher = Agent(
@@ -43,7 +43,7 @@ def on_complete(task, output):
 
 if __name__ == "__main__":
     # Create agents with callbacks
-    agents = PraisonAIAgents(
+    agents = Agents(
         agents=[researcher],
         tasks=[task1, task2],
         process="workflow",

@@ -1513,7 +1513,7 @@ class PraisonAI:
                 print("\npip install \"praisonai\\[crewai]\"  # For CrewAI")
                 print("pip install \"praisonai\\[autogen]\"  # For AutoGen")
                 print("pip install \"praisonai\\[crewai,autogen]\"  # For both frameworks\n")
-                print("pip install praisonaiagents # For PraisonAIAgents\n")  
+                print("pip install praisonaiagents # For Agents\n")  
                 sys.exit(1)
 
         # Handle direct prompt if command is not a special command or file
@@ -4022,7 +4022,7 @@ Now, {final_instruction.lower()}:"""
             print("\npip install \"praisonai\\[crewai]\"  # For CrewAI")
             print("pip install \"praisonai\\[autogen]\"  # For AutoGen")
             print("pip install \"praisonai\\[crewai,autogen]\"  # For both frameworks\n")
-            print("pip install praisonaiagents # For PraisonAIAgents\n")  
+            print("pip install praisonaiagents # For Agents\n")  
             sys.exit(1)
 
     def _handle_profiled_prompt(self, prompt):
@@ -4315,7 +4315,7 @@ Now, {final_instruction.lower()}:"""
             praisonai agents.yaml --serve
         """
         import yaml
-        from praisonaiagents import Agent, PraisonAIAgents
+        from praisonaiagents import Agent, Agents
         
         # Determine the YAML file path
         yaml_file = None
@@ -4490,14 +4490,14 @@ Now, {final_instruction.lower()}:"""
         
         # Create and launch - with tasks if defined
         if tasks_list:
-            praison = PraisonAIAgents(
+            praison = Agents(
                 agents=agents_list, 
                 tasks=tasks_list,
                 process=process_type,
                 verbose=1 if verbose else 0
             )
         else:
-            praison = PraisonAIAgents(
+            praison = Agents(
                 agents=agents_list,
                 process=process_type,
                 verbose=1 if verbose else 0
@@ -4753,7 +4753,7 @@ Now, {final_instruction.lower()}:"""
             
             # If tools are provided, use Agent with tools first, then DeepResearchAgent
             if tools_list:
-                from praisonaiagents import Agent, Task, PraisonAIAgents
+                from praisonaiagents import Agent, Task, Agents
                 
                 # Create a research assistant agent with tools
                 research_assistant = Agent(
@@ -4774,7 +4774,7 @@ Now, {final_instruction.lower()}:"""
                 )
                 
                 print("[cyan]Gathering information with tools...[/cyan]")
-                agents = PraisonAIAgents(agents=[research_assistant], tasks=[gather_task], verbose=0)
+                agents = Agents(agents=[research_assistant], tasks=[gather_task], verbose=0)
                 tool_results = agents.start()
                 
                 # Enhance query with tool results

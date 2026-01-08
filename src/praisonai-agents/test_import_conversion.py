@@ -18,20 +18,20 @@ def test_new_import_pattern():
     
     try:
         # Test importing from PraisonAI (note: this is actually importing from praisonai package)
-        from praisonai import Agent, Task, PraisonAIAgents
-        print("✓ Successfully imported Agent, Task, PraisonAIAgents from praisonai")
+        from praisonai import Agent, Task, Agents
+        print("✓ Successfully imported Agent, Task, Agents from praisonai")
         
         # Test that the classes are available
         assert Agent is not None, "Agent class should be available"
         assert Task is not None, "Task class should be available"
-        assert PraisonAIAgents is not None, "PraisonAIAgents class should be available"
+        assert Agents is not None, "Agents class should be available"
         
         print("✓ All classes are properly available")
         
         # Test that we can access the class names
         print(f"✓ Agent class: {Agent.__name__}")
         print(f"✓ Task class: {Task.__name__}")
-        print(f"✓ PraisonAIAgents class: {PraisonAIAgents.__name__}")
+        print(f"✓ Agents class: {Agents.__name__}")
         
         return True
         
@@ -45,13 +45,13 @@ def test_backward_compatibility():
     
     try:
         # Test the old import pattern still works
-        from praisonaiagents import Agent, Task, PraisonAIAgents
-        print("✓ Successfully imported Agent, Task, PraisonAIAgents from praisonaiagents")
+        from praisonaiagents import Agent, Task, Agents
+        print("✓ Successfully imported Agent, Task, Agents from praisonaiagents")
         
         # Test that the classes are available
         assert Agent is not None, "Agent class should be available"
         assert Task is not None, "Task class should be available"
-        assert PraisonAIAgents is not None, "PraisonAIAgents class should be available"
+        assert Agents is not None, "Agents class should be available"
         
         print("✓ All classes are properly available")
         
@@ -68,11 +68,11 @@ def test_class_identity():
     try:
         # Import from both packages
         from praisonai import Agent as PraisonAIAgent, Task as PraisonAITask
-        from praisonaiagents import Agent as PraisonAIAgentsAgent, Task as PraisonAIAgentsTask
+        from praisonaiagents import Agent as AgentsAgent, Task as AgentsTask
         
         # They should be the same class
-        assert PraisonAIAgent is PraisonAIAgentsAgent, "Agent classes should be identical"
-        assert PraisonAITask is PraisonAIAgentsTask, "Task classes should be identical"
+        assert PraisonAIAgent is AgentsAgent, "Agent classes should be identical"
+        assert PraisonAITask is AgentsTask, "Task classes should be identical"
         
         print("✓ Both import patterns reference the same classes")
         

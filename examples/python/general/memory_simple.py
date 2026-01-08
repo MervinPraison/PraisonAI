@@ -1,4 +1,4 @@
-from praisonaiagents.agents.agents import Agent, Task, PraisonAIAgents
+from praisonaiagents.agents.agents import Agent, Task, Agents
 from praisonaiagents.tools import duckduckgo
 
 # Test facts
@@ -54,7 +54,7 @@ blog_task = Task(
     agent=blog_agent
 )
 
-agents = PraisonAIAgents(
+agents = Agents(
     agents=[fact_agent, research_agent, blog_agent],
     tasks=[fact_task, research_task, research_task2, research_task3, research_task4, blog_task],
     memory=True

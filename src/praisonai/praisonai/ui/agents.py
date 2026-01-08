@@ -5,7 +5,7 @@ import yaml
 import logging
 import inspect
 import chainlit as cl
-from praisonaiagents import Agent, Task, PraisonAIAgents, register_display_callback
+from praisonaiagents import Agent, Task, Agents, register_display_callback
 
 framework = "praisonai"
 config_list = [
@@ -521,7 +521,7 @@ async def ui_run_praisonai(config, topic, tools_dict):
 
         # Decide how to process tasks
         if config.get('process') == 'hierarchical':
-            prai_agents = PraisonAIAgents(
+            prai_agents = Agents(
                 agents=list(agents_map.values()),
                 tasks=tasks,
                 verbose=True,
@@ -529,7 +529,7 @@ async def ui_run_praisonai(config, topic, tools_dict):
                 manager_llm=config.get('manager_llm', 'gpt-5-nano')
             )
         else:
-            prai_agents = PraisonAIAgents(
+            prai_agents = Agents(
                 agents=list(agents_map.values()),
                 tasks=tasks,
                 verbose=2

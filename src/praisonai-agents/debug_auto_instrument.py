@@ -10,8 +10,8 @@ print("   Telemetry module imported")
 print("\n2. Check if auto_instrument_all was called...")
 print(f"   _initialized: {praisonaiagents.telemetry._initialized}")
 
-print("\n3. Import Agent and PraisonAIAgents...")
-from praisonaiagents import Agent, PraisonAIAgents
+print("\n3. Import Agent and Agents...")
+from praisonaiagents import Agent, Agents
 print("   Classes imported")
 
 print("\n4. Check if classes are instrumented...")
@@ -41,4 +41,4 @@ print(f"   Telemetry enabled: {telemetry.enabled}")
 print(f"   PostHog available: {telemetry._posthog is not None}")
 
 # The key insight: auto_instrument_all needs to be called AFTER
-# the Agent and PraisonAIAgents classes are imported!
+# the Agent and Agents classes are imported!

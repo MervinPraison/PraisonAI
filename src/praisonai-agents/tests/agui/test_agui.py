@@ -3,7 +3,7 @@ Test AGUI Class - TDD Tests for Main Interface Class
 
 Phase 5: AGUI Class Tests
 - Test AGUI initialization with Agent
-- Test AGUI initialization with PraisonAIAgents
+- Test AGUI initialization with Agents
 - Test get_router returns FastAPI router
 - Test validation errors
 """
@@ -24,13 +24,13 @@ class TestAGUIInitialization:
         assert agui.agents is None
     
     def test_agui_init_with_agents(self):
-        """Test AGUI initialization with PraisonAIAgents."""
+        """Test AGUI initialization with Agents."""
         from praisonaiagents.ui.agui import AGUI
-        from praisonaiagents import Agent, Task, PraisonAIAgents
+        from praisonaiagents import Agent, Task, Agents
         
         agent = Agent(name="Test", role="Tester", goal="Test things")
         task = Task(description="Test task", expected_output="Result", agent=agent)
-        agents = PraisonAIAgents(agents=[agent], tasks=[task])
+        agents = Agents(agents=[agent], tasks=[task])
         
         agui = AGUI(agents=agents)
         

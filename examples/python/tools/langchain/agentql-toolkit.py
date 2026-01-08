@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, PraisonAIAgents
+from praisonaiagents import Agent, Agents
 from langchain_agentql.tools import ExtractWebDataTool
 from dotenv import load_dotenv
 
@@ -23,5 +23,5 @@ orchestration_agent = Agent(
 )
 
 # Initialize and run agents
-agents = PraisonAIAgents(agents=[orchestration_agent])
+agents = Agents(agents=[orchestration_agent])
 agents.start()

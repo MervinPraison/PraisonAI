@@ -1,6 +1,6 @@
 from praisonaiagents.agent import Agent
 from praisonaiagents.task import Task
-from praisonaiagents.agents import PraisonAIAgents
+from praisonaiagents.agents import Agents
 import time
 
 current_time = int(time.time())
@@ -60,7 +60,7 @@ final_task = Task(
 )
 
 # Create and run workflow
-workflow = PraisonAIAgents(
+workflow = Agents(
     agents=[router, processor1, processor2],
     tasks=[routing_task, processing_task, final_task],
     process="workflow",

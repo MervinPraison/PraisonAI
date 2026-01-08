@@ -8,7 +8,7 @@ from praisonaiagents import (
     register_display_callback,
     Agent, 
     Task, 
-    PraisonAIAgents
+    Agents
 )
 
 # Track if callback was executed
@@ -51,7 +51,7 @@ with open('callback_test_log.txt', 'w') as f:
 
 # Run the agent
 try:
-    agents = PraisonAIAgents(
+    agents = Agents(
         agents=[agent],
         tasks=[task]
     )

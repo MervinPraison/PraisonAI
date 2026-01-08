@@ -26,7 +26,7 @@ AGENTOPS_AVAILABLE = False
 PRAISONAI_AVAILABLE = False
 
 try:
-    from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, PraisonAIAgents
+    from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, Agents
     PRAISONAI_AVAILABLE = True
 except ImportError:
     pass
@@ -873,7 +873,7 @@ class AgentsGenerator:
         memory = config.get('memory', False)
         self.logger.debug(f"Memory: {memory}")
         if config.get('process') == 'hierarchical':
-            agents = PraisonAIAgents(
+            agents = Agents(
                 agents=list(agents.values()),
                 tasks=tasks,
                 verbose=True,
@@ -882,7 +882,7 @@ class AgentsGenerator:
                 memory=memory
             )
         else:
-            agents = PraisonAIAgents(
+            agents = Agents(
                 agents=list(agents.values()),
                 tasks=tasks,
                 verbose=True,

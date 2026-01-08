@@ -804,7 +804,7 @@ def _execute_praisonai_workflow(
     options: Dict[str, Any],
 ) -> Any:
     """Execute a PraisonAI agents/tasks workflow."""
-    from praisonaiagents import Agent, Task, PraisonAIAgents
+    from praisonaiagents import Agent, Task, Agents
     from praisonai.templates.tool_override import resolve_tools
     
     agents = []
@@ -848,7 +848,7 @@ def _execute_praisonai_workflow(
         )
         tasks.append(task)
     
-    praison = PraisonAIAgents(
+    praison = Agents(
         agents=agents,
         tasks=tasks,
         process=workflow_config.get("process", "sequential"),

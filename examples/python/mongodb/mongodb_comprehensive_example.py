@@ -20,7 +20,7 @@ Features demonstrated:
 """
 
 import os
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 from praisonaiagents.tools import mongodb_tools
 
 # Ensure OpenAI API key is set
@@ -190,7 +190,7 @@ def main():
     print("🚀 Starting Comprehensive MongoDB Business System...")
     print("=" * 60)
     
-    business_system = PraisonAIAgents(
+    business_system = Agents(
         agents=[data_manager, knowledge_curator, business_analyst, customer_service],
         tasks=business_tasks,
         memory=True,

@@ -21,7 +21,7 @@ Features Demonstrated:
 
 import time
 import random
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 from praisonaiagents.tools import duckduckgo
 from praisonaiagents.telemetry import (
     monitor_function, track_api_call, performance_monitor,
@@ -213,7 +213,7 @@ def execute_monitored_task(agent, task_description):
         agent=agent
     )
     
-    agents_workflow = PraisonAIAgents(
+    agents_workflow = Agents(
         agents=[agent],
         tasks=[task],
         verbose=False

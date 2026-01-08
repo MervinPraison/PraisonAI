@@ -10,7 +10,7 @@ Run this example:
     python 05_loop_control_with_state.py
 """
 
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 import time
 import random
 from datetime import datetime
@@ -363,7 +363,7 @@ report_task = Task(
 )
 
 # Create workflow
-workflow = PraisonAIAgents(
+workflow = Agents(
     agents=[batch_processor, data_collector, validator, reporter],
     tasks=[batch_loop_task, retry_loop_task, pagination_loop_task, validation_loop_task, report_task],
     verbose=True,

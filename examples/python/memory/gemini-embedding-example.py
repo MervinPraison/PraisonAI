@@ -20,7 +20,7 @@ Prerequisites:
 """
 
 import os
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 
 def main():
     """Demonstrate Gemini embedding usage"""
@@ -82,7 +82,7 @@ def main():
     
     # Configure with Gemini embeddings
     # Option 1: Using stable text-embedding-004
-    agents = PraisonAIAgents(
+    agents = Agents(
         agents=[researcher, retriever],
         tasks=[store_task, retrieve_task],
         verbose=True,
@@ -98,7 +98,7 @@ def main():
     )
     
     # Alternative: Using experimental model with advanced features
-    # agents = PraisonAIAgents(
+    # agents = Agents(
     #     agents=[researcher, retriever],
     #     tasks=[store_task, retrieve_task],
     #     verbose=True,

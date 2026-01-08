@@ -16,7 +16,7 @@ Environment Variables:
 
 import cv2
 import os
-from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents import Agent, Task, Agents
 
 
 def capture_and_analyze():
@@ -58,7 +58,7 @@ def capture_and_analyze():
             )
             
             # Run analysis
-            agents = PraisonAIAgents(
+            agents = Agents(
                 agents=[vision_agent],
                 tasks=[task],
                 process="sequential",
