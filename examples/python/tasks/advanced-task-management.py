@@ -113,7 +113,7 @@ initial_research = Task(
     description="Research the current state of renewable energy adoption in the business sector, including trends, challenges, and opportunities",
     expected_output="Comprehensive research report on renewable energy adoption in business",
     agent=research_agent,
-    guardrail=data_quality_validator,
+    guardrails=data_quality_validator,
     max_retries=3
 )
 
@@ -124,7 +124,7 @@ quality_check = Task(
     expected_output="Quality assessment report with go/no-go decision for proceeding to analysis",
     agent=quality_checker,
     context=[initial_research],
-    guardrail=completeness_validator,
+    guardrails=completeness_validator,
     max_retries=2
 )
 
@@ -153,7 +153,7 @@ additional_research = Task(
     agent=research_agent,
     context=[initial_research, quality_check],
     tools=[duckduckgo],
-    guardrail=data_quality_validator,
+    guardrails=data_quality_validator,
     max_retries=2
 )
 
@@ -190,7 +190,7 @@ final_report = Task(
     expected_output="Executive report with strategic recommendations for renewable energy adoption",
     agent=report_writer,
     context=[initial_research, quality_check, data_analysis, decision_task],
-    guardrail=completeness_validator,
+    guardrails=completeness_validator,
     max_retries=2
 )
 

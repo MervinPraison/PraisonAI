@@ -125,7 +125,7 @@ email_task = Task(
     description="Write a business proposal for a new software project, including contact information",
     expected_output="Professional business proposal with contact email addresses",
     agent=email_agent,
-    guardrail=email_format_guardrail,
+    guardrails=email_format_guardrail,
     max_retries=3
 )
 
@@ -135,7 +135,7 @@ content_task = Task(
     description="Write an analysis of cloud computing benefits for small businesses",
     expected_output="Comprehensive analysis of cloud computing benefits (minimum 50 words)",
     agent=content_agent,
-    guardrail=word_count_guardrail,
+    guardrails=word_count_guardrail,
     max_retries=3
 )
 
@@ -145,7 +145,7 @@ business_task = Task(
     description="Provide advice on handling difficult client relationships",
     expected_output="Professional advice maintaining appropriate business tone",
     agent=business_agent,
-    guardrail=professional_tone_guardrail,
+    guardrails=professional_tone_guardrail,
     max_retries=3
 )
 
@@ -155,7 +155,7 @@ research_task = Task(
     description="Analyze the impact of artificial intelligence on job markets",
     expected_output="Research-backed analysis with citations and evidence",
     agent=research_agent,
-    guardrail=factual_accuracy_guardrail,
+    guardrails=factual_accuracy_guardrail,
     max_retries=3
 )
 
@@ -176,7 +176,7 @@ llm_guardrail_task = Task(
     agent=llm_guardrail_agent,
     
     # LLM-based guardrail using natural language validation
-    guardrail="Validate that this marketing content is: 1) Factually accurate with no false claims, 2) Compliant with advertising standards (no misleading statements), 3) Engaging and professional in tone, 4) Includes a clear call-to-action. If any criteria are not met, explain what needs to be improved.",
+    guardrails="Validate that this marketing content is: 1) Factually accurate with no false claims, 2) Compliant with advertising standards (no misleading statements), 3) Engaging and professional in tone, 4) Includes a clear call-to-action. If any criteria are not met, explain what needs to be improved.",
     max_retries=2
 )
 

@@ -40,7 +40,7 @@ class DynamicAgentSystem:
             goal=f"Conduct {inputs['depth']} research on {inputs['topic']} in {inputs['language']}",
             backstory=f"Multilingual expert specializing in {inputs['depth']} analysis",
             tools=[duckduckgo],
-            self_reflect=inputs['depth'] == 'detailed',
+            reflection=inputs['depth'] == 'detailed',
             llm=self.llm_config
         )
         agents.append(research_agent)

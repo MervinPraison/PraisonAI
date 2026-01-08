@@ -60,7 +60,7 @@ async_agent = Agent(
     goal="Perform fast and efficient asynchronous searches with structured results",
     backstory="Expert in parallel search operations and data retrieval",
     tools=[async_search_tool],
-    self_reflect=False,
+    reflection=False,
     verbose=True,
     markdown=True
 )
@@ -72,7 +72,7 @@ summary_agent = Agent(
     backstory="""Expert in analyzing and synthesizing information from multiple sources.
 Skilled at identifying patterns, trends, and connections between different topics.
 Specializes in creating clear, structured summaries that highlight key insights.""",
-    self_reflect=True,  # Enable self-reflection for better summary quality
+    reflection=True,  # Enable self-reflection for better summary quality
     verbose=True,
     markdown=True
 )

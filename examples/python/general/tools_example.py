@@ -8,7 +8,7 @@ news_agent = Agent(
     goal="Collect and analyze news articles from various sources.",
     backstory="Expert in news gathering and content analysis.",
     tools=[get_article, get_news_sources, get_articles_from_source, get_trending_topics],
-    self_reflect=False
+    reflection=False
 )
 
 

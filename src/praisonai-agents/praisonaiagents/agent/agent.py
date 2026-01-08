@@ -268,35 +268,22 @@ class Agent:
         allow_code_execution: Optional[bool] = False,
         max_retry_limit: int = 2,
         code_execution_mode: Literal["safe", "unsafe"] = "safe",
-        embedder_config: Optional[Dict[str, Any]] = None,
-        knowledge: Optional[Union[List[str], Any]] = None,
+        knowledge: Optional[Union[bool, List[str], Any]] = None,
         retrieval_config: Optional[Union[Dict[str, Any], Any]] = None,
         knowledge_config: Optional[Dict[str, Any]] = None,
         rag_config: Optional[Dict[str, Any]] = None,
+        embedder_config: Optional[Dict[str, Any]] = None,
+        user_id: Optional[str] = None,
         use_system_prompt: Optional[bool] = True,
         markdown: bool = True,
         stream: bool = False,
         metrics: bool = False,
-        self_reflect: bool = False,
-        max_reflect: int = 3,
-        min_reflect: int = 1,
-        reflect_llm: Optional[str] = None,
-        reflect_prompt: Optional[str] = None,
-        user_id: Optional[str] = None,
         reasoning_steps: bool = False,
-        guardrail: Optional[Union[Callable[['TaskOutput'], Tuple[bool, Any]], str]] = None,
-        max_guardrail_retries: int = 3,
         handoffs: Optional[List[Union['Agent', 'Handoff']]] = None,
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
-        web_search: Optional[Union[bool, Dict[str, Any]]] = None,
-        web_fetch: Optional[Union[bool, Dict[str, Any]]] = None,
         prompt_caching: Optional[bool] = None,
-        claude_memory: Optional[Union[bool, Any]] = None,
-        plan_mode: bool = False,
-        planning: bool = False,
-        planning_tools: Optional[List[Any]] = None,
-        planning_reasoning: bool = False,
+        planning: Optional[Union[bool, Any]] = False,
         auto_save: Optional[str] = None,
         skills: Optional[List[str]] = None,
         skills_dirs: Optional[List[str]] = None,
@@ -313,7 +300,12 @@ class Agent:
         output_style: Optional[Any] = None,
         thinking_budget: Optional[Any] = None,
         # Context management (single param for all context features)
-        context: Optional[Union[bool, Any]] = False
+        context: Optional[Union[bool, Any]] = False,
+        # NEW: Consolidated feature params (agent-centric API)
+        # These take precedence over individual params when provided
+        reflection: Optional[Union[bool, Any]] = None,  # Union[bool, ReflectionConfig]
+        guardrails: Optional[Union[bool, Callable, Any]] = None,  # Union[bool, Callable, GuardrailConfig]
+        web: Optional[Union[bool, Any]] = None,  # Union[bool, WebConfig]
     ):
         """Initialize an Agent instance.
 
@@ -428,6 +420,178 @@ class Agent:
         if not hasattr(Agent, '_logging_configured'):
             Agent._configure_logging()
             Agent._logging_configured = True
+
+        # ============================================================
+        # CONSOLIDATED PARAMS EXTRACTION (agent-centric API)
+        # New consolidated params take precedence over individual params
+        # Initialize removed params with defaults before extraction
+        # ============================================================
+        
+        # Initialize removed params with defaults (these were removed from signature)
+        claude_memory = None
+        self_reflect = False
+        max_reflect = 3
+        min_reflect = 1
+        reflect_llm = None
+        reflect_prompt = None
+        guardrail = None
+        max_guardrail_retries = 3
+        web_search = None
+        web_fetch = None
+        plan_mode = False
+        planning_tools = None
+        planning_reasoning = False
+        
+        # Extract memory settings from consolidated 'memory' param
+        # memory can be: False, True, MemoryConfig, or MemoryManager instance
+        _memory_user_id = user_id  # Default from param
+        _memory_session_id = session_id  # Default from param
+        _memory_db = db  # Default from param
+        _memory_auto_memory = auto_memory  # Default from param
+        _memory_claude_memory = claude_memory  # Default from param
+        
+        if memory is not None and memory is not False:
+            if hasattr(memory, 'user_id') and hasattr(memory, 'backend'):
+                # It's a MemoryConfig
+                if memory.user_id:
+                    _memory_user_id = memory.user_id
+                if memory.session_id:
+                    _memory_session_id = memory.session_id
+                if memory.db:
+                    _memory_db = memory.db
+                _memory_auto_memory = memory.auto_memory
+                _memory_claude_memory = memory.claude_memory
+                # Convert MemoryConfig to appropriate memory init value
+                if memory.backend == "file" or (hasattr(memory.backend, 'value') and memory.backend.value == "file"):
+                    memory = True  # Use FileMemory
+                elif memory.config:
+                    memory = memory.config  # Use config dict
+                else:
+                    backend_val = memory.backend.value if hasattr(memory.backend, 'value') else memory.backend
+                    memory = backend_val  # Use backend string
+        
+        # Apply extracted memory values
+        user_id = _memory_user_id
+        session_id = _memory_session_id
+        db = _memory_db
+        auto_memory = _memory_auto_memory
+        claude_memory = _memory_claude_memory
+        
+        # Extract knowledge settings from consolidated 'knowledge' param
+        # knowledge can be: False, True, List[str], KnowledgeConfig, or KnowledgeBase instance
+        _knowledge_sources = None
+        _knowledge_retrieval_config = retrieval_config
+        _knowledge_embedder_config = embedder_config
+        
+        if knowledge is not None and knowledge is not False:
+            if isinstance(knowledge, list):
+                # It's a list of sources - use directly
+                _knowledge_sources = knowledge
+            elif hasattr(knowledge, 'search') and hasattr(knowledge, 'add'):
+                # It's a Knowledge/KnowledgeBase instance - pass through unchanged
+                # Don't modify knowledge, let the existing logic handle it
+                pass
+            elif hasattr(knowledge, 'sources') and hasattr(knowledge, 'embedder'):
+                # It's a KnowledgeConfig (has sources list and embedder string)
+                _knowledge_sources = knowledge.sources
+                _knowledge_embedder_config = knowledge.embedder_config or embedder_config
+                # Build retrieval config from KnowledgeConfig
+                if knowledge.config:
+                    _knowledge_retrieval_config = knowledge.config
+                else:
+                    _knowledge_retrieval_config = {
+                        'top_k': knowledge.retrieval_k,
+                        'threshold': knowledge.retrieval_threshold,
+                        'rerank': knowledge.rerank,
+                        'rerank_model': knowledge.rerank_model,
+                    }
+                # Update knowledge to be the sources list for internal processing
+                knowledge = _knowledge_sources if _knowledge_sources else None
+            elif knowledge is True:
+                # Enable knowledge but no sources provided yet
+                knowledge = None
+        
+        # Apply extracted knowledge values
+        retrieval_config = _knowledge_retrieval_config
+        embedder_config = _knowledge_embedder_config
+        
+        # Extract planning settings from consolidated 'planning' param
+        # planning can be: False, True, or PlanningConfig
+        _planning_enabled = planning
+        _plan_mode = plan_mode
+        _planning_tools = planning_tools
+        _planning_reasoning = planning_reasoning
+        
+        if planning is not None:
+            if planning is True:
+                _planning_enabled = True
+            elif planning is False:
+                _planning_enabled = False
+            elif hasattr(planning, 'reasoning'):
+                # It's a PlanningConfig
+                _planning_enabled = True
+                _planning_tools = planning.tools
+                _planning_reasoning = planning.reasoning
+                _plan_mode = planning.read_only
+                # planning param becomes True for internal use
+                planning = True
+        
+        # Apply extracted planning values
+        plan_mode = _plan_mode
+        planning_tools = _planning_tools
+        planning_reasoning = _planning_reasoning
+        
+        # Extract reflection settings from consolidated 'reflection' param
+        if reflection is not None:
+            if reflection is True:
+                # Enable with defaults
+                self_reflect = True
+            elif reflection is False:
+                self_reflect = False
+            elif hasattr(reflection, 'min_iterations'):
+                # It's a ReflectionConfig
+                self_reflect = True
+                min_reflect = reflection.min_iterations
+                max_reflect = reflection.max_iterations
+                reflect_llm = reflection.llm
+                reflect_prompt = reflection.prompt
+        
+        # Extract guardrail settings from consolidated 'guardrails' param
+        if guardrails is not None:
+            if guardrails is True:
+                # Enable with defaults (no-op, user must provide validator)
+                pass
+            elif guardrails is False:
+                guardrail = None
+            elif callable(guardrails):
+                # Direct validator function
+                guardrail = guardrails
+            elif hasattr(guardrails, 'validator'):
+                # It's a GuardrailConfig
+                if guardrails.validator:
+                    guardrail = guardrails.validator
+                elif guardrails.llm_validator:
+                    guardrail = guardrails.llm_validator
+                max_guardrail_retries = guardrails.max_retries
+        
+        # Extract web settings from consolidated 'web' param
+        if web is not None:
+            if web is True:
+                # Enable both search and fetch with defaults
+                web_search = True
+                web_fetch = True
+            elif web is False:
+                web_search = False
+                web_fetch = False
+            elif hasattr(web, 'search'):
+                # It's a WebConfig
+                web_search = web.search
+                web_fetch = web.fetch
+                # Could also extract search_config, fetch_config if needed
+        
+        # ============================================================
+        # END CONSOLIDATED PARAMS EXTRACTION
+        # ============================================================
 
         # If instructions are provided, use them to set role, goal, and backstory
         if instructions:

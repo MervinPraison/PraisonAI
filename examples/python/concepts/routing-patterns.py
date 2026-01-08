@@ -208,7 +208,7 @@ dynamic_router = Agent(
 5. Current system load
 
 Provide clear routing decisions with reasoning.""",
-    self_reflect=True
+    reflection=True
 )
 
 def dynamic_routing_example():

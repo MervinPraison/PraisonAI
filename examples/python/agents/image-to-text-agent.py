@@ -14,7 +14,7 @@ image_agent = Agent(
     backstory="""You are an expert in computer vision and image analysis.
     You excel at describing images, detecting objects, and understanding visual content.""",
     llm="gpt-5-nano",
-    self_reflect=False
+    reflection=False
 )
 
 # 1. Task with Image URL

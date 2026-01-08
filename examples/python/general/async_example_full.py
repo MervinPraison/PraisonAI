@@ -53,7 +53,7 @@ async_agent = Agent(
     goal="Perform fast parallel searches with structured results",
     backstory="Expert in efficient data retrieval and parallel search operations",
     tools=[async_search_tool],
-    self_reflect=False,
+    reflection=False,
     verbose=True,
     markdown=True
 )
@@ -63,7 +63,7 @@ summary_agent = Agent(
     role="Research Synthesizer",
     goal="Create concise summaries from multiple search results",
     backstory="Expert in analyzing and synthesizing information from multiple sources",
-    self_reflect=True,
+    reflection=True,
     verbose=True,
     markdown=True
 )

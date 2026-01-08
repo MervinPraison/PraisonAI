@@ -38,7 +38,7 @@ production_agent = Agent(
     goal="Generate safe, compliant content for production use",
     backstory="Production-ready agent with built-in safety and compliance checks",
     tools=[internet_search],
-    guardrail=content_guardrail,
+    guardrails=content_guardrail,
     max_retries=3,
     verbose=True
 )

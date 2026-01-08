@@ -65,9 +65,9 @@ calculation_agent = Agent(
     backstory="You are an expert mathematician who can handle complex calculations with precision.",
     instructions="Perform the requested calculations step by step, showing your work clearly.",
     tools=[basic_calculator, solve_quadratic, calculate_statistics],
-    self_reflect=True,
-    min_reflect=1,
-    max_reflect=2
+    reflection=True,
+    
+    
 )
 
 problem_solver_agent = Agent(
@@ -81,9 +81,9 @@ problem_solver_agent = Agent(
 3. Determine what needs to be found
 4. Show each step of the solution
 5. Verify the answer makes sense""",
-    self_reflect=True,
-    min_reflect=2,
-    max_reflect=4
+    reflection=True,
+    
+    
 )
 
 math_tutor_agent = Agent(
@@ -148,9 +148,9 @@ math_assistant = Agent(
 
 Always show your work step by step.""",
     tools=[basic_calculator, solve_quadratic, calculate_statistics],
-    self_reflect=True,
-    min_reflect=1,
-    max_reflect=3
+    reflection=True,
+    
+    
 )
 
 if __name__ == "__main__":
