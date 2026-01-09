@@ -34,7 +34,7 @@ jobs:
   # ============================================
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
     - uses: actions/checkout@v4
     
@@ -70,14 +70,14 @@ jobs:
         cd src/praisonai
         python -m pytest tests/unit/ \
           -m "not slow and not network" \
-          -q --tb=short \
+          -q --tb=line \
           --timeout=30 \
           --ignore=tests/fixtures \
           --ignore=tests/unit/jobs \
           --ignore=tests/unit/api \
           --ignore-glob="**/test_*gradio*" \
           --ignore-glob="**/test_*chainlit*" \
-          -x
+          --maxfail=5
     
     - name: Smoke Test Summary
       if: always()
