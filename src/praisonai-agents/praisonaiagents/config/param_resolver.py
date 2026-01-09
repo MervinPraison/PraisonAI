@@ -54,7 +54,7 @@ def resolve(
 ) -> Any:
     """
     Resolve a consolidated parameter following precedence rules:
-    Instance > Config > Array > String > Bool > Default
+    Instance > Config > Array > Dict > String > Bool > Default
     
     Args:
         value: The parameter value
@@ -92,7 +92,20 @@ def resolve(
         return value
     
     # =========================================================================
-    # 4. Dict -> convert to config (STRICT validation)
+    # 4. Array handling (BEFORE Dict per AC-1 precedence)
+    # =========================================================================
+    if isinstance(value, (list, tuple)):
+        return _resolve_array(
+            value=value,
+            param_name=param_name,
+            config_class=config_class,
+            presets=presets,
+            url_schemes=url_schemes,
+            array_mode=array_mode,
+        )
+    
+    # =========================================================================
+    # 5. Dict -> convert to config (STRICT validation)
     # =========================================================================
     if isinstance(value, dict):
         if config_class:
@@ -119,19 +132,6 @@ def resolve(
                 f"Dict input not supported for {param_name} (no config class defined). "
                 f"Use a supported type: bool, str, or instance."
             )
-    
-    # =========================================================================
-    # 5. Array handling (before string to respect precedence)
-    # =========================================================================
-    if isinstance(value, (list, tuple)):
-        return _resolve_array(
-            value=value,
-            param_name=param_name,
-            config_class=config_class,
-            presets=presets,
-            url_schemes=url_schemes,
-            array_mode=array_mode,
-        )
     
     # =========================================================================
     # 6. String handling
@@ -221,7 +221,7 @@ def _resolve_array(
             return config_class(sources=sources, **config_override)
         return sources
     
-    # Single or list mode
+    # Single or list mode - SINGLE item only, multiple items raise error
     if array_mode == ArrayMode.SINGLE_OR_LIST:
         if len(value) == 1:
             single_value = value[0]
@@ -233,10 +233,17 @@ def _resolve_array(
             # Check if single item is a preset
             if isinstance(single_value, str) and presets and single_value in presets:
                 return _apply_preset(single_value, presets, config_class)
-        # Multiple items - treat as sources
-        if config_class:
-            return config_class(sources=list(value))
-        return list(value)
+            # Single non-preset string - try as URL or return as-is
+            if isinstance(single_value, str):
+                if config_class:
+                    return config_class()
+                return single_value
+        # Multiple items - ERROR (not allowed for SINGLE_OR_LIST mode)
+        raise TypeError(
+            f"Multiple values not allowed for {param_name}. "
+            f"Use a single value: {param_name}='preset' or {param_name}='url://...' "
+            f"Got {len(value)} items: {value}"
+        )
     
     # Preset override mode - [preset, {overrides}] or [preset]
     if array_mode == ArrayMode.PRESET_OVERRIDE:

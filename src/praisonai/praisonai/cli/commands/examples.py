@@ -691,5 +691,94 @@ def examples_run_all(
     raise typer.Exit(0)
 
 
+@app.command("report")
+def examples_report(
+    report_dir: Optional[Path] = typer.Argument(
+        None,
+        help="Report directory path (default: auto-detect latest)",
+    ),
+    base_dir: Optional[Path] = typer.Option(
+        None,
+        "--base-dir", "-b",
+        help="Base reports directory (default: ~/Downloads/reports/examples)",
+    ),
+    limit: int = typer.Option(
+        50,
+        "--limit", "-n",
+        help="Limit rows in tables (0 = no limit)",
+    ),
+    errors: bool = typer.Option(
+        True,
+        "--errors/--no-errors",
+        help="Show error grouping section",
+    ),
+    wide: bool = typer.Option(
+        False,
+        "--wide/--no-wide",
+        help="Wide output: full error messages and item lists",
+    ),
+    show_paths: bool = typer.Option(
+        True,
+        "--show-paths/--no-show-paths",
+        help="Show affected item paths in error groups",
+    ),
+    match: Optional[List[str]] = typer.Option(
+        None,
+        "--match", "-m",
+        help="Filter by status (repeatable: --match failed --match timeout)",
+    ),
+    group: Optional[List[str]] = typer.Option(
+        None,
+        "--group", "-g",
+        help="Filter by group name (repeatable)",
+    ),
+    contains: Optional[str] = typer.Option(
+        None,
+        "--contains", "-c",
+        help="Filter items whose error contains text (case-insensitive)",
+    ),
+    open_dir: bool = typer.Option(
+        False,
+        "--open",
+        help="Show report artifacts listing",
+    ),
+    output_format: str = typer.Option(
+        "table",
+        "--format", "-f",
+        help="Output format: table or json",
+    ),
+):
+    """
+    View execution report with failures and error grouping.
+    
+    Examples:
+        praisonai examples report                    # View latest report
+        praisonai examples report ./my-report        # View specific report
+        praisonai examples report --wide --limit 0   # Full details
+        praisonai examples report --match failed     # Only failures
+        praisonai examples report --format json      # JSON output
+    """
+    # Lazy import to avoid loading at CLI startup
+    from praisonai.suite_runner.report_viewer import view_report
+    
+    output, exit_code = view_report(
+        report_dir=report_dir,
+        suite="examples",
+        base_dir=base_dir,
+        limit=limit,
+        show_errors=errors,
+        wide=wide,
+        show_paths=show_paths,
+        match_statuses=match,
+        match_groups=group,
+        contains=contains,
+        show_artifacts=open_dir,
+        output_format=output_format,
+    )
+    
+    typer.echo(output)
+    raise typer.Exit(exit_code)
+
+
 if __name__ == "__main__":
     app()

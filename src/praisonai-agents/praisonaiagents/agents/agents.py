@@ -142,6 +142,12 @@ class Agents:
         output: Optional[Any] = None,  # Union[str, MultiAgentOutputConfig]
         execution: Optional[Any] = None,  # Union[str, MultiAgentExecutionConfig]
         hooks: Optional[Any] = None,  # MultiAgentHooksConfig
+        # Additional consolidated params for feature parity with Agent
+        autonomy: Optional[Any] = None,  # Union[bool, AutonomyConfig] - agent autonomy
+        knowledge: Optional[Any] = None,  # Union[bool, List[str], KnowledgeConfig] - RAG
+        guardrails: Optional[Any] = None,  # Union[bool, Callable, GuardrailConfig] - validation
+        web: Optional[Any] = None,  # Union[bool, WebConfig] - web search/fetch
+        reflection: Optional[Any] = None,  # Union[bool, ReflectionConfig] - self-reflection
     ):
         """
         Initialize PraisonAIAgents with consolidated feature parameters.
@@ -159,7 +165,18 @@ class Agents:
             output: Output configuration (str | MultiAgentOutputConfig)
             execution: Execution configuration (str | MultiAgentExecutionConfig)
             hooks: Hooks configuration (MultiAgentHooksConfig)
+            autonomy: Autonomy configuration (bool | AutonomyConfig)
+            knowledge: Knowledge/RAG configuration (bool | List[str] | KnowledgeConfig)
+            guardrails: Guardrails configuration (bool | Callable | GuardrailConfig)
+            web: Web search/fetch configuration (bool | WebConfig)
+            reflection: Self-reflection configuration (bool | ReflectionConfig)
         """
+        # Store new params for propagation to agents
+        self._autonomy = autonomy
+        self._knowledge = knowledge
+        self._guardrails = guardrails
+        self._web = web
+        self._reflection = reflection
         # ─────────────────────────────────────────────────────────────────────
         # Extract values from consolidated params using UNIFIED CANONICAL resolver
         # Precedence: Instance > Config > Dict > Array > String > Bool > Default
