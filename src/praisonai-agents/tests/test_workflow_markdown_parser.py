@@ -13,11 +13,8 @@ import sys
 # Add the package to path for testing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from praisonaiagents.memory.workflows import (
-    WorkflowStep,
-    Workflow,
-    WorkflowManager
-)
+from praisonaiagents import Workflow, WorkflowStep
+from praisonaiagents.workflows import WorkflowManager
 
 
 class TestParseAgentConfig:
@@ -253,8 +250,9 @@ Do something
             
             assert workflow is not None
             assert workflow.default_llm == "gpt-4o"
-            assert workflow.planning is True
-            assert workflow.planning_llm == "gpt-4o-mini"
+            # Planning is now a config object, check _planning_enabled
+            assert workflow._planning_enabled is True
+            assert workflow._planning_llm == "gpt-4o-mini"
         finally:
             os.unlink(temp_path)
 

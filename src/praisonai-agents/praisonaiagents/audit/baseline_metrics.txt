@@ -1,0 +1,38 @@
+# Agent-Centric API Audit Baseline Metrics
+# Generated: 2025-01-09
+
+## File Counts
+- Examples (.py files): 611
+- Feature docs (.mdx files): 135
+- Agent-centric compliant examples: 104 (17%)
+
+## Legacy Workflow Params (to be removed)
+- verbose: bool = False (line 288)
+- stream: bool = True (line 289)
+- planning_llm: Optional[str] = None (line 286)
+- memory_config: Optional[Dict[str, Any]] = None (line 284)
+- on_workflow_start, on_workflow_complete, on_step_start, on_step_complete, on_step_error (lines 292-296)
+
+## Legacy WorkflowStep Params (to be consolidated)
+- context_from, retain_full_context (lines 196-197)
+- output_file, output_json, output_pydantic (lines 217-219)
+- async_execution, quality_check, rerun, max_retries (lines 225-227, 193)
+- next_steps, branch_condition (lines 206-207)
+
+## Current Consolidated Params
+### Agent (14 consolidated)
+- memory, knowledge, planning, reflection, guardrails, web, context
+- autonomy, output, execution, templates, caching, hooks, skills
+
+### PraisonAIAgents (6 consolidated)
+- memory, planning, context, output, execution, hooks
+
+### Workflow (1 consolidated, 5 legacy)
+- context (consolidated)
+- verbose, stream, planning_llm, memory_config, callbacks (legacy)
+
+## Target State
+- Workflow: output=, planning=, memory=, hooks=, context=
+- WorkflowStep: context=, output=, execution=, routing=
+- All examples: agent-centric first
+- All docs: agent-centric first code block

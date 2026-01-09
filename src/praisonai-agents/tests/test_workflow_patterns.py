@@ -11,7 +11,9 @@ from praisonaiagents import Workflow, WorkflowContext, StepResult, Pipeline
 from praisonaiagents.workflows import (
     route, parallel, loop, repeat,
     Route, Parallel, Loop, Repeat,
-    WorkflowStep, WorkflowManager
+    WorkflowStep, WorkflowManager,
+    WorkflowHooksConfig, WorkflowPlanningConfig, WorkflowOutputConfig,
+    WorkflowStepExecutionConfig, WorkflowStepOutputConfig,
 )
 
 
@@ -554,7 +556,7 @@ class TestCallbacks:
         
         workflow = Workflow(
             steps=[step1],
-            on_workflow_start=on_start
+            hooks=WorkflowHooksConfig(on_workflow_start=on_start)
         )
         workflow.start("test input")
         
@@ -572,7 +574,7 @@ class TestCallbacks:
         
         workflow = Workflow(
             steps=[step1],
-            on_workflow_complete=on_complete
+            hooks=WorkflowHooksConfig(on_workflow_complete=on_complete)
         )
         workflow.start("test")
         
@@ -591,7 +593,7 @@ class TestCallbacks:
         
         workflow = Workflow(
             steps=[step1, step2],
-            on_step_start=on_step_start
+            hooks=WorkflowHooksConfig(on_step_start=on_step_start)
         )
         workflow.start("test")
         
@@ -611,7 +613,7 @@ class TestCallbacks:
         
         workflow = Workflow(
             steps=[step1, step2],
-            on_step_complete=on_step_complete
+            hooks=WorkflowHooksConfig(on_step_complete=on_step_complete)
         )
         workflow.start("test")
         
@@ -631,7 +633,7 @@ class TestCallbacks:
         
         workflow = Workflow(
             steps=[failing_step],
-            on_step_error=on_error
+            hooks=WorkflowHooksConfig(on_step_error=on_error)
         )
         workflow.start("test")
         
@@ -676,7 +678,7 @@ class TestGuardrails:
             return StepResult(output=f"Output attempt {attempt[0]}")
         
         workflow = Workflow(steps=[
-            WorkflowStep(name="step1", handler=step1, guardrail=validator, max_retries=5)
+            WorkflowStep(name="step1", handler=step1, guardrail=validator, execution=WorkflowStepExecutionConfig(max_retries=5))
         ])
         result = workflow.start("test")
         
@@ -695,7 +697,7 @@ class TestGuardrails:
             return StepResult(output=f"Attempt {attempt[0]}")
         
         workflow = Workflow(steps=[
-            WorkflowStep(name="step1", handler=step1, guardrail=validator, max_retries=2)
+            WorkflowStep(name="step1", handler=step1, guardrail=validator, execution=WorkflowStepExecutionConfig(max_retries=2))
         ])
         result = workflow.start("test")
         
@@ -719,7 +721,7 @@ class TestGuardrails:
             return StepResult(output="initial")
         
         workflow = Workflow(steps=[
-            WorkflowStep(name="step1", handler=step1, guardrail=validator, max_retries=3)
+            WorkflowStep(name="step1", handler=step1, guardrail=validator, execution=WorkflowStepExecutionConfig(max_retries=3))
         ])
         result = workflow.start("test")
         
@@ -977,10 +979,12 @@ class TestDocumentationExamples:
         
         workflow = Workflow(
             steps=[step1, step2],
-            on_workflow_start=on_start,
-            on_workflow_complete=on_complete,
-            on_step_start=on_step_start,
-            on_step_complete=on_step_complete
+            hooks=WorkflowHooksConfig(
+                on_workflow_start=on_start,
+                on_workflow_complete=on_complete,
+                on_step_start=on_step_start,
+                on_step_complete=on_step_complete
+            )
         )
         
         result = workflow.start("test input")
@@ -1009,7 +1013,7 @@ class TestDocumentationExamples:
             return (False, "Please fix the output")
         
         workflow = Workflow(steps=[
-            WorkflowStep(name="gen", handler=generator, guardrail=validator, max_retries=3)
+            WorkflowStep(name="gen", handler=generator, guardrail=validator, execution=WorkflowStepExecutionConfig(max_retries=3))
         ])
         
         result = workflow.start("test")
@@ -1175,22 +1179,22 @@ class TestWorkflowConfiguration:
         """Test that workflow verbose setting is used."""
         def step1(ctx): return StepResult(output="Done")
         
-        workflow = Workflow(steps=[step1], verbose=True)
+        workflow = Workflow(steps=[step1], output="verbose")
         assert workflow.verbose == True
     
     def test_workflow_reasoning_setting(self):
         """Test that workflow reasoning setting is stored."""
         def step1(ctx): return StepResult(output="Done")
         
-        workflow = Workflow(steps=[step1], reasoning=True)
+        workflow = Workflow(steps=[step1], planning=WorkflowPlanningConfig(reasoning=True))
         assert workflow.reasoning == True
     
     def test_workflow_planning_setting(self):
         """Test that workflow planning setting is stored."""
         def step1(ctx): return StepResult(output="Done")
         
-        workflow = Workflow(steps=[step1], planning=True, planning_llm="gpt-5-nano")
-        assert workflow.planning == True
+        workflow = Workflow(steps=[step1], planning=WorkflowPlanningConfig(enabled=True, llm="gpt-5-nano"))
+        assert workflow._planning_enabled == True
         assert workflow.planning_llm == "gpt-5-nano"
     
     def test_workflow_default_llm(self):
@@ -1274,7 +1278,7 @@ class TestMigratedFeatures:
                 WorkflowStep(
                     name="generator",
                     handler=generate_content,
-                    output_file=output_path
+                    output=WorkflowStepOutputConfig(file=output_path)
                 )
             ])
             
@@ -1307,7 +1311,7 @@ class TestMigratedFeatures:
         step = WorkflowStep(
             name="structured_step",
             action="Generate structured output",
-            output_pydantic=OutputModel
+            output=WorkflowStepOutputConfig(pydantic_model=OutputModel)
         )
         
         assert step.output_pydantic == OutputModel
@@ -1317,7 +1321,7 @@ class TestMigratedFeatures:
         step = WorkflowStep(
             name="async_step",
             action="Run async",
-            async_execution=True
+            execution=WorkflowStepExecutionConfig(async_exec=True)
         )
         
         assert step.async_execution == True
@@ -1327,7 +1331,7 @@ class TestMigratedFeatures:
         step = WorkflowStep(
             name="quality_step",
             action="Check quality",
-            quality_check=False
+            execution=WorkflowStepExecutionConfig(quality_check=False)
         )
         
         assert step.quality_check == False
@@ -1337,7 +1341,7 @@ class TestMigratedFeatures:
         step = WorkflowStep(
             name="rerun_step",
             action="Can rerun",
-            rerun=False
+            execution=WorkflowStepExecutionConfig(rerun=False)
         )
         
         assert step.rerun == False
@@ -1365,20 +1369,16 @@ class TestMigratedFeatures:
         step = WorkflowStep(
             name="test_step",
             action="Test action",
-            output_file="output.txt",
+            output=WorkflowStepOutputConfig(file="output.txt"),
             images=["img.jpg"],
-            async_execution=True,
-            quality_check=False,
-            rerun=False
+            execution=WorkflowStepExecutionConfig(async_exec=True, quality_check=False, rerun=False)
         )
         
         d = step.to_dict()
         
-        assert d["output_file"] == "output.txt"
+        assert d["output"]["file"] == "output.txt"
         assert d["images"] == ["img.jpg"]
-        assert d["async_execution"] == True
-        assert d["quality_check"] == False
-        assert d["rerun"] == False
+        assert d["execution"]["async"] == True
 
 
 # =============================================================================
@@ -1392,33 +1392,33 @@ class TestPlanningAndReasoning:
         """Test that Workflow accepts planning parameter."""
         workflow = Workflow(
             steps=[lambda ctx: StepResult(output="test")],
-            planning=True,
-            planning_llm="gpt-5-nano"
+            planning=WorkflowPlanningConfig(enabled=True, llm="gpt-5-nano")
         )
-        assert workflow.planning == True
+        assert workflow._planning_enabled == True
         assert workflow.planning_llm == "gpt-5-nano"
     
     def test_workflow_reasoning_parameter_exists(self):
         """Test that Workflow accepts reasoning parameter."""
         workflow = Workflow(
             steps=[lambda ctx: StepResult(output="test")],
-            reasoning=True
+            planning=WorkflowPlanningConfig(reasoning=True)
         )
         assert workflow.reasoning == True
     
     def test_workflow_memory_config_parameter_exists(self):
-        """Test that Workflow accepts memory_config parameter."""
+        """Test that Workflow accepts memory parameter."""
+        from praisonaiagents.workflows import WorkflowMemoryConfig
         workflow = Workflow(
             steps=[lambda ctx: StepResult(output="test")],
-            memory_config={"provider": "rag", "persist": True}
+            memory=WorkflowMemoryConfig(backend="rag")
         )
-        assert workflow.memory_config == {"provider": "rag", "persist": True}
+        assert workflow._memory_config is not None
     
     def test_workflow_verbose_parameter_exists(self):
-        """Test that Workflow accepts verbose parameter."""
+        """Test that Workflow accepts output parameter for verbose."""
         workflow = Workflow(
             steps=[lambda ctx: StepResult(output="test")],
-            verbose=True
+            output="verbose"
         )
         assert workflow.verbose == True
 

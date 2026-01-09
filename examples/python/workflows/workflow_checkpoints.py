@@ -5,7 +5,8 @@ Demonstrates saving and resuming workflow execution using checkpoints.
 Useful for long-running workflows that may be interrupted.
 """
 
-from praisonaiagents.memory.workflows import WorkflowManager, WorkflowStep, Workflow
+from praisonaiagents import Workflow, WorkflowStep
+from praisonaiagents.workflows import WorkflowManager
 
 # Create a multi-step workflow
 workflow = Workflow(

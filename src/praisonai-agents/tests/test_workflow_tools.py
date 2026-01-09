@@ -13,11 +13,8 @@ import os
 # Add the package to path for testing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from praisonaiagents.memory.workflows import (
-    WorkflowStep,
-    Workflow,
-    WorkflowManager
-)
+from praisonaiagents import Workflow, WorkflowStep
+from praisonaiagents.workflows import WorkflowManager
 
 
 class TestWorkflowStepToolsField:
