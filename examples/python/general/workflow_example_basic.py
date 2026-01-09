@@ -67,7 +67,6 @@ validate_task = Task(
 agents = Agents(
     agents=[data_agent],
     tasks=[collect_task, validate_task],
-    verbose=1,
     process="workflow"
 )
 

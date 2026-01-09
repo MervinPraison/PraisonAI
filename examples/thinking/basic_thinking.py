@@ -45,8 +45,9 @@ def main():
     agent = Agent(
         name="DeepThinker",
         instructions="You are a problem-solving assistant that thinks step by step.",
-        thinking_budget=ThinkingBudget.high()  # 16,000 tokens for reasoning
     )
+    # Set thinking budget via property setter (not constructor param)
+    agent.thinking_budget = ThinkingBudget.high()  # 16,000 tokens for reasoning
     
     print(f"Agent: {agent.name}")
     print(f"Thinking budget: {agent.thinking_budget.max_tokens:,} tokens")
@@ -67,8 +68,9 @@ def main():
     agent_custom = Agent(
         name="CustomThinker",
         instructions="You solve complex problems.",
-        thinking_budget=custom_budget
     )
+    # Set thinking budget via property setter (not constructor param)
+    agent_custom.thinking_budget = custom_budget
     
     print(f"Agent: {agent_custom.name}")
     print(f"Max tokens: {agent_custom.thinking_budget.max_tokens:,}")

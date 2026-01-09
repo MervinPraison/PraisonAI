@@ -29,7 +29,6 @@ agents = Agents(
     agents=[video_agent],
     tasks=[task1],
     process="sequential",
-    verbose=1
 )
 
 # Run all tasks

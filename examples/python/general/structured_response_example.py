@@ -32,9 +32,7 @@ def get_structured_analysis(query: str, verbose: bool = True) -> AnalysisReport:
         role="Research Analyst",
         goal="Analyze topics and provide structured reports",
         backstory="Expert at gathering information and providing structured analysis",
-        verbose=verbose,
         reflection=True,  # Enable self-reflection for better quality
-        markdown=True,
         llm="gpt-4o-mini"
     )
     

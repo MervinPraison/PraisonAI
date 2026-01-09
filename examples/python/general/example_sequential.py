@@ -39,10 +39,6 @@ researcher = Agent(
     allow_delegation=False,
     tools=[internet_search_tool],
     llm="gpt-4o-mini",
-    markdown=True,
-    
-    
-    
 )
 writer = Agent(
     name="Writer",
@@ -53,7 +49,6 @@ writer = Agent(
     allow_delegation=True,
     llm="gpt-4o-mini",
     tools=[],
-    markdown=True
 )
 
 # Create tasks

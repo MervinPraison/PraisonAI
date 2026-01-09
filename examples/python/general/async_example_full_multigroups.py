@@ -61,7 +61,6 @@ async_agent = Agent(
     backstory="Expert in parallel search operations and data retrieval",
     tools=[async_search_tool],
     reflection=False,
-    markdown=True
 )
 
 summary_agent = Agent(
@@ -72,7 +71,6 @@ summary_agent = Agent(
 Skilled at identifying patterns, trends, and connections between different topics.
 Specializes in creating clear, structured summaries that highlight key insights.""",
     reflection=True,  # Enable self-reflection for better summary quality
-    markdown=True
 )
 
 # 5. Create async tasks
@@ -104,7 +102,6 @@ async def run_single_task():
     agents = Agents(
         agents=[async_agent],
         tasks=[async_task],
-        verbose=1,
         process="sequential"
     )
     result = await agents.astart()
@@ -188,7 +185,6 @@ Present the summary in a clear, structured format with sections for findings, pa
     agents = Agents(
         agents=[async_agent],
         tasks=parallel_tasks,  # Only run search tasks first
-        verbose=1,
         process="sequential"
     )
     search_results = await agents.astart()
@@ -213,7 +209,6 @@ Present the summary in a clear, structured format with sections for findings, pa
     summary_agents = Agents(
         agents=[summary_agent],  # Use summary agent for synthesis
         tasks=[summary_task],
-        verbose=1,
         process="sequential"
     )
     summary_result = await summary_agents.astart()

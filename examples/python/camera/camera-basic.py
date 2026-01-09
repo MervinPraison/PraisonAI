@@ -62,7 +62,6 @@ def capture_and_analyze():
                 agents=[vision_agent],
                 tasks=[task],
                 process="sequential",
-                verbose=1
             )
             
             result = agents.start()

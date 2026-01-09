@@ -228,7 +228,6 @@ process_task = Task(
 workflow = Agents(
     agents=[data_agent, process_agent],
     tasks=[collect_task, validate_task, process_task],
-    verbose=1,
     process="workflow"
 )
 

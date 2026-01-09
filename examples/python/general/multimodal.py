@@ -46,8 +46,7 @@ task3 = Task(
 agents = Agents(
     agents=[vision_agent],
     tasks=[task1, task2, task3],
-    process="sequential",
-    verbose=1
+    process="sequential"
 )
 
 # Run all tasks

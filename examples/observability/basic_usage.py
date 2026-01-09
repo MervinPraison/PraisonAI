@@ -24,13 +24,13 @@ obs.init()
 # Create an agent
 agent = Agent(
     instructions="You are a helpful assistant.",
-    model="gpt-4o-mini",
+    llm="gpt-4o-mini",
 )
 
 # Use trace context manager for complete workflow tracing
 with obs.trace("chat-session", session_id="user-123"):
     # Use span context manager for individual operations
-    with obs.span("user-query", kind=obs.SpanKind.AGENT):
+    with obs.span("user-query"):
         response = agent.chat("What is the capital of France?")
         print(response)
 
