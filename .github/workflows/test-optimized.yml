@@ -55,8 +55,11 @@ jobs:
     - name: Install minimal dependencies
       run: |
         pip install --upgrade pip
-        cd src/praisonai
-        pip install -e ".[dev]" --no-deps || pip install -e .
+        # Install praisonai-agents first (required for tests)
+        cd src/praisonai-agents
+        pip install -e .
+        cd ../praisonai
+        pip install -e .
         pip install pytest pytest-asyncio pytest-timeout
     
     - name: Run Smoke Tests
@@ -108,7 +111,10 @@ jobs:
     - name: Install dependencies
       run: |
         pip install --upgrade pip
-        cd src/praisonai
+        # Install praisonai-agents first (required for tests)
+        cd src/praisonai-agents
+        pip install -e .
+        cd ../praisonai
         pip install -e ".[crewai,autogen]"
         pip install pytest pytest-asyncio pytest-timeout pytest-cov pytest-xdist
     
@@ -186,7 +192,9 @@ jobs:
       if: steps.check-key.outputs.has_key == 'true'
       run: |
         pip install --upgrade pip
-        cd src/praisonai
+        cd src/praisonai-agents
+        pip install -e .
+        cd ../praisonai
         pip install -e ".[openai]"
         pip install pytest pytest-asyncio pytest-timeout
     
@@ -245,7 +253,9 @@ jobs:
       if: steps.check-key.outputs.has_key == 'true'
       run: |
         pip install --upgrade pip
-        cd src/praisonai
+        cd src/praisonai-agents
+        pip install -e .
+        cd ../praisonai
         pip install -e ".[anthropic]"
         pip install pytest pytest-asyncio pytest-timeout
     
@@ -298,7 +308,9 @@ jobs:
       if: steps.check-key.outputs.has_key == 'true'
       run: |
         pip install --upgrade pip
-        cd src/praisonai
+        cd src/praisonai-agents
+        pip install -e .
+        cd ../praisonai
         pip install -e ".[google]"
         pip install pytest pytest-asyncio pytest-timeout
     
@@ -351,7 +363,9 @@ jobs:
       if: steps.check-key.outputs.has_key == 'true'
       run: |
         pip install --upgrade pip
-        cd src/praisonai
+        cd src/praisonai-agents
+        pip install -e .
+        cd ../praisonai
         pip install -e .
         pip install pytest pytest-asyncio pytest-timeout
     
@@ -404,7 +418,9 @@ jobs:
       if: steps.check-key.outputs.has_key == 'true'
       run: |
         pip install --upgrade pip
-        cd src/praisonai
+        cd src/praisonai-agents
+        pip install -e .
+        cd ../praisonai
         pip install -e .
         pip install pytest pytest-asyncio pytest-timeout
     
@@ -457,7 +473,9 @@ jobs:
       if: steps.check-key.outputs.has_key == 'true'
       run: |
         pip install --upgrade pip
-        cd src/praisonai
+        cd src/praisonai-agents
+        pip install -e .
+        cd ../praisonai
         pip install -e ".[cohere]"
         pip install pytest pytest-asyncio pytest-timeout
     
