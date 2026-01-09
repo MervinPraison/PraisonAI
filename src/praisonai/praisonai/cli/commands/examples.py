@@ -21,6 +21,8 @@ app = typer.Typer(help="Run and manage example files")
 def _get_default_examples_path() -> Path:
     """Get default examples path (repo examples/ or cwd)."""
     candidates = [
+        Path.home() / "praisonai-package" / "examples",
+        Path("/Users/praison/praisonai-package/examples"),
         Path.cwd() / "examples",
         Path(__file__).parent.parent.parent.parent.parent / "examples",  # repo root
     ]
@@ -35,7 +37,7 @@ def _get_default_examples_path() -> Path:
 def _get_default_report_dir() -> Path:
     """Get default report directory with timestamp."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return Path.cwd() / "reports" / "examples" / timestamp
+    return Path.home() / "Downloads" / "reports" / "examples" / timestamp
 
 
 @app.command()
@@ -384,6 +386,309 @@ def info(
     typer.echo(f"  XFail: {item.xfail or 'no'}")
     typer.echo(f"  Interactive: {item.is_interactive}")
     typer.echo(f"  Code Hash: {item.code_hash}")
+
+
+@app.command("stats")
+def examples_stats(
+    path: Optional[Path] = typer.Option(
+        None,
+        "--path", "-p",
+        help="Path to examples directory",
+    ),
+    group: Optional[List[str]] = typer.Option(
+        None,
+        "--group", "-g",
+        help="Filter by group (top-level dir)",
+    ),
+):
+    """
+    Show statistics for examples.
+    
+    Displays counts by group, runnable status, and agent-centric usage.
+    
+    Examples:
+        praisonai examples stats
+        praisonai examples stats --group python --group mcp
+    """
+    from collections import Counter
+    from praisonai.suite_runner import ExamplesSource
+    
+    examples_path = path or _get_default_examples_path()
+    
+    if not examples_path.exists():
+        typer.echo(f"❌ Examples path not found: {examples_path}")
+        raise typer.Exit(2)
+    
+    source = ExamplesSource(
+        root=examples_path,
+        groups=list(group) if group else None,
+    )
+    
+    items = source.discover()
+    
+    # Calculate stats
+    group_counts = Counter(item.group for item in items)
+    runnable_by_group = Counter(item.group for item in items if item.runnable)
+    
+    # Agent-centric stats
+    agent_count = sum(1 for item in items if item.uses_agent)
+    agents_count = sum(1 for item in items if item.uses_agents)
+    workflow_count = sum(1 for item in items if item.uses_workflow)
+    
+    agent_by_group = Counter(item.group for item in items if item.uses_agent)
+    agents_by_group = Counter(item.group for item in items if item.uses_agents)
+    workflow_by_group = Counter(item.group for item in items if item.uses_workflow)
+    
+    typer.echo("\n📊 Examples Statistics")
+    typer.echo(f"Path: {examples_path}")
+    typer.echo("=" * 80)
+    
+    typer.echo(f"\n{'Group':<20} {'Total':>8} {'Runnable':>10} {'Agent':>8} {'Agents':>8} {'Workflow':>10}")
+    typer.echo("-" * 80)
+    
+    for g in sorted(group_counts.keys()):
+        typer.echo(
+            f"{g:<20} {group_counts[g]:>8} {runnable_by_group[g]:>10} "
+            f"{agent_by_group[g]:>8} {agents_by_group[g]:>8} {workflow_by_group[g]:>10}"
+        )
+    
+    typer.echo("-" * 80)
+    typer.echo(
+        f"{'TOTAL':<20} {len(items):>8} {sum(1 for i in items if i.runnable):>10} "
+        f"{agent_count:>8} {agents_count:>8} {workflow_count:>10}"
+    )
+    typer.echo()
+
+
+@app.command("run-all")
+def examples_run_all(
+    path: Optional[Path] = typer.Option(
+        None,
+        "--path", "-p",
+        help="Path to examples directory",
+    ),
+    timeout: int = typer.Option(
+        60,
+        "--timeout", "-t",
+        help="Per-example timeout in seconds",
+    ),
+    report_dir: Optional[Path] = typer.Option(
+        None,
+        "--report-dir", "-r",
+        help="Directory for reports (default: ~/Downloads/reports/examples/<timestamp>)",
+    ),
+    parallel: bool = typer.Option(
+        True,
+        "--parallel/--sequential",
+        help="Run groups in parallel (default: parallel)",
+    ),
+    max_workers: int = typer.Option(
+        4,
+        "--workers", "-w",
+        help="Max parallel workers (default: 4)",
+    ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet", "-q",
+        help="Minimal output",
+    ),
+):
+    """
+    Run all examples group-by-group.
+    
+    Executes all groups and generates a comprehensive report.
+    Uses parallel execution by default for faster results.
+    
+    Examples:
+        praisonai examples run-all
+        praisonai examples run-all --sequential
+        praisonai examples run-all --workers 8 --timeout 120
+    """
+    import json
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    from praisonai.suite_runner import ExamplesSource, SuiteExecutor, RunResult
+    
+    examples_path = path or _get_default_examples_path()
+    output_dir = report_dir or _get_default_report_dir()
+    
+    if not examples_path.exists():
+        typer.echo(f"❌ Examples path not found: {examples_path}")
+        raise typer.Exit(2)
+    
+    # Get all groups
+    source = ExamplesSource(root=examples_path)
+    all_groups = sorted(source.get_groups())
+    
+    typer.echo(f"Found {len(all_groups)} groups to process")
+    typer.echo(f"Mode: {'parallel' if parallel else 'sequential'}")
+    typer.echo("=" * 60)
+    
+    # Track overall results
+    overall_results = {
+        'passed': 0, 'failed': 0, 'skipped': 0,
+        'timeout': 0, 'not_run': 0, 'total': 0, 'xfail': 0,
+    }
+    group_summaries = []
+    
+    def run_group(group_name: str) -> dict:
+        """Run a single group and return summary."""
+        group_source = ExamplesSource(root=examples_path, groups=[group_name])
+        items = group_source.discover()
+        
+        if not items:
+            return {
+                'group': group_name,
+                'total': 0, 'passed': 0, 'failed': 0,
+                'skipped': 0, 'timeout': 0, 'not_run': 0, 'xfail': 0,
+            }
+        
+        group_report_dir = output_dir / group_name
+        group_report_dir.mkdir(parents=True, exist_ok=True)
+        
+        executor = SuiteExecutor(
+            suite='examples',
+            source_path=examples_path,
+            report_dir=group_report_dir,
+            timeout=timeout,
+            stream_output=False,
+            generate_json=True,
+            generate_md=True,
+            generate_csv=True,
+            groups=[group_name],
+        )
+        
+        report = executor.run(items=items)
+        totals = report.totals
+        
+        return {
+            'group': group_name,
+            **totals,
+        }
+    
+    if parallel and len(all_groups) > 1:
+        # Parallel execution
+        with ProcessPoolExecutor(max_workers=min(max_workers, len(all_groups))) as pool:
+            futures = {pool.submit(run_group, g): g for g in all_groups}
+            
+            for future in as_completed(futures):
+                group_name = futures[future]
+                try:
+                    summary = future.result()
+                    group_summaries.append(summary)
+                    
+                    # Update overall
+                    for key in overall_results:
+                        if key in summary:
+                            overall_results[key] += summary[key]
+                    
+                    if not quiet:
+                        typer.echo(
+                            f"✅ {group_name}: "
+                            f"✅{summary['passed']} ❌{summary['failed']} "
+                            f"⏭️{summary['skipped']} ⏱️{summary['timeout']} ⚠️{summary.get('xfail', 0)}"
+                        )
+                except Exception as e:
+                    typer.echo(f"❌ {group_name}: Error - {e}")
+    else:
+        # Sequential execution with real-time output
+        for group_name in all_groups:
+            if not quiet:
+                typer.echo(f"\n{'='*60}")
+                typer.echo(f"GROUP: {group_name}")
+                typer.echo(f"{'='*60}")
+            
+            group_source = ExamplesSource(root=examples_path, groups=[group_name])
+            items = group_source.discover()
+            
+            if not items:
+                if not quiet:
+                    typer.echo("  No items found, skipping")
+                group_summaries.append({
+                    'group': group_name,
+                    'total': 0, 'passed': 0, 'failed': 0,
+                    'skipped': 0, 'timeout': 0, 'not_run': 0, 'xfail': 0,
+                })
+                continue
+            
+            group_report_dir = output_dir / group_name
+            group_report_dir.mkdir(parents=True, exist_ok=True)
+            
+            executor = SuiteExecutor(
+                suite='examples',
+                source_path=examples_path,
+                report_dir=group_report_dir,
+                timeout=timeout,
+                stream_output=False,
+                generate_json=True,
+                generate_md=True,
+                generate_csv=True,
+                groups=[group_name],
+            )
+            
+            icons = {'passed': '✅', 'failed': '❌', 'skipped': '⏭️', 'timeout': '⏱️', 'xfail': '⚠️'}
+            
+            def on_start(item, idx, total):
+                if not quiet:
+                    typer.echo(f"  [{idx}/{total}] {item.display_name} ", nl=False)
+            
+            def on_end(result: RunResult, idx, total):
+                if not quiet:
+                    icon = icons.get(result.status, '❓')
+                    typer.echo(f"{icon}")
+            
+            report = executor.run(items=items, on_item_start=on_start, on_item_end=on_end)
+            totals = report.totals
+            
+            group_summaries.append({'group': group_name, **totals})
+            
+            for key in overall_results:
+                if key in totals:
+                    overall_results[key] += totals[key]
+            
+            if not quiet:
+                typer.echo(
+                    f"\n  Summary: ✅{totals['passed']} ❌{totals['failed']} "
+                    f"⏭️{totals['skipped']} ⏱️{totals['timeout']} ⚠️{totals.get('xfail', 0)}"
+                )
+    
+    # Final report
+    typer.echo("\n" + "=" * 80)
+    typer.echo("FINAL REPORT - ALL GROUPS")
+    typer.echo("=" * 80)
+    
+    typer.echo(f"\n{'Group':<20} {'Total':>8} {'Passed':>8} {'Failed':>8} {'Skip':>8} {'Timeout':>8} {'XFail':>8}")
+    typer.echo("-" * 80)
+    
+    for gs in sorted(group_summaries, key=lambda x: x['group']):
+        typer.echo(
+            f"{gs['group']:<20} {gs['total']:>8} {gs['passed']:>8} {gs['failed']:>8} "
+            f"{gs['skipped']:>8} {gs['timeout']:>8} {gs.get('xfail', 0):>8}"
+        )
+    
+    typer.echo("-" * 80)
+    typer.echo(
+        f"{'TOTAL':<20} {overall_results['total']:>8} {overall_results['passed']:>8} "
+        f"{overall_results['failed']:>8} {overall_results['skipped']:>8} "
+        f"{overall_results['timeout']:>8} {overall_results.get('xfail', 0):>8}"
+    )
+    
+    # Save final summary
+    output_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = output_dir / 'final_summary.json'
+    with open(summary_path, 'w') as f:
+        json.dump({
+            'timestamp': datetime.now().isoformat(),
+            'overall': overall_results,
+            'groups': group_summaries,
+        }, f, indent=2)
+    
+    typer.echo(f"\n📁 Final summary saved to: {summary_path}")
+    typer.echo(f"📁 Individual group reports in: {output_dir}")
+    
+    # Exit code
+    if overall_results['failed'] > 0 or overall_results['timeout'] > 0:
+        raise typer.Exit(1)
+    raise typer.Exit(0)
 
 
 if __name__ == "__main__":
