@@ -23,6 +23,7 @@ __all__ = [
     'acp_app',
     'mcp_app',
     'rag_app',
+    'test_app',
 ]
 
 
@@ -76,4 +77,7 @@ def __getattr__(name: str):
     elif name == 'rag_app':
         from .rag import app as rag_app
         return rag_app
+    elif name == 'test_app':
+        from .test import app as test_app
+        return test_app
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

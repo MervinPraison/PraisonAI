@@ -1,0 +1,18 @@
+{
+  "decision": "SKIP",
+  "rationale": "Record/replay (VCR.py or similar) adds complexity without sufficient benefit for this codebase",
+  "reasons": [
+    "OpenAI responses are non-deterministic, making cassette matching unreliable",
+    "API response formats change frequently, requiring cassette maintenance",
+    "Most provider tests are already gated and skipped by default",
+    "The fast_sleep fixture and network guard provide sufficient speedup",
+    "Risk of committing secrets in cassettes outweighs benefits"
+  ],
+  "alternatives_implemented": [
+    "Network guard blocks outbound calls in unit tests",
+    "Provider tests are gated by environment variables",
+    "fast_sleep fixture accelerates sleep-heavy tests",
+    "Smoke/main tiers exclude network tests by default"
+  ],
+  "future_consideration": "If OpenAI live tests become a bottleneck (>5 min), revisit with redacted cassettes"
+}

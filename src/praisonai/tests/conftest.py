@@ -5,10 +5,13 @@ import asyncio
 import warnings
 import gc
 from unittest.mock import Mock, patch
-from typing import Dict, Any, List
 
-# Register pytest-asyncio plugin
-pytest_plugins = ('pytest_asyncio',)
+# Register pytest plugins
+pytest_plugins = (
+    'pytest_asyncio',
+    'tests._pytest_plugins.test_gating',
+    'tests._pytest_plugins.network_guard',
+)
 
 # Suppress aiohttp unclosed session warnings during tests
 warnings.filterwarnings("ignore", message="Unclosed client session")
@@ -114,19 +117,21 @@ def setup_test_environment(request):
     # Real tests (marked with @pytest.mark.real) should use actual environment variables
     is_real_test = False
     
-    # Check if this test is marked as a real test or integration test
+    # Check if this test is marked as a real test, network test, or provider test
     if hasattr(request, 'node') and hasattr(request.node, 'iter_markers'):
         for marker in request.node.iter_markers():
-            if marker.name in ('real', 'integration'):
+            if marker.name in ('real', 'network', 'e2e') or marker.name.startswith('provider_'):
                 is_real_test = True
                 break
     
-    # Also check if the test file is in the integration directory
+    # Also check if the test file is in the integration/live/e2e directory
     if hasattr(request, 'fspath') and request.fspath:
         test_path = str(request.fspath)
         if '/integration/' in test_path or '\\integration\\' in test_path:
             is_real_test = True
         if '/live/' in test_path or '\\live\\' in test_path:
+            is_real_test = True
+        if '/e2e/' in test_path or '\\e2e\\' in test_path:
             is_real_test = True
     
     # Store original values to restore later
@@ -137,7 +142,10 @@ def setup_test_environment(request):
         test_keys = {
             'OPENAI_API_KEY': 'test-key',
             'ANTHROPIC_API_KEY': 'test-key', 
-            'GOOGLE_API_KEY': 'test-key'
+            'GOOGLE_API_KEY': 'test-key',
+            'XAI_API_KEY': 'test-key',
+            'GROQ_API_KEY': 'test-key',
+            'COHERE_API_KEY': 'test-key',
         }
         
         for key, value in test_keys.items():
@@ -152,4 +160,42 @@ def setup_test_environment(request):
             if original_value is None:
                 os.environ.pop(key, None)
             else:
-                os.environ[key] = original_value 
+                os.environ[key] = original_value
+
+
+@pytest.fixture(autouse=True)
+def fast_sleep(request, monkeypatch):
+    """
+    Replace time.sleep and asyncio.sleep with near-instant versions for unit tests.
+    
+    This fixture is automatically applied to all tests but can be disabled by:
+    - Marking the test with @pytest.mark.allow_sleep
+    - Marking the test with @pytest.mark.integration, @pytest.mark.e2e, or @pytest.mark.local_service
+    - Marking the test with @pytest.mark.flaky
+    """
+    # Check if test should use real sleep
+    if hasattr(request, 'node') and hasattr(request.node, 'iter_markers'):
+        for marker in request.node.iter_markers():
+            if marker.name in ('allow_sleep', 'integration', 'e2e', 'local_service', 'flaky'):
+                return  # Don't patch sleep for these tests
+    
+    # Check path-based exclusions
+    if hasattr(request, 'fspath') and request.fspath:
+        test_path = str(request.fspath)
+        if any(p in test_path for p in ['/integration/', '/e2e/', '/live/']):
+            return  # Don't patch sleep for integration/e2e/live tests
+    
+    import time
+    import asyncio
+    
+    # Patch time.sleep to be near-instant (0.001s max)
+    original_sleep = time.sleep
+    def fast_time_sleep(seconds):
+        original_sleep(min(seconds, 0.001))
+    monkeypatch.setattr(time, 'sleep', fast_time_sleep)
+    
+    # Patch asyncio.sleep to be near-instant
+    original_async_sleep = asyncio.sleep
+    async def fast_async_sleep(seconds):
+        await original_async_sleep(min(seconds, 0.001))
+    monkeypatch.setattr(asyncio, 'sleep', fast_async_sleep) 
