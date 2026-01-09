@@ -244,3 +244,52 @@ class TestNetworkGuard:
         assert _is_localhost(("::1", 443))
         assert not _is_localhost(("example.com", 80))
         assert not _is_localhost(("8.8.8.8", 53))
+
+
+class TestExcludedPaths:
+    """Tests for the excluded path detection in gating plugin."""
+    
+    def test_pytest_plugins_excluded(self):
+        """_pytest_plugins directory should be excluded from provider detection."""
+        from tests._pytest_plugins.test_gating import _is_excluded_path
+        
+        assert _is_excluded_path("/path/to/tests/_pytest_plugins/test_gating.py")
+        assert _is_excluded_path("/path/to/tests/_pytest_plugins/network_guard.py")
+        assert _is_excluded_path("tests/_pytest_plugins/some_file.py")
+    
+    def test_meta_excluded(self):
+        """_meta directory should be excluded from provider detection."""
+        from tests._pytest_plugins.test_gating import _is_excluded_path
+        
+        assert _is_excluded_path("/path/to/tests/_meta/inventory.json")
+        assert _is_excluded_path("tests/_meta/anything.py")
+    
+    def test_conftest_excluded(self):
+        """conftest files should be excluded from provider detection."""
+        from tests._pytest_plugins.test_gating import _is_excluded_path
+        
+        assert _is_excluded_path("/path/to/tests/conftest.py")
+        assert _is_excluded_path("conftest.py")
+    
+    def test_fixtures_excluded(self):
+        """fixtures directory should be excluded from provider detection."""
+        from tests._pytest_plugins.test_gating import _is_excluded_path
+        
+        assert _is_excluded_path("/path/to/tests/fixtures/mock_data.py")
+        assert _is_excluded_path("tests/fixtures/")
+    
+    def test_regular_tests_not_excluded(self):
+        """Regular test files should NOT be excluded."""
+        from tests._pytest_plugins.test_gating import _is_excluded_path
+        
+        assert not _is_excluded_path("/path/to/tests/unit/test_agent.py")
+        assert not _is_excluded_path("tests/integration/test_openai.py")
+        assert not _is_excluded_path("tests/e2e/test_workflow.py")
+    
+    def test_nodeid_also_checked(self):
+        """Nodeid should also be checked for exclusions."""
+        from tests._pytest_plugins.test_gating import _is_excluded_path
+        
+        # Even if filepath doesn't match, nodeid should be checked
+        assert _is_excluded_path("/some/path.py", "tests/_pytest_plugins/test_gating.py::test_foo")
+        assert not _is_excluded_path("/some/path.py", "tests/unit/test_agent.py::test_bar")

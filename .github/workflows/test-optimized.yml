@@ -23,6 +23,9 @@ on:
 
 env:
   PYTHONPATH: ${{ github.workspace }}/src/praisonai-agents
+  # Test gating environment variables
+  PRAISONAI_ALLOW_NETWORK: '0'
+  PRAISONAI_LIVE_TESTS: '0'
 
 jobs:
   # ============================================
@@ -142,22 +145,36 @@ jobs:
   # ============================================
   # OPENAI LIVE TESTS - Real OpenAI API calls
   # Only runs if OPENAI_API_KEY secret is set
+  # Safe for forks (skips gracefully if no key)
   # ============================================
   openai-live:
     needs: smoke
-    if: ${{ secrets.OPENAI_API_KEY != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
+    # This job always runs but steps are conditional on secret availability
     
     steps:
+    - name: Check if OpenAI key is available
+      id: check-key
+      run: |
+        if [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
+          echo "has_key=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_key=false" >> $GITHUB_OUTPUT
+          echo "⚠️ OPENAI_API_KEY not set - skipping live tests"
+        fi
+    
     - uses: actions/checkout@v4
+      if: steps.check-key.outputs.has_key == 'true'
     
     - name: Set up Python 3.11
+      if: steps.check-key.outputs.has_key == 'true'
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
     
     - name: Cache pip packages
+      if: steps.check-key.outputs.has_key == 'true'
       uses: actions/cache@v4
       with:
         path: ~/.cache/pip
@@ -166,6 +183,7 @@ jobs:
           ${{ runner.os }}-pip-
     
     - name: Install dependencies
+      if: steps.check-key.outputs.has_key == 'true'
       run: |
         pip install --upgrade pip
         cd src/praisonai
@@ -173,6 +191,7 @@ jobs:
         pip install pytest pytest-asyncio pytest-timeout
     
     - name: Run OpenAI Live Tests
+      if: steps.check-key.outputs.has_key == 'true'
       env:
         PRAISONAI_TEST_TIER: extended
         PRAISONAI_ALLOW_NETWORK: '1'
@@ -188,6 +207,10 @@ jobs:
           --timeout=120 \
           --ignore=tests/fixtures \
           || echo "Some OpenAI tests failed"
+    
+    - name: Skip notice
+      if: steps.check-key.outputs.has_key == 'false'
+      run: echo "✅ OpenAI live tests skipped (no API key available - this is expected for forks)"
 
   # ============================================
   # EXTENDED PROVIDER TESTS - Nightly only
@@ -199,14 +222,27 @@ jobs:
     timeout-minutes: 10
     
     steps:
+    - name: Check if Anthropic key is available
+      id: check-key
+      run: |
+        if [ -n "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+          echo "has_key=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_key=false" >> $GITHUB_OUTPUT
+          echo "⚠️ ANTHROPIC_API_KEY not set - skipping tests"
+        fi
+    
     - uses: actions/checkout@v4
+      if: steps.check-key.outputs.has_key == 'true'
     
     - name: Set up Python 3.11
+      if: steps.check-key.outputs.has_key == 'true'
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
     
     - name: Install dependencies
+      if: steps.check-key.outputs.has_key == 'true'
       run: |
         pip install --upgrade pip
         cd src/praisonai
@@ -214,7 +250,7 @@ jobs:
         pip install pytest pytest-asyncio pytest-timeout
     
     - name: Run Anthropic Tests
-      if: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      if: steps.check-key.outputs.has_key == 'true'
       env:
         PRAISONAI_ALLOW_NETWORK: '1'
         PRAISONAI_LIVE_TESTS: '1'
@@ -229,9 +265,9 @@ jobs:
           --ignore=tests/fixtures \
           || echo "Anthropic tests completed"
     
-    - name: Skip if no API key
-      if: ${{ secrets.ANTHROPIC_API_KEY == '' }}
-      run: echo "⚠️ Skipping Anthropic tests - ANTHROPIC_API_KEY not set"
+    - name: Skip notice
+      if: steps.check-key.outputs.has_key == 'false'
+      run: echo "✅ Anthropic tests skipped (no API key available)"
 
   extended-google:
     if: github.event_name == 'schedule' || github.event.inputs.tier == 'extended' || github.event.inputs.tier == 'nightly'
@@ -239,14 +275,27 @@ jobs:
     timeout-minutes: 10
     
     steps:
+    - name: Check if Google key is available
+      id: check-key
+      run: |
+        if [ -n "${{ secrets.GOOGLE_API_KEY }}" ]; then
+          echo "has_key=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_key=false" >> $GITHUB_OUTPUT
+          echo "⚠️ GOOGLE_API_KEY not set - skipping tests"
+        fi
+    
     - uses: actions/checkout@v4
+      if: steps.check-key.outputs.has_key == 'true'
     
     - name: Set up Python 3.11
+      if: steps.check-key.outputs.has_key == 'true'
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
     
     - name: Install dependencies
+      if: steps.check-key.outputs.has_key == 'true'
       run: |
         pip install --upgrade pip
         cd src/praisonai
@@ -254,7 +303,7 @@ jobs:
         pip install pytest pytest-asyncio pytest-timeout
     
     - name: Run Google/Gemini Tests
-      if: ${{ secrets.GOOGLE_API_KEY != '' }}
+      if: steps.check-key.outputs.has_key == 'true'
       env:
         PRAISONAI_ALLOW_NETWORK: '1'
         PRAISONAI_LIVE_TESTS: '1'
@@ -269,9 +318,9 @@ jobs:
           --ignore=tests/fixtures \
           || echo "Google tests completed"
     
-    - name: Skip if no API key
-      if: ${{ secrets.GOOGLE_API_KEY == '' }}
-      run: echo "⚠️ Skipping Google tests - GOOGLE_API_KEY not set"
+    - name: Skip notice
+      if: steps.check-key.outputs.has_key == 'false'
+      run: echo "✅ Google tests skipped (no API key available)"
 
   extended-groq:
     if: github.event_name == 'schedule' || github.event.inputs.tier == 'extended' || github.event.inputs.tier == 'nightly'
@@ -279,14 +328,27 @@ jobs:
     timeout-minutes: 10
     
     steps:
+    - name: Check if Groq key is available
+      id: check-key
+      run: |
+        if [ -n "${{ secrets.GROQ_API_KEY }}" ]; then
+          echo "has_key=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_key=false" >> $GITHUB_OUTPUT
+          echo "⚠️ GROQ_API_KEY not set - skipping tests"
+        fi
+    
     - uses: actions/checkout@v4
+      if: steps.check-key.outputs.has_key == 'true'
     
     - name: Set up Python 3.11
+      if: steps.check-key.outputs.has_key == 'true'
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
     
     - name: Install dependencies
+      if: steps.check-key.outputs.has_key == 'true'
       run: |
         pip install --upgrade pip
         cd src/praisonai
@@ -294,7 +356,7 @@ jobs:
         pip install pytest pytest-asyncio pytest-timeout
     
     - name: Run Groq Tests
-      if: ${{ secrets.GROQ_API_KEY != '' }}
+      if: steps.check-key.outputs.has_key == 'true'
       env:
         PRAISONAI_ALLOW_NETWORK: '1'
         PRAISONAI_LIVE_TESTS: '1'
@@ -309,9 +371,9 @@ jobs:
           --ignore=tests/fixtures \
           || echo "Groq tests completed"
     
-    - name: Skip if no API key
-      if: ${{ secrets.GROQ_API_KEY == '' }}
-      run: echo "⚠️ Skipping Groq tests - GROQ_API_KEY not set"
+    - name: Skip notice
+      if: steps.check-key.outputs.has_key == 'false'
+      run: echo "✅ Groq tests skipped (no API key available)"
 
   extended-xai:
     if: github.event_name == 'schedule' || github.event.inputs.tier == 'extended' || github.event.inputs.tier == 'nightly'
@@ -319,14 +381,27 @@ jobs:
     timeout-minutes: 10
     
     steps:
+    - name: Check if xAI key is available
+      id: check-key
+      run: |
+        if [ -n "${{ secrets.XAI_API_KEY }}" ]; then
+          echo "has_key=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_key=false" >> $GITHUB_OUTPUT
+          echo "⚠️ XAI_API_KEY not set - skipping tests"
+        fi
+    
     - uses: actions/checkout@v4
+      if: steps.check-key.outputs.has_key == 'true'
     
     - name: Set up Python 3.11
+      if: steps.check-key.outputs.has_key == 'true'
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
     
     - name: Install dependencies
+      if: steps.check-key.outputs.has_key == 'true'
       run: |
         pip install --upgrade pip
         cd src/praisonai
@@ -334,7 +409,7 @@ jobs:
         pip install pytest pytest-asyncio pytest-timeout
     
     - name: Run xAI/Grok Tests
-      if: ${{ secrets.XAI_API_KEY != '' }}
+      if: steps.check-key.outputs.has_key == 'true'
       env:
         PRAISONAI_ALLOW_NETWORK: '1'
         PRAISONAI_LIVE_TESTS: '1'
@@ -349,9 +424,9 @@ jobs:
           --ignore=tests/fixtures \
           || echo "xAI tests completed"
     
-    - name: Skip if no API key
-      if: ${{ secrets.XAI_API_KEY == '' }}
-      run: echo "⚠️ Skipping xAI tests - XAI_API_KEY not set"
+    - name: Skip notice
+      if: steps.check-key.outputs.has_key == 'false'
+      run: echo "✅ xAI tests skipped (no API key available)"
 
   extended-cohere:
     if: github.event_name == 'schedule' || github.event.inputs.tier == 'extended' || github.event.inputs.tier == 'nightly'
@@ -359,14 +434,27 @@ jobs:
     timeout-minutes: 10
     
     steps:
+    - name: Check if Cohere key is available
+      id: check-key
+      run: |
+        if [ -n "${{ secrets.COHERE_API_KEY }}" ]; then
+          echo "has_key=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_key=false" >> $GITHUB_OUTPUT
+          echo "⚠️ COHERE_API_KEY not set - skipping tests"
+        fi
+    
     - uses: actions/checkout@v4
+      if: steps.check-key.outputs.has_key == 'true'
     
     - name: Set up Python 3.11
+      if: steps.check-key.outputs.has_key == 'true'
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
     
     - name: Install dependencies
+      if: steps.check-key.outputs.has_key == 'true'
       run: |
         pip install --upgrade pip
         cd src/praisonai
@@ -374,7 +462,7 @@ jobs:
         pip install pytest pytest-asyncio pytest-timeout
     
     - name: Run Cohere Tests
-      if: ${{ secrets.COHERE_API_KEY != '' }}
+      if: steps.check-key.outputs.has_key == 'true'
       env:
         PRAISONAI_ALLOW_NETWORK: '1'
         PRAISONAI_LIVE_TESTS: '1'
@@ -389,9 +477,9 @@ jobs:
           --ignore=tests/fixtures \
           || echo "Cohere tests completed"
     
-    - name: Skip if no API key
-      if: ${{ secrets.COHERE_API_KEY == '' }}
-      run: echo "⚠️ Skipping Cohere tests - COHERE_API_KEY not set"
+    - name: Skip notice
+      if: steps.check-key.outputs.has_key == 'false'
+      run: echo "✅ Cohere tests skipped (no API key available)"
 
   # ============================================
   # TEST SUMMARY
