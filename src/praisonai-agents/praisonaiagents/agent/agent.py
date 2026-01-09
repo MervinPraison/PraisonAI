@@ -522,34 +522,45 @@ class Agent:
             cache, prompt_caching = True, None
         
         # ─────────────────────────────────────────────────────────────────────
-        # Resolve HOOKS param
-        # Supports: None, list of callables, HooksConfig
+        # Resolve HOOKS param using unified resolver
+        # Supports: None, list of callables, HooksConfig, dict
         # ─────────────────────────────────────────────────────────────────────
         _hooks_list = []
         step_callback = None
-        if hooks is not None:
-            if isinstance(hooks, list):
-                _hooks_list = hooks
-            elif isinstance(hooks, HooksConfig):
-                step_callback = hooks.on_step
-                _hooks_list = hooks.middleware or []
-            elif isinstance(hooks, dict):
-                step_callback = hooks.get('on_step')
-                _hooks_list = hooks.get('middleware', [])
+        _hooks_config = resolve(
+            value=hooks,
+            param_name="hooks",
+            config_class=HooksConfig,
+            array_mode=ArrayMode.PASSTHROUGH,
+            default=None,
+        )
+        if _hooks_config is not None:
+            if isinstance(_hooks_config, list):
+                _hooks_list = _hooks_config
+            elif isinstance(_hooks_config, HooksConfig):
+                step_callback = _hooks_config.on_step
+                _hooks_list = _hooks_config.middleware or []
         
         # ─────────────────────────────────────────────────────────────────────
-        # Resolve SKILLS param
-        # Supports: None, list of paths, SkillsConfig
+        # Resolve SKILLS param using unified resolver
+        # Supports: None, list of paths, SkillsConfig, str
         # ─────────────────────────────────────────────────────────────────────
         _skills = None
-        if skills is not None:
-            if isinstance(skills, list):
-                _skills = skills
-            elif isinstance(skills, SkillsConfig):
-                _skills = skills.paths
-                skills_dirs = skills.dirs
-            elif isinstance(skills, str):
-                _skills = [skills]
+        skills_dirs = None
+        _skills_config = resolve(
+            value=skills,
+            param_name="skills",
+            config_class=SkillsConfig,
+            array_mode=ArrayMode.SOURCES,
+            string_mode="path_as_source",
+            default=None,
+        )
+        if _skills_config is not None:
+            if isinstance(_skills_config, SkillsConfig):
+                _skills = _skills_config.paths
+                skills_dirs = _skills_config.dirs
+            elif isinstance(_skills_config, list):
+                _skills = _skills_config
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve MEMORY param using unified resolver
@@ -595,36 +606,42 @@ class Agent:
             memory = None
         
         # ─────────────────────────────────────────────────────────────────────
-        # Resolve KNOWLEDGE param
+        # Resolve KNOWLEDGE param using unified resolver
         # Supports: None, bool, str path, list of sources, KnowledgeConfig, Instance
         # ─────────────────────────────────────────────────────────────────────
         retrieval_config = None
         embedder_config = None
         
-        if knowledge is not None and knowledge is not False:
-            if isinstance(knowledge, list):
-                # List of sources - use directly
-                pass
-            elif hasattr(knowledge, 'search') and hasattr(knowledge, 'add'):
+        _knowledge_config = resolve(
+            value=knowledge,
+            param_name="knowledge",
+            config_class=KnowledgeConfig,
+            instance_check=lambda v: hasattr(v, 'search') and hasattr(v, 'add'),
+            array_mode=ArrayMode.SOURCES_WITH_CONFIG,
+            string_mode="path_as_source",
+            default=None,
+        )
+        
+        if _knowledge_config is not None:
+            if hasattr(_knowledge_config, 'search') and hasattr(_knowledge_config, 'add'):
                 # Knowledge instance - pass through
-                pass
-            elif isinstance(knowledge, KnowledgeConfig):
-                embedder_config = knowledge.embedder_config
-                if knowledge.config:
-                    retrieval_config = knowledge.config
+                knowledge = _knowledge_config
+            elif isinstance(_knowledge_config, KnowledgeConfig):
+                embedder_config = _knowledge_config.embedder_config
+                if _knowledge_config.config:
+                    retrieval_config = _knowledge_config.config
                 else:
                     retrieval_config = {
-                        'top_k': knowledge.retrieval_k,
-                        'threshold': knowledge.retrieval_threshold,
-                        'rerank': knowledge.rerank,
-                        'rerank_model': knowledge.rerank_model,
+                        'top_k': _knowledge_config.retrieval_k,
+                        'threshold': _knowledge_config.retrieval_threshold,
+                        'rerank': _knowledge_config.rerank,
+                        'rerank_model': _knowledge_config.rerank_model,
                     }
-                knowledge = knowledge.sources if knowledge.sources else None
-            elif isinstance(knowledge, str):
-                # Single path - convert to list
-                knowledge = [knowledge]
-            elif knowledge is True:
-                knowledge = None
+                knowledge = _knowledge_config.sources if _knowledge_config.sources else None
+            elif isinstance(_knowledge_config, list):
+                knowledge = _knowledge_config
+        elif knowledge is False:
+            knowledge = None
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve PLANNING param
@@ -681,22 +698,25 @@ class Agent:
             self_reflect = False
         
         # ─────────────────────────────────────────────────────────────────────
-        # Resolve GUARDRAILS param
+        # Resolve GUARDRAILS param using unified resolver
         # Supports: None, bool, callable, str prompt, GuardrailConfig
         # ─────────────────────────────────────────────────────────────────────
-        if guardrails is not None:
-            if guardrails is False:
-                guardrail = None
-            elif callable(guardrails):
-                guardrail = guardrails
-            elif isinstance(guardrails, GuardrailConfig):
-                guardrail = guardrails.validator or guardrails.llm_validator
-                max_guardrail_retries = guardrails.max_retries
-            elif isinstance(guardrails, str):
-                # Long string = LLM validator prompt
-                guardrail = guardrails
-            elif guardrails is True:
-                pass  # No-op, user must provide validator
+        from .._resolver_helpers import resolve_guardrails as _resolve_guardrails
+        _guardrails_config = _resolve_guardrails(
+            value=guardrails,
+            config_class=GuardrailConfig,
+        )
+        
+        if _guardrails_config is not None:
+            if callable(_guardrails_config) and not isinstance(_guardrails_config, type):
+                # Callable validator function
+                guardrail = _guardrails_config
+            elif isinstance(_guardrails_config, GuardrailConfig):
+                guardrail = _guardrails_config.validator or _guardrails_config.llm_validator
+                max_guardrail_retries = _guardrails_config.max_retries
+            elif isinstance(_guardrails_config, str):
+                # LLM validator prompt
+                guardrail = _guardrails_config
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve WEB param using unified resolver

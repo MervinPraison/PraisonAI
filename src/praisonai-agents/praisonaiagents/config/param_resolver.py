@@ -12,7 +12,8 @@ This is the SINGLE, DRY resolver used by:
 Performance: O(1) happy path. Typo suggestions only on error path.
 """
 
-from typing import Any, Callable, Dict, Optional, Type, Union
+from typing import Any, Callable, Dict, Optional, Set, Type, Union
+import inspect
 
 from .parse_utils import (
     detect_url_scheme,
@@ -401,16 +402,51 @@ def _get_config_fields(config_class: Type) -> str:
     return "unknown"
 
 
+def _get_valid_keys(config_class: Type) -> Optional[Set[str]]:
+    """
+    Get valid keys from a config class.
+    
+    Supports:
+    - Dataclasses (via __dataclass_fields__)
+    - Regular classes (via __init__ signature)
+    - Classes with __annotations__
+    
+    Returns:
+        Set of valid key names, or None if cannot determine.
+    """
+    # 1. Dataclass fields (most common)
+    if hasattr(config_class, '__dataclass_fields__'):
+        return set(config_class.__dataclass_fields__.keys())
+    
+    # 2. __init__ signature parameters
+    try:
+        sig = inspect.signature(config_class.__init__)
+        params = set(sig.parameters.keys()) - {'self'}
+        if params:
+            return params
+    except (ValueError, TypeError):
+        pass
+    
+    # 3. Class annotations
+    if hasattr(config_class, '__annotations__'):
+        return set(config_class.__annotations__.keys())
+    
+    # Cannot determine valid keys
+    return None
+
+
 def _validate_dict_keys(value: dict, config_class: Type) -> list:
     """
     Validate dict keys against config class fields.
     Returns list of unknown keys (empty if all valid).
     O(n) where n = number of keys in dict (typically small).
-    """
-    if not hasattr(config_class, '__dataclass_fields__'):
-        return []  # Not a dataclass, can't validate
     
-    valid_keys = set(config_class.__dataclass_fields__.keys())
+    Works for both dataclasses and regular classes.
+    """
+    valid_keys = _get_valid_keys(config_class)
+    if valid_keys is None:
+        return []  # Cannot validate, allow all keys
+    
     provided_keys = set(value.keys())
     unknown = provided_keys - valid_keys
     return list(unknown)
