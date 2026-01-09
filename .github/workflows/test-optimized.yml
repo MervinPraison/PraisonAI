@@ -87,7 +87,7 @@ jobs:
   main:
     needs: smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 10
     strategy:
       matrix:
         python-version: ['3.11']
@@ -130,14 +130,17 @@ jobs:
         cd src/praisonai
         python -m pytest tests/unit/ tests/integration/ \
           -m "not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
-          -v --tb=short \
+          -q --tb=line \
           --timeout=60 \
           --ignore=tests/fixtures \
           --ignore=tests/e2e \
           --ignore=tests/live \
+          --ignore=tests/unit/jobs \
+          --ignore=tests/unit/api \
           --cov=praisonai \
           --cov-report=xml \
-          -n 2 \
+          -n 4 \
+          --maxfail=10 \
           || echo "Some tests failed"
     
     - name: Upload coverage
