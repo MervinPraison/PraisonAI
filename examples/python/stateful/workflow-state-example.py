@@ -91,7 +91,6 @@ def main():
         memory=True,
         process="workflow",
         user_id="research_project_001",
-        verbose=1
     )
     
     print(f"🤖 Created workflow with {len(workflow.agents)} agents and {len(workflow.tasks)} tasks")

@@ -51,7 +51,6 @@ def basic_rag_example():
         
         COMPANY DATABASE:
         {context}""",
-        verbose=False
     )
     
     # Test queries

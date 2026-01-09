@@ -99,7 +99,6 @@ sync_agent = Agent(
     backstory="Expert in sync operations and data organization",
     tools=[sync_search_tool],
     reflection=False,
-    markdown=True
 )
 
 async_agent = Agent(
@@ -109,7 +108,6 @@ async_agent = Agent(
     backstory="Expert in async operations and data organization",
     tools=[async_search_tool],
     reflection=False,
-    markdown=True
 )
 
 # 5. Create tasks with different configurations
@@ -161,7 +159,6 @@ def run_sync_example():
     agents = Agents(
         agents=[sync_agent],
         tasks=[sync_task],
-        verbose=1,
         process="sequential"
     )
     result = agents.start()
@@ -173,7 +170,6 @@ async def run_async_example():
     agents = Agents(
         agents=[async_agent],
         tasks=[async_task],
-        verbose=1,
         process="sequential"
     )
     result = await agents.astart()
@@ -185,7 +181,6 @@ async def run_mixed_example():
     agents = Agents(
         agents=[sync_agent, async_agent],
         tasks=[sync_task, async_task],
-        verbose=1,
         process="sequential"
     )
     result = await agents.astart()
@@ -197,7 +192,6 @@ async def run_workflow_example():
     agents = Agents(
         agents=[sync_agent, async_agent],
         tasks=[workflow_sync_task, workflow_async_task],
-        verbose=1,
         process="workflow"
     )
     result = await agents.astart()

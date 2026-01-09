@@ -54,7 +54,6 @@ async_agent = Agent(
     backstory="Expert in efficient data retrieval and parallel search operations",
     tools=[async_search_tool],
     reflection=False,
-    markdown=True
 )
 
 summary_agent = Agent(
@@ -63,7 +62,6 @@ summary_agent = Agent(
     goal="Create concise summaries from multiple search results",
     backstory="Expert in analyzing and synthesizing information from multiple sources",
     reflection=True,
-    markdown=True
 )
 
 # 5. Create async tasks
@@ -116,7 +114,6 @@ async def run_parallel_tasks():
     agents = Agents(
         agents=[async_agent, summary_agent],
         tasks=parallel_tasks + [summary_task],
-        verbose=1,
         process="sequential"
     )
     

@@ -135,7 +135,6 @@ class CameraVideoAnalyzer:
             agents=[self.video_agent],
             tasks=[task],
             process="sequential",
-            verbose=1
         )
         
         return agents.start()

@@ -40,7 +40,6 @@ agents = Agents(
     agents=[image_agent],
     tasks=[task1, task2],
     process="sequential",
-    verbose=1
 )
 
 # Run all tasks

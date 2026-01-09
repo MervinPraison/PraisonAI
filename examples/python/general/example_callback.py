@@ -127,10 +127,6 @@ def main():
         allow_delegation=False,
         tools=[internet_search_tool],
         llm="gpt-4o-mini",
-        markdown=True,
-        
-        
-        
     )
     
     writer = Agent(
@@ -142,7 +138,6 @@ def main():
         allow_delegation=True,
         llm="gpt-4o-mini",
         tools=[],
-        markdown=True
     )
 
     # Create tasks with callbacks

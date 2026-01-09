@@ -118,7 +118,6 @@ def analyze_with_multiple_agents():
         agents=[security_agent, object_detector, scene_analyst],
         tasks=[security_task, object_task, scene_task],
         process="parallel",  # Run all analyses in parallel
-        verbose=1
     )
     
     result = agents.start()

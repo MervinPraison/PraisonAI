@@ -152,7 +152,6 @@ def main():
     agents_system = Agents(
         agents=[researcher],
         tasks=[build_knowledge_task, query_knowledge_task, expand_knowledge_task],
-        verbose=1,
         memory=True,
         memory_config=memory_config
     )
