@@ -1,17 +1,20 @@
 """
 Agent-Centric API Example
 
-Demonstrates the new consolidated feature parameters for PraisonAI Agents.
+Demonstrates the consolidated feature parameters for PraisonAI Agents.
 These params provide a cleaner, more intuitive API with progressive disclosure.
 
-New Consolidated Params:
-- memory: Union[bool, MemoryConfig, MemoryManager] - Memory and session management
-- knowledge: Union[bool, List[str], KnowledgeConfig, KnowledgeBase] - RAG and retrieval
-- planning: Union[bool, PlanningConfig] - Planning mode
-- reflection: Union[bool, ReflectionConfig] - Self-reflection
-- guardrails: Union[bool, Callable, GuardrailConfig] - Safety validation
-- web: Union[bool, WebConfig] - Web search and fetch
-- context: Union[bool, ManagerConfig, ContextManager] - Context management
+Precedence Rule: Instance > Config > Array > String > Bool > Default
+
+Consolidated Params Support:
+- memory: bool | str URL | str preset | [preset, overrides] | MemoryConfig | Instance
+- knowledge: bool | str path | [sources...] | KnowledgeConfig | Instance
+- planning: bool | str LLM | [preset, overrides] | PlanningConfig
+- reflection: bool | str preset | [preset, overrides] | ReflectionConfig
+- guardrails: bool | callable | str prompt | GuardrailConfig
+- web: bool | str provider | [provider, overrides] | WebConfig
+- output: str preset | [preset, overrides] | OutputConfig
+- execution: str preset | [preset, overrides] | ExecutionConfig
 """
 
 from praisonaiagents import (
@@ -140,6 +143,86 @@ def example_real_chat():
     print(f"Response: {response}")
 
 
+def example_string_presets():
+    """Example 7: String presets (NEW - user-friendly shortcuts)"""
+    print("\n=== Example 7: String Presets ===")
+    
+    # Output presets: minimal, normal, verbose, debug, silent
+    agent = Agent(
+        instructions="You are a verbose assistant",
+        output="verbose",      # String preset for output
+        execution="fast",      # String preset for execution
+        web="tavily",          # String preset for web provider
+    )
+    print(f"Output preset 'verbose': verbose={agent.verbose}, metrics={agent.metrics}")
+    print(f"Execution preset 'fast': max_iter={agent.max_iter}")
+    print(f"Web preset 'tavily': web_search={agent.web_search}")
+
+
+def example_array_overrides():
+    """Example 8: Array with overrides (NEW - preset + customization)"""
+    print("\n=== Example 8: Array Overrides ===")
+    
+    # Array format: [preset, {overrides}]
+    agent = Agent(
+        instructions="You are a streaming assistant",
+        output=["verbose", {"stream": True}],      # Verbose preset + enable streaming
+        execution=["fast", {"max_iter": 15}],      # Fast preset + custom max_iter
+    )
+    print(f"Output array override: verbose={agent.verbose}, stream={agent.stream}")
+    print(f"Execution array override: max_iter={agent.max_iter}")
+
+
+def example_url_parsing():
+    """Example 9: URL parsing for memory (NEW - connection strings)"""
+    print("\n=== Example 9: URL Parsing ===")
+    
+    # Memory supports URL connection strings
+    # Supported: postgresql://, redis://, sqlite:///, mongodb://
+    agent = Agent(
+        instructions="You are a database-backed assistant",
+        memory="postgresql://postgres:password@localhost:5432/praisonai",
+    )
+    print("Memory URL parsed: memory enabled")
+    
+    # Also works with presets
+    agent2 = Agent(
+        instructions="You are a redis-backed assistant",
+        memory="redis",  # Preset name
+    )
+    print("Memory preset 'redis': configured")
+
+
+def example_knowledge_sources():
+    """Example 10: Knowledge with sources (list and string)"""
+    print("\n=== Example 10: Knowledge Sources ===")
+    
+    # Single path string
+    agent1 = Agent(
+        instructions="You are a document assistant",
+        knowledge="docs/",  # Single path
+    )
+    print(f"Knowledge single path: knowledge={agent1.knowledge}")
+    
+    # List of sources
+    agent2 = Agent(
+        instructions="You are a multi-source assistant",
+        knowledge=["docs/", "data.pdf", "https://example.com/api"],
+    )
+    print(f"Knowledge list: knowledge={agent2.knowledge}")
+    
+    # With config for advanced settings
+    agent3 = Agent(
+        instructions="You are an advanced RAG assistant",
+        knowledge=KnowledgeConfig(
+            sources=["docs/"],
+            retrieval_k=10,
+            rerank=True,
+        ),
+    )
+    print("Knowledge config: configured with rerank")
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("PraisonAI Agent-Centric API Examples")
@@ -151,6 +234,10 @@ if __name__ == "__main__":
     example_planning()
     example_backward_compatible()
     example_real_chat()
+    example_string_presets()
+    example_array_overrides()
+    example_url_parsing()
+    example_knowledge_sources()
     
     print("\n" + "=" * 60)
     print("All examples completed!")

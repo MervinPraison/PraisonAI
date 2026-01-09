@@ -163,7 +163,7 @@ def main():
             list_all_templates_tool,
             get_template_details_tool
         ],
-        verbose=True
+        output="verbose"  # Use new consolidated param
     )
     
     # Example queries

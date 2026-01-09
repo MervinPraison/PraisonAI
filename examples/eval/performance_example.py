@@ -26,7 +26,7 @@ if has_api_key:
         num_iterations=10,  # Run 10 benchmark iterations
         warmup_runs=2,      # 2 warmup runs before measurement
         track_memory=True,  # Track memory usage
-        verbose=True
+        output="verbose"
     )
 
     # Run evaluation

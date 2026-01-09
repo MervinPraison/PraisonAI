@@ -5,8 +5,8 @@ This example demonstrates the various output modes and configurations
 available in PraisonAI agents.
 
 Features demonstrated:
-- verbose=True: Full output with agent info, task, and response panels
-- verbose=False: Clean output with just the result
+- output="verbose": Full output with agent info, task, and response panels
+- output="minimal": Clean output with just the result
 - Tool call display with consolidated output
 - Multi-agent output with clear attribution
 """
@@ -29,30 +29,30 @@ def get_weather(city: str) -> str:
 
 
 def example_verbose_true():
-    """Example with verbose=True (default) - shows full output panels."""
+    """Example with output='verbose' - shows full output panels."""
     print("\n" + "=" * 60)
-    print("EXAMPLE 1: verbose=True (Full Output)")
+    print("EXAMPLE 1: output='verbose' (Full Output)")
     print("=" * 60)
     
     agent = Agent(
         name="Assistant",
         instructions="You are a helpful assistant. Be concise.",
-        verbose=True  # Default - shows Agent Info, Task, and Response panels
+        output="verbose"  # Shows Agent Info, Task, and Response panels
     )
     result = agent.start("What is the capital of France? Answer in one sentence.")
     print(f"\nReturned value: {result}")
 
 
 def example_verbose_false():
-    """Example with verbose=False - clean output, just the result."""
+    """Example with output='minimal' - clean output, just the result."""
     print("\n" + "=" * 60)
-    print("EXAMPLE 2: verbose=False (Clean Output)")
+    print("EXAMPLE 2: output='minimal' (Clean Output)")
     print("=" * 60)
     
     agent = Agent(
         name="Assistant",
         instructions="You are a helpful assistant. Be concise.",
-        verbose=False  # No panels, just returns the result
+        output="minimal"  # No panels, just returns the result
     )
     result = agent.start("What is 2+2? Answer in one word.")
     print(f"Result: {result}")
@@ -68,7 +68,7 @@ def example_with_tools():
         name="Weather Bot",
         instructions="You help users check the weather. Use the get_weather tool.",
         tools=[get_weather],
-        verbose=True
+        output="verbose"
     )
     result = agent.start("What's the weather in Tokyo?")
     print(f"\nReturned value: {result}")
@@ -84,14 +84,14 @@ def example_multi_agent():
         name="Researcher",
         role="Research Analyst",
         instructions="You research topics and provide factual information.",
-        verbose=True
+        output="verbose"
     )
     
     writer = Agent(
         name="Writer",
         role="Content Writer",
         instructions="You write clear summaries based on research.",
-        verbose=True
+        output="verbose"
     )
     
     task1 = Task(
@@ -110,7 +110,7 @@ def example_multi_agent():
         agents=[researcher, writer],
         tasks=[task1, task2],
         process="sequential",
-        verbose=1
+        output="verbose"
     )
     
     result = agents.start()

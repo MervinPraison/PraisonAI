@@ -68,7 +68,7 @@ agent = Agent(
     instructions="You are a helpful assistant that summarizes web content",
     llm="gemini/gemini-2.5-flash-lite-preview-06-17",
     reflection=False,
-    verbose=True,
+    output="verbose",  # Use new consolidated param
     tools=[get_url_context]  # FIX: tools must be a list, not a single function
 )
 

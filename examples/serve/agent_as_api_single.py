@@ -49,7 +49,7 @@ def main():
         goal="Help users with their questions accurately and concisely",
         backstory="You are a knowledgeable assistant who provides clear, helpful answers.",
         llm="gpt-4o-mini",
-        verbose=True
+        output="verbose"
     )
     
     print(f"Agent: {agent.name}")

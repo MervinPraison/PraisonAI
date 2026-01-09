@@ -1,0 +1,545 @@
+"""
+Unified Parameter Resolver for Consolidated Parameters.
+
+Implements the precedence rules: Instance > Config > Array > String > Bool > Default
+
+This is the SINGLE, DRY resolver used by:
+- Agent
+- Agents
+- Workflow
+- WorkflowStep
+
+Performance: O(1) happy path. Typo suggestions only on error path.
+"""
+
+from typing import Any, Callable, Dict, Optional, Type, Union
+
+from .parse_utils import (
+    detect_url_scheme,
+    is_path_like,
+    make_preset_error,
+    merge_config_with_overrides,
+)
+
+
+# =============================================================================
+# Array Modes
+# =============================================================================
+
+class ArrayMode:
+    """Array parsing modes."""
+    PASSTHROUGH = "passthrough"  # Return list as-is (e.g., hooks)
+    SOURCES = "sources"  # List of source paths/URLs
+    SOURCES_WITH_CONFIG = "sources_with_config"  # Sources + optional config dict at end
+    PRESET_OVERRIDE = "preset_override"  # [preset, {overrides}]
+    SINGLE_OR_LIST = "single_or_list"  # Single item treated as scalar, else list
+    STEP_NAMES = "step_names"  # List of step names (workflow context/routing)
+
+
+# =============================================================================
+# Main Resolver Function
+# =============================================================================
+
+def resolve(
+    value: Any,
+    param_name: str,
+    config_class: Optional[Type] = None,
+    presets: Optional[Dict[str, Any]] = None,
+    default: Any = None,
+    instance_check: Optional[Callable[[Any], bool]] = None,
+    url_schemes: Optional[Dict[str, str]] = None,
+    array_mode: Optional[str] = None,
+    string_mode: Optional[str] = None,
+) -> Any:
+    """
+    Resolve a consolidated parameter following precedence rules:
+    Instance > Config > Array > String > Bool > Default
+    
+    Args:
+        value: The parameter value
+        param_name: Name of the parameter (for error messages)
+        config_class: Expected config dataclass type
+        presets: Dict mapping preset strings to config dicts or instances
+        default: Default value if None/unset
+        instance_check: Function to check if value is an instance
+        url_schemes: Dict mapping URL schemes to backend names
+        array_mode: How to handle array values (see ArrayMode)
+        string_mode: How to handle string values ("path_as_source", etc.)
+        
+    Returns:
+        Resolved config object or value
+        
+    Raises:
+        ValueError: If value is invalid with helpful error message
+    """
+    # =========================================================================
+    # 1. None/unset -> Default
+    # =========================================================================
+    if value is None:
+        return default
+    
+    # =========================================================================
+    # 2. Instance check (highest precedence)
+    # =========================================================================
+    if instance_check and instance_check(value):
+        return value
+    
+    # =========================================================================
+    # 3. Config dataclass check
+    # =========================================================================
+    if config_class and isinstance(value, config_class):
+        return value
+    
+    # =========================================================================
+    # 4. Dict -> convert to config
+    # =========================================================================
+    if isinstance(value, dict) and config_class:
+        try:
+            return config_class(**value)
+        except TypeError as e:
+            raise ValueError(
+                f"Invalid {param_name} dict: {e}. "
+                f"Valid fields: {_get_config_fields(config_class)}"
+            )
+    
+    # =========================================================================
+    # 5. Array handling (before string to respect precedence)
+    # =========================================================================
+    if isinstance(value, (list, tuple)):
+        return _resolve_array(
+            value=value,
+            param_name=param_name,
+            config_class=config_class,
+            presets=presets,
+            url_schemes=url_schemes,
+            array_mode=array_mode,
+        )
+    
+    # =========================================================================
+    # 6. String handling
+    # =========================================================================
+    if isinstance(value, str):
+        return _resolve_string(
+            value=value,
+            param_name=param_name,
+            config_class=config_class,
+            presets=presets,
+            url_schemes=url_schemes,
+            string_mode=string_mode,
+        )
+    
+    # =========================================================================
+    # 7. Bool handling
+    # =========================================================================
+    if isinstance(value, bool):
+        if value:
+            # True -> return default config instance
+            if config_class:
+                return config_class()
+            return True
+        else:
+            # False -> disabled
+            return None
+    
+    # =========================================================================
+    # 8. Fallback to default
+    # =========================================================================
+    return default
+
+
+# =============================================================================
+# Array Resolution
+# =============================================================================
+
+def _resolve_array(
+    value: Union[list, tuple],
+    param_name: str,
+    config_class: Optional[Type],
+    presets: Optional[Dict[str, Any]],
+    url_schemes: Optional[Dict[str, str]],
+    array_mode: Optional[str],
+) -> Any:
+    """Resolve array value based on array_mode."""
+    
+    # Empty array -> disabled
+    if not value:
+        return None
+    
+    # Passthrough mode - return list as-is
+    if array_mode == ArrayMode.PASSTHROUGH:
+        return list(value)
+    
+    # Step names mode - create config with list field
+    if array_mode == ArrayMode.STEP_NAMES:
+        if config_class:
+            # Determine field name based on param
+            if param_name == "context":
+                return config_class(from_steps=list(value))
+            elif param_name == "routing":
+                return config_class(next_steps=list(value))
+        return list(value)
+    
+    # Sources mode - list of source paths/URLs
+    if array_mode == ArrayMode.SOURCES:
+        if config_class:
+            return config_class(sources=list(value))
+        return list(value)
+    
+    # Sources with config - sources + optional config dict at end
+    if array_mode == ArrayMode.SOURCES_WITH_CONFIG:
+        sources = []
+        config_override = {}
+        
+        for item in value:
+            if isinstance(item, dict):
+                config_override = item
+                # If dict has sources, merge them
+                if "sources" in config_override:
+                    sources.extend(config_override.pop("sources"))
+            else:
+                sources.append(item)
+        
+        if config_class:
+            return config_class(sources=sources, **config_override)
+        return sources
+    
+    # Single or list mode
+    if array_mode == ArrayMode.SINGLE_OR_LIST:
+        if len(value) == 1:
+            single_value = value[0]
+            # Check if single item is a URL
+            if isinstance(single_value, str) and url_schemes:
+                scheme = detect_url_scheme(single_value)
+                if scheme and scheme in url_schemes:
+                    return _resolve_url(single_value, config_class, url_schemes)
+            # Check if single item is a preset
+            if isinstance(single_value, str) and presets and single_value in presets:
+                return _apply_preset(single_value, presets, config_class)
+        # Multiple items - treat as sources
+        if config_class:
+            return config_class(sources=list(value))
+        return list(value)
+    
+    # Preset override mode - [preset, {overrides}] or [preset]
+    if array_mode == ArrayMode.PRESET_OVERRIDE:
+        if not value:
+            return None
+        
+        first = value[0]
+        
+        # First item should be a preset string
+        if isinstance(first, str):
+            # Get base config from preset
+            if presets and first in presets:
+                base_config = _apply_preset(first, presets, config_class)
+            elif presets:
+                # Invalid preset
+                raise make_preset_error(param_name, first, presets.keys())
+            else:
+                # No presets defined, treat as value
+                if config_class:
+                    base_config = config_class()
+                else:
+                    base_config = None
+            
+            # Apply overrides if present
+            if len(value) >= 2 and isinstance(value[-1], dict):
+                overrides = value[-1]
+                if base_config and config_class:
+                    return merge_config_with_overrides(base_config, overrides, config_class)
+            
+            return base_config
+    
+    # Default: treat as sources list
+    if config_class:
+        # Check if all items are strings (sources)
+        if all(isinstance(item, str) for item in value):
+            return config_class(sources=list(value))
+    
+    return list(value)
+
+
+# =============================================================================
+# String Resolution
+# =============================================================================
+
+def _resolve_string(
+    value: str,
+    param_name: str,
+    config_class: Optional[Type],
+    presets: Optional[Dict[str, str]],
+    url_schemes: Optional[Dict[str, str]],
+    string_mode: Optional[str],
+) -> Any:
+    """Resolve string value."""
+    
+    # Check for URL first
+    if url_schemes:
+        scheme = detect_url_scheme(value)
+        if scheme:
+            if scheme in url_schemes:
+                return _resolve_url(value, config_class, url_schemes)
+            else:
+                # Unknown scheme - raise helpful error
+                valid_schemes = ", ".join(sorted(url_schemes.keys()))
+                raise ValueError(
+                    f"Unsupported URL scheme '{scheme}' for {param_name}. "
+                    f"Supported: {valid_schemes}"
+                )
+    
+    # Check for preset
+    if presets:
+        # Case-insensitive lookup
+        value_lower = value.lower()
+        for preset_key in presets:
+            if preset_key.lower() == value_lower:
+                return _apply_preset(preset_key, presets, config_class)
+        
+        # Not a valid preset - raise helpful error
+        raise make_preset_error(param_name, value, presets.keys(), url_schemes)
+    
+    # Path as source mode
+    if string_mode == "path_as_source":
+        if is_path_like(value) and config_class:
+            return config_class(sources=[value])
+    
+    # LLM model name mode (for planning)
+    if string_mode == "llm_model":
+        if config_class:
+            return config_class(llm=value)
+    
+    # If no presets and no URL schemes, and we have a config class,
+    # try to use the string as a single source
+    if config_class and is_path_like(value):
+        try:
+            return config_class(sources=[value])
+        except TypeError:
+            pass
+    
+    # Fallback - return string as-is if no config class
+    if not config_class:
+        return value
+    
+    # Unknown string - if we have presets, this is an error
+    if presets:
+        raise make_preset_error(param_name, value, presets.keys(), url_schemes)
+    
+    # No presets defined - return default config
+    return config_class() if config_class else value
+
+
+def _resolve_url(
+    url: str,
+    config_class: Optional[Type],
+    url_schemes: Dict[str, str],
+) -> Any:
+    """Resolve a URL string to config."""
+    scheme = detect_url_scheme(url)
+    if not scheme or scheme not in url_schemes:
+        raise ValueError(f"Invalid URL: {url}")
+    
+    backend = url_schemes[scheme]
+    
+    if config_class:
+        return config_class(backend=backend, config={"url": url})
+    
+    return {"backend": backend, "url": url}
+
+
+def _apply_preset(
+    preset_name: str,
+    presets: Dict[str, Any],
+    config_class: Optional[Type],
+) -> Any:
+    """Apply a preset to create a config instance."""
+    preset_value = presets.get(preset_name)
+    
+    if preset_value is None:
+        return None
+    
+    # If preset is already a config instance, return it
+    if config_class and isinstance(preset_value, config_class):
+        return preset_value
+    
+    # If preset is a dict, convert to config
+    if isinstance(preset_value, dict) and config_class:
+        return config_class(**preset_value)
+    
+    # Return preset value as-is
+    return preset_value
+
+
+def _get_config_fields(config_class: Type) -> str:
+    """Get field names from a config class for error messages."""
+    if hasattr(config_class, '__dataclass_fields__'):
+        return ", ".join(config_class.__dataclass_fields__.keys())
+    return "unknown"
+
+
+# =============================================================================
+# Convenience Functions for Specific Parameters
+# =============================================================================
+
+def resolve_memory(value: Any, config_class: Type) -> Any:
+    """Resolve memory parameter."""
+    from .presets import MEMORY_PRESETS, MEMORY_URL_SCHEMES
+    
+    return resolve(
+        value=value,
+        param_name="memory",
+        config_class=config_class,
+        presets=MEMORY_PRESETS,
+        url_schemes=MEMORY_URL_SCHEMES,
+        instance_check=lambda v: (
+            hasattr(v, 'search') and hasattr(v, 'add')
+        ) or hasattr(v, 'database_url'),
+        array_mode=ArrayMode.SINGLE_OR_LIST,
+    )
+
+
+def resolve_knowledge(value: Any, config_class: Type) -> Any:
+    """Resolve knowledge parameter."""
+    return resolve(
+        value=value,
+        param_name="knowledge",
+        config_class=config_class,
+        instance_check=lambda v: hasattr(v, 'search') and hasattr(v, 'add'),
+        array_mode=ArrayMode.SOURCES_WITH_CONFIG,
+        string_mode="path_as_source",
+    )
+
+
+def resolve_output(value: Any, config_class: Type) -> Any:
+    """Resolve output parameter."""
+    from .presets import OUTPUT_PRESETS
+    
+    return resolve(
+        value=value,
+        param_name="output",
+        config_class=config_class,
+        presets=OUTPUT_PRESETS,
+        array_mode=ArrayMode.PRESET_OVERRIDE,
+    )
+
+
+def resolve_execution(value: Any, config_class: Type) -> Any:
+    """Resolve execution parameter."""
+    from .presets import EXECUTION_PRESETS
+    
+    return resolve(
+        value=value,
+        param_name="execution",
+        config_class=config_class,
+        presets=EXECUTION_PRESETS,
+        array_mode=ArrayMode.PRESET_OVERRIDE,
+    )
+
+
+def resolve_web(value: Any, config_class: Type) -> Any:
+    """Resolve web parameter."""
+    from .presets import WEB_PRESETS
+    
+    return resolve(
+        value=value,
+        param_name="web",
+        config_class=config_class,
+        presets=WEB_PRESETS,
+        array_mode=ArrayMode.PRESET_OVERRIDE,
+    )
+
+
+def resolve_planning(value: Any, config_class: Type) -> Any:
+    """Resolve planning parameter."""
+    from .presets import PLANNING_PRESETS
+    
+    return resolve(
+        value=value,
+        param_name="planning",
+        config_class=config_class,
+        presets=PLANNING_PRESETS,
+        string_mode="llm_model",
+        array_mode=ArrayMode.PRESET_OVERRIDE,
+    )
+
+
+def resolve_reflection(value: Any, config_class: Type) -> Any:
+    """Resolve reflection parameter."""
+    from .presets import REFLECTION_PRESETS
+    
+    return resolve(
+        value=value,
+        param_name="reflection",
+        config_class=config_class,
+        presets=REFLECTION_PRESETS,
+        array_mode=ArrayMode.PRESET_OVERRIDE,
+    )
+
+
+def resolve_context(value: Any, config_class: Type) -> Any:
+    """Resolve context parameter."""
+    from .presets import CONTEXT_PRESETS
+    
+    return resolve(
+        value=value,
+        param_name="context",
+        config_class=config_class,
+        presets=CONTEXT_PRESETS,
+        instance_check=lambda v: hasattr(v, 'get_context'),
+        array_mode=ArrayMode.STEP_NAMES,
+    )
+
+
+def resolve_autonomy(value: Any, config_class: Type) -> Any:
+    """Resolve autonomy parameter."""
+    from .presets import AUTONOMY_PRESETS
+    
+    return resolve(
+        value=value,
+        param_name="autonomy",
+        config_class=config_class,
+        presets=AUTONOMY_PRESETS,
+        array_mode=ArrayMode.PRESET_OVERRIDE,
+    )
+
+
+def resolve_caching(value: Any, config_class: Type) -> Any:
+    """Resolve caching parameter."""
+    from .presets import CACHING_PRESETS
+    
+    return resolve(
+        value=value,
+        param_name="caching",
+        config_class=config_class,
+        presets=CACHING_PRESETS,
+    )
+
+
+def resolve_hooks(value: Any, config_class: Optional[Type] = None) -> Any:
+    """Resolve hooks parameter."""
+    return resolve(
+        value=value,
+        param_name="hooks",
+        config_class=config_class,
+        array_mode=ArrayMode.PASSTHROUGH,
+    )
+
+
+def resolve_skills(value: Any, config_class: Type) -> Any:
+    """Resolve skills parameter."""
+    return resolve(
+        value=value,
+        param_name="skills",
+        config_class=config_class,
+        array_mode=ArrayMode.SOURCES,
+        string_mode="path_as_source",
+    )
+
+
+def resolve_routing(value: Any, config_class: Type) -> Any:
+    """Resolve routing parameter (workflow steps)."""
+    return resolve(
+        value=value,
+        param_name="routing",
+        config_class=config_class,
+        array_mode=ArrayMode.STEP_NAMES,
+    )

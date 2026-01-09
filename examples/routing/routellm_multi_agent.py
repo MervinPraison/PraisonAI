@@ -12,7 +12,7 @@ Prerequisites:
      --port 6060
 """
 
-from praisonaiagents import Agent, PraisonAIAgents, Task
+from praisonaiagents import Agent, Agents, Task
 
 ROUTELLM_URL = "http://localhost:6060/v1"
 
@@ -44,6 +44,6 @@ task2 = Task(
     expected_output="Short article about AI trends"
 )
 
-agents = PraisonAIAgents(agents=[researcher, writer], tasks=[task1, task2])
+agents = Agents(agents=[researcher, writer], tasks=[task1, task2])
 result = agents.start()
 print(result)

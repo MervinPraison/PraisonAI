@@ -165,7 +165,7 @@ When asked about department codes, provide the EXACT code from the documents.
 Be specific about which department you're referring to.""",
             knowledge=[temp_dir],
             user_id="hierarchy_demo_user",
-            verbose=True,
+            output="verbose",
         )
         
         # Test retrieval of department codes

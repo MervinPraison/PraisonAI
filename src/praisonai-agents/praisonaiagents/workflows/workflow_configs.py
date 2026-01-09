@@ -272,17 +272,19 @@ def resolve_param(
     presets: Optional[Dict[str, Any]] = None,
     default: Any = None,
     instance_check: Optional[Callable[[Any], bool]] = None,
+    array_mode: Optional[str] = None,
 ) -> Any:
     """
     Resolve a consolidated parameter following precedence rules:
-    Instance > Config > String > Bool > Default
+    Instance > Config > Array > String > Bool > Default
     
     Args:
-        value: The parameter value (can be Instance, Config, String, Bool, or None)
+        value: The parameter value (can be Instance, Config, Array, String, Bool, or None)
         config_class: The expected config dataclass type
         presets: Dict mapping preset strings to config instances or dicts
         default: Default value if None/unset
         instance_check: Optional function to check if value is an instance
+        array_mode: How to handle arrays ("preset_override", "step_names", "passthrough")
         
     Returns:
         Resolved config object or value
@@ -297,6 +299,14 @@ def resolve_param(
                 "verbose": WorkflowOutputConfig(verbose=True, stream=True),
             },
             default=WorkflowOutputConfig(),
+        )
+        
+        # With array override
+        output_config = resolve_param(
+            value=["verbose", {"stream": False}],
+            config_class=WorkflowOutputConfig,
+            presets=presets,
+            array_mode="preset_override",
         )
     """
     # None/unset -> Default
@@ -318,6 +328,51 @@ def resolve_param(
         except TypeError:
             return default
     
+    # Array handling (NEW - before string to respect precedence)
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return None  # Empty array = disabled
+        
+        # Passthrough mode - return list as-is
+        if array_mode == "passthrough":
+            return list(value)
+        
+        # Step names mode - for context/routing
+        if array_mode == "step_names":
+            # All strings = step names
+            if all(isinstance(item, str) for item in value):
+                return value  # Return list directly for step names
+        
+        # Preset override mode - [preset, {overrides}]
+        if array_mode == "preset_override" and presets:
+            first = value[0]
+            if isinstance(first, str) and first in presets:
+                # Get base config from preset
+                preset_value = presets[first]
+                if isinstance(preset_value, dict):
+                    base_config = config_class(**preset_value)
+                elif isinstance(preset_value, config_class):
+                    base_config = preset_value
+                else:
+                    base_config = config_class()
+                
+                # Apply overrides if present
+                if len(value) >= 2 and isinstance(value[-1], dict):
+                    overrides = value[-1]
+                    # Merge base with overrides
+                    from dataclasses import asdict
+                    base_dict = asdict(base_config)
+                    base_dict.update(overrides)
+                    return config_class(**base_dict)
+                
+                return base_config
+        
+        # Default: treat first item as value
+        if len(value) == 1:
+            return resolve_param(value[0], config_class, presets, default, instance_check)
+        
+        return default
+    
     # String -> preset lookup
     if isinstance(value, str) and presets:
         preset_value = presets.get(value)
@@ -338,7 +393,10 @@ def resolve_param(
 
 
 def resolve_output_config(value: Any) -> WorkflowOutputConfig:
-    """Resolve output parameter to WorkflowOutputConfig."""
+    """Resolve output parameter to WorkflowOutputConfig.
+    
+    Supports: None, str preset, list [preset, overrides], Config, dict
+    """
     presets = {
         "silent": WorkflowOutputConfig(verbose=False, stream=False),
         "minimal": WorkflowOutputConfig(verbose=False, stream=True),
@@ -346,7 +404,10 @@ def resolve_output_config(value: Any) -> WorkflowOutputConfig:
         "verbose": WorkflowOutputConfig(verbose=True, stream=True),
         "debug": WorkflowOutputConfig(verbose=True, stream=True),
     }
-    result = resolve_param(value, WorkflowOutputConfig, presets, WorkflowOutputConfig())
+    result = resolve_param(
+        value, WorkflowOutputConfig, presets, WorkflowOutputConfig(),
+        array_mode="preset_override"
+    )
     return result if result else WorkflowOutputConfig(verbose=False, stream=False)
 
 

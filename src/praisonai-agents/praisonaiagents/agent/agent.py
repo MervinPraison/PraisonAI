@@ -403,11 +403,22 @@ class Agent:
 
         # ============================================================
         # CONSOLIDATED PARAMS EXTRACTION (agent-centric API)
-        # New consolidated params take precedence over individual params
-        # Initialize removed params with defaults before extraction
+        # Uses unified resolver: Instance > Config > Array > String > Bool > Default
         # ============================================================
         
-        # Initialize removed params with defaults (these were removed from signature)
+        # Import resolver and config classes
+        from ..config.param_resolver import resolve, ArrayMode
+        from ..config.presets import (
+            OUTPUT_PRESETS, EXECUTION_PRESETS, MEMORY_PRESETS, MEMORY_URL_SCHEMES,
+            WEB_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS, CACHING_PRESETS,
+        )
+        from ..config.feature_configs import (
+            OutputConfig, ExecutionConfig, MemoryConfig, KnowledgeConfig,
+            PlanningConfig, ReflectionConfig, GuardrailConfig, WebConfig,
+            TemplateConfig, CachingConfig, HooksConfig, SkillsConfig,
+        )
+        
+        # Initialize extracted values with defaults
         user_id = None
         session_id = None
         db = None
@@ -425,8 +436,6 @@ class Agent:
         plan_mode = False
         planning_tools = None
         planning_reasoning = False
-        # Note: retrieval_config, embedder_config, knowledge_config, rag_config
-        # are now passed as params for backward compat, so don't reset them here
         policy = None
         background = None
         checkpoints = None
@@ -434,311 +443,287 @@ class Agent:
         thinking_budget = None
         skills_dirs = None
         
-        # Extract output settings from consolidated 'output' param
-        # output can be: None, str preset, or OutputConfig
-        # Initialize with defaults (legacy params removed from signature)
-        _verbose = True
-        _markdown = True
-        _stream = False
-        _metrics = False
-        _reasoning_steps = False
+        # ─────────────────────────────────────────────────────────────────────
+        # Resolve OUTPUT param using unified resolver
+        # Supports: None, str preset, list [preset, overrides], OutputConfig
+        # ─────────────────────────────────────────────────────────────────────
+        _output_config = resolve(
+            value=output,
+            param_name="output",
+            config_class=OutputConfig,
+            presets=OUTPUT_PRESETS,
+            array_mode=ArrayMode.PRESET_OVERRIDE,
+            default=OutputConfig(),
+        )
+        if _output_config:
+            verbose = _output_config.verbose
+            markdown = _output_config.markdown
+            stream = _output_config.stream
+            metrics = _output_config.metrics
+            reasoning_steps = _output_config.reasoning_steps
+            output_style = getattr(_output_config, 'style', None)
+        else:
+            verbose, markdown, stream, metrics, reasoning_steps = True, True, False, False, False
         
-        if output is not None:
-            if isinstance(output, str):
-                # It's a preset name
-                if output == "minimal":
-                    _verbose = False
-                    _markdown = False
-                    _stream = False
-                    _metrics = False
-                elif output == "verbose":
-                    _verbose = True
-                    _markdown = True
-                    _stream = False
-                    _metrics = True
-                    _reasoning_steps = True
-                elif output == "debug":
-                    _verbose = True
-                    _markdown = True
-                    _stream = False
-                    _metrics = True
-                    _reasoning_steps = True
-                elif output == "silent":
-                    _verbose = False
-                    _markdown = False
-                    _stream = False
-                    _metrics = False
-                # "normal" uses defaults
-            elif hasattr(output, 'verbose'):
-                # It's an OutputConfig
-                _verbose = output.verbose
-                _markdown = output.markdown
-                _stream = output.stream
-                _metrics = output.metrics
-                _reasoning_steps = output.reasoning_steps
-                output_style = output.style
+        # ─────────────────────────────────────────────────────────────────────
+        # Resolve EXECUTION param using unified resolver
+        # Supports: None, str preset, list [preset, overrides], ExecutionConfig
+        # ─────────────────────────────────────────────────────────────────────
+        _exec_config = resolve(
+            value=execution,
+            param_name="execution",
+            config_class=ExecutionConfig,
+            presets=EXECUTION_PRESETS,
+            array_mode=ArrayMode.PRESET_OVERRIDE,
+            default=ExecutionConfig(),
+        )
+        if _exec_config:
+            max_iter = _exec_config.max_iter
+            max_rpm = _exec_config.max_rpm
+            max_execution_time = _exec_config.max_execution_time
+            max_retry_limit = _exec_config.max_retry_limit
+        else:
+            max_iter, max_rpm, max_execution_time, max_retry_limit = 20, None, None, 2
         
-        # Apply final output values
-        verbose = _verbose
-        markdown = _markdown
-        stream = _stream
-        metrics = _metrics
-        reasoning_steps = _reasoning_steps
+        # ─────────────────────────────────────────────────────────────────────
+        # Resolve TEMPLATES param
+        # ─────────────────────────────────────────────────────────────────────
+        _template_config = resolve(
+            value=templates,
+            param_name="templates",
+            config_class=TemplateConfig,
+            default=None,
+        )
+        if _template_config:
+            system_template = _template_config.system
+            prompt_template = _template_config.prompt
+            response_template = _template_config.response
+            use_system_prompt = _template_config.use_system_prompt
+        else:
+            system_template, prompt_template, response_template, use_system_prompt = None, None, None, True
         
-        # Extract execution settings from consolidated 'execution' param
-        # execution can be: None, str preset, or ExecutionConfig
-        # Initialize with defaults (legacy params removed from signature)
-        _max_iter = 20
-        _max_rpm = None
-        _max_execution_time = None
-        _max_retry_limit = 2
+        # ─────────────────────────────────────────────────────────────────────
+        # Resolve CACHING param
+        # Supports: None, bool, str preset, CachingConfig
+        # ─────────────────────────────────────────────────────────────────────
+        _caching_config = resolve(
+            value=caching,
+            param_name="caching",
+            config_class=CachingConfig,
+            presets=CACHING_PRESETS,
+            default=CachingConfig() if caching is None else None,
+        )
+        if _caching_config:
+            cache = _caching_config.enabled
+            prompt_caching = _caching_config.prompt_caching
+        elif caching is False:
+            cache, prompt_caching = False, None
+        else:
+            cache, prompt_caching = True, None
         
-        if execution is not None:
-            if isinstance(execution, str):
-                # It's a preset name
-                if execution == "fast":
-                    _max_iter = 10
-                    _max_retry_limit = 1
-                elif execution == "thorough":
-                    _max_iter = 50
-                    _max_retry_limit = 5
-                elif execution == "unlimited":
-                    _max_iter = 1000
-                    _max_retry_limit = 10
-                # "balanced" uses defaults
-            elif hasattr(execution, 'max_iter'):
-                # It's an ExecutionConfig
-                _max_iter = execution.max_iter
-                _max_rpm = execution.max_rpm
-                _max_execution_time = execution.max_execution_time
-                _max_retry_limit = execution.max_retry_limit
-        
-        # Apply final execution values
-        max_iter = _max_iter
-        max_rpm = _max_rpm
-        max_execution_time = _max_execution_time
-        max_retry_limit = _max_retry_limit
-        
-        # Extract template settings from consolidated 'templates' param
-        # Initialize with defaults (legacy params removed from signature)
-        _system_template = None
-        _prompt_template = None
-        _response_template = None
-        _use_system_prompt = True
-        
-        if templates is not None:
-            if hasattr(templates, 'system'):
-                # It's a TemplateConfig
-                _system_template = templates.system
-                _prompt_template = templates.prompt
-                _response_template = templates.response
-                _use_system_prompt = templates.use_system_prompt
-        
-        # Apply final template values
-        system_template = _system_template
-        prompt_template = _prompt_template
-        response_template = _response_template
-        use_system_prompt = _use_system_prompt
-        
-        # Extract caching settings from consolidated 'caching' param
-        # Initialize with defaults (legacy params removed from signature)
-        _cache = True
-        _prompt_caching = None
-        
-        if caching is not None:
-            if caching is True:
-                _cache = True
-            elif caching is False:
-                _cache = False
-            elif hasattr(caching, 'enabled'):
-                # It's a CachingConfig
-                _cache = caching.enabled
-                _prompt_caching = caching.prompt_caching
-        
-        # Apply final caching values
-        cache = _cache
-        prompt_caching = _prompt_caching
-        
-        # Extract hooks settings from consolidated 'hooks' param
-        # Initialize with defaults (legacy params removed from signature)
-        _step_callback = None
+        # ─────────────────────────────────────────────────────────────────────
+        # Resolve HOOKS param
+        # Supports: None, list of callables, HooksConfig
+        # ─────────────────────────────────────────────────────────────────────
         _hooks_list = []
-        
+        step_callback = None
         if hooks is not None:
             if isinstance(hooks, list):
                 _hooks_list = hooks
-            elif hasattr(hooks, 'on_step'):
-                # It's a HooksConfig
-                _step_callback = hooks.on_step
-                _hooks_list = hooks.middleware
+            elif isinstance(hooks, HooksConfig):
+                step_callback = hooks.on_step
+                _hooks_list = hooks.middleware or []
+            elif isinstance(hooks, dict):
+                step_callback = hooks.get('on_step')
+                _hooks_list = hooks.get('middleware', [])
         
-        # Apply final hooks values
-        step_callback = _step_callback
-        
-        # Extract skills settings from consolidated 'skills' param
-        # Initialize with defaults (legacy params removed from signature)
+        # ─────────────────────────────────────────────────────────────────────
+        # Resolve SKILLS param
+        # Supports: None, list of paths, SkillsConfig
+        # ─────────────────────────────────────────────────────────────────────
         _skills = None
-        _skills_dirs = None
-        
         if skills is not None:
             if isinstance(skills, list):
                 _skills = skills
-            elif hasattr(skills, 'paths'):
-                # It's a SkillsConfig
+            elif isinstance(skills, SkillsConfig):
                 _skills = skills.paths
-                _skills_dirs = skills.dirs
+                skills_dirs = skills.dirs
+            elif isinstance(skills, str):
+                _skills = [skills]
         
-        # Apply final skills values
-        skills_dirs = _skills_dirs
+        # ─────────────────────────────────────────────────────────────────────
+        # Resolve MEMORY param using unified resolver
+        # Supports: None, bool, str preset, str URL, list, MemoryConfig, Instance
+        # ─────────────────────────────────────────────────────────────────────
+        _memory_config = resolve(
+            value=memory,
+            param_name="memory",
+            config_class=MemoryConfig,
+            presets=MEMORY_PRESETS,
+            url_schemes=MEMORY_URL_SCHEMES,
+            instance_check=lambda v: (hasattr(v, 'search') and hasattr(v, 'add')) or hasattr(v, 'database_url'),
+            array_mode=ArrayMode.SINGLE_OR_LIST,
+            default=None,
+        )
         
-        # Extract memory settings from consolidated 'memory' param
-        # memory can be: False, True, MemoryConfig, or MemoryManager instance
-        # Initialize with defaults (legacy params removed from signature)
-        _memory_user_id = None
-        _memory_session_id = None
-        _memory_db = None
-        _memory_auto_memory = None
-        _memory_claude_memory = None
-        
-        if memory is not None and memory is not False:
-            if hasattr(memory, 'user_id') and hasattr(memory, 'backend'):
-                # It's a MemoryConfig
-                if memory.user_id:
-                    _memory_user_id = memory.user_id
-                if memory.session_id:
-                    _memory_session_id = memory.session_id
-                if memory.db:
-                    _memory_db = memory.db
-                _memory_auto_memory = memory.auto_memory
-                _memory_claude_memory = memory.claude_memory
-                # Convert MemoryConfig to appropriate memory init value
-                if memory.backend == "file" or (hasattr(memory.backend, 'value') and memory.backend.value == "file"):
-                    memory = True  # Use FileMemory
-                elif memory.config:
-                    memory = memory.config  # Use config dict
+        # Extract values from resolved memory config
+        if _memory_config is not None:
+            if hasattr(_memory_config, 'database_url'):
+                # It's a db() instance - pass through
+                db = _memory_config
+                memory = True
+            elif isinstance(_memory_config, MemoryConfig):
+                user_id = _memory_config.user_id
+                session_id = _memory_config.session_id
+                db = _memory_config.db
+                auto_memory = _memory_config.auto_memory
+                claude_memory = _memory_config.claude_memory
+                # Convert to internal format
+                backend = _memory_config.backend
+                if hasattr(backend, 'value'):
+                    backend = backend.value
+                if backend == "file":
+                    memory = True
+                elif _memory_config.config:
+                    memory = _memory_config.config
                 else:
-                    backend_val = memory.backend.value if hasattr(memory.backend, 'value') else memory.backend
-                    memory = backend_val  # Use backend string
+                    memory = backend
+            elif hasattr(_memory_config, 'search') and hasattr(_memory_config, 'add'):
+                # Memory instance - pass through
+                pass
+        elif memory is False:
+            memory = None
         
-        # Apply extracted memory values
-        user_id = _memory_user_id
-        session_id = _memory_session_id
-        db = _memory_db
-        auto_memory = _memory_auto_memory
-        claude_memory = _memory_claude_memory
-        
-        # Extract knowledge settings from consolidated 'knowledge' param
-        # knowledge can be: False, True, List[str], KnowledgeConfig, or KnowledgeBase instance
-        # Initialize with defaults (legacy params removed from signature)
-        _knowledge_sources = None
-        _knowledge_retrieval_config = None
-        _knowledge_embedder_config = None
+        # ─────────────────────────────────────────────────────────────────────
+        # Resolve KNOWLEDGE param
+        # Supports: None, bool, str path, list of sources, KnowledgeConfig, Instance
+        # ─────────────────────────────────────────────────────────────────────
+        retrieval_config = None
+        embedder_config = None
         
         if knowledge is not None and knowledge is not False:
             if isinstance(knowledge, list):
-                # It's a list of sources - use directly
-                _knowledge_sources = knowledge
-            elif hasattr(knowledge, 'search') and hasattr(knowledge, 'add'):
-                # It's a Knowledge/KnowledgeBase instance - pass through unchanged
-                # Don't modify knowledge, let the existing logic handle it
+                # List of sources - use directly
                 pass
-            elif hasattr(knowledge, 'sources') and hasattr(knowledge, 'embedder'):
-                # It's a KnowledgeConfig (has sources list and embedder string)
-                _knowledge_sources = knowledge.sources
-                _knowledge_embedder_config = knowledge.embedder_config
-                # Build retrieval config from KnowledgeConfig
+            elif hasattr(knowledge, 'search') and hasattr(knowledge, 'add'):
+                # Knowledge instance - pass through
+                pass
+            elif isinstance(knowledge, KnowledgeConfig):
+                embedder_config = knowledge.embedder_config
                 if knowledge.config:
-                    _knowledge_retrieval_config = knowledge.config
+                    retrieval_config = knowledge.config
                 else:
-                    _knowledge_retrieval_config = {
+                    retrieval_config = {
                         'top_k': knowledge.retrieval_k,
                         'threshold': knowledge.retrieval_threshold,
                         'rerank': knowledge.rerank,
                         'rerank_model': knowledge.rerank_model,
                     }
-                # Update knowledge to be the sources list for internal processing
-                knowledge = _knowledge_sources if _knowledge_sources else None
+                knowledge = knowledge.sources if knowledge.sources else None
+            elif isinstance(knowledge, str):
+                # Single path - convert to list
+                knowledge = [knowledge]
             elif knowledge is True:
-                # Enable knowledge but no sources provided yet
                 knowledge = None
         
-        # Apply extracted knowledge values
-        retrieval_config = _knowledge_retrieval_config
-        embedder_config = _knowledge_embedder_config
+        # ─────────────────────────────────────────────────────────────────────
+        # Resolve PLANNING param
+        # Supports: None, bool, str LLM/preset, list, PlanningConfig
+        # ─────────────────────────────────────────────────────────────────────
+        _planning_config = resolve(
+            value=planning,
+            param_name="planning",
+            config_class=PlanningConfig,
+            presets=PLANNING_PRESETS,
+            string_mode="llm_model",
+            array_mode=ArrayMode.PRESET_OVERRIDE,
+            default=None,
+        )
         
-        # Extract planning settings from consolidated 'planning' param
-        # planning can be: False, True, or PlanningConfig
-        _planning_enabled = planning
-        _plan_mode = plan_mode
-        _planning_tools = planning_tools
-        _planning_reasoning = planning_reasoning
-        
-        if planning is not None:
-            if planning is True:
-                _planning_enabled = True
-            elif planning is False:
-                _planning_enabled = False
-            elif hasattr(planning, 'reasoning'):
-                # It's a PlanningConfig
-                _planning_enabled = True
-                _planning_tools = planning.tools
-                _planning_reasoning = planning.reasoning
-                _plan_mode = planning.read_only
-                # planning param becomes True for internal use
+        if _planning_config is not None:
+            if isinstance(_planning_config, PlanningConfig):
                 planning = True
+                planning_tools = _planning_config.tools
+                planning_reasoning = _planning_config.reasoning
+                plan_mode = _planning_config.read_only
+            else:
+                planning = bool(_planning_config)
+        elif planning is True:
+            pass  # Keep as True
+        else:
+            planning = False
         
-        # Apply extracted planning values
-        plan_mode = _plan_mode
-        planning_tools = _planning_tools
-        planning_reasoning = _planning_reasoning
+        # ─────────────────────────────────────────────────────────────────────
+        # Resolve REFLECTION param
+        # Supports: None, bool, str preset, list, ReflectionConfig
+        # ─────────────────────────────────────────────────────────────────────
+        _reflection_config = resolve(
+            value=reflection,
+            param_name="reflection",
+            config_class=ReflectionConfig,
+            presets=REFLECTION_PRESETS,
+            array_mode=ArrayMode.PRESET_OVERRIDE,
+            default=None,
+        )
         
-        # Extract reflection settings from consolidated 'reflection' param
-        if reflection is not None:
-            if reflection is True:
-                # Enable with defaults
+        if _reflection_config is not None:
+            if isinstance(_reflection_config, ReflectionConfig):
                 self_reflect = True
-            elif reflection is False:
-                self_reflect = False
-            elif hasattr(reflection, 'min_iterations'):
-                # It's a ReflectionConfig
-                self_reflect = True
-                min_reflect = reflection.min_iterations
-                max_reflect = reflection.max_iterations
-                reflect_llm = reflection.llm
-                reflect_prompt = reflection.prompt
+                min_reflect = _reflection_config.min_iterations
+                max_reflect = _reflection_config.max_iterations
+                reflect_llm = _reflection_config.llm
+                reflect_prompt = _reflection_config.prompt
+            else:
+                self_reflect = bool(_reflection_config)
+        elif reflection is True:
+            self_reflect = True
+        elif reflection is False:
+            self_reflect = False
         
-        # Extract guardrail settings from consolidated 'guardrails' param
+        # ─────────────────────────────────────────────────────────────────────
+        # Resolve GUARDRAILS param
+        # Supports: None, bool, callable, str prompt, GuardrailConfig
+        # ─────────────────────────────────────────────────────────────────────
         if guardrails is not None:
-            if guardrails is True:
-                # Enable with defaults (no-op, user must provide validator)
-                pass
-            elif guardrails is False:
+            if guardrails is False:
                 guardrail = None
             elif callable(guardrails):
-                # Direct validator function
                 guardrail = guardrails
-            elif hasattr(guardrails, 'validator'):
-                # It's a GuardrailConfig
-                if guardrails.validator:
-                    guardrail = guardrails.validator
-                elif guardrails.llm_validator:
-                    guardrail = guardrails.llm_validator
+            elif isinstance(guardrails, GuardrailConfig):
+                guardrail = guardrails.validator or guardrails.llm_validator
                 max_guardrail_retries = guardrails.max_retries
+            elif isinstance(guardrails, str):
+                # Long string = LLM validator prompt
+                guardrail = guardrails
+            elif guardrails is True:
+                pass  # No-op, user must provide validator
         
-        # Extract web settings from consolidated 'web' param
-        if web is not None:
-            if web is True:
-                # Enable both search and fetch with defaults
-                web_search = True
-                web_fetch = True
-            elif web is False:
-                web_search = False
-                web_fetch = False
-            elif hasattr(web, 'search'):
-                # It's a WebConfig
-                web_search = web.search
-                web_fetch = web.fetch
-                # Could also extract search_config, fetch_config if needed
+        # ─────────────────────────────────────────────────────────────────────
+        # Resolve WEB param using unified resolver
+        # Supports: None, bool, str provider/mode, list, WebConfig
+        # ─────────────────────────────────────────────────────────────────────
+        _web_config = resolve(
+            value=web,
+            param_name="web",
+            config_class=WebConfig,
+            presets=WEB_PRESETS,
+            array_mode=ArrayMode.PRESET_OVERRIDE,
+            default=None,
+        )
+        
+        if _web_config is not None:
+            if isinstance(_web_config, WebConfig):
+                web_search = _web_config.search
+                web_fetch = _web_config.fetch
+            else:
+                web_search = bool(_web_config)
+                web_fetch = bool(_web_config)
+        elif web is True:
+            web_search = True
+            web_fetch = True
+        elif web is False:
+            web_search = False
+            web_fetch = False
         
         # ============================================================
         # END CONSOLIDATED PARAMS EXTRACTION
