@@ -59,7 +59,7 @@ jobs:
         cd src/praisonai-agents
         pip install -e ".[all]"
         cd ../praisonai
-        pip install -e .
+        pip install -e ".[chat]"
         pip install pytest pytest-asyncio pytest-timeout
     
     - name: Run Smoke Tests
