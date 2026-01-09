@@ -231,8 +231,12 @@ class WorkflowStep:
     loop_over: Optional[str] = None  # Variable name to iterate over (e.g., "items")
     loop_var: str = "item"  # Variable name for current item in loop
     
-    # Guardrail (like process="workflow")
-    guardrail: Optional[Callable[['StepResult'], Tuple[bool, Any]]] = None  # Returns (is_valid, feedback)
+    # Guardrails (standardized plural naming)
+    # Accepts: callable, str (LLM prompt), GuardrailConfig, or list [preset, overrides]
+    guardrails: Optional[Any] = None  # Union[Callable, str, GuardrailConfig] - validation
+    
+    # Backward compatibility alias (deprecated - use guardrails instead)
+    guardrail: Optional[Callable[['StepResult'], Tuple[bool, Any]]] = None  # DEPRECATED: use guardrails
     
     # Image handling (migrated from Task)
     images: Optional[List[str]] = None  # Image paths/URLs for vision tasks
@@ -271,6 +275,18 @@ class WorkflowStep:
             resolve_step_context_config, resolve_step_output_config,
             resolve_step_execution_config, resolve_step_routing_config,
         )
+        
+        # Handle guardrails/guardrail compatibility
+        # guardrails (plural) takes precedence; guardrail (singular) is deprecated
+        if self.guardrails is None and self.guardrail is not None:
+            # Use deprecated guardrail value, map to guardrails
+            import warnings
+            warnings.warn(
+                "WorkflowStep 'guardrail' parameter is deprecated. Use 'guardrails' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            object.__setattr__(self, 'guardrails', self.guardrail)
         
         # Resolve context param
         ctx_cfg = resolve_step_context_config(self.context)
