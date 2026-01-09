@@ -271,6 +271,12 @@ class GuardrailConfig:
         # With validator function
         Agent(guardrails=my_validator_fn)
         
+        # With string preset
+        Agent(guardrails="strict")  # Uses strict preset
+        
+        # With policy strings
+        Agent(guardrails=["policy:strict", "pii:redact"])
+        
         # With config
         Agent(guardrails=GuardrailConfig(
             validator=my_validator_fn,
@@ -297,6 +303,9 @@ class GuardrailConfig:
     # Policy engine (for advanced use)
     policy: Optional[Any] = None
     
+    # Policy strings (e.g., ["policy:strict", "pii:redact"])
+    policies: List[str] = field(default_factory=list)
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -304,6 +313,7 @@ class GuardrailConfig:
             "llm_validator": self.llm_validator,
             "max_retries": self.max_retries,
             "on_fail": self.on_fail.value if isinstance(self.on_fail, GuardrailAction) else self.on_fail,
+            "policies": self.policies,
         }
 
 
@@ -612,7 +622,7 @@ class MultiAgentHooksConfig:
     Consolidates: completion_checker, on_task_start, on_task_complete
     
     Usage:
-        PraisonAIAgents(
+        Agents(
             agents=[...],
             hooks=MultiAgentHooksConfig(
                 on_task_start=my_start_callback,
@@ -646,10 +656,10 @@ class MultiAgentOutputConfig:
     
     Usage:
         # Simple preset
-        PraisonAIAgents(agents=[...], output="verbose")
+        Agents(agents=[...], output="verbose")
         
         # With config
-        PraisonAIAgents(
+        Agents(
             agents=[...],
             output=MultiAgentOutputConfig(verbose=2, stream=True)
         )
@@ -676,7 +686,7 @@ class MultiAgentExecutionConfig:
     Consolidates: max_iter, max_retries
     
     Usage:
-        PraisonAIAgents(
+        Agents(
             agents=[...],
             execution=MultiAgentExecutionConfig(max_iter=20, max_retries=5)
         )
@@ -704,10 +714,10 @@ class MultiAgentPlanningConfig:
     
     Usage:
         # Simple enable
-        PraisonAIAgents(agents=[...], planning=True)
+        Agents(agents=[...], planning=True)
         
         # With config
-        PraisonAIAgents(
+        Agents(
             agents=[...],
             planning=MultiAgentPlanningConfig(
                 llm="gpt-4o",
@@ -747,10 +757,10 @@ class MultiAgentMemoryConfig:
     
     Usage:
         # Simple enable
-        PraisonAIAgents(agents=[...], memory=True)
+        Agents(agents=[...], memory=True)
         
         # With config
-        PraisonAIAgents(
+        Agents(
             agents=[...],
             memory=MultiAgentMemoryConfig(
                 user_id="user123",

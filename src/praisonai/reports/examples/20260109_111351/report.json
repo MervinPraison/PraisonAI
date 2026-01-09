@@ -1,0 +1,47 @@
+{
+  "metadata": {
+    "timestamp": "2026-01-09T11:13:51.223609+00:00",
+    "platform": "Darwin-25.3.0-arm64",
+    "python_version": "3.12.11",
+    "praisonai_version": "3.5.6",
+    "git_commit": "abea33d2",
+    "cli_args": [],
+    "totals": {
+      "passed": 0,
+      "failed": 1,
+      "skipped": 1,
+      "timeout": 0,
+      "xfail": 0
+    }
+  },
+  "examples": [
+    {
+      "path": "/private/var/folders/0b/t9c4hwvx6lg6jk58gw8w_dp80000gn/T/pytest-of-praison/pytest-22/test_examples_run_fail_fast0/a_fail.py",
+      "slug": "a_fail",
+      "status": "failed",
+      "exit_code": 1,
+      "duration_seconds": 0.041557,
+      "start_time": "2026-01-09T11:13:51.181906+00:00",
+      "end_time": "2026-01-09T11:13:51.223463+00:00",
+      "skip_reason": null,
+      "error_summary": "ValueError: fail",
+      "stderr_tail": "Traceback (most recent call last):\n  File \"/private/var/folders/0b/t9c4hwvx6lg6jk58gw8w_dp80000gn/T/pytest-of-praison/pytest-22/test_examples_run_fail_fast0/a_fail.py\", line 1, in <module>\n    raise ValueError('fail')\nValueError: fail\n",
+      "stdout_path": null,
+      "stderr_path": "logs/a_fail.stderr.log"
+    },
+    {
+      "path": "/private/var/folders/0b/t9c4hwvx6lg6jk58gw8w_dp80000gn/T/pytest-of-praison/pytest-22/test_examples_run_fail_fast0/b_pass.py",
+      "slug": "b_pass",
+      "status": "skipped",
+      "exit_code": 0,
+      "duration_seconds": 0.0,
+      "start_time": "",
+      "end_time": "",
+      "skip_reason": "Skipped due to --fail-fast",
+      "error_summary": null,
+      "stderr_tail": null,
+      "stdout_path": null,
+      "stderr_path": null
+    }
+  ]
+}

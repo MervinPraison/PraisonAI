@@ -207,6 +207,7 @@ def register_commands():
     from .commands.package import app as package_app
     from .commands.endpoints import app as endpoints_app
     from .commands.test import app as test_app
+    from .commands.examples import app as examples_app
     
     # Import TUI and queue commands
     from .features.tui.debug import create_debug_app as create_tui_debug_app
@@ -263,6 +264,7 @@ def register_commands():
     app.add_typer(package_app, name="package", help="Package management")
     app.add_typer(endpoints_app, name="endpoints", help="API endpoint management")
     app.add_typer(test_app, name="test", help="Run test suite with tier and provider options")
+    app.add_typer(examples_app, name="examples", help="Run and manage example files")
     
     # Register TUI and queue commands
     tui_app = create_tui_debug_app()
