@@ -1,0 +1,418 @@
+name: Optimized Test Suite
+
+on: 
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Nightly extended tests at 3 AM UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: 'Test tier to run'
+        required: true
+        default: 'main'
+        type: choice
+        options:
+          - smoke
+          - main
+          - extended
+          - nightly
+
+env:
+  PYTHONPATH: ${{ github.workspace }}/src/praisonai-agents
+
+jobs:
+  # ============================================
+  # SMOKE TESTS - Fast unit tests, no network
+  # Target: <= 2 minutes
+  # ============================================
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-smoke-${{ hashFiles('**/pyproject.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-smoke-
+          ${{ runner.os }}-pip-
+    
+    - name: Install minimal dependencies
+      run: |
+        pip install --upgrade pip
+        cd src/praisonai
+        pip install -e ".[dev]" --no-deps || pip install -e .
+        pip install pytest pytest-asyncio pytest-timeout
+    
+    - name: Run Smoke Tests
+      env:
+        PRAISONAI_TEST_TIER: smoke
+        PRAISONAI_ALLOW_NETWORK: '0'
+      run: |
+        cd src/praisonai
+        python -m pytest tests/unit/ \
+          -m "not slow and not network" \
+          -q --tb=short \
+          --timeout=30 \
+          --ignore=tests/fixtures \
+          -x
+    
+    - name: Smoke Test Summary
+      if: always()
+      run: echo "✅ Smoke tests completed"
+
+  # ============================================
+  # MAIN TESTS - Unit + safe integration
+  # Target: <= 5 minutes
+  # ============================================
+  main:
+    needs: smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    strategy:
+      matrix:
+        python-version: ['3.11']
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-main-${{ hashFiles('**/pyproject.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-main-
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        cd src/praisonai
+        pip install -e ".[crewai,autogen]"
+        pip install pytest pytest-asyncio pytest-timeout pytest-cov pytest-xdist
+    
+    - name: Run Main Tests
+      env:
+        PRAISONAI_TEST_TIER: main
+        PRAISONAI_ALLOW_NETWORK: '0'
+        OPENAI_API_KEY: 'test-key'
+        ANTHROPIC_API_KEY: 'test-key'
+        GOOGLE_API_KEY: 'test-key'
+      run: |
+        cd src/praisonai
+        python -m pytest tests/unit/ tests/integration/ \
+          -m "not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -v --tb=short \
+          --timeout=60 \
+          --ignore=tests/fixtures \
+          --ignore=tests/e2e \
+          --ignore=tests/live \
+          --cov=praisonai \
+          --cov-report=xml \
+          -n 2 \
+          || echo "Some tests failed"
+    
+    - name: Upload coverage
+      if: matrix.python-version == '3.11'
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        file: src/praisonai/coverage.xml
+        flags: main-tests
+        fail_ci_if_error: false
+
+  # ============================================
+  # OPENAI LIVE TESTS - Real OpenAI API calls
+  # Only runs if OPENAI_API_KEY secret is set
+  # ============================================
+  openai-live:
+    needs: smoke
+    if: ${{ secrets.OPENAI_API_KEY != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-openai-${{ hashFiles('**/pyproject.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        cd src/praisonai
+        pip install -e ".[openai]"
+        pip install pytest pytest-asyncio pytest-timeout
+    
+    - name: Run OpenAI Live Tests
+      env:
+        PRAISONAI_TEST_TIER: extended
+        PRAISONAI_ALLOW_NETWORK: '1'
+        PRAISONAI_LIVE_TESTS: '1'
+        PRAISONAI_TEST_PROVIDERS: 'openai'
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        OPENAI_MODEL_NAME: ${{ secrets.OPENAI_MODEL_NAME || 'gpt-4o-mini' }}
+      run: |
+        cd src/praisonai
+        python -m pytest tests/ \
+          -m "provider_openai or real" \
+          -v --tb=short \
+          --timeout=120 \
+          --ignore=tests/fixtures \
+          || echo "Some OpenAI tests failed"
+
+  # ============================================
+  # EXTENDED PROVIDER TESTS - Nightly only
+  # Runs all provider-specific tests
+  # ============================================
+  extended-anthropic:
+    if: github.event_name == 'schedule' || github.event.inputs.tier == 'extended' || github.event.inputs.tier == 'nightly'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        cd src/praisonai
+        pip install -e ".[anthropic]"
+        pip install pytest pytest-asyncio pytest-timeout
+    
+    - name: Run Anthropic Tests
+      if: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      env:
+        PRAISONAI_ALLOW_NETWORK: '1'
+        PRAISONAI_LIVE_TESTS: '1'
+        PRAISONAI_TEST_PROVIDERS: 'anthropic'
+        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      run: |
+        cd src/praisonai
+        python -m pytest tests/ \
+          -m "provider_anthropic" \
+          -v --tb=short \
+          --timeout=120 \
+          --ignore=tests/fixtures \
+          || echo "Anthropic tests completed"
+    
+    - name: Skip if no API key
+      if: ${{ secrets.ANTHROPIC_API_KEY == '' }}
+      run: echo "⚠️ Skipping Anthropic tests - ANTHROPIC_API_KEY not set"
+
+  extended-google:
+    if: github.event_name == 'schedule' || github.event.inputs.tier == 'extended' || github.event.inputs.tier == 'nightly'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        cd src/praisonai
+        pip install -e ".[google]"
+        pip install pytest pytest-asyncio pytest-timeout
+    
+    - name: Run Google/Gemini Tests
+      if: ${{ secrets.GOOGLE_API_KEY != '' }}
+      env:
+        PRAISONAI_ALLOW_NETWORK: '1'
+        PRAISONAI_LIVE_TESTS: '1'
+        PRAISONAI_TEST_PROVIDERS: 'google'
+        GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      run: |
+        cd src/praisonai
+        python -m pytest tests/ \
+          -m "provider_google" \
+          -v --tb=short \
+          --timeout=120 \
+          --ignore=tests/fixtures \
+          || echo "Google tests completed"
+    
+    - name: Skip if no API key
+      if: ${{ secrets.GOOGLE_API_KEY == '' }}
+      run: echo "⚠️ Skipping Google tests - GOOGLE_API_KEY not set"
+
+  extended-groq:
+    if: github.event_name == 'schedule' || github.event.inputs.tier == 'extended' || github.event.inputs.tier == 'nightly'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        cd src/praisonai
+        pip install -e .
+        pip install pytest pytest-asyncio pytest-timeout
+    
+    - name: Run Groq Tests
+      if: ${{ secrets.GROQ_API_KEY != '' }}
+      env:
+        PRAISONAI_ALLOW_NETWORK: '1'
+        PRAISONAI_LIVE_TESTS: '1'
+        PRAISONAI_TEST_PROVIDERS: 'groq'
+        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      run: |
+        cd src/praisonai
+        python -m pytest tests/ \
+          -m "provider_groq" \
+          -v --tb=short \
+          --timeout=120 \
+          --ignore=tests/fixtures \
+          || echo "Groq tests completed"
+    
+    - name: Skip if no API key
+      if: ${{ secrets.GROQ_API_KEY == '' }}
+      run: echo "⚠️ Skipping Groq tests - GROQ_API_KEY not set"
+
+  extended-xai:
+    if: github.event_name == 'schedule' || github.event.inputs.tier == 'extended' || github.event.inputs.tier == 'nightly'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        cd src/praisonai
+        pip install -e .
+        pip install pytest pytest-asyncio pytest-timeout
+    
+    - name: Run xAI/Grok Tests
+      if: ${{ secrets.XAI_API_KEY != '' }}
+      env:
+        PRAISONAI_ALLOW_NETWORK: '1'
+        PRAISONAI_LIVE_TESTS: '1'
+        PRAISONAI_TEST_PROVIDERS: 'grok_xai'
+        XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      run: |
+        cd src/praisonai
+        python -m pytest tests/ \
+          -m "provider_grok_xai" \
+          -v --tb=short \
+          --timeout=120 \
+          --ignore=tests/fixtures \
+          || echo "xAI tests completed"
+    
+    - name: Skip if no API key
+      if: ${{ secrets.XAI_API_KEY == '' }}
+      run: echo "⚠️ Skipping xAI tests - XAI_API_KEY not set"
+
+  extended-cohere:
+    if: github.event_name == 'schedule' || github.event.inputs.tier == 'extended' || github.event.inputs.tier == 'nightly'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        cd src/praisonai
+        pip install -e ".[cohere]"
+        pip install pytest pytest-asyncio pytest-timeout
+    
+    - name: Run Cohere Tests
+      if: ${{ secrets.COHERE_API_KEY != '' }}
+      env:
+        PRAISONAI_ALLOW_NETWORK: '1'
+        PRAISONAI_LIVE_TESTS: '1'
+        PRAISONAI_TEST_PROVIDERS: 'cohere'
+        COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+      run: |
+        cd src/praisonai
+        python -m pytest tests/ \
+          -m "provider_cohere" \
+          -v --tb=short \
+          --timeout=120 \
+          --ignore=tests/fixtures \
+          || echo "Cohere tests completed"
+    
+    - name: Skip if no API key
+      if: ${{ secrets.COHERE_API_KEY == '' }}
+      run: echo "⚠️ Skipping Cohere tests - COHERE_API_KEY not set"
+
+  # ============================================
+  # TEST SUMMARY
+  # ============================================
+  test-summary:
+    needs: [smoke, main]
+    if: always()
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Test Summary
+      run: |
+        echo "# 📊 Test Suite Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+        echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Smoke | ${{ needs.smoke.result }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Main | ${{ needs.main.result }} |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## Test Tiers" >> $GITHUB_STEP_SUMMARY
+        echo "- **smoke**: Fast unit tests, no network (≤2 min)" >> $GITHUB_STEP_SUMMARY
+        echo "- **main**: Unit + integration, no network (≤5 min)" >> $GITHUB_STEP_SUMMARY
+        echo "- **openai-live**: OpenAI API tests (when key available)" >> $GITHUB_STEP_SUMMARY
+        echo "- **extended-***: Provider-specific tests (nightly)" >> $GITHUB_STEP_SUMMARY

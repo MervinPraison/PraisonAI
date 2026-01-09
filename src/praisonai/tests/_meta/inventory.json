@@ -1,0 +1,71 @@
+{
+  "generated_at": "2026-01-09T06:18:00Z",
+  "baseline_metrics": {
+    "praisonai_wrapper": {
+      "test_files": 182,
+      "tests_collected": 2896,
+      "collection_errors": 3,
+      "unit_tests_runtime_baseline": "2m0s"
+    },
+    "praisonai_agents": {
+      "test_files": 149,
+      "tests_collected": 2453,
+      "collection_errors": 9
+    }
+  },
+  "after_optimization": {
+    "praisonai_wrapper": {
+      "tests_collected": 2896,
+      "unit_tests_runtime_with_parallel": "1m30s",
+      "smoke_tier_target": "<=2min",
+      "main_tier_target": "<=5min"
+    }
+  },
+  "provider_references": {
+    "praisonai": {
+      "openai": 34,
+      "anthropic": 10,
+      "ollama": 6,
+      "google_gemini": 16,
+      "grok_xai": 1,
+      "groq": 1,
+      "cohere": 3
+    }
+  },
+  "runtime_patterns": {
+    "praisonai": {
+      "files_with_sleep": 14,
+      "files_with_subprocess": 21,
+      "files_with_http_clients": 6
+    }
+  },
+  "sleep_offenders": [
+    "tests/integration/acp/test_acp_stdio.py",
+    "tests/unit/test_daemon_manager.py",
+    "tests/unit/test_profiler.py",
+    "tests/unit/mcp_server/test_auth.py",
+    "tests/unit/acp/test_session.py",
+    "tests/unit/test_profiler_advanced.py",
+    "tests/unit/doctor/test_engine.py",
+    "tests/unit/cli/test_message_queue.py",
+    "tests/unit/scheduler/test_agent_scheduler.py"
+  ],
+  "target_tiers": {
+    "smoke": {
+      "target_runtime": "<=2min",
+      "scope": "unit tests, no network, no slow"
+    },
+    "main": {
+      "target_runtime": "<=5min",
+      "scope": "unit + integration, OpenAI gated only"
+    },
+    "extended": {
+      "target_runtime": "<=15min",
+      "scope": "all providers, gated by keys"
+    },
+    "nightly": {
+      "target_runtime": "<=30min",
+      "scope": "full matrix + stress tests"
+    }
+  }
+}
