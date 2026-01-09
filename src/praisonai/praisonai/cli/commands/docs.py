@@ -56,6 +56,11 @@ def docs_run(
         "--exclude", "-e",
         help="Exclude patterns (glob), can be specified multiple times",
     ),
+    group: Optional[List[str]] = typer.Option(
+        None,
+        "--group", "-g",
+        help="Run only specific groups (top-level dirs), can be repeated",
+    ),
     languages: str = typer.Option(
         "python",
         "--languages", "-l",
@@ -66,25 +71,20 @@ def docs_run(
         "--timeout", "-t",
         help="Per-snippet timeout in seconds",
     ),
+    max_snippets: Optional[int] = typer.Option(
+        None,
+        "--max-snippets",
+        help="Maximum snippets to process",
+    ),
     fail_fast: bool = typer.Option(
         False,
         "--fail-fast", "-x",
         help="Stop on first failure",
     ),
-    dry_run: bool = typer.Option(
-        False,
-        "--dry-run",
-        help="Extract only, don't execute",
-    ),
     mode: str = typer.Option(
         "lenient",
         "--mode", "-m",
         help="Mode: 'lenient' or 'strict' (strict fails on not_run)",
-    ),
-    max_snippets: Optional[int] = typer.Option(
-        None,
-        "--max-snippets",
-        help="Maximum snippets to process",
     ),
     no_stream: bool = typer.Option(
         False,
@@ -106,10 +106,20 @@ def docs_run(
         "--no-md",
         help="Skip Markdown report generation",
     ),
+    no_csv: bool = typer.Option(
+        False,
+        "--no-csv",
+        help="Skip CSV report generation",
+    ),
     require_env: Optional[List[str]] = typer.Option(
         None,
         "--require-env",
         help="Required env vars (skip all if missing)",
+    ),
+    python: Optional[str] = typer.Option(
+        None,
+        "--python",
+        help="Python executable to use (default: current interpreter)",
     ),
     quiet: bool = typer.Option(
         False,
@@ -121,17 +131,16 @@ def docs_run(
     Run Python code blocks from documentation files.
     
     Extracts code blocks from Mintlify docs, classifies them as runnable,
-    executes them, and generates reports.
+    executes them, and generates reports (JSON, Markdown, CSV).
     
     Examples:
         praisonai docs run
         praisonai docs run --docs-path /path/to/docs --timeout 120
-        praisonai docs run --dry-run --max-snippets 10
+        praisonai docs run --group models --group tools --max-snippets 10
         praisonai docs run --include "quickstart*" --fail-fast
     """
     # Lazy import to avoid loading at CLI startup
-    from praisonai.docs_runner.executor import DocsExecutor
-    from praisonai.docs_runner.reporter import SnippetResult
+    from praisonai.suite_runner import DocsSource, SuiteExecutor, RunResult
     
     # Resolve paths
     docs = docs_path or _get_default_docs_path()
@@ -144,22 +153,34 @@ def docs_run(
     # Parse languages
     lang_list = [lang.strip() for lang in languages.split(',') if lang.strip()]
     
-    # Create executor
-    executor = DocsExecutor(
-        docs_path=docs,
+    # Create source
+    source = DocsSource(
+        root=docs,
+        languages=lang_list,
         include_patterns=list(include) if include else None,
         exclude_patterns=list(exclude) if exclude else None,
-        languages=lang_list,
+        groups=list(group) if group else None,
+    )
+    
+    # Discover items
+    items = source.discover()
+    
+    # Create executor
+    executor = SuiteExecutor(
+        suite="docs",
+        source_path=docs,
         timeout=timeout,
         fail_fast=fail_fast,
         stream_output=not no_stream,
-        dry_run=dry_run,
-        mode=mode,
-        max_snippets=max_snippets,
+        max_items=max_snippets,
         require_env=list(require_env) if require_env else None,
         report_dir=output_dir,
         generate_json=not no_json,
         generate_md=not no_md,
+        generate_csv=not no_csv,
+        python_executable=python,
+        pythonpath_additions=source.get_pythonpath(),
+        groups=list(group) if group else None,
     )
     
     # Status icons
@@ -169,27 +190,27 @@ def docs_run(
         "skipped": "⏭️",
         "timeout": "⏱️",
         "not_run": "📝",
+        "xfail": "⚠️",
     }
     
-    def on_snippet_start(block, idx: int, total: int):
+    def on_item_start(item, idx: int, total: int):
         if not quiet:
-            doc_name = block.doc_path.name
-            typer.echo(f"\n[{idx}/{total}] {doc_name} block {block.block_index}")
+            typer.echo(f"\n[{idx}/{total}] {item.display_name}")
     
-    def on_snippet_end(result: SnippetResult, idx: int, total: int):
+    def on_item_end(result: RunResult, idx: int, total: int):
         icon = icons.get(result.status, "?")
         duration = f"{result.duration_seconds:.2f}s" if result.duration_seconds else ""
         
         if quiet:
-            typer.echo(f"{icon} {result.doc_path.name}:{result.block_index}")
+            typer.echo(f"{icon} {result.display_name}")
         else:
             msg = f"  {icon} {result.status.upper()}"
             if duration:
                 msg += f" ({duration})"
             if result.skip_reason:
                 msg += f" - {result.skip_reason[:50]}"
-            if result.error_summary and not no_stream:
-                msg += f"\n     Error: {result.error_summary[:100]}"
+            if result.error_message and not no_stream:
+                msg += f"\n     Error: {result.error_message[:100]}"
             typer.echo(msg)
     
     def on_output(line: str, stream: str):
@@ -205,16 +226,24 @@ def docs_run(
         typer.echo(f"Docs Path: {docs}")
         typer.echo(f"Timeout: {timeout}s")
         typer.echo(f"Mode: {mode}")
-        if dry_run:
-            typer.echo("Mode: DRY RUN (no execution)")
+        if group:
+            typer.echo(f"Groups: {', '.join(group)}")
         typer.echo(f"Reports: {output_dir}")
+        typer.echo(f"Items: {len(items)}")
     
     # Run
     report = executor.run(
-        on_snippet_start=on_snippet_start,
-        on_snippet_end=on_snippet_end,
+        items=items,
+        on_item_start=on_item_start,
+        on_item_end=on_item_end,
         on_output=on_output if not no_stream else None,
     )
+    
+    # Update report with CLI args
+    report.cli_args = [f"--docs-path={docs}", f"--timeout={timeout}"]
+    if group:
+        for g in group:
+            report.cli_args.append(f"--group={g}")
     
     # Print summary
     totals = report.totals
@@ -263,6 +292,11 @@ def docs_list(
         "--exclude", "-e",
         help="Exclude patterns (glob)",
     ),
+    group: Optional[List[str]] = typer.Option(
+        None,
+        "--group", "-g",
+        help="Filter by group (top-level dir)",
+    ),
     languages: str = typer.Option(
         "python",
         "--languages", "-l",
@@ -273,16 +307,21 @@ def docs_list(
         "--code", "-c",
         help="Show code preview",
     ),
+    show_groups: bool = typer.Option(
+        False,
+        "--groups",
+        help="Show available groups only",
+    ),
 ):
     """
     List discovered code blocks from documentation.
     
     Examples:
         praisonai docs list
-        praisonai docs list --docs-path /path/to/docs --code
+        praisonai docs list --groups
+        praisonai docs list --group models --code
     """
-    from praisonai.docs_runner.extractor import FenceExtractor
-    from praisonai.docs_runner.classifier import RunnableClassifier
+    from praisonai.suite_runner import DocsSource
     
     docs = docs_path or _get_default_docs_path()
     
@@ -293,32 +332,37 @@ def docs_list(
     # Parse languages
     lang_list = [lang.strip() for lang in languages.split(',') if lang.strip()]
     
-    extractor = FenceExtractor(languages=lang_list)
-    classifier = RunnableClassifier(target_languages=tuple(lang_list))
-    
-    blocks = extractor.extract_from_directory(
-        docs,
+    source = DocsSource(
+        root=docs,
+        languages=lang_list,
         include_patterns=list(include) if include else None,
         exclude_patterns=list(exclude) if exclude else None,
+        groups=list(group) if group else None,
     )
     
-    # Filter to target languages
-    blocks = [b for b in blocks if b.language in lang_list]
+    # Show groups only
+    if show_groups:
+        groups = source.get_groups()
+        typer.echo(f"Available groups in {docs}:\n")
+        for g in groups:
+            typer.echo(f"  - {g}")
+        return
     
-    typer.echo(f"Found {len(blocks)} code blocks in {docs}\n")
+    items = source.discover()
     
-    for idx, block in enumerate(blocks, 1):
-        rel_path = block.doc_path.relative_to(docs) if docs in block.doc_path.parents else block.doc_path
-        classification = classifier.classify(block)
+    typer.echo(f"Found {len(items)} code blocks in {docs}\n")
+    
+    for idx, item in enumerate(items, 1):
+        rel_path = item.source_path.relative_to(docs) if docs in item.source_path.parents else item.source_path
         
-        status = "✅ Runnable" if classification.is_runnable else "📝 Partial"
+        status = "✅ Runnable" if item.runnable else "📝 Partial"
         
-        typer.echo(f"{idx:3}. {rel_path}:{block.line_start}-{block.line_end}")
-        typer.echo(f"     {status} ({classification.reason})")
+        typer.echo(f"{idx:3}. [{item.group}] {rel_path}:{item.line_start}-{item.line_end}")
+        typer.echo(f"     {status} ({item.runnable_decision})")
         
         if show_code:
-            preview = block.code[:100].replace('\n', ' ')
-            if len(block.code) > 100:
+            preview = item.code[:100].replace('\n', ' ')
+            if len(item.code) > 100:
                 preview += "..."
             typer.echo(f"     Code: {preview}")
         

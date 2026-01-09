@@ -20,7 +20,6 @@ app = typer.Typer(help="Run and manage example files")
 
 def _get_default_examples_path() -> Path:
     """Get default examples path (repo examples/ or cwd)."""
-    # Try to find examples directory
     candidates = [
         Path.cwd() / "examples",
         Path(__file__).parent.parent.parent.parent.parent / "examples",  # repo root
@@ -56,10 +55,20 @@ def run(
         "--exclude", "-e",
         help="Exclude patterns (glob), can be specified multiple times",
     ),
+    group: Optional[List[str]] = typer.Option(
+        None,
+        "--group", "-g",
+        help="Run only specific groups (top-level dirs), can be repeated",
+    ),
     timeout: int = typer.Option(
         60,
         "--timeout", "-t",
         help="Per-example timeout in seconds",
+    ),
+    max_items: Optional[int] = typer.Option(
+        None,
+        "--max-items",
+        help="Maximum examples to run",
     ),
     fail_fast: bool = typer.Option(
         False,
@@ -86,10 +95,20 @@ def run(
         "--no-md",
         help="Skip Markdown report generation",
     ),
+    no_csv: bool = typer.Option(
+        False,
+        "--no-csv",
+        help="Skip CSV report generation",
+    ),
     require_env: Optional[List[str]] = typer.Option(
         None,
         "--require-env",
         help="Required env vars (skip all if missing)",
+    ),
+    python: Optional[str] = typer.Option(
+        None,
+        "--python",
+        help="Python executable to use (default: current interpreter)",
     ),
     quiet: bool = typer.Option(
         False,
@@ -103,11 +122,12 @@ def run(
     Examples:
         praisonai examples run
         praisonai examples run --path ./examples --timeout 120
+        praisonai examples run --group python --group mcp --max-items 5
         praisonai examples run --include "context/*" --exclude "*_wow.py"
         praisonai examples run --fail-fast --no-stream
     """
     # Lazy import to avoid loading at CLI startup
-    from praisonai.cli.features.examples import ExamplesExecutor, ExampleResult
+    from praisonai.suite_runner import ExamplesSource, SuiteExecutor, RunResult
     
     # Resolve paths
     examples_path = path or _get_default_examples_path()
@@ -117,18 +137,33 @@ def run(
         typer.echo(f"❌ Examples path not found: {examples_path}")
         raise typer.Exit(2)
     
+    # Create source
+    source = ExamplesSource(
+        root=examples_path,
+        include_patterns=list(include) if include else None,
+        exclude_patterns=list(exclude) if exclude else None,
+        groups=list(group) if group else None,
+    )
+    
+    # Discover items
+    items = source.discover()
+    
     # Create executor
-    executor = ExamplesExecutor(
-        path=examples_path,
+    executor = SuiteExecutor(
+        suite="examples",
+        source_path=examples_path,
         timeout=timeout,
         fail_fast=fail_fast,
         stream_output=not no_stream,
-        include_patterns=list(include) if include else None,
-        exclude_patterns=list(exclude) if exclude else None,
+        max_items=max_items,
         require_env=list(require_env) if require_env else None,
         report_dir=output_dir,
         generate_json=not no_json,
         generate_md=not no_md,
+        generate_csv=not no_csv,
+        python_executable=python,
+        pythonpath_additions=source.get_pythonpath(),
+        groups=list(group) if group else None,
     )
     
     # Status icons
@@ -138,26 +173,27 @@ def run(
         "skipped": "⏭️",
         "timeout": "⏱️",
         "xfail": "⚠️",
+        "not_run": "📝",
     }
     
-    def on_example_start(path: Path, idx: int, total: int):
+    def on_item_start(item, idx: int, total: int):
         if not quiet:
-            typer.echo(f"\n[{idx}/{total}] Running: {path.name}")
+            typer.echo(f"\n[{idx}/{total}] Running: {item.display_name}")
     
-    def on_example_end(result: ExampleResult, idx: int, total: int):
+    def on_item_end(result: RunResult, idx: int, total: int):
         icon = icons.get(result.status, "?")
         duration = f"{result.duration_seconds:.2f}s" if result.duration_seconds else ""
         
         if quiet:
-            typer.echo(f"{icon} {result.path.name}")
+            typer.echo(f"{icon} {result.display_name}")
         else:
             msg = f"  {icon} {result.status.upper()}"
             if duration:
                 msg += f" ({duration})"
             if result.skip_reason:
                 msg += f" - {result.skip_reason}"
-            if result.error_summary and not no_stream:
-                msg += f"\n     Error: {result.error_summary[:100]}"
+            if result.error_message and not no_stream:
+                msg += f"\n     Error: {result.error_message[:100]}"
             typer.echo(msg)
     
     def on_output(line: str, stream: str):
@@ -172,28 +208,26 @@ def run(
         typer.echo("=" * 60)
         typer.echo(f"Path: {examples_path}")
         typer.echo(f"Timeout: {timeout}s")
+        if group:
+            typer.echo(f"Groups: {', '.join(group)}")
         typer.echo(f"Reports: {output_dir}")
+        typer.echo(f"Items: {len(items)}")
     
     # Run examples
     report = executor.run(
-        on_example_start=on_example_start,
-        on_example_end=on_example_end,
+        items=items,
+        on_item_start=on_item_start,
+        on_item_end=on_item_end,
         on_output=on_output if not no_stream else None,
     )
     
     # Update report with CLI args
-    report.cli_args = [
-        f"--path={examples_path}",
-        f"--timeout={timeout}",
-    ]
+    report.cli_args = [f"--path={examples_path}", f"--timeout={timeout}"]
     if fail_fast:
         report.cli_args.append("--fail-fast")
-    if include:
-        for p in include:
-            report.cli_args.append(f"--include={p}")
-    if exclude:
-        for p in exclude:
-            report.cli_args.append(f"--exclude={p}")
+    if group:
+        for g in group:
+            report.cli_args.append(f"--group={g}")
     
     # Print summary
     totals = report.totals
@@ -239,10 +273,20 @@ def list_examples(
         "--exclude", "-e",
         help="Exclude patterns (glob)",
     ),
+    group: Optional[List[str]] = typer.Option(
+        None,
+        "--group", "-g",
+        help="Filter by group (top-level dir)",
+    ),
     show_metadata: bool = typer.Option(
         False,
         "--metadata", "-m",
         help="Show parsed metadata for each example",
+    ),
+    show_groups: bool = typer.Option(
+        False,
+        "--groups",
+        help="Show available groups only",
     ),
 ):
     """
@@ -250,9 +294,10 @@ def list_examples(
     
     Examples:
         praisonai examples list
-        praisonai examples list --path ./examples --metadata
+        praisonai examples list --groups
+        praisonai examples list --group python --metadata
     """
-    from praisonai.cli.features.examples import ExampleDiscovery, ExampleMetadata
+    from praisonai.suite_runner import ExamplesSource
     
     examples_path = path or _get_default_examples_path()
     
@@ -260,37 +305,45 @@ def list_examples(
         typer.echo(f"❌ Examples path not found: {examples_path}")
         raise typer.Exit(2)
     
-    discovery = ExampleDiscovery(
-        examples_path,
+    source = ExamplesSource(
+        root=examples_path,
         include_patterns=list(include) if include else None,
         exclude_patterns=list(exclude) if exclude else None,
+        groups=list(group) if group else None,
     )
     
-    examples = discovery.discover()
+    # Show groups only
+    if show_groups:
+        groups = source.get_groups()
+        typer.echo(f"Available groups in {examples_path}:\n")
+        for g in groups:
+            typer.echo(f"  - {g}")
+        return
     
-    typer.echo(f"Found {len(examples)} examples in {examples_path}\n")
+    items = source.discover()
     
-    for idx, ex in enumerate(examples, 1):
-        rel_path = ex.relative_to(examples_path)
+    typer.echo(f"Found {len(items)} examples in {examples_path}\n")
+    
+    for idx, item in enumerate(items, 1):
+        rel_path = item.source_path.relative_to(examples_path)
         
         if show_metadata:
-            meta = ExampleMetadata.from_file(ex)
             flags = []
-            if meta.skip:
+            if item.skip:
                 flags.append("skip")
-            if meta.timeout:
-                flags.append(f"timeout={meta.timeout}")
-            if meta.require_env:
-                flags.append(f"env={','.join(meta.require_env)}")
-            if meta.xfail:
-                flags.append(f"xfail={meta.xfail}")
-            if meta.is_interactive:
+            if item.timeout:
+                flags.append(f"timeout={item.timeout}")
+            if item.require_env:
+                flags.append(f"env={','.join(item.require_env)}")
+            if item.xfail:
+                flags.append(f"xfail={item.xfail}")
+            if item.is_interactive:
                 flags.append("interactive")
             
             flag_str = f" [{', '.join(flags)}]" if flags else ""
-            typer.echo(f"  {idx:3}. {rel_path}{flag_str}")
+            typer.echo(f"  {idx:3}. [{item.group}] {rel_path}{flag_str}")
         else:
-            typer.echo(f"  {idx:3}. {rel_path}")
+            typer.echo(f"  {idx:3}. [{item.group}] {rel_path}")
 
 
 @app.command()
@@ -306,25 +359,31 @@ def info(
     Examples:
         praisonai examples info ./examples/context/01_basic.py
     """
-    from praisonai.cli.features.examples import ExampleMetadata
+    from praisonai.suite_runner import ExamplesSource
     
     if not example.exists():
         typer.echo(f"❌ Example not found: {example}")
         raise typer.Exit(2)
     
-    meta = ExampleMetadata.from_file(example)
+    # Create a source just to parse the file
+    source = ExamplesSource(root=example.parent)
+    item = source._create_item(example)
     
     typer.echo(f"Example: {example.name}")
     typer.echo(f"Path: {example}")
+    typer.echo(f"Group: {item.group}")
     typer.echo("")
     typer.echo("Metadata:")
-    typer.echo(f"  Skip: {meta.skip}" if meta.skip else "  Skip: False")
-    if meta.skip_reason:
-        typer.echo(f"  Skip Reason: {meta.skip_reason}")
-    typer.echo(f"  Timeout: {meta.timeout or 'default'}")
-    typer.echo(f"  Required Env: {', '.join(meta.require_env) if meta.require_env else 'none'}")
-    typer.echo(f"  XFail: {meta.xfail or 'no'}")
-    typer.echo(f"  Interactive: {meta.is_interactive}")
+    typer.echo(f"  Runnable: {item.runnable}")
+    typer.echo(f"  Decision: {item.runnable_decision}")
+    typer.echo(f"  Skip: {item.skip}")
+    if item.skip_reason:
+        typer.echo(f"  Skip Reason: {item.skip_reason}")
+    typer.echo(f"  Timeout: {item.timeout or 'default'}")
+    typer.echo(f"  Required Env: {', '.join(item.require_env) if item.require_env else 'none'}")
+    typer.echo(f"  XFail: {item.xfail or 'no'}")
+    typer.echo(f"  Interactive: {item.is_interactive}")
+    typer.echo(f"  Code Hash: {item.code_hash}")
 
 
 if __name__ == "__main__":
