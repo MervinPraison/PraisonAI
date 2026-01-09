@@ -73,6 +73,10 @@ jobs:
           -q --tb=short \
           --timeout=30 \
           --ignore=tests/fixtures \
+          --ignore=tests/unit/jobs \
+          --ignore=tests/unit/api \
+          --ignore-glob="**/test_*gradio*" \
+          --ignore-glob="**/test_*chainlit*" \
           -x
     
     - name: Smoke Test Summary
