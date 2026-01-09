@@ -177,6 +177,13 @@ def __getattr__(name):
         _lazy_cache["PraisonAIAgents"] = Agents  # Also cache alias
         return Agents
     elif name == "PraisonAIAgents":
+        import warnings
+        warnings.warn(
+            "PraisonAIAgents is deprecated, use Agents instead. "
+            "Example: from praisonaiagents import Agents",
+            DeprecationWarning,
+            stacklevel=2
+        )
         from .agents.agents import Agents
         _lazy_cache["Agents"] = Agents
         _lazy_cache[name] = Agents

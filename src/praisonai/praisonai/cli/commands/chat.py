@@ -5,11 +5,45 @@ Provides terminal-native interactive chat mode.
 This command NEVER opens a browser - it runs entirely in the terminal.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import typer
 
 app = typer.Typer(help="Terminal-native interactive chat mode")
+
+
+def _parse_memory_flag(memory: Optional[str], no_memory: bool) -> Union[bool, str, None]:
+    """
+    Parse memory CLI flag to value for Agent.
+    
+    Precedence: --no-memory > --memory=value > --memory (flag) > None
+    
+    Args:
+        memory: Memory flag value (None, "true", preset string, or URL)
+        no_memory: Whether --no-memory was specified
+        
+    Returns:
+        - False if --no-memory
+        - True if --memory (flag only)
+        - str if --memory=preset or --memory=URL
+        - None if neither specified
+    """
+    if no_memory:
+        return False
+    
+    if memory is None:
+        return None
+    
+    # --memory flag without value sets "true"
+    if memory.lower() == "true":
+        return True
+    
+    # --memory=false explicitly disables
+    if memory.lower() == "false":
+        return False
+    
+    # Otherwise it's a preset or URL string
+    return memory
 
 
 @app.callback(invoke_without_command=True)
@@ -18,7 +52,13 @@ def chat_main(
     prompt: Optional[str] = typer.Argument(None, help="Initial prompt for chat"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model to use"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
-    memory: bool = typer.Option(False, "--memory", help="Enable memory"),
+    memory: Optional[str] = typer.Option(
+        None, "--memory",
+        help="Enable memory. Use --memory for default, --memory=redis for preset, --memory=postgresql://... for URL",
+        is_flag=False,
+        flag_value="true",
+    ),
+    no_memory: bool = typer.Option(False, "--no-memory", help="Disable memory"),
     tools: Optional[str] = typer.Option(None, "--tools", "-t", help="Tools file path"),
     user_id: Optional[str] = typer.Option(None, "--user-id", help="User ID for memory isolation"),
     session_id: Optional[str] = typer.Option(None, "--session", "-s", help="Session ID to resume"),
@@ -69,6 +109,9 @@ def chat_main(
         typer.echo("⚠️  Profiling is only supported for single prompt mode.", err=True)
         typer.echo("   Use: praisonai chat \"your prompt\" --profile", err=True)
     
+    # Parse memory flag: --no-memory takes precedence, then --memory value
+    memory_value = _parse_memory_flag(memory, no_memory)
+    
     # Try InteractiveCore first (preferred terminal-native implementation)
     try:
         from praisonai.cli.interactive import InteractiveCore, InteractiveConfig
@@ -80,7 +123,7 @@ def chat_main(
             continue_session=continue_session,
             workspace=workspace or None,
             verbose=verbose,
-            memory=memory,
+            memory=memory_value,
             files=list(file) if file else [],
             autonomy=autonomy,
         )
