@@ -115,13 +115,41 @@ def _get_file_content(filepath: Path) -> str:
     return _file_content_cache[filepath_str]
 
 
+# Paths that should NEVER have provider markers auto-assigned
+# These are test infrastructure files that may contain provider keywords
+# but are not actual provider tests
+EXCLUDED_PATHS = (
+    '_pytest_plugins',
+    '_meta',
+    'test_test_command',
+    'test_gating',
+    'test_network_guard',
+    'conftest',
+    'fixtures/',
+)
+
+
+def _is_excluded_path(filepath_str: str, nodeid: str = '') -> bool:
+    """
+    Check if a path should be excluded from provider auto-detection.
+    
+    This prevents test infrastructure files from being incorrectly
+    classified as provider tests just because they contain provider
+    keywords in their validation/testing logic.
+    """
+    check_str = filepath_str.lower() + nodeid.lower()
+    for excluded in EXCLUDED_PATHS:
+        if excluded.lower() in check_str:
+            return True
+    return False
+
+
 def _detect_providers_in_file(filepath: Path) -> Set[str]:
     """Detect which providers are referenced in a test file."""
-    # Skip detection for plugin test files and meta directories
     filepath_str = str(filepath)
-    if '_pytest_plugins' in filepath_str or '_meta' in filepath_str:
-        return set()
-    if 'test_test_command' in filepath_str or 'test_gating' in filepath_str:
+    
+    # Skip detection for excluded paths (plugin tests, meta, fixtures)
+    if _is_excluded_path(filepath_str):
         return set()
     
     content = _get_file_content(filepath)
@@ -177,18 +205,23 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(getattr(pytest.mark, test_type))
         
         # 2. Auto-detect and assign provider markers from file content
+        # Skip auto-detection entirely for excluded paths (plugin tests, etc.)
         if item.fspath:
             filepath = Path(item.fspath)
-            detected_providers = _detect_providers_in_file(filepath)
+            filepath_str = str(filepath)
             
-            # Also check nodeid for provider keywords
-            for marker, pattern in PROVIDER_PATTERNS.items():
-                if pattern.search(item.nodeid):
-                    detected_providers.add(marker)
-            
-            for provider in detected_providers:
-                if provider not in existing_markers:
-                    item.add_marker(getattr(pytest.mark, provider))
+            # Check if this path should be excluded from provider detection
+            if not _is_excluded_path(filepath_str, item.nodeid):
+                detected_providers = _detect_providers_in_file(filepath)
+                
+                # Also check nodeid for provider keywords (but not for excluded paths)
+                for marker, pattern in PROVIDER_PATTERNS.items():
+                    if pattern.search(item.nodeid):
+                        detected_providers.add(marker)
+                
+                for provider in detected_providers:
+                    if provider not in existing_markers:
+                        item.add_marker(getattr(pytest.mark, provider))
         
         # Refresh existing markers after additions
         existing_markers = {m.name for m in item.iter_markers()}
