@@ -256,6 +256,68 @@ def make_array_error(
     )
 
 
+def is_policy_string(value: str) -> bool:
+    """
+    Check if a string is a policy specification. O(1) operation.
+    
+    Policy strings have format: type:action (e.g., "policy:strict", "pii:redact")
+    
+    Args:
+        value: String to check
+        
+    Returns:
+        True if string is a policy specification
+        
+    Examples:
+        >>> is_policy_string("policy:strict")
+        True
+        >>> is_policy_string("pii:redact")
+        True
+        >>> is_policy_string("strict")
+        False
+    """
+    if not isinstance(value, str):
+        return False
+    
+    # Policy strings have exactly one colon and no spaces before it
+    if ":" not in value:
+        return False
+    
+    # Check format: type:action (no spaces, short strings)
+    parts = value.split(":", 1)
+    if len(parts) != 2:
+        return False
+    
+    policy_type, action = parts
+    # Policy type should be short identifier (policy, pii, safety, etc.)
+    if not policy_type or not action:
+        return False
+    if " " in policy_type or len(policy_type) > 20:
+        return False
+    
+    return True
+
+
+def parse_policy_string(value: str) -> tuple:
+    """
+    Parse a policy string into type and action. O(1) operation.
+    
+    Args:
+        value: Policy string (e.g., "policy:strict", "pii:redact")
+        
+    Returns:
+        Tuple of (policy_type, action)
+        
+    Examples:
+        >>> parse_policy_string("policy:strict")
+        ('policy', 'strict')
+        >>> parse_policy_string("pii:redact")
+        ('pii', 'redact')
+    """
+    parts = value.split(":", 1)
+    return (parts[0], parts[1]) if len(parts) == 2 else (value, "")
+
+
 def merge_config_with_overrides(
     base_config: Any,
     overrides: Dict[str, Any],

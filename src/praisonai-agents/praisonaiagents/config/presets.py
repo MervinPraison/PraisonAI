@@ -155,8 +155,9 @@ REFLECTION_PRESETS: Dict[str, Dict[str, Any]] = {
 # =============================================================================
 
 GUARDRAIL_PRESETS: Dict[str, Dict[str, Any]] = {
-    # Policy presets (prefix: policy:)
-    # These are handled specially in the resolver
+    "strict": {"max_retries": 5, "on_fail": "raise"},
+    "permissive": {"max_retries": 1, "on_fail": "skip"},
+    "safety": {"max_retries": 3, "on_fail": "retry"},
 }
 
 
@@ -237,4 +238,13 @@ WORKFLOW_OUTPUT_PRESETS: Dict[str, Dict[str, Any]] = {
     "normal": {"verbose": False, "stream": True},
     "verbose": {"verbose": True, "stream": True},
     "debug": {"verbose": True, "stream": True},
+}
+
+
+# =============================================================================
+# Knowledge Presets
+# =============================================================================
+
+KNOWLEDGE_PRESETS: Dict[str, Dict[str, Any]] = {
+    "auto": {"auto_retrieve": True},
 }

@@ -308,6 +308,14 @@ def _resolve_string(
         if config_class:
             return config_class(llm=value)
     
+    # LLM prompt mode (for guardrails) - long strings are LLM validator prompts
+    if string_mode == "llm_prompt":
+        if config_class:
+            # Check if config has llm_validator field
+            if hasattr(config_class, '__dataclass_fields__') and 'llm_validator' in config_class.__dataclass_fields__:
+                return config_class(llm_validator=value)
+        return value
+    
     # If no presets and no URL schemes, and we have a config class,
     # try to use the string as a single source
     if config_class and is_path_like(value):
@@ -543,3 +551,56 @@ def resolve_routing(value: Any, config_class: Type) -> Any:
         config_class=config_class,
         array_mode=ArrayMode.STEP_NAMES,
     )
+
+
+def resolve_guardrails(value: Any, config_class: Type) -> Any:
+    """Resolve guardrails parameter."""
+    from .presets import GUARDRAIL_PRESETS
+    
+    # Handle callable (highest precedence after instance)
+    if callable(value) and not isinstance(value, type):
+        return value
+    
+    return resolve(
+        value=value,
+        param_name="guardrails",
+        config_class=config_class,
+        presets=GUARDRAIL_PRESETS,
+        array_mode=ArrayMode.PRESET_OVERRIDE,
+        string_mode="llm_prompt",
+    )
+
+
+def resolve_guardrail_policies(
+    policies: list,
+    config_class: Type,
+) -> Any:
+    """
+    Resolve a list of policy strings into a guardrail config.
+    
+    Supports policy strings like:
+    - "policy:strict" - Apply strict policy preset
+    - "pii:redact" - PII detection with redaction
+    - "safety:block" - Safety check with blocking
+    
+    Args:
+        policies: List of policy strings
+        config_class: GuardrailConfig class
+        
+    Returns:
+        Config instance with policies list populated
+    """
+    from .parse_utils import is_policy_string
+    
+    # Filter to only valid policy strings
+    valid_policies = [p for p in policies if isinstance(p, str) and is_policy_string(p)]
+    
+    if not valid_policies:
+        return None
+    
+    # Create config with policies list
+    if config_class and hasattr(config_class, '__dataclass_fields__'):
+        if 'policies' in config_class.__dataclass_fields__:
+            return config_class(policies=valid_policies)
+    
+    return {"policies": valid_policies}
