@@ -85,7 +85,7 @@ async def main():
         Use lsp_find_references to find where symbols are used.
         Provide clear, organized summaries of code structure.""",
         tools=tools,
-        verbose=True
+        output="verbose"  # Use new consolidated param
     )
     print()
     

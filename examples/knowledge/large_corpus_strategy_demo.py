@@ -143,7 +143,7 @@ When asked about verification codes, provide the EXACT code from the documents.
 If information is not in the context, say 'Information not found in documents.'""",
             knowledge=[temp_dir],
             user_id="strategy_demo_user",
-            verbose=True,
+            output="verbose",  # Use new consolidated param
         )
         
         # Test retrieval with unique codes

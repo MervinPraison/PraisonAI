@@ -393,6 +393,35 @@ def __getattr__(name):
         _lazy_cache[name] = result
         return result
     
+    # Unified parameter resolver (agent-centric API)
+    elif name in ("resolve", "ArrayMode", "resolve_memory", "resolve_knowledge",
+                  "resolve_output", "resolve_execution", "resolve_web",
+                  "resolve_planning", "resolve_reflection", "resolve_context",
+                  "resolve_autonomy", "resolve_caching", "resolve_hooks",
+                  "resolve_skills", "resolve_routing"):
+        from .config import param_resolver
+        result = getattr(param_resolver, name)
+        _lazy_cache[name] = result
+        return result
+    
+    # Preset registries (agent-centric API)
+    elif name in ("MEMORY_PRESETS", "MEMORY_URL_SCHEMES", "OUTPUT_PRESETS",
+                  "EXECUTION_PRESETS", "WEB_PRESETS", "PLANNING_PRESETS",
+                  "REFLECTION_PRESETS", "CONTEXT_PRESETS", "AUTONOMY_PRESETS",
+                  "CACHING_PRESETS", "MULTI_AGENT_OUTPUT_PRESETS",
+                  "MULTI_AGENT_EXECUTION_PRESETS"):
+        from .config import presets
+        result = getattr(presets, name)
+        _lazy_cache[name] = result
+        return result
+    
+    # Parse utilities (agent-centric API)
+    elif name in ("detect_url_scheme", "is_path_like", "suggest_similar"):
+        from .config import parse_utils
+        result = getattr(parse_utils, name)
+        _lazy_cache[name] = result
+        return result
+    
     # Context management config (already exists)
     elif name == "ManagerConfig":
         from .context.manager import ManagerConfig

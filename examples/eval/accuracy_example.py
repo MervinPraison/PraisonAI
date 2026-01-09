@@ -24,7 +24,7 @@ if has_api_key:
         input_text="What is 2 + 2?",
         expected_output="4",
         num_iterations=3,  # Run 3 times for statistical significance
-        verbose=True
+        output="verbose"
     )
 
     # Run evaluation
@@ -42,7 +42,7 @@ else:
         input_text="What is 2 + 2?",
         expected_output="4",
         num_iterations=1,
-        verbose=True
+        output="verbose"
     )
     
     # Test with mock output

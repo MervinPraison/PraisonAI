@@ -37,7 +37,7 @@ if has_api_key:
         input_text="Search for the weather in Paris and calculate 25 * 4",
         expected_tools=["search_web", "calculate"],  # Tools that should be called
         forbidden_tools=["delete_file"],  # Tools that should NOT be called
-        verbose=True
+        output="verbose"
     )
 
     # Run evaluation
@@ -59,7 +59,7 @@ evaluator = ReliabilityEvaluator(
     agent=mock_agent,
     expected_tools=["search_web", "calculate"],  # Tools that should be called
     forbidden_tools=["delete_file"],  # Tools that should NOT be called
-    verbose=True
+    output="verbose"
 )
 
 result2 = evaluator.evaluate_tool_calls(

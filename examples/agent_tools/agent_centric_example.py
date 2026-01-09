@@ -75,7 +75,7 @@ async def main():
             Use read_file to read files.
             Use list_files to list directory contents.""",
             tools=tools,
-            verbose=True
+            output="verbose"  # Use new consolidated param
         )
         print()
         

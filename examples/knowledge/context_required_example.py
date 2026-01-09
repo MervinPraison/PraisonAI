@@ -69,7 +69,7 @@ If the answer is not in the context, say 'I don't have that information.'
 Be precise and quote exact values when asked about codes or numbers.""",
             knowledge=[temp_dir],
             user_id="demo_user",
-            verbose=True,
+            output="verbose",
         )
         
         # Question 1: Unique code that requires context
