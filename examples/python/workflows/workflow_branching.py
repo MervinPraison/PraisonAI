@@ -5,7 +5,8 @@ Demonstrates conditional branching in workflows where steps can route
 to different next steps based on output content.
 """
 
-from praisonaiagents.memory.workflows import WorkflowManager, WorkflowStep, Workflow
+from praisonaiagents import Workflow, WorkflowStep
+from praisonaiagents.workflows import WorkflowManager
 
 # Create a workflow with branching
 workflow = Workflow(
@@ -15,10 +16,12 @@ workflow = Workflow(
         WorkflowStep(
             name="validate",
             action="Check if the number 42 is positive. Reply with 'valid' or 'invalid'.",
-            next_steps=["success_handler", "error_handler"],
-            branch_condition={
-                "valid": ["success_handler"],
-                "invalid": ["error_handler"]
+            routing={
+                "next_steps": ["success_handler", "error_handler"],
+                "branches": {
+                    "valid": ["success_handler"],
+                    "invalid": ["error_handler"]
+                }
             }
         ),
         WorkflowStep(

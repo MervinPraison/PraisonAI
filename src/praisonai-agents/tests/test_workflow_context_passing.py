@@ -13,23 +13,19 @@ import os
 # Add the package to path for testing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from praisonaiagents.memory.workflows import (
-    WorkflowStep,
-    Workflow,
-    WorkflowManager,
-    create_workflow_manager
-)
+from praisonaiagents import Workflow, WorkflowStep
+from praisonaiagents.workflows import WorkflowManager, WorkflowStepContextConfig, WorkflowStepOutputConfig
 
 
 class TestWorkflowStepContextFields:
     """Test WorkflowStep dataclass context-related fields."""
     
     def test_workflow_step_has_context_from_field(self):
-        """WorkflowStep should have context_from field."""
+        """WorkflowStep should have context_from via consolidated context param."""
         step = WorkflowStep(
             name="test_step",
             action="do something",
-            context_from=["step1", "step2"]
+            context=WorkflowStepContextConfig(from_steps=["step1", "step2"])
         )
         assert hasattr(step, 'context_from')
         assert step.context_from == ["step1", "step2"]
@@ -41,11 +37,11 @@ class TestWorkflowStepContextFields:
         assert step.retain_full_context == True
     
     def test_workflow_step_has_output_variable_field(self):
-        """WorkflowStep should have output_variable field."""
+        """WorkflowStep should have output_variable via consolidated output param."""
         step = WorkflowStep(
             name="test_step",
             action="do something",
-            output_variable="research_result"
+            output=WorkflowStepOutputConfig(variable="research_result")
         )
         assert hasattr(step, 'output_variable')
         assert step.output_variable == "research_result"
@@ -55,14 +51,13 @@ class TestWorkflowStepContextFields:
         step = WorkflowStep(
             name="test_step",
             action="do something",
-            context_from=["step1"],
-            retain_full_context=False,
-            output_variable="result"
+            context=WorkflowStepContextConfig(from_steps=["step1"], retain_full=False),
+            output=WorkflowStepOutputConfig(variable="result")
         )
         d = step.to_dict()
-        assert "context_from" in d
-        assert "retain_full_context" in d
-        assert "output_variable" in d
+        # Check that consolidated params are in dict
+        assert "context" in d or "context_from" in d
+        assert "output" in d or "output_variable" in d
 
 
 class TestContextPassing:
@@ -111,9 +106,9 @@ class TestContextPassing:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(name="step1", action="First action", retain_full_context=True),
-                WorkflowStep(name="step2", action="Second action", retain_full_context=True),
-                WorkflowStep(name="step3", action="Third with context: {{step1_output}} and {{step2_output}}", retain_full_context=True)
+                WorkflowStep(name="step1", action="First action", context=WorkflowStepContextConfig(retain_full=True)),
+                WorkflowStep(name="step2", action="Second action", context=WorkflowStepContextConfig(retain_full=True)),
+                WorkflowStep(name="step3", action="Third with context: {{step1_output}} and {{step2_output}}", context=WorkflowStepContextConfig(retain_full=True))
             ]
         )
         self._register_workflow(manager, workflow)
@@ -147,8 +142,7 @@ class TestContextPassing:
                 WorkflowStep(
                     name="summary",
                     action="Summarize based on: {{research_output}}",
-                    context_from=["research"],  # Only include research, not analysis
-                    retain_full_context=False
+                    context=WorkflowStepContextConfig(from_steps=["research"], retain_full=False)
                 )
             ]
         )
@@ -180,7 +174,7 @@ class TestContextPassing:
                 WorkflowStep(
                     name="step1",
                     action="Generate report",
-                    output_variable="report_data"
+                    output=WorkflowStepOutputConfig(variable="report_data")
                 ),
                 WorkflowStep(
                     name="step2",
@@ -211,7 +205,7 @@ class TestContextPassing:
                 WorkflowStep(
                     name="step3",
                     action="Third with {{previous_output}}",
-                    retain_full_context=False
+                    context=WorkflowStepContextConfig(retain_full=False)
                 )
             ]
         )

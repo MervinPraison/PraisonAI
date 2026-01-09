@@ -5,10 +5,10 @@ Demonstrates how to stop a workflow early using custom handler
 functions that return StepResult with stop_workflow=True.
 """
 
-from praisonaiagents.memory.workflows import (
-    WorkflowManager, WorkflowStep, Workflow,
-    WorkflowContext, StepResult
+from praisonaiagents import (
+    Workflow, WorkflowStep, WorkflowContext, StepResult
 )
+from praisonaiagents.workflows import WorkflowManager
 
 # Custom validator that can stop the workflow
 def validate_data(context: WorkflowContext) -> StepResult:

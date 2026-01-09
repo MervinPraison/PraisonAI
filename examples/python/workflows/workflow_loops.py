@@ -5,7 +5,8 @@ Demonstrates iterating over a list of items in a workflow step.
 Each item is processed individually with the loop variable.
 """
 
-from praisonaiagents.memory.workflows import WorkflowManager, WorkflowStep, Workflow
+from praisonaiagents import Workflow, WorkflowStep
+from praisonaiagents.workflows import WorkflowManager
 
 # Create a workflow with loop
 workflow = Workflow(
