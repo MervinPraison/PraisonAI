@@ -55,9 +55,9 @@ jobs:
     - name: Install minimal dependencies
       run: |
         pip install --upgrade pip
-        # Install praisonai-agents first (required for tests)
+        # Install praisonai-agents with all deps (required for tests)
         cd src/praisonai-agents
-        pip install -e .
+        pip install -e ".[all]"
         cd ../praisonai
         pip install -e .
         pip install pytest pytest-asyncio pytest-timeout
@@ -115,9 +115,9 @@ jobs:
     - name: Install dependencies
       run: |
         pip install --upgrade pip
-        # Install praisonai-agents first (required for tests)
+        # Install praisonai-agents with all deps (required for tests)
         cd src/praisonai-agents
-        pip install -e .
+        pip install -e ".[all]"
         cd ../praisonai
         pip install -e ".[crewai,autogen]"
         pip install pytest pytest-asyncio pytest-timeout pytest-cov pytest-xdist
@@ -197,7 +197,7 @@ jobs:
       run: |
         pip install --upgrade pip
         cd src/praisonai-agents
-        pip install -e .
+        pip install -e ".[all]"
         cd ../praisonai
         pip install -e ".[openai]"
         pip install pytest pytest-asyncio pytest-timeout
@@ -258,7 +258,7 @@ jobs:
       run: |
         pip install --upgrade pip
         cd src/praisonai-agents
-        pip install -e .
+        pip install -e ".[all]"
         cd ../praisonai
         pip install -e ".[anthropic]"
         pip install pytest pytest-asyncio pytest-timeout
@@ -313,7 +313,7 @@ jobs:
       run: |
         pip install --upgrade pip
         cd src/praisonai-agents
-        pip install -e .
+        pip install -e ".[all]"
         cd ../praisonai
         pip install -e ".[google]"
         pip install pytest pytest-asyncio pytest-timeout
@@ -368,7 +368,7 @@ jobs:
       run: |
         pip install --upgrade pip
         cd src/praisonai-agents
-        pip install -e .
+        pip install -e ".[all]"
         cd ../praisonai
         pip install -e .
         pip install pytest pytest-asyncio pytest-timeout
@@ -423,7 +423,7 @@ jobs:
       run: |
         pip install --upgrade pip
         cd src/praisonai-agents
-        pip install -e .
+        pip install -e ".[all]"
         cd ../praisonai
         pip install -e .
         pip install pytest pytest-asyncio pytest-timeout
@@ -478,7 +478,7 @@ jobs:
       run: |
         pip install --upgrade pip
         cd src/praisonai-agents
-        pip install -e .
+        pip install -e ".[all]"
         cd ../praisonai
         pip install -e ".[cohere]"
         pip install pytest pytest-asyncio pytest-timeout
