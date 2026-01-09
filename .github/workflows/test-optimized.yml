@@ -68,15 +68,12 @@ jobs:
         PRAISONAI_ALLOW_NETWORK: '0'
       run: |
         cd src/praisonai
-        python -m pytest tests/unit/ \
+        # Run only CLI tests for smoke - fast and critical path
+        python -m pytest tests/unit/cli/ \
           -m "not slow and not network" \
           -q --tb=line \
           --timeout=30 \
           --ignore=tests/fixtures \
-          --ignore=tests/unit/jobs \
-          --ignore=tests/unit/api \
-          --ignore-glob="**/test_*gradio*" \
-          --ignore-glob="**/test_*chainlit*" \
           --maxfail=5
     
     - name: Smoke Test Summary
