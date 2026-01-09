@@ -161,11 +161,12 @@ class Agents:
             hooks: Hooks configuration (MultiAgentHooksConfig)
         """
         # ─────────────────────────────────────────────────────────────────────
-        # Extract values from consolidated params using unified resolver
-        # Precedence: Instance > Config > Array > String > Bool > Default
+        # Extract values from consolidated params using UNIFIED CANONICAL resolver
+        # Precedence: Instance > Config > Dict > Array > String > Bool > Default
         # ─────────────────────────────────────────────────────────────────────
         
-        # Import presets for unified resolution
+        # Import canonical resolver and presets
+        from ..config.param_resolver import resolve, ArrayMode
         from ..config.presets import (
             MULTI_AGENT_OUTPUT_PRESETS, MULTI_AGENT_EXECUTION_PRESETS,
             MEMORY_PRESETS, MEMORY_URL_SCHEMES,
@@ -186,156 +187,118 @@ class Agents:
             MultiAgentHooksConfig = None
         
         # ─────────────────────────────────────────────────────────────────────
-        # Resolve OUTPUT param
+        # Resolve OUTPUT param using canonical resolver
         # Supports: None, str preset, list [preset, overrides], Config, dict
         # ─────────────────────────────────────────────────────────────────────
-        _verbose = 0
-        _stream = True
-        if output is None:
-            pass  # Use defaults
-        elif isinstance(output, str):
-            preset = MULTI_AGENT_OUTPUT_PRESETS.get(output, {})
-            _verbose = preset.get("verbose", 0)
-            _stream = preset.get("stream", True)
-        elif isinstance(output, list) and len(output) >= 1:
-            # Array mode: [preset] or [preset, overrides]
-            preset_name = output[0] if isinstance(output[0], str) else None
-            overrides = output[-1] if len(output) > 1 and isinstance(output[-1], dict) else {}
-            if preset_name and preset_name in MULTI_AGENT_OUTPUT_PRESETS:
-                preset = MULTI_AGENT_OUTPUT_PRESETS[preset_name].copy()
-                preset.update(overrides)
-                _verbose = preset.get("verbose", 0)
-                _stream = preset.get("stream", True)
-        elif MultiAgentOutputConfig and isinstance(output, MultiAgentOutputConfig):
-            _verbose = output.verbose
-            _stream = output.stream
-        elif isinstance(output, dict):
-            _verbose = output.get("verbose", 0)
-            _stream = output.get("stream", True)
+        _output_config = resolve(
+            value=output,
+            param_name="output",
+            config_class=MultiAgentOutputConfig,
+            presets=MULTI_AGENT_OUTPUT_PRESETS,
+            array_mode=ArrayMode.PRESET_OVERRIDE,
+            default=MultiAgentOutputConfig() if MultiAgentOutputConfig else None,
+        )
+        if _output_config and hasattr(_output_config, 'verbose'):
+            _verbose = _output_config.verbose
+            _stream = _output_config.stream
+        else:
+            _verbose = 0
+            _stream = True
         
         # ─────────────────────────────────────────────────────────────────────
-        # Resolve EXECUTION param
+        # Resolve EXECUTION param using canonical resolver
         # Supports: None, str preset, list [preset, overrides], Config, dict
         # ─────────────────────────────────────────────────────────────────────
-        _max_iter = 10
-        _max_retries = 5
-        if execution is None:
-            pass  # Use defaults
-        elif isinstance(execution, str):
-            preset = MULTI_AGENT_EXECUTION_PRESETS.get(execution, {})
-            _max_iter = preset.get("max_iter", 10)
-            _max_retries = preset.get("max_retries", 5)
-        elif isinstance(execution, list) and len(execution) >= 1:
-            # Array mode: [preset] or [preset, overrides]
-            preset_name = execution[0] if isinstance(execution[0], str) else None
-            overrides = execution[-1] if len(execution) > 1 and isinstance(execution[-1], dict) else {}
-            if preset_name and preset_name in MULTI_AGENT_EXECUTION_PRESETS:
-                preset = MULTI_AGENT_EXECUTION_PRESETS[preset_name].copy()
-                preset.update(overrides)
-                _max_iter = preset.get("max_iter", 10)
-                _max_retries = preset.get("max_retries", 5)
-        elif MultiAgentExecutionConfig and isinstance(execution, MultiAgentExecutionConfig):
-            _max_iter = execution.max_iter
-            _max_retries = execution.max_retries
-        elif isinstance(execution, dict):
-            _max_iter = execution.get("max_iter", 10)
-            _max_retries = execution.get("max_retries", 5)
+        _exec_config = resolve(
+            value=execution,
+            param_name="execution",
+            config_class=MultiAgentExecutionConfig,
+            presets=MULTI_AGENT_EXECUTION_PRESETS,
+            array_mode=ArrayMode.PRESET_OVERRIDE,
+            default=MultiAgentExecutionConfig() if MultiAgentExecutionConfig else None,
+        )
+        if _exec_config and hasattr(_exec_config, 'max_iter'):
+            _max_iter = _exec_config.max_iter
+            _max_retries = _exec_config.max_retries
+        else:
+            _max_iter = 10
+            _max_retries = 5
         
         # ─────────────────────────────────────────────────────────────────────
-        # Resolve HOOKS param
+        # Resolve HOOKS param using canonical resolver
         # Supports: None, list, Config, dict
         # ─────────────────────────────────────────────────────────────────────
-        _completion_checker = None
-        _on_task_start = None
-        _on_task_complete = None
-        if hooks is not None:
-            if MultiAgentHooksConfig and isinstance(hooks, MultiAgentHooksConfig):
-                _completion_checker = hooks.completion_checker
-                _on_task_start = hooks.on_task_start
-                _on_task_complete = hooks.on_task_complete
-            elif isinstance(hooks, dict):
-                _completion_checker = hooks.get("completion_checker")
-                _on_task_start = hooks.get("on_task_start")
-                _on_task_complete = hooks.get("on_task_complete")
+        _hooks_config = resolve(
+            value=hooks,
+            param_name="hooks",
+            config_class=MultiAgentHooksConfig,
+            array_mode=ArrayMode.PASSTHROUGH,
+            default=None,
+        )
+        if _hooks_config and hasattr(_hooks_config, 'completion_checker'):
+            _completion_checker = _hooks_config.completion_checker
+            _on_task_start = _hooks_config.on_task_start
+            _on_task_complete = _hooks_config.on_task_complete
+        else:
+            _completion_checker = None
+            _on_task_start = None
+            _on_task_complete = None
         
         # ─────────────────────────────────────────────────────────────────────
-        # Resolve MEMORY param
+        # Resolve MEMORY param using canonical resolver
         # Supports: None, bool, str preset/URL, list, Config, dict, Instance
         # ─────────────────────────────────────────────────────────────────────
+        _memory_config_resolved = resolve(
+            value=memory,
+            param_name="memory",
+            config_class=MultiAgentMemoryConfig,
+            presets=MEMORY_PRESETS,
+            url_schemes=MEMORY_URL_SCHEMES,
+            instance_check=lambda v: hasattr(v, 'database_url'),
+            array_mode=ArrayMode.SINGLE_OR_LIST,
+            default=None,
+        )
+        
+        # Extract values from resolved memory config
         _user_id = "praison"
         _memory_config = None
         _embedder = None
-        
-        if memory is None or memory is False:
-            pass  # Disabled
-        elif memory is True:
-            pass  # Use defaults
-        elif isinstance(memory, str):
-            # Check for URL
-            if "://" in memory:
-                # URL - extract backend from scheme
-                scheme = memory.split("://")[0].lower()
-                backend = MEMORY_URL_SCHEMES.get(scheme)
-                if backend:
-                    _memory_config = {"url": memory, "backend": backend}
-            elif memory in MEMORY_PRESETS:
-                # Preset name
-                _memory_config = MEMORY_PRESETS[memory]
-        elif isinstance(memory, list) and len(memory) >= 1:
-            # Array mode: [URL] or [preset, overrides]
-            first = memory[0]
-            if isinstance(first, str) and "://" in first:
-                scheme = first.split("://")[0].lower()
-                backend = MEMORY_URL_SCHEMES.get(scheme)
-                if backend:
-                    _memory_config = {"url": first, "backend": backend}
-        elif MultiAgentMemoryConfig and isinstance(memory, MultiAgentMemoryConfig):
-            _user_id = memory.user_id or "praison"
-            _memory_config = memory.config
-            _embedder = memory.embedder
-        elif isinstance(memory, dict):
-            _user_id = memory.get("user_id", "praison")
-            _memory_config = memory.get("config")
-            _embedder = memory.get("embedder")
-        elif hasattr(memory, 'database_url'):
-            # db() instance
-            _memory_config = {"db_instance": memory}
+        if _memory_config_resolved is not None:
+            if hasattr(_memory_config_resolved, 'database_url'):
+                # db() instance - pass through
+                _memory_config = {"db_instance": _memory_config_resolved}
+            elif MultiAgentMemoryConfig and isinstance(_memory_config_resolved, MultiAgentMemoryConfig):
+                _user_id = _memory_config_resolved.user_id or "praison"
+                _memory_config = _memory_config_resolved.config
+                _embedder = _memory_config_resolved.embedder
+            elif isinstance(_memory_config_resolved, dict):
+                # Dict from preset resolution
+                _memory_config = _memory_config_resolved
         
         # ─────────────────────────────────────────────────────────────────────
-        # Resolve PLANNING param
+        # Resolve PLANNING param using canonical resolver
         # Supports: None, bool, str LLM, list, Config, dict
         # ─────────────────────────────────────────────────────────────────────
+        _planning_config = resolve(
+            value=planning,
+            param_name="planning",
+            config_class=MultiAgentPlanningConfig,
+            string_mode="llm_model",
+            array_mode=ArrayMode.PRESET_OVERRIDE,
+            default=None,
+        )
+        
+        # Extract values from resolved planning config
         _planning_llm = "gpt-4o-mini"
         _auto_approve_plan = False
         _planning_tools = None
         _planning_reasoning = False
-        
-        if planning is None or planning is False:
-            pass  # Disabled
-        elif planning is True:
-            pass  # Use defaults
-        elif isinstance(planning, str):
-            # String = LLM model name
-            _planning_llm = planning
-        elif isinstance(planning, list) and len(planning) >= 1:
-            # Array mode: [llm] or [llm, overrides]
-            if isinstance(planning[0], str):
-                _planning_llm = planning[0]
-            if len(planning) > 1 and isinstance(planning[-1], dict):
-                overrides = planning[-1]
-                _auto_approve_plan = overrides.get("auto_approve", False)
-                _planning_tools = overrides.get("tools")
-                _planning_reasoning = overrides.get("reasoning", False)
-        elif MultiAgentPlanningConfig and isinstance(planning, MultiAgentPlanningConfig):
-            _planning_llm = planning.llm or "gpt-4o-mini"
-            _auto_approve_plan = planning.auto_approve
-            _planning_tools = planning.tools
-            _planning_reasoning = planning.reasoning
-        elif isinstance(planning, dict):
-            _planning_llm = planning.get("llm", "gpt-4o-mini")
-            _auto_approve_plan = planning.get("auto_approve", False)
-            _planning_tools = planning.get("tools")
-            _planning_reasoning = planning.get("reasoning", False)
+        if _planning_config is not None:
+            if MultiAgentPlanningConfig and isinstance(_planning_config, MultiAgentPlanningConfig):
+                _planning_llm = _planning_config.llm or "gpt-4o-mini"
+                _auto_approve_plan = _planning_config.auto_approve
+                _planning_tools = _planning_config.tools
+                _planning_reasoning = _planning_config.reasoning
         
         # ─────────────────────────────────────────────────────────────────────
         # Memory dependency check

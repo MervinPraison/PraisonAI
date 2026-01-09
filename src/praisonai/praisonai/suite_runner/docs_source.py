@@ -46,6 +46,11 @@ TERMINAL_ACTIONS = [
 ]
 TERMINAL_PATTERN = re.compile('|'.join(TERMINAL_ACTIONS))
 
+# Agent-centric detection patterns
+AGENT_PATTERN = re.compile(r'\bAgent\s*\(')
+AGENTS_PATTERN = re.compile(r'\b(?:Agents|PraisonAIAgents)\s*\(')
+WORKFLOW_PATTERN = re.compile(r'\bWorkflow\s*\(')
+
 
 class DocsSource:
     """
@@ -262,6 +267,11 @@ class DocsSource:
             runnable_decision = "directive_skip"
             skip_reason = "Directive skip"
         
+        # Detect agent-centric usage
+        uses_agent = bool(AGENT_PATTERN.search(dedented_code))
+        uses_agents = bool(AGENTS_PATTERN.search(dedented_code))
+        uses_workflow = bool(WORKFLOW_PATTERN.search(dedented_code))
+        
         # Write script to workspace
         script_path = None
         if runnable:
@@ -286,6 +296,9 @@ class DocsSource:
             require_env=directive.get('require_env', []),
             is_interactive=is_interactive,
             title=title,
+            uses_agent=uses_agent,
+            uses_agents=uses_agents,
+            uses_workflow=uses_workflow,
         )
     
     def _classify(self, code: str, directive: dict) -> Tuple[bool, str]:

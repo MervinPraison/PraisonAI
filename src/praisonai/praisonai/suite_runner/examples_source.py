@@ -19,6 +19,11 @@ from .discovery import FileDiscovery, get_pythonpath_for_dev
 DIRECTIVE_PATTERN = re.compile(r'^#\s*praisonai:\s*(\w+)=(.+)$', re.MULTILINE)
 INPUT_PATTERN = re.compile(r'\binput\s*\(')
 
+# Agent-centric detection patterns
+AGENT_PATTERN = re.compile(r'\bAgent\s*\(')
+AGENTS_PATTERN = re.compile(r'\b(?:Agents|PraisonAIAgents)\s*\(')
+WORKFLOW_PATTERN = re.compile(r'\bWorkflow\s*\(')
+
 
 class ExamplesSource:
     """
@@ -128,6 +133,11 @@ class ExamplesSource:
             skip = True
             skip_reason = "Interactive example (contains input())"
         
+        # Detect agent-centric usage
+        uses_agent = bool(AGENT_PATTERN.search(content))
+        uses_agents = bool(AGENTS_PATTERN.search(content))
+        uses_workflow = bool(WORKFLOW_PATTERN.search(content))
+        
         # Determine runnable status
         runnable = not skip
         runnable_decision = "runnable" if runnable else (skip_reason or "skipped")
@@ -149,6 +159,9 @@ class ExamplesSource:
             require_env=require_env,
             xfail=xfail,
             is_interactive=is_interactive,
+            uses_agent=uses_agent,
+            uses_agents=uses_agents,
+            uses_workflow=uses_workflow,
         )
     
     def get_groups(self) -> List[str]:

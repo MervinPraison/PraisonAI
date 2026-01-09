@@ -12,7 +12,9 @@ Provides dataclasses for consolidated workflow feature configuration:
 - WorkflowStepRoutingConfig: Step routing/branching settings
 
 All configs follow the workflow-centric pattern with precedence:
-Instance > Config > String > Bool > Default
+Instance > Config > Dict > Array > String > Bool > Default
+
+Uses the CANONICAL resolver from param_resolver.py for DRY resolution.
 
 Usage:
     from praisonaiagents import Workflow, WorkflowOutputConfig
@@ -263,7 +265,7 @@ class WorkflowStepRoutingConfig:
 
 
 # =============================================================================
-# Precedence Resolution Helper
+# Precedence Resolution Helper - Uses CANONICAL resolver
 # =============================================================================
 
 def resolve_param(
@@ -275,245 +277,173 @@ def resolve_param(
     array_mode: Optional[str] = None,
 ) -> Any:
     """
-    Resolve a consolidated parameter following precedence rules:
-    Instance > Config > Array > String > Bool > Default
+    Resolve a consolidated parameter following precedence rules.
     
-    Args:
-        value: The parameter value (can be Instance, Config, Array, String, Bool, or None)
-        config_class: The expected config dataclass type
-        presets: Dict mapping preset strings to config instances or dicts
-        default: Default value if None/unset
-        instance_check: Optional function to check if value is an instance
-        array_mode: How to handle arrays ("preset_override", "step_names", "passthrough")
-        
-    Returns:
-        Resolved config object or value
-        
-    Example:
-        # Resolve output param
-        output_config = resolve_param(
-            value=output,
-            config_class=WorkflowOutputConfig,
-            presets={
-                "silent": WorkflowOutputConfig(verbose=False, stream=False),
-                "verbose": WorkflowOutputConfig(verbose=True, stream=True),
-            },
-            default=WorkflowOutputConfig(),
-        )
-        
-        # With array override
-        output_config = resolve_param(
-            value=["verbose", {"stream": False}],
-            config_class=WorkflowOutputConfig,
-            presets=presets,
-            array_mode="preset_override",
-        )
+    DEPRECATED: This is a wrapper around the canonical resolver for backward compatibility.
+    New code should use `from ..config.param_resolver import resolve` directly.
+    
+    Precedence: Instance > Config > Dict > Array > String > Bool > Default
     """
-    # None/unset -> Default
-    if value is None:
-        return default
+    # Import canonical resolver
+    from ..config.param_resolver import resolve as canonical_resolve, ArrayMode
     
-    # Instance check (e.g., pre-built manager object)
-    if instance_check and instance_check(value):
-        return value
+    # Map string array_mode to ArrayMode enum
+    array_mode_map = {
+        "preset_override": ArrayMode.PRESET_OVERRIDE,
+        "step_names": ArrayMode.STEP_NAMES,
+        "passthrough": ArrayMode.PASSTHROUGH,
+    }
+    canonical_array_mode = array_mode_map.get(array_mode) if array_mode else None
     
-    # Config dataclass
-    if isinstance(value, config_class):
-        return value
+    # Convert presets from config instances to dicts for canonical resolver
+    presets_dict = None
+    if presets:
+        presets_dict = {}
+        for key, val in presets.items():
+            if hasattr(val, 'to_dict'):
+                presets_dict[key] = val.to_dict()
+            elif hasattr(val, '__dataclass_fields__'):
+                from dataclasses import asdict
+                presets_dict[key] = asdict(val)
+            else:
+                presets_dict[key] = val
     
-    # Dict -> convert to config
-    if isinstance(value, dict):
-        try:
-            return config_class(**value)
-        except TypeError:
-            return default
-    
-    # Array handling (NEW - before string to respect precedence)
-    if isinstance(value, (list, tuple)):
-        if not value:
-            return None  # Empty array = disabled
-        
-        # Passthrough mode - return list as-is
-        if array_mode == "passthrough":
-            return list(value)
-        
-        # Step names mode - for context/routing
-        if array_mode == "step_names":
-            # All strings = step names
-            if all(isinstance(item, str) for item in value):
-                return value  # Return list directly for step names
-        
-        # Preset override mode - [preset, {overrides}]
-        if array_mode == "preset_override" and presets:
-            first = value[0]
-            if isinstance(first, str) and first in presets:
-                # Get base config from preset
-                preset_value = presets[first]
-                if isinstance(preset_value, dict):
-                    base_config = config_class(**preset_value)
-                elif isinstance(preset_value, config_class):
-                    base_config = preset_value
-                else:
-                    base_config = config_class()
-                
-                # Apply overrides if present
-                if len(value) >= 2 and isinstance(value[-1], dict):
-                    overrides = value[-1]
-                    # Merge base with overrides
-                    from dataclasses import asdict
-                    base_dict = asdict(base_config)
-                    base_dict.update(overrides)
-                    return config_class(**base_dict)
-                
-                return base_config
-        
-        # Default: treat first item as value
-        if len(value) == 1:
-            return resolve_param(value[0], config_class, presets, default, instance_check)
-        
-        return default
-    
-    # String -> preset lookup
-    if isinstance(value, str) and presets:
-        preset_value = presets.get(value)
-        if preset_value is not None:
-            if isinstance(preset_value, dict):
-                return config_class(**preset_value)
-            return preset_value
-        return default
-    
-    # Bool -> True enables defaults, False disables
-    if isinstance(value, bool):
-        if value:
-            return config_class() if config_class else True
-        return None  # Disabled
-    
-    # Fallback to default
-    return default
+    return canonical_resolve(
+        value=value,
+        param_name="workflow_param",
+        config_class=config_class,
+        presets=presets_dict,
+        default=default,
+        instance_check=instance_check,
+        array_mode=canonical_array_mode,
+    )
 
 
 def resolve_output_config(value: Any) -> WorkflowOutputConfig:
-    """Resolve output parameter to WorkflowOutputConfig.
+    """Resolve output parameter to WorkflowOutputConfig using canonical resolver.
     
     Supports: None, str preset, list [preset, overrides], Config, dict
     """
-    presets = {
-        "silent": WorkflowOutputConfig(verbose=False, stream=False),
-        "minimal": WorkflowOutputConfig(verbose=False, stream=True),
-        "normal": WorkflowOutputConfig(verbose=False, stream=True),
-        "verbose": WorkflowOutputConfig(verbose=True, stream=True),
-        "debug": WorkflowOutputConfig(verbose=True, stream=True),
-    }
-    result = resolve_param(
-        value, WorkflowOutputConfig, presets, WorkflowOutputConfig(),
-        array_mode="preset_override"
+    from ..config.param_resolver import resolve, ArrayMode
+    from ..config.presets import WORKFLOW_OUTPUT_PRESETS
+    
+    result = resolve(
+        value=value,
+        param_name="output",
+        config_class=WorkflowOutputConfig,
+        presets=WORKFLOW_OUTPUT_PRESETS,
+        array_mode=ArrayMode.PRESET_OVERRIDE,
+        default=WorkflowOutputConfig(),
     )
     return result if result else WorkflowOutputConfig(verbose=False, stream=False)
 
 
 def resolve_planning_config(value: Any) -> Optional[WorkflowPlanningConfig]:
-    """Resolve planning parameter to WorkflowPlanningConfig or None."""
-    if value is None or value is False:
-        return None
-    if value is True:
-        return WorkflowPlanningConfig(enabled=True)
-    if isinstance(value, WorkflowPlanningConfig):
-        return value
-    if isinstance(value, dict):
-        return WorkflowPlanningConfig(**value)
-    if isinstance(value, str):
-        # String is treated as LLM model name
-        return WorkflowPlanningConfig(enabled=True, llm=value)
-    return None
+    """Resolve planning parameter to WorkflowPlanningConfig using canonical resolver."""
+    from ..config.param_resolver import resolve, ArrayMode
+    
+    result = resolve(
+        value=value,
+        param_name="planning",
+        config_class=WorkflowPlanningConfig,
+        string_mode="llm_model",
+        array_mode=ArrayMode.PRESET_OVERRIDE,
+        default=None,
+    )
+    return result
 
 
 def resolve_memory_config(value: Any) -> Optional[WorkflowMemoryConfig]:
-    """Resolve memory parameter to WorkflowMemoryConfig or None."""
-    if value is None or value is False:
-        return None
-    if value is True:
-        return WorkflowMemoryConfig()
-    if isinstance(value, WorkflowMemoryConfig):
-        return value
-    if isinstance(value, dict):
-        return WorkflowMemoryConfig(**value)
-    # Instance check - if it has search/add methods, it's a memory instance
-    if hasattr(value, 'search') and hasattr(value, 'add'):
-        return value  # Return instance directly
-    return None
+    """Resolve memory parameter to WorkflowMemoryConfig using canonical resolver."""
+    from ..config.param_resolver import resolve, ArrayMode
+    from ..config.presets import MEMORY_PRESETS, MEMORY_URL_SCHEMES
+    
+    result = resolve(
+        value=value,
+        param_name="memory",
+        config_class=WorkflowMemoryConfig,
+        presets=MEMORY_PRESETS,
+        url_schemes=MEMORY_URL_SCHEMES,
+        instance_check=lambda v: hasattr(v, 'search') and hasattr(v, 'add'),
+        array_mode=ArrayMode.SINGLE_OR_LIST,
+        default=None,
+    )
+    return result
 
 
 def resolve_hooks_config(value: Any) -> Optional[WorkflowHooksConfig]:
-    """Resolve hooks parameter to WorkflowHooksConfig or None."""
-    if value is None:
-        return None
-    if isinstance(value, WorkflowHooksConfig):
-        return value
-    if isinstance(value, dict):
-        return WorkflowHooksConfig(**value)
-    return None
+    """Resolve hooks parameter to WorkflowHooksConfig using canonical resolver."""
+    from ..config.param_resolver import resolve, ArrayMode
+    
+    result = resolve(
+        value=value,
+        param_name="hooks",
+        config_class=WorkflowHooksConfig,
+        array_mode=ArrayMode.PASSTHROUGH,
+        default=None,
+    )
+    return result
 
 
 def resolve_step_context_config(value: Any) -> Optional[WorkflowStepContextConfig]:
-    """Resolve step context parameter."""
-    if value is None or value is False:
-        return None
-    if value is True:
-        return WorkflowStepContextConfig()
-    if isinstance(value, WorkflowStepContextConfig):
-        return value
-    if isinstance(value, dict):
-        return WorkflowStepContextConfig(**value)
-    if isinstance(value, list):
-        # List of step names
-        return WorkflowStepContextConfig(from_steps=value)
-    return None
+    """Resolve step context parameter using canonical resolver."""
+    from ..config.param_resolver import resolve, ArrayMode
+    
+    result = resolve(
+        value=value,
+        param_name="context",
+        config_class=WorkflowStepContextConfig,
+        array_mode=ArrayMode.STEP_NAMES,
+        default=None,
+    )
+    return result
 
 
 def resolve_step_output_config(value: Any) -> Optional[WorkflowStepOutputConfig]:
-    """Resolve step output parameter."""
-    if value is None:
-        return None
-    if isinstance(value, WorkflowStepOutputConfig):
-        return value
-    if isinstance(value, dict):
-        return WorkflowStepOutputConfig(**value)
-    if isinstance(value, str):
-        # String is treated as output file
+    """Resolve step output parameter using canonical resolver."""
+    from ..config.param_resolver import resolve
+    
+    result = resolve(
+        value=value,
+        param_name="output",
+        config_class=WorkflowStepOutputConfig,
+        string_mode="path_as_source",  # String treated as output file
+        default=None,
+    )
+    # Handle string -> file conversion for backward compatibility
+    if isinstance(value, str) and result is None:
         return WorkflowStepOutputConfig(file=value)
-    return None
+    return result
 
 
 def resolve_step_execution_config(value: Any) -> WorkflowStepExecutionConfig:
-    """Resolve step execution parameter."""
-    presets = {
-        "fast": WorkflowStepExecutionConfig(max_retries=1, quality_check=False),
-        "balanced": WorkflowStepExecutionConfig(max_retries=3, quality_check=True),
-        "thorough": WorkflowStepExecutionConfig(max_retries=5, quality_check=True),
-    }
-    if value is None:
-        return WorkflowStepExecutionConfig()
-    if isinstance(value, WorkflowStepExecutionConfig):
-        return value
-    if isinstance(value, dict):
-        return WorkflowStepExecutionConfig(**value)
-    if isinstance(value, str) and value in presets:
-        return presets[value]
-    return WorkflowStepExecutionConfig()
+    """Resolve step execution parameter using canonical resolver."""
+    from ..config.param_resolver import resolve, ArrayMode
+    from ..config.presets import WORKFLOW_STEP_EXECUTION_PRESETS
+    
+    result = resolve(
+        value=value,
+        param_name="execution",
+        config_class=WorkflowStepExecutionConfig,
+        presets=WORKFLOW_STEP_EXECUTION_PRESETS,
+        array_mode=ArrayMode.PRESET_OVERRIDE,
+        default=WorkflowStepExecutionConfig(),
+    )
+    return result if result else WorkflowStepExecutionConfig()
 
 
 def resolve_step_routing_config(value: Any) -> Optional[WorkflowStepRoutingConfig]:
-    """Resolve step routing parameter."""
-    if value is None:
-        return None
-    if isinstance(value, WorkflowStepRoutingConfig):
-        return value
-    if isinstance(value, dict):
-        return WorkflowStepRoutingConfig(**value)
-    if isinstance(value, list):
-        # List of next step names
-        return WorkflowStepRoutingConfig(next_steps=value)
-    return None
+    """Resolve step routing parameter using canonical resolver."""
+    from ..config.param_resolver import resolve, ArrayMode
+    
+    result = resolve(
+        value=value,
+        param_name="routing",
+        config_class=WorkflowStepRoutingConfig,
+        array_mode=ArrayMode.STEP_NAMES,
+        default=None,
+    )
+    return result
 
 
 # =============================================================================

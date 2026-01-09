@@ -1,7 +1,7 @@
 """
 Unified Parameter Resolver for Consolidated Parameters.
 
-Implements the precedence rules: Instance > Config > Array > String > Bool > Default
+Implements the precedence rules: Instance > Config > Dict > Array > String > Bool > Default
 
 This is the SINGLE, DRY resolver used by:
 - Agent
@@ -91,15 +91,32 @@ def resolve(
         return value
     
     # =========================================================================
-    # 4. Dict -> convert to config
+    # 4. Dict -> convert to config (STRICT validation)
     # =========================================================================
-    if isinstance(value, dict) and config_class:
-        try:
-            return config_class(**value)
-        except TypeError as e:
-            raise ValueError(
-                f"Invalid {param_name} dict: {e}. "
-                f"Valid fields: {_get_config_fields(config_class)}"
+    if isinstance(value, dict):
+        if config_class:
+            # Validate keys BEFORE construction for helpful errors
+            unknown_keys = _validate_dict_keys(value, config_class)
+            if unknown_keys:
+                valid_fields = _get_config_fields(config_class)
+                example = _get_example_dict(config_class)
+                raise TypeError(
+                    f"Unknown keys for {param_name}: {unknown_keys}. "
+                    f"Valid keys: {valid_fields}. "
+                    f"Example: {param_name}={{{example}}}"
+                )
+            try:
+                return config_class(**value)
+            except TypeError as e:
+                raise TypeError(
+                    f"Invalid {param_name} dict: {e}. "
+                    f"Valid fields: {_get_config_fields(config_class)}"
+                )
+        else:
+            # No config class - dict input not supported
+            raise TypeError(
+                f"Dict input not supported for {param_name} (no config class defined). "
+                f"Use a supported type: bool, str, or instance."
             )
     
     # =========================================================================
@@ -382,6 +399,46 @@ def _get_config_fields(config_class: Type) -> str:
     if hasattr(config_class, '__dataclass_fields__'):
         return ", ".join(config_class.__dataclass_fields__.keys())
     return "unknown"
+
+
+def _validate_dict_keys(value: dict, config_class: Type) -> list:
+    """
+    Validate dict keys against config class fields.
+    Returns list of unknown keys (empty if all valid).
+    O(n) where n = number of keys in dict (typically small).
+    """
+    if not hasattr(config_class, '__dataclass_fields__'):
+        return []  # Not a dataclass, can't validate
+    
+    valid_keys = set(config_class.__dataclass_fields__.keys())
+    provided_keys = set(value.keys())
+    unknown = provided_keys - valid_keys
+    return list(unknown)
+
+
+def _get_example_dict(config_class: Type) -> str:
+    """
+    Generate a minimal example dict snippet for error messages.
+    Shows first 2-3 fields with placeholder values.
+    """
+    if not hasattr(config_class, '__dataclass_fields__'):
+        return "..."
+    
+    fields = list(config_class.__dataclass_fields__.items())[:3]
+    examples = []
+    for name, field in fields:
+        # Generate appropriate placeholder based on type hint
+        field_type = field.type if hasattr(field, 'type') else None
+        if field_type is bool or str(field_type) == 'bool':
+            examples.append(f"'{name}': True")
+        elif field_type is int or str(field_type) == 'int':
+            examples.append(f"'{name}': 1")
+        elif field_type is str or 'str' in str(field_type):
+            examples.append(f"'{name}': '...'")
+        else:
+            examples.append(f"'{name}': ...")
+    
+    return ", ".join(examples)
 
 
 # =============================================================================

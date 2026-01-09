@@ -54,6 +54,23 @@ class RunItem:
     # Metadata
     title: Optional[str] = None
     
+    # Agent-centric detection
+    uses_agent: bool = False  # Agent() class
+    uses_agents: bool = False  # Agents() / PraisonAIAgents class
+    uses_workflow: bool = False  # Workflow class
+    
+    @property
+    def agent_type(self) -> str:
+        """Get agent type used in this item."""
+        types = []
+        if self.uses_agent:
+            types.append("Agent")
+        if self.uses_agents:
+            types.append("Agents")
+        if self.uses_workflow:
+            types.append("Workflow")
+        return ",".join(types) if types else "none"
+    
     @property
     def code_hash(self) -> str:
         """Generate short hash of code content."""
@@ -182,8 +199,10 @@ class RunReport:
             "timeout": 0,
             "not_run": 0,
             "xfail": 0,
+            "total": 0,
         }
         for r in self.results:
+            counts["total"] += 1
             if r.status in counts:
                 counts[r.status] += 1
         return counts
