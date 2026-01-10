@@ -15,7 +15,7 @@ Supported Rewriting Strategies:
 Example:
     from praisonaiagents import QueryRewriterAgent, RewriteStrategy
     
-    agent = QueryRewriterAgent(verbose=True)
+    agent = QueryRewriterAgent()
     
     # Basic rewriting
     result = agent.rewrite("AI trends")
@@ -34,7 +34,7 @@ Example:
     
     # With search tools for context-aware rewriting
     from praisonaiagents.tools import internet_search
-    agent = QueryRewriterAgent(tools=[internet_search], verbose=True)
+    agent = QueryRewriterAgent(tools=[internet_search])
     result = agent.rewrite("latest AI developments")  # Searches first, then rewrites
 """
 
@@ -96,13 +96,12 @@ class QueryRewriterAgent:
     
     Attributes:
         name: Name of the agent
-        model: LLM model to use for rewriting
-        verbose: Whether to print detailed logs
+        model: LLM model to use for rewriting (alias for llm=)
         max_queries: Maximum number of queries to generate for multi-query strategy
         abbreviations: Dictionary of common abbreviations to expand
         
     Example:
-        agent = QueryRewriterAgent(model="gpt-4o-mini", verbose=True)
+        agent = QueryRewriterAgent(model="gpt-4o-mini")
         result = agent.rewrite("ML best practices", strategy=RewriteStrategy.MULTI_QUERY)
         for query in result.rewritten_queries:
             print(query)
@@ -288,8 +287,7 @@ Improved version:"""
                 backstory="You are an expert at understanding user intent and transforming queries for optimal information retrieval.",
                 tools=self.tools,
                 llm=self.model,
-                verbose=self.verbose,
-                markdown=False
+                output={"verbose": self.verbose, "markdown": False}
             )
         return self._agent
     

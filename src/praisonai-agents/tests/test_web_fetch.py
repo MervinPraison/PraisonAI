@@ -179,25 +179,27 @@ class TestAgentWebFetchParameter:
     """Test the web_fetch parameter in Agent class."""
     
     def test_agent_init_with_web_fetch_true(self):
-        """Test Agent initialization with web_fetch=True."""
+        """Test Agent initialization with web=WebConfig(fetch=True)."""
         from praisonaiagents.agent.agent import Agent
+        from praisonaiagents.config.feature_configs import WebConfig
         agent = Agent(
             name="Test Agent",
             llm="anthropic/claude-3-5-sonnet-latest",
-            web_fetch=True
+            web=WebConfig(fetch=True)
         )
         assert agent.web_fetch is True
     
     def test_agent_init_with_web_fetch_dict(self):
-        """Test Agent initialization with web_fetch as dict."""
+        """Test Agent initialization with web=WebConfig(fetch=True)."""
         from praisonaiagents.agent.agent import Agent
-        web_fetch_config = {"max_uses": 10, "allowed_domains": ["example.com"]}
+        from praisonaiagents.config.feature_configs import WebConfig
+        # Now using consolidated web= param with WebConfig
         agent = Agent(
             name="Test Agent",
             llm="anthropic/claude-3-5-sonnet-latest",
-            web_fetch=web_fetch_config
+            web=WebConfig(fetch=True)
         )
-        assert agent.web_fetch == web_fetch_config
+        assert agent.web_fetch is True
     
     def test_agent_init_without_web_fetch(self):
         """Test Agent initialization without web_fetch."""
@@ -208,10 +210,11 @@ class TestAgentWebFetchParameter:
     def test_agent_passes_web_fetch_to_llm(self):
         """Test that Agent passes web_fetch to LLM instance."""
         from praisonaiagents.agent.agent import Agent
+        from praisonaiagents.config.feature_configs import WebConfig
         agent = Agent(
             name="Test Agent",
             llm="anthropic/claude-3-5-sonnet-latest",
-            web_fetch=True
+            web=WebConfig(fetch=True)
         )
         assert agent.llm_instance.web_fetch is True
     
@@ -270,12 +273,13 @@ class TestWebFetchIntegration:
     def test_web_fetch_with_anthropic(self):
         """Test actual web fetch with Anthropic API."""
         from praisonaiagents.agent.agent import Agent
+        from praisonaiagents.config.feature_configs import WebConfig
         
         agent = Agent(
             name="Web Fetch Agent",
             instructions="You are a helpful assistant that can fetch web content.",
             llm="anthropic/claude-3-5-sonnet-latest",
-            web_fetch=True
+            web=WebConfig(fetch=True)
         )
         
         # This would make an actual API call

@@ -74,6 +74,17 @@ class AutoAgents(Agents):
         api_key: Optional[str] = None,
         max_agents: int = 3,  # Maximum number of agents
         autonomy: Optional[Any] = None,  # Union[bool, dict, AutonomyConfig] - Enable autonomy for all agents
+        # ============================================================
+        # CONSOLIDATED PARAMS (new SDK contract - take precedence)
+        # ============================================================
+        output: Optional[Any] = None,  # Union[str, OutputConfig] - overrides verbose/markdown
+        reflection: Optional[Any] = None,  # Union[bool, ReflectionConfig] - overrides self_reflect/max_reflect/min_reflect/reflect_llm
+        caching: Optional[Any] = None,  # Union[bool, CachingConfig] - overrides cache
+        knowledge: Optional[Any] = None,  # Union[bool, List[str], KnowledgeConfig] - overrides knowledge_sources/embedder_config
+        execution: Optional[Any] = None,  # Union[str, ExecutionConfig] - overrides max_iter
+        guardrails: Optional[Any] = None,  # Union[bool, Callable, GuardrailConfig]
+        web: Optional[Any] = None,  # Union[bool, WebConfig]
+        hooks: Optional[Any] = None,  # HooksConfig
     ):
         """Initialize AutoAgents with configuration for automatic agent and task creation."""
         if max_agents < 1:
@@ -112,6 +123,16 @@ class AutoAgents(Agents):
         self.api_key = api_key
         self.autonomy = autonomy  # Store autonomy config for agents
         
+        # Store consolidated params (new SDK contract - take precedence over legacy)
+        self._output = output
+        self._reflection = reflection
+        self._caching = caching
+        self._knowledge = knowledge
+        self._execution = execution
+        self._guardrails = guardrails
+        self._web = web
+        self._hooks = hooks
+        
         # Display initial instruction
         if self.verbose:
             display_instruction(f"🎯 Main Task: {self.instructions}")
@@ -129,14 +150,21 @@ class AutoAgents(Agents):
             self._display_agents_and_tasks(agents, tasks)
         
         # Initialize parent class with generated agents and tasks
+        # Use consolidated output= instead of legacy verbose=
         super().__init__(
             agents=agents,
             tasks=tasks,
-            verbose=verbose,
-            completion_checker=completion_checker,
-            max_retries=max_retries,
             process=process,
-            manager_llm=manager_llm or self.llm
+            manager_llm=manager_llm or self.llm,
+            output=self._output,  # Consolidated output param
+            execution=self._execution,
+            hooks=self._hooks,
+            memory=self.memory,
+            reflection=self._reflection,
+            caching=self._caching,
+            guardrails=self._guardrails,
+            web=self._web,
+            autonomy=self.autonomy,
         )
 
     def _display_agents_and_tasks(self, agents: List[Agent], tasks: List[Task]):
@@ -431,38 +459,33 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
             agent_tools = self._assign_tools_to_agent(agent_config)
             
             # Create the agent with all parameters
+            # Consolidated params take precedence over legacy params
+            # Use consolidated knowledge if provided, else fall back to legacy knowledge_sources
+            effective_knowledge = self._knowledge if self._knowledge is not None else self.knowledge_sources
+            
             agent = Agent(
                 name=agent_config.name,
                 role=agent_config.role,
                 goal=agent_config.goal,
                 backstory=agent_config.backstory,
                 tools=agent_tools,  # Use assigned tools
-                verbose=self.verbose >= 1,
                 allow_code_execution=self.allow_code_execution,
                 memory=self.memory,
-                markdown=self.markdown,
-                self_reflect=self.self_reflect,
-                max_reflect=self.max_reflect,
-                min_reflect=self.min_reflect,
-                llm=self.llm,
-                function_calling_llm=self.function_calling_llm,
+                llm=self.llm,  # Consolidated LLM param
                 code_execution_mode=self.code_execution_mode,
-                embedder_config=self.embedder_config,
-                knowledge=self.knowledge_sources,
-                use_system_prompt=self.use_system_prompt,
-                cache=self.cache,
                 allow_delegation=self.allow_delegation,
-                step_callback=self.step_callback,
-                system_template=self.system_template,
-                prompt_template=self.prompt_template,
-                response_template=self.response_template,
-                max_rpm=self.max_rpm,
-                max_execution_time=self.max_execution_time,
-                max_iter=self.max_iter,
-                reflect_llm=self.reflect_llm,
                 base_url=self.base_url,
                 api_key=self.api_key,
-                autonomy=self.autonomy  # Pass autonomy config to agents
+                # Consolidated params (new SDK contract)
+                output=self._output,  # Overrides verbose/markdown
+                reflection=self._reflection,  # Overrides self_reflect/max_reflect/min_reflect/reflect_llm
+                caching=self._caching,  # Overrides cache
+                knowledge=effective_knowledge,  # Overrides knowledge_sources/embedder_config
+                execution=self._execution,  # Overrides max_iter
+                guardrails=self._guardrails,
+                web=self._web,
+                hooks=self._hooks,
+                autonomy=self.autonomy,
             )
             agents.append(agent)
             

@@ -813,3 +813,47 @@ def docs_report(
     
     typer.echo(output)
     raise typer.Exit(exit_code)
+
+
+@app.command("api-md")
+def docs_api_md(
+    write: bool = typer.Option(
+        True,
+        "--write", "-w",
+        help="Write api.md file (default)",
+    ),
+    check: bool = typer.Option(
+        False,
+        "--check", "-c",
+        help="Check if api.md is up to date (exit 1 if not)",
+    ),
+    stdout: bool = typer.Option(
+        False,
+        "--stdout", "-s",
+        help="Print to stdout instead of writing file",
+    ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output", "-o",
+        help="Output file path (default: repo_root/api.md)",
+    ),
+):
+    """
+    Generate or check the api.md API reference file.
+    
+    This command generates a comprehensive API reference document
+    covering all public exports from praisonaiagents, praisonai, CLI, and TypeScript.
+    
+    Examples:
+        praisonai docs api-md              # Generate api.md
+        praisonai docs api-md --check      # Check if api.md is up to date
+        praisonai docs api-md --stdout     # Print to stdout
+    """
+    from praisonai._dev.api_md import generate_api_md
+    
+    exit_code = generate_api_md(
+        output_path=output,
+        check=check,
+        stdout=stdout
+    )
+    raise typer.Exit(exit_code)
