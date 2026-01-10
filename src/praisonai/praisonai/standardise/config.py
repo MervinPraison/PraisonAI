@@ -117,25 +117,37 @@ class StandardiseConfig:
         
         root = self.project_root
         
-        # Docs root detection
+        # Docs root detection - default: ~/PraisonAIDocs/docs
         if self.docs_root is None:
-            for candidate in ["docs", "PraisonAIDocs/docs"]:
-                path = root / candidate
-                if path.exists():
-                    self.docs_root = path
-                    break
-            # Check parent for PraisonAIDocs
-            parent_docs = root.parent / "PraisonAIDocs"
-            if parent_docs.exists() and self.docs_root is None:
-                self.docs_root = parent_docs / "docs"
+            # First check home directory for PraisonAIDocs
+            home_docs = Path.home() / "PraisonAIDocs" / "docs"
+            if home_docs.exists():
+                self.docs_root = home_docs
+            else:
+                # Fallback to project-relative paths
+                for candidate in ["docs", "PraisonAIDocs/docs"]:
+                    path = root / candidate
+                    if path.exists():
+                        self.docs_root = path
+                        break
+                # Check parent for PraisonAIDocs
+                parent_docs = root.parent / "PraisonAIDocs"
+                if parent_docs.exists() and self.docs_root is None:
+                    self.docs_root = parent_docs / "docs"
         
-        # Examples root detection
+        # Examples root detection - default: ~/praisonai-package/examples
         if self.examples_root is None:
-            for candidate in ["examples/python", "examples"]:
-                path = root / candidate
-                if path.exists():
-                    self.examples_root = path
-                    break
+            # First check home directory for praisonai-package/examples
+            home_examples = Path.home() / "praisonai-package" / "examples"
+            if home_examples.exists():
+                self.examples_root = home_examples
+            else:
+                # Fallback to project-relative paths
+                for candidate in ["examples/python", "examples"]:
+                    path = root / candidate
+                    if path.exists():
+                        self.examples_root = path
+                        break
         
         # SDK root detection
         if self.sdk_root is None:
