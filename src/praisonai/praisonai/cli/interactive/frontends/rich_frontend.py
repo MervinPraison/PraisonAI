@@ -31,14 +31,21 @@ class RichFrontend:
     - `praisonai chat`
     """
     
-    def __init__(self, core: Optional[InteractiveCore] = None, config: Optional[InteractiveConfig] = None):
+    def __init__(
+        self,
+        core: Optional[InteractiveCore] = None,
+        config: Optional[InteractiveConfig] = None,
+        ui_config: Optional['UIConfig'] = None,
+    ):
         """Initialize the Rich frontend.
         
         Args:
             core: InteractiveCore instance. If None, creates one.
             config: Configuration. Used if core is None.
+            ui_config: UI backend configuration for rendering options.
         """
         self.core = core or InteractiveCore(config=config)
+        self._ui_config = ui_config
         self._running = False
         self._current_response = ""
         self._pending_approval: Optional[ApprovalRequest] = None

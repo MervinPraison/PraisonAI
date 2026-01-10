@@ -15,7 +15,8 @@ import sys
 from pathlib import Path
 
 # Add the praisonai package to path
-repo_root = Path(__file__).parent.parent
+# Script is in src/praisonai/scripts/, so go up 3 levels to repo root
+repo_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(repo_root / "src" / "praisonai"))
 
 from praisonai._dev.api_md import generate_api_md

@@ -126,6 +126,12 @@ def chat_main(
     ),
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
+    # UI backend selection
+    ui: str = typer.Option("auto", "--ui", help="UI backend: auto, plain, rich, mg (middle-ground)"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON (forces plain backend)"),
+    no_color: bool = typer.Option(False, "--no-color", help="Disable colors"),
+    theme: str = typer.Option("default", "--theme", help="UI theme: default, dark, light, minimal"),
+    compact: bool = typer.Option(False, "--compact", help="Compact output mode"),
 ):
     """
     Start terminal-native interactive chat mode.
@@ -149,6 +155,18 @@ def chat_main(
     # Set workspace if provided
     if workspace:
         os.environ["PRAISONAI_WORKSPACE"] = workspace
+    
+    # Configure UI backend
+    from praisonai.cli.ui import select_backend, UIConfig
+    ui_config = UIConfig(
+        ui_backend=ui,
+        json_output=json_output,
+        no_color=no_color,
+        theme=theme,
+        compact=compact,
+        verbose=verbose,
+    )
+    backend = select_backend(ui_config)
     
     # Handle profiling for single prompt mode
     if prompt and (profile or profile_deep):
@@ -187,17 +205,22 @@ def chat_main(
         core = InteractiveCore(config=config)
         
         if prompt:
-            # Single prompt mode
+            # Single prompt mode - use backend for output
+            from praisonai.cli.ui.events import UIEventType
+            
             async def run_prompt():
                 if continue_session:
                     core.continue_session()
+                
+                backend.emit(UIEventType.MESSAGE_START, {})
                 response = await core.prompt(prompt)
-                print(response)
+                backend.emit(UIEventType.MESSAGE_CHUNK, {'content': response})
+                backend.emit(UIEventType.MESSAGE_END, {})
             
             asyncio.run(run_prompt())
         else:
-            # Interactive REPL mode
-            frontend = RichFrontend(core=core, config=config)
+            # Interactive REPL mode - pass ui_config to frontend
+            frontend = RichFrontend(core=core, config=config, ui_config=ui_config)
             asyncio.run(frontend.run())
             
     except ImportError:
