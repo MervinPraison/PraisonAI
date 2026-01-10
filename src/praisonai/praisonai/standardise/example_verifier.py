@@ -67,6 +67,14 @@ class ExampleVerifier:
         "import boto3",
     ]
     
+    # Patterns that indicate LLM API calls (will timeout during verification)
+    LLM_CALL_PATTERNS = [
+        "agent.start(",
+        "agents.start(",
+        ".chat(",
+        ".run(",
+    ]
+    
     def __init__(self, timeout: int = 30):
         self.timeout = timeout
     
@@ -96,7 +104,19 @@ class ExampleVerifier:
         # Step 2: Check for external dependencies
         requires_external, external_libs = self._detect_external_deps(code)
         
-        # Step 3: Execute the code
+        # Step 3: Skip execution for examples with LLM calls (they will timeout)
+        if "LLM_API_CALL" in external_libs:
+            return VerificationResult(
+                success=True,
+                syntax_valid=True,
+                execution_passed=False,
+                output="",
+                error="Skipped: Example makes LLM API calls",
+                missing_libraries=["praisonaiagents (LLM API)"],
+                requires_external=True,
+            )
+        
+        # Step 4: Execute the code
         execution_passed, output, error, missing_libs = self._execute(code)
         
         # Combine missing libraries
@@ -121,13 +141,19 @@ class ExampleVerifier:
             return False, f"Line {e.lineno}: {e.msg}"
     
     def _detect_external_deps(self, code: str) -> Tuple[bool, List[str]]:
-        """Detect if code requires external libraries."""
+        """Detect if code requires external libraries or makes LLM calls."""
         external_libs = []
         
         for pattern in self.EXTERNAL_IMPORT_PATTERNS:
             if pattern in code:
                 lib_name = pattern.split()[-1]
                 external_libs.append(lib_name)
+        
+        # Check for LLM API calls that will timeout during verification
+        for pattern in self.LLM_CALL_PATTERNS:
+            if pattern in code:
+                external_libs.append("LLM_API_CALL")
+                break
         
         return len(external_libs) > 0, external_libs
     

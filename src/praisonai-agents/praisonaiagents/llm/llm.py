@@ -1430,6 +1430,8 @@ Now provide your final answer using this result."""
         task_id: Optional[str] = None,
         execute_tool_fn: Optional[Callable] = None,
         stream: bool = True,
+        stream_callback: Optional[Callable] = None,
+        emit_events: bool = False,
         **kwargs
     ) -> str:
         """Enhanced get_response with all OpenAI-like features"""
@@ -1488,6 +1490,19 @@ Now provide your final answer using this result."""
             reasoning_steps = kwargs.pop('reasoning_steps', self.reasoning_steps) 
             # Disable litellm debug messages
             litellm.set_verbose = False
+            
+            # Setup StreamEvent emission if enabled
+            _emit = emit_events and stream_callback is not None
+            if _emit:
+                from ..streaming.events import StreamEvent, StreamEventType
+                _first_token_emitted = False
+                _last_content_time = None
+                _request_start_perf = time.perf_counter()
+                stream_callback(StreamEvent(
+                    type=StreamEventType.REQUEST_START,
+                    timestamp=_request_start_perf,
+                    metadata={"model": self.model, "provider": "litellm"}
+                ))
             
             # Format tools if provided
             formatted_tools = self._format_tools_for_litellm(tools)

@@ -356,7 +356,8 @@ def _run_init(parsed) -> int:
 
 
 def _run_ai(parsed) -> int:
-    """Run the AI generation subcommand."""
+    """Run the AI generation subcommand with ACP/LSP runtime support."""
+    import asyncio
     from praisonai.standardise.ai_generator import AIGenerator
     from praisonai.standardise.models import ArtifactType, FeatureSlug
     
@@ -367,11 +368,29 @@ def _run_ai(parsed) -> int:
         print(f"Error: Invalid feature slug: {slug.validation_error}")
         return 2
     
+    # Start ACP/LSP runtime for context gathering
+    runtime = None
+    try:
+        from praisonai.cli.features.interactive_runtime import create_runtime
+        runtime = create_runtime(
+            workspace=str(config.sdk_root or config.project_root or "."),
+            lsp=True,
+            acp=False  # ACP not needed for generation
+        )
+        # Start runtime in background
+        asyncio.get_event_loop().run_until_complete(runtime.start())
+        if runtime.lsp_ready:
+            print("🔧 LSP server ready for code intelligence")
+    except Exception:
+        # Runtime is optional, continue without it
+        pass
+    
     generator = AIGenerator(
         model=parsed.model,
         sdk_root=config.sdk_root,
         docs_root=config.docs_root,
         examples_root=config.examples_root,
+        use_fast_context=True,
     )
     
     # Determine which artifacts to generate
@@ -465,6 +484,13 @@ def _run_ai(parsed) -> int:
     
     if not parsed.apply:
         print("\nRun with --apply to create these files.")
+    
+    # Cleanup runtime
+    if runtime:
+        try:
+            asyncio.get_event_loop().run_until_complete(runtime.stop())
+        except Exception:
+            pass
     
     return 0
 
