@@ -1,0 +1,57 @@
+name: Update API Reference
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'src/praisonai-agents/praisonaiagents/**/*.py'
+      - 'src/praisonai/praisonai/**/*.py'
+      - 'src/praisonai-ts/src/**/*.ts'
+      - '.github/workflows/update-api-md.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  update-api-md:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: main
+        persist-credentials: true
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Generate api.md
+      run: |
+        cd $GITHUB_WORKSPACE
+        python3 src/praisonai/scripts/generate_api_md.py
+        
+    - name: Check for changes
+      id: check_changes
+      run: |
+        if git diff --quiet api.md; then
+          echo "changes=false" >> $GITHUB_OUTPUT
+          echo "No changes to api.md"
+        else
+          echo "changes=true" >> $GITHUB_OUTPUT
+          echo "api.md has been updated"
+          git diff api.md | head -50
+        fi
+
+    - name: Commit and push changes
+      if: steps.check_changes.outputs.changes == 'true'
+      uses: stefanzweifel/git-auto-commit-action@v5
+      with:
+        commit_message: "docs: auto-update api.md [skip ci]"
+        file_pattern: 'api.md'
+        commit_user_name: "github-actions[bot]"
+        commit_user_email: "41898282+github-actions[bot]@users.noreply.github.com"
+        commit_author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
