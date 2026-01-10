@@ -358,6 +358,69 @@ class AIGenerator:
                 pass
         return self._fast_context_handler
     
+    def _detect_feature_capabilities(self, slug_str: str, source_info: Dict[str, Any]) -> Dict[str, Any]:
+        """Detect feature capabilities from source analysis."""
+        caps = {
+            "supports_bool": True,
+            "supports_list": False,
+            "supports_dict": False,
+            "supports_presets": [],
+            "supports_url": False,
+            "usage_forms": [],
+            "decorator": None,
+            "built_in_items": [],
+        }
+        
+        # Feature-specific detection based on slug
+        if slug_str == "tools":
+            caps["supports_list"] = True
+            caps["supports_bool"] = False
+            caps["decorator"] = "@tool"
+            caps["built_in_items"] = ["duckduckgo", "wikipedia_tools", "read_file", "execute_command"]
+            caps["usage_forms"] = [
+                "- List of tools: `tools=[my_func, another_func]`",
+                "- Using @tool decorator to create custom tools",
+                "- Using built-in tools: duckduckgo, wikipedia_tools, etc.",
+            ]
+        elif slug_str == "memory":
+            caps["supports_dict"] = True
+            caps["supports_presets"] = ["sqlite", "redis", "postgres", "qdrant", "chroma"]
+            caps["supports_url"] = True
+            caps["usage_forms"] = [
+                "- Boolean: `memory=True`",
+                "- Preset: `memory=\"sqlite\"` or `memory=\"redis\"`",
+                "- URL: `memory=\"redis://localhost:6379\"`",
+                "- Dict: `memory={\"provider\": \"qdrant\"}`",
+            ]
+        elif slug_str == "knowledge":
+            caps["supports_dict"] = True
+            caps["supports_list"] = True
+            caps["usage_forms"] = [
+                "- Boolean: `knowledge=True`",
+                "- List of sources: `knowledge=[\"file.pdf\", \"doc.txt\"]`",
+                "- Dict config: `knowledge={\"sources\": [...]}`",
+            ]
+        elif slug_str == "guardrails":
+            caps["supports_list"] = True
+            caps["decorator"] = "guardrail function"
+            caps["usage_forms"] = [
+                "- Boolean: `guardrails=True`",
+                "- List of functions: `guardrails=[my_guardrail_func]`",
+                "- Custom guardrail function returning GuardrailResult",
+            ]
+        elif slug_str == "streaming":
+            caps["supports_bool"] = True
+            caps["usage_forms"] = [
+                "- Boolean: `output=\"stream\"` or iterate over agent.start()",
+                "- Streaming with callbacks",
+            ]
+        else:
+            # Generic detection from source
+            caps["usage_forms"] = [f"- Boolean: `{slug_str}=True`"]
+        
+        logger.debug(f"Feature '{slug_str}' capabilities: {caps}")
+        return caps
+    
     def _get_agent(self):
         """Lazy-load the generation agent."""
         if self._agent is None:
@@ -591,13 +654,18 @@ ISSUES: List any issues found (or "None")
         context = {}
         slug_str = slug.normalised
         
+        logger.debug(f"Gathering context for feature '{slug_str}', artifact '{artifact_type.value}'")
+        
         # Use FastContext to find relevant code in SDK
         fast_context = self._get_fast_context_handler()
         if fast_context and self.sdk_root:
+            logger.debug(f"FastContext available, searching in {self.sdk_root}")
             try:
                 # Search for feature-related code
                 query = f"Find {slug_str} implementation, usage examples, and API"
                 matches = fast_context.search_context(query, str(self.sdk_root), use_llm_keywords=False)
+                
+                logger.debug(f"FastContext found {len(matches)} matches for '{query}'")
                 
                 # Read matched files
                 for match in matches[:3]:
@@ -606,10 +674,11 @@ ISSUES: List any issues found (or "None")
                         try:
                             content = file_path.read_text(encoding="utf-8")[:2000]
                             context[f"sdk_{file_path.stem}"] = content
+                            logger.debug(f"Added SDK context: {file_path.name} ({len(content)} chars)")
                         except Exception:
                             pass
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"FastContext search failed: {e}")
         
         # Get SDK module info (fallback)
         if self.sdk_root and not context:
@@ -653,6 +722,7 @@ ISSUES: List any issues found (or "None")
                 if doc_path.exists():
                     context[f"existing_{doc_type}"] = doc_path.read_text(encoding="utf-8")[:2000]
         
+        logger.debug(f"Context gathered for '{slug_str}': {list(context.keys())}")
         return context
     
     def _read_sdk_module(self, sdk_path: Path) -> str:
@@ -866,17 +936,26 @@ print(result)
             "",
         ]
         
-        # Add usage forms guidance (common patterns for all features)
-        param_name = slug_str.replace("-", "_")
-        prompt_parts.extend([
-            "## USAGE FORMS TO DEMONSTRATE (MUST cover ALL these progressively):",
-            f"- Boolean: `{param_name}=True` - Enable with defaults",
-            f"- String preset: `{param_name}=\"sqlite\"` or `{param_name}=\"redis\"` - Use predefined backend",
-            f"- URL: `{param_name}=\"redis://localhost:6379\"` - Backend-specific connection",
-            f"- Dict config: `{param_name}={{\"backend\": \"postgres\", \"user_id\": \"u1\"}}` - Custom config",
-            f"- Array + overrides: `{param_name}=[\"redis\", {{\"user_id\": \"u1\"}}]` - Preset + customization",
-            "",
-        ])
+        # Get dynamic feature capabilities - NO hardcoded usage forms
+        capabilities = self._detect_feature_capabilities(slug_str, source_info)
+        
+        # Add ONLY the usage forms this feature actually supports
+        prompt_parts.append("## USAGE FORMS TO DEMONSTRATE (cover these progressively):")
+        for usage_form in capabilities["usage_forms"]:
+            prompt_parts.append(usage_form)
+        
+        # Add decorator info if applicable
+        if capabilities.get("decorator"):
+            prompt_parts.append(f"- MUST demonstrate the {capabilities['decorator']} pattern")
+        
+        # Add built-in items if applicable
+        if capabilities.get("built_in_items"):
+            items = ", ".join(capabilities["built_in_items"][:4])
+            prompt_parts.append(f"- Built-in options to show: {items}")
+        
+        prompt_parts.append("")
+        
+        logger.debug(f"Feature '{slug_str}' usage forms: {capabilities['usage_forms']}")
         
         # Add dynamically extracted parameters if available
         main_class = source_info.get("main_class")
