@@ -51,7 +51,6 @@ class AIGenerator:
                     - Mermaid diagrams for concepts
                     - Consistent formatting and terminology""",
                     llm=self.model,
-                    verbose=False,
                 )
             except ImportError:
                 raise RuntimeError("praisonaiagents not available. Install with: pip install praisonaiagents")
@@ -73,7 +72,6 @@ class AIGenerator:
                     - Uses consistent terminology
                     - Is user-friendly and progressive""",
                     llm=self.model,
-                    verbose=False,
                 )
             except ImportError:
                 raise RuntimeError("praisonaiagents not available")
