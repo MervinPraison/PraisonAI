@@ -148,6 +148,7 @@ class Agents:
         guardrails: Optional[Any] = None,  # Union[bool, Callable, GuardrailConfig] - validation
         web: Optional[Any] = None,  # Union[bool, WebConfig] - web search/fetch
         reflection: Optional[Any] = None,  # Union[bool, ReflectionConfig] - self-reflection
+        caching: Optional[Any] = None,  # Union[bool, CachingConfig] - caching
     ):
         """
         Initialize PraisonAIAgents with consolidated feature parameters.
@@ -177,6 +178,7 @@ class Agents:
         self._guardrails = guardrails
         self._web = web
         self._reflection = reflection
+        self._caching = caching
         # ─────────────────────────────────────────────────────────────────────
         # Extract values from consolidated params using UNIFIED CANONICAL resolver
         # Precedence: Instance > Config > Dict > Array > String > Bool > Default

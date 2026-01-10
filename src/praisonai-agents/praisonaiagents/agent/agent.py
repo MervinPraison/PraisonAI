@@ -254,10 +254,11 @@ class Agent:
         instructions: Optional[str] = None,
         # LLM configuration
         llm: Optional[Union[str, Any]] = None,
-        function_calling_llm: Optional[Any] = None,
-        llm_config: Optional[Dict[str, Any]] = None,
-        base_url: Optional[str] = None,
-        api_key: Optional[str] = None,
+        model: Optional[Union[str, Any]] = None,  # Alias for llm=
+        function_calling_llm: Optional[Any] = None,  # DEPRECATED: use llm= with LLMConfig
+        llm_config: Optional[Dict[str, Any]] = None,  # DEPRECATED: use llm= with LLMConfig
+        base_url: Optional[str] = None,  # Kept separate (connection/auth)
+        api_key: Optional[str] = None,  # Kept separate (connection/auth)
         # Tools
         tools: Optional[List[Any]] = None,
         allow_delegation: bool = False,
@@ -783,13 +784,30 @@ class Agent:
         self._llm_config = llm_config or {}
         self._llm_configurable = self._llm_config.get('configurable', False)
         
+        # ============================================================
+        # LLM CONSOLIDATION: Handle model= alias and deprecation warnings
+        # Precedence: llm= > model= > default
+        # ============================================================
+        import warnings
+        
+        # Handle model= alias for llm= (NO warnings - both are valid)
+        if llm is None and model is not None:
+            llm = model  # model= is an alias for llm=
+        
+        # Legacy params (llm_config, function_calling_llm) are accepted silently
+        # for backward compatibility - NO deprecation warnings per policy
+        
         # Store rate limiter (optional, zero overhead when None)
         self._rate_limiter = rate_limiter
         
-        # Store OpenAI client parameters for lazy initialization
+        # Store OpenAI client parameters for lazy initialization (kept separate)
         self._openai_api_key = api_key
         self._openai_base_url = base_url
         self.__openai_client = None
+        
+        # Expose base_url and api_key as properties for tests
+        self.base_url = base_url
+        self.api_key = api_key
 
         # If base_url is provided, always create a custom LLM instance
         if base_url:
@@ -957,9 +975,14 @@ Your Goal: {self.goal}
                 self.tools.append(internet_search)
                 logging.info("Model does not support native web search. Added DuckDuckGo fallback tool.")
         
-        # Log warning if web_fetch is enabled but model doesn't support it
+        # Raise error if web_fetch is explicitly enabled but model doesn't support it
+        # Web fetch is only supported by Anthropic/Claude models
         if web_fetch and not self._model_supports_web_fetch():
-            logging.warning(f"Model '{self.llm}' does not support native web fetch. Web fetch will be ignored.")
+            raise ValueError(
+                f"web_fetch is only supported on Anthropic/Claude models. "
+                f"Model '{self.llm}' does not support web fetch. "
+                f"Either use a Claude model (e.g., 'anthropic/claude-sonnet-4') or disable fetch with web=WebConfig(fetch=False)."
+            )
         
         # Initialize guardrail settings
         self.guardrail = guardrail

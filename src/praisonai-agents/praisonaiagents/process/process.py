@@ -722,9 +722,8 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
             goal="Manage the entire flow of tasks and delegate them to the right agent",
             backstory="Expert project manager to coordinate tasks among agents",
             llm=self.manager_llm,
-            verbose=self.verbose,
-            markdown=True,
-            self_reflect=False
+            output={"verbose": self.verbose, "markdown": True},
+            reflection=False
         )
 
         class ManagerInstructions(BaseModel):
@@ -1384,9 +1383,8 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
             goal="Manage the entire flow of tasks and delegate them to the right agent",
             backstory="Expert project manager to coordinate tasks among agents",
             llm=self.manager_llm,
-            verbose=self.verbose,
-            markdown=True,
-            self_reflect=False
+            output={"verbose": self.verbose, "markdown": True},
+            reflection=False
         )
 
         class ManagerInstructions(BaseModel):

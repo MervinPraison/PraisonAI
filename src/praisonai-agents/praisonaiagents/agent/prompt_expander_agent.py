@@ -17,7 +17,7 @@ Supported Expansion Strategies:
 Example:
     from praisonaiagents import PromptExpanderAgent, ExpandStrategy
     
-    agent = PromptExpanderAgent(verbose=True)
+    agent = PromptExpanderAgent()
     
     # Basic expansion
     result = agent.expand("write a movie script in 3 lines")
@@ -29,7 +29,7 @@ Example:
     
     # With tools for context gathering
     from praisonaiagents.tools import internet_search
-    agent = PromptExpanderAgent(tools=[internet_search], verbose=True)
+    agent = PromptExpanderAgent(tools=[internet_search])
     result = agent.expand("latest AI developments")
 """
 
@@ -73,13 +73,12 @@ class PromptExpanderAgent:
     
     Attributes:
         name: Name of the agent
-        model: LLM model to use for expansion
-        verbose: Whether to print detailed logs
+        model: LLM model to use for expansion (alias for llm=)
         temperature: Temperature for LLM generation (higher = more creative)
         tools: Optional tools for context gathering
         
     Example:
-        agent = PromptExpanderAgent(model="gpt-4o-mini", verbose=True)
+        agent = PromptExpanderAgent(model="gpt-4o-mini")
         result = agent.expand("write a poem", strategy=ExpandStrategy.CREATIVE)
         print(result.expanded_prompt)
     """
@@ -230,8 +229,7 @@ Expanded prompt:"""
                 backstory="You are an expert at understanding user intent and transforming brief requests into comprehensive, detailed prompts.",
                 tools=self.tools,
                 llm=self.model,
-                verbose=self.verbose,
-                markdown=False
+                output={"verbose": self.verbose, "markdown": False}
             )
         return self._agent
     

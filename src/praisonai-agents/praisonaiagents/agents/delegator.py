@@ -376,7 +376,7 @@ class SubagentDelegator:
         return result
     
     async def _create_agent(self, profile: AgentProfile, task: DelegationTask) -> Any:
-        """Create an agent from profile."""
+        """Create an agent from profile using consolidated params."""
         if self.agent_factory:
             return self.agent_factory(profile.name)
         
@@ -387,14 +387,17 @@ class SubagentDelegator:
             # Filter tools based on profile
             tools = self._get_tools_for_profile(profile)
             
+            # Use consolidated params (protocol-compliant)
+            # output='silent' replaces verbose=False
+            # execution={max_iter: N} replaces max_iter=N
             agent = Agent(
                 name=profile.name,
                 role=profile.name.title(),
                 goal=task.objective,
                 backstory=profile.system_prompt,
                 tools=tools,
-                verbose=False,
-                max_iter=min(task.max_steps, profile.max_steps),
+                output='silent',
+                execution={'max_iter': min(task.max_steps, profile.max_steps)},
             )
             
             return agent

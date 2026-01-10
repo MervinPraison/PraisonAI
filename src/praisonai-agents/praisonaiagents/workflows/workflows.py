@@ -254,6 +254,10 @@ class WorkflowStep:
     knowledge: Optional[Any] = None  # Union[bool, List[str], KnowledgeConfig] - RAG
     web: Optional[Any] = None  # Union[bool, WebConfig] - web search/fetch
     reflection: Optional[Any] = None  # Union[bool, ReflectionConfig] - self-reflection
+    memory: Optional[Any] = None  # Union[bool, MemoryConfig] - step-level memory
+    planning: Optional[Any] = None  # Union[bool, PlanningConfig] - step-level planning
+    hooks: Optional[Any] = None  # Union[List, HooksConfig] - step lifecycle hooks
+    caching: Optional[Any] = None  # Union[bool, CachingConfig] - step-level caching
     
     # Status tracking
     status: str = "pending"  # pending, running, completed, failed, skipped
@@ -278,6 +282,10 @@ class WorkflowStep:
     _knowledge_config: Optional[Any] = field(default=None, repr=False)
     _web_config: Optional[Any] = field(default=None, repr=False)
     _reflection_config: Optional[Any] = field(default=None, repr=False)
+    _memory_config: Optional[Any] = field(default=None, repr=False)
+    _planning_config: Optional[Any] = field(default=None, repr=False)
+    _hooks_config: Optional[Any] = field(default=None, repr=False)
+    _caching_config: Optional[Any] = field(default=None, repr=False)
     
     def __post_init__(self):
         """Resolve consolidated params to internal values."""
@@ -368,6 +376,62 @@ class WorkflowStep:
             self._reflection_config = resolve(
                 value=self.reflection, param_name="reflection",
                 config_class=ReflectionConfig, presets=REFLECTION_PRESETS,
+                default=None,
+            )
+        
+        # Resolve memory (NEW for feature parity)
+        try:
+            from ..config.feature_configs import MemoryConfig
+            from ..config.presets import MEMORY_PRESETS
+        except ImportError:
+            MemoryConfig = None
+            MEMORY_PRESETS = {}
+        if MemoryConfig and self.memory is not None:
+            self._memory_config = resolve(
+                value=self.memory, param_name="memory",
+                config_class=MemoryConfig, presets=MEMORY_PRESETS,
+                default=None,
+            )
+        
+        # Resolve planning (NEW for feature parity)
+        try:
+            from ..config.feature_configs import PlanningConfig
+            from ..config.presets import PLANNING_PRESETS
+        except ImportError:
+            PlanningConfig = None
+            PLANNING_PRESETS = {}
+        if PlanningConfig and self.planning is not None:
+            self._planning_config = resolve(
+                value=self.planning, param_name="planning",
+                config_class=PlanningConfig, presets=PLANNING_PRESETS,
+                default=None,
+            )
+        
+        # Resolve hooks (NEW for feature parity)
+        try:
+            from ..config.feature_configs import HooksConfig
+        except ImportError:
+            HooksConfig = None
+        if HooksConfig and self.hooks is not None:
+            # Hooks don't have presets, just config class
+            if isinstance(self.hooks, list):
+                self._hooks_config = HooksConfig(callbacks=self.hooks)
+            elif hasattr(self.hooks, 'callbacks'):
+                self._hooks_config = self.hooks
+            else:
+                self._hooks_config = self.hooks
+        
+        # Resolve caching (NEW for feature parity)
+        try:
+            from ..config.feature_configs import CachingConfig
+            from ..config.presets import CACHING_PRESETS
+        except ImportError:
+            CachingConfig = None
+            CACHING_PRESETS = {}
+        if CachingConfig and self.caching is not None:
+            self._caching_config = resolve(
+                value=self.caching, param_name="caching",
+                config_class=CachingConfig, presets=CACHING_PRESETS,
                 default=None,
             )
     
@@ -507,6 +571,8 @@ class Workflow:
     guardrails: Optional[Any] = None  # Union[bool, Callable, GuardrailConfig] - validation
     web: Optional[Any] = None  # Union[bool, WebConfig] - web search/fetch
     reflection: Optional[Any] = None  # Union[bool, ReflectionConfig] - self-reflection
+    execution: Optional[Any] = None  # Union[str, ExecutionConfig] - execution control
+    caching: Optional[Any] = None  # Union[bool, CachingConfig] - caching
     
     # Status tracking
     status: str = "not_started"  # not_started, running, completed, failed

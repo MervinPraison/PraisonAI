@@ -93,6 +93,37 @@ def chat_main(
         is_flag=False,
         flag_value="true",
     ),
+    # NEW: Additional consolidated params for ALL GREEN feature parity
+    planning: Optional[str] = typer.Option(
+        None, "--planning",
+        help="Enable planning mode. Use --planning for default, --planning=thorough for preset",
+        is_flag=False,
+        flag_value="true",
+    ),
+    context: Optional[str] = typer.Option(
+        None, "--context",
+        help="Enable context management. Use --context for default",
+        is_flag=False,
+        flag_value="true",
+    ),
+    output: Optional[str] = typer.Option(
+        None, "--output",
+        help="Output preset. Use --output=verbose, --output=minimal, --output=silent",
+    ),
+    execution: Optional[str] = typer.Option(
+        None, "--execution",
+        help="Execution preset. Use --execution=fast, --execution=thorough, --execution=unlimited",
+    ),
+    hooks: Optional[str] = typer.Option(
+        None, "--hooks",
+        help="Hooks config file path for lifecycle callbacks",
+    ),
+    caching: Optional[str] = typer.Option(
+        None, "--caching",
+        help="Enable caching. Use --caching for default, --caching=redis for preset",
+        is_flag=False,
+        flag_value="true",
+    ),
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
 ):
