@@ -140,7 +140,11 @@ class TestFeatureDiscovery:
         cli_root.mkdir()
         (cli_root / "features").mkdir()
         
-        config = StandardiseConfig(sdk_root=sdk_root, docs_root=docs_root, cli_root=cli_root)
+        # Create empty examples root to ensure no examples found
+        examples_root = tmp_path / "examples"
+        examples_root.mkdir()
+        
+        config = StandardiseConfig(sdk_root=sdk_root, docs_root=docs_root, cli_root=cli_root, examples_root=examples_root)
         discovery = FeatureDiscovery(config)
         
         slug = FeatureSlug.from_string("guardrails")

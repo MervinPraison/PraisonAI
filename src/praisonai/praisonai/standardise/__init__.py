@@ -25,6 +25,9 @@ __all__ = [
     "ReportGenerator",
     # Config
     "StandardiseConfig",
+    # AI Generation
+    "AIGenerator",
+    "ExampleVerifier",
 ]
 
 
@@ -69,5 +72,13 @@ def __getattr__(name: str):
     if name == "StandardiseConfig":
         from .config import StandardiseConfig
         return StandardiseConfig
+    
+    if name == "AIGenerator":
+        from .ai_generator import AIGenerator
+        return AIGenerator
+    
+    if name == "ExampleVerifier":
+        from .example_verifier import ExampleVerifier
+        return ExampleVerifier
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -476,6 +476,58 @@ def _init_telemetry():
 _init_telemetry()
 
 
+def warmup(include_litellm: bool = True, include_openai: bool = True) -> dict:
+    """
+    Pre-import heavy dependencies to reduce first-call latency.
+    
+    By default, LiteLLM and other heavy dependencies are lazy-loaded to minimize
+    import time. This function allows you to pre-import them during application
+    startup (e.g., in a background thread) to eliminate the ~2-3s delay on the
+    first LLM call.
+    
+    Args:
+        include_litellm: Pre-import LiteLLM (adds ~2-3s to warmup, saves ~2-3s on first call)
+        include_openai: Pre-import OpenAI client (adds ~0.5s to warmup)
+    
+    Returns:
+        dict: Timing information for each component warmed up
+    
+    Example:
+        # Warmup during app startup
+        from praisonaiagents import warmup
+        warmup()  # Now first agent.start() will be faster
+        
+        # Or in a background thread
+        import threading
+        threading.Thread(target=warmup, daemon=True).start()
+    """
+    import time
+    timings = {}
+    
+    if include_litellm:
+        start = time.perf_counter()
+        try:
+            import litellm
+            # Also configure litellm to avoid first-call overhead
+            litellm.telemetry = False
+            litellm.set_verbose = False
+            litellm.drop_params = True
+            litellm.modify_params = True
+            timings['litellm'] = (time.perf_counter() - start) * 1000
+        except ImportError:
+            timings['litellm'] = -1  # Not available
+    
+    if include_openai:
+        start = time.perf_counter()
+        try:
+            import openai
+            timings['openai'] = (time.perf_counter() - start) * 1000
+        except ImportError:
+            timings['openai'] = -1  # Not available
+    
+    return timings
+
+
 __all__ = [
     # Core classes (lazy loaded)
     'Agent',
@@ -646,4 +698,6 @@ __all__ = [
     # Parse Utilities
     'is_policy_string',
     'parse_policy_string',
+    # Performance utilities
+    'warmup',
 ]

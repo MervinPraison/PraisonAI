@@ -6,10 +6,11 @@ Uses Agent() to generate:
 - Example files (basic, advanced)
 
 Features:
-- Template-guided generation
+- Template-guided generation with REAL working examples
 - Context-aware (SDK info, existing examples)
-- Verification via Agent()
-- Dry-run preview
+- Verification via Agent() and code execution
+- Dry-run preview with execution testing
+- Mock data generation for real-world scenarios
 """
 
 from pathlib import Path
@@ -17,6 +18,7 @@ from typing import Dict, List, Optional, Tuple
 
 from .models import ArtifactType, FeatureSlug
 from .templates import TemplateGenerator
+from .example_verifier import ExampleVerifier
 
 
 class AIGenerator:
@@ -32,6 +34,7 @@ class AIGenerator:
         self.docs_root = docs_root
         self.examples_root = examples_root
         self.template_generator = TemplateGenerator()
+        self.example_verifier = ExampleVerifier(timeout=30)
         self._agent = None
         self._verifier = None
     
@@ -78,7 +81,9 @@ class AIGenerator:
         return self._verifier
     
     def generate(self, slug: FeatureSlug, artifact_type: ArtifactType,
-                 dry_run: bool = True) -> Tuple[str, Optional[str]]:
+                 dry_run: bool = True, 
+                 verify_execution: bool = True,
+                 max_retries: int = 2) -> Tuple[str, Optional[str], Optional[dict]]:
         """
         Generate content for an artifact using AI.
         
@@ -86,9 +91,11 @@ class AIGenerator:
             slug: Feature slug
             artifact_type: Type of artifact to generate
             dry_run: If True, return content without writing
+            verify_execution: If True, verify examples run before writing
+            max_retries: Max retries if verification fails
         
         Returns:
-            Tuple of (generated_content, output_path or None if dry_run)
+            Tuple of (generated_content, output_path or None, verification_info)
         """
         # Get template as base
         template = self.template_generator.generate(slug, artifact_type)
@@ -96,7 +103,7 @@ class AIGenerator:
         # Gather context
         context = self._gather_context(slug, artifact_type)
         
-        # Build prompt
+        # Build prompt with enhanced instructions for real examples
         prompt = self._build_generation_prompt(slug, artifact_type, template, context)
         
         # Generate with AI
@@ -106,8 +113,40 @@ class AIGenerator:
         # Extract content
         content = self._extract_content(result, artifact_type)
         
+        # Verification info
+        verification_info = None
+        
+        # For example files, verify they run
+        if artifact_type.value.startswith("example_") and verify_execution:
+            for attempt in range(max_retries + 1):
+                verification = self.example_verifier.verify(content)
+                verification_info = {
+                    "success": verification.success,
+                    "syntax_valid": verification.syntax_valid,
+                    "execution_passed": verification.execution_passed,
+                    "requires_external": verification.requires_external,
+                    "missing_libraries": verification.missing_libraries,
+                    "error": verification.error[:500] if verification.error else None,
+                    "attempt": attempt + 1,
+                }
+                
+                if verification.can_write:
+                    break
+                
+                # If failed and we have retries left, regenerate with error feedback
+                if attempt < max_retries:
+                    fix_prompt = self._build_fix_prompt(
+                        slug, artifact_type, content, verification.error
+                    )
+                    result = agent.start(fix_prompt)
+                    content = self._extract_content(result, artifact_type)
+            
+            # If still failing after retries and not due to external libs, don't write
+            if not verification.can_write:
+                return content, None, verification_info
+        
         if dry_run:
-            return content, None
+            return content, None, verification_info
         
         # Write to file
         output_path = self.template_generator.get_expected_path(
@@ -119,9 +158,29 @@ class AIGenerator:
         if output_path:
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_text(content, encoding="utf-8")
-            return content, str(output_path)
+            return content, str(output_path), verification_info
         
-        return content, None
+        return content, None, verification_info
+    
+    def _build_fix_prompt(self, slug: FeatureSlug, artifact_type: ArtifactType,
+                          code: str, error: str) -> str:
+        """Build a prompt to fix broken code."""
+        return f"""The following Python code for '{slug.normalised}' has an error:
+
+```python
+{code[:2000]}
+```
+
+Error:
+{error[:500]}
+
+Please fix the code to make it runnable. Requirements:
+1. Fix the specific error mentioned
+2. Ensure all imports are correct
+3. Use mock data if needed instead of external dependencies
+4. The code must be complete and runnable
+
+Return ONLY the fixed Python code, no explanations."""
     
     def verify(self, content: str, artifact_type: ArtifactType,
                slug: FeatureSlug) -> Tuple[bool, str, List[str]]:
@@ -233,12 +292,137 @@ ISSUES: List any issues found (or "None")
                                   artifact_type: ArtifactType,
                                   template: str,
                                   context: Dict[str, str]) -> str:
-        """Build the generation prompt."""
+        """Build the generation prompt with real example requirements."""
+        # Different prompts for examples vs docs
+        if artifact_type.value.startswith("example_"):
+            return self._build_example_prompt(slug, artifact_type, template, context)
+        else:
+            return self._build_docs_prompt(slug, artifact_type, template, context)
+    
+    def _build_example_prompt(self, slug: FeatureSlug,
+                               artifact_type: ArtifactType,
+                               template: str,
+                               context: Dict[str, str]) -> str:
+        """Build prompt for generating REAL, RUNNABLE examples."""
+        slug_str = slug.normalised
+        name = slug_str.replace("-", " ").title()
+        is_advanced = "advanced" in artifact_type.value
+        
+        prompt_parts = [
+            f"Generate a {'advanced' if is_advanced else 'basic'} Python example for the '{name}' feature in PraisonAI.",
+            "",
+            "## CRITICAL REQUIREMENTS:",
+            "1. The code MUST be REAL and RUNNABLE - not a template with placeholders",
+            "2. Use ACTUAL working code, not comments like '# configure here'",
+            "3. Include MOCK DATA for any real-world scenario (fake emails, sample text, etc.)",
+            "4. The example should demonstrate a REAL USE CASE",
+            "5. All imports must be correct: `from praisonaiagents import Agent, Task, PraisonAIAgents`",
+            "6. Include proper error handling where appropriate",
+            "7. The code must run without requiring external API keys or services",
+            "",
+        ]
+        
+        # Add feature-specific guidance
+        prompt_parts.extend(self._get_feature_guidance(slug_str, is_advanced))
+        
+        if context:
+            prompt_parts.append("## Reference from existing code:")
+            for key, value in list(context.items())[:2]:
+                prompt_parts.append(f"\n### {key}:")
+                prompt_parts.append(f"```python\n{value[:1500]}\n```")
+        
+        prompt_parts.extend([
+            "",
+            "## Structure:",
+            '"""',
+            f"{name} - {'Advanced' if is_advanced else 'Basic'} Example",
+            "",
+            "Demonstrates [specific use case].",
+            "",
+            "Expected Output:",
+            "    [Describe what the user will see]",
+            '"""',
+            "",
+            "# Your complete, runnable code here",
+            "",
+            "## REMEMBER:",
+            "- NO placeholder comments like '# configure here' or '# option1: value1'",
+            "- Use REAL values and MOCK DATA",
+            "- The code must ACTUALLY WORK when run",
+            "- Include print statements to show output",
+            "",
+            "Generate the complete Python code now:",
+        ])
+        
+        return "\n".join(prompt_parts)
+    
+    def _get_feature_guidance(self, slug: str, is_advanced: bool) -> List[str]:
+        """Get feature-specific guidance for example generation."""
+        guidance = {
+            "guardrails": [
+                "## Feature-Specific Guidance for Guardrails:",
+                "- Guardrails are validation functions that check agent output",
+                "- They return Tuple[bool, Any] - (passed, result_or_feedback)",
+                "- Basic example: Single guardrail function checking word count or format",
+                "- Advanced example: Multiple guardrails, custom validation logic",
+                "",
+                "Example guardrail function:",
+                "```python",
+                "def word_count_guardrail(output) -> Tuple[bool, Any]:",
+                "    words = len(str(output.raw).split())",
+                "    if words >= 50:",
+                "        return True, output",
+                "    return False, f'Need at least 50 words, got {words}'",
+                "```",
+            ],
+            "memory": [
+                "## Feature-Specific Guidance for Memory:",
+                "- Memory allows agents to remember previous interactions",
+                "- Use `memory=True` for basic memory or `memory=MemoryConfig(...)` for advanced",
+                "- Basic example: Agent with memory enabled, multiple turns",
+                "- Advanced example: Custom memory configuration, shared memory between agents",
+            ],
+            "knowledge": [
+                "## Feature-Specific Guidance for Knowledge:",
+                "- Knowledge allows agents to access external information",
+                "- Use `knowledge=['file.txt']` or `knowledge=True` with knowledge sources",
+                "- Basic example: Agent with inline knowledge text",
+                "- Advanced example: Multiple knowledge sources, RAG patterns",
+            ],
+            "tools": [
+                "## Feature-Specific Guidance for Tools:",
+                "- Tools are functions that agents can call",
+                "- Define as regular Python functions with docstrings",
+                "- Basic example: Simple tool like calculator or string manipulation",
+                "- Advanced example: Multiple tools, async tools, tool chaining",
+                "",
+                "Example tool:",
+                "```python",
+                "def calculate(expression: str) -> str:",
+                '    """Evaluate a math expression."""',
+                "    return str(eval(expression))",
+                "```",
+            ],
+        }
+        
+        # Return guidance for the feature or generic guidance
+        return guidance.get(slug, [
+            f"## Feature-Specific Guidance for {slug.replace('-', ' ').title()}:",
+            f"- Demonstrate the core functionality of {slug}",
+            "- Use realistic mock data for any inputs",
+            "- Show clear before/after or input/output",
+        ])
+    
+    def _build_docs_prompt(self, slug: FeatureSlug,
+                           artifact_type: ArtifactType,
+                           template: str,
+                           context: Dict[str, str]) -> str:
+        """Build prompt for documentation pages."""
         slug_str = slug.normalised
         name = slug_str.replace("-", " ").title()
         
         prompt_parts = [
-            f"Generate a {artifact_type.value} for the '{name}' feature in PraisonAI.",
+            f"Generate a {artifact_type.value} documentation page for the '{name}' feature in PraisonAI.",
             "",
             "## Template to follow:",
             "```",
@@ -257,11 +441,12 @@ ISSUES: List any issues found (or "None")
             "",
             "## Requirements:",
             "1. Follow the template structure exactly",
-            "2. Use real, working code examples",
+            "2. Use REAL, WORKING code examples (not placeholders)",
             "3. Be concise but comprehensive",
             "4. Include a mermaid diagram if this is a concept page",
             "5. Use Mintlify MDX components (CodeGroup, Tabs, Cards)",
             "6. Ensure all imports are correct for praisonaiagents",
+            "7. Code examples must be complete and runnable",
             "",
             "Generate the complete content now:",
         ])
