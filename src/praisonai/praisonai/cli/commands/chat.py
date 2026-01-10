@@ -9,7 +9,7 @@ from typing import List, Optional, Union
 
 import typer
 
-app = typer.Typer(help="Terminal-native interactive chat mode")
+app = typer.Typer(help="Terminal-native interactive chat mode", invoke_without_command=True)
 
 
 def _parse_memory_flag(memory: Optional[str], no_memory: bool) -> Union[bool, str, None]:
