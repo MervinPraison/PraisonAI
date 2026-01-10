@@ -400,13 +400,30 @@ def _run_ai(parsed) -> int:
         print(f"\n📝 Generating {artifact_type.value}...")
         
         try:
-            content, output_path = generator.generate(
+            # Generate with execution verification for examples
+            content, output_path, verification_info = generator.generate(
                 slug, artifact_type,
                 dry_run=not parsed.apply,
+                verify_execution=True,
             )
             
+            # Show verification results for examples
+            if verification_info:
+                if verification_info.get("execution_passed"):
+                    print("  ✅ Code verified: runs successfully")
+                elif verification_info.get("requires_external"):
+                    libs = ", ".join(verification_info.get("missing_libraries", []))
+                    print(f"  ⚠️  Requires external libraries: {libs}")
+                elif not verification_info.get("syntax_valid"):
+                    print(f"  ❌ Syntax error: {verification_info.get('error', 'Unknown')[:100]}")
+                else:
+                    print(f"  ❌ Execution failed after {verification_info.get('attempt', 1)} attempts")
+                    if verification_info.get("error"):
+                        print(f"     Error: {verification_info['error'][:150]}")
+            
+            # AI content verification (optional)
             if parsed.verify:
-                print("  🔍 Verifying...")
+                print("  🔍 AI content review...")
                 is_valid, summary, issues = generator.verify(content, artifact_type, slug)
                 if is_valid:
                     print(f"  ✅ {summary}")
@@ -415,9 +432,17 @@ def _run_ai(parsed) -> int:
                     for issue in issues[:3]:
                         print(f"     - {issue}")
             
-            if parsed.apply and output_path:
+            # Check if we should write
+            can_write = True
+            if verification_info and not verification_info.get("success"):
+                if not verification_info.get("requires_external"):
+                    can_write = False
+                    print("  ⛔ Not writing: code doesn't run")
+            
+            if parsed.apply and output_path and can_write:
                 print(f"  ✓ Created: {output_path}")
-            else:
+                results.append((artifact_type.value, True, output_path))
+            elif not parsed.apply:
                 print(f"  📋 Preview ({len(content)} chars)")
                 # Show first few lines
                 preview_lines = content.split("\n")[:10]
@@ -425,8 +450,9 @@ def _run_ai(parsed) -> int:
                     print(f"     {line[:60]}")
                 if len(content.split("\n")) > 10:
                     print("     ...")
-            
-            results.append((artifact_type.value, True, output_path))
+                results.append((artifact_type.value, True, None))
+            else:
+                results.append((artifact_type.value, False, "Verification failed"))
             
         except Exception as e:
             print(f"  ❌ Error: {e}")

@@ -127,7 +127,7 @@ def chat_main(
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
     # UI backend selection
-    ui: str = typer.Option("auto", "--ui", help="UI backend: auto, plain, rich, mg (middle-ground)"),
+    ui_backend: str = typer.Option("auto", "--ui-backend", help="UI backend: auto, plain, rich, mg (middle-ground)"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON (forces plain backend)"),
     no_color: bool = typer.Option(False, "--no-color", help="Disable colors"),
     theme: str = typer.Option("default", "--theme", help="UI theme: default, dark, light, minimal"),
@@ -159,7 +159,7 @@ def chat_main(
     # Configure UI backend
     from praisonai.cli.ui import select_backend, UIConfig
     ui_config = UIConfig(
-        ui_backend=ui,
+        ui_backend=ui_backend,
         json_output=json_output,
         no_color=no_color,
         theme=theme,
@@ -275,7 +275,6 @@ def _run_profiled_chat(
         "name": "ChatAgent",
         "role": "Assistant",
         "goal": "Help the user",
-        "verbose": verbose,
     }
     if model:
         agent_config["llm"] = model
