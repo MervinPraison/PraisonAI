@@ -76,6 +76,14 @@ OUTPUT_PRESETS: Dict[str, Dict[str, Any]] = {
         "metrics": False,
         "reasoning_steps": False,
     },
+    # Streaming preset - enables streaming by default
+    "stream": {
+        "verbose": True,
+        "markdown": True,
+        "stream": True,
+        "metrics": False,
+        "reasoning_steps": False,
+    },
 }
 
 
