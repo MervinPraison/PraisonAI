@@ -23,6 +23,7 @@ examples/
 
 | Category | Examples | Docs |
 |----------|----------|------|
+| **Consolidated Params** | [consolidated_params/](consolidated_params/) | [📖](https://docs.praison.ai/api/consolidated-params) |
 | **Agents** | [python/agents/](python/agents/) | [📖](https://docs.praison.ai/concepts/agents) |
 | **Workflows** | [python/workflows/](python/workflows/) | [📖](https://docs.praison.ai/features/workflows) |
 | **Model Router** | [python/agents/router-agent-cost-optimization.py](python/agents/router-agent-cost-optimization.py) | [📖](https://docs.praison.ai/features/model-router) |
@@ -34,6 +35,21 @@ examples/
 | **Doctor** | [doctor/](doctor/) | [📖](https://docs.praison.ai/cli/doctor) |
 | **Serve** | [serve/](serve/) | [📖](https://docs.praison.ai/cli/serve) |
 | **Endpoints** | [serve/](serve/) | [📖](https://docs.praison.ai/cli/endpoints) |
+
+## Consolidated Params Examples
+
+Agent-centric API with unified parameter resolution. Precedence: Instance > Config > Array > Dict > String > Bool > Default
+
+| Example | Description |
+|---------|-------------|
+| [basic_agent.py](consolidated_params/basic_agent.py) | Minimal agent with memory |
+| [basic_agents.py](consolidated_params/basic_agents.py) | Multi-agent with memory+planning |
+| [basic_workflow.py](consolidated_params/basic_workflow.py) | Workflow with consolidated params |
+| [basic_memory.py](consolidated_params/basic_memory.py) | Memory presets (file, redis, postgres) |
+| [basic_guardrails.py](consolidated_params/basic_guardrails.py) | Guardrails with callable or config |
+| [basic_workflow_agentlike.py](consolidated_params/basic_workflow_agentlike.py) | Workflow with agent-like params |
+| [basic_step_override.py](consolidated_params/basic_step_override.py) | Step-level override of workflow defaults |
+| [advanced_workflow_full_features.py](consolidated_params/advanced_workflow_full_features.py) | All consolidated params |
 
 ## Serve Examples
 

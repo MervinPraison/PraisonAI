@@ -620,5 +620,101 @@ class TestStrictDictValidation:
         assert "unknown_field" in error_msg.lower() or "unknown" in error_msg.lower()
 
 
+# =============================================================================
+# PHASE 1 TDD: Tests for Workflow/WorkflowStep New Params (ALL GREEN target)
+# =============================================================================
+
+class TestWorkflowNewParams:
+    """Test Workflow supports all consolidated params like Agents."""
+    
+    def test_workflow_has_autonomy_param(self):
+        """Workflow should have autonomy param."""
+        from praisonaiagents.workflows.workflows import Workflow
+        
+        # Should accept autonomy param without error
+        workflow = Workflow(steps=[], autonomy=True)
+        assert hasattr(workflow, 'autonomy') or hasattr(workflow, '_autonomy_config')
+    
+    def test_workflow_has_knowledge_param(self):
+        """Workflow should have knowledge param."""
+        from praisonaiagents.workflows.workflows import Workflow
+        
+        workflow = Workflow(steps=[], knowledge=["docs/"])
+        assert hasattr(workflow, 'knowledge') or hasattr(workflow, '_knowledge_config')
+    
+    def test_workflow_has_guardrails_param(self):
+        """Workflow should have guardrails param."""
+        from praisonaiagents.workflows.workflows import Workflow
+        
+        workflow = Workflow(steps=[], guardrails=True)
+        assert hasattr(workflow, 'guardrails') or hasattr(workflow, '_guardrails_config')
+    
+    def test_workflow_has_web_param(self):
+        """Workflow should have web param."""
+        from praisonaiagents.workflows.workflows import Workflow
+        
+        workflow = Workflow(steps=[], web=True)
+        assert hasattr(workflow, 'web') or hasattr(workflow, '_web_config')
+    
+    def test_workflow_has_reflection_param(self):
+        """Workflow should have reflection param."""
+        from praisonaiagents.workflows.workflows import Workflow
+        
+        workflow = Workflow(steps=[], reflection=True)
+        assert hasattr(workflow, 'reflection') or hasattr(workflow, '_reflection_config')
+
+
+class TestWorkflowStepNewParams:
+    """Test WorkflowStep supports all consolidated params."""
+    
+    def test_workflowstep_has_autonomy_param(self):
+        """WorkflowStep should have autonomy param."""
+        from praisonaiagents.workflows.workflows import WorkflowStep
+        
+        step = WorkflowStep(name="test", autonomy=True)
+        assert hasattr(step, 'autonomy') or hasattr(step, '_autonomy_config')
+    
+    def test_workflowstep_has_knowledge_param(self):
+        """WorkflowStep should have knowledge param."""
+        from praisonaiagents.workflows.workflows import WorkflowStep
+        
+        step = WorkflowStep(name="test", knowledge=["docs/"])
+        assert hasattr(step, 'knowledge') or hasattr(step, '_knowledge_config')
+    
+    def test_workflowstep_has_web_param(self):
+        """WorkflowStep should have web param."""
+        from praisonaiagents.workflows.workflows import WorkflowStep
+        
+        step = WorkflowStep(name="test", web=True)
+        assert hasattr(step, 'web') or hasattr(step, '_web_config')
+    
+    def test_workflowstep_has_reflection_param(self):
+        """WorkflowStep should have reflection param."""
+        from praisonaiagents.workflows.workflows import WorkflowStep
+        
+        step = WorkflowStep(name="test", reflection=True)
+        assert hasattr(step, 'reflection') or hasattr(step, '_reflection_config')
+
+
+class TestWorkflowPropagation:
+    """Test workflow defaults propagate to steps/agents."""
+    
+    def test_workflow_defaults_available_for_steps(self):
+        """Workflow-level configs should be accessible for step propagation."""
+        from praisonaiagents.workflows.workflows import Workflow
+        
+        workflow = Workflow(
+            steps=[],
+            knowledge=["docs/"],
+            web=True,
+            guardrails=True,
+        )
+        
+        # Workflow should store resolved configs for propagation
+        assert workflow.knowledge is not None or hasattr(workflow, '_knowledge_config')
+        assert workflow.web is not None or hasattr(workflow, '_web_config')
+        assert workflow.guardrails is not None or hasattr(workflow, '_guardrails_config')
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

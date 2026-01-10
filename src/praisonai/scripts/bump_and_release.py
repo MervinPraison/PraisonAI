@@ -130,6 +130,19 @@ def bump_version(new_version: str, agents_version: Optional[str] = None):
     print("\n✨ Version bump complete!")
 
 
+def validate_dependencies() -> bool:
+    """Validate that uv lock will succeed before making any changes."""
+    praisonai_dir = get_praisonai_dir()
+    
+    print("\n🔍 Validating dependencies (dry-run)...")
+    result = run(["uv", "lock", "--dry-run"], cwd=praisonai_dir, check=False)
+    if result.returncode != 0:
+        print("\n❌ Dependency validation failed. Fix the issues above before releasing.")
+        return False
+    print("  ✅ Dependencies validated successfully")
+    return True
+
+
 def release(version: str):
     """Run the release process."""
     root = get_project_root()
@@ -214,6 +227,11 @@ def main():
     
     # Run bump version
     bump_version(args.version, args.agents)
+    
+    # Validate dependencies after version bump (before git operations)
+    if not validate_dependencies():
+        print("\n💡 Tip: Revert changes with 'git checkout .' if needed")
+        sys.exit(1)
     
     # Run release
     release(args.version)

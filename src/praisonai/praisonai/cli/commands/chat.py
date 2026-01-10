@@ -68,6 +68,31 @@ def chat_main(
     no_acp: bool = typer.Option(False, "--no-acp", help="Disable ACP tools"),
     no_lsp: bool = typer.Option(False, "--no-lsp", help="Disable LSP tools"),
     autonomy: bool = typer.Option(True, "--autonomy/--no-autonomy", help="Enable agent autonomy for complex tasks"),
+    # NEW: Agent-like consolidated params for ALL GREEN consistency
+    knowledge: Optional[str] = typer.Option(
+        None, "--knowledge", "-k",
+        help="Enable knowledge/RAG. Use --knowledge for default, --knowledge=docs/ for sources",
+        is_flag=False,
+        flag_value="true",
+    ),
+    guardrails: Optional[str] = typer.Option(
+        None, "--guardrails",
+        help="Enable guardrails. Use --guardrails for default, --guardrails=strict for preset",
+        is_flag=False,
+        flag_value="true",
+    ),
+    web: Optional[str] = typer.Option(
+        None, "--web",
+        help="Enable web search. Use --web for default, --web=duckduckgo for preset",
+        is_flag=False,
+        flag_value="true",
+    ),
+    reflection: Optional[str] = typer.Option(
+        None, "--reflection",
+        help="Enable self-reflection. Use --reflection for default, --reflection=thorough for preset",
+        is_flag=False,
+        flag_value="true",
+    ),
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
 ):
