@@ -552,7 +552,7 @@ Methods:
 
 Types:
 ```python
-from praisonaiagents import AutoRagConfig, Citation, CodeExecutionStep, DeepResearchResponse, ExpandResult, ExpandStrategy, FileSearchCall, MCPCall, Provider, RagRetrievalPolicy, ReasoningStep, RewriteResult, RewriteStrategy, Task, WebSearchCall
+from praisonaiagents import AutoRagConfig, Citation, CodeExecutionStep, DeepResearchResponse, ExpandResult, ExpandStrategy, FileSearchCall, MCPCall, Provider, RagRetrievalPolicy, ReasoningStep, RewriteResult, RewriteStrategy, Task, WebSearchCall, warmup
 ```
 
 Methods:
@@ -569,6 +569,7 @@ Methods:
 * <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">execute_callback_sync</a>(task_output: TaskOutput) -> None</code>
 * <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">initialize_memory</a>()</code>
 * <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">store_in_memory</a>(content: str, agent_name: str = None, task_id: str = None)</code>
+* <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/__init__.py">warmup</a>(include_litellm: bool = False, include_openai: bool = True) -> dict</code>
 
 # Wrapper (praisonai)
 
@@ -731,6 +732,10 @@ Methods:
 * <code title="cli">praisonai skills install <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
 * <code title="cli">praisonai skills list <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
 * <code title="cli">praisonai skills validate <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
+* <code title="cli">praisonai standardise check <a href="./src/praisonai/praisonai/cli/commands/standardise.py">--help</a></code>
+* <code title="cli">praisonai standardise fix <a href="./src/praisonai/praisonai/cli/commands/standardise.py">--help</a></code>
+* <code title="cli">praisonai standardise init <a href="./src/praisonai/praisonai/cli/commands/standardise.py">--help</a></code>
+* <code title="cli">praisonai standardise report <a href="./src/praisonai/praisonai/cli/commands/standardise.py">--help</a></code>
 * <code title="cli">praisonai templates create <a href="./src/praisonai/praisonai/cli/commands/templates.py">--help</a></code>
 * <code title="cli">praisonai templates list <a href="./src/praisonai/praisonai/cli/commands/templates.py">--help</a></code>
 * <code title="cli">praisonai test info <a href="./src/praisonai/praisonai/cli/commands/test.py">--help</a></code>
