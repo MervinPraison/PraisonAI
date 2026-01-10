@@ -266,6 +266,115 @@ def register_commands():
     app.add_typer(test_app, name="test", help="Run test suite with tier and provider options")
     app.add_typer(examples_app, name="examples", help="Run and manage example files")
     
+    # Register standardise command
+    try:
+        standardise_app = typer.Typer(name="standardise", help="Documentation and examples standardisation (FDEP)")
+        
+        @standardise_app.command("check")
+        def standardise_check(
+            path: str = typer.Option(".", "--path", "-p", help="Project root path"),
+            feature: str = typer.Option(None, "--feature", help="Specific feature slug"),
+            scope: str = typer.Option("all", "--scope", help="Scope: all, docs, examples, sdk, cli"),
+            ci: bool = typer.Option(False, "--ci", help="CI mode"),
+        ):
+            """Check for standardisation issues."""
+            from .commands.standardise import _run_check
+            import argparse
+            args = argparse.Namespace(path=path, feature=feature, scope=scope, ci=ci, dry_run=True)
+            _run_check(args)
+        
+        @standardise_app.command("report")
+        def standardise_report(
+            path: str = typer.Option(".", "--path", "-p", help="Project root path"),
+            format: str = typer.Option("text", "--format", "-f", help="Format: text, json, markdown"),
+            output: str = typer.Option(None, "--output", "-o", help="Output file"),
+            ci: bool = typer.Option(False, "--ci", help="CI mode"),
+        ):
+            """Generate detailed report."""
+            from .commands.standardise import _run_report
+            import argparse
+            args = argparse.Namespace(path=path, format=format, output=output, ci=ci, feature=None, scope="all", dry_run=True)
+            _run_report(args)
+        
+        @standardise_app.command("fix")
+        def standardise_fix(
+            path: str = typer.Option(".", "--path", "-p", help="Project root path"),
+            feature: str = typer.Option(None, "--feature", help="Specific feature slug"),
+            apply: bool = typer.Option(False, "--apply", help="Actually apply changes"),
+            no_backup: bool = typer.Option(False, "--no-backup", help="Don't create backups"),
+        ):
+            """Fix standardisation issues."""
+            from .commands.standardise import _run_fix
+            import argparse
+            args = argparse.Namespace(path=path, feature=feature, apply=apply, no_backup=no_backup, scope="all", ci=False, dry_run=not apply)
+            _run_fix(args)
+        
+        @standardise_app.command("init")
+        def standardise_init(
+            feature: str = typer.Argument(..., help="Feature slug to initialise"),
+            path: str = typer.Option(".", "--path", "-p", help="Project root path"),
+            apply: bool = typer.Option(False, "--apply", help="Actually create files"),
+        ):
+            """Initialise a new feature with all required artifacts."""
+            from .commands.standardise import _run_init
+            import argparse
+            args = argparse.Namespace(feature=feature, path=path, apply=apply, scope="all", ci=False, dry_run=not apply)
+            _run_init(args)
+        
+        @standardise_app.command("ai")
+        def standardise_ai(
+            feature: str = typer.Argument(..., help="Feature slug to generate content for"),
+            gen_type: str = typer.Option("all", "--type", "-t", help="Type: docs, examples, all"),
+            apply: bool = typer.Option(False, "--apply", help="Actually create files"),
+            verify: bool = typer.Option(False, "--verify", help="Verify with AI"),
+            model: str = typer.Option("gpt-4o-mini", "--model", help="LLM model"),
+            path: str = typer.Option(".", "--path", "-p", help="Project root path"),
+        ):
+            """AI-powered generation of docs/examples."""
+            from .commands.standardise import _run_ai
+            import argparse
+            args = argparse.Namespace(feature=feature, type=gen_type, apply=apply, verify=verify, model=model, path=path, scope="all", ci=False, dry_run=not apply)
+            _run_ai(args)
+        
+        @standardise_app.command("checkpoint")
+        def standardise_checkpoint(
+            message: str = typer.Option(None, "--message", "-m", help="Checkpoint message"),
+            path: str = typer.Option(".", "--path", "-p", help="Repository path"),
+        ):
+            """Create an undo checkpoint."""
+            from .commands.standardise import _run_checkpoint
+            import argparse
+            args = argparse.Namespace(message=message, path=path)
+            _run_checkpoint(args)
+        
+        @standardise_app.command("undo")
+        def standardise_undo(
+            checkpoint: str = typer.Option(None, "--checkpoint", help="Checkpoint ID"),
+            list_checkpoints: bool = typer.Option(False, "--list", help="List checkpoints"),
+            path: str = typer.Option(".", "--path", "-p", help="Repository path"),
+        ):
+            """Undo to a previous checkpoint."""
+            from .commands.standardise import _run_undo
+            import argparse
+            args = argparse.Namespace(checkpoint=checkpoint, list=list_checkpoints, path=path)
+            _run_undo(args)
+        
+        @standardise_app.command("redo")
+        def standardise_redo(
+            path: str = typer.Option(".", "--path", "-p", help="Repository path"),
+        ):
+            """Redo after an undo."""
+            from .commands.standardise import _run_redo
+            import argparse
+            args = argparse.Namespace(path=path)
+            _run_redo(args)
+        
+        app.add_typer(standardise_app, name="standardise", help="Documentation and examples standardisation (FDEP)")
+        # Also register as 'standardize' for US spelling
+        app.add_typer(standardise_app, name="standardize", help="Documentation and examples standardisation (FDEP)")
+    except Exception:
+        pass  # Graceful degradation if standardise module not available
+    
     # Register TUI and queue commands
     tui_app = create_tui_debug_app()
     queue_app = create_queue_app()

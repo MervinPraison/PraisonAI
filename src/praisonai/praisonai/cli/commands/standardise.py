@@ -2,10 +2,14 @@
 CLI commands for the FDEP standardisation system.
 
 Commands:
-- praisonai standardise check   - Check for standardisation issues
-- praisonai standardise report  - Generate detailed report
-- praisonai standardise fix     - Fix issues (with --apply)
-- praisonai standardise init    - Initialise a new feature
+- praisonai standardise check      - Check for standardisation issues
+- praisonai standardise report     - Generate detailed report
+- praisonai standardise fix        - Fix issues (with --apply)
+- praisonai standardise init       - Initialise a new feature
+- praisonai standardise ai         - AI-powered generation
+- praisonai standardise checkpoint - Create undo checkpoint
+- praisonai standardise undo       - Undo to previous checkpoint
+- praisonai standardise redo       - Redo after undo
 """
 
 import sys
@@ -88,6 +92,91 @@ def standardise_command(args=None):
         help="Actually create files (default: dry-run)",
     )
     
+    # ai subcommand
+    ai_parser = subparsers.add_parser(
+        "ai",
+        help="AI-powered generation of docs/examples",
+    )
+    ai_parser.add_argument(
+        "feature",
+        type=str,
+        help="Feature slug to generate content for",
+    )
+    ai_parser.add_argument(
+        "--type", "-t",
+        choices=["docs", "examples", "all"],
+        default="all",
+        help="Type of content to generate",
+    )
+    ai_parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Actually create files (default: dry-run preview)",
+    )
+    ai_parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="Verify generated content with AI",
+    )
+    ai_parser.add_argument(
+        "--model",
+        type=str,
+        default="gpt-4o-mini",
+        help="LLM model to use (default: gpt-4o-mini)",
+    )
+    _add_common_args(ai_parser)
+    
+    # checkpoint subcommand
+    checkpoint_parser = subparsers.add_parser(
+        "checkpoint",
+        help="Create an undo checkpoint",
+    )
+    checkpoint_parser.add_argument(
+        "--message", "-m",
+        type=str,
+        help="Checkpoint message",
+    )
+    checkpoint_parser.add_argument(
+        "--path", "-p",
+        type=str,
+        default=".",
+        help="Repository path",
+    )
+    
+    # undo subcommand
+    undo_parser = subparsers.add_parser(
+        "undo",
+        help="Undo to a previous checkpoint",
+    )
+    undo_parser.add_argument(
+        "--checkpoint",
+        type=str,
+        help="Specific checkpoint ID to restore",
+    )
+    undo_parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List available checkpoints",
+    )
+    undo_parser.add_argument(
+        "--path", "-p",
+        type=str,
+        default=".",
+        help="Repository path",
+    )
+    
+    # redo subcommand
+    redo_parser = subparsers.add_parser(
+        "redo",
+        help="Redo after an undo",
+    )
+    redo_parser.add_argument(
+        "--path", "-p",
+        type=str,
+        default=".",
+        help="Repository path",
+    )
+    
     # Parse args
     parsed = parser.parse_args(args)
     
@@ -105,6 +194,14 @@ def standardise_command(args=None):
         return _run_fix(parsed)
     elif parsed.subcommand == "init":
         return _run_init(parsed)
+    elif parsed.subcommand == "ai":
+        return _run_ai(parsed)
+    elif parsed.subcommand == "checkpoint":
+        return _run_checkpoint(parsed)
+    elif parsed.subcommand == "undo":
+        return _run_undo(parsed)
+    elif parsed.subcommand == "redo":
+        return _run_redo(parsed)
     
     return 0
 
@@ -254,6 +351,158 @@ def _run_init(parsed) -> int:
     
     if config.dry_run:
         print("\nRun with --apply to create these files.")
+    
+    return 0
+
+
+def _run_ai(parsed) -> int:
+    """Run the AI generation subcommand."""
+    from praisonai.standardise.ai_generator import AIGenerator
+    from praisonai.standardise.models import ArtifactType, FeatureSlug
+    
+    config = _create_config(parsed)
+    
+    slug = FeatureSlug.from_string(parsed.feature)
+    if not slug.is_valid:
+        print(f"Error: Invalid feature slug: {slug.validation_error}")
+        return 2
+    
+    generator = AIGenerator(
+        model=parsed.model,
+        sdk_root=config.sdk_root,
+        docs_root=config.docs_root,
+        examples_root=config.examples_root,
+    )
+    
+    # Determine which artifacts to generate
+    artifact_types = []
+    gen_type = getattr(parsed, "type", "all")
+    
+    if gen_type in ["docs", "all"]:
+        artifact_types.extend([
+            ArtifactType.DOCS_CONCEPT,
+            ArtifactType.DOCS_FEATURE,
+            ArtifactType.DOCS_CLI,
+            ArtifactType.DOCS_SDK,
+        ])
+    
+    if gen_type in ["examples", "all"]:
+        artifact_types.extend([
+            ArtifactType.EXAMPLE_BASIC,
+            ArtifactType.EXAMPLE_ADVANCED,
+        ])
+    
+    print(f"🤖 AI Generation for '{slug.normalised}'")
+    print("=" * 50)
+    
+    results = []
+    for artifact_type in artifact_types:
+        print(f"\n📝 Generating {artifact_type.value}...")
+        
+        try:
+            content, output_path = generator.generate(
+                slug, artifact_type,
+                dry_run=not parsed.apply,
+            )
+            
+            if parsed.verify:
+                print("  🔍 Verifying...")
+                is_valid, summary, issues = generator.verify(content, artifact_type, slug)
+                if is_valid:
+                    print(f"  ✅ {summary}")
+                else:
+                    print(f"  ⚠️  {summary}")
+                    for issue in issues[:3]:
+                        print(f"     - {issue}")
+            
+            if parsed.apply and output_path:
+                print(f"  ✓ Created: {output_path}")
+            else:
+                print(f"  📋 Preview ({len(content)} chars)")
+                # Show first few lines
+                preview_lines = content.split("\n")[:10]
+                for line in preview_lines:
+                    print(f"     {line[:60]}")
+                if len(content.split("\n")) > 10:
+                    print("     ...")
+            
+            results.append((artifact_type.value, True, output_path))
+            
+        except Exception as e:
+            print(f"  ❌ Error: {e}")
+            results.append((artifact_type.value, False, str(e)))
+    
+    print("\n" + "=" * 50)
+    print("Summary:")
+    success_count = sum(1 for _, success, _ in results if success)
+    print(f"  Generated: {success_count}/{len(results)}")
+    
+    if not parsed.apply:
+        print("\nRun with --apply to create these files.")
+    
+    return 0
+
+
+def _run_checkpoint(parsed) -> int:
+    """Run the checkpoint subcommand."""
+    from praisonai.standardise.undo_redo import UndoRedoManager
+    
+    manager = UndoRedoManager(Path(parsed.path).resolve())
+    
+    success, result = manager.create_checkpoint(parsed.message)
+    
+    if success:
+        print(f"✓ Checkpoint created: {result}")
+    else:
+        print(f"❌ Failed: {result}")
+        return 1
+    
+    return 0
+
+
+def _run_undo(parsed) -> int:
+    """Run the undo subcommand."""
+    from praisonai.standardise.undo_redo import UndoRedoManager
+    
+    manager = UndoRedoManager(Path(parsed.path).resolve())
+    
+    # List checkpoints if requested
+    if getattr(parsed, "list", False):
+        checkpoints = manager.list_checkpoints()
+        if not checkpoints:
+            print("No checkpoints found.")
+            return 0
+        
+        print("Available checkpoints:")
+        for cp_id, date, message in checkpoints:
+            print(f"  • {cp_id} ({date}): {message[:50]}")
+        return 0
+    
+    # Undo to checkpoint
+    success, result = manager.undo(parsed.checkpoint)
+    
+    if success:
+        print(f"✓ {result}")
+    else:
+        print(f"❌ {result}")
+        return 1
+    
+    return 0
+
+
+def _run_redo(parsed) -> int:
+    """Run the redo subcommand."""
+    from praisonai.standardise.undo_redo import UndoRedoManager
+    
+    manager = UndoRedoManager(Path(parsed.path).resolve())
+    
+    success, result = manager.redo()
+    
+    if success:
+        print(f"✓ {result}")
+    else:
+        print(f"❌ {result}")
+        return 1
     
     return 0
 
