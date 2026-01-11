@@ -171,30 +171,29 @@ def chat_main(
         typer.echo("   Use: praisonai chat \"your prompt\" --profile", err=True)
     
     # Parse memory flag: --no-memory takes precedence, then --memory value
-    memory_value = _parse_memory_flag(memory, no_memory)
+    # TODO: Pass memory_value to TUI when memory support is added
+    _parse_memory_flag(memory, no_memory)
     
-    # Use the new TUI application (Aider/Claude Code style)
-    from praisonai.cli.interactive.tui_app import PraisonTUI, TUIConfig
+    # Use the async TUI (non-blocking, scrollable output)
+    from praisonai.cli.interactive.async_tui import AsyncTUI, AsyncTUIConfig
     
-    tui_config = TUIConfig(
+    tui_config = AsyncTUIConfig(
         model=model or "gpt-4o-mini",
         show_logo=not compact,
-        show_tips=not compact,
         show_status_bar=not compact,
-        compact_mode=compact,
         session_id=session_id,
         workspace=workspace,
     )
     
-    tui = PraisonTUI(config=tui_config)
+    tui = AsyncTUI(config=tui_config)
     
     if prompt:
-        # Single prompt mode
+        # Single prompt mode - direct response, no streaming
         response = tui.run_single(prompt)
         if response:
             print(response)
     else:
-        # Interactive TUI mode
+        # Interactive split-pane TUI mode
         tui.run()
 
 
