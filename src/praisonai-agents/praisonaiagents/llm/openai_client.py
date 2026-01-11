@@ -649,6 +649,7 @@ class OpenAIClient:
             chunks = []
             first_token_emitted = False
             last_content_time = None
+            ttft_logged = False
             
             # If display function provided, use Live display
             if display_fn:
@@ -668,6 +669,12 @@ class OpenAIClient:
                             content = chunk.choices[0].delta.content
                             full_response_text += content
                             last_content_time = time.perf_counter()
+                            
+                            # Log TTFT on first token
+                            if not ttft_logged:
+                                ttft_ms = (last_content_time - request_start_perf) * 1000
+                                logging.debug(f"TTFT (Time To First Token): {ttft_ms:.0f}ms")
+                                ttft_logged = True
                             
                             # Emit FIRST_TOKEN on first content
                             if _emit and not first_token_emitted:
@@ -715,11 +722,17 @@ class OpenAIClient:
                 for chunk in response_stream:
                     chunks.append(chunk)
                     
-                    if _emit and chunk.choices and chunk.choices[0].delta.content:
+                    if chunk.choices and chunk.choices[0].delta.content:
                         content = chunk.choices[0].delta.content
                         last_content_time = time.perf_counter()
                         
-                        if not first_token_emitted:
+                        # Log TTFT on first token
+                        if not ttft_logged:
+                            ttft_ms = (last_content_time - request_start_perf) * 1000
+                            logging.debug(f"TTFT (Time To First Token): {ttft_ms:.0f}ms")
+                            ttft_logged = True
+                        
+                        if _emit and not first_token_emitted:
                             stream_callback(StreamEvent(
                                 type=StreamEventType.FIRST_TOKEN,
                                 timestamp=last_content_time,
@@ -1130,7 +1143,9 @@ class OpenAIClient:
                 if display_fn and console:
                     # When verbose (display_fn provided), use streaming for better UX
                     try:
-                        with Live(display_fn("", start_time), console=console, refresh_per_second=4, transient=True) as live:
+                        request_start_perf = time.perf_counter()
+                        ttft_logged = False
+                        with Live(display_fn("", start_time), console=console, refresh_per_second=10, transient=True) as live:
                             # Use streaming when display_fn is provided for progressive display
                             response_stream = self.create_completion(
                                 messages=messages,
@@ -1148,6 +1163,11 @@ class OpenAIClient:
                             for chunk in response_stream:
                                 chunks.append(chunk)
                                 if chunk.choices[0].delta.content:
+                                    # Log TTFT on first token
+                                    if not ttft_logged:
+                                        ttft_ms = (time.perf_counter() - request_start_perf) * 1000
+                                        logging.debug(f"TTFT (Time To First Token): {ttft_ms:.0f}ms")
+                                        ttft_logged = True
                                     full_response_text += chunk.choices[0].delta.content
                                     live.update(display_fn(full_response_text, start_time))
                             

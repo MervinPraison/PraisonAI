@@ -141,11 +141,18 @@ def main_callback(
     )
     set_output_controller(state.output_controller)
     
-    # If no command provided, show help or handle legacy behavior
+    # If no command provided, start interactive mode
     if ctx.invoked_subcommand is None:
-        # Check if there are remaining args (legacy behavior)
-        # This is handled by the legacy adapter in main.py
-        pass
+        from praisonai.cli.interactive.tui_app import PraisonTUI, TUIConfig
+        
+        tui_config = TUIConfig(
+            model="gpt-4o-mini",
+            show_logo=True,
+            compact_mode=state.output_format == OutputFormat.json,
+        )
+        
+        tui = PraisonTUI(config=tui_config)
+        tui.run()
 
 
 def get_output_controller() -> OutputController:
