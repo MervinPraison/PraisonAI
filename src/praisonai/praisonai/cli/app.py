@@ -143,15 +143,15 @@ def main_callback(
     
     # If no command provided, start interactive mode
     if ctx.invoked_subcommand is None:
-        from praisonai.cli.interactive.tui_app import PraisonTUI, TUIConfig
+        from praisonai.cli.interactive.async_tui import AsyncTUI, AsyncTUIConfig
         
-        tui_config = TUIConfig(
+        tui_config = AsyncTUIConfig(
             model="gpt-4o-mini",
             show_logo=True,
-            compact_mode=state.output_format == OutputFormat.json,
+            show_status_bar=state.output_format != OutputFormat.json,
         )
         
-        tui = PraisonTUI(config=tui_config)
+        tui = AsyncTUI(config=tui_config)
         tui.run()
 
 
