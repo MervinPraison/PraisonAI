@@ -149,24 +149,11 @@ def chat_main(
         praisonai chat "Summarize this" --file README.md
         praisonai chat "What is 2+2?" --profile
     """
-    import asyncio
     import os
     
     # Set workspace if provided
     if workspace:
         os.environ["PRAISONAI_WORKSPACE"] = workspace
-    
-    # Configure UI backend
-    from praisonai.cli.ui import select_backend, UIConfig
-    ui_config = UIConfig(
-        ui_backend=ui_backend,
-        json_output=json_output,
-        no_color=no_color,
-        theme=theme,
-        compact=compact,
-        verbose=verbose,
-    )
-    backend = select_backend(ui_config)
     
     # Handle profiling for single prompt mode
     if prompt and (profile or profile_deep):
@@ -186,58 +173,29 @@ def chat_main(
     # Parse memory flag: --no-memory takes precedence, then --memory value
     memory_value = _parse_memory_flag(memory, no_memory)
     
-    # Try InteractiveCore first (preferred terminal-native implementation)
-    try:
-        from praisonai.cli.interactive import InteractiveCore, InteractiveConfig
-        from praisonai.cli.interactive.frontends import RichFrontend
-        
-        config = InteractiveConfig(
-            model=model,
-            session_id=session_id,
-            continue_session=continue_session,
-            workspace=workspace or None,
-            verbose=verbose,
-            memory=memory_value,
-            files=list(file) if file else [],
-            autonomy=autonomy,
-        )
-        
-        core = InteractiveCore(config=config)
-        
-        if prompt:
-            # Single prompt mode - use backend for output
-            from praisonai.cli.ui.events import UIEventType
-            
-            async def run_prompt():
-                if continue_session:
-                    core.continue_session()
-                
-                backend.emit(UIEventType.MESSAGE_START, {})
-                response = await core.prompt(prompt)
-                backend.emit(UIEventType.MESSAGE_CHUNK, {'content': response})
-                backend.emit(UIEventType.MESSAGE_END, {})
-            
-            asyncio.run(run_prompt())
-        else:
-            # Interactive REPL mode - pass ui_config to frontend
-            frontend = RichFrontend(core=core, config=config, ui_config=ui_config)
-            asyncio.run(frontend.run())
-            
-    except ImportError:
-        # Fallback to legacy terminal-native interactive mode
-        _run_legacy_terminal_chat(
-            prompt=prompt,
-            model=model,
-            verbose=verbose,
-            memory=memory,
-            tools=tools,
-            user_id=user_id,
-            session_id=session_id,
-            continue_session=continue_session,
-            workspace=workspace,
-            no_acp=no_acp,
-            no_lsp=no_lsp,
-        )
+    # Use the new TUI application (Aider/Claude Code style)
+    from praisonai.cli.interactive.tui_app import PraisonTUI, TUIConfig
+    
+    tui_config = TUIConfig(
+        model=model or "gpt-4o-mini",
+        show_logo=not compact,
+        show_tips=not compact,
+        show_status_bar=not compact,
+        compact_mode=compact,
+        session_id=session_id,
+        workspace=workspace,
+    )
+    
+    tui = PraisonTUI(config=tui_config)
+    
+    if prompt:
+        # Single prompt mode
+        response = tui.run_single(prompt)
+        if response:
+            print(response)
+    else:
+        # Interactive TUI mode
+        tui.run()
 
 
 def _run_profiled_chat(
