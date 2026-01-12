@@ -315,6 +315,8 @@ Methods:
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">compute_quality_score</a>(completeness: float, relevance: float, clarity: float, accuracy: float, weights: Dict[str, float] = None) -> float</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">finalize_task_output</a>(content: str, agent_name: str, quality_score: float, threshold: float = 0.7, metrics: Dict[str, Any] = None, task_id: str = None)</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">get_all_memories</a>() -> List[Dict[str, Any]]</code>
+* <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">get_learn_context</a>() -> str</code>
+* <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">learn</a>()</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">reset_all</a>()</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">reset_entity_only</a>()</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">reset_long_term</a>()</code>
@@ -616,8 +618,11 @@ Methods:
 * <code title="cli">praisonai context clear <a href="./src/praisonai/praisonai/cli/commands/context.py">--help</a></code>
 * <code title="cli">praisonai context compact <a href="./src/praisonai/praisonai/cli/commands/context.py">--help</a></code>
 * <code title="cli">praisonai context export <a href="./src/praisonai/praisonai/cli/commands/context.py">--help</a></code>
+* <code title="cli">praisonai context grep <a href="./src/praisonai/praisonai/cli/commands/context.py">--help</a></code>
+* <code title="cli">praisonai context list <a href="./src/praisonai/praisonai/cli/commands/context.py">--help</a></code>
 * <code title="cli">praisonai context show <a href="./src/praisonai/praisonai/cli/commands/context.py">--help</a></code>
 * <code title="cli">praisonai context stats <a href="./src/praisonai/praisonai/cli/commands/context.py">--help</a></code>
+* <code title="cli">praisonai context tail <a href="./src/praisonai/praisonai/cli/commands/context.py">--help</a></code>
 * <code title="cli">praisonai debug acp <a href="./src/praisonai/praisonai/cli/commands/debug.py">--help</a></code>
 * <code title="cli">praisonai debug debug-callback <a href="./src/praisonai/praisonai/cli/commands/debug.py">--help</a></code>
 * <code title="cli">praisonai debug interactive <a href="./src/praisonai/praisonai/cli/commands/debug.py">--help</a></code>
@@ -672,14 +677,19 @@ Methods:
 * <code title="cli">praisonai lsp status <a href="./src/praisonai/praisonai/cli/commands/lsp.py">--help</a></code>
 * <code title="cli">praisonai lsp stop <a href="./src/praisonai/praisonai/cli/commands/lsp.py">--help</a></code>
 * <code title="cli">praisonai mcp add <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
+* <code title="cli">praisonai mcp describe <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
 * <code title="cli">praisonai mcp list <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
 * <code title="cli">praisonai mcp mcp-callback <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
 * <code title="cli">praisonai mcp remove <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
+* <code title="cli">praisonai mcp status <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
+* <code title="cli">praisonai mcp sync <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
 * <code title="cli">praisonai mcp test <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
+* <code title="cli">praisonai mcp tools <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
 * <code title="cli">praisonai memory add <a href="./src/praisonai/praisonai/cli/commands/memory.py">--help</a></code>
 * <code title="cli">praisonai memory clear <a href="./src/praisonai/praisonai/cli/commands/memory.py">--help</a></code>
 * <code title="cli">praisonai memory search <a href="./src/praisonai/praisonai/cli/commands/memory.py">--help</a></code>
 * <code title="cli">praisonai memory show <a href="./src/praisonai/praisonai/cli/commands/memory.py">--help</a></code>
+* <code title="cli">praisonai memory status <a href="./src/praisonai/praisonai/cli/commands/memory.py">--help</a></code>
 * <code title="cli">praisonai package install <a href="./src/praisonai/praisonai/cli/commands/package.py">--help</a></code>
 * <code title="cli">praisonai package list <a href="./src/praisonai/praisonai/cli/commands/package.py">--help</a></code>
 * <code title="cli">praisonai package uninstall <a href="./src/praisonai/praisonai/cli/commands/package.py">--help</a></code>
@@ -730,8 +740,10 @@ Methods:
 * <code title="cli">praisonai session resume <a href="./src/praisonai/praisonai/cli/commands/session.py">--help</a></code>
 * <code title="cli">praisonai session show <a href="./src/praisonai/praisonai/cli/commands/session.py">--help</a></code>
 * <code title="cli">praisonai skills create <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
+* <code title="cli">praisonai skills info <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
 * <code title="cli">praisonai skills install <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
 * <code title="cli">praisonai skills list <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
+* <code title="cli">praisonai skills search <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
 * <code title="cli">praisonai skills validate <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
 * <code title="cli">praisonai standardise check <a href="./src/praisonai/praisonai/cli/commands/standardise.py">--help</a></code>
 * <code title="cli">praisonai standardise fix <a href="./src/praisonai/praisonai/cli/commands/standardise.py">--help</a></code>
