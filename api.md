@@ -60,6 +60,7 @@ Methods:
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">get_skills_prompt</a>() -> str</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">handoff_to</a>(target_agent: 'Agent', prompt: str, context: Optional[Dict[str, Any]] = None, config: Optional['HandoffConfig'] = None) -> 'HandoffResult'</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">handoff_to_async</a>(target_agent: 'Agent', prompt: str, context: Optional[Dict[str, Any]] = None, config: Optional['HandoffConfig'] = None) -> 'HandoffResult'</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">iter_stream</a>(prompt: str, **kwargs)</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">launch</a>(path: str = '/', port: int = 8000, host: str = '0.0.0.0', debug: bool = False, protocol: str = 'http')</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">llm_model</a>()</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">output_style</a>()</code>
@@ -739,6 +740,7 @@ Methods:
 * <code title="cli">praisonai templates create <a href="./src/praisonai/praisonai/cli/commands/templates.py">--help</a></code>
 * <code title="cli">praisonai templates list <a href="./src/praisonai/praisonai/cli/commands/templates.py">--help</a></code>
 * <code title="cli">praisonai test info <a href="./src/praisonai/praisonai/cli/commands/test.py">--help</a></code>
+* <code title="cli">praisonai test interactive <a href="./src/praisonai/praisonai/cli/commands/test.py">--help</a></code>
 * <code title="cli">praisonai test run <a href="./src/praisonai/praisonai/cli/commands/test.py">--help</a></code>
 * <code title="cli">praisonai todo add <a href="./src/praisonai/praisonai/cli/commands/todo.py">--help</a></code>
 * <code title="cli">praisonai todo done <a href="./src/praisonai/praisonai/cli/commands/todo.py">--help</a></code>
