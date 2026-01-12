@@ -29,7 +29,7 @@ def run_main(
     max_tokens: int = typer.Option(16000, "--max-tokens", help="Maximum output tokens"),
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
-    output_mode: Optional[str] = typer.Option(None, "--output", "-o", help="Output mode: actions, verbose, silent, stream"),
+    output_mode: Optional[str] = typer.Option(None, "--output", "-o", help="Output mode: silent (default), actions, verbose, json, stream"),
 ):
     """
     Run agents from a file or prompt.

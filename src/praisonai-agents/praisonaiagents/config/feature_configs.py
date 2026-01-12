@@ -391,17 +391,17 @@ class OutputConfig:
     
     Consolidates: verbose, markdown, stream, metrics, reasoning_steps, output_style
     
-    DEFAULT: output="actions" (minimal overhead, multi-agent safe)
+    DEFAULT: output="silent" (zero overhead, fastest performance)
     
     Usage:
-        # Default is actions mode (tool calls + final output only)
-        Agent(instructions="...")  # Uses output="actions"
+        # Default is silent mode (no output overhead, programmatic use)
+        Agent(instructions="...")  # Uses output="silent"
         
-        # Verbose mode with Rich streaming
+        # Actions mode (tool calls + final output trace)
+        Agent(output="actions")
+        
+        # Verbose mode with Rich panels
         Agent(output="verbose")
-        
-        # Plain mode (final output only, no action trace)
-        Agent(output="plain")
         
         # JSON mode for piping
         Agent(output="json")
@@ -415,10 +415,10 @@ class OutputConfig:
             reasoning_steps=True,
         ))
     """
-    # Verbosity - False by default for actions mode
+    # Verbosity - False by default for silent mode (fastest)
     verbose: bool = False
     
-    # Formatting - False by default for actions mode
+    # Formatting - False by default for silent mode
     markdown: bool = False
     
     # Streaming
@@ -434,9 +434,9 @@ class OutputConfig:
     style: Optional[Any] = None
     
     # Actions trace mode - shows tool calls, agent lifecycle, final output
-    # When True, suppresses verbose output and shows action-level trace instead
-    # DEFAULT: True for minimal overhead
-    actions_trace: bool = True
+    # When True, registers callbacks and outputs to stderr
+    # DEFAULT: False for zero overhead (silent mode)
+    actions_trace: bool = False
     
     # JSON output mode - emit JSONL events for piping
     json_output: bool = False
