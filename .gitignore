@@ -84,3 +84,4 @@ issue_details.json
 .mcpregistry_*
 
 *.log
+.internal

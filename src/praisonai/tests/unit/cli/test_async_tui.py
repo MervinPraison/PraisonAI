@@ -58,30 +58,30 @@ class TestGetLogo:
     
     def test_logo_wide_terminal(self):
         """Test logo for wide terminal."""
-        from praisonai.cli.interactive.async_tui import get_logo, LOGO
+        from praisonai.cli.branding import get_logo, LOGO_LARGE
         
         logo = get_logo(100)
-        assert logo == LOGO
+        assert logo == LOGO_LARGE
     
     def test_logo_medium_terminal(self):
         """Test logo for medium terminal."""
-        from praisonai.cli.interactive.async_tui import get_logo, LOGO_SMALL
+        from praisonai.cli.branding import get_logo, LOGO_MEDIUM
         
         logo = get_logo(50)
-        assert logo == LOGO_SMALL
+        assert logo == LOGO_MEDIUM
     
     def test_logo_narrow_terminal(self):
         """Test logo for narrow terminal."""
-        from praisonai.cli.interactive.async_tui import get_logo, LOGO_MINIMAL
+        from praisonai.cli.branding import get_logo, LOGO_SMALL
         
         logo = get_logo(30)
-        assert logo == LOGO_MINIMAL
+        assert logo == LOGO_SMALL
     
     def test_logo_contains_praison_ai(self):
         """Test that logo contains 'Praison AI' branding."""
-        from praisonai.cli.interactive.async_tui import LOGO_MINIMAL
+        from praisonai.cli.branding import LOGO_SMALL
         
-        assert "Praison AI" in LOGO_MINIMAL
+        assert "Praison AI" in LOGO_SMALL
 
 
 class TestAsyncTUI:
@@ -246,18 +246,18 @@ class TestASCIILogos:
     
     def test_logo_exists(self):
         """Test LOGO constant exists and has content."""
-        from praisonai.cli.interactive.async_tui import LOGO
-        assert len(LOGO) > 0
-        assert "██" in LOGO
+        from praisonai.cli.branding import LOGO_LARGE
+        assert len(LOGO_LARGE) > 0
+        assert "██" in LOGO_LARGE
     
     def test_logo_small_exists(self):
         """Test LOGO_SMALL constant exists."""
-        from praisonai.cli.interactive.async_tui import LOGO_SMALL
+        from praisonai.cli.branding import LOGO_SMALL
         assert len(LOGO_SMALL) > 0
     
     def test_logo_minimal_branding(self):
         """Test LOGO_MINIMAL has correct branding."""
-        from praisonai.cli.interactive.async_tui import LOGO_MINIMAL
+        from praisonai.cli.branding import LOGO_MINIMAL
         assert "Praison AI" in LOGO_MINIMAL
 
 
@@ -598,3 +598,251 @@ class TestRuntimeIntegration:
         # It's an async method
         import asyncio
         assert asyncio.iscoroutinefunction(tui._start_runtime)
+
+
+class TestLogoDisplay:
+    """Tests for logo display functionality."""
+    
+    def test_logo_always_shows_when_enabled(self):
+        """Test logo shows even when messages exist."""
+        from praisonai.cli.interactive.async_tui import AsyncTUI, AsyncTUIConfig, ChatMessage
+        
+        config = AsyncTUIConfig(show_logo=True)
+        tui = AsyncTUI(config=config)
+        
+        # Add a message
+        tui.messages.append(ChatMessage(role="system", content="Test message"))
+        
+        # Logo should still be in output
+        output = tui._format_output()
+        assert "Praison" in output or "██" in output  # Logo contains these
+    
+    def test_logo_hidden_when_disabled(self):
+        """Test logo is hidden when show_logo=False."""
+        from praisonai.cli.interactive.async_tui import AsyncTUI, AsyncTUIConfig
+        
+        config = AsyncTUIConfig(show_logo=False)
+        tui = AsyncTUI(config=config)
+        
+        output = tui._format_output()
+        # Should not contain the large logo characters
+        assert "██████" not in output
+    
+    def test_tips_hidden_after_first_message(self):
+        """Test tips are hidden after first message but logo remains."""
+        from praisonai.cli.interactive.async_tui import AsyncTUI, AsyncTUIConfig, ChatMessage
+        
+        config = AsyncTUIConfig(show_logo=True)
+        tui = AsyncTUI(config=config)
+        
+        # Before messages - tips should show
+        output_before = tui._format_output()
+        assert "Type your message" in output_before
+        
+        # Add a message
+        tui.messages.append(ChatMessage(role="user", content="Hello"))
+        
+        # After messages - tips should be hidden but logo remains
+        output_after = tui._format_output()
+        assert "Type your message" not in output_after
+        # Logo should still be there
+        assert "Model:" in output_after
+
+
+class TestToolCallVisibility:
+    """Tests for tool call visibility."""
+    
+    def test_tool_role_in_format_output(self):
+        """Test tool role messages are formatted correctly."""
+        from praisonai.cli.interactive.async_tui import AsyncTUI, ChatMessage
+        
+        tui = AsyncTUI()
+        tui.messages.append(ChatMessage(role="tool", content="read_file completed"))
+        
+        output = tui._format_output()
+        assert "⚙" in output
+        assert "read_file completed" in output
+
+
+class TestDebugMode:
+    """Tests for debug mode (/debug command and --debug flag)."""
+    
+    def test_debug_command_toggles_mode(self):
+        """Test /debug command toggles debug mode."""
+        from praisonai.cli.interactive.async_tui import AsyncTUI
+        
+        tui = AsyncTUI()
+        assert tui.config.debug is False
+        
+        result = tui._handle_command("/debug")
+        
+        assert result is True
+        assert tui.config.debug is True
+        assert "enabled" in tui.messages[0].content.lower()
+        assert "async_tui_debug.log" in tui.messages[0].content
+    
+    def test_debug_flag_in_config(self):
+        """Test debug flag can be set via config."""
+        from praisonai.cli.interactive.async_tui import AsyncTUI, AsyncTUIConfig
+        
+        config = AsyncTUIConfig(debug=True)
+        tui = AsyncTUI(config=config)
+        
+        assert tui.config.debug is True
+
+
+class TestPlanningIntegration:
+    """Tests for planning integration (/plan command)."""
+    
+    def test_plan_command_no_args(self):
+        """Test /plan command without arguments shows usage."""
+        from praisonai.cli.interactive.async_tui import AsyncTUI
+        
+        tui = AsyncTUI()
+        result = tui._handle_command("/plan")
+        
+        assert result is True
+        assert len(tui.messages) == 1
+        assert "Usage:" in tui.messages[0].content
+        assert "/plan" in tui.messages[0].content
+    
+    def test_plan_command_with_task(self):
+        """Test /plan command with a task description."""
+        from praisonai.cli.interactive.async_tui import AsyncTUI
+        
+        tui = AsyncTUI()
+        # Mock _queue_or_execute to prevent actual execution
+        executed_prompts = []
+        tui._queue_or_execute = lambda p: executed_prompts.append(p)
+        
+        result = tui._handle_command("/plan refactor the auth module")
+        
+        assert result is True
+        assert len(tui.messages) == 1
+        assert "Creating plan" in tui.messages[0].content
+        assert len(executed_prompts) == 1
+        assert "refactor the auth module" in executed_prompts[0]
+
+
+class TestHandoffSubagents:
+    """Tests for handoff/subagents (/handoff command)."""
+    
+    def test_handoff_command_no_args(self):
+        """Test /handoff command without arguments shows usage."""
+        from praisonai.cli.interactive.async_tui import AsyncTUI
+        
+        tui = AsyncTUI()
+        result = tui._handle_command("/handoff")
+        
+        assert result is True
+        assert len(tui.messages) == 1
+        assert "Usage:" in tui.messages[0].content
+        assert "code" in tui.messages[0].content
+        assert "research" in tui.messages[0].content
+    
+    def test_handoff_command_missing_task(self):
+        """Test /handoff command with only agent type."""
+        from praisonai.cli.interactive.async_tui import AsyncTUI
+        
+        tui = AsyncTUI()
+        result = tui._handle_command("/handoff code")
+        
+        assert result is True
+        assert "specify both" in tui.messages[0].content.lower()
+    
+    def test_handoff_command_code_agent(self):
+        """Test /handoff code command."""
+        from praisonai.cli.interactive.async_tui import AsyncTUI
+        
+        tui = AsyncTUI()
+        executed_prompts = []
+        tui._queue_or_execute = lambda p: executed_prompts.append(p)
+        
+        result = tui._handle_command('/handoff code "fix the bug"')
+        
+        assert result is True
+        assert "Handing off" in tui.messages[0].content
+        assert len(executed_prompts) == 1
+        assert "code" in executed_prompts[0].lower()
+    
+    def test_handoff_command_research_agent(self):
+        """Test /handoff research command."""
+        from praisonai.cli.interactive.async_tui import AsyncTUI
+        
+        tui = AsyncTUI()
+        executed_prompts = []
+        tui._queue_or_execute = lambda p: executed_prompts.append(p)
+        
+        result = tui._handle_command('/handoff research "find best practices"')
+        
+        assert result is True
+        assert len(executed_prompts) == 1
+        assert "research" in executed_prompts[0].lower()
+    
+    def test_handoff_command_unknown_agent(self):
+        """Test /handoff with unknown agent type."""
+        from praisonai.cli.interactive.async_tui import AsyncTUI
+        
+        tui = AsyncTUI()
+        result = tui._handle_command('/handoff unknown "some task"')
+        
+        assert result is True
+        assert "Unknown agent type" in tui.messages[0].content
+
+
+class TestInteractiveRuntimeReadOnly:
+    """Tests for InteractiveRuntime read_only property."""
+    
+    def test_read_only_false_when_config_approval_auto(self):
+        """Test read_only is False when config.approval_mode is 'auto'."""
+        from praisonai.cli.features.interactive_runtime import InteractiveRuntime, RuntimeConfig
+        
+        config = RuntimeConfig(approval_mode="auto")
+        runtime = InteractiveRuntime(config)
+        
+        # Even without ACP ready, should not be read-only in auto mode
+        assert runtime.read_only is False
+    
+    def test_read_only_false_when_env_approval_auto(self):
+        """Test read_only is False when PRAISON_APPROVAL_MODE env is 'auto'."""
+        import os
+        from praisonai.cli.features.interactive_runtime import InteractiveRuntime, RuntimeConfig
+        
+        # Set env var
+        old_val = os.environ.get("PRAISON_APPROVAL_MODE")
+        os.environ["PRAISON_APPROVAL_MODE"] = "auto"
+        
+        try:
+            config = RuntimeConfig(approval_mode="manual")  # Config says manual
+            runtime = InteractiveRuntime(config)
+            
+            # Config takes precedence, so this should be read-only
+            # But env var should also work as fallback
+            # Actually config.approval_mode="manual" so env var is checked
+            # Wait, config says manual, so it won't return False on first check
+            # Then env var check should return False
+            assert runtime.read_only is False
+        finally:
+            if old_val is None:
+                os.environ.pop("PRAISON_APPROVAL_MODE", None)
+            else:
+                os.environ["PRAISON_APPROVAL_MODE"] = old_val
+    
+    def test_read_only_true_when_manual_mode(self):
+        """Test read_only respects _read_only flag in manual mode."""
+        import os
+        from praisonai.cli.features.interactive_runtime import InteractiveRuntime, RuntimeConfig
+        
+        # Clear env var
+        old_val = os.environ.get("PRAISON_APPROVAL_MODE")
+        os.environ.pop("PRAISON_APPROVAL_MODE", None)
+        
+        try:
+            config = RuntimeConfig(approval_mode="manual")
+            runtime = InteractiveRuntime(config)
+            runtime._read_only = True  # Explicitly set read-only
+            
+            assert runtime.read_only is True
+        finally:
+            if old_val is not None:
+                os.environ["PRAISON_APPROVAL_MODE"] = old_val

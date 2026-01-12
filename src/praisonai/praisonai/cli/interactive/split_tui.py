@@ -19,44 +19,10 @@ from typing import List, Optional
 from datetime import datetime
 
 # ============================================================================
-# ASCII Art Logo - "Praison AI" branding
+# Branding - Import from unified source
 # ============================================================================
 
-LOGO = r"""
- ██████╗ ██████╗  █████╗ ██╗███████╗ ██████╗ ███╗   ██╗     █████╗ ██╗
- ██╔══██╗██╔══██╗██╔══██╗██║██╔════╝██╔═══██╗████╗  ██║    ██╔══██╗██║
- ██████╔╝██████╔╝███████║██║███████╗██║   ██║██╔██╗ ██║    ███████║██║
- ██╔═══╝ ██╔══██╗██╔══██║██║╚════██║██║   ██║██║╚██╗██║    ██╔══██║██║
- ██║     ██║  ██║██║  ██║██║███████║╚██████╔╝██║ ╚████║    ██║  ██║██║
- ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═══╝    ╚═╝  ╚═╝╚═╝
-"""
-
-LOGO_SMALL = r"""
- ╔═╗┬─┐┌─┐┬┌─┐┌─┐┌┐┌  ╔═╗╦
- ╠═╝├┬┘├─┤│└─┐│ ││││  ╠═╣║
- ╩  ┴└─┴ ┴┴└─┘└─┘┘└┘  ╩ ╩╩
-"""
-
-LOGO_MINIMAL = "▶ Praison AI"
-
-
-def get_logo(width: int = 80) -> str:
-    """Get appropriate logo based on terminal width."""
-    if width >= 75:
-        return LOGO
-    elif width >= 40:
-        return LOGO_SMALL
-    else:
-        return LOGO_MINIMAL
-
-
-def get_version() -> str:
-    """Get PraisonAI version."""
-    try:
-        from praisonai import __version__
-        return __version__
-    except Exception:
-        return "1.0.0"
+from praisonai.cli.branding import get_logo, get_version
 
 
 # ============================================================================

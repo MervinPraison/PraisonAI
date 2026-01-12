@@ -596,20 +596,34 @@ class CodeIntelligenceRouter:
     
     def _extract_symbol_from_query(self, query: str) -> Optional[str]:
         """Extract symbol name from query."""
-        # Common patterns for symbol extraction
+        # Common patterns for symbol extraction (order matters - more specific first)
         patterns = [
-            r'(?:definition\s+of|where\s+is|find|show)\s+["\']?(\w+)["\']?',
+            # "find all references to X" - capture X after "to"
+            r'references?\s+to\s+["\']?(\w+)["\']?',
+            # "definition of X" - capture X after "of"
+            r'definition\s+of\s+["\']?(\w+)["\']?',
+            # "where is X defined/used"
+            r'where\s+is\s+["\']?(\w+)["\']?\s+(?:defined|used)',
+            # Quoted or backticked symbols
             r'["\'](\w+)["\']',
             r'`(\w+)`',
+            # "X is defined/used"
             r'(\w+)\s+(?:is\s+)?(?:defined|used)',
+            # Generic "find/show X" - but filter common words
+            r'(?:find|show)\s+["\']?(\w+)["\']?',
         ]
+        
+        # Words to filter out
+        filter_words = {'the', 'a', 'an', 'is', 'are', 'in', 'of', 'to', 'for', 
+                       'all', 'any', 'some', 'this', 'that', 'where', 'what',
+                       'definition', 'references', 'reference', 'symbol', 'symbols'}
         
         for pattern in patterns:
             match = re.search(pattern, query, re.IGNORECASE)
             if match:
                 symbol = match.group(1)
                 # Filter out common words
-                if symbol.lower() not in ['the', 'a', 'an', 'is', 'are', 'in', 'of', 'to', 'for']:
+                if symbol.lower() not in filter_words:
                     return symbol
         
         return None

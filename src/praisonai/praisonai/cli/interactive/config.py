@@ -50,8 +50,9 @@ class InteractiveConfig:
     autonomy: bool = True  # Enable autonomy by default for complex tasks
     autonomy_config: Optional[dict] = None  # Custom autonomy config
     
-    # Approval mode
-    approval_mode: Union[str, ApprovalMode] = "prompt"
+    # Approval mode - default to "auto" for full privileges in interactive mode
+    # Use "prompt" for safer mode that asks before each action
+    approval_mode: Union[str, ApprovalMode] = "auto"
     
     # File attachments
     files: List[str] = field(default_factory=list)

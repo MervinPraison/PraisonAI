@@ -29,6 +29,7 @@ def run_main(
     max_tokens: int = typer.Option(16000, "--max-tokens", help="Maximum output tokens"),
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
+    output_mode: Optional[str] = typer.Option(None, "--output", "-o", help="Output mode: actions, verbose, silent, stream"),
 ):
     """
     Run agents from a file or prompt.
@@ -108,6 +109,7 @@ def run_main(
             memory=memory,
             tools=tools,
             max_tokens=max_tokens,
+            output_mode=output_mode,
         )
     else:
         # Run as prompt
@@ -120,6 +122,7 @@ def run_main(
             memory=memory,
             tools=tools,
             max_tokens=max_tokens,
+            output_mode=output_mode,
         )
 
 
@@ -134,6 +137,7 @@ def _run_from_file(
     memory: bool = False,
     tools: Optional[str] = None,
     max_tokens: int = 16000,
+    output_mode: Optional[str] = None,
 ):
     """Run agents from a YAML file."""
     output = get_output_controller()
@@ -178,12 +182,37 @@ def _run_prompt(
     memory: bool = False,
     tools: Optional[str] = None,
     max_tokens: int = 16000,
+    output_mode: Optional[str] = None,
 ):
     """Run a direct prompt."""
     output = get_output_controller()
     
     try:
-        # Use existing handle_direct_prompt
+        # If output_mode is "actions", use direct Agent with actions preset
+        if output_mode == "actions":
+            from praisonaiagents import Agent
+            
+            agent_config = {
+                "name": "RunAgent",
+                "role": "Assistant", 
+                "goal": "Complete the task",
+                "output": "actions",  # Use actions preset
+            }
+            if model:
+                agent_config["llm"] = model
+            
+            agent = Agent(**agent_config)
+            result = agent.start(prompt)
+            
+            output.emit_result(
+                message="Prompt completed",
+                data={"result": str(result) if result else None}
+            )
+            
+            # Don't print result again - actions mode already shows output
+            return
+        
+        # Use existing handle_direct_prompt for other modes
         from praisonai.cli.main import PraisonAI
         
         praison = PraisonAI()

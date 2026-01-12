@@ -160,6 +160,8 @@ class ActionOrchestrator:
     
     async def _create_fallback_plan(self, prompt: str, plan_id: str) -> ActionResult:
         """Create a fallback plan when ACP is not available for planning."""
+        import re  # Import at function level for all pattern matching
+        
         # This is a simplified fallback - in production, this would use LLM
         steps = []
         
@@ -168,7 +170,6 @@ class ActionOrchestrator:
         
         if "create" in prompt_lower or "new file" in prompt_lower:
             # Extract file path if mentioned
-            import re
             file_match = re.search(r'(?:create|new)\s+(?:a\s+)?(?:file\s+)?(?:called\s+)?([^\s]+\.\w+)', prompt_lower)
             target = file_match.group(1) if file_match else "new_file.py"
             
@@ -188,7 +189,8 @@ class ActionOrchestrator:
             ))
         
         elif "edit" in prompt_lower or "modify" in prompt_lower or "change" in prompt_lower:
-            file_match = re.search(r'(?:edit|modify|change)\s+([^\s]+\.\w+)', prompt_lower)
+            # Match patterns like "edit file X", "edit X", "modify X"
+            file_match = re.search(r'(?:edit|modify|change)\s+(?:file\s+)?([^\s]+(?:\.\w+)?)', prompt_lower)
             target = file_match.group(1) if file_match else ""
             
             if target:
@@ -197,11 +199,13 @@ class ActionOrchestrator:
                     action_type=ActionType.FILE_EDIT,
                     description=f"Edit file: {target}",
                     target=target,
-                    params={"changes": prompt}
+                    params={"changes": prompt},
+                    status=ActionStatus.APPROVED  # Auto-approve for fallback
                 ))
         
         elif "delete" in prompt_lower or "remove" in prompt_lower:
-            file_match = re.search(r'(?:delete|remove)\s+([^\s]+\.\w+)', prompt_lower)
+            # Match patterns like "delete file X", "delete X", "remove X"
+            file_match = re.search(r'(?:delete|remove)\s+(?:file\s+)?([^\s]+(?:\.\w+)?)', prompt_lower)
             target = file_match.group(1) if file_match else ""
             
             if target:
@@ -209,7 +213,8 @@ class ActionOrchestrator:
                     id=self._generate_step_id(plan_id, 0),
                     action_type=ActionType.FILE_DELETE,
                     description=f"Delete file: {target}",
-                    target=target
+                    target=target,
+                    status=ActionStatus.APPROVED  # Auto-approve for fallback
                 ))
         
         elif "rename" in prompt_lower:
@@ -218,19 +223,22 @@ class ActionOrchestrator:
                 action_type=ActionType.REFACTOR,
                 description="Rename operation",
                 target="",
-                params={"prompt": prompt}
+                params={"prompt": prompt},
+                status=ActionStatus.APPROVED  # Auto-approve for fallback
             ))
         
-        elif "run" in prompt_lower or "execute" in prompt_lower:
-            cmd_match = re.search(r'(?:run|execute)\s+[`"\']?([^`"\']+)[`"\']?', prompt_lower)
-            command = cmd_match.group(1) if cmd_match else ""
+        elif "run" in prompt_lower or "execute" in prompt_lower or "command" in prompt_lower:
+            # Match patterns like "run command: X", "execute X", "run X"
+            cmd_match = re.search(r'(?:run|execute)\s+(?:command[:\s]+)?[`"\']?(.+?)[`"\']?$', prompt_lower)
+            command = cmd_match.group(1).strip() if cmd_match else ""
             
             if command:
                 steps.append(ActionStep(
                     id=self._generate_step_id(plan_id, 0),
                     action_type=ActionType.SHELL_COMMAND,
                     description=f"Execute: {command}",
-                    target=command
+                    target=command,
+                    status=ActionStatus.APPROVED  # Auto-approve for fallback
                 ))
         
         if not steps:
