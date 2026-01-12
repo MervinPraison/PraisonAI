@@ -224,3 +224,191 @@ def context_export(
     except ImportError as e:
         typer.echo(f"Error: Context module not available: {e}", err=True)
         raise typer.Exit(1)
+
+
+# =============================================================================
+# Artifact Commands (Dynamic Context Discovery)
+# =============================================================================
+
+artifacts_app = typer.Typer(help="Artifact management for dynamic context discovery")
+app.add_typer(artifacts_app, name="artifacts")
+
+
+@artifacts_app.command("list")
+def artifacts_list(
+    run_id: str = typer.Option(None, "--run-id", "-r", help="Filter by run ID"),
+    agent_id: str = typer.Option(None, "--agent-id", "-a", help="Filter by agent ID"),
+    tool_name: str = typer.Option(None, "--tool", "-t", help="Filter by tool name"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List artifacts."""
+    try:
+        from praisonai.context import FileSystemArtifactStore
+        import json as json_module
+        
+        store = FileSystemArtifactStore()
+        artifacts = store.list_artifacts(
+            run_id=run_id,
+            agent_id=agent_id,
+            tool_name=tool_name,
+        )
+        
+        if json_output:
+            data = [a.to_dict() for a in artifacts]
+            print(json_module.dumps(data, indent=2))
+        else:
+            if not artifacts:
+                typer.echo("No artifacts found.")
+                return
+            
+            from rich.console import Console
+            from rich.table import Table
+            
+            console = Console()
+            table = Table(title=f"Artifacts ({len(artifacts)} found)")
+            table.add_column("ID", style="cyan")
+            table.add_column("Tool", style="green")
+            table.add_column("Size", justify="right")
+            table.add_column("Summary")
+            table.add_column("Path", style="dim")
+            
+            for ref in artifacts:
+                size_str = ref._format_size(ref.size_bytes)
+                table.add_row(
+                    ref.artifact_id,
+                    ref.tool_name or "-",
+                    size_str,
+                    ref.summary[:40] + "..." if len(ref.summary) > 40 else ref.summary,
+                    ref.path,
+                )
+            
+            console.print(table)
+            
+    except ImportError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@artifacts_app.command("show")
+def artifacts_show(
+    artifact_path: str = typer.Argument(..., help="Path to artifact"),
+    lines: int = typer.Option(None, "--lines", "-n", help="Number of lines to show"),
+):
+    """Show artifact content."""
+    try:
+        from praisonai.context import FileSystemArtifactStore
+        from praisonaiagents.context.artifacts import ArtifactRef
+        
+        store = FileSystemArtifactStore()
+        ref = ArtifactRef(path=artifact_path, summary="", size_bytes=0)
+        
+        if lines:
+            content = store.head(ref, lines=lines)
+        else:
+            content = store.load(ref)
+            if not isinstance(content, str):
+                import json
+                content = json.dumps(content, indent=2)
+        
+        typer.echo(content)
+        
+    except FileNotFoundError:
+        typer.echo(f"Artifact not found: {artifact_path}", err=True)
+        raise typer.Exit(1)
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@artifacts_app.command("tail")
+def artifacts_tail(
+    artifact_path: str = typer.Argument(..., help="Path to artifact"),
+    lines: int = typer.Option(50, "--lines", "-n", help="Number of lines"),
+):
+    """Get last N lines of artifact."""
+    try:
+        from praisonai.context import FileSystemArtifactStore
+        from praisonaiagents.context.artifacts import ArtifactRef
+        
+        store = FileSystemArtifactStore()
+        ref = ArtifactRef(path=artifact_path, summary="", size_bytes=0)
+        content = store.tail(ref, lines=lines)
+        typer.echo(content)
+        
+    except FileNotFoundError:
+        typer.echo(f"Artifact not found: {artifact_path}", err=True)
+        raise typer.Exit(1)
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@artifacts_app.command("grep")
+def artifacts_grep(
+    artifact_path: str = typer.Argument(..., help="Path to artifact"),
+    pattern: str = typer.Argument(..., help="Search pattern (regex)"),
+    context_lines: int = typer.Option(2, "--context", "-C", help="Context lines"),
+    max_matches: int = typer.Option(50, "--max", "-m", help="Max matches"),
+):
+    """Search for pattern in artifact."""
+    try:
+        from praisonai.context import FileSystemArtifactStore
+        from praisonaiagents.context.artifacts import ArtifactRef
+        
+        store = FileSystemArtifactStore()
+        ref = ArtifactRef(path=artifact_path, summary="", size_bytes=0)
+        matches = store.grep(ref, pattern=pattern, context_lines=context_lines, max_matches=max_matches)
+        
+        if not matches:
+            typer.echo(f"No matches found for: {pattern}")
+            return
+        
+        from rich.console import Console
+        console = Console()
+        
+        console.print(f"[bold]Found {len(matches)} matches:[/bold]")
+        for match in matches:
+            console.print(f"\n[cyan]--- Line {match.line_number} ---[/cyan]")
+            for ctx in match.context_before:
+                console.print(f"  {ctx}", style="dim")
+            console.print(f"[green]> {match.line_content}[/green]")
+            for ctx in match.context_after:
+                console.print(f"  {ctx}", style="dim")
+        
+    except FileNotFoundError:
+        typer.echo(f"Artifact not found: {artifact_path}", err=True)
+        raise typer.Exit(1)
+    except ValueError as e:
+        typer.echo(f"Invalid pattern: {e}", err=True)
+        raise typer.Exit(1)
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@artifacts_app.command("export")
+def artifacts_export(
+    artifact_path: str = typer.Argument(..., help="Path to artifact"),
+    output: str = typer.Option(None, "--output", "-o", help="Output file path"),
+):
+    """Export artifact to file."""
+    try:
+        from pathlib import Path
+        import shutil
+        
+        src_path = Path(artifact_path)
+        if not src_path.exists():
+            typer.echo(f"Artifact not found: {artifact_path}", err=True)
+            raise typer.Exit(1)
+        
+        if output:
+            dst_path = Path(output)
+        else:
+            dst_path = Path.cwd() / src_path.name
+        
+        shutil.copy2(src_path, dst_path)
+        typer.echo(f"Exported to: {dst_path}")
+        
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)

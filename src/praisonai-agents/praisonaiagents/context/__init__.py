@@ -157,6 +157,16 @@ __all__ = [
     "FastContextResult",
     "FileMatch",
     "LineRange",
+    # Artifacts (Dynamic Context Discovery)
+    "ArtifactRef",
+    "ArtifactMetadata",
+    "GrepMatch",
+    "QueueConfig",
+    "ArtifactStoreProtocol",
+    "HistoryStoreProtocol",
+    "TerminalLoggerProtocol",
+    "compute_checksum",
+    "generate_summary",
 ]
 
 
@@ -251,5 +261,12 @@ def __getattr__(name: str):
     if name == "LineRange":
         from praisonaiagents.context.fast.result import LineRange
         return LineRange
+    
+    # Artifacts (Dynamic Context Discovery)
+    if name in ("ArtifactRef", "ArtifactMetadata", "GrepMatch", "QueueConfig",
+                "ArtifactStoreProtocol", "HistoryStoreProtocol", "TerminalLoggerProtocol",
+                "compute_checksum", "generate_summary"):
+        from . import artifacts
+        return getattr(artifacts, name)
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
