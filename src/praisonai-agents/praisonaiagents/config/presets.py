@@ -41,10 +41,20 @@ MEMORY_URL_SCHEMES: Dict[str, str] = {
 # =============================================================================
 
 OUTPUT_PRESETS: Dict[str, Dict[str, Any]] = {
-    # Actions preset - DEFAULT for SDK
+    # Silent preset - DEFAULT for SDK
+    # Zero overhead, no callbacks, no I/O on hot path
+    # Fastest performance for programmatic use
+    "silent": {
+        "verbose": False,
+        "markdown": False,
+        "stream": False,
+        "metrics": False,
+        "reasoning_steps": False,
+        "actions_trace": False,
+    },
+    # Actions preset - opt-in observability
     # Shows action trace (tool calls, agent lifecycle) + final output
-    # No verbose panels, no streaming tokens, just action-level trace
-    # Minimal overhead, multi-agent safe
+    # Registers callbacks, outputs to stderr
     "actions": {
         "verbose": False,
         "markdown": False,
@@ -90,13 +100,6 @@ OUTPUT_PRESETS: Dict[str, Dict[str, Any]] = {
         "metrics": True,
         "reasoning_steps": True,
     },
-    "silent": {
-        "verbose": False,
-        "markdown": False,
-        "stream": False,
-        "metrics": False,
-        "reasoning_steps": False,
-    },
     # Streaming preset - enables streaming by default
     "stream": {
         "verbose": True,
@@ -118,7 +121,9 @@ OUTPUT_PRESETS: Dict[str, Dict[str, Any]] = {
 }
 
 # Default output mode - can be overridden by PRAISONAI_OUTPUT env var
-DEFAULT_OUTPUT_MODE = "actions"
+# "silent" = zero overhead, fastest performance (DEFAULT)
+# "actions" = tool call trace + final output (opt-in observability)
+DEFAULT_OUTPUT_MODE = "silent"
 
 
 # =============================================================================

@@ -447,7 +447,7 @@ class Agent:
         # ─────────────────────────────────────────────────────────────────────
         # Resolve OUTPUT param using unified resolver
         # Supports: None, str preset, list [preset, overrides], OutputConfig
-        # DEFAULT: "actions" mode (minimal overhead, multi-agent safe)
+        # DEFAULT: "silent" mode (zero overhead, fastest performance)
         # Can be overridden by PRAISONAI_OUTPUT env var
         # ─────────────────────────────────────────────────────────────────────
         from ..config.presets import DEFAULT_OUTPUT_MODE
@@ -467,7 +467,7 @@ class Agent:
             config_class=OutputConfig,
             presets=OUTPUT_PRESETS,
             array_mode=ArrayMode.PRESET_OVERRIDE,
-            default=OutputConfig(),  # OutputConfig defaults to actions mode
+            default=OutputConfig(),  # OutputConfig defaults to silent mode (zero overhead)
         )
         if _output_config:
             verbose = _output_config.verbose
@@ -476,12 +476,12 @@ class Agent:
             metrics = _output_config.metrics
             reasoning_steps = _output_config.reasoning_steps
             output_style = getattr(_output_config, 'style', None)
-            actions_trace = getattr(_output_config, 'actions_trace', True)  # Default True
+            actions_trace = getattr(_output_config, 'actions_trace', False)  # Default False (silent)
             json_output = getattr(_output_config, 'json_output', False)
         else:
-            # Fallback defaults match actions mode
+            # Fallback defaults match silent mode (zero overhead)
             verbose, markdown, stream, metrics, reasoning_steps = False, False, False, False, False
-            actions_trace = True
+            actions_trace = False  # No callbacks by default
             json_output = False
         
         # Enable actions output mode if configured
