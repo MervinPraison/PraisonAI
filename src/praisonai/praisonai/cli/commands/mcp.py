@@ -203,6 +203,164 @@ def mcp_test(
             raise typer.Exit(1)
 
 
+@app.command("sync")
+def mcp_sync(
+    server: Optional[str] = typer.Argument(None, help="Server name (None for all)"),
+):
+    """Sync tool schemas from MCP servers to local index."""
+    output = get_output_controller()
+    
+    try:
+        from praisonai.mcp_server.tool_index import MCPToolIndex
+        
+        index = MCPToolIndex()
+        loader = get_config_loader()
+        config = loader.load()
+        
+        servers_to_sync = []
+        if server:
+            if server not in config.mcp.servers:
+                output.print_error(f"Server not found: {server}")
+                raise typer.Exit(1)
+            servers_to_sync = [server]
+        else:
+            servers_to_sync = list(config.mcp.servers.keys())
+        
+        if not servers_to_sync:
+            output.print_info("No MCP servers configured")
+            return
+        
+        total_tools = 0
+        for srv in servers_to_sync:
+            output.print_info(f"Syncing {srv}...")
+            # Note: This would need actual MCP connection to fetch tools
+            # For now, we just create the index structure
+            count = index.sync(srv, tools=[])
+            total_tools += count
+            output.print(f"  Synced {count} tools")
+        
+        if output.is_json_mode:
+            output.print_json({"synced_servers": servers_to_sync, "total_tools": total_tools})
+        else:
+            output.print_success(f"Synced {len(servers_to_sync)} servers, {total_tools} tools total")
+            
+    except ImportError as e:
+        output.print_error(f"Error: {e}")
+        raise typer.Exit(1)
+
+
+@app.command("tools")
+def mcp_tools(
+    server: Optional[str] = typer.Argument(None, help="Server name (None for all)"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+):
+    """List indexed MCP tools."""
+    output = get_output_controller()
+    
+    try:
+        from praisonai.mcp_server.tool_index import MCPToolIndex
+        
+        index = MCPToolIndex()
+        
+        if server:
+            tools = index.list_tools(server)
+            if not tools:
+                output.print_info(f"No tools indexed for server: {server}")
+                output.print("\nRun 'praisonai mcp sync' to index tools")
+                return
+        else:
+            tools = index.get_all_tools()
+            if not tools:
+                output.print_info("No tools indexed")
+                output.print("\nRun 'praisonai mcp sync' to index tools")
+                return
+        
+        if output.is_json_mode or json_output:
+            output.print_json({"tools": [t.to_dict() for t in tools]})
+        else:
+            headers = ["Server", "Tool", "Description"]
+            rows = [[t.server, t.name, t.hint[:50] + "..." if len(t.hint) > 50 else t.hint] for t in tools]
+            output.print_table(headers, rows, title=f"MCP Tools ({len(tools)} total)")
+            
+    except ImportError as e:
+        output.print_error(f"Error: {e}")
+        raise typer.Exit(1)
+
+
+@app.command("describe")
+def mcp_describe(
+    server: str = typer.Argument(..., help="Server name"),
+    tool: str = typer.Argument(..., help="Tool name"),
+):
+    """Show full schema for an MCP tool."""
+    output = get_output_controller()
+    
+    try:
+        from praisonai.mcp_server.tool_index import MCPToolIndex
+        import json
+        
+        index = MCPToolIndex()
+        schema = index.describe(server, tool)
+        
+        if not schema:
+            output.print_error(f"Tool not found: {server}/{tool}")
+            raise typer.Exit(1)
+        
+        if output.is_json_mode:
+            output.print_json(schema)
+        else:
+            output.print(json.dumps(schema, indent=2))
+            
+    except ImportError as e:
+        output.print_error(f"Error: {e}")
+        raise typer.Exit(1)
+
+
+@app.command("status")
+def mcp_status(
+    server: Optional[str] = typer.Argument(None, help="Server name (None for all)"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+):
+    """Show status of MCP servers."""
+    output = get_output_controller()
+    
+    try:
+        from praisonai.mcp_server.tool_index import MCPToolIndex
+        from datetime import datetime
+        
+        index = MCPToolIndex()
+        
+        servers = [server] if server else index.list_servers()
+        
+        if not servers:
+            output.print_info("No servers indexed")
+            return
+        
+        statuses = []
+        for srv in servers:
+            status = index.get_status(srv)
+            if status:
+                statuses.append(status)
+        
+        if output.is_json_mode or json_output:
+            output.print_json({"statuses": [s.to_dict() for s in statuses]})
+        else:
+            headers = ["Server", "Status", "Tools", "Last Sync"]
+            rows = []
+            for s in statuses:
+                status_str = "✓ Available" if s.available else "✗ Unavailable"
+                if s.auth_required:
+                    status_str += " (auth required)"
+                last_sync = datetime.fromtimestamp(s.last_sync).strftime("%Y-%m-%d %H:%M") if s.last_sync else "Never"
+                rows.append([s.server, status_str, str(s.tool_count), last_sync])
+            
+            output.print_table(headers, rows, title="MCP Server Status")
+            
+    except ImportError as e:
+        output.print_error(f"Error: {e}")
+        raise typer.Exit(1)
+
+
 @app.callback(invoke_without_command=True)
 def mcp_callback(ctx: typer.Context):
     """Show MCP help or list servers."""

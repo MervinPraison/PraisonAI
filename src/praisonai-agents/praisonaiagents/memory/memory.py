@@ -146,6 +146,8 @@ class Memory:
         self.use_rag = (self.provider.lower() == "rag") and CHROMADB_AVAILABLE and self.cfg.get("use_embedding", False)
         self.use_mongodb = (self.provider.lower() == "mongodb") and PYMONGO_AVAILABLE
         self.graph_enabled = False  # Initialize graph support flag
+        self._learn_manager = None  # Lazy-loaded LearnManager
+        self._learn_config = self.cfg.get("learn", None)  # Learn configuration
         
         # Extract embedding model from config
         self.embedder_config = self.cfg.get("embedder", {})
@@ -1599,3 +1601,50 @@ class Memory:
         except Exception as e:
             self._log_verbose(f"Error getting all memories: {e}", logging.ERROR)
             return []
+
+    # -------------------------------------------------------------------------
+    #                          Learn Integration
+    # -------------------------------------------------------------------------
+    @property
+    def learn(self):
+        """
+        Get the LearnManager for continuous learning capabilities.
+        
+        Returns None if learn is not enabled in config.
+        
+        Usage:
+            memory = Memory({"learn": True})
+            memory.learn.capture_persona("User prefers concise responses")
+            memory.learn.capture_insight("User works in data science")
+        """
+        if self._learn_manager is not None:
+            return self._learn_manager
+        
+        if self._learn_config is None or self._learn_config is False:
+            return None
+        
+        from .learn import LearnManager
+        from ..config.feature_configs import LearnConfig
+        
+        if self._learn_config is True:
+            config = LearnConfig()
+        elif isinstance(self._learn_config, dict):
+            config = LearnConfig(**self._learn_config)
+        elif isinstance(self._learn_config, LearnConfig):
+            config = self._learn_config
+        else:
+            return None
+        
+        user_id = self.cfg.get("user_id", "default")
+        self._learn_manager = LearnManager(config=config, user_id=user_id)
+        return self._learn_manager
+    
+    def get_learn_context(self) -> str:
+        """
+        Get learning context suitable for injection into system prompt.
+        
+        Returns empty string if learn is not enabled.
+        """
+        if self.learn is None:
+            return ""
+        return self.learn.to_system_prompt_context()

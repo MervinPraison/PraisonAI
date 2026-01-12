@@ -704,4 +704,17 @@ __all__ = [
     'parse_policy_string',
     # Performance utilities
     'warmup',
+    # Cortex - Continuous Improvement System
+    'CortexConfig',
+    'CaptureStore',
+    'CaptureMode',
+    'CaptureScope',
+    'PersonaConfig',
+    'InsightConfig',
+    'ThreadConfig',
+    'EntityConfig',
+    'PatternConfig',
+    'DecisionConfig',
+    'FeedbackConfig',
+    'ImprovementConfig',
 ]
