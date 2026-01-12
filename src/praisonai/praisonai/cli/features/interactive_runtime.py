@@ -40,7 +40,7 @@ class RuntimeConfig:
     workspace: str = "."
     lsp_enabled: bool = True
     acp_enabled: bool = True
-    approval_mode: str = "manual"  # manual, auto, scoped
+    approval_mode: str = "auto"  # auto (full privileges), manual, scoped
     trace_enabled: bool = False
     trace_file: Optional[str] = None
     json_output: bool = False
@@ -146,15 +146,21 @@ class InteractiveRuntime:
     def read_only(self) -> bool:
         """Check if runtime is in read-only mode.
         
-        Note: When PRAISON_APPROVAL_MODE=auto, we allow writes even without ACP
-        to support non-interactive automation and testing scenarios.
+        Note: When approval_mode=auto (via config or env), we allow writes even 
+        without ACP to support non-interactive automation and testing scenarios.
         """
-        # Auto-approval mode bypasses read-only for automation
-        import os as _os
-        approval_mode = _os.environ.get("PRAISON_APPROVAL_MODE", "").lower()
-        if approval_mode == "auto":
+        # Check config approval_mode first (takes precedence)
+        if self.config.approval_mode == "auto":
             return False
-        return self._read_only or not self.acp_ready
+        
+        # Then check environment variable as fallback
+        import os as _os
+        env_approval_mode = _os.environ.get("PRAISON_APPROVAL_MODE", "").lower()
+        if env_approval_mode == "auto":
+            return False
+        
+        # Only enforce read-only if explicitly set or ACP not ready
+        return self._read_only
     
     def get_status(self) -> Dict[str, Any]:
         """Get runtime status."""

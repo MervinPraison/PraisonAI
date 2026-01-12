@@ -24,6 +24,9 @@ class InteractiveEventType(Enum):
     TOOL_START = "tool.start"
     TOOL_END = "tool.end"
     
+    # Stage transitions (PLAN → EXPLORE → BUILD → REVIEW)
+    STAGE_CHANGE = "stage.change"
+    
     # Approval/permission flow
     APPROVAL_ASKED = "approval.asked"
     APPROVAL_ANSWERED = "approval.answered"

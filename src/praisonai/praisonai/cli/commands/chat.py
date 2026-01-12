@@ -67,6 +67,7 @@ def chat_main(
     workspace: Optional[str] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     no_acp: bool = typer.Option(False, "--no-acp", help="Disable ACP tools"),
     no_lsp: bool = typer.Option(False, "--no-lsp", help="Disable LSP tools"),
+    safe_mode: bool = typer.Option(False, "--safe", help="Safe mode: require approval for file writes and commands"),
     autonomy: bool = typer.Option(True, "--autonomy/--no-autonomy", help="Enable agent autonomy for complex tasks"),
     # NEW: Agent-like consolidated params for ALL GREEN consistency
     knowledge: Optional[str] = typer.Option(
@@ -107,8 +108,8 @@ def chat_main(
         flag_value="true",
     ),
     output: Optional[str] = typer.Option(
-        None, "--output",
-        help="Output preset. Use --output=verbose, --output=minimal, --output=silent",
+        None, "--output", "-o",
+        help="Output mode (default: actions). Options: actions, plain, verbose, json, silent",
     ),
     execution: Optional[str] = typer.Option(
         None, "--execution",
@@ -126,6 +127,7 @@ def chat_main(
     ),
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
+    debug: bool = typer.Option(False, "--debug", help="Enable debug logging to ~/.praisonai/async_tui_debug.log"),
     # UI backend selection
     ui_backend: str = typer.Option("auto", "--ui-backend", help="UI backend: auto, plain, rich, mg (middle-ground)"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON (forces plain backend)"),
@@ -174,6 +176,13 @@ def chat_main(
     # TODO: Pass memory_value to TUI when memory support is added
     _parse_memory_flag(memory, no_memory)
     
+    # Set approval mode based on --safe flag
+    import os
+    if safe_mode:
+        os.environ["PRAISON_APPROVAL_MODE"] = "prompt"
+    else:
+        os.environ["PRAISON_APPROVAL_MODE"] = "auto"
+    
     # Use the async TUI (non-blocking, scrollable output)
     from praisonai.cli.interactive.async_tui import AsyncTUI, AsyncTUIConfig
     
@@ -183,6 +192,7 @@ def chat_main(
         show_status_bar=not compact,
         session_id=session_id,
         workspace=workspace,
+        debug=debug,
     )
     
     tui = AsyncTUI(config=tui_config)

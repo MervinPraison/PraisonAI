@@ -76,24 +76,24 @@ class TestGetLogo:
     
     def test_logo_wide_terminal(self):
         """Test logo for wide terminal."""
-        from praisonai.cli.interactive.tui_app import get_logo, LOGO_SMALL
+        from praisonai.cli.branding import get_logo, LOGO_LARGE
         
         logo = get_logo(100)
-        assert logo == LOGO_SMALL
+        assert logo == LOGO_LARGE
     
     def test_logo_medium_terminal(self):
         """Test logo for medium terminal."""
-        from praisonai.cli.interactive.tui_app import get_logo, LOGO_TINY
+        from praisonai.cli.branding import get_logo, LOGO_MEDIUM
         
         logo = get_logo(65)
-        assert logo == LOGO_TINY
+        assert logo == LOGO_MEDIUM
     
     def test_logo_narrow_terminal(self):
         """Test logo for narrow terminal."""
-        from praisonai.cli.interactive.tui_app import get_logo, LOGO_MINIMAL
+        from praisonai.cli.branding import get_logo, LOGO_SMALL
         
-        logo = get_logo(50)
-        assert logo == LOGO_MINIMAL
+        logo = get_logo(30)
+        assert logo == LOGO_SMALL
 
 
 class TestPraisonTUI:
@@ -324,21 +324,21 @@ class TestASCIILogos:
     
     def test_logo_large_exists(self):
         """Test LOGO_LARGE constant exists."""
-        from praisonai.cli.interactive.tui_app import LOGO_LARGE
+        from praisonai.cli.branding import LOGO_LARGE
         assert len(LOGO_LARGE) > 0
         assert "PRAISON" in LOGO_LARGE or "██" in LOGO_LARGE
     
     def test_logo_small_exists(self):
         """Test LOGO_SMALL constant exists."""
-        from praisonai.cli.interactive.tui_app import LOGO_SMALL
+        from praisonai.cli.branding import LOGO_SMALL
         assert len(LOGO_SMALL) > 0
     
     def test_logo_tiny_exists(self):
-        """Test LOGO_TINY constant exists."""
-        from praisonai.cli.interactive.tui_app import LOGO_TINY
-        assert len(LOGO_TINY) > 0
+        """Test LOGO_MEDIUM constant exists (was LOGO_TINY)."""
+        from praisonai.cli.branding import LOGO_MEDIUM
+        assert len(LOGO_MEDIUM) > 0
     
     def test_logo_minimal_exists(self):
         """Test LOGO_MINIMAL constant exists."""
-        from praisonai.cli.interactive.tui_app import LOGO_MINIMAL
-        assert "PraisonAI" in LOGO_MINIMAL
+        from praisonai.cli.branding import LOGO_MINIMAL
+        assert "Praison AI" in LOGO_MINIMAL

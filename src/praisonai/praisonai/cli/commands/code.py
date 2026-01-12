@@ -23,6 +23,7 @@ def code_main(
     file: Optional[List[str]] = typer.Option(None, "--file", "-f", help="Attach file(s) to context"),
     no_acp: bool = typer.Option(False, "--no-acp", help="Disable ACP tools (file operations)"),
     no_lsp: bool = typer.Option(False, "--no-lsp", help="Disable LSP tools (code intelligence)"),
+    safe_mode: bool = typer.Option(False, "--safe", help="Safe mode: require approval for file writes and commands"),
     session_id: Optional[str] = typer.Option(None, "--session", "-s", help="Session ID to resume"),
     continue_session: bool = typer.Option(False, "--continue", "-c", help="Continue last session"),
     autonomy: bool = typer.Option(True, "--autonomy/--no-autonomy", help="Enable agent autonomy for complex tasks"),
@@ -53,6 +54,12 @@ def code_main(
     
     # Enable code-specific environment
     os.environ["PRAISONAI_CODE_MODE"] = "true"
+    
+    # Set approval mode based on --safe flag
+    if safe_mode:
+        os.environ["PRAISON_APPROVAL_MODE"] = "prompt"
+    else:
+        os.environ["PRAISON_APPROVAL_MODE"] = "auto"
     
     # Handle profiling for single prompt mode
     if prompt and (profile or profile_deep):

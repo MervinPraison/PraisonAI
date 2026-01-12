@@ -72,7 +72,7 @@ class ToolConfig:
     enable_acp: bool = True
     enable_lsp: bool = True
     enable_basic: bool = True
-    approval_mode: str = "auto"  # auto, manual, scoped
+    approval_mode: str = "auto"  # auto (full privileges), manual, scoped
     lsp_enabled: bool = True
     acp_enabled: bool = True
     

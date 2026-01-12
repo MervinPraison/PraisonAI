@@ -13,6 +13,8 @@ Key fixes:
 - Proper app.invalidate() for UI refresh
 """
 
+import logging
+import os
 import shutil
 import threading
 import time
@@ -22,44 +24,41 @@ from typing import List, Optional
 from datetime import datetime
 
 # ============================================================================
-# ASCII Art Logo - "Praison AI" branding
+# Debug Logging - Only enabled with --debug flag or PRAISON_DEBUG=1
 # ============================================================================
 
-LOGO = r"""
- ██████╗ ██████╗  █████╗ ██╗███████╗ ██████╗ ███╗   ██╗     █████╗ ██╗
- ██╔══██╗██╔══██╗██╔══██╗██║██╔════╝██╔═══██╗████╗  ██║    ██╔══██╗██║
- ██████╔╝██████╔╝███████║██║███████╗██║   ██║██╔██╗ ██║    ███████║██║
- ██╔═══╝ ██╔══██╗██╔══██║██║╚════██║██║   ██║██║╚██╗██║    ██╔══██║██║
- ██║     ██║  ██║██║  ██║██║███████║╚██████╔╝██║ ╚████║    ██║  ██║██║
- ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═══╝    ╚═╝  ╚═╝╚═╝
-"""
+logger = logging.getLogger(__name__)
+_debug_initialized = False
 
-LOGO_SMALL = r"""
- ╔═╗┬─┐┌─┐┬┌─┐┌─┐┌┐┌  ╔═╗╦
- ╠═╝├┬┘├─┤│└─┐│ ││││  ╠═╣║
- ╩  ┴└─┴ ┴┴└─┘└─┘┘└┘  ╩ ╩╩
-"""
+def _init_debug_logging():
+    """Initialize debug logging to file. Only called when debug mode is enabled."""
+    global _debug_initialized
+    if _debug_initialized:
+        return
+    
+    _debug_log_file = os.path.expanduser("~/.praisonai/async_tui_debug.log")
+    os.makedirs(os.path.dirname(_debug_log_file), exist_ok=True)
+    
+    _file_handler = logging.FileHandler(_debug_log_file, mode='a')
+    _file_handler.setLevel(logging.DEBUG)
+    _file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s - %(levelname)s - %(message)s'
+    ))
+    
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(_file_handler)
+    _debug_initialized = True
+    logger.debug("Debug logging initialized")
 
-LOGO_MINIMAL = "▶ Praison AI"
+# Check if debug mode is enabled via environment variable
+if os.environ.get("PRAISON_DEBUG", "").lower() in ("1", "true", "yes"):
+    _init_debug_logging()
 
+# ============================================================================
+# Branding - Import from unified source
+# ============================================================================
 
-def get_logo(width: int = 80) -> str:
-    """Get appropriate logo based on terminal width."""
-    if width >= 75:
-        return LOGO
-    elif width >= 40:
-        return LOGO_SMALL
-    else:
-        return LOGO_MINIMAL
-
-
-def get_version() -> str:
-    """Get PraisonAI version."""
-    try:
-        from praisonai import __version__
-        return __version__
-    except Exception:
-        return "1.0.0"
+from praisonai.cli.branding import get_logo, get_version
 
 
 # ============================================================================
@@ -77,6 +76,8 @@ class AsyncTUIConfig:
     history_file: Optional[str] = None
     compact_mode: bool = False
     multiline_mode: bool = False
+    autonomy_mode: bool = False  # Enable autonomous task delegation
+    debug: bool = False  # Enable debug logging to file (~/.praisonai/async_tui_debug.log)
 
 
 # ============================================================================
@@ -108,6 +109,11 @@ class AsyncTUI:
     
     def __init__(self, config: Optional[AsyncTUIConfig] = None):
         self.config = config or AsyncTUIConfig()
+        
+        # Initialize debug logging if enabled
+        if self.config.debug:
+            _init_debug_logging()
+        
         self.messages: List[ChatMessage] = []
         self._running = False
         self._agent = None
@@ -183,21 +189,34 @@ class AsyncTUI:
     def _get_agent(self):
         """Lazy-load the agent with tools."""
         if self._agent is None:
+            logger.debug("Creating new agent...")
             try:
                 from praisonaiagents import Agent
                 
                 # Load interactive tools (read_file, write_file, execute_command, etc.)
                 tools = self._load_tools()
+                logger.debug(f"Tools for agent: {len(tools) if tools else 0}")
                 
-                self._agent = Agent(
-                    name="Praison",
-                    role="AI Assistant",
-                    goal="Help the user with their requests",
-                    instructions="You are Praison AI, a helpful assistant. Be concise and helpful. You have access to tools for file operations, code execution, and web search.",
-                    llm=self.config.model,
-                    tools=tools if tools else None,
-                )
+                # Build agent config
+                agent_config = {
+                    "name": "Praison",
+                    "role": "AI Assistant",
+                    "goal": "Help the user with their requests",
+                    "instructions": "You are Praison AI, a helpful assistant. Be concise and helpful. You have access to tools for file operations, code execution, and web search.",
+                    "llm": self.config.model,
+                    "tools": tools if tools else None,
+                }
+                
+                # Enable autonomy for complex task handling when autonomy_mode is on
+                if self.config.autonomy_mode:
+                    agent_config["autonomy"] = True
+                    logger.debug("Autonomy mode enabled")
+                
+                logger.debug(f"Agent config: model={self.config.model}, tools={len(tools) if tools else 0}")
+                self._agent = Agent(**agent_config)
+                logger.debug("Agent created successfully")
             except ImportError as e:
+                logger.error(f"Failed to import praisonaiagents: {e}")
                 raise RuntimeError(f"Failed to import praisonaiagents: {e}")
         
         return self._agent
@@ -205,8 +224,10 @@ class AsyncTUI:
     async def _start_runtime(self):
         """Start the InteractiveRuntime with ACP/LSP servers."""
         if self._runtime_started:
+            logger.debug("Runtime already started, skipping")
             return
         
+        logger.debug("Starting runtime...")
         try:
             from praisonai.cli.features.interactive_runtime import create_runtime
             
@@ -216,28 +237,36 @@ class AsyncTUI:
                 acp=True,
                 approval="auto",  # Auto-approve for interactive mode
             )
+            logger.debug("Runtime created")
             
             # Start runtime (this starts ACP/LSP servers)
             await self._runtime.start()
             self._runtime_started = True
             
+            lsp_status = "ready" if self._runtime.lsp_ready else "failed"
+            acp_status = "ready" if self._runtime.acp_ready else "failed"
+            logger.debug(f"Runtime started: LSP={lsp_status}, ACP={acp_status}")
+            
             # Return status
             return {
-                "lsp": "ready" if self._runtime.lsp_ready else "failed",
-                "acp": "ready" if self._runtime.acp_ready else "failed",
+                "lsp": lsp_status,
+                "acp": acp_status,
                 "read_only": self._runtime.read_only
             }
         except ImportError as e:
             # Runtime not available, continue without it
+            logger.debug(f"Runtime import error: {e}")
             self._runtime_started = True  # Mark as attempted
             return {"error": f"Runtime not available: {e}"}
         except Exception as e:
+            logger.error(f"Runtime start error: {e}", exc_info=True)
             self._runtime_started = True
             return {"error": str(e)}
     
     def _load_tools(self):
         """Load interactive tools for the agent."""
         tools = []
+        logger.debug("Starting tool loading...")
         
         # Try to load all interactive tools (basic + ACP + LSP)
         try:
@@ -247,13 +276,15 @@ class AsyncTUI:
                 workspace=self.config.workspace,
             )
             if tools:
+                logger.debug(f"Loaded {len(tools)} tools from interactive_tools: {[t.__name__ for t in tools]}")
                 return tools
-        except ImportError:
-            pass
-        except Exception:
-            pass
+        except ImportError as e:
+            logger.debug(f"interactive_tools import failed: {e}")
+        except Exception as e:
+            logger.debug(f"interactive_tools error: {e}")
         
         # Fallback: try to load basic tools directly from praisonaiagents
+        logger.debug("Falling back to direct praisonaiagents.tools import...")
         try:
             from praisonaiagents.tools import (
                 read_file,
@@ -262,32 +293,37 @@ class AsyncTUI:
                 execute_command,
             )
             tools = [read_file, write_file, list_files, execute_command]
-        except ImportError:
-            pass
+            logger.debug(f"Loaded basic tools: {[t.__name__ for t in tools]}")
+        except ImportError as e:
+            logger.debug(f"Basic tools import failed: {e}")
         
         # Try to add internet search
         try:
             from praisonaiagents.tools import internet_search
             tools.append(internet_search)
-        except ImportError:
-            pass
+            logger.debug("Added internet_search tool")
+        except ImportError as e:
+            logger.debug(f"internet_search import failed: {e}")
         
+        logger.debug(f"Final tools loaded: {len(tools)}")
         return tools
     
     def _format_output(self) -> str:
         """Format all messages for the output pane."""
         lines = []
         
-        # Logo (only if no messages yet)
-        if self.config.show_logo and not self.messages:
+        # Logo - ALWAYS show at top (like Claude Code, OpenCode)
+        if self.config.show_logo:
             logo = get_logo(self.term_width)
             lines.append(logo.strip())
             lines.append("")
             lines.append(f"  v{get_version()} · Model: {self.config.model}")
             lines.append("")
-            lines.append("  Type your message and press Enter. Use /help for commands.")
-            lines.append("  Use PageUp/PageDown or Ctrl+Up/Down to scroll.")
-            lines.append("")
+            # Only show tips if no conversation yet
+            if not self.messages:
+                lines.append("  Type your message and press Enter. Use /help for commands.")
+                lines.append("  Use PageUp/PageDown or Ctrl+Up/Down to scroll.")
+                lines.append("")
         
         # Messages
         for msg in self.messages:
@@ -302,6 +338,9 @@ class AsyncTUI:
                 lines.append("")
             elif msg.role == "status":
                 lines.append(f"  ⏳ {msg.content}")
+                lines.append("")
+            elif msg.role == "tool":
+                lines.append(f"  ⚙ {msg.content}")
                 lines.append("")
         
         # Processing indicator
@@ -352,6 +391,10 @@ class AsyncTUI:
   /import <file>   Import conversation from file
   /cost            Show token usage and cost
   /status          Show ACP/LSP runtime status
+  /auto            Toggle autonomy mode (auto-delegate complex tasks)
+  /debug           Toggle debug logging to ~/.praisonai/async_tui_debug.log
+  /plan <task>     Create a step-by-step plan for a task
+  /handoff <type> <task>  Delegate to specialized agent (code/research/review/docs)
   /compact         Toggle compact output mode
   /multiline       Toggle multiline input mode
   /files           List workspace files for @ mentions
@@ -366,7 +409,8 @@ Keyboard Shortcuts:
 
 Tips:
   Use @filename to include file contents in your prompt
-  Type multiple prompts while AI is thinking (queued)"""
+  Type multiple prompts while AI is thinking (queued)
+  Use --debug flag or /debug command to enable debug logging"""
             self.messages.append(ChatMessage(role="system", content=help_text))
             return True
         
@@ -548,6 +592,102 @@ Tips:
                 self.messages.append(ChatMessage(role="system", content="Runtime not initialized."))
             return True
         
+        elif cmd == "auto":
+            # Toggle autonomy mode for complex task delegation
+            self.config.autonomy_mode = not self.config.autonomy_mode
+            mode = "enabled" if self.config.autonomy_mode else "disabled"
+            self.messages.append(ChatMessage(
+                role="system", 
+                content=f"Autonomy mode {mode}. Agent will {'auto-delegate complex tasks' if self.config.autonomy_mode else 'handle tasks directly'}."
+            ))
+            # Recreate agent with autonomy setting
+            self._agent = None
+            return True
+        
+        elif cmd == "debug":
+            # Toggle debug logging mode
+            self.config.debug = not self.config.debug
+            if self.config.debug:
+                _init_debug_logging()
+                logger.debug("Debug mode enabled via /debug command")
+            mode = "enabled" if self.config.debug else "disabled"
+            log_file = os.path.expanduser("~/.praisonai/async_tui_debug.log")
+            self.messages.append(ChatMessage(
+                role="system", 
+                content=f"Debug mode {mode}. Logs written to: {log_file}"
+            ))
+            return True
+        
+        elif cmd == "plan":
+            # Planning mode - create a plan for a complex task
+            if not args:
+                self.messages.append(ChatMessage(
+                    role="system", 
+                    content="Usage: /plan <task description>\nCreates a step-by-step plan before execution."
+                ))
+            else:
+                # Execute with planning enabled
+                self.messages.append(ChatMessage(role="system", content=f"📋 Creating plan for: {args}"))
+                self._update_output()
+                
+                # Use planning agent to create plan
+                planning_prompt = f"""Create a detailed step-by-step plan for the following task. 
+Do NOT execute anything yet, just analyze and plan.
+
+Task: {args}
+
+Provide:
+1. Analysis of what needs to be done
+2. Step-by-step plan with clear actions
+3. Potential risks or considerations
+4. Estimated complexity (simple/medium/complex)"""
+                
+                self._queue_or_execute(planning_prompt)
+            return True
+        
+        elif cmd == "handoff":
+            # Handoff to a specialized sub-agent
+            if not args:
+                self.messages.append(ChatMessage(
+                    role="system",
+                    content="""Usage: /handoff <agent_type> <task>
+Available agent types:
+  - code: Code analysis and generation
+  - research: Web research and information gathering
+  - review: Code review and quality analysis
+  - docs: Documentation generation
+Example: /handoff code "refactor the auth module" """
+                ))
+            else:
+                parts = args.split(maxsplit=1)
+                if len(parts) < 2:
+                    self.messages.append(ChatMessage(role="system", content="Please specify both agent type and task."))
+                else:
+                    agent_type, task = parts
+                    agent_type = agent_type.lower()
+                    
+                    # Map agent types to specialized prompts
+                    agent_prompts = {
+                        "code": f"You are a specialized code agent. Focus on code analysis, generation, and refactoring. Task: {task}",
+                        "research": f"You are a research agent. Focus on gathering information and providing comprehensive analysis. Task: {task}",
+                        "review": f"You are a code review agent. Focus on identifying issues, suggesting improvements, and ensuring quality. Task: {task}",
+                        "docs": f"You are a documentation agent. Focus on creating clear, comprehensive documentation. Task: {task}",
+                    }
+                    
+                    if agent_type in agent_prompts:
+                        self.messages.append(ChatMessage(
+                            role="system", 
+                            content=f"🔄 Handing off to {agent_type} agent..."
+                        ))
+                        self._update_output()
+                        self._queue_or_execute(agent_prompts[agent_type])
+                    else:
+                        self.messages.append(ChatMessage(
+                            role="system",
+                            content=f"Unknown agent type: {agent_type}. Use: code, research, review, or docs"
+                        ))
+            return True
+        
         else:
             self.messages.append(ChatMessage(role="system", content=f"Unknown command: /{cmd}. Use /help for available commands."))
             return True
@@ -558,14 +698,20 @@ Tips:
         import io
         import asyncio
         
+        logger.debug(f"Executing prompt: {prompt[:100]}...")
+        
         try:
             agent = self._get_agent()
+            logger.debug(f"Agent loaded: {agent.name if hasattr(agent, 'name') else 'unnamed'}")
+            logger.debug(f"Agent tools: {[t.__name__ if hasattr(t, '__name__') else str(t) for t in (agent.tools or [])]}")
             
-            # Suppress agent's Rich output
+            # Capture agent's Rich output for logging
             old_stdout = sys.stdout
             old_stderr = sys.stderr
-            sys.stdout = io.StringIO()
-            sys.stderr = io.StringIO()
+            captured_stdout = io.StringIO()
+            captured_stderr = io.StringIO()
+            sys.stdout = captured_stdout
+            sys.stderr = captured_stderr
             
             try:
                 # Try async execution first for better non-blocking behavior
@@ -575,21 +721,62 @@ Tips:
                         asyncio.set_event_loop(loop)
                         response = loop.run_until_complete(agent.astart(prompt))
                         loop.close()
-                    except Exception:
+                        logger.debug("Used async execution (astart)")
+                    except Exception as e:
+                        logger.debug(f"Async execution failed: {e}, falling back to sync")
                         # Fallback to sync
                         response = agent.start(prompt)
                 else:
                     response = agent.start(prompt)
+                    logger.debug("Used sync execution (start)")
             finally:
                 sys.stdout = old_stdout
                 sys.stderr = old_stderr
+                
+                # Log captured output
+                stdout_content = captured_stdout.getvalue()
+                stderr_content = captured_stderr.getvalue()
+                if stdout_content:
+                    logger.debug(f"Agent stdout: {stdout_content[:500]}")
+                if stderr_content:
+                    logger.debug(f"Agent stderr: {stderr_content[:500]}")
             
+            logger.debug(f"Response received: {str(response)[:200] if response else 'None'}")
             return str(response) if response else None
         except Exception as e:
+            logger.error(f"Error executing prompt: {e}", exc_info=True)
             return f"Error: {e}"
     
     def _execute_in_background(self, prompt: str):
         """Execute prompt in background thread (non-blocking)."""
+        # Track tool calls for visibility
+        tool_calls = []
+        
+        def tool_call_callback(message):
+            """Callback triggered when a tool is called."""
+            if "Calling function:" in message:
+                parts = message.split("Calling function:")
+                if len(parts) > 1:
+                    tool_name = parts[1].strip()
+                    if tool_name and tool_name not in tool_calls:
+                        tool_calls.append(tool_name)
+                        self._status_text = f"⚙ Using {tool_name}..."
+                        self._update_output()
+            elif "Function " in message and " returned:" in message:
+                self._status_text = "Processing result..."
+                self._update_output()
+        
+        # Register callback for tool visibility
+        _sync_display_callbacks = None
+        _register_display_callback = None
+        try:
+            from praisonaiagents import register_display_callback, sync_display_callbacks
+            _sync_display_callbacks = sync_display_callbacks
+            _register_display_callback = register_display_callback
+            _register_display_callback('tool_call', tool_call_callback)
+        except ImportError:
+            pass
+        
         def run():
             self._processing = True
             self._status_text = "Praison AI is thinking..."
@@ -633,9 +820,18 @@ Tips:
             
             llm_thread.join()
             
+            # Cleanup callback
+            if _sync_display_callbacks is not None and 'tool_call' in _sync_display_callbacks:
+                del _sync_display_callbacks['tool_call']
+            
             # Done processing current prompt
             self._processing = False
             self._status_text = ""
+            
+            # Show tool calls summary if any were made
+            if tool_calls:
+                tools_used = ", ".join(tool_calls)
+                self.messages.append(ChatMessage(role="system", content=f"Tools used: {tools_used}"))
             
             if error[0]:
                 self.messages.append(ChatMessage(role="assistant", content=f"Error: {error[0]}"))
@@ -680,18 +876,10 @@ Tips:
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            runtime_status = loop.run_until_complete(self._start_runtime())
+            loop.run_until_complete(self._start_runtime())
             loop.close()
-            
-            # Show runtime status
-            if runtime_status and "error" not in runtime_status:
-                lsp = runtime_status.get("lsp", "unknown")
-                acp = runtime_status.get("acp", "unknown")
-                if lsp == "ready" or acp == "ready":
-                    self.messages.append(ChatMessage(
-                        role="system", 
-                        content=f"Runtime started: LSP={lsp}, ACP={acp}"
-                    ))
+            # Runtime status logged to debug file only (not shown in UI)
+            # Tools are available silently when runtime is ready
         except Exception as e:
             # Continue without runtime
             self.messages.append(ChatMessage(
@@ -759,8 +947,8 @@ Tips:
         
         # Create completer for commands and files
         commands = ["help", "exit", "quit", "clear", "new", "model", "session", "sessions",
-                    "continue", "history", "export", "import", "cost", "status", "compact", 
-                    "multiline", "files", "queue"]
+                    "continue", "history", "export", "import", "cost", "status", "auto",
+                    "debug", "plan", "handoff", "compact", "multiline", "files", "queue"]
         workspace_files = self._workspace_files
         
         class PraisonCompleter(Completer):

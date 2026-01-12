@@ -58,30 +58,30 @@ class TestGetLogo:
     
     def test_logo_wide_terminal(self):
         """Test logo for wide terminal."""
-        from praisonai.cli.interactive.split_tui import get_logo, LOGO
+        from praisonai.cli.branding import get_logo, LOGO_LARGE
         
         logo = get_logo(100)
-        assert logo == LOGO
+        assert logo == LOGO_LARGE
     
     def test_logo_medium_terminal(self):
         """Test logo for medium terminal."""
-        from praisonai.cli.interactive.split_tui import get_logo, LOGO_SMALL
+        from praisonai.cli.branding import get_logo, LOGO_MEDIUM
         
         logo = get_logo(50)
-        assert logo == LOGO_SMALL
+        assert logo == LOGO_MEDIUM
     
     def test_logo_narrow_terminal(self):
         """Test logo for narrow terminal."""
-        from praisonai.cli.interactive.split_tui import get_logo, LOGO_MINIMAL
+        from praisonai.cli.branding import get_logo, LOGO_SMALL
         
         logo = get_logo(30)
-        assert logo == LOGO_MINIMAL
+        assert logo == LOGO_SMALL
     
     def test_logo_contains_praison_ai(self):
         """Test that logo contains 'Praison AI' branding."""
-        from praisonai.cli.interactive.split_tui import LOGO_MINIMAL
+        from praisonai.cli.branding import LOGO_SMALL
         
-        assert "Praison AI" in LOGO_MINIMAL
+        assert "Praison AI" in LOGO_SMALL
 
 
 class TestSplitTUI:
@@ -233,18 +233,18 @@ class TestASCIILogos:
     
     def test_logo_exists(self):
         """Test LOGO constant exists and has content."""
-        from praisonai.cli.interactive.split_tui import LOGO
-        assert len(LOGO) > 0
-        assert "██" in LOGO  # Contains block characters
+        from praisonai.cli.branding import LOGO_LARGE
+        assert len(LOGO_LARGE) > 0
+        assert "██" in LOGO_LARGE  # Contains block characters
     
     def test_logo_small_exists(self):
         """Test LOGO_SMALL constant exists."""
-        from praisonai.cli.interactive.split_tui import LOGO_SMALL
+        from praisonai.cli.branding import LOGO_SMALL
         assert len(LOGO_SMALL) > 0
     
     def test_logo_minimal_branding(self):
         """Test LOGO_MINIMAL has correct branding."""
-        from praisonai.cli.interactive.split_tui import LOGO_MINIMAL
+        from praisonai.cli.branding import LOGO_MINIMAL
         assert "Praison AI" in LOGO_MINIMAL
 
 

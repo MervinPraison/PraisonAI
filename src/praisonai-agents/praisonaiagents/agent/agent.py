@@ -447,14 +447,27 @@ class Agent:
         # ─────────────────────────────────────────────────────────────────────
         # Resolve OUTPUT param using unified resolver
         # Supports: None, str preset, list [preset, overrides], OutputConfig
+        # DEFAULT: "actions" mode (minimal overhead, multi-agent safe)
+        # Can be overridden by PRAISONAI_OUTPUT env var
         # ─────────────────────────────────────────────────────────────────────
+        from ..config.presets import DEFAULT_OUTPUT_MODE
+        
+        # Check for env var override
+        env_output = os.environ.get('PRAISONAI_OUTPUT', '').lower()
+        if env_output and env_output in OUTPUT_PRESETS and output is None:
+            output = env_output
+        
+        # Use default output mode if not specified
+        if output is None:
+            output = DEFAULT_OUTPUT_MODE
+        
         _output_config = resolve(
             value=output,
             param_name="output",
             config_class=OutputConfig,
             presets=OUTPUT_PRESETS,
             array_mode=ArrayMode.PRESET_OVERRIDE,
-            default=OutputConfig(),
+            default=OutputConfig(),  # OutputConfig defaults to actions mode
         )
         if _output_config:
             verbose = _output_config.verbose
@@ -463,8 +476,24 @@ class Agent:
             metrics = _output_config.metrics
             reasoning_steps = _output_config.reasoning_steps
             output_style = getattr(_output_config, 'style', None)
+            actions_trace = getattr(_output_config, 'actions_trace', True)  # Default True
+            json_output = getattr(_output_config, 'json_output', False)
         else:
-            verbose, markdown, stream, metrics, reasoning_steps = True, True, False, False, False
+            # Fallback defaults match actions mode
+            verbose, markdown, stream, metrics, reasoning_steps = False, False, False, False, False
+            actions_trace = True
+            json_output = False
+        
+        # Enable actions output mode if configured
+        # This registers callbacks to capture tool calls and final output
+        if actions_trace:
+            try:
+                from ..output.actions import enable_actions_mode, is_actions_mode_enabled
+                if not is_actions_mode_enabled():
+                    output_format = "jsonl" if json_output else "text"
+                    enable_actions_mode(redact=True, use_color=True, format=output_format)
+            except ImportError:
+                pass  # Actions module not available
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve EXECUTION param using unified resolver
@@ -1065,6 +1094,9 @@ Your Goal: {self.goal}
         self._context_param = context  # Store raw param for lazy init
         self._context_manager = None  # Lazy initialized on first use
         self._context_manager_initialized = False
+        
+        # Action trace mode - handled via display callbacks, not separate emitter
+        self._actions_trace = actions_trace
 
     @property
     def auto_memory(self):

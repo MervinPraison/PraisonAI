@@ -41,6 +41,27 @@ MEMORY_URL_SCHEMES: Dict[str, str] = {
 # =============================================================================
 
 OUTPUT_PRESETS: Dict[str, Dict[str, Any]] = {
+    # Actions preset - DEFAULT for SDK
+    # Shows action trace (tool calls, agent lifecycle) + final output
+    # No verbose panels, no streaming tokens, just action-level trace
+    # Minimal overhead, multi-agent safe
+    "actions": {
+        "verbose": False,
+        "markdown": False,
+        "stream": False,
+        "metrics": False,
+        "reasoning_steps": False,
+        "actions_trace": True,  # Special flag for action trace mode
+    },
+    # Plain preset - final output only, no action trace
+    "plain": {
+        "verbose": False,
+        "markdown": False,
+        "stream": False,
+        "metrics": False,
+        "reasoning_steps": False,
+        "actions_trace": False,
+    },
     "minimal": {
         "verbose": False,
         "markdown": False,
@@ -84,7 +105,20 @@ OUTPUT_PRESETS: Dict[str, Dict[str, Any]] = {
         "metrics": False,
         "reasoning_steps": False,
     },
+    # JSON preset - JSONL output for piping
+    "json": {
+        "verbose": False,
+        "markdown": False,
+        "stream": False,
+        "metrics": False,
+        "reasoning_steps": False,
+        "actions_trace": True,
+        "json_output": True,  # Output as JSONL
+    },
 }
+
+# Default output mode - can be overridden by PRAISONAI_OUTPUT env var
+DEFAULT_OUTPUT_MODE = "actions"
 
 
 # =============================================================================
