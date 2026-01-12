@@ -44,7 +44,7 @@ _shared_apps = {}  # Dict of port -> FastAPI app
 if TYPE_CHECKING:
     from ..task.task import Task
     from ..main import TaskOutput
-    from ..handoff import Handoff
+    from .handoff import Handoff, HandoffConfig, HandoffResult
     from ..rag.models import RAGResult, ContextPack
 
 class Agent:
@@ -291,96 +291,87 @@ class Agent:
         """Initialize an Agent instance.
 
         Args:
-            name (Optional[str], optional): Name of the agent used for identification and logging.
-                If None, defaults to "Agent". Defaults to None.
-            role (Optional[str], optional): Role or job title that defines the agent's expertise
-                and behavior patterns. Examples: "Data Analyst", "Content Writer". Defaults to None.
-            goal (Optional[str], optional): Primary objective or goal the agent aims to achieve.
-                Defines the agent's purpose and success criteria. Defaults to None.
-            backstory (Optional[str], optional): Background story or context that shapes the agent's
-                personality and decision-making approach. Defaults to None.
-            instructions (Optional[str], optional): Direct instructions that override role, goal,
-                and backstory when provided. Used for simple, task-specific agents. Defaults to None.
-            llm (Optional[Union[str, Any]], optional): Language model configuration. Can be a model
-                name string (e.g., "gpt-5-nano", "anthropic/claude-3-sonnet") or a configured LLM object.
-                Defaults to environment variable OPENAI_MODEL_NAME or "gpt-5-nano".
-            tools (Optional[List[Any]], optional): List of tools, functions, or capabilities
-                available to the agent for task execution. Can include callables, tool objects,
-                or MCP instances. Defaults to None.
-            function_calling_llm (Optional[Any], optional): Dedicated language model for function
-                calling operations. If None, uses the main llm parameter. Defaults to None.
-            max_iter (int, optional): Maximum number of iterations the agent can perform during
-                task execution to prevent infinite loops. Defaults to 20.
-            max_rpm (Optional[int], optional): Maximum requests per minute to rate limit API calls
-                and prevent quota exhaustion. If None, no rate limiting is applied. Defaults to None.
-            max_execution_time (Optional[int], optional): Maximum execution time in seconds for
-                agent operations before timeout. If None, no time limit is enforced. Defaults to None.
-            memory (Optional[Any], optional): Memory system for storing and retrieving information
-                across conversations. Requires memory dependencies to be installed. Defaults to None.
-            verbose (bool, optional): Enable detailed logging and status updates during agent
-                execution for debugging and monitoring. Defaults to True.
-            allow_delegation (bool, optional): Allow the agent to delegate tasks to other agents
-                or sub-processes when appropriate. Defaults to False.
-            step_callback (Optional[Any], optional): Callback function called after each step
-                of agent execution for custom monitoring or intervention. Defaults to None.
-            cache (bool, optional): Enable caching of responses and computations to improve
-                performance and reduce API costs. Defaults to True.
-            system_template (Optional[str], optional): Custom template for system prompts that
-                overrides the default system prompt generation. Defaults to None.
-            prompt_template (Optional[str], optional): Template for formatting user prompts
-                before sending to the language model. Defaults to None.
-            response_template (Optional[str], optional): Template for formatting agent responses
-                before returning to the user. Defaults to None.
-            allow_code_execution (Optional[bool], optional): Enable the agent to execute code
-                snippets during task completion. Use with caution for security. Defaults to False.
-            max_retry_limit (int, optional): Maximum number of retry attempts for failed operations
-                before giving up. Helps handle transient errors. Defaults to 2.
-            code_execution_mode (Literal["safe", "unsafe"], optional): Safety mode for code execution.
-                "safe" restricts dangerous operations, "unsafe" allows full code execution. Defaults to "safe".
-            embedder_config (Optional[Dict[str, Any]], optional): Configuration dictionary for
-                text embedding models used in knowledge retrieval and similarity search. Defaults to None.
-            knowledge (Optional[List[str]], optional): List of knowledge sources (file paths, URLs,
-                or text content) to be processed and made available to the agent. Defaults to None.
-            knowledge_config (Optional[Dict[str, Any]], optional): Configuration for knowledge
-                processing and retrieval system including chunking and indexing parameters. Defaults to None.
-            use_system_prompt (Optional[bool], optional): Whether to include system prompts in
-                conversations to establish agent behavior and context. Defaults to True.
-            markdown (bool, optional): Enable markdown formatting in agent responses for better
-                readability and structure. Defaults to True.
-            stream (bool, optional): Enable streaming responses from the language model for real-time
-                output when using Agent.start() method. Defaults to False for backward compatibility.
-            metrics (bool, optional): Enable automatic token usage tracking and display summary
-                when tasks complete. Simplifies token monitoring for cost optimization. Defaults to False.
-            self_reflect (bool, optional): Enable self-reflection capabilities where the agent
-                evaluates and improves its own responses. Defaults to False.
-            max_reflect (int, optional): Maximum number of self-reflection iterations to prevent
-                excessive reflection loops. Defaults to 3.
-            min_reflect (int, optional): Minimum number of self-reflection iterations required
-                before accepting a response as satisfactory. Defaults to 1.
-            reflect_llm (Optional[str], optional): Dedicated language model for self-reflection
-                operations. If None, uses the main llm parameter. Defaults to None.
-            reflect_prompt (Optional[str], optional): Custom prompt template for self-reflection
-                that guides the agent's self-evaluation process. Defaults to None.
-            user_id (Optional[str], optional): Unique identifier for the user or session to
-                enable personalized responses and memory isolation. Defaults to "praison".
-            reasoning_steps (bool, optional): Enable step-by-step reasoning output to show the
-                agent's thought process during problem solving. Defaults to False.
-            guardrail (Optional[Union[Callable[['TaskOutput'], Tuple[bool, Any]], str]], optional):
-                Safety mechanism to validate agent outputs. Can be a validation function or
-                description string for LLM-based validation. Defaults to None.
-            max_guardrail_retries (int, optional): Maximum number of retry attempts when guardrail
-                validation fails before giving up. Defaults to 3.
-            handoffs (Optional[List[Union['Agent', 'Handoff']]], optional): List of agents or
-                handoff configurations that this agent can delegate tasks to. Enables agent-to-agent
-                collaboration and task specialization. Defaults to None.
-            base_url (Optional[str], optional): Base URL for custom LLM endpoints (e.g., Ollama).
-                If provided, automatically creates a custom LLM instance. Defaults to None.
-            api_key (Optional[str], optional): API key for LLM provider. If not provided,
-                falls back to environment variables. Defaults to None.
+            name: Agent name for identification and logging. Defaults to "Agent".
+            role: Role/job title defining expertise (e.g., "Data Analyst").
+            goal: Primary objective the agent aims to achieve.
+            backstory: Background context shaping personality and decisions.
+            instructions: Direct instructions (overrides role/goal/backstory). Recommended for simple agents.
+            llm: Model name string ("gpt-4o", "anthropic/claude-3-sonnet") or LLM object.
+                Defaults to OPENAI_MODEL_NAME env var or "gpt-5-nano".
+            model: Alias for llm parameter.
+            function_calling_llm: Dedicated LLM for function calling. Deprecated: use llm=.
+            llm_config: LLM configuration dict. Deprecated: use llm=.
+            base_url: Custom LLM endpoint URL (e.g., for Ollama). Kept separate for auth.
+            api_key: API key for LLM provider. Kept separate for auth.
+            tools: List of tools, functions, callables, or MCP instances.
+            allow_delegation: Allow task delegation to other agents. Defaults to False.
+            allow_code_execution: Enable code execution during tasks. Defaults to False.
+            code_execution_mode: "safe" (restricted) or "unsafe" (full access). Defaults to "safe".
+            handoffs: List of Agent or Handoff objects for agent-to-agent collaboration.
+            auto_save: Session name for automatic session saving.
+            rate_limiter: Rate limiter instance for API call throttling.
+            memory: Memory system configuration. Accepts:
+                - bool: True enables defaults, False disables
+                - MemoryConfig: Custom configuration
+                - MemoryManager: Pre-configured instance
+            knowledge: Knowledge sources. Accepts:
+                - bool: True enables defaults
+                - List[str]: File paths, URLs, or text content
+                - KnowledgeConfig: Custom configuration
+            planning: Planning mode. Accepts:
+                - bool: True enables with defaults
+                - PlanningConfig: Custom configuration
+            reflection: Self-reflection. Accepts:
+                - bool: True enables with defaults
+                - ReflectionConfig: Custom configuration
+            guardrails: Output validation. Accepts:
+                - bool: True enables with defaults
+                - Callable: Validation function
+                - GuardrailConfig: Custom configuration
+            web: Web search/fetch. Accepts:
+                - bool: True enables with defaults
+                - WebConfig: Custom configuration
+            context: Context management. Accepts:
+                - bool: True enables with defaults
+                - ManagerConfig: Custom configuration
+            autonomy: Autonomy settings. Accepts:
+                - bool: True enables with defaults
+                - Dict: Configuration dict
+                - AutonomyConfig: Custom configuration
+            verification_hooks: List of VerificationHook instances for output verification.
+            output: Output configuration. Accepts:
+                - str: Preset name ("silent", "actions", "verbose", "json", "stream")
+                - OutputConfig: Custom configuration
+                Controls: verbose, markdown, stream, metrics, reasoning_steps
+            execution: Execution configuration. Accepts:
+                - str: Preset name ("fast", "balanced", "thorough")
+                - ExecutionConfig: Custom configuration
+                Controls: max_iter, max_rpm, max_execution_time, max_retry_limit
+            templates: Template configuration (TemplateConfig).
+                Controls: system_template, prompt_template, response_template
+            caching: Caching configuration. Accepts:
+                - bool: True enables with defaults
+                - CachingConfig: Custom configuration
+            hooks: Event hooks. Accepts:
+                - List: List of hook callables
+                - HooksConfig: Custom configuration
+            skills: Agent skills. Accepts:
+                - List[str]: Skill directory paths
+                - SkillsConfig: Custom configuration
 
         Raises:
             ValueError: If all of name, role, goal, backstory, and instructions are None.
             ImportError: If memory or LLM features are requested but dependencies are not installed.
+
+        Note:
+            Many legacy parameters have been consolidated into config objects:
+            - verbose, markdown, stream, metrics, reasoning_steps → output=
+            - max_iter, max_rpm, max_execution_time, max_retry_limit → execution=
+            - self_reflect, max_reflect, min_reflect, reflect_llm → reflection=
+            - guardrail, max_guardrail_retries → guardrails=
+            - system_template, prompt_template, response_template → templates=
+            - cache, prompt_caching → caching=
+            - web_search, web_fetch → web=
         """
         # Add check at start if memory is requested
         if memory is not None:
@@ -4267,16 +4258,86 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             return None
 
     async def arun(self, prompt: str, **kwargs):
-        """Async alias for astart() method"""
-        return await self.astart(prompt, **kwargs)
+        """Async version of run() - silent, non-streaming, returns structured result.
+        
+        Production-friendly async execution. Does not stream or display output.
+        
+        Args:
+            prompt: The input prompt to process
+            **kwargs: Additional arguments passed to achat()
+            
+        Returns:
+            The agent's response as a string
+        """
+        # Force non-streaming, non-display for production use
+        kwargs['stream'] = False
+        return await self.achat(prompt, **kwargs)
 
     async def astart(self, prompt: str, **kwargs):
-        """Async version of start method"""
+        """Async version of start() - interactive, streaming-aware.
+        
+        Beginner-friendly async execution. Streams by default when in TTY.
+        
+        Args:
+            prompt: The input prompt to process
+            **kwargs: Additional arguments passed to achat()
+            
+        Returns:
+            The agent's response as a string
+        """
+        import sys
+        
+        # Determine streaming behavior (same logic as start())
+        stream_requested = kwargs.get('stream')
+        if stream_requested is None:
+            if getattr(self, 'stream', None) is not None:
+                stream_requested = self.stream
+            else:
+                stream_requested = sys.stdout.isatty()
+        
+        kwargs['stream'] = stream_requested
         return await self.achat(prompt, **kwargs)
 
     def run(self, prompt: str, **kwargs):
-        """Alias for start() method"""
-        return self.start(prompt, **kwargs)
+        """Execute agent silently and return structured result.
+        
+        Production-friendly execution. Does not stream or display output by default.
+        Use this for programmatic/scripted usage where you want the result only.
+        
+        Args:
+            prompt: The input prompt to process
+            **kwargs: Additional arguments:
+                - stream (bool): Force streaming if True. Default: False
+                - display (bool): Force terminal display if True. Default: False
+                - output (str): Output preset override
+                
+        Returns:
+            The agent's response as a string
+            
+        Example:
+            ```python
+            agent = Agent(instructions="You are helpful")
+            result = agent.run("What is 2+2?")  # Silent, returns "4"
+            print(result)
+            ```
+        """
+        # Production defaults: no streaming, no display
+        if 'stream' not in kwargs:
+            kwargs['stream'] = False
+        
+        # Load history context
+        self._load_history_context()
+        
+        # Check if planning mode is enabled
+        if self.planning:
+            result = self._start_with_planning(prompt, **kwargs)
+        else:
+            result = self.chat(prompt, **kwargs)
+        
+        # Auto-save session if enabled
+        self._auto_save_session()
+        
+        return result
     
     def _get_planning_agent(self):
         """Lazy load PlanningAgent for planning mode."""
@@ -4411,18 +4472,59 @@ Write the complete compiled report:"""
         # Chat history is preserved in self.chat_history (no action needed)
 
     def start(self, prompt: str, **kwargs):
-        """Start the agent with a prompt. This is a convenience method that wraps chat()."""
-        # Load history from past sessions (now handled via context= param)
+        """Start the agent interactively with streaming output.
+        
+        Beginner-friendly execution. Streams output by default when running in a TTY.
+        Use this for interactive/terminal usage where you want to see output in real-time.
+        
+        Args:
+            prompt: The input prompt to process
+            **kwargs: Additional arguments:
+                - stream (bool | None): Override streaming. None = auto-detect TTY
+                - display (bool | None): Override display. None = auto (True if streaming)
+                - output (str): Output preset override
+                
+        Returns:
+            - If streaming: Generator yielding response chunks
+            - If not streaming: The complete response as a string
+            
+        Example:
+            ```python
+            agent = Agent(instructions="You are helpful")
+            
+            # Interactive use - streams by default in terminal
+            for chunk in agent.start("Tell me a story"):
+                print(chunk, end="", flush=True)
+            
+            # Or let it handle display automatically
+            result = agent.start("What is 2+2?")  # Streams if TTY
+            ```
+        """
+        import sys
+        
+        # Load history from past sessions
         self._load_history_context()
+        
+        # Determine streaming behavior
+        # Priority: explicit kwarg > agent's stream attribute > TTY detection
+        stream_requested = kwargs.get('stream')
+        if stream_requested is None:
+            # Check agent's stream attribute first
+            if getattr(self, 'stream', None) is not None:
+                stream_requested = self.stream
+            else:
+                # Auto-detect: stream if stdout is a TTY (interactive terminal)
+                stream_requested = sys.stdout.isatty()
         
         # Check if planning mode is enabled
         if self.planning:
             result = self._start_with_planning(prompt, **kwargs)
-        elif kwargs.get('stream', getattr(self, 'stream', False)):
+        elif stream_requested:
             # Return a generator for streaming response
+            kwargs['stream'] = True
             result = self._start_stream(prompt, **kwargs)
         else:
-            # Return regular chat response for backward compatibility
+            # Return regular chat response
             kwargs['stream'] = False
             result = self.chat(prompt, **kwargs)
         
@@ -4430,6 +4532,48 @@ Write the complete compiled report:"""
         self._auto_save_session()
         
         return result
+    
+    def iter_stream(self, prompt: str, **kwargs):
+        """Stream agent response as an iterator of chunks.
+        
+        App-friendly streaming. Yields response chunks without terminal display.
+        Use this for building custom UIs or processing streams programmatically.
+        
+        Args:
+            prompt: The input prompt to process
+            **kwargs: Additional arguments:
+                - display (bool): Show terminal output. Default: False
+                - output (str): Output preset override
+                
+        Yields:
+            str: Response chunks as they are generated
+            
+        Example:
+            ```python
+            agent = Agent(instructions="You are helpful")
+            
+            # Process stream programmatically
+            full_response = ""
+            for chunk in agent.iter_stream("Tell me a story"):
+                full_response += chunk
+                # Custom processing here
+            
+            # Or collect all at once
+            response = "".join(agent.iter_stream("Hello"))
+            ```
+        """
+        # Load history context
+        self._load_history_context()
+        
+        # Force streaming, no display by default (app-friendly)
+        kwargs['stream'] = True
+        
+        # Use the internal streaming generator
+        for chunk in self._start_stream(prompt, **kwargs):
+            yield chunk
+        
+        # Auto-save session if enabled
+        self._auto_save_session()
     
     def _load_history_context(self):
         """Load history from past sessions into context.

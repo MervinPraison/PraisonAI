@@ -10,6 +10,12 @@ Usage:
     praisonai test --provider openai    # Run OpenAI provider tests
     praisonai test --live               # Enable live API tests
     praisonai test --parallel auto      # Run with parallelization
+    
+    # Interactive mode tests
+    praisonai test interactive --csv tests.csv
+    praisonai test interactive --suite smoke
+    praisonai test interactive --list
+    praisonai test interactive --generate-template
 """
 
 import os
@@ -236,6 +242,272 @@ def run(
         raise typer.Exit(result.returncode)
     except KeyboardInterrupt:
         typer.echo("\n❌ Tests interrupted")
+        raise typer.Exit(1)
+
+
+# Built-in interactive test suites
+BUILTIN_SUITES = {
+    "smoke": "smoke.csv",
+    "tools": "tools.csv",
+    "refactor": "refactor.csv",
+    "multi_agent": "multi_agent.csv",
+}
+
+# Special suites that don't use CSV
+SPECIAL_SUITES = {
+    "advanced": "Advanced Agent-Centric (5 complex autonomous scenarios)",
+}
+
+
+def _get_builtin_suite_path(suite: str):
+    """Get path to built-in test suite."""
+    from pathlib import Path
+    
+    if suite not in BUILTIN_SUITES:
+        return None
+    
+    # Find fixtures directory relative to package
+    package_dir = Path(__file__).parent.parent.parent.parent  # Up to src/praisonai
+    fixtures_dir = package_dir / "tests" / "fixtures" / "interactive"
+    
+    suite_path = fixtures_dir / BUILTIN_SUITES[suite]
+    if suite_path.exists():
+        return suite_path
+    
+    return None
+
+
+@app.command("interactive")
+def interactive(
+    csv: Optional[str] = typer.Option(
+        None, "--csv", "-c",
+        help="Path to CSV file with test cases"
+    ),
+    suite: Optional[str] = typer.Option(
+        None, "--suite", "-s",
+        help="Built-in test suite: smoke, tools, refactor, multi_agent"
+    ),
+    model: str = typer.Option(
+        "gpt-4o-mini", "--model", "-m",
+        help="LLM model for agent"
+    ),
+    judge_model: str = typer.Option(
+        "gpt-4o-mini", "--judge-model",
+        help="LLM model for judge"
+    ),
+    workspace: Optional[str] = typer.Option(
+        None, "--workspace", "-w",
+        help="Workspace directory (default: temp)"
+    ),
+    artifacts_dir: Optional[str] = typer.Option(
+        None, "--artifacts-dir",
+        help="Directory for test artifacts"
+    ),
+    fail_fast: bool = typer.Option(
+        False, "--fail-fast", "-x",
+        help="Stop on first failure"
+    ),
+    keep_artifacts: bool = typer.Option(
+        False, "--keep-artifacts",
+        help="Keep test artifacts after run"
+    ),
+    no_judge: bool = typer.Option(
+        False, "--no-judge",
+        help="Skip judge evaluation even if rubric present"
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v",
+        help="Verbose output"
+    ),
+    list_suites: bool = typer.Option(
+        False, "--list",
+        help="List available built-in suites"
+    ),
+    generate_template: bool = typer.Option(
+        False, "--generate-template",
+        help="Generate CSV template in current directory"
+    ),
+):
+    """
+    Run interactive mode tests from CSV.
+    
+    Tests are executed through the headless interactive core, using the same
+    pipeline as the interactive TUI (InteractiveRuntime, get_interactive_tools,
+    ActionOrchestrator).
+    
+    Examples:
+        praisonai test interactive --csv tests.csv
+        praisonai test interactive --suite smoke
+        praisonai test interactive --suite tools --keep-artifacts
+        praisonai test interactive --list
+        praisonai test interactive --generate-template
+    """
+    from pathlib import Path
+    
+    # List suites
+    if list_suites:
+        typer.echo("📋 Available built-in test suites:")
+        typer.echo("")
+        typer.echo("CSV-based suites:")
+        for name, filename in BUILTIN_SUITES.items():
+            suite_path = _get_builtin_suite_path(name)
+            status = "✅" if suite_path else "❌ (not found)"
+            typer.echo(f"  {name:15} {filename:20} {status}")
+        typer.echo("")
+        typer.echo("Special suites:")
+        for name, description in SPECIAL_SUITES.items():
+            typer.echo(f"  {name:15} {description}")
+        typer.echo("")
+        typer.echo("Usage: praisonai test interactive --suite <name>")
+        typer.echo("       PRAISONAI_LIVE_INTERACTIVE=1 praisonai test interactive --suite advanced")
+        return
+    
+    # Generate template
+    if generate_template:
+        # Lazy import
+        from praisonai.cli.features.csv_test_runner import generate_csv_template
+        
+        output_path = Path.cwd() / "interactive_tests_template.csv"
+        generate_csv_template(output_path)
+        typer.echo(f"✅ Generated CSV template: {output_path}")
+        return
+    
+    # Validate inputs
+    if not csv and not suite:
+        typer.echo("❌ Either --csv or --suite is required")
+        typer.echo("")
+        typer.echo("Examples:")
+        typer.echo("  praisonai test interactive --csv tests.csv")
+        typer.echo("  praisonai test interactive --suite smoke")
+        typer.echo("  praisonai test interactive --suite advanced")
+        typer.echo("  praisonai test interactive --list")
+        raise typer.Exit(1)
+    
+    # Handle special suites
+    if suite and suite in SPECIAL_SUITES:
+        if suite == "advanced":
+            _run_advanced_suite(
+                model=model,
+                artifacts_dir=Path(artifacts_dir) if artifacts_dir else None,
+                keep_artifacts=keep_artifacts,
+                verbose=verbose,
+            )
+            return
+    
+    # Get CSV path
+    if csv:
+        csv_path = Path(csv)
+        if not csv_path.exists():
+            typer.echo(f"❌ CSV file not found: {csv}")
+            raise typer.Exit(1)
+    else:
+        csv_path = _get_builtin_suite_path(suite)
+        if not csv_path:
+            typer.echo(f"❌ Built-in suite not found: {suite}")
+            typer.echo("Use --list to see available suites")
+            raise typer.Exit(1)
+    
+    # Lazy import runner
+    from praisonai.cli.features.csv_test_runner import CSVTestRunner
+    
+    typer.echo(f"🧪 Running interactive tests from: {csv_path}")
+    typer.echo(f"   Model: {model} | Judge: {judge_model}")
+    typer.echo("")
+    
+    # Create runner
+    runner = CSVTestRunner(
+        csv_path=csv_path,
+        model=model,
+        judge_model=judge_model,
+        workspace=Path(workspace) if workspace else None,
+        artifacts_dir=Path(artifacts_dir) if artifacts_dir else None,
+        fail_fast=fail_fast,
+        keep_artifacts=keep_artifacts,
+        no_judge=no_judge,
+        verbose=verbose,
+    )
+    
+    # Run tests
+    summary = runner.run()
+    
+    # Print summary
+    typer.echo("")
+    summary.print_summary()
+    
+    # Save summary if keeping artifacts
+    if keep_artifacts and runner.artifacts_dir:
+        import json
+        summary_path = runner.artifacts_dir / "summary.json"
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(summary_path, "w") as f:
+            json.dump(summary.to_dict(), f, indent=2, default=str)
+        typer.echo(f"\n📁 Artifacts saved to: {runner.artifacts_dir}")
+    
+    # Exit code based on results
+    if summary.failed > 0 or summary.errors > 0:
+        raise typer.Exit(1)
+
+
+def _run_advanced_suite(
+    model: str = "gpt-4o-mini",
+    artifacts_dir = None,
+    keep_artifacts: bool = True,
+    verbose: bool = True,
+):
+    """Run the Advanced Agent-Centric test suite."""
+    from pathlib import Path
+    
+    # Check prerequisites
+    typer.echo("🔍 Checking Advanced suite prerequisites...")
+    
+    # Check if live interactive is enabled
+    live_enabled = os.environ.get("PRAISONAI_LIVE_INTERACTIVE", "0") == "1"
+    has_api_key = bool(os.environ.get("OPENAI_API_KEY"))
+    
+    if not live_enabled:
+        typer.echo("\n⚠️  Cannot run Advanced tests: PRAISONAI_LIVE_INTERACTIVE=1 not set")
+        typer.echo("")
+        typer.echo("Prerequisites:")
+        typer.echo("  1. Set PRAISONAI_LIVE_INTERACTIVE=1")
+        typer.echo("  2. Set OPENAI_API_KEY")
+        typer.echo("")
+        typer.echo("Example:")
+        typer.echo("  PRAISONAI_LIVE_INTERACTIVE=1 praisonai test interactive --suite advanced")
+        raise typer.Exit(1)
+    
+    if not has_api_key:
+        typer.echo("\n⚠️  Cannot run Advanced tests: OPENAI_API_KEY not set")
+        raise typer.Exit(1)
+    
+    typer.echo("✅ Live interactive mode enabled")
+    typer.echo("✅ API key configured")
+    typer.echo("")
+    
+    # Lazy import runner and scenarios
+    from tests.live.interactive.runner import LiveInteractiveRunner
+    from tests.live.interactive.advanced.scenarios import ALL_ADVANCED_SCENARIOS
+    
+    # Create runner
+    runner = LiveInteractiveRunner(
+        model=model,
+        artifacts_dir=Path(artifacts_dir) if artifacts_dir else None,
+        keep_artifacts=keep_artifacts,
+        verbose=verbose,
+    )
+    
+    # Run tests
+    summary = runner.run_all(ALL_ADVANCED_SCENARIOS)
+    
+    # Print summary
+    typer.echo("")
+    summary.print_summary()
+    
+    # Show artifacts location
+    if keep_artifacts:
+        typer.echo(f"\n📁 Artifacts saved to: {runner.artifacts_dir}")
+    
+    # Exit code
+    if summary.failed > 0:
         raise typer.Exit(1)
 
 

@@ -22,7 +22,7 @@ def run_main(
     framework: Optional[str] = typer.Option(None, "--framework", "-f", help="Framework: praisonai, crewai, autogen"),
     interactive: bool = typer.Option(False, "--interactive", "-i", help="Interactive mode"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
-    stream: bool = typer.Option(True, "--stream/--no-stream", help="Stream output"),
+    stream: bool = typer.Option(False, "--stream/--no-stream", help="Stream output (default: off for production use)"),
     trace: bool = typer.Option(False, "--trace", help="Enable tracing"),
     memory: bool = typer.Option(False, "--memory", help="Enable memory"),
     tools: Optional[str] = typer.Option(None, "--tools", "-t", help="Tools file path"),
