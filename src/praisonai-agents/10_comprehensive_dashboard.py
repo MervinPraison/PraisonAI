@@ -302,13 +302,17 @@ def display_dashboard(dashboard_data, benchmark_results):
     perf_data = dashboard_data['performance_data']
     
     print("  Fastest Functions:")
-    fastest_functions = sorted(perf_data['slowest_functions'], key=lambda x: x[1])[:3]
-    for name, time in fastest_functions:
-        print(f"    {name}: {time:.3f}s")
+    fastest_functions = sorted(perf_data['slowest_functions'], key=lambda x: x.get('average_time', float('inf')))[:3]
+    for item in fastest_functions:
+        name = item.get('function', 'unknown')
+        time_val = item.get('average_time', 0)
+        print(f"    {name}: {time_val:.3f}s")
     
     print("  Slowest Functions:")
-    for name, time in perf_data['slowest_functions'][:3]:
-        print(f"    {name}: {time:.3f}s")
+    for item in perf_data['slowest_functions'][:3]:
+        name = item.get('function', 'unknown')
+        time_val = item.get('average_time', 0)
+        print(f"    {name}: {time_val:.3f}s")
     
     # Benchmark Results
     print(f"\n⚡ BENCHMARK RESULTS")

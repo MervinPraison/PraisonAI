@@ -13,7 +13,7 @@ def main():
         role="Research Specialist", 
         goal="Find information about a topic",
         backstory="You are an expert researcher who finds comprehensive information.",
-        verbose=True,
+        output="verbose",
         llm="gpt-5-nano",  # Use a cost-effective model for examples
         metrics=True  # 🎯 SIMPLIFIED: Just add this parameter!
     )
@@ -29,7 +29,7 @@ def main():
     agents = Agents(
         agents=[research_agent],
         tasks=[research_task],
-        verbose=True
+        output="verbose"
     )
     
     print("🚀 Running agent task...")

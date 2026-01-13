@@ -1,6 +1,6 @@
 # PraisonAI Agents - Real Execution Benchmark
 
-**Generated:** 2026-01-13 05:32:09
+**Generated:** 2026-01-13 06:07:28
 **Model:** gpt-4o-mini
 **Iterations:** 3
 **Prompt:** "What is 2+2? Reply with just the number."
@@ -9,18 +9,18 @@
 
 | Framework | Method | Avg Time | Relative |
 |-----------|--------|----------|----------|
-| **PraisonAI** | `agent.start()` | **0.61s** | **1.00x (fastest)** |
-| PraisonAI (LiteLLM) | `agent.start()` | 0.69s | 1.13x |
-| CrewAI | `crew.kickoff()` | 0.85s | 1.39x |
-| Agno | `agent.run()` | 1.06s | 1.72x |
+| **PraisonAI (LiteLLM)** | `agent.start()` | **0.55s** | **1.00x (fastest)** |
+| PraisonAI | `agent.start()` | 0.64s | 1.15x |
+| CrewAI | `crew.kickoff()` | 0.95s | 1.71x |
+| Agno | `agent.run()` | 1.05s | 1.90x |
 
 ## Package Versions
 
 | Package | Version |
 |---------|--------|
 | PraisonAI | 0.11.7 |
-| Agno | 2.3.14 |
-| CrewAI | 1.6.1 |
+| Agno | 2.3.25 |
+| CrewAI | 1.8.0 |
 
 ## How to Reproduce
 

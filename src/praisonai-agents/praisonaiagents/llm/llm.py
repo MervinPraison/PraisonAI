@@ -1540,6 +1540,7 @@ Now provide your final answer using this result."""
             max_iterations = 10  # Prevent infinite loops
             iteration_count = 0
             final_response_text = ""
+            response_text = ""  # Initialize to prevent UnboundLocalError on API errors
             stored_reasoning_content = None  # Store reasoning content from tool execution
             accumulated_tool_results = []  # Store all tool results across iterations
 

@@ -691,7 +691,7 @@ def force_shutdown_telemetry():
 def enable_telemetry():
     """Programmatically enable telemetry (if not disabled by environment)."""
     global _telemetry_instance
-    if not _TELEMETRY_DISABLED:
+    if not _is_telemetry_disabled():
         if _telemetry_instance:
             _telemetry_instance.enabled = True
         else:

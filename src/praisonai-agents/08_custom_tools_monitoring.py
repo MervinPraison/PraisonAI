@@ -263,7 +263,7 @@ def main():
     # Slowest operations
     print("\n🐌 Slowest Tool Operations:")
     slowest = get_slowest_functions()
-    tool_slowest = [(name, time) for name, time in slowest if 'tool' in name.lower()]
+    tool_slowest = [(item.get('function', 'unknown'), item.get('average_time', 0)) for item in slowest if 'tool' in item.get('function', '').lower()]
     
     for tool_name, avg_time in tool_slowest[:3]:
         print(f"  {tool_name}: {avg_time:.3f}s")
