@@ -3684,12 +3684,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             self.session_token_metrics = self.session_token_metrics + metrics
             
             # Track in global collector
+            # Extract provider from model string (e.g., 'openai' from 'openai/gpt-4o-mini')
+            provider = model.split('/')[0] if '/' in model else 'litellm'
             _token_collector.track_tokens(
                 model=model,
                 agent=self.current_agent_name,
                 metrics=metrics,
                 metadata={
-                    "provider": self.provider,
+                    "provider": provider,
                     "stream": False
                 }
             )

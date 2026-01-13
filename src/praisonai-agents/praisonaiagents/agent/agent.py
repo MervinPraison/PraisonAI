@@ -2885,9 +2885,8 @@ Your Goal: {self.goal}"""
         """
         logging.debug(f"{self.name} executing tool {function_name} with arguments: {arguments}")
         
-        # Notify callbacks that tool is being called (for dynamic status updates)
-        from ..main import execute_sync_callback
-        execute_sync_callback('tool_call', tool_name=function_name, tool_input=arguments)
+        # NOTE: tool_call callback is triggered by display_tool_call in openai_client.py
+        # Do NOT call it here to avoid duplicate output
         
         # Set up injection context for tools with Injected parameters
         from ..tools.injected import AgentState, with_injection_context
