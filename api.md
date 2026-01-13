@@ -77,7 +77,7 @@ Methods:
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">run_autonomous</a>(prompt: str, max_iterations: Optional[int] = None, timeout_seconds: Optional[float] = None)</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">session_id</a>() -> Optional[str]</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">skill_manager</a>()</code>
-* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">start</a>(prompt: str, **kwargs)</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">start</a>(prompt: str = None, **kwargs)</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">store_memory</a>(content: str, memory_type: str = 'short_term', **kwargs)</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">switch_model</a>(new_model: str) -> None</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">thinking_budget</a>()</code>
@@ -117,7 +117,7 @@ Methods:
 * <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">save_output_to_file</a>(task, task_output)</code>
 * <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">save_session_state</a>(session_id: str, include_memory: bool = True) -> None</code>
 * <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">set_state</a>(key: str, value: Any) -> None</code>
-* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">start</a>(content = None, return_dict = False, **kwargs)</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">start</a>(content = None, return_dict = False, output = None, **kwargs)</code>
 * <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">todo_list</a>()</code>
 * <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">update_plan_step_status</a>(step_id: str, status: str) -> bool</code>
 * <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">update_state</a>(updates: Dict) -> None</code>
@@ -194,7 +194,7 @@ Methods:
 * <code title="class PraisonAIAgents">PraisonAIAgents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">save_output_to_file</a>(task, task_output)</code>
 * <code title="class PraisonAIAgents">PraisonAIAgents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">save_session_state</a>(session_id: str, include_memory: bool = True) -> None</code>
 * <code title="class PraisonAIAgents">PraisonAIAgents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">set_state</a>(key: str, value: Any) -> None</code>
-* <code title="class PraisonAIAgents">PraisonAIAgents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">start</a>(content = None, return_dict = False, **kwargs)</code>
+* <code title="class PraisonAIAgents">PraisonAIAgents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">start</a>(content = None, return_dict = False, output = None, **kwargs)</code>
 * <code title="class PraisonAIAgents">PraisonAIAgents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">todo_list</a>()</code>
 * <code title="class PraisonAIAgents">PraisonAIAgents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">update_plan_step_status</a>(step_id: str, status: str) -> bool</code>
 * <code title="class PraisonAIAgents">PraisonAIAgents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">update_state</a>(updates: Dict) -> None</code>
@@ -546,9 +546,9 @@ Methods:
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/main.py">display_error</a>(message: str, console = None)</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/main.py">display_generating</a>(content: str = '', start_time: Optional[float] = None)</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/main.py">display_instruction</a>(message: str, console = None, agent_name: str = None, agent_role: str = None, agent_tools: List[str] = None)</code>
-* <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/main.py">display_interaction</a>(message, response, markdown = True, generation_time = None, console = None, agent_name = None, agent_role = None, agent_tools = None, task_name = None, task_description = None, task_id = None)</code>
+* <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/main.py">display_interaction</a>(message, response, markdown = True, generation_time = None, console = None, agent_name = None, agent_role = None, agent_tools = None, task_name = None, task_description = None, task_id = None, metrics = None)</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/main.py">display_self_reflection</a>(message: str, console = None)</code>
-* <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/main.py">display_tool_call</a>(message: str, console = None, tool_name: str = None, tool_input: dict = None, tool_output: str = None)</code>
+* <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/main.py">display_tool_call</a>(message: str, console = None, tool_name: str = None, tool_input: dict = None, tool_output: str = None, elapsed_time: float = None, success: bool = True)</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/main.py">register_display_callback</a>(display_type: str, callback_fn, is_async: bool = False)</code>
 
 # Other
