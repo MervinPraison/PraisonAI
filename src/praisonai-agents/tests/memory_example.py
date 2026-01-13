@@ -33,14 +33,14 @@ def main():
         role="Research Analyst",
         goal="Research and document key information about topics",
         backstory="Expert at analyzing and storing information in memory",
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     retriever = Agent(
         role="Information Retriever",
         goal="Retrieve and verify stored information from memory",
         backstory="Specialist in searching and validating information from memory",
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
 
     # Task 1: Process the facts

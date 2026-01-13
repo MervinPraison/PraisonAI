@@ -21,7 +21,7 @@ config = {
     "llm": {
         "provider": "openai",
         "config": {
-            "model": "gpt-5-nano"
+            "model": "gpt-4o-mini"
         }
     }
 }

@@ -11,7 +11,7 @@ def test_agent_direct():
     
     agent = Agent(
         instructions="You are a helpful assistant that can break down complex problems.",
-        llm="gpt-5-nano",
+        llm="gpt-4o-mini",
         tools=MCP("npx -y @modelcontextprotocol/server-sequential-thinking")
     )
     

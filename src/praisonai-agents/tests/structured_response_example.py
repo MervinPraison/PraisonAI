@@ -35,7 +35,7 @@ def get_structured_analysis(query: str, verbose: bool = True) -> AnalysisReport:
         verbose=verbose,
         self_reflect=True,  # Enable self-reflection for better quality
         markdown=True,
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     # Create the analysis prompt

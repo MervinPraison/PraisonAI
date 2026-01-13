@@ -46,7 +46,7 @@ agent = RouterAgent(
     name="Smart Assistant",
     role="Adaptive AI Assistant",
     goal="Complete tasks using the most appropriate model",
-    models=["gpt-5-nano", "gpt-5-nano", "claude-3-5-sonnet-20241022"],
+    models=["gpt-4o-mini", "gpt-4o-mini", "claude-3-5-sonnet-20241022"],
     routing_strategy="auto"  # Automatic model selection
 )
 
@@ -90,7 +90,7 @@ analyzer = RouterAgent(
     goal="Analyze data efficiently",
     models={
         "gemini/gemini-1.5-flash": {},
-        "gpt-5-nano": {},
+        "gpt-4o-mini": {},
         "claude-3-haiku-20240307": {}
     },
     model_router=router,
@@ -207,7 +207,7 @@ for i, agent in enumerate(auto.agents):
         name=agent.name,
         role=agent.role,
         goal=agent.goal,
-        models=["gpt-5-nano", "gpt-5-nano", "claude-3-5-sonnet"],
+        models=["gpt-4o-mini", "gpt-4o-mini", "claude-3-5-sonnet"],
         routing_strategy="auto"
     )
 

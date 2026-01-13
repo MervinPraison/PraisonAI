@@ -42,19 +42,19 @@ def collect_comprehensive_data():
     agents = {
         'quick_agent': Agent(
             instructions="You are a quick-response agent. Provide concise answers.",
-            llm="gpt-5-nano"
+            llm="gpt-4o-mini"
         ),
         'analytical_agent': Agent(
             instructions="You are an analytical agent. Provide detailed analysis.",
-            llm="gpt-5-nano"
+            llm="gpt-4o-mini"
         ),
         'research_agent': Agent(
             instructions="You are a research agent. Provide comprehensive information.",
-            llm="gpt-5-nano"
+            llm="gpt-4o-mini"
         ),
         'creative_agent': Agent(
             instructions="You are a creative agent. Provide imaginative responses.",
-            llm="gpt-5-nano"
+            llm="gpt-4o-mini"
         )
     }
     
@@ -98,19 +98,19 @@ def simulate_complex_workflow():
     planner = Agent(
         name="planner",
         instructions="You are a project planner. Break down tasks and plan execution.",
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     executor = Agent(
         name="executor", 
         instructions="You are a task executor. Complete assigned tasks efficiently.",
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     reviewer = Agent(
         name="reviewer",
         instructions="You are a quality reviewer. Review and improve work.",
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     # Create workflow tasks

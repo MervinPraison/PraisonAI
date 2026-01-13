@@ -44,7 +44,7 @@ def basic_telemetry_example():
         goal="Find accurate information about topics",
         backstory="You are an expert researcher with attention to detail",
         tools=[DuckDuckGoSearchTool()],
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     writer = Agent(
@@ -52,7 +52,7 @@ def basic_telemetry_example():
         role="Content creator",
         goal="Create engaging content based on research",
         backstory="You are a skilled writer who creates clear, engaging content",
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     # Create tasks
@@ -115,7 +115,7 @@ def manual_telemetry_example():
         role="General assistant",
         goal="Help with various tasks",
         backstory="You are a helpful AI assistant",
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     # Manual telemetry - trace custom operations
@@ -174,7 +174,7 @@ def advanced_telemetry_example():
             role="Data analyst",
             goal="Analyze data and provide insights",
             backstory="You are an experienced data analyst",
-            llm="gpt-5-nano"
+            llm="gpt-4o-mini"
         )
         
         result = agent.chat("Analyze the trend: [10, 15, 13, 18, 22, 20, 25]")
@@ -187,7 +187,7 @@ def advanced_telemetry_example():
         role="Data analyst", 
         goal="Analyze data and provide insights",
         backstory="You are an experienced data analyst",
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     # Use context manager for grouped operations
@@ -199,7 +199,7 @@ def advanced_telemetry_example():
         
         # Record custom metrics
         telemetry.record_metric("analysis.steps", 3)
-        telemetry.record_cost(0.001, model="gpt-5-nano")  # Track costs
+        telemetry.record_cost(0.001, model="gpt-4o-mini")  # Track costs
     
     print("\nAnalysis complete. Telemetry data exported to OTLP collector.")
     
@@ -220,7 +220,7 @@ def telemetry_with_errors_example():
         role="Test agent",
         goal="Test error handling",
         backstory="An agent for testing",
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     # This will be traced and errors will be recorded

@@ -1193,16 +1193,16 @@ class TestWorkflowConfiguration:
         """Test that workflow planning setting is stored."""
         def step1(ctx): return StepResult(output="Done")
         
-        workflow = Workflow(steps=[step1], planning=WorkflowPlanningConfig(enabled=True, llm="gpt-5-nano"))
+        workflow = Workflow(steps=[step1], planning=WorkflowPlanningConfig(enabled=True, llm="gpt-4o-mini"))
         assert workflow._planning_enabled == True
-        assert workflow.planning_llm == "gpt-5-nano"
+        assert workflow.planning_llm == "gpt-4o-mini"
     
     def test_workflow_default_llm(self):
         """Test default LLM setting."""
         def step1(ctx): return StepResult(output="Done")
         
-        workflow = Workflow(steps=[step1], default_llm="gpt-5-nano")
-        assert workflow.default_llm == "gpt-5-nano"
+        workflow = Workflow(steps=[step1], default_llm="gpt-4o-mini")
+        assert workflow.default_llm == "gpt-4o-mini"
     
     def test_workflow_default_agent_config(self):
         """Test default agent config."""
@@ -1392,10 +1392,10 @@ class TestPlanningAndReasoning:
         """Test that Workflow accepts planning parameter."""
         workflow = Workflow(
             steps=[lambda ctx: StepResult(output="test")],
-            planning=WorkflowPlanningConfig(enabled=True, llm="gpt-5-nano")
+            planning=WorkflowPlanningConfig(enabled=True, llm="gpt-4o-mini")
         )
         assert workflow._planning_enabled == True
-        assert workflow.planning_llm == "gpt-5-nano"
+        assert workflow.planning_llm == "gpt-4o-mini"
     
     def test_workflow_reasoning_parameter_exists(self):
         """Test that Workflow accepts reasoning parameter."""

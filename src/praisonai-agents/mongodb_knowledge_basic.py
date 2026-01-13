@@ -57,7 +57,7 @@ def main():
         and providing accurate, context-aware responses.""",
         knowledge=[os.path.join(os.path.dirname(__file__), "llms.md")],
         memory=True,
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     # Create a research assistant agent
@@ -70,7 +70,7 @@ def main():
         knowledge base. You ensure information is accurate, well-structured, 
         and properly categorized.""",
         memory=True,
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     # Create tasks for knowledge management

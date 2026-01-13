@@ -71,7 +71,7 @@ def main():
         tools=[mongodb_tools],
         memory=True,
         verbose=True,
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     # 2. Knowledge Curator Agent - manages knowledge base
@@ -85,7 +85,7 @@ def main():
         knowledge_config=mongodb_knowledge_config,
         memory=True,
         verbose=True,
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     # 3. Business Analyst Agent - analyzes data and provides insights
@@ -99,7 +99,7 @@ def main():
         tools=[mongodb_tools],
         memory=True,
         verbose=True,
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     # 4. Customer Service Agent - handles customer interactions
@@ -114,7 +114,7 @@ def main():
         tools=[mongodb_tools],
         memory=True,
         verbose=True,
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     # Create comprehensive business tasks

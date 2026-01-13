@@ -2,7 +2,7 @@ from praisonaiagents import Agent, MCP
 
 search_agent = Agent(
     instructions="""You help book apartments on Airbnb.""",
-    llm="gpt-5-nano",
+    llm="gpt-4o-mini",
     tools=MCP(
         command="npx",
         args=[
@@ -18,7 +18,7 @@ search_agent.start("I want to book an apartment in Paris for 2 nights. 03/28 - 0
 agent = Agent(
     instructions="""You are a helpful assistant that can check stock prices and perform other tasks.
     Use the available tools when relevant to answer user questions.""",
-    llm="gpt-5-nano",
+    llm="gpt-4o-mini",
     tools = MCP("/Users/praison/miniconda3/envs/mcp/bin/python /Users/praison/stockprice/app.py")
 )
 

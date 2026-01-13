@@ -268,12 +268,14 @@ def display_interaction(message, response, markdown=True, generation_time=None, 
             metrics_line += f" · {model}"
         response_content = response + metrics_line
 
-    # Use semantic colors: Task (coral), Response (ocean blue)
+    # Task is inline (less visual weight), Response keeps panel (it's the main content)
+    # Format: 📝 Task message
+    task_prefix = "[bold #FF9B9B]📝[/]"
     if markdown:
-        console.print(Panel.fit(Markdown(message), title="Task", border_style=PRAISON_COLORS["task"]))
+        console.print(f"{task_prefix} {message}\n")
         console.print(Panel.fit(Markdown(response_content), title=response_title, border_style=PRAISON_COLORS["response"]))
     else:
-        console.print(Panel.fit(Text(message, style=f"bold {PRAISON_COLORS['task_text']}"), title="Task", border_style=PRAISON_COLORS["task"]))
+        console.print(f"{task_prefix} [bold {PRAISON_COLORS['task_text']}]{message}[/]\n")
         console.print(Panel.fit(Text(response_content, style=f"bold {PRAISON_COLORS['response_text']}"), title=response_title, border_style=PRAISON_COLORS["response"]))
 
 def display_self_reflection(message: str, console=None):
@@ -337,11 +339,11 @@ def display_tool_call(message: str, console=None, tool_name: str = None, tool_in
     # Execute synchronous callbacks (always, even when console is None)
     execute_sync_callback('tool_call', message=message, tool_name=tool_name, tool_input=tool_input, tool_output=tool_output)
     
-    # Only print panel if console is provided (verbose mode)
+    # Only print if console is provided (verbose mode)
     if console is not None:
-        # Build unique PraisonAI timeline format
+        # Build clean inline format - no panels, just prefixed lines
         if tool_name:
-            # Format: ▸ tool_name(args) [X.Xs] ✓
+            # Format: ▸ tool_name(args) → result [X.Xs] ✓
             args_str = ""
             if tool_input:
                 # Truncate long values for display
@@ -353,31 +355,25 @@ def display_tool_call(message: str, console=None, tool_name: str = None, tool_in
                     args_parts.append(f"{k}={repr(v_str) if isinstance(v, str) else v_str}")
                 args_str = ", ".join(args_parts)
             
-            # Build the timeline entry
-            status_icon = "✓" if success else "✗"
-            time_str = f"[{elapsed_time:.1f}s]" if elapsed_time else ""
+            # Build the inline entry
+            status_icon = "[green]✓[/]" if success else "[red]✗[/]"
+            time_str = f"[dim][{elapsed_time:.1f}s][/]" if elapsed_time else ""
             
-            tool_display = f"▸ {tool_name}({args_str}) {time_str} {status_icon}"
+            # Base tool call line
+            tool_line = f"[bold #86A789]▸[/] [#B4D4FF]{tool_name}[/]({args_str})"
             
-            # Add output on next line with tree connector
+            # Add output inline with arrow if available
             if tool_output:
                 output_str = str(tool_output)
-                if len(output_str) > 100:
-                    output_str = output_str[:97] + "..."
-                tool_display += f"\n  └─ {output_str}"
+                if len(output_str) > 80:
+                    output_str = output_str[:77] + "..."
+                tool_line += f" [dim]→[/] [italic]{output_str}[/]"
             
-            console.print(Panel.fit(
-                Text(tool_display, style=f"bold {PRAISON_COLORS['tool_text']}"), 
-                title="Tool Activity", 
-                border_style=PRAISON_COLORS["tool"]
-            ))
+            tool_line += f" {time_str} {status_icon}"
+            console.print(tool_line)
         else:
-            # Legacy format with new colors
-            console.print(Panel.fit(
-                Text(message, style=f"bold {PRAISON_COLORS['tool_text']}"), 
-                title="Tool Activity", 
-                border_style=PRAISON_COLORS["tool"]
-            ))
+            # Legacy format - simple inline
+            console.print(f"[bold #86A789]▸[/] {message}")
 
 def display_error(message: str, console=None):
     if not message or not message.strip():

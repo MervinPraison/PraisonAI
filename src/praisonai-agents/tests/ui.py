@@ -4,7 +4,7 @@ import gradio as gr
 def search_airbnb(query):
     agent = Agent(
         instructions="You help book apartments on Airbnb.",
-        llm="gpt-5-nano",
+        llm="gpt-4o-mini",
         tools=MCP("npx -y @openbnb/mcp-server-airbnb --ignore-robots-txt")
     )
     result = agent.start(query)

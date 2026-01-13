@@ -17,7 +17,7 @@ def my_function():
 
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="gpt-5-nano"
+    llm="gpt-4o-mini"
 )
 
 with track_api_call("agent_request"):

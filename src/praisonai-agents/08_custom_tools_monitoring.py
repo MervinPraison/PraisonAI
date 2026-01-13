@@ -180,7 +180,7 @@ def run_agent_with_custom_tools():
         instructions="""You are a technical assistant with access to various tools.
         Use the appropriate tools to help with data processing, API calls, database queries,
         and file operations. Always explain what tools you're using and why.""",
-        llm="gpt-5-nano",
+        llm="gpt-4o-mini",
         tools=[process_data, call_external_api, query_database, file_operation]
     )
     

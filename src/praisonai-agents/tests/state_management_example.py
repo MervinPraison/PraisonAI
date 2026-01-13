@@ -140,7 +140,7 @@ project_manager = Agent(
     goal="Initialize and manage project state effectively",
     backstory="Experienced project manager who tracks all project details",
     tools=[initialize_project_state, add_feature_to_project, check_project_status],
-    llm="gpt-5-nano"
+    llm="gpt-4o-mini"
 )
 
 developer = Agent(
@@ -149,7 +149,7 @@ developer = Agent(
     goal="Implement features based on project state",
     backstory="Senior developer who implements features systematically",
     tools=[implement_next_feature, check_project_status],
-    llm="gpt-5-nano"
+    llm="gpt-4o-mini"
 )
 
 analyst = Agent(
@@ -158,7 +158,7 @@ analyst = Agent(
     goal="Analyze project state and provide insights",
     backstory="Data analyst who provides comprehensive project reports",
     tools=[check_project_status, retrieve_session_history],
-    llm="gpt-5-nano"
+    llm="gpt-4o-mini"
 )
 
 # Create tasks that utilize state
