@@ -449,8 +449,12 @@ class Agent:
             output = env_output
         
         # Use default output mode if not specified
+        # Track if user explicitly configured output (for respecting in start())
         if output is None:
             output = DEFAULT_OUTPUT_MODE
+            _has_explicit_output = False
+        else:
+            _has_explicit_output = True
         
         _output_config = resolve(
             value=output,
@@ -950,6 +954,7 @@ class Agent:
         self._memory_instance = None
         self._init_memory(memory, user_id)
         self.verbose = verbose
+        self._has_explicit_output_config = _has_explicit_output  # Track if user set output mode
         self.allow_delegation = allow_delegation
         self.step_callback = step_callback
         self.cache = cache
@@ -4577,24 +4582,29 @@ Write the complete compiled report:"""
         
         # ─────────────────────────────────────────────────────────────────────
         # Enable verbose output in TTY for beginner-friendly interactive use
-        # Priority: explicit output= kwarg > TTY auto-verbose > agent's default
+        # Priority: agent's explicit output config > start() override > TTY auto
         # ─────────────────────────────────────────────────────────────────────
         original_verbose = self.verbose
         original_markdown = self.markdown
         output_override = kwargs.pop('output', None)  # Pop to prevent passing to chat()
         
+        # Check if agent was configured with explicit output mode (not default)
+        # If so, respect it and don't auto-enable verbose for TTY
+        has_explicit_output = getattr(self, '_has_explicit_output_config', False)
+        
         try:
-            # If running in TTY and no explicit output override, enable verbose
-            if is_tty and output_override is None:
-                self.verbose = True
-                self.markdown = True
-            elif output_override:
+            # Apply output override from start() call if provided
+            if output_override:
                 # Apply explicit output preset for this call
                 from ..config.presets import OUTPUT_PRESETS
                 if output_override in OUTPUT_PRESETS:
                     preset = OUTPUT_PRESETS[output_override]
                     self.verbose = preset.get('verbose', False)
                     self.markdown = preset.get('markdown', False)
+            # Only auto-enable verbose for TTY if NO explicit output was configured
+            elif is_tty and not has_explicit_output:
+                self.verbose = True
+                self.markdown = True
             
             # Check if planning mode is enabled
             if self.planning:
