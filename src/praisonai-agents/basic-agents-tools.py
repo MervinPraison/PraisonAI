@@ -5,8 +5,8 @@ def get_weather(city: str) -> str:
 
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="gpt-4o-mini",
-    tools=[get_weather]
+    tools=[get_weather],
+    output="silent"
 )
 
 agent.start("What is the weather in Tokyo?")
