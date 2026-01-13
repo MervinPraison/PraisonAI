@@ -528,6 +528,16 @@ class OutputConfig:
     # JSON output mode - emit JSONL events for piping
     json_output: bool = False
     
+    # Simple output mode - just print response without panels
+    simple_output: bool = False
+    
+    # Show LLM parameters (for debug mode)
+    show_parameters: bool = False
+    
+    # Status trace mode - clean inline status updates
+    # Shows: [timestamp] Calling LLM..., Executing tool..., Response: ...
+    status_trace: bool = False
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -538,6 +548,9 @@ class OutputConfig:
             "reasoning_steps": self.reasoning_steps,
             "actions_trace": self.actions_trace,
             "json_output": self.json_output,
+            "simple_output": self.simple_output,
+            "show_parameters": self.show_parameters,
+            "status_trace": self.status_trace,
         }
 
 
