@@ -500,11 +500,13 @@ class Agent:
                 if not is_status_output_enabled():
                     output_format = "jsonl" if json_output else "text"
                     # simple_output=True means status preset (no timestamps)
+                    # metrics=True means debug preset (show token/cost info)
                     enable_status_output(
                         redact=True,
                         use_color=True,
                         format=output_format,
-                        show_timestamps=not simple_output
+                        show_timestamps=not simple_output,
+                        show_metrics=metrics
                     )
             except ImportError:
                 pass  # Status module not available
