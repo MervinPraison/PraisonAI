@@ -1,28 +1,27 @@
 """
-Status Output Mode for PraisonAI Agents.
+Actions Output Mode for PraisonAI Agents.
 
-Provides a clean, simple output mode that shows:
-1. LLM call status (calling, completed)
-2. Tool execution status (name, duration, result)
-3. Final response (no boxes, just text)
+Provides a filtered output mode that shows only:
+1. Agent lifecycle events (start/end)
+2. Tool calls (name, args, duration, status)
+3. Final agent output
 
-This is ideal for:
-- CLI users who want minimal but informative output
-- External apps that parse status updates
-- Logging and monitoring
+This module integrates with the existing display callback system
+and uses the existing redaction utilities.
 
 Usage:
     from praisonaiagents import Agent
     
     # Enable via preset
-    agent = Agent(instructions="...", output="status")
+    agent = Agent(instructions="...", output="actions")
     agent.start("Do something")
     
-    # Output:
-    # [13:45:02] Calling LLM (gpt-4o-mini)...
-    # [13:45:03] Executing tool: get_weather
-    # [13:45:03] Tool completed (0.1s)
-    # Response: The weather in Paris is sunny.
+    # Or via OutputConfig
+    from praisonaiagents.config import OutputConfig
+    agent = Agent(
+        instructions="...",
+        output=OutputConfig(actions_trace=True)
+    )
 """
 
 import sys
@@ -31,23 +30,43 @@ import threading
 from datetime import datetime
 from typing import Any, Dict, Optional, TextIO
 
-# Global state for status mode
-_status_mode_enabled = False
-_status_sink: Optional['StatusSink'] = None
+# Global state for actions mode
+_status_output_enabled = False
+_status_output: Optional['StatusOutput'] = None
+_agent_start_times: Dict[str, float] = {}
 _output_lock = threading.Lock()  # Multi-agent safe output lock
 
 
-def _format_timestamp() -> str:
-    """Format current time as HH:MM:SS."""
-    return datetime.now().strftime("%H:%M:%S")
+def _format_timestamp(ts: float) -> str:
+    """Format timestamp as HH:MM:SS.mmm."""
+    dt = datetime.fromtimestamp(ts)
+    return dt.strftime("%H:%M:%S.") + f"{int(dt.microsecond / 1000):03d}"
 
 
-class StatusSink:
+def _format_duration(duration_ms: Optional[float]) -> str:
+    """Format duration in human-readable form."""
+    if duration_ms is None:
+        return ""
+    if duration_ms < 1000:
+        return f"{duration_ms:.0f}ms"
+    return f"{duration_ms / 1000:.1f}s"
+
+
+def _truncate(text: str, max_len: int = 50) -> str:
+    """Truncate text with ellipsis."""
+    if not text:
+        return ""
+    if len(text) <= max_len:
+        return text
+    return text[:max_len - 3] + "..."
+
+
+class StatusOutput:
     """
-    Sink for clean status output.
+    Sink for actions-only output.
     
-    Formats and outputs status events in a simple, readable format.
-    No boxes, no panels, just timestamped status lines.
+    Formats and outputs action events in a clean, readable format.
+    Supports both human-readable text and JSONL output.
     
     Thread-safe for multi-agent concurrent execution.
     """
@@ -55,18 +74,19 @@ class StatusSink:
     def __init__(
         self,
         file: TextIO = None,
+        format: str = "text",  # "text" or "jsonl"
+        redact: bool = True,
         use_color: bool = True,
-        show_timestamps: bool = True,
-        use_markdown: bool = True,
+        show_timestamps: bool = True,  # NEW: control timestamp display
     ):
-        self._file = file or sys.stderr
+        self._file = file or sys.stderr  # Use stderr to not interfere with agent output
+        self._format = format
+        self._redact = redact
         self._use_color = use_color
         self._show_timestamps = show_timestamps
-        self._use_markdown = use_markdown
         self._console = None
-        self._lock = threading.Lock()
         self._tool_start_times: Dict[str, float] = {}
-        self._llm_start_time: Optional[float] = None
+        self._lock = threading.Lock()  # Per-sink lock for thread safety
     
     def _get_console(self):
         """Get Rich console for colored output."""
@@ -78,11 +98,163 @@ class StatusSink:
                 self._console = None
         return self._console
     
-    def _emit(self, message: str, style: str = None) -> None:
-        """Emit a status line. Thread-safe."""
-        ts_str = f"[{_format_timestamp()}] " if self._show_timestamps else ""
+    def _redact_args(self, args: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Redact sensitive data from args."""
+        if args is None or not self._redact:
+            return args
+        try:
+            from ..trace.redact import redact_dict
+            return redact_dict(args)
+        except ImportError:
+            return args
+    
+    def _format_args(self, args: Optional[Dict[str, Any]]) -> str:
+        """Format tool arguments for display."""
+        if not args:
+            return ""
         
-        with self._lock:
+        redacted = self._redact_args(args)
+        parts = []
+        for k, v in (redacted or {}).items():
+            if isinstance(v, str):
+                v_str = f'"{_truncate(v, 30)}"'
+            else:
+                v_str = _truncate(str(v), 30)
+            parts.append(f"{k}={v_str}")
+        
+        return _truncate(", ".join(parts), 80)
+    
+    def agent_start(self, agent_name: str) -> None:
+        """Record agent start."""
+        ts = time.time()
+        _agent_start_times[agent_name] = ts
+        
+        if self._format == "jsonl":
+            self._emit_jsonl("agent_start", agent_name=agent_name, timestamp=ts)
+        else:
+            self._emit_text(f"▶ Agent:{agent_name} started", ts, "green")
+    
+    def agent_end(self, agent_name: str, duration_ms: Optional[float] = None) -> None:
+        """Record agent end."""
+        ts = time.time()
+        
+        # Calculate duration if not provided
+        if duration_ms is None and agent_name in _agent_start_times:
+            start_ts = _agent_start_times.pop(agent_name, None)
+            if start_ts:
+                duration_ms = (ts - start_ts) * 1000
+        
+        duration_str = f" [{_format_duration(duration_ms)}]" if duration_ms else ""
+        
+        if self._format == "jsonl":
+            self._emit_jsonl("agent_end", agent_name=agent_name, timestamp=ts, duration_ms=duration_ms)
+        else:
+            self._emit_text(f"◀ Agent:{agent_name} completed{duration_str}", ts, "green")
+    
+    def llm_start(self, model: str = None, agent_name: Optional[str] = None) -> None:
+        """Record LLM call start."""
+        ts = time.time()
+        self._llm_start_time = ts
+        
+        model_str = f" ({model})" if model else ""
+        
+        if self._format == "jsonl":
+            self._emit_jsonl("llm_start", model=model, agent_name=agent_name, timestamp=ts)
+        else:
+            prefix = f"[{agent_name}] " if agent_name else ""
+            self._emit_text(f"{prefix}▸ Calling LLM{model_str}...", ts, "yellow")
+    
+    def llm_end(self, duration_ms: Optional[float] = None, agent_name: Optional[str] = None) -> None:
+        """Record LLM call end."""
+        ts = time.time()
+        
+        # Calculate duration if not provided
+        if duration_ms is None and hasattr(self, '_llm_start_time'):
+            start_ts = self._llm_start_time
+            if start_ts:
+                duration_ms = (ts - start_ts) * 1000
+        
+        duration_str = f" [{_format_duration(duration_ms)}]" if duration_ms else ""
+        
+        if self._format == "jsonl":
+            self._emit_jsonl("llm_end", agent_name=agent_name, timestamp=ts, duration_ms=duration_ms)
+        else:
+            prefix = f"[{agent_name}] " if agent_name else ""
+            self._emit_text(f"{prefix}✓ LLM responded{duration_str}", ts, "green")
+    
+    def tool_start(self, tool_name: str, tool_args: Optional[Dict[str, Any]] = None, agent_name: Optional[str] = None) -> None:
+        """Record tool start."""
+        ts = time.time()
+        self._tool_start_times[tool_name] = ts
+        
+        args_str = self._format_args(tool_args)
+        
+        if self._format == "jsonl":
+            self._emit_jsonl("tool_start", tool_name=tool_name, tool_args=self._redact_args(tool_args), agent_name=agent_name, timestamp=ts)
+        else:
+            prefix = f"[{agent_name}] " if agent_name else ""
+            self._emit_text(f"{prefix}│ → {tool_name}({args_str})", ts, "cyan")
+    
+    def tool_end(
+        self,
+        tool_name: str,
+        duration_ms: Optional[float] = None,
+        status: str = "ok",
+        result_summary: Optional[str] = None,
+        agent_name: Optional[str] = None,
+        error_message: Optional[str] = None,
+    ) -> None:
+        """Record tool end."""
+        ts = time.time()
+        
+        # Calculate duration if not provided
+        if duration_ms is None and tool_name in self._tool_start_times:
+            start_ts = self._tool_start_times.pop(tool_name, None)
+            if start_ts:
+                duration_ms = (ts - start_ts) * 1000
+        
+        duration_str = f" [{_format_duration(duration_ms)}]" if duration_ms else ""
+        status_icon = "✓" if status == "ok" else "✗"
+        
+        if self._format == "jsonl":
+            self._emit_jsonl(
+                "tool_end",
+                tool_name=tool_name,
+                duration_ms=duration_ms,
+                status=status,
+                result_summary=_truncate(result_summary, 200) if result_summary else None,
+                agent_name=agent_name,
+                error_message=error_message,
+                timestamp=ts,
+            )
+        else:
+            prefix = f"[{agent_name}] " if agent_name else ""
+            color = "green" if status == "ok" else "red"
+            self._emit_text(f"{prefix}│ ← {tool_name}{duration_str} {status_icon}", ts, color)
+            if error_message:
+                self._emit_text(f"{prefix}│   Error: {_truncate(error_message, 100)}", ts, "red")
+    
+    def output(self, content: str, agent_name: Optional[str] = None) -> None:
+        """Record final output."""
+        ts = time.time()
+        
+        if self._format == "jsonl":
+            self._emit_jsonl("output", content=_truncate(content, 500), agent_name=agent_name, timestamp=ts)
+        else:
+            separator = "─" * 50
+            self._emit_text(separator, ts, "dim", show_timestamp=False)
+            self._emit_text("Final Output:", ts, "bold", show_timestamp=False)
+            # Print actual content without truncation for final output
+            with self._lock:  # Thread-safe output
+                print(content, file=self._file)
+    
+    def _emit_text(self, message: str, ts: float, style: str = None, show_timestamp: bool = True) -> None:
+        """Emit a text line. Thread-safe for multi-agent execution."""
+        # Respect both instance-level and per-call timestamp settings
+        should_show_ts = show_timestamp and self._show_timestamps
+        ts_str = f"[{_format_timestamp(ts)}] " if should_show_ts else ""
+        
+        with self._lock:  # Thread-safe output
             console = self._get_console()
             if console and self._use_color:
                 if style:
@@ -92,209 +264,114 @@ class StatusSink:
             else:
                 print(f"{ts_str}{message}", file=self._file)
     
-    def llm_start(self, model: str = None) -> None:
-        """Record LLM call start."""
-        self._llm_start_time = time.time()
-        model_str = f" ({model})" if model else ""
-        self._emit(f"Calling LLM{model_str}...", "cyan")
-    
-    def llm_end(self, duration_ms: float = None) -> None:
-        """Record LLM call end."""
-        if duration_ms is None and self._llm_start_time:
-            duration_ms = (time.time() - self._llm_start_time) * 1000
-        duration_str = f" ({duration_ms/1000:.1f}s)" if duration_ms else ""
-        self._emit(f"LLM responded{duration_str}", "green")
-        self._llm_start_time = None
-    
-    def tool_start(self, tool_name: str, tool_args: Dict[str, Any] = None) -> None:
-        """Record tool execution start."""
-        self._tool_start_times[tool_name] = time.time()
-        
-        # Format args compactly
-        args_str = ""
-        if tool_args:
-            parts = []
-            for k, v in tool_args.items():
-                v_str = str(v)
-                if len(v_str) > 30:
-                    v_str = v_str[:27] + "..."
-                parts.append(f"{k}={repr(v_str) if isinstance(v, str) else v_str}")
-            args_str = f"({', '.join(parts)})"
-        
-        self._emit(f"▸ {tool_name}{args_str}", "blue")
-    
-    def tool_end(
-        self,
-        tool_name: str,
-        duration_ms: float = None,
-        result: str = None,
-        success: bool = True,
-    ) -> None:
-        """Record tool execution end."""
-        # Calculate duration if not provided
-        if duration_ms is None and tool_name in self._tool_start_times:
-            start_ts = self._tool_start_times.pop(tool_name, None)
-            if start_ts:
-                duration_ms = (time.time() - start_ts) * 1000
-        
-        duration_str = f" [{duration_ms/1000:.1f}s]" if duration_ms else ""
-        status_icon = "✓" if success else "✗"
-        
-        # Show result inline if short
-        result_str = ""
-        if result:
-            result_preview = str(result)
-            if len(result_preview) > 50:
-                result_preview = result_preview[:47] + "..."
-            result_str = f" → {result_preview}"
-        
-        color = "green" if success else "red"
-        self._emit(f"  └─ {tool_name}{result_str}{duration_str} {status_icon}", color)
-    
-    def response(self, content: str, agent_name: str = None) -> None:
-        """Output final response with optional Markdown rendering."""
-        with self._lock:
-            console = self._get_console()
-            
-            # Separator line
-            if console and self._use_color:
-                console.print("")
-                console.print("[bold]Response:[/bold]")
-                
-                # Render as Markdown if enabled
-                if self._use_markdown:
-                    try:
-                        from rich.markdown import Markdown
-                        console.print(Markdown(content))
-                    except ImportError:
-                        # Fallback if markdown-it not available
-                        console.print(content)
-                else:
-                    console.print(content)
-            else:
-                print("", file=self._file)
-                print("Response:", file=self._file)
-                print(content, file=self._file)
-    
-    def error(self, message: str) -> None:
-        """Output error message."""
-        self._emit(f"✗ Error: {message}", "red")
+    def _emit_jsonl(self, event_type: str, **kwargs) -> None:
+        """Emit a JSONL line. Thread-safe for multi-agent execution."""
+        import json
+        data = {"event": event_type, **{k: v for k, v in kwargs.items() if v is not None}}
+        with self._lock:  # Thread-safe output
+            print(json.dumps(data, default=str), file=self._file)
 
 
-def enable_status_mode(
+def enable_status_output(
     file: TextIO = None,
+    format: str = "text",
+    redact: bool = True,
     use_color: bool = True,
     show_timestamps: bool = True,
-    use_markdown: bool = True,
-) -> StatusSink:
+) -> StatusOutput:
     """
-    Enable status output mode globally.
+    Enable actions output mode globally.
     
     This registers callbacks with the display system to capture
-    tool calls and output clean status updates.
+    tool calls and agent lifecycle events.
     
     Args:
         file: Output file (default: stderr)
+        format: Output format ("text" or "jsonl")
+        redact: Whether to redact sensitive data (default: True)
         use_color: Whether to use colored output (default: True)
         show_timestamps: Whether to show timestamps (default: True)
-        use_markdown: Whether to render response as Markdown (default: True)
     
     Returns:
-        StatusSink instance
+        StatusOutput instance for programmatic access
     """
-    global _status_mode_enabled, _status_sink
+    global _status_output_enabled, _status_output
     
-    _status_sink = StatusSink(
+    _status_output = StatusOutput(
         file=file,
+        format=format,
+        redact=redact,
         use_color=use_color,
         show_timestamps=show_timestamps,
-        use_markdown=use_markdown,
     )
-    _status_mode_enabled = True
+    _status_output_enabled = True
     
     # Register callbacks with the display system
     from ..main import register_display_callback
     
-    def on_tool_call(
-        message: str = None,
-        tool_name: str = None,
-        tool_input: dict = None,
-        tool_output: str = None,
-        **kwargs
-    ):
+    def on_tool_call(message: str = None, tool_name: str = None, tool_input: dict = None, tool_output: str = None, **kwargs):
         """Callback for tool calls."""
-        if not _status_mode_enabled or _status_sink is None:
+        if not _status_output_enabled or _status_output is None:
             return
         
-        # Handle structured tool call (when tool_name is set)
-        if tool_name and tool_input is not None:
-            _status_sink.tool_start(tool_name, tool_input)
-            return
-        
-        # Handle legacy message format
-        if message:
-            # Check for "Function X returned: Y" pattern
-            if "returned:" in message.lower():
-                import re
-                match = re.match(r'Function (\w+) returned: (.+)', message, re.IGNORECASE)
-                if match:
-                    func_name = match.group(1)
-                    result = match.group(2).strip('"')
-                    _status_sink.tool_end(func_name, result=result, success=True)
-            # "Calling function" is already shown via tool_start, skip duplicate
+        if tool_name:
+            # Emit tool_start when we see a tool call
+            _status_output.tool_start(tool_name, tool_input)
+            # Emit tool_end immediately since we have the output
+            if tool_output is not None:
+                _status_output.tool_end(
+                    tool_name,
+                    status="ok",
+                    result_summary=str(tool_output)[:200] if tool_output else None,
+                )
     
-    def on_interaction(
-        message: str = None,
-        response: str = None,
-        agent_name: str = None,
-        generation_time: float = None,
-        **kwargs
-    ):
+    def on_interaction(message: str = None, response: str = None, agent_name: str = None, generation_time: float = None, **kwargs):
         """Callback for agent interactions (final output)."""
-        if not _status_mode_enabled or _status_sink is None:
+        if not _status_output_enabled or _status_output is None:
             return
         
-        # Output final response
+        # Only emit output for final responses
         if response:
-            _status_sink.response(response, agent_name)
+            _status_output.output(response, agent_name)
     
     def on_error(message: str = None, **kwargs):
         """Callback for errors."""
-        if not _status_mode_enabled or _status_sink is None:
+        if not _status_output_enabled or _status_output is None:
             return
         
         if message:
-            _status_sink.error(message)
+            ts = time.time()
+            _status_output._emit_text(f"✗ Error: {message}", ts, "red")
     
     # Register the callbacks
     register_display_callback('tool_call', on_tool_call)
     register_display_callback('interaction', on_interaction)
     register_display_callback('error', on_error)
     
-    return _status_sink
+    return _status_output
 
 
-def disable_status_mode() -> None:
-    """Disable status output mode."""
-    global _status_mode_enabled, _status_sink
-    _status_mode_enabled = False
-    _status_sink = None
+def disable_status_output() -> None:
+    """Disable actions output mode."""
+    global _status_output_enabled, _status_output
+    _status_output_enabled = False
+    _status_output = None
 
 
-def is_status_mode_enabled() -> bool:
-    """Check if status mode is enabled."""
-    return _status_mode_enabled
+def is_status_output_enabled() -> bool:
+    """Check if actions mode is enabled."""
+    return _status_output_enabled
 
 
-def get_status_sink() -> Optional[StatusSink]:
-    """Get the current status sink."""
-    return _status_sink
+def get_status_output() -> Optional[StatusOutput]:
+    """Get the current actions sink."""
+    return _status_output
 
 
 __all__ = [
-    "StatusSink",
-    "enable_status_mode",
-    "disable_status_mode",
-    "is_status_mode_enabled",
-    "get_status_sink",
+    "StatusOutput",
+    "enable_status_output",
+    "disable_status_output",
+    "is_status_output_enabled",
+    "get_status_output",
 ]

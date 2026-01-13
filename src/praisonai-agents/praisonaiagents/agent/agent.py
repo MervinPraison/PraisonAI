@@ -483,31 +483,31 @@ class Agent:
             status_trace = False
             simple_output = False
         
-        # Enable status output mode if configured (takes priority over actions)
-        # This provides clean inline status without boxes
+        # Enable trace output mode if configured (takes priority)
+        # This provides timestamped inline status with duration
         if status_trace:
             try:
-                from ..output.status import enable_status_mode, is_status_mode_enabled
-                if not is_status_mode_enabled():
-                    enable_status_mode(use_color=True, show_timestamps=True)
+                from ..output.trace import enable_trace_output, is_trace_output_enabled
+                if not is_trace_output_enabled():
+                    enable_trace_output(use_color=True, show_timestamps=True)
             except ImportError:
-                pass  # Status module not available
-        # Enable actions output mode if configured (and status not enabled)
+                pass  # Trace module not available
+        # Enable status output mode if configured (simple progress, no timestamps)
         # This registers callbacks to capture tool calls and final output
         elif actions_trace:
             try:
-                from ..output.actions import enable_actions_mode, is_actions_mode_enabled
-                if not is_actions_mode_enabled():
+                from ..output.status import enable_status_output, is_status_output_enabled
+                if not is_status_output_enabled():
                     output_format = "jsonl" if json_output else "text"
                     # simple_output=True means status preset (no timestamps)
-                    enable_actions_mode(
+                    enable_status_output(
                         redact=True,
                         use_color=True,
                         format=output_format,
                         show_timestamps=not simple_output
                     )
             except ImportError:
-                pass  # Actions module not available
+                pass  # Status module not available
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve EXECUTION param using unified resolver
