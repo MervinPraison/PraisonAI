@@ -1520,6 +1520,9 @@ Now provide your final answer using this result."""
             reflection_count = 0
             callback_executed = False  # Track if callback has been executed for this interaction
             interaction_displayed = False  # Track if interaction has been displayed
+            
+            # Trigger LLM start callback for status/trace output (once per get_response call)
+            execute_sync_callback('llm_start', model=self.model, agent_name=agent_name)
 
             # Display initial instruction once
             if verbose:

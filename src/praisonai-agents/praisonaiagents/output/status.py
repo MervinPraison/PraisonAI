@@ -343,10 +343,18 @@ def enable_status_output(
             ts = time.time()
             _status_output._emit_text(f"✗ Error: {message}", ts, "red")
     
+    def on_llm_start(model: str = None, agent_name: str = None, **kwargs):
+        """Callback for LLM calls."""
+        if not _status_output_enabled or _status_output is None:
+            return
+        
+        _status_output.llm_start(model=model, agent_name=agent_name)
+    
     # Register the callbacks
     register_display_callback('tool_call', on_tool_call)
     register_display_callback('interaction', on_interaction)
     register_display_callback('error', on_error)
+    register_display_callback('llm_start', on_llm_start)
     
     return _status_output
 
