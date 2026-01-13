@@ -18,7 +18,7 @@ def main():
         backstory="You are a knowledgeable assistant who explains scientific concepts clearly.",
         instructions="You are a helpful assistant",
         verbose=True,
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     # Create a task to answer the question

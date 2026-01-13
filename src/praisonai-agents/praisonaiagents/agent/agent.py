@@ -775,21 +775,15 @@ class Agent:
 
         # If instructions are provided, use them to set role, goal, and backstory
         if instructions:
-            # Auto-generate descriptive name from instructions if not provided
+            # Only use explicitly provided name, don't auto-generate from instructions
+            # Auto-generation was producing confusing names like "You Are Agent" from
+            # instructions like "You are a helpful assistant"
             if name:
                 self.name = name
             else:
-                # Generate name from first 2 meaningful words of instructions
-                # "Research about AI" → "Research Agent"
-                # "Summarise research agent's findings" → "Summarise Agent"
-                words = instructions.split()
-                # Filter out common stop words
-                stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'about'}
-                meaningful = [w for w in words if w.lower() not in stop_words][:2]
-                if meaningful:
-                    self.name = " ".join(meaningful).title() + " Agent"
-                else:
-                    self.name = words[0].title() + " Agent" if words else "Agent"
+                # Don't auto-generate - None signals "no explicit name provided"
+                # Display logic will skip Agent Info panel when name is None
+                self.name = None
             self.role = role or "Assistant"
             self.goal = goal or instructions
             self.backstory = backstory or instructions

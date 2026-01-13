@@ -15,14 +15,14 @@ def test_streaming_behavior():
     test_cases = [
         {
             "name": "OpenAI - Stream True",
-            "llm": "gpt-5-nano",
+            "llm": "gpt-4o-mini",
             "stream": True,
             "verbose": True,
             "expected": "Should show real-time streaming"
         },
         {
             "name": "OpenAI - Stream False",
-            "llm": "gpt-5-nano", 
+            "llm": "gpt-4o-mini", 
             "stream": False,
             "verbose": True,
             "expected": "Should show 'Generating...' animation during API call"

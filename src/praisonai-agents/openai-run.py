@@ -3,7 +3,7 @@ import asyncio
 
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="gpt-5-nano"
+    llm="gpt-4o-mini"
 )
 agent.run("Why sea is Blue?")
 

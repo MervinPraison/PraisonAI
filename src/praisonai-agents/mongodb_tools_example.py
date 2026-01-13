@@ -38,7 +38,7 @@ def main():
         for data management and retrieval.""",
         tools=[mongodb_tools],
         verbose=True,
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     # Create a Data Analysis Agent
@@ -51,7 +51,7 @@ def main():
         identify patterns and trends in the stored information.""",
         tools=[mongodb_tools],
         verbose=True,
-        llm="gpt-5-nano"
+        llm="gpt-4o-mini"
     )
     
     # Create tasks for MongoDB operations

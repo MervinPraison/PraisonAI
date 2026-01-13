@@ -106,7 +106,7 @@ def test_provider_detection():
     print("✅ Ollama prefix detection works")
     
     # Test non-Ollama provider
-    openai_llm = LLM(model="gpt-5-nano")
+    openai_llm = LLM(model="gpt-4o-mini")
     assert not openai_llm._is_ollama_provider(), "Should not detect OpenAI as Ollama"
     print("✅ Non-Ollama provider detection works")
     

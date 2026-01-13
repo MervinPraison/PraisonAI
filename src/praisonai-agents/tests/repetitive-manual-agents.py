@@ -82,7 +82,7 @@ identify_agent = Agent(
     role="Pending Task Identifier",
     goal="Identify the next pending task",
     tools=[get_next_task],
-    llm="gpt-5-nano"
+    llm="gpt-4o-mini"
 )
 
 # Create the repetitive agent
@@ -90,7 +90,7 @@ repetitive_agent = Agent(
     name="TaskProcessor",
     role="Task Processing Specialist",
     goal="Complete the task response",
-    llm="gpt-5-nano"
+    llm="gpt-4o-mini"
 )
 
 update_status_agent = Agent(
@@ -98,7 +98,7 @@ update_status_agent = Agent(
     role="Status Updater",
     goal="Update the status of the task in CSV",
     tools=[update_task_status],
-    llm="gpt-5-nano"
+    llm="gpt-4o-mini"
 )
 
 # Define the repetitive task

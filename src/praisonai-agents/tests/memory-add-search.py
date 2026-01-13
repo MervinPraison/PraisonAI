@@ -39,7 +39,7 @@ class MemoryManager:
             "llm": {
                 "provider": "openai",
                 "config": {
-                    "model": "gpt-5-nano",
+                    "model": "gpt-4o-mini",
                     "temperature": 0,
                     "max_tokens": 1000
                 }

@@ -21,7 +21,7 @@ agent = Agent(
     role="Tester",
     goal="Test telemetry",
     backstory="I test things",
-    llm="gpt-5-nano"
+    llm="gpt-4o-mini"
 )
 
 task = Task(
@@ -60,7 +60,7 @@ new_agent = Agent(
     role="Tester",
     goal="Test auto telemetry",
     backstory="I test auto-instrumentation",
-    llm="gpt-5-nano"
+    llm="gpt-4o-mini"
 )
 
 print(f"  New agent instrumented: {hasattr(new_agent.execute, '__wrapped__')}")
