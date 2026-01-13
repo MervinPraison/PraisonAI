@@ -1205,6 +1205,35 @@ class OpenAIClient:
             if not final_response:
                 return None
             
+            # Trigger llm_end callback with metrics for debug output
+            llm_end_time = time.perf_counter()
+            llm_latency_ms = (llm_end_time - start_time) * 1000
+            
+            # Extract usage info if available
+            usage = getattr(final_response, 'usage', None)
+            tokens_in = getattr(usage, 'prompt_tokens', 0) if usage else 0
+            tokens_out = getattr(usage, 'completion_tokens', 0) if usage else 0
+            
+            # Calculate cost if litellm available
+            cost = None
+            try:
+                import litellm
+                if hasattr(final_response, 'model_dump'):
+                    cost = litellm.completion_cost(completion_response=final_response.model_dump())
+                elif isinstance(final_response, dict):
+                    cost = litellm.completion_cost(completion_response=final_response)
+            except Exception:
+                pass  # Cost calculation is optional
+            
+            execute_sync_callback(
+                'llm_end',
+                model=model,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                cost=cost,
+                latency_ms=llm_latency_ms
+            )
+            
             # Check for tool calls
             tool_calls = getattr(final_response.choices[0].message, 'tool_calls', None)
             

@@ -79,12 +79,14 @@ class StatusOutput:
         redact: bool = True,
         use_color: bool = True,
         show_timestamps: bool = True,  # NEW: control timestamp display
+        show_metrics: bool = False,  # Enable metrics display for debug mode
     ):
         self._file = file or sys.stderr  # Use stderr to not interfere with agent output
         self._format = format
         self._redact = redact
         self._use_color = use_color
         self._show_timestamps = show_timestamps
+        self._show_metrics = show_metrics
         self._console = None
         self._tool_start_times: Dict[str, float] = {}
         self._lock = threading.Lock()  # Per-sink lock for thread safety
@@ -170,23 +172,55 @@ class StatusOutput:
         else:
             self._emit_text(f"▸ AI → {context}...", ts, "yellow")
     
-    def llm_end(self, duration_ms: Optional[float] = None, agent_name: Optional[str] = None) -> None:
-        """Record LLM call end."""
+    def llm_end(
+        self, 
+        duration_ms: Optional[float] = None, 
+        agent_name: Optional[str] = None,
+        model: Optional[str] = None,
+        tokens_in: int = 0,
+        tokens_out: int = 0,
+        cost: Optional[float] = None,
+        latency_ms: Optional[float] = None,
+    ) -> None:
+        """Record LLM call end with optional metrics for debug mode."""
         ts = time.time()
         
-        # Calculate duration if not provided
-        if duration_ms is None and hasattr(self, '_llm_start_time'):
+        # Use latency_ms if provided, otherwise calculate from start time
+        if latency_ms is not None:
+            duration_ms = latency_ms
+        elif duration_ms is None and hasattr(self, '_llm_start_time'):
             start_ts = self._llm_start_time
             if start_ts:
                 duration_ms = (ts - start_ts) * 1000
         
-        duration_str = f" [{_format_duration(duration_ms)}]" if duration_ms else ""
+        # Track session totals for summary
+        if not hasattr(self, '_session_tokens_in'):
+            self._session_tokens_in = 0
+            self._session_tokens_out = 0
+            self._session_cost = 0.0
+            self._session_llm_calls = 0
+        
+        self._session_tokens_in += tokens_in
+        self._session_tokens_out += tokens_out
+        if cost:
+            self._session_cost += cost
+        self._session_llm_calls += 1
+        
+        # Only show metrics line in debug mode (when show_metrics is enabled)
+        show_metrics = getattr(self, '_show_metrics', False)
         
         if self._format == "jsonl":
-            self._emit_jsonl("llm_end", agent_name=agent_name, timestamp=ts, duration_ms=duration_ms)
-        else:
-            prefix = f"[{agent_name}] " if agent_name else ""
-            self._emit_text(f"{prefix}✓ LLM responded{duration_str}", ts, "green")
+            self._emit_jsonl("llm_end", agent_name=agent_name, timestamp=ts, 
+                           duration_ms=duration_ms, model=model, 
+                           tokens_in=tokens_in, tokens_out=tokens_out, cost=cost)
+        elif show_metrics and (tokens_in > 0 or tokens_out > 0):
+            # Debug mode: show metrics line
+            duration_str = f" [{_format_duration(duration_ms)}]" if duration_ms else ""
+            model_str = model.split('/')[-1] if model else "?"  # Short model name
+            cost_str = f" (~${cost:.4f})" if cost else ""
+            
+            metrics_line = f"  │ 📊 {model_str}: {tokens_in}→{tokens_out} tokens{cost_str}{duration_str}"
+            self._emit_text(metrics_line, ts, "dim", show_timestamp=False)
     
     def tool_start(self, tool_name: str, tool_args: Optional[Dict[str, Any]] = None, agent_name: Optional[str] = None) -> None:
         """Record tool start - stores info for inline display with result."""
@@ -285,6 +319,7 @@ def enable_status_output(
     redact: bool = True,
     use_color: bool = True,
     show_timestamps: bool = True,
+    show_metrics: bool = False,  # Enable metrics for debug mode
 ) -> StatusOutput:
     """
     Enable actions output mode globally.
@@ -298,6 +333,7 @@ def enable_status_output(
         redact: Whether to redact sensitive data (default: True)
         use_color: Whether to use colored output (default: True)
         show_timestamps: Whether to show timestamps (default: True)
+        show_metrics: Whether to show token/cost metrics (default: False)
     
     Returns:
         StatusOutput instance for programmatic access
@@ -313,6 +349,7 @@ def enable_status_output(
         redact=redact,
         use_color=use_color,
         show_timestamps=show_timestamps,
+        show_metrics=show_metrics,
     )
     _status_output_enabled = True
     
@@ -360,11 +397,19 @@ def enable_status_output(
         
         _status_output.llm_start(model=model, agent_name=agent_name)
     
+    def on_llm_end(model: str = None, tokens_in: int = 0, tokens_out: int = 0, cost: float = None, latency_ms: float = None, **kwargs):
+        """Callback for LLM call completion with metrics."""
+        if not _status_output_enabled or _status_output is None:
+            return
+        
+        _status_output.llm_end(model=model, tokens_in=tokens_in, tokens_out=tokens_out, cost=cost, latency_ms=latency_ms)
+    
     # Register the callbacks
     register_display_callback('tool_call', on_tool_call)
     register_display_callback('interaction', on_interaction)
     register_display_callback('error', on_error)
     register_display_callback('llm_start', on_llm_start)
+    register_display_callback('llm_end', on_llm_end)
     
     return _status_output
 

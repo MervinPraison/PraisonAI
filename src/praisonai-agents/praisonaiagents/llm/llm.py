@@ -1574,6 +1574,39 @@ Now provide your final answer using this result."""
                         if self.metrics:
                             self._track_token_usage(final_response, self.model)
                         
+                        # Trigger llm_end callback with metrics for debug output
+                        llm_latency_ms = (time.time() - current_time) * 1000
+                        
+                        # Extract usage - handle both dict and ModelResponse object
+                        tokens_in = 0
+                        tokens_out = 0
+                        if isinstance(final_response, dict):
+                            usage = final_response.get("usage", {})
+                            tokens_in = usage.get("prompt_tokens", 0)
+                            tokens_out = usage.get("completion_tokens", 0)
+                        else:
+                            # ModelResponse object
+                            usage = getattr(final_response, 'usage', None)
+                            if usage:
+                                tokens_in = getattr(usage, 'prompt_tokens', 0) or 0
+                                tokens_out = getattr(usage, 'completion_tokens', 0) or 0
+                        
+                        # Calculate cost if available
+                        llm_cost = None
+                        try:
+                            llm_cost = litellm.completion_cost(completion_response=final_response)
+                        except Exception:
+                            pass
+                        
+                        execute_sync_callback(
+                            'llm_end',
+                            model=self.model,
+                            tokens_in=tokens_in,
+                            tokens_out=tokens_out,
+                            cost=llm_cost,
+                            latency_ms=llm_latency_ms
+                        )
+                        
                         # Execute callbacks and display based on verbose setting
                         generation_time_val = time.time() - current_time
                         response_content = f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}" if reasoning_content else response_text

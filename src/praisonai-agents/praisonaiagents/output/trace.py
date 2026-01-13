@@ -98,12 +98,32 @@ class TraceOutput:
         model_str = f" ({model})" if model else ""
         self._emit(f"Calling LLM{model_str}...", "cyan")
     
-    def llm_end(self, duration_ms: float = None) -> None:
-        """Record LLM call end."""
-        if duration_ms is None and self._llm_start_time:
+    def llm_end(
+        self, 
+        duration_ms: float = None,
+        model: str = None,
+        tokens_in: int = 0,
+        tokens_out: int = 0,
+        cost: float = None,
+    ) -> None:
+        """Record LLM call end with optional metrics."""
+        # If duration_ms was passed and is positive, use it directly
+        # Otherwise calculate from internal tracking
+        if duration_ms is not None and duration_ms > 0:
+            pass  # Use the passed value
+        elif self._llm_start_time:
             duration_ms = (time.time() - self._llm_start_time) * 1000
-        duration_str = f" ({duration_ms/1000:.1f}s)" if duration_ms else ""
-        self._emit(f"LLM responded{duration_str}", "green")
+        
+        duration_str = f" [{duration_ms/1000:.1f}s]" if duration_ms and duration_ms > 0 else ""
+        
+        # Show metrics if tokens are available
+        if tokens_in > 0 or tokens_out > 0:
+            model_str = model.split('/')[-1] if model else "?"
+            cost_str = f" (~${cost:.4f})" if cost and cost > 0 else ""
+            metrics_line = f"  │ 📊 {model_str}: {tokens_in}→{tokens_out} tokens{cost_str}{duration_str}"
+            self._emit(metrics_line, "dim")
+        else:
+            self._emit(f"LLM responded{duration_str}", "green")
         self._llm_start_time = None
     
     def tool_start(self, tool_name: str, tool_args: Dict[str, Any] = None) -> None:
@@ -266,10 +286,32 @@ def enable_trace_output(
         if message:
             _trace_output.error(message)
     
+    def on_llm_start(model: str = None, agent_name: str = None, **kwargs):
+        """Callback for LLM call start."""
+        if not _trace_output_enabled or _trace_output is None:
+            return
+        
+        _trace_output.llm_start(model=model)
+    
+    def on_llm_end(model: str = None, tokens_in: int = 0, tokens_out: int = 0, cost: float = None, latency_ms: float = None, **kwargs):
+        """Callback for LLM call completion with optional metrics."""
+        if not _trace_output_enabled or _trace_output is None:
+            return
+        
+        _trace_output.llm_end(
+            duration_ms=latency_ms, 
+            model=model, 
+            tokens_in=tokens_in, 
+            tokens_out=tokens_out, 
+            cost=cost
+        )
+    
     # Register the callbacks
     register_display_callback('tool_call', on_tool_call)
     register_display_callback('interaction', on_interaction)
     register_display_callback('error', on_error)
+    register_display_callback('llm_start', on_llm_start)
+    register_display_callback('llm_end', on_llm_end)
     
     return _trace_output
 
