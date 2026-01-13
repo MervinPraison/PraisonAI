@@ -363,7 +363,7 @@ class Agents:
         self.variables = variables if variables else {}
         
         # Check for manager_llm in environment variable if not provided
-        self.manager_llm = manager_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-5-nano')
+        self.manager_llm = manager_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o-mini')
         
         # Set logger level based on verbose
         if _verbose >= 5:

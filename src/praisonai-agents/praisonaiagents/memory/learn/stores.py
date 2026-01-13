@@ -56,7 +56,7 @@ class BaseStore(ABC):
         self,
         store_path: Optional[str] = None,
         user_id: Optional[str] = None,
-        scope: str = "user",
+        scope: str = "private",
     ):
         self.user_id = user_id or "default"
         self.scope = scope

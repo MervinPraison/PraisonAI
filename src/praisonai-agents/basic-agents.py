@@ -1,14 +1,4 @@
-#!/usr/bin/env python3
-
 from praisonaiagents import Agent
-
-print("Creating agent...")
-agent = Agent(
-    instructions="You are a helpful assistant"
-)
-
-print("Starting agent...")
+agent = Agent(instructions="You are a helpful assistant")
 result = agent.start("Why is the sky blue?")
-
-print("Agent completed successfully!")
-print(f"Result: {result}") 
+print(result) 

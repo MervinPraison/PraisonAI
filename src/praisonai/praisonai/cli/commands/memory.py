@@ -117,7 +117,7 @@ app.add_typer(learn_app, name="learn")
 @learn_app.command("status")
 def learn_status(
     user_id: str = typer.Option("default", "--user-id", "-u", help="User ID"),
-    scope: str = typer.Option("user", "--scope", "-s", help="Scope (user/team/org)"),
+    scope: str = typer.Option("private", "--scope", "-s", help="Scope (private/shared)"),
 ):
     """Show learning status and statistics."""
     from praisonaiagents.memory.learn import LearnManager

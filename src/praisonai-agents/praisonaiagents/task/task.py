@@ -326,7 +326,7 @@ class Task:
                         if hasattr(self.agent.llm_instance, 'model'):
                             llm_model = self.agent.llm_instance.model
                         else:
-                            llm_model = "gpt-5-nano"  # Default fallback
+                            llm_model = "gpt-4o-mini"  # Default fallback
                     elif hasattr(self.agent, 'llm') and self.agent.llm:
                         # For standard model strings
                         llm_model = self.agent.llm

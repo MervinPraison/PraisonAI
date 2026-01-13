@@ -45,11 +45,13 @@ class MemoryBackend(str, Enum):
 
 
 class LearnScope(str, Enum):
-    """Scope for continuous learning."""
-    USER = "user"      # Per-user learning
-    TEAM = "team"      # Team-shared learning
-    ORG = "org"        # Organization-wide learning
-    GLOBAL = "global"  # Global learning
+    """Scope for learning data visibility.
+    
+    PRIVATE: Learning data is private to this user/agent (default, safest)
+    SHARED: Learning data is shared with all agents
+    """
+    PRIVATE = "private"   # Private to this user/agent
+    SHARED = "shared"     # Shared with all agents
 
 
 @dataclass
@@ -83,7 +85,7 @@ class LearnConfig:
     improvements: bool = False # Self-improvement proposals
     
     # Scope configuration
-    scope: Union[str, LearnScope] = LearnScope.USER
+    scope: Union[str, LearnScope] = LearnScope.PRIVATE
     
     # Storage configuration
     store_path: Optional[str] = None  # Custom storage path
