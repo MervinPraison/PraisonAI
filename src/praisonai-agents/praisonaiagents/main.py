@@ -30,6 +30,53 @@ async_display_callbacks = {}
 # Global approval callback registry
 approval_callback = None
 
+# ─────────────────────────────────────────────────────────────────────────────
+# PraisonAI Unique Color Palette: "Elegant Intelligence"
+# Creates a visual narrative flow: Agent → Task → Working → Response
+# ─────────────────────────────────────────────────────────────────────────────
+PRAISON_COLORS = {
+    # Agent identity - grounded, stable
+    "agent": "#86A789",       # Soft Sage Green
+    "agent_text": "#D2E3C8",  # Light sage for text
+    
+    # Task/Question - input, attention-grabbing
+    "task": "#FF9B9B",        # Warm Coral
+    "task_text": "#FFE5E5",   # Light coral for text
+    
+    # Working/Processing - action, energy
+    "working": "#FFB347",     # Amber
+    "working_text": "#FFF3E0", # Light amber for text
+    
+    # Response/Output - completion, calm
+    "response": "#4A90D9",    # Ocean Blue
+    "response_text": "#E3F2FD", # Light blue for text
+    
+    # Tool calls - special action
+    "tool": "#9B7EDE",        # Violet Accent
+    "tool_text": "#EDE7F6",   # Light violet for text
+    
+    # Reasoning - thought process
+    "reasoning": "#78909C",   # Blue Gray
+    "reasoning_text": "#ECEFF1", # Light gray for text
+    
+    # Error/Warning - alert
+    "error": "#E57373",       # Alert Red
+    "error_text": "#FFEBEE",  # Light red for text
+    
+    # Metrics - meta information
+    "metrics": "#B4B4B3",     # Cool Gray
+    "metrics_text": "#FAFAFA", # Near white for text
+}
+
+# Status animation frames for "Working" indicator
+WORKING_FRAMES = ["●○○", "○●○", "○○●", "○●○"]
+WORKING_PHASES = [
+    "Analyzing query...",
+    "Processing context...",
+    "Generating response...",
+    "Finalizing output...",
+]
+
 # At the top of the file, add display_callbacks to __all__
 __all__ = [
     'error_logs',
@@ -39,7 +86,19 @@ __all__ = [
     'async_display_callbacks',
     'execute_callback',
     'approval_callback',
-    # ... other exports
+    # Color palette and animation constants
+    'PRAISON_COLORS',
+    'WORKING_FRAMES',
+    'WORKING_PHASES',
+    # Display functions
+    'display_interaction',
+    'display_instruction',
+    'display_tool_call',
+    'display_error',
+    'display_generating',
+    'display_reasoning_steps',
+    'display_working_status',
+    'display_self_reflection',
 ]
 
 def register_display_callback(display_type: str, callback_fn, is_async: bool = False):
@@ -149,10 +208,14 @@ def _clean_display_content(content: str, max_length: int = 20000) -> str:
     
     return content.strip()
 
-def display_interaction(message, response, markdown=True, generation_time=None, console=None, agent_name=None, agent_role=None, agent_tools=None, task_name=None, task_description=None, task_id=None):
+def display_interaction(message, response, markdown=True, generation_time=None, console=None, agent_name=None, agent_role=None, agent_tools=None, task_name=None, task_description=None, task_id=None, metrics=None):
     """Synchronous version of display_interaction.
     
-    Displays the task/message and response in clean panels with response time in title.
+    Displays the task/message and response in clean panels with semantic colors
+    and optional metrics footer. Uses PraisonAI's unique color palette.
+    
+    Args:
+        metrics: Optional dict with token_in, token_out, cost, model for footer display
     """
     if console is None:
         console = Console()
@@ -180,20 +243,38 @@ def display_interaction(message, response, markdown=True, generation_time=None, 
         agent_tools=agent_tools,
         task_name=task_name,
         task_description=task_description,
-        task_id=task_id
+        task_id=task_id,
+        metrics=metrics
     )
     
-    # Build response title with time (Agno-style: "Response (1.2s)")
+    # Build response title with time
     response_title = "Response"
     if generation_time:
         response_title = f"Response ({generation_time:.1f}s)"
+    
+    # Build response content with optional metrics footer
+    response_content = response
+    if metrics and isinstance(metrics, dict):
+        # Add dashed separator and compact metrics line
+        tokens_in = metrics.get('tokens_in', 0)
+        tokens_out = metrics.get('tokens_out', 0)
+        cost = metrics.get('cost', 0)
+        model = metrics.get('model', '')
+        
+        metrics_line = f"\n\n─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─\n📊 {tokens_in} tokens in · {tokens_out} out"
+        if cost > 0:
+            metrics_line += f" · ${cost:.4f}"
+        if model:
+            metrics_line += f" · {model}"
+        response_content = response + metrics_line
 
+    # Use semantic colors: Task (coral), Response (ocean blue)
     if markdown:
-        console.print(Panel.fit(Markdown(message), title="Task", border_style="cyan"))
-        console.print(Panel.fit(Markdown(response), title=response_title, border_style="cyan"))
+        console.print(Panel.fit(Markdown(message), title="Task", border_style=PRAISON_COLORS["task"]))
+        console.print(Panel.fit(Markdown(response_content), title=response_title, border_style=PRAISON_COLORS["response"]))
     else:
-        console.print(Panel.fit(Text(message, style="bold green"), title="Task", border_style="cyan"))
-        console.print(Panel.fit(Text(response, style="bold blue"), title=response_title, border_style="cyan"))
+        console.print(Panel.fit(Text(message, style=f"bold {PRAISON_COLORS['task_text']}"), title="Task", border_style=PRAISON_COLORS["task"]))
+        console.print(Panel.fit(Text(response_content, style=f"bold {PRAISON_COLORS['response_text']}"), title=response_title, border_style=PRAISON_COLORS["response"]))
 
 def display_self_reflection(message: str, console=None):
     if not message or not message.strip():
@@ -231,8 +312,11 @@ def display_instruction(message: str, console=None, agent_name: str = None, agen
     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
         console.print(Panel.fit(Text(message, style="bold blue"), title="Instruction", border_style="cyan"))
 
-def display_tool_call(message: str, console=None, tool_name: str = None, tool_input: dict = None, tool_output: str = None):
-    """Display tool call information in a consolidated panel.
+def display_tool_call(message: str, console=None, tool_name: str = None, tool_input: dict = None, tool_output: str = None, elapsed_time: float = None, success: bool = True):
+    """Display tool call information in PraisonAI's unique timeline format.
+    
+    Uses ▸ prefix, inline timing [X.Xs], and status icons ✓/✗ for a clean,
+    scannable tool activity display.
     
     Args:
         message: The tool call message (legacy format)
@@ -240,6 +324,8 @@ def display_tool_call(message: str, console=None, tool_name: str = None, tool_in
         tool_name: Name of the tool being called
         tool_input: Input arguments to the tool
         tool_output: Output from the tool (if available)
+        elapsed_time: Time taken for tool execution in seconds
+        success: Whether the tool call succeeded
     """
     logging.debug(f"display_tool_call called with message: {repr(message)}")
     if not message or not message.strip():
@@ -253,17 +339,45 @@ def display_tool_call(message: str, console=None, tool_name: str = None, tool_in
     
     # Only print panel if console is provided (verbose mode)
     if console is not None:
-        # Build consolidated tool call display (Agno-style)
-        if tool_name and tool_input is not None:
-            # Format: tool_name(arg1=val1, arg2=val2)
-            args_str = ", ".join(f"{k}={v}" for k, v in tool_input.items()) if tool_input else ""
-            tool_display = f"• {tool_name}({args_str})"
+        # Build unique PraisonAI timeline format
+        if tool_name:
+            # Format: ▸ tool_name(args) [X.Xs] ✓
+            args_str = ""
+            if tool_input:
+                # Truncate long values for display
+                args_parts = []
+                for k, v in tool_input.items():
+                    v_str = str(v)
+                    if len(v_str) > 50:
+                        v_str = v_str[:47] + "..."
+                    args_parts.append(f"{k}={repr(v_str) if isinstance(v, str) else v_str}")
+                args_str = ", ".join(args_parts)
+            
+            # Build the timeline entry
+            status_icon = "✓" if success else "✗"
+            time_str = f"[{elapsed_time:.1f}s]" if elapsed_time else ""
+            
+            tool_display = f"▸ {tool_name}({args_str}) {time_str} {status_icon}"
+            
+            # Add output on next line with tree connector
             if tool_output:
-                tool_display += f"\n  → {tool_output}"
-            console.print(Panel.fit(Text(tool_display, style="bold cyan"), title="Tool Call", border_style="green"))
+                output_str = str(tool_output)
+                if len(output_str) > 100:
+                    output_str = output_str[:97] + "..."
+                tool_display += f"\n  └─ {output_str}"
+            
+            console.print(Panel.fit(
+                Text(tool_display, style=f"bold {PRAISON_COLORS['tool_text']}"), 
+                title="Tool Activity", 
+                border_style=PRAISON_COLORS["tool"]
+            ))
         else:
-            # Legacy format
-            console.print(Panel.fit(Text(message, style="bold cyan"), title="Tool Call", border_style="green"))
+            # Legacy format with new colors
+            console.print(Panel.fit(
+                Text(message, style=f"bold {PRAISON_COLORS['tool_text']}"), 
+                title="Tool Activity", 
+                border_style=PRAISON_COLORS["tool"]
+            ))
 
 def display_error(message: str, console=None):
     if not message or not message.strip():
@@ -275,7 +389,12 @@ def display_error(message: str, console=None):
     # Execute synchronous callbacks
     execute_sync_callback('error', message=message)
     
-    console.print(Panel.fit(Text(message, style="bold red"), title="Error", border_style="red"))
+    # Use semantic error color
+    console.print(Panel.fit(
+        Text(message, style=f"bold {PRAISON_COLORS['error_text']}"), 
+        title="⚠ Error", 
+        border_style=PRAISON_COLORS["error"]
+    ))
     error_logs.append(message)
 
 def display_generating(content: str = "", start_time: Optional[float] = None):
@@ -293,7 +412,73 @@ def display_generating(content: str = "", start_time: Optional[float] = None):
     # Execute synchronous callbacks
     execute_sync_callback('generating', content=content, elapsed_time=elapsed_str.strip() if elapsed_str else None)
     
-    return Panel(Markdown(content), title=f"Generating...{elapsed_str}", border_style="green")
+    # Use semantic response color
+    return Panel(Markdown(content), title=f"Generating...{elapsed_str}", border_style=PRAISON_COLORS["response"])
+
+def display_reasoning_steps(steps: List[str], console=None):
+    """Display reasoning steps with unique numbered circles.
+    
+    Uses ①②③ numbered circles for a distinctive, scannable format
+    that shows the agent's thought process.
+    
+    Args:
+        steps: List of reasoning step descriptions
+        console: Rich console for output
+    """
+    if not steps:
+        return
+    if console is None:
+        console = Console()
+    
+    # Circle number mapping (supports up to 20 steps)
+    circle_numbers = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
+    
+    # Build reasoning display with numbered circles
+    reasoning_lines = []
+    for i, step in enumerate(steps):
+        circle = circle_numbers[i] if i < len(circle_numbers) else f"({i+1})"
+        step_text = _clean_display_content(str(step))
+        if len(step_text) > 80:
+            step_text = step_text[:77] + "..."
+        reasoning_lines.append(f"{circle} {step_text}")
+    
+    reasoning_display = "\n".join(reasoning_lines)
+    
+    console.print(Panel.fit(
+        Text(reasoning_display, style=f"italic {PRAISON_COLORS['reasoning_text']}"),
+        title="Reasoning",
+        border_style=PRAISON_COLORS["reasoning"]
+    ))
+
+def display_working_status(phase: int = 0, status_text: str = None, console=None):
+    """Display animated working status with pulsing dots.
+    
+    Shows a unique "Working ●○○" indicator with phase-specific status.
+    This is PraisonAI's distinctive approach to showing processing status.
+    
+    Args:
+        phase: Current animation phase (0-3)
+        status_text: Optional status description
+        console: Rich console for output
+    
+    Returns:
+        Panel object for use with Rich.Live
+    """
+    if console is None:
+        console = Console()
+    
+    # Get current frame and phase text
+    frame = WORKING_FRAMES[phase % len(WORKING_FRAMES)]
+    phase_text = status_text or WORKING_PHASES[phase % len(WORKING_PHASES)]
+    
+    # Build working status display
+    working_display = f"Working {frame}  {phase_text}"
+    
+    return Panel.fit(
+        Text(working_display, style=f"bold {PRAISON_COLORS['working_text']}"),
+        title="Status",
+        border_style=PRAISON_COLORS["working"]
+    )
 
 # Async versions with 'a' prefix
 async def adisplay_interaction(message, response, markdown=True, generation_time=None, console=None, agent_name=None, agent_role=None, agent_tools=None, task_name=None, task_description=None, task_id=None):
