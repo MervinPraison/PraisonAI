@@ -25,6 +25,14 @@ from .tools.registry import get_registry, register_tool, get_tool, ToolRegistry
 from .db import db
 from .obs import obs
 
+# Sub-packages for organized imports (pa.config, pa.tools, etc.)
+# These enable: import praisonaiagents as pa; pa.config.MemoryConfig
+from . import config
+from . import tools
+from . import memory
+from . import workflows
+# Note: knowledge and mcp are lazy-loaded via __getattr__ due to heavy deps
+
 # Workflows - lightweight module
 from .workflows import (
     Workflow, WorkflowStep, WorkflowContext, StepResult,
@@ -532,189 +540,61 @@ def warmup(include_litellm: bool = False, include_openai: bool = True) -> dict:
     return timings
 
 
+# ============================================================================
+# PUBLIC API: __all__ (controls IDE autocomplete and `from X import *`)
+# ============================================================================
+# DESIGN: Keep __all__ minimal for clean IDE experience.
+# All 186+ symbols are still accessible via __getattr__ for backwards compat.
+# Organized imports available via sub-packages: config, tools, memory, workflows
+# ============================================================================
+
 __all__ = [
-    # Core classes (lazy loaded)
+    # Core classes - the essentials
     'Agent',
-    'ImageAgent',
-    'ContextAgent',
-    'create_context_agent',
-    'PraisonAIAgents',
     'Agents',
-    'Tools',
     'Task',
-    # Plugin system
-    'BaseTool',
-    'ToolResult',
-    'ToolValidationError',
-    'validate_tool',
+    
+    # Tool essentials
     'tool',
-    'FunctionTool',
-    'ToolRegistry',
-    'get_registry',
-    'register_tool',
-    'get_tool',
-    'TaskOutput',
-    'ReflectionOutput',
-    'AutoAgents',
-    'AutoRagAgent',
-    'AutoRagConfig',
-    'RagRetrievalPolicy',
-    'Session',
-    'Memory',
-    'db',
-    'obs',
-    'display_interaction',
-    'display_self_reflection',
-    'display_instruction',
-    'display_tool_call',
-    'display_error',
-    'display_generating',
-    'clean_triple_backticks',
-    'error_logs',
-    'register_display_callback',
-    'sync_display_callbacks',
-    'async_display_callbacks',
-    'Knowledge',
-    'Chunking',
-    'GuardrailResult',
-    'LLMGuardrail',
-    'Handoff',
-    'handoff',
-    'handoff_filters',
-    'RECOMMENDED_PROMPT_PREFIX',
-    'prompt_with_handoff_instructions',
-    'HandoffConfig',
-    'HandoffResult',
-    'HandoffInputData',
-    'ContextPolicy',
-    'HandoffError',
-    'HandoffCycleError',
-    'HandoffDepthError',
-    'HandoffTimeoutError',
-    'get_telemetry',
-    'enable_telemetry',
-    'disable_telemetry',
-    'enable_performance_mode',
-    'disable_performance_mode',
-    'cleanup_telemetry_resources',
-    'MinimalTelemetry',
-    'TelemetryCollector',
-    'DeepResearchAgent',
-    'DeepResearchResponse',
-    'Citation',
-    'ReasoningStep',
-    'WebSearchCall',
-    'CodeExecutionStep',
-    'MCPCall',
-    'FileSearchCall',
-    'Provider',
-    'QueryRewriterAgent',
-    'RewriteStrategy',
-    'RewriteResult',
-    'PromptExpanderAgent',
-    'ExpandStrategy',
-    'ExpandResult',
-    # Workflows
-    'Workflow',
-    'WorkflowStep', 
-    'WorkflowContext',
-    'StepResult',
-    'Route',
-    'Parallel',
-    'Loop',
-    'Repeat',
-    'route',
-    'parallel',
-    'loop',
-    'repeat',
-    'Pipeline',
-    # MCP
-    'MCP',
-    # Flow display
-    'FlowDisplay',
-    'track_workflow',
-    # FastContext
-    'FastContext',
-    'FastContextResult',
-    'FileMatch',
-    'LineRange',
-    # Agent Skills
-    'SkillManager',
-    'SkillProperties',
-    'SkillMetadata',
-    'SkillLoader',
-    # Planning
-    'Plan',
-    'PlanStep',
-    'TodoList',
-    'TodoItem',
-    'PlanStorage',
-    'PlanningAgent',
-    'ApprovalCallback',
-    'READ_ONLY_TOOLS',
-    'RESTRICTED_TOOLS',
-    # UI
-    'AGUI',
-    'A2A',
-    # RAG
-    'RAG',
-    'RAGConfig',
-    'RAGResult',
-    'RAGCitation',
-    # Feature Configs (agent-centric API)
-    'MemoryConfig',
-    'KnowledgeConfig',
-    'PlanningConfig',
-    'ReflectionConfig',
-    'GuardrailConfig',
-    'WebConfig',
-    'OutputConfig',
-    'ExecutionConfig',
-    'TemplateConfig',
-    'CachingConfig',
-    'HooksConfig',
-    'SkillsConfig',
-    'AutonomyConfig',
-    'MemoryBackend',
-    'ChunkingStrategy',
-    'GuardrailAction',
-    'WebSearchProvider',
-    'OutputPreset',
-    'ExecutionPreset',
-    'AutonomyLevel',
-    # Multi-Agent Feature Configs
-    'MultiAgentHooksConfig',
-    'MultiAgentOutputConfig',
-    'MultiAgentExecutionConfig',
-    'MultiAgentPlanningConfig',
-    'MultiAgentMemoryConfig',
-    # Context Management
-    'ManagerConfig',
-    'ContextManager',
-    # Parameter Resolution (agent-centric API)
-    'resolve',
-    'ArrayMode',
-    'resolve_guardrails',
-    'resolve_guardrail_policies',
-    # Presets (agent-centric API)
-    'GUARDRAIL_PRESETS',
-    'KNOWLEDGE_PRESETS',
-    # Parse Utilities
-    'is_policy_string',
-    'parse_policy_string',
-    # Performance utilities
-    'warmup',
-    # Cortex - Continuous Improvement System
-    'CortexConfig',
-    'CaptureStore',
-    'CaptureMode',
-    'CaptureScope',
-    'PersonaConfig',
-    'InsightConfig',
-    'ThreadConfig',
-    'EntityConfig',
-    'PatternConfig',
-    'DecisionConfig',
-    'FeedbackConfig',
-    'ImprovementConfig',
+    'Tools',
+    
+    # Sub-packages for organized imports
+    # Usage: import praisonaiagents as pa; pa.config.MemoryConfig
+    'config',
+    'tools',
+    'memory',
+    'workflows',
 ]
+
+
+def __dir__():
+    """
+    Return clean list for dir() - matches __all__ plus standard attributes.
+    
+    This keeps IDE autocomplete clean while preserving full backwards
+    compatibility via __getattr__ for all 186+ legacy exports.
+    """
+    return list(__all__) + [
+        # Standard module attributes
+        '__name__', '__doc__', '__file__', '__path__', '__package__',
+        '__loader__', '__spec__', '__cached__', '__builtins__',
+    ]
+
+
+# ============================================================================
+# BACKWARDS COMPATIBILITY: Legacy __all__ items (for reference)
+# ============================================================================
+# All items below are still importable via __getattr__ but NOT in autocomplete:
+# - ImageAgent, ContextAgent, create_context_agent, PraisonAIAgents
+# - BaseTool, ToolResult, ToolValidationError, validate_tool, FunctionTool
+# - ToolRegistry, get_registry, register_tool, get_tool
+# - TaskOutput, ReflectionOutput, AutoAgents, AutoRagAgent, AutoRagConfig
+# - Session, Memory, db, obs, Knowledge, Chunking
+# - GuardrailResult, LLMGuardrail, Handoff, handoff, handoff_filters
+# - MemoryConfig, KnowledgeConfig, PlanningConfig, OutputConfig, etc.
+# - Workflow, WorkflowStep, Route, Parallel, Loop, Repeat, Pipeline, etc.
+# - MCP, FlowDisplay, track_workflow, FastContext, etc.
+# - Plan, PlanStep, TodoList, PlanningAgent, ApprovalCallback, etc.
+# - RAG, RAGConfig, RAGResult, AGUI, A2A, etc.
+# - All telemetry, display, and utility functions
+# ============================================================================

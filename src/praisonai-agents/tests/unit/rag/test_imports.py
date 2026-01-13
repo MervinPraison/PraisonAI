@@ -105,12 +105,14 @@ class TestMainPackageExports:
     """Tests for main package exports."""
     
     def test_rag_in_all(self):
-        """Test that RAG is in __all__."""
+        """Test that RAG is accessible (via __getattr__, not necessarily in __all__)."""
         import praisonaiagents
         
-        assert 'RAG' in praisonaiagents.__all__
-        assert 'RAGConfig' in praisonaiagents.__all__
-        assert 'RAGResult' in praisonaiagents.__all__
+        # RAG is accessible via __getattr__ for backwards compatibility
+        # but may not be in __all__ (which is kept minimal for IDE experience)
+        assert hasattr(praisonaiagents, 'RAG'), "RAG not accessible from praisonaiagents"
+        assert hasattr(praisonaiagents, 'RAGConfig'), "RAGConfig not accessible"
+        assert hasattr(praisonaiagents, 'RAGResult'), "RAGResult not accessible"
     
     def test_rag_accessible_from_main(self):
         """Test that RAG classes are accessible from main package."""
