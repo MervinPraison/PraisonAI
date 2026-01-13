@@ -466,9 +466,15 @@ class Agents:
         
         if self.shared_memory:
             for task in tasks:
-                if not task.memory:
                     task.memory = self.shared_memory
                     logger.info(f"Assigned shared memory to task {task.id}")
+
+        # Telemetry
+        try:
+            from ..telemetry import get_telemetry
+            self._telemetry = get_telemetry()
+        except (ImportError, AttributeError):
+            self._telemetry = None
 
     def add_task(self, task):
         task_id = self.task_id_counter
@@ -821,13 +827,17 @@ Context:
                     await loop.run_in_executor(None, self.run_task, task_id)
 
     async def astart(self, content=None, return_dict=False, **kwargs):
-        """Async version of start method
+        """Async version of start method.
         
         Args:
             content: Optional content to add to all tasks' context
             return_dict: If True, returns the full results dictionary instead of only the final response
             **kwargs: Additional arguments
         """
+        # Track execution via telemetry
+        if hasattr(self, '_telemetry') and self._telemetry:
+            self._telemetry.track_agent_execution(self.name, success=True, async_mode=True)
+            
         if content:
             # Add content to context of all tasks
             for task in self.tasks.values():
@@ -1217,6 +1227,9 @@ Context:
             result = agents.start(output="silent")
             ```
         """
+        # Track execution via telemetry
+        if hasattr(self, '_telemetry') and self._telemetry:
+            self._telemetry.track_agent_execution(self.name, success=True)
         import sys
         from ..main import PRAISON_COLORS
         

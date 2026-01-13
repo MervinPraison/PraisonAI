@@ -34,17 +34,17 @@ except Exception as e:
     print(f"❌ PostHog capture failed: {e}")
 
 print("\n4. Testing telemetry module...")
-from praisonaiagents.telemetry.telemetry import MinimalTelemetry, POSTHOG_AVAILABLE
-print(f"POSTHOG_AVAILABLE in telemetry module: {POSTHOG_AVAILABLE}")
+from praisonaiagents.telemetry.telemetry import MinimalTelemetry
+print("✅ MinimalTelemetry imported successfully")
 
 print("\n5. Creating MinimalTelemetry instance...")
 telemetry = MinimalTelemetry(enabled=True)
 print(f"Telemetry enabled: {telemetry.enabled}")
-print(f"Telemetry _posthog: {telemetry._posthog}")
+print(f"Telemetry has _posthog: {hasattr(telemetry, '_posthog') and telemetry._posthog is not None}")
 
 print("\n6. Checking get_telemetry()...")
 from praisonaiagents.telemetry import get_telemetry
 global_telemetry = get_telemetry()
 print(f"Global telemetry enabled: {global_telemetry.enabled}")
-print(f"Global telemetry _posthog: {global_telemetry._posthog}")
+print(f"Global telemetry has _posthog: {hasattr(global_telemetry, '_posthog') and global_telemetry._posthog is not None}")
 print(f"Global telemetry session_id: {global_telemetry.session_id}")

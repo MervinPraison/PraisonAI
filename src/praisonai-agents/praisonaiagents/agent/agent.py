@@ -1103,6 +1103,13 @@ Your Goal: {self.goal}
         # Action trace mode - handled via display callbacks, not separate emitter
         self._actions_trace = actions_trace
 
+        # Telemetry
+        try:
+            from ..telemetry import get_telemetry
+            self._telemetry = get_telemetry()
+        except (ImportError, AttributeError):
+            self._telemetry = None
+
     @property
     def auto_memory(self):
         """AutoMemory instance for automatic memory extraction."""
@@ -3889,6 +3896,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     async def achat(self, prompt: str, temperature=1.0, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None):
         """Async version of chat method with self-reflection support.""" 
+        # Track execution via telemetry
+        if hasattr(self, '_telemetry') and self._telemetry:
+            self._telemetry.track_agent_execution(self.name, success=True)
+            
         # Reset the final display flag for each new conversation
         self._final_display_shown = False
         
@@ -4287,8 +4298,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         Returns:
             The agent's response as a string
         """
-        # Force non-streaming, non-display for production use
-        kwargs['stream'] = False
+        # Remove stream from kwargs since achat() doesn't accept it
+        kwargs.pop('stream', None)
         return await self.achat(prompt, **kwargs)
 
     async def astart(self, prompt: str, **kwargs):

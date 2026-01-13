@@ -14,8 +14,7 @@ task2 = Task(description="Write a short article about meditation benefits", agen
 agents = Agents(
     agents=[researcher, writer],
     tasks=[task1, task2],
-    planning=True,
-    auto_approve_plan=True  # Auto-approve the generated plan
+    planning=True
 )
 
 agents.start()

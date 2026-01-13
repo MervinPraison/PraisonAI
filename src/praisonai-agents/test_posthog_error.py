@@ -10,8 +10,7 @@ try:
     posthog_client = Posthog(
         project_api_key='phc_skZpl3eFLQJ4iYjsERNMbCO6jfeSJi2vyZlPahKgxZ7',
         host='https://eu.i.posthog.com',
-        disable_geoip=True,
-        events_to_ignore=['test-event']
+        disable_geoip=True
     )
     print(f"✅ PostHog client created: {posthog_client}")
 except Exception as e:
