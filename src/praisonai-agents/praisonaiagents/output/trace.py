@@ -247,11 +247,14 @@ def enable_trace_output(
             return
         
         # Handle structured tool call (when tool_name is set)
-        if tool_name and tool_input is not None:
+        if tool_name:
             _trace_output.tool_start(tool_name, tool_input)
+            # If we have output, call tool_end immediately for inline display
+            if tool_output is not None:
+                _trace_output.tool_end(tool_name, result=str(tool_output)[:200], success=True)
             return
         
-        # Handle legacy message format
+        # Handle legacy message format (for backward compatibility)
         if message:
             # Check for "Function X returned: Y" pattern
             if "returned:" in message.lower():
@@ -261,7 +264,7 @@ def enable_trace_output(
                     func_name = match.group(1)
                     result = match.group(2).strip('"')
                     _trace_output.tool_end(func_name, result=result, success=True)
-            # "Calling function" is already shown via tool_start, skip duplicate
+            # "Calling function" message is already shown via tool_start, skip
     
     def on_interaction(
         message: str = None,
