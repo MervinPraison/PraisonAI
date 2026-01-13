@@ -1233,7 +1233,11 @@ Your Goal: {self.goal}
 
     @property
     def console(self):
-        """Lazily initialize Rich Console only when needed."""
+        """Lazily initialize Rich Console only when needed AND verbose is True."""
+        # Only return console if verbose mode is enabled
+        # This prevents panels from being shown in status/silent modes
+        if not self.verbose:
+            return None
         if self._console is None:
             from rich.console import Console
             self._console = Console()
