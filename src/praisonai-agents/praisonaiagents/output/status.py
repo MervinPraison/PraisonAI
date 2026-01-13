@@ -35,6 +35,7 @@ _status_output_enabled = False
 _status_output: Optional['StatusOutput'] = None
 _agent_start_times: Dict[str, float] = {}
 _output_lock = threading.Lock()  # Multi-agent safe output lock
+_ai_call_count = 0  # Track AI call count for context display
 
 
 def _format_timestamp(ts: float) -> str:
@@ -153,16 +154,21 @@ class StatusOutput:
     
     def llm_start(self, model: str = None, agent_name: Optional[str] = None) -> None:
         """Record LLM call start."""
+        global _ai_call_count
         ts = time.time()
         self._llm_start_time = ts
+        _ai_call_count += 1
         
-        model_str = f" ({model})" if model else ""
+        # Context based on call sequence
+        if _ai_call_count == 1:
+            context = "thinking"
+        else:
+            context = "responding"
         
         if self._format == "jsonl":
             self._emit_jsonl("llm_start", model=model, agent_name=agent_name, timestamp=ts)
         else:
-            prefix = f"[{agent_name}] " if agent_name else ""
-            self._emit_text(f"{prefix}▸ Calling LLM{model_str}...", ts, "yellow")
+            self._emit_text(f"▸ AI → {context}...", ts, "yellow")
     
     def llm_end(self, duration_ms: Optional[float] = None, agent_name: Optional[str] = None) -> None:
         """Record LLM call end."""
@@ -183,17 +189,13 @@ class StatusOutput:
             self._emit_text(f"{prefix}✓ LLM responded{duration_str}", ts, "green")
     
     def tool_start(self, tool_name: str, tool_args: Optional[Dict[str, Any]] = None, agent_name: Optional[str] = None) -> None:
-        """Record tool start."""
+        """Record tool start - stores info for inline display with result."""
         ts = time.time()
         self._tool_start_times[tool_name] = ts
+        self._pending_tool_args = tool_args  # Store for display with result
+        self._pending_tool_name = tool_name
         
-        args_str = self._format_args(tool_args)
-        
-        if self._format == "jsonl":
-            self._emit_jsonl("tool_start", tool_name=tool_name, tool_args=self._redact_args(tool_args), agent_name=agent_name, timestamp=ts)
-        else:
-            prefix = f"[{agent_name}] " if agent_name else ""
-            self._emit_text(f"{prefix}│ → {tool_name}({args_str})", ts, "cyan")
+        # Don't emit anything here - wait for result to show inline
     
     def tool_end(
         self,
@@ -204,7 +206,7 @@ class StatusOutput:
         agent_name: Optional[str] = None,
         error_message: Optional[str] = None,
     ) -> None:
-        """Record tool end."""
+        """Record tool end with inline display showing tool call and result."""
         ts = time.time()
         
         # Calculate duration if not provided
@@ -212,9 +214,6 @@ class StatusOutput:
             start_ts = self._tool_start_times.pop(tool_name, None)
             if start_ts:
                 duration_ms = (ts - start_ts) * 1000
-        
-        duration_str = f" [{_format_duration(duration_ms)}]" if duration_ms else ""
-        status_icon = "✓" if status == "ok" else "✗"
         
         if self._format == "jsonl":
             self._emit_jsonl(
@@ -228,11 +227,19 @@ class StatusOutput:
                 timestamp=ts,
             )
         else:
-            prefix = f"[{agent_name}] " if agent_name else ""
-            color = "green" if status == "ok" else "red"
-            self._emit_text(f"{prefix}│ ← {tool_name}{duration_str} {status_icon}", ts, color)
-            if error_message:
-                self._emit_text(f"{prefix}│   Error: {_truncate(error_message, 100)}", ts, "red")
+            # Build inline tool call with result: │ → tool(args) → result
+            args_str = ""
+            if hasattr(self, '_pending_tool_args') and self._pending_tool_args:
+                args_str = self._format_args(self._pending_tool_args)
+            
+            result_str = ""
+            if result_summary:
+                result_str = f" → {_truncate(result_summary, 50)}"
+            elif error_message:
+                result_str = f" → ✗ {_truncate(error_message, 50)}"
+            
+            color = "cyan" if status == "ok" else "red"
+            self._emit_text(f"  │ → {tool_name}({args_str}){result_str}", ts, color)
     
     def output(self, content: str, agent_name: Optional[str] = None) -> None:
         """Record final output."""
