@@ -1240,17 +1240,19 @@ class OpenAIClient:
                     
                     # Always trigger callback for tool call tracking (even when verbose=False)
                     display_tool_call_fn = _get_display_tool_call()
-                    display_tool_call_fn(f"Calling function: {function_name}", console=console if verbose else None)
-                    
-                    if verbose and console:
-                        console.print(f"[dim]Arguments:[/dim] {arguments}")
                     
                     # Execute the tool
                     tool_result = execute_tool_fn(function_name, arguments)
                     results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
                     
-                    # Trigger callback with result
-                    display_tool_call_fn(f"Function {function_name} returned: {results_str[:200]}{'...' if len(results_str) > 200 else ''}", console=console if verbose else None)
+                    # Trigger callback with structured parameters for status output
+                    display_tool_call_fn(
+                        f"Calling function: {function_name}",
+                        console=console if verbose else None,
+                        tool_name=function_name,
+                        tool_input=arguments,
+                        tool_output=results_str[:200] if results_str else None
+                    )
                     
                     messages.append({
                         "role": "tool",
