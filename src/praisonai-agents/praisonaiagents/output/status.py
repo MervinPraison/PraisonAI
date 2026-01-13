@@ -57,10 +57,12 @@ class StatusSink:
         file: TextIO = None,
         use_color: bool = True,
         show_timestamps: bool = True,
+        use_markdown: bool = True,
     ):
         self._file = file or sys.stderr
         self._use_color = use_color
         self._show_timestamps = show_timestamps
+        self._use_markdown = use_markdown
         self._console = None
         self._lock = threading.Lock()
         self._tool_start_times: Dict[str, float] = {}
@@ -150,7 +152,7 @@ class StatusSink:
         self._emit(f"  └─ {tool_name}{result_str}{duration_str} {status_icon}", color)
     
     def response(self, content: str, agent_name: str = None) -> None:
-        """Output final response."""
+        """Output final response with optional Markdown rendering."""
         with self._lock:
             console = self._get_console()
             
@@ -158,7 +160,17 @@ class StatusSink:
             if console and self._use_color:
                 console.print("")
                 console.print("[bold]Response:[/bold]")
-                console.print(content)
+                
+                # Render as Markdown if enabled
+                if self._use_markdown:
+                    try:
+                        from rich.markdown import Markdown
+                        console.print(Markdown(content))
+                    except ImportError:
+                        # Fallback if markdown-it not available
+                        console.print(content)
+                else:
+                    console.print(content)
             else:
                 print("", file=self._file)
                 print("Response:", file=self._file)
@@ -173,6 +185,7 @@ def enable_status_mode(
     file: TextIO = None,
     use_color: bool = True,
     show_timestamps: bool = True,
+    use_markdown: bool = True,
 ) -> StatusSink:
     """
     Enable status output mode globally.
@@ -184,6 +197,7 @@ def enable_status_mode(
         file: Output file (default: stderr)
         use_color: Whether to use colored output (default: True)
         show_timestamps: Whether to show timestamps (default: True)
+        use_markdown: Whether to render response as Markdown (default: True)
     
     Returns:
         StatusSink instance
@@ -194,6 +208,7 @@ def enable_status_mode(
         file=file,
         use_color=use_color,
         show_timestamps=show_timestamps,
+        use_markdown=use_markdown,
     )
     _status_mode_enabled = True
     
