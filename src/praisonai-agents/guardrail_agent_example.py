@@ -7,8 +7,7 @@ def validate_content(data):
 
 agent = Agent(
     instructions="You are a writer",
-    guardrail=validate_content,
-    max_guardrail_retries=1
+    guardrails=validate_content
 )
 
 agent.start("Write a welcome message with 5 words")

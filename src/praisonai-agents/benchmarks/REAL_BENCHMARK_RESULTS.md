@@ -1,6 +1,6 @@
 # PraisonAI Agents - Real-World Execution Benchmark
 
-**Generated:** 2025-12-18 14:33:49
+**Generated:** 2026-01-13 06:05:09
 **Model:** gpt-4o-mini
 **Iterations:** 3 per test
 
@@ -8,60 +8,60 @@
 
 | Test | PraisonAI (avg) | Agno (avg) | Difference |
 |------|-----------------|------------|------------|
-| Single Agent | 2.04s | 3.18s | PraisonAI 1.56x faster |
-| 2 Agents | 2.49s | 20.49s | PraisonAI 8.21x faster |
-| 3 Agents | 6.52s | 13.97s | PraisonAI 2.14x faster |
+| Single Agent | 2.09s | 3.25s | PraisonAI 1.55x faster |
+| 2 Agents | 2.50s | 9.73s | PraisonAI 3.89x faster |
+| 3 Agents | 6.25s | 13.56s | PraisonAI 2.17x faster |
 
 ## Detailed Results
 
 ### praisonai_single
-- Average: 2.04s
-- Min: 1.95s
-- Max: 2.19s
-- Std Dev: 0.13s
-- Times: ['2.19s', '1.95s', '2.00s']
+- Average: 2.09s
+- Min: 1.64s
+- Max: 2.84s
+- Std Dev: 0.66s
+- Times: ['2.84s', '1.79s', '1.64s']
 
 ### agno_single
-- Average: 3.18s
-- Min: 3.00s
-- Max: 3.51s
-- Std Dev: 0.28s
-- Times: ['3.51s', '3.00s', '3.04s']
+- Average: 3.25s
+- Min: 3.14s
+- Max: 3.35s
+- Std Dev: 0.10s
+- Times: ['3.35s', '3.25s', '3.14s']
 
 ### praisonai_two_agents
-- Average: 2.49s
-- Min: 2.22s
-- Max: 2.65s
-- Std Dev: 0.24s
-- Times: ['2.65s', '2.22s', '2.62s']
+- Average: 2.50s
+- Min: 2.38s
+- Max: 2.75s
+- Std Dev: 0.21s
+- Times: ['2.38s', '2.75s', '2.38s']
 
 ### agno_two_agents
-- Average: 20.49s
-- Min: 9.96s
-- Max: 35.05s
-- Std Dev: 13.02s
-- Times: ['16.46s', '9.96s', '35.05s']
+- Average: 9.73s
+- Min: 9.34s
+- Max: 10.53s
+- Std Dev: 0.69s
+- Times: ['10.53s', '9.34s', '9.34s']
 
 ### praisonai_three_agents
-- Average: 6.52s
-- Min: 5.62s
-- Max: 7.39s
-- Std Dev: 0.88s
-- Times: ['5.62s', '6.54s', '7.39s']
+- Average: 6.25s
+- Min: 5.86s
+- Max: 6.80s
+- Std Dev: 0.49s
+- Times: ['6.80s', '6.09s', '5.86s']
 
 ### agno_three_agents
-- Average: 13.97s
-- Min: 11.69s
-- Max: 15.32s
-- Std Dev: 1.99s
-- Times: ['14.91s', '11.69s', '15.32s']
+- Average: 13.56s
+- Min: 12.26s
+- Max: 14.90s
+- Std Dev: 1.32s
+- Times: ['14.90s', '13.51s', '12.26s']
 
 ## Package Versions
 
 | Package | Version |
 |---------|--------|
-| PraisonAI | 0.1.5 |
-| Agno | 2.3.14 |
+| PraisonAI | 0.11.7 |
+| Agno | 2.3.25 |
 
 ## How to Reproduce
 

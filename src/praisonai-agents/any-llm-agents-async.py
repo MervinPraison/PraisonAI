@@ -5,8 +5,8 @@ async def main():
     agent = Agent(
         instructions="You are a helpful assistant",
         llm="gemini/gemini-1.5-flash-8b",
-        self_reflect=True,
-        verbose=True
+        reflection=True,
+        output="verbose"
     )
 
     # Use achat instead of start/chat for async operation

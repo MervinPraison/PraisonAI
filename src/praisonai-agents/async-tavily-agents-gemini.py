@@ -79,7 +79,7 @@ async def run_parallel_searches():
         backstory="Expert in web search and information retrieval. You have access to the tavily_search tool to search the web.",
         tools=[tavily_search],
         llm=llm_config,
-        verbose=True
+        output="verbose"
     )
     
     # Create summary agent
