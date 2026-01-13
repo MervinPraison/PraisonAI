@@ -1551,6 +1551,10 @@ Now provide your final answer using this result."""
                 try:
                     # Get response from LiteLLM
                     current_time = time.time()
+                    
+                    # Trigger LLM callback for subsequent iterations (after tool calls)
+                    # Initial callback is in agent._chat_completion, so this triggers for all loop iterations
+                    execute_sync_callback('llm_start', model=self.model, agent_name=agent_name)
 
                     # If reasoning_steps is True, do a single non-streaming call
                     if reasoning_steps:
