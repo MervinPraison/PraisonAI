@@ -1520,9 +1520,6 @@ Now provide your final answer using this result."""
             reflection_count = 0
             callback_executed = False  # Track if callback has been executed for this interaction
             interaction_displayed = False  # Track if interaction has been displayed
-            
-            # Trigger LLM start callback for status/trace output (once per get_response call)
-            execute_sync_callback('llm_start', model=self.model, agent_name=agent_name)
 
             # Display initial instruction once
             if verbose:
@@ -2162,6 +2159,16 @@ Now provide your final answer using this result."""
                                 
                                 logging.debug(f"[TOOL_EXEC_DEBUG] About to display tool call with message: {display_message}")
                                 display_tool_call(display_message, console=self.console)
+                            
+                            # Always trigger callback for status output (even when verbose=False)
+                            result_str = json.dumps(tool_result) if tool_result else "empty"
+                            execute_sync_callback(
+                                'tool_call',
+                                message=f"Calling function: {function_name}",
+                                tool_name=function_name,
+                                tool_input=arguments,
+                                tool_output=result_str[:200] if result_str else None
+                            )
                                 
                             # Check if this is Ollama provider
                             if self._is_ollama_provider():

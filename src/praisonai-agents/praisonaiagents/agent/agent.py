@@ -3201,21 +3201,20 @@ Your Goal: {self.goal}"""
         
         This centralizes the logic for callback execution and display to avoid duplication.
         """
-        # Always execute callbacks regardless of verbose setting (only when not using custom LLM)
-        if not self._using_custom_llm:
-            execute_sync_callback(
-                'interaction',
-                message=prompt,
-                response=response,
-                markdown=self.markdown,
-                generation_time=generation_time,
-                agent_name=self.name,
-                agent_role=self.role,
-                agent_tools=[t.__name__ for t in self.tools] if self.tools else None,
-                task_name=task_name,
-                task_description=task_description, 
-                task_id=task_id
-            )
+        # Always execute callbacks for status/trace output (regardless of LLM backend)
+        execute_sync_callback(
+            'interaction',
+            message=prompt,
+            response=response,
+            markdown=self.markdown,
+            generation_time=generation_time,
+            agent_name=self.name,
+            agent_role=self.role,
+            agent_tools=[t.__name__ for t in self.tools] if self.tools else None,
+            task_name=task_name,
+            task_description=task_description, 
+            task_id=task_id
+        )
         # Always display final interaction when verbose is True to ensure consistent formatting
         # This ensures both OpenAI and custom LLM providers (like Gemini) show formatted output
         if self.verbose and not self._final_display_shown:

@@ -302,7 +302,10 @@ def enable_status_output(
     Returns:
         StatusOutput instance for programmatic access
     """
-    global _status_output_enabled, _status_output
+    global _status_output_enabled, _status_output, _ai_call_count
+    
+    # Reset AI call counter for new agent run
+    _ai_call_count = 0
     
     _status_output = StatusOutput(
         file=file,
