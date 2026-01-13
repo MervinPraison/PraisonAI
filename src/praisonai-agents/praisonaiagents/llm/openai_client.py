@@ -1126,6 +1126,10 @@ class OpenAIClient:
         iteration_count = 0
         
         while iteration_count < max_iterations:
+            # Trigger LLM callback for status/trace output
+            from ..main import execute_sync_callback
+            execute_sync_callback('llm_start', model=model, agent_name=None)
+            
             if stream:
                 # Process as streaming response with formatted tools
                 final_response = self.process_stream_response(
