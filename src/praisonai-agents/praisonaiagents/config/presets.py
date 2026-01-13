@@ -62,35 +62,51 @@ OUTPUT_PRESETS: Dict[str, Dict[str, Any]] = {
         "reasoning_steps": False,
         "actions_trace": False,
     },
-    # Text preset - Shows final response only
-    # Simple one-line format without panels
-    "text": {
+    # Status preset - Shows tool calls and response without timestamps
+    # Simple progress indicator: ▸ tool → result ✓
+    "status": {
         "verbose": False,
         "markdown": False,
         "stream": False,
         "metrics": False,
         "reasoning_steps": False,
-        "actions_trace": True,  # Triggers final output display
-        "simple_output": True,  # New flag for simple text format
+        "actions_trace": True,
+        "simple_output": True,  # Simple format without timestamps
     },
-    # Verbose preset - Full interactive output
+    # Trace preset - Full execution trace with timestamps
+    # Shows: [HH:MM:SS] ▸ tool → result [0.2s] ✓
+    # Ideal for debugging and monitoring
+    "trace": {
+        "verbose": False,
+        "markdown": False,
+        "stream": False,
+        "metrics": False,
+        "reasoning_steps": False,
+        "actions_trace": True,
+        "status_trace": True,  # Enable timestamped status output
+    },
+    # Verbose preset - Full interactive output with panels
     # Shows: Task prompt, Tool calls (inline), Response panel
+    # Best for interactive terminal use
     "verbose": {
         "verbose": True,
         "markdown": True,
         "stream": False,
-        "metrics": False,  # No metrics footer
+        "metrics": False,
         "reasoning_steps": False,
     },
-    # Debug preset - verbose + metrics footer
-    # Shows everything verbose shows + token counts, cost, model info
+    # Debug preset - trace + metrics (NO boxes)
+    # Shows: [timestamp] tool calls, metrics footer, reasoning steps
+    # Best for developers debugging agent behavior
     "debug": {
-        "verbose": True,
-        "markdown": True,
+        "verbose": False,  # No boxes
+        "markdown": False,
         "stream": False,
         "metrics": True,  # Shows metrics footer
         "reasoning_steps": True,
-        "show_parameters": True,  # New: show LLM parameters
+        "actions_trace": True,
+        "status_trace": True,  # Timestamps like trace
+        "show_parameters": True,
     },
     # Streaming preset - enables streaming by default
     "stream": {
@@ -99,18 +115,6 @@ OUTPUT_PRESETS: Dict[str, Dict[str, Any]] = {
         "stream": True,
         "metrics": False,
         "reasoning_steps": False,
-    },
-    # Status preset - Clean inline status updates without boxes
-    # Shows: [timestamp] Calling LLM..., Executing tool..., Response: ...
-    # Ideal for external apps that want to track progress
-    "status": {
-        "verbose": False,
-        "markdown": False,
-        "stream": False,
-        "metrics": False,
-        "reasoning_steps": False,
-        "actions_trace": True,
-        "status_trace": True,  # New: enable simple status output
     },
     # JSON preset - JSONL output for piping/scripting
     "json": {
@@ -151,7 +155,7 @@ OUTPUT_PRESETS: Dict[str, Dict[str, Any]] = {
         "metrics": False,
         "reasoning_steps": False,
     },
-    # actions → text (renamed for clarity)
+    # actions → status (renamed for clarity)
     "actions": {
         "verbose": False,
         "markdown": False,
@@ -159,6 +163,17 @@ OUTPUT_PRESETS: Dict[str, Dict[str, Any]] = {
         "metrics": False,
         "reasoning_steps": False,
         "actions_trace": True,
+        "simple_output": True,
+    },
+    # text → status (old name, kept for backward compat)
+    "text": {
+        "verbose": False,
+        "markdown": False,
+        "stream": False,
+        "metrics": False,
+        "reasoning_steps": False,
+        "actions_trace": True,
+        "simple_output": True,
     },
 }
 
