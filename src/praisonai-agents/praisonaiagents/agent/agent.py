@@ -469,15 +469,26 @@ class Agent:
             output_style = getattr(_output_config, 'style', None)
             actions_trace = getattr(_output_config, 'actions_trace', False)  # Default False (silent)
             json_output = getattr(_output_config, 'json_output', False)
+            status_trace = getattr(_output_config, 'status_trace', False)  # New: clean inline status
         else:
             # Fallback defaults match silent mode (zero overhead)
             verbose, markdown, stream, metrics, reasoning_steps = False, False, False, False, False
             actions_trace = False  # No callbacks by default
             json_output = False
+            status_trace = False
         
-        # Enable actions output mode if configured
+        # Enable status output mode if configured (takes priority over actions)
+        # This provides clean inline status without boxes
+        if status_trace:
+            try:
+                from ..output.status import enable_status_mode, is_status_mode_enabled
+                if not is_status_mode_enabled():
+                    enable_status_mode(use_color=True, show_timestamps=True)
+            except ImportError:
+                pass  # Status module not available
+        # Enable actions output mode if configured (and status not enabled)
         # This registers callbacks to capture tool calls and final output
-        if actions_trace:
+        elif actions_trace:
             try:
                 from ..output.actions import enable_actions_mode, is_actions_mode_enabled
                 if not is_actions_mode_enabled():
