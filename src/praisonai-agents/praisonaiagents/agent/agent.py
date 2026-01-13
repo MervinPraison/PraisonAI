@@ -297,7 +297,7 @@ class Agent:
             backstory: Background context shaping personality and decisions.
             instructions: Direct instructions (overrides role/goal/backstory). Recommended for simple agents.
             llm: Model name string ("gpt-4o", "anthropic/claude-3-sonnet") or LLM object.
-                Defaults to OPENAI_MODEL_NAME env var or "gpt-5-nano".
+                Defaults to OPENAI_MODEL_NAME env var or "gpt-4o-mini".
             model: Alias for llm parameter.
             function_calling_llm: Dedicated LLM for function calling. Deprecated: use llm=.
             llm_config: LLM configuration dict. Deprecated: use llm=.
@@ -844,7 +844,7 @@ class Agent:
                     self.llm_instance = LLM(**llm_config)
                 else:
                     # Create LLM with model string and base_url
-                    model_name = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-5-nano')
+                    model_name = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o-mini')
                     self.llm_instance = LLM(
                         model=model_name,
                         base_url=base_url,
@@ -907,7 +907,7 @@ class Agent:
                 ) from e
         # Otherwise, fall back to OpenAI environment/name
         else:
-            self.llm = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-5-nano')
+            self.llm = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o-mini')
         # Handle tools parameter - ensure it's always a list
         if callable(tools):
             # If a single function/callable is passed, wrap it in a list
@@ -953,7 +953,7 @@ class Agent:
         self.min_reflect = min_reflect
         self.reflect_prompt = reflect_prompt
         # Use the same model selection logic for reflect_llm
-        self.reflect_llm = reflect_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-5-nano')
+        self.reflect_llm = reflect_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o-mini')
         self._console = None  # Lazy load console when needed
         
         # Initialize system prompt
@@ -1743,7 +1743,7 @@ Your Goal: {self.goal}
         elif hasattr(self, 'llm') and self.llm:
             model_name = self.llm
         else:
-            model_name = "gpt-5-nano"
+            model_name = "gpt-4o-mini"
         
         return supports_web_search(model_name)
     
@@ -1765,7 +1765,7 @@ Your Goal: {self.goal}
         elif hasattr(self, 'llm') and self.llm:
             model_name = self.llm
         else:
-            model_name = "gpt-5-nano"
+            model_name = "gpt-4o-mini"
         
         return supports_web_fetch(model_name)
     
@@ -2009,7 +2009,7 @@ Your Goal: {self.goal}
         
         Returns:
             The LLM model/instance being used by this agent.
-            - For standard models: returns the model string (e.g., "gpt-5-nano")
+            - For standard models: returns the model string (e.g., "gpt-4o-mini")
             - For custom LLM instances: returns the LLM instance object
             - For provider models: returns the LLM instance object
         """
@@ -2019,7 +2019,7 @@ Your Goal: {self.goal}
             return self.llm
         else:
             # Default fallback
-            return "gpt-5-nano"
+            return "gpt-4o-mini"
 
     def _ensure_knowledge_processed(self):
         """Ensure knowledge is initialized and processed when first accessed."""
@@ -3719,7 +3719,7 @@ Your Goal: {self.goal}"""
                             if self.verbose:
                                 logging.debug(f"Agent {self.name} final response: {response_text}")
                             # Return only reasoning content if reasoning_steps is True
-                            if reasoning_steps and hasattr(response.choices[0].message, 'reasoning_content'):
+                            if reasoning_steps and hasattr(response.choices[0].message, 'reasoning_content') and response.choices[0].message.reasoning_content:
                                 # Apply guardrail to reasoning content
                                 try:
                                     validated_reasoning = self._apply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools, task_name, task_description, task_id)
@@ -4244,7 +4244,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         
                         final_response = process_stream_chunks(chunks)
                         # Return only reasoning content if reasoning_steps is True
-                        if reasoning_steps and hasattr(final_response.choices[0].message, 'reasoning_content'):
+                        if reasoning_steps and hasattr(final_response.choices[0].message, 'reasoning_content') and final_response.choices[0].message.reasoning_content:
                             return final_response.choices[0].message.reasoning_content
                         return final_response.choices[0].message.content if final_response else full_response_text
 

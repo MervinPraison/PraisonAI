@@ -162,7 +162,7 @@ class MCP:
         # Method 1: Using command and args separately
         agent = Agent(
             instructions="You are a helpful assistant...",
-            llm="gpt-5-nano",
+            llm="gpt-4o-mini",
             tools=MCP(
                 command="/path/to/python",
                 args=["/path/to/app.py"]
@@ -172,14 +172,14 @@ class MCP:
         # Method 2: Using a single command string
         agent = Agent(
             instructions="You are a helpful assistant...",
-            llm="gpt-5-nano",
+            llm="gpt-4o-mini",
             tools=MCP("/path/to/python /path/to/app.py")
         )
         
         # Method 3: Using an SSE endpoint
         agent = Agent(
             instructions="You are a helpful assistant...",
-            llm="gpt-5-nano",
+            llm="gpt-4o-mini",
             tools=MCP("http://localhost:8080/sse")
         )
         
@@ -548,7 +548,7 @@ class MCP:
         """Convert the MCP tool to an OpenAI-compatible tool definition.
         
         This method is specifically invoked by the Agent class when using
-        provider/model format (e.g., "openai/gpt-5-nano").
+        provider/model format (e.g., "openai/gpt-4o-mini").
         
         Returns:
             dict or list: OpenAI-compatible tool definition(s)

@@ -103,7 +103,7 @@ class AutoAgents(Agents):
         self.self_reflect = self_reflect
         self.max_reflect = max_reflect
         self.min_reflect = min_reflect
-        self.llm = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-5-nano')
+        self.llm = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o-mini')
         self.function_calling_llm = function_calling_llm
         self.code_execution_mode = code_execution_mode
         self.embedder_config = embedder_config

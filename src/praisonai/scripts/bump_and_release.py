@@ -3,26 +3,35 @@
 Combined bump version and release script for PraisonAI package.
 
 Usage:
-    python src/praisonai/scripts/bump_and_release.py 2.2.99
+    # Basic: bump praisonai to 3.8.2 with agents 0.11.8
+    python scripts/bump_and_release.py --agents 0.11.8 3.8.2
     
-Or with optional praisonaiagents version:
-    python src/praisonai/scripts/bump_and_release.py 2.2.99 --agents 0.0.169
+    # Wait for agents version to propagate to PyPI (recommended after publishing agents)
+    python scripts/bump_and_release.py --agents 0.11.8 --wait 3.8.2
+    
+    # Auto-detect latest agents version from PyPI
+    python scripts/bump_and_release.py --auto 3.8.2
 
 This script:
-1. Bumps version in all required files
-2. Copies root README.md to package dir
-3. Runs uv lock & uv build
-4. Commits changes
-5. Creates git tag
-6. Pushes to GitHub
-7. Creates GitHub release (latest)
+1. Validates pre-flight conditions (clean git state, versions)
+2. Optionally waits for praisonaiagents to be available on PyPI
+3. Bumps version in all required files
+4. Copies root README.md to package dir
+5. Runs uv lock & uv build
+6. Commits changes
+7. Creates git tag
+8. Pushes to GitHub (with rebase if needed)
+9. Creates GitHub release (latest)
 """
 
 import re
 import sys
+import time
+import json
 import argparse
 import subprocess
 import shutil
+import urllib.request
 from pathlib import Path
 from typing import Optional
 
@@ -37,18 +46,61 @@ def get_praisonai_dir() -> Path:
     return get_project_root() / "src/praisonai"
 
 
-def run(cmd: list[str], cwd: Optional[Path] = None, check: bool = True) -> subprocess.CompletedProcess:
+def run(cmd: list[str], cwd: Optional[Path] = None, check: bool = True, silent: bool = False) -> subprocess.CompletedProcess:
     """Run a command and print it."""
-    print(f"$ {' '.join(cmd)}")
+    if not silent:
+        print(f"$ {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
-    if result.stdout:
-        print(result.stdout)
-    if result.stderr:
-        print(result.stderr, file=sys.stderr)
+    if not silent:
+        if result.stdout:
+            print(result.stdout)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
     if check and result.returncode != 0:
         print(f"❌ Command failed with exit code {result.returncode}")
         sys.exit(1)
     return result
+
+
+def get_pypi_version(package: str) -> Optional[str]:
+    """Get the latest version of a package from PyPI."""
+    try:
+        url = f"https://pypi.org/pypi/{package}/json"
+        with urllib.request.urlopen(url, timeout=10) as response:
+            data = json.loads(response.read().decode())
+            return data["info"]["version"]
+    except Exception as e:
+        print(f"  ⚠️  Failed to fetch PyPI version: {e}")
+        return None
+
+
+def wait_for_pypi_version(package: str, version: str, max_wait: int = 300, interval: int = 30) -> bool:
+    """Wait for a specific version to be available on PyPI."""
+    print(f"\n⏳ Waiting for {package}=={version} to be available on PyPI...")
+    start = time.time()
+    
+    while time.time() - start < max_wait:
+        current = get_pypi_version(package)
+        if current == version:
+            print(f"  ✅ {package}=={version} is now available on PyPI")
+            return True
+        
+        elapsed = int(time.time() - start)
+        remaining = max_wait - elapsed
+        print(f"  ⏳ Current: {current}, waiting for: {version} ({remaining}s remaining...)")
+        time.sleep(interval)
+    
+    print(f"  ❌ Timeout waiting for {package}=={version} on PyPI")
+    return False
+
+
+def check_git_status() -> bool:
+    """Check if there are uncommitted changes."""
+    root = get_project_root()
+    result = run(["git", "status", "--porcelain"], cwd=root, check=False, silent=True)
+    if result.stdout.strip():
+        return True  # Has uncommitted changes
+    return False
 
 
 def update_file(filepath: Path, patterns: list[tuple[str, str]], root: Path) -> bool:
@@ -130,17 +182,27 @@ def bump_version(new_version: str, agents_version: Optional[str] = None):
     print("\n✨ Version bump complete!")
 
 
-def validate_dependencies() -> bool:
-    """Validate that uv lock will succeed before making any changes."""
+def validate_dependencies(max_retries: int = 3, retry_interval: int = 60) -> bool:
+    """Validate that uv lock will succeed, with retry logic for PyPI propagation."""
     praisonai_dir = get_praisonai_dir()
     
-    print("\n🔍 Validating dependencies (dry-run)...")
-    result = run(["uv", "lock", "--dry-run"], cwd=praisonai_dir, check=False)
-    if result.returncode != 0:
-        print("\n❌ Dependency validation failed. Fix the issues above before releasing.")
-        return False
-    print("  ✅ Dependencies validated successfully")
-    return True
+    for attempt in range(max_retries):
+        print(f"\n🔍 Validating dependencies (attempt {attempt + 1}/{max_retries})...")
+        
+        # Clear cache before validation
+        run(["uv", "cache", "clean"], cwd=praisonai_dir, silent=True)
+        
+        result = run(["uv", "lock", "--dry-run"], cwd=praisonai_dir, check=False)
+        if result.returncode == 0:
+            print("  ✅ Dependencies validated successfully")
+            return True
+        
+        if attempt < max_retries - 1:
+            print(f"\n⏳ Waiting {retry_interval}s for PyPI propagation before retry...")
+            time.sleep(retry_interval)
+    
+    print("\n❌ Dependency validation failed after all retries.")
+    return False
 
 
 def release(version: str):
@@ -179,8 +241,17 @@ def release(version: str):
     print(f"\n🏷️  Creating tag {tag}...")
     run(["git", "tag", "-f", tag], cwd=root)
     
-    # 6. Push to GitHub
+    # 6. Pull rebase and push to GitHub
     print("\n⬆️  Pushing to GitHub...")
+    # First fetch and rebase to handle any remote changes (e.g., auto-generated api.md)
+    result = run(["git", "pull", "--rebase", "origin", "main"], cwd=root, check=False)
+    if result.returncode != 0:
+        print("  ⚠️  Rebase failed, trying to continue...")
+    
+    # Recreate tag after rebase (commit hash may have changed)
+    run(["git", "tag", "-f", tag], cwd=root)
+    
+    # Push changes
     run(["git", "push"], cwd=root)
     run(["git", "push", "--tags", "-f"], cwd=root)
     
@@ -200,16 +271,55 @@ def release(version: str):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Bump version and release PraisonAI package"
+        description="Bump version and release PraisonAI package",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Bump to 3.8.2 with agents 0.11.8
+  python scripts/bump_and_release.py --agents 0.11.8 3.8.2
+  
+  # Wait for agents to propagate to PyPI first (recommended)
+  python scripts/bump_and_release.py --agents 0.11.8 --wait 3.8.2
+  
+  # Auto-detect latest agents version from PyPI
+  python scripts/bump_and_release.py --auto 3.8.2
+"""
     )
     parser.add_argument(
         "version",
-        help="New version number (e.g., 2.2.99)"
+        help="New version number (e.g., 3.8.2)"
     )
     parser.add_argument(
         "--agents", "-a",
-        help="Optional: Update praisonaiagents dependency version (e.g., 0.0.169)",
+        help="Update praisonaiagents dependency version (e.g., 0.11.8)",
         default=None
+    )
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="Auto-detect latest praisonaiagents version from PyPI"
+    )
+    parser.add_argument(
+        "--wait", "-w",
+        action="store_true",
+        help="Wait for the specified agents version to be available on PyPI"
+    )
+    parser.add_argument(
+        "--max-wait",
+        type=int,
+        default=300,
+        help="Maximum seconds to wait for PyPI propagation (default: 300)"
+    )
+    parser.add_argument(
+        "--retries", "-r",
+        type=int,
+        default=3,
+        help="Number of retries for dependency validation (default: 3)"
+    )
+    parser.add_argument(
+        "--force", "-f",
+        action="store_true",
+        help="Skip pre-flight checks (use with caution)"
     )
     
     args = parser.parse_args()
@@ -217,20 +327,49 @@ def main():
     # Validate version format
     if not re.match(r'^\d+\.\d+\.\d+$', args.version):
         print(f"❌ Invalid version format: {args.version}")
-        print("   Expected format: X.Y.Z (e.g., 2.2.99)")
+        print("   Expected format: X.Y.Z (e.g., 3.8.2)")
         sys.exit(1)
     
+    # Handle --auto flag
+    if args.auto:
+        print("\n🔍 Auto-detecting latest praisonaiagents version from PyPI...")
+        agents_version = get_pypi_version("praisonaiagents")
+        if not agents_version:
+            print("❌ Failed to auto-detect praisonaiagents version")
+            sys.exit(1)
+        print(f"  ✅ Latest version: {agents_version}")
+        args.agents = agents_version
+    
+    # Validate agents version format if provided
     if args.agents and not re.match(r'^\d+\.\d+\.\d+$', args.agents):
         print(f"❌ Invalid agents version format: {args.agents}")
-        print("   Expected format: X.Y.Z (e.g., 0.0.169)")
+        print("   Expected format: X.Y.Z (e.g., 0.11.8)")
         sys.exit(1)
+    
+    # Pre-flight checks
+    if not args.force:
+        print("\n🔍 Pre-flight checks...")
+        
+        # Check for uncommitted changes (warning only)
+        if check_git_status():
+            print("  ⚠️  Warning: You have uncommitted changes")
+        else:
+            print("  ✅ Git working directory is clean")
+    
+    # Wait for PyPI propagation if requested
+    if args.wait and args.agents:
+        if not wait_for_pypi_version("praisonaiagents", args.agents, max_wait=args.max_wait):
+            print("\n💡 Tip: Check if the package was published successfully")
+            print("💡 Tip: You can retry without --wait if the package is confirmed published")
+            sys.exit(1)
     
     # Run bump version
     bump_version(args.version, args.agents)
     
-    # Validate dependencies after version bump (before git operations)
-    if not validate_dependencies():
+    # Validate dependencies after version bump (with retries)
+    if not validate_dependencies(max_retries=args.retries):
         print("\n💡 Tip: Revert changes with 'git checkout .' if needed")
+        print("💡 Tip: The package may need more time to propagate to PyPI")
         sys.exit(1)
     
     # Run release

@@ -51,7 +51,7 @@ class ModelRouter:
     DEFAULT_MODELS = [
         # Lightweight/cheap models for simple tasks
         ModelProfile(
-            name="gpt-5-nano",
+            name="gpt-4o-mini",
             provider="openai",
             complexity_range=(TaskComplexity.SIMPLE, TaskComplexity.MODERATE),
             cost_per_1k_tokens=0.00075,  # Average of $0.00015 input, $0.0006 output
@@ -80,7 +80,7 @@ class ModelRouter:
         
         # Mid-tier models for moderate complexity
         ModelProfile(
-            name="gpt-5-nano",
+            name="gpt-4o-mini",
             provider="openai",
             complexity_range=(TaskComplexity.MODERATE, TaskComplexity.COMPLEX),
             cost_per_1k_tokens=0.0075,  # Average of $0.0025 input, $0.01 output
@@ -145,7 +145,7 @@ class ModelRouter:
             preferred_providers: List of preferred providers in order
         """
         self.models = models or self.DEFAULT_MODELS
-        self.default_model = default_model or os.getenv('OPENAI_MODEL_NAME', 'gpt-5-nano')
+        self.default_model = default_model or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o-mini')
         self.cost_threshold = cost_threshold
         self.preferred_providers = preferred_providers or []
         
