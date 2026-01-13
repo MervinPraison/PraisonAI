@@ -104,8 +104,7 @@ def main():
         workflow = Agents(
             agents=[researcher, analyst, writer],
             tasks=[research_task, analysis_task, report_task], 
-            process="sequential",
-            verbose=True
+            process="sequential"
         )
         
         result = workflow.start()

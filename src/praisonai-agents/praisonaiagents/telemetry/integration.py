@@ -26,16 +26,41 @@ _telemetry_executor = None
 _telemetry_queue = None
 _queue_processor_running = False
 _queue_lock = threading.Lock()
+_atexit_registered = False
+
+def _atexit_cleanup():
+    """Cleanup handler registered with atexit to prevent hanging on exit."""
+    global _queue_processor_running, _telemetry_executor, _telemetry_queue
+    
+    # Signal queue processor to stop
+    _queue_processor_running = False
+    
+    # Shutdown executor without waiting (to prevent hang)
+    if _telemetry_executor is not None:
+        try:
+            _telemetry_executor.shutdown(wait=False)
+        except:
+            pass
+        _telemetry_executor = None
+    
+    _telemetry_queue = None
 
 def _get_telemetry_executor():
     """Get or create the shared telemetry thread pool executor."""
-    global _telemetry_executor
+    global _telemetry_executor, _atexit_registered
     if _telemetry_executor is None:
         # Use a small thread pool to avoid resource overhead
         _telemetry_executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=2, 
             thread_name_prefix="telemetry"
         )
+        
+        # Register atexit cleanup to prevent hanging on exit
+        if not _atexit_registered:
+            import atexit
+            atexit.register(_atexit_cleanup)
+            _atexit_registered = True
+            
     return _telemetry_executor
 
 def _get_telemetry_queue():
@@ -48,8 +73,13 @@ def _get_telemetry_queue():
     with _queue_lock:
         if not _queue_processor_running:
             _queue_processor_running = True
-            executor = _get_telemetry_executor()
-            executor.submit(_process_telemetry_queue)
+            # Use a daemon thread directly instead of executor to prevent hang
+            processor_thread = threading.Thread(
+                target=_process_telemetry_queue,
+                name="telemetry-queue-processor",
+                daemon=True  # Daemon thread will be killed on exit
+            )
+            processor_thread.start()
     
     return _telemetry_queue
 
@@ -61,12 +91,22 @@ def _process_telemetry_queue():
     
     try:
         while _queue_processor_running:
+            # Check if interpreter is shutting down
+            try:
+                import sys
+                if hasattr(sys, 'is_finalizing') and sys.is_finalizing():
+                    break
+            except:
+                break
+                
             events = []
             deadline = time.time() + batch_timeout
             
             # Collect events until batch size or timeout
             while len(events) < batch_size and time.time() < deadline:
                 try:
+                    if _telemetry_queue is None:
+                        break
                     event = _telemetry_queue.get(timeout=0.1)
                     events.append(event)
                     _telemetry_queue.task_done()

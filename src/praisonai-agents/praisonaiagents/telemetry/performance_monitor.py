@@ -381,6 +381,10 @@ class PerformanceMonitor:
         Returns:
             List of flow events showing function execution order and timing
         """
+        # If monitoring is disabled, return empty results
+        if self._monitoring_disabled:
+            return []
+            
         with self._lock:
             flow = []
             for event in self._function_flow.copy():
@@ -400,6 +404,10 @@ class PerformanceMonitor:
     
     def get_active_calls(self) -> Dict[str, Any]:
         """Get information about currently executing functions."""
+        # If monitoring is disabled, return empty results
+        if self._monitoring_disabled:
+            return {}
+            
         with self._lock:
             active = {}
             current_time = time.time()
@@ -417,6 +425,10 @@ class PerformanceMonitor:
     
     def get_slowest_functions(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get the slowest performing functions."""
+        # If monitoring is disabled, return empty results
+        if self._monitoring_disabled:
+            return []
+            
         with self._lock:
             functions = []
             for name, stats in self._function_stats.items():
@@ -435,6 +447,10 @@ class PerformanceMonitor:
     
     def get_slowest_api_calls(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get the slowest performing API calls."""
+        # If monitoring is disabled, return empty results
+        if self._monitoring_disabled:
+            return []
+            
         with self._lock:
             apis = []
             for name, stats in self._api_calls.items():
@@ -539,6 +555,10 @@ class PerformanceMonitor:
     
     def clear_statistics(self):
         """Clear all performance statistics."""
+        # If monitoring is disabled, nothing to clear
+        if self._monitoring_disabled:
+            return
+            
         with self._lock:
             self._function_stats.clear()
             self._api_calls.clear()

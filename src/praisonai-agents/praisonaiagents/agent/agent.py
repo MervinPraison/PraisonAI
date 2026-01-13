@@ -775,7 +775,21 @@ class Agent:
 
         # If instructions are provided, use them to set role, goal, and backstory
         if instructions:
-            self.name = name or "Agent"
+            # Auto-generate descriptive name from instructions if not provided
+            if name:
+                self.name = name
+            else:
+                # Generate name from first 2 meaningful words of instructions
+                # "Research about AI" → "Research Agent"
+                # "Summarise research agent's findings" → "Summarise Agent"
+                words = instructions.split()
+                # Filter out common stop words
+                stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'about'}
+                meaningful = [w for w in words if w.lower() not in stop_words][:2]
+                if meaningful:
+                    self.name = " ".join(meaningful).title() + " Agent"
+                else:
+                    self.name = words[0].title() + " Agent" if words else "Agent"
             self.role = role or "Assistant"
             self.goal = goal or instructions
             self.backstory = backstory or instructions
@@ -2840,6 +2854,10 @@ Your Goal: {self.goal}"""
         """
         logging.debug(f"{self.name} executing tool {function_name} with arguments: {arguments}")
         
+        # Notify callbacks that tool is being called (for dynamic status updates)
+        from ..main import execute_sync_callback
+        execute_sync_callback('tool_call', tool_name=function_name, tool_input=arguments)
+        
         # Set up injection context for tools with Injected parameters
         from ..tools.injected import AgentState, with_injection_context
         state = AgentState(
@@ -4301,15 +4319,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
     def run(self, prompt: str, **kwargs):
         """Execute agent silently and return structured result.
         
-        Production-friendly execution. Does not stream or display output by default.
-        Use this for programmatic/scripted usage where you want the result only.
+        Production-friendly execution. Always uses silent mode with no streaming
+        or verbose display, regardless of TTY status. Use this for programmatic,
+        scripted, or automated usage where you want just the result.
         
         Args:
             prompt: The input prompt to process
             **kwargs: Additional arguments:
                 - stream (bool): Force streaming if True. Default: False
-                - display (bool): Force terminal display if True. Default: False
-                - output (str): Output preset override
+                - output (str): Output preset override (rarely needed)
                 
         Returns:
             The agent's response as a string
@@ -4320,6 +4338,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             result = agent.run("What is 2+2?")  # Silent, returns "4"
             print(result)
             ```
+            
+        Note:
+            Unlike .start() which enables verbose output in TTY for interactive
+            use, .run() is always silent. This makes it suitable for:
+            - Production pipelines
+            - Automated scripts
+            - Background processing
+            - API endpoints
         """
         # Production defaults: no streaming, no display
         if 'stream' not in kwargs:
@@ -4471,18 +4497,20 @@ Write the complete compiled report:"""
         
         # Chat history is preserved in self.chat_history (no action needed)
 
-    def start(self, prompt: str, **kwargs):
-        """Start the agent interactively with streaming output.
+    def start(self, prompt: str = None, **kwargs):
+        """Start the agent interactively with verbose output.
         
-        Beginner-friendly execution. Streams output by default when running in a TTY.
-        Use this for interactive/terminal usage where you want to see output in real-time.
+        Beginner-friendly execution. Defaults to verbose output with streaming
+        when running in a TTY. Use this for interactive/terminal usage where 
+        you want to see output in real-time with rich formatting.
         
         Args:
-            prompt: The input prompt to process
+            prompt: The input prompt to process. If not provided, uses the 
+                    agent's instructions as the task (useful when instructions
+                    already describe what the agent should do).
             **kwargs: Additional arguments:
                 - stream (bool | None): Override streaming. None = auto-detect TTY
-                - display (bool | None): Override display. None = auto (True if streaming)
-                - output (str): Output preset override
+                - output (str): Output preset override (e.g., "silent", "verbose")
                 
         Returns:
             - If streaming: Generator yielding response chunks
@@ -4490,20 +4518,31 @@ Write the complete compiled report:"""
             
         Example:
             ```python
-            agent = Agent(instructions="You are helpful")
+            # Minimal usage - instructions IS the task
+            agent = Agent(instructions="Research AI trends and summarize")
+            result = agent.start()  # Uses instructions as task
             
-            # Interactive use - streams by default in terminal
-            for chunk in agent.start("Tell me a story"):
-                print(chunk, end="", flush=True)
-            
-            # Or let it handle display automatically
-            result = agent.start("What is 2+2?")  # Streams if TTY
+            # With explicit prompt (overrides/adds to instructions)
+            agent = Agent(instructions="You are a helpful assistant")
+            result = agent.start("What is 2+2?")  # Uses prompt as task
             ```
+            
+        Note:
+            Unlike .run() which is always silent (production use), .start()
+            enables verbose output by default when in a TTY for beginner-friendly
+            interactive use. Use .run() for programmatic/scripted usage.
         """
         import sys
         
+        # If no prompt provided, use instructions as the task
+        if prompt is None:
+            prompt = self.instructions or "Hello"
+        
         # Load history from past sessions
         self._load_history_context()
+        
+        # Determine if we're in an interactive TTY
+        is_tty = sys.stdout.isatty()
         
         # Determine streaming behavior
         # Priority: explicit kwarg > agent's stream attribute > TTY detection
@@ -4514,24 +4553,192 @@ Write the complete compiled report:"""
                 stream_requested = self.stream
             else:
                 # Auto-detect: stream if stdout is a TTY (interactive terminal)
-                stream_requested = sys.stdout.isatty()
+                stream_requested = is_tty
         
-        # Check if planning mode is enabled
-        if self.planning:
-            result = self._start_with_planning(prompt, **kwargs)
-        elif stream_requested:
-            # Return a generator for streaming response
-            kwargs['stream'] = True
-            result = self._start_stream(prompt, **kwargs)
-        else:
-            # Return regular chat response
-            kwargs['stream'] = False
-            result = self.chat(prompt, **kwargs)
+        # ─────────────────────────────────────────────────────────────────────
+        # Enable verbose output in TTY for beginner-friendly interactive use
+        # Priority: explicit output= kwarg > TTY auto-verbose > agent's default
+        # ─────────────────────────────────────────────────────────────────────
+        original_verbose = self.verbose
+        original_markdown = self.markdown
+        output_override = kwargs.pop('output', None)  # Pop to prevent passing to chat()
         
-        # Auto-save session if enabled
-        self._auto_save_session()
-        
-        return result
+        try:
+            # If running in TTY and no explicit output override, enable verbose
+            if is_tty and output_override is None:
+                self.verbose = True
+                self.markdown = True
+            elif output_override:
+                # Apply explicit output preset for this call
+                from ..config.presets import OUTPUT_PRESETS
+                if output_override in OUTPUT_PRESETS:
+                    preset = OUTPUT_PRESETS[output_override]
+                    self.verbose = preset.get('verbose', False)
+                    self.markdown = preset.get('markdown', False)
+            
+            # Check if planning mode is enabled
+            if self.planning:
+                result = self._start_with_planning(prompt, **kwargs)
+            elif stream_requested:
+                # Return a generator for streaming response
+                kwargs['stream'] = True
+                result = self._start_stream(prompt, **kwargs)
+            else:
+                # Return regular chat response with animated working status
+                kwargs['stream'] = False
+                
+                # Show animated status during LLM call if verbose
+                if self.verbose and is_tty:
+                    from rich.live import Live
+                    from rich.console import Group
+                    from rich.status import Status
+                    from ..main import PRAISON_COLORS, sync_display_callbacks
+                    import threading
+                    import time as time_module
+                    
+                    console = Console()
+                    start_time = time_module.time()
+                    
+                    # ─────────────────────────────────────────────────────────────
+                    # Shared state for dynamic status messages (thread-safe)
+                    # Updated by callbacks during tool execution
+                    # ─────────────────────────────────────────────────────────────
+                    current_status = ["Analyzing query..."]
+                    tools_called = []
+                    
+                    # Register a temporary callback to track tool calls
+                    def status_tool_callback(**kwargs):
+                        tool_name = kwargs.get('tool_name', '')
+                        if tool_name:
+                            tools_called.append(tool_name)
+                            current_status[0] = f"Calling tool: {tool_name}..."
+                    
+                    # Store original callback and register ours
+                    original_tool_callback = sync_display_callbacks.get('tool_call')
+                    sync_display_callbacks['tool_call'] = status_tool_callback
+                    
+                    # Animation state
+                    result_holder = [None]
+                    error_holder = [None]
+                    
+                    # Temporarily disable verbose in chat to prevent duplicate output
+                    original_verbose_chat = self.verbose
+                    
+                    def run_chat():
+                        try:
+                            # Suppress verbose during animation - we'll display result ourselves
+                            self.verbose = False
+                            current_status[0] = "Sending to LLM..."
+                            result_holder[0] = self.chat(prompt, **kwargs)
+                            current_status[0] = "Finalizing response..."
+                        except Exception as e:
+                            error_holder[0] = e
+                        finally:
+                            self.verbose = original_verbose_chat
+                            # Restore original callback
+                            if original_tool_callback:
+                                sync_display_callbacks['tool_call'] = original_tool_callback
+                            elif 'tool_call' in sync_display_callbacks:
+                                del sync_display_callbacks['tool_call']
+                    
+                    # Start chat in background thread
+                    chat_thread = threading.Thread(target=run_chat)
+                    chat_thread.start()
+                    
+                    from rich.panel import Panel
+                    from rich.text import Text
+                    from rich.markdown import Markdown
+                    
+                    # ─────────────────────────────────────────────────────────────
+                    # Smart Agent Info: Only show if user provided meaningful info
+                    # Skip if using defaults ("Agent"/"Assistant") with single agent
+                    # ─────────────────────────────────────────────────────────────
+                    has_custom_name = self.name and self.name not in ("Agent", "agent", None, "")
+                    has_custom_role = self.role and self.role not in ("Assistant", "AI Assistant", "assistant", None, "")
+                    has_tools = bool(self.tools)
+                    
+                    show_agent_info = has_custom_name or has_custom_role or has_tools
+                    
+                    agent_panel = None
+                    if show_agent_info:
+                        agent_info_parts = []
+                        if has_custom_name:
+                            agent_info_parts.append(f"[bold {PRAISON_COLORS['task']}]👤 Agent:[/] [{PRAISON_COLORS['agent_text']}]{self.name}[/]")
+                        if has_custom_role:
+                            agent_info_parts.append(f"[bold {PRAISON_COLORS['metrics']}]Role:[/] [{PRAISON_COLORS['agent_text']}]{self.role}[/]")
+                        if has_tools:
+                            tools_list = [t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools][:5]
+                            tools_str = ", ".join(f"[italic {PRAISON_COLORS['response']}]{tool}[/]" for tool in tools_list)
+                            agent_info_parts.append(f"[bold {PRAISON_COLORS['agent']}]Tools:[/] {tools_str}")
+                        
+                        agent_panel = Panel(
+                            "\n".join(agent_info_parts), 
+                            border_style=PRAISON_COLORS["agent"], 
+                            title="[bold]Agent Info[/]", 
+                            title_align="left", 
+                            padding=(1, 2)
+                        )
+                    
+                    # Create task panel
+                    task_panel = Panel.fit(
+                        Markdown(prompt) if self.markdown else Text(prompt),
+                        title="Task",
+                        border_style=PRAISON_COLORS["task"]
+                    )
+                    
+                    # Show initial panels (agent info if applicable, then task)
+                    if agent_panel:
+                        console.print(agent_panel)
+                    console.print(task_panel)
+                    
+                    # ─────────────────────────────────────────────────────────────
+                    # Animate with Rich.Status showing DYNAMIC status from callbacks
+                    # ─────────────────────────────────────────────────────────────
+                    with console.status(
+                        f"[bold yellow]Working...[/]  {current_status[0]}", 
+                        spinner="dots",
+                        spinner_style="yellow"
+                    ) as status:
+                        last_status = current_status[0]
+                        while chat_thread.is_alive():
+                            time_module.sleep(0.15)  # More responsive updates
+                            # Only update if status changed (reduces flicker)
+                            if current_status[0] != last_status:
+                                last_status = current_status[0]
+                            status.update(f"[bold yellow]Working...[/]  {current_status[0]}")
+                    
+                    # Calculate elapsed time
+                    elapsed = time_module.time() - start_time
+                    
+                    # Re-raise any error from chat
+                    if error_holder[0]:
+                        raise error_holder[0]
+                    
+                    result = result_holder[0]
+                    
+                    # Display response panel
+                    response_panel = Panel.fit(
+                        Markdown(str(result)) if self.markdown else Text(str(result)),
+                        title=f"Response ({elapsed:.1f}s)",
+                        border_style=PRAISON_COLORS["response"]
+                    )
+                    console.print(response_panel)
+                    
+                    # Show tool activity summary if tools were called
+                    if tools_called:
+                        tools_summary = ", ".join(tools_called)
+                        console.print(f"[dim]🔧 Tools used: {tools_summary}[/dim]")
+                else:
+                    result = self.chat(prompt, **kwargs)
+            
+            # Auto-save session if enabled
+            self._auto_save_session()
+            
+            return result
+        finally:
+            # Restore original output settings
+            self.verbose = original_verbose
+            self.markdown = original_markdown
     
     def iter_stream(self, prompt: str, **kwargs):
         """Stream agent response as an iterator of chunks.

@@ -52,12 +52,11 @@ def benchmark_praisonai(model, iterations, prompt):
         agent = Agent(
             name="Calculator",
             instructions="You are a helpful assistant. Be very brief.",
-            llm=model,
-            verbose=False
+            llm=model
         )
         
         start = time.perf_counter()
-        response = agent.start(prompt)
+        response = agent.start(prompt, output="silent")
         elapsed = time.perf_counter() - start
         
         times.append(elapsed)
@@ -80,12 +79,11 @@ def benchmark_praisonai_litellm(model, iterations, prompt):
         agent = Agent(
             name="Calculator",
             instructions="You are a helpful assistant. Be very brief.",
-            llm=f"openai/{model}",
-            verbose=False
+            llm=f"openai/{model}"
         )
         
         start = time.perf_counter()
-        response = agent.start(prompt)
+        response = agent.start(prompt, output="silent")
         elapsed = time.perf_counter() - start
         
         times.append(elapsed)

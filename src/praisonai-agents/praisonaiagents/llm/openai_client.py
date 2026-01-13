@@ -739,7 +739,8 @@ class OpenAIClient:
                                 content=content
                             ))
                             first_token_emitted = True
-                        else:
+                        elif _emit:
+                            # Emit DELTA_TEXT for subsequent tokens
                             stream_callback(StreamEvent(
                                 type=StreamEventType.DELTA_TEXT,
                                 timestamp=last_content_time,

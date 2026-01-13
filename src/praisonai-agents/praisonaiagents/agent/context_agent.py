@@ -435,7 +435,6 @@ This report contains all agent interactions and outputs from a complete ContextA
                     Provide comprehensive analysis that follows the PRD template principles and enables 
                     AI assistants to implement features that perfectly match existing codebase patterns.""",
                     llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
-                    verbose=getattr(self, 'verbose', True)
                 )
                 
                 prompt = f"""Analyze this gitingest codebase digest following PRD template methodology:
@@ -516,7 +515,6 @@ codebase style and architecture following PRD template principles."""
             goal="Perform comprehensive manual codebase analysis following PRD methodology",
             instructions="""Analyze the codebase samples following PRD template methodology for complete understanding.""",
             llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
-            verbose=getattr(self, 'verbose', True)
         )
         
         # Format comprehensive sample
@@ -567,7 +565,6 @@ Analyze following PRD principles to extract patterns, conventions, and architect
             7. Code complexity metrics
             8. API and interface patterns""",
             llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
-            verbose=getattr(self, 'verbose', True)
         )
         
         # Perform AST analysis on Python files
@@ -625,7 +622,6 @@ Extract comprehensive patterns that follow PRD template principles for implement
             For each pattern, provide the pattern name, where it's used, and how to replicate it 
             following PRD template principles.""",
             llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
-            verbose=getattr(self, 'verbose', True)
         )
         
         # Get representative code samples
@@ -675,7 +671,6 @@ patterns and best practices for first-try success."""
             instructions="""Analyze testing patterns to understand validation approaches and create 
             comprehensive test frameworks following PRD methodology.""",
             llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
-            verbose=getattr(self, 'verbose', True)
         )
         
         # Get test files
@@ -802,7 +797,6 @@ Extract testing patterns for validation framework creation following PRD princip
             
             Generate PRPs following this EXACT structure for first-try implementation success.""",
             llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
-            verbose=getattr(self, 'verbose', True)
         )
         
         prompt = f"""Generate a comprehensive Product Requirements Prompt (PRP) following the EXACT PRD template structure:
@@ -851,7 +845,6 @@ on the first try following PRD template principles."""
             7. DOCUMENTATION VALIDATION: Documentation completeness
             8. DEPENDENCY VALIDATION: Dependency analysis and security""",
             llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
-            verbose=getattr(self, 'verbose', True)
         )
         
         # Analyze existing validation patterns
@@ -898,7 +891,6 @@ following PRD template principles."""
             README files, API documentation, setup guides, architecture docs, and any other 
             relevant documentation that provides context for implementation.""",
             llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
-            verbose=getattr(self, 'verbose', True)
         )
         
         # Get documentation files
@@ -944,7 +936,6 @@ following PRD template principles."""
             APIs, databases, external services, configuration points, and any other 
             integration requirements that affect implementation.""",
             llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
-            verbose=getattr(self, 'verbose', True)
         )
         
         # Get configuration and dependency files
@@ -1005,7 +996,6 @@ following PRD template principles."""
             9. INTEGRATION STEPS: How to integrate with existing systems
             10. VALIDATION CHECKPOINTS: Validation steps at each phase""",
             llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
-            verbose=getattr(self, 'verbose', True)
         )
         
         prompt = f"""Create detailed implementation blueprint following PRD methodology:
@@ -1303,7 +1293,6 @@ Every agent interaction has been saved for full audit trail and reproducibility.
             
             Be precise and extract only what is explicitly mentioned or clearly implied.""",
             llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
-            verbose=getattr(self, 'verbose', True)
         )
         
         prompt = f"""Parse this user input to extract codebase and goal:
@@ -1537,7 +1526,6 @@ Note: Detailed function/class metadata not available due to content access limit
             
             Make the output easy for a file selection agent to understand which files contain what functionality.""",
             llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
-            verbose=getattr(self, 'verbose', True)
         )
         
         structure_text = basic_structure.get('structure', '')
@@ -1771,7 +1759,6 @@ Focus on creating clear, structured metadata that will help with intelligent fil
             
             Maximum 50 files for efficient analysis.""",
             llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
-            verbose=getattr(self, 'verbose', True)
         )
         
         # Prepare enhanced structure information
@@ -1924,7 +1911,6 @@ Maximum 50 files.""".format(goal=goal)
             
             Since these files were pre-selected for relevance, provide deep analysis of how each contributes to implementing: {goal}""",
             llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
-            verbose=getattr(self, 'verbose', True)
         )
         
         prompt = f"""Analyze these carefully selected repository files for implementing: {goal}
@@ -2025,7 +2011,6 @@ Since these files were pre-selected for relevance, explain how each contributes 
             
             Focus everything on successfully implementing: {goal}""",
             llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
-            verbose=getattr(self, 'verbose', True)
         )
         
         chunk_info = ""
