@@ -3095,6 +3095,9 @@ Your Goal: {self.goal}"""
 
         # Use the new _format_tools_for_completion helper method
         formatted_tools = self._format_tools_for_completion(tools)
+        
+        # Trigger LLM start callback for status/trace output
+        execute_sync_callback('llm_start', model=self.llm if hasattr(self, 'llm') else 'gpt-4o-mini', agent_name=self.name)
 
         try:
             # Use the custom LLM instance if available
