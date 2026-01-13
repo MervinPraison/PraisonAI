@@ -1320,8 +1320,9 @@ Context:
                 if result:
                     response_text = str(result.raw)
                     # No truncation - show full response in verbose mode
+                    from rich.markdown import Markdown
                     console.print(Panel(
-                        Text(response_text),
+                        Markdown(response_text),
                         title=f"[bold]Agent [{idx}/{total_agents}] Complete ({elapsed:.1f}s)[/]",
                         border_style=PRAISON_COLORS["response"],
                         padding=(1, 2)
