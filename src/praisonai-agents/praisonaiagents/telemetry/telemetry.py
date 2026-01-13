@@ -433,15 +433,24 @@ class MinimalTelemetry:
         if posthog_client:
             
             try:
+                # Include captured metrics in the event properties
+                event_properties = {
+                    'version': self._environment.get('framework_version', 'unknown'),
+                    'os': platform.system(),
+                    'python_version': platform.python_version(),
+                    '$process_person_profile': False,
+                    '$geoip_disable': True,
+                    'session_id': self.session_id
+                }
+                
+                # Add all metrics to properties
+                if metrics:
+                    event_properties.update(metrics)
+
                 posthog_client.capture(
                     distinct_id='anonymous',
                     event='sdk_used',
-                    properties={
-                        'version': self._environment['framework_version'],
-                        'os': platform.system(),
-                        '$process_person_profile': False,
-                        '$geoip_disable': True
-                    }
+                    properties=event_properties
                 )
                 # Don't flush here - let PostHog handle it asynchronously
             except:

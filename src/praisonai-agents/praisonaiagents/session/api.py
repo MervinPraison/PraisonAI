@@ -162,11 +162,13 @@ class Session:
 
         from ..agent import Agent as AgentClass
 
+        # Filter out parameters that are not valid for Agent.__init__
+        valid_kwargs = {k: v for k, v in kwargs.items() if k not in ('verbose', 'user_id')}
+
         agent_kwargs = {
             "name": name,
             "role": role,
-            "user_id": self.user_id,
-            **kwargs
+            **valid_kwargs
         }
 
         if instructions:
@@ -177,7 +179,6 @@ class Session:
             agent_kwargs["memory"] = self.memory
         if knowledge:
             agent_kwargs["knowledge"] = knowledge
-            agent_kwargs["knowledge_config"] = self.knowledge_config
 
         agent = AgentClass(**agent_kwargs)
         
