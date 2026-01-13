@@ -151,6 +151,37 @@ class ActionsSink:
         else:
             self._emit_text(f"◀ Agent:{agent_name} completed{duration_str}", ts, "green")
     
+    def llm_start(self, model: str = None, agent_name: Optional[str] = None) -> None:
+        """Record LLM call start."""
+        ts = time.time()
+        self._llm_start_time = ts
+        
+        model_str = f" ({model})" if model else ""
+        
+        if self._format == "jsonl":
+            self._emit_jsonl("llm_start", model=model, agent_name=agent_name, timestamp=ts)
+        else:
+            prefix = f"[{agent_name}] " if agent_name else ""
+            self._emit_text(f"{prefix}▸ Calling LLM{model_str}...", ts, "yellow")
+    
+    def llm_end(self, duration_ms: Optional[float] = None, agent_name: Optional[str] = None) -> None:
+        """Record LLM call end."""
+        ts = time.time()
+        
+        # Calculate duration if not provided
+        if duration_ms is None and hasattr(self, '_llm_start_time'):
+            start_ts = self._llm_start_time
+            if start_ts:
+                duration_ms = (ts - start_ts) * 1000
+        
+        duration_str = f" [{_format_duration(duration_ms)}]" if duration_ms else ""
+        
+        if self._format == "jsonl":
+            self._emit_jsonl("llm_end", agent_name=agent_name, timestamp=ts, duration_ms=duration_ms)
+        else:
+            prefix = f"[{agent_name}] " if agent_name else ""
+            self._emit_text(f"{prefix}✓ LLM responded{duration_str}", ts, "green")
+    
     def tool_start(self, tool_name: str, tool_args: Optional[Dict[str, Any]] = None, agent_name: Optional[str] = None) -> None:
         """Record tool start."""
         ts = time.time()
