@@ -5,6 +5,7 @@ def get_weather(city: str) -> str:
 
 agent = Agent(
     instructions="You are a helpful assistant",
+    llm="openai/gpt-4o-mini",
     tools=[get_weather],
     output="status"
 )
