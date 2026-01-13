@@ -450,6 +450,51 @@ def __getattr__(name):
         _lazy_cache[name] = ContextManager
         return ContextManager
     
+    # =========================================================================
+    # Sub-package fallback: delegate to sub-packages for additional symbols
+    # This enables: from praisonaiagents import duckduckgo, FileMemory, etc.
+    # =========================================================================
+    
+    # Try tools sub-package (110+ tool functions)
+    try:
+        from . import tools as _tools_module
+        if hasattr(_tools_module, name):
+            result = getattr(_tools_module, name)
+            _lazy_cache[name] = result
+            return result
+    except (ImportError, AttributeError):
+        pass
+    
+    # Try memory sub-package (FileMemory, RulesManager, etc.)
+    try:
+        from . import memory as _memory_module
+        if hasattr(_memory_module, name):
+            result = getattr(_memory_module, name)
+            _lazy_cache[name] = result
+            return result
+    except (ImportError, AttributeError):
+        pass
+    
+    # Try config sub-package (already handled above, but catch any stragglers)
+    try:
+        from . import config as _config_module
+        if hasattr(_config_module, name):
+            result = getattr(_config_module, name)
+            _lazy_cache[name] = result
+            return result
+    except (ImportError, AttributeError):
+        pass
+    
+    # Try workflows sub-package (Pipeline, Route, etc. - already imported, catch aliases)
+    try:
+        from . import workflows as _workflows_module
+        if hasattr(_workflows_module, name):
+            result = getattr(_workflows_module, name)
+            _lazy_cache[name] = result
+            return result
+    except (ImportError, AttributeError):
+        pass
+    
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
