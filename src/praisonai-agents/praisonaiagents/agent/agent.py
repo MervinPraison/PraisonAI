@@ -474,12 +474,14 @@ class Agent:
             actions_trace = getattr(_output_config, 'actions_trace', False)  # Default False (silent)
             json_output = getattr(_output_config, 'json_output', False)
             status_trace = getattr(_output_config, 'status_trace', False)  # New: clean inline status
+            simple_output = getattr(_output_config, 'simple_output', False)  # status preset: no timestamps
         else:
             # Fallback defaults match silent mode (zero overhead)
             verbose, markdown, stream, metrics, reasoning_steps = False, False, False, False, False
             actions_trace = False  # No callbacks by default
             json_output = False
             status_trace = False
+            simple_output = False
         
         # Enable status output mode if configured (takes priority over actions)
         # This provides clean inline status without boxes
@@ -497,7 +499,13 @@ class Agent:
                 from ..output.actions import enable_actions_mode, is_actions_mode_enabled
                 if not is_actions_mode_enabled():
                     output_format = "jsonl" if json_output else "text"
-                    enable_actions_mode(redact=True, use_color=True, format=output_format)
+                    # simple_output=True means status preset (no timestamps)
+                    enable_actions_mode(
+                        redact=True,
+                        use_color=True,
+                        format=output_format,
+                        show_timestamps=not simple_output
+                    )
             except ImportError:
                 pass  # Actions module not available
         
