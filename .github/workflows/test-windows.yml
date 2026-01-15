@@ -121,12 +121,13 @@ jobs:
         out_cfg = OutputConfig(verbose=True, stream=True)
         print('OutputConfig verbose:', out_cfg.verbose)
         
-        exec_cfg = ExecutionConfig(max_retries=3, timeout=60)
-        print('ExecutionConfig retries:', exec_cfg.max_retries)
+        exec_cfg = ExecutionConfig(max_iter=50, max_retry_limit=5)
+        print('ExecutionConfig max_iter:', exec_cfg.max_iter)
         
         plan_cfg = PlanningConfig(enabled=True)
         print('PlanningConfig enabled:', plan_cfg.enabled)
         "
+
 
     # ==================== HANDOFF ====================
     - name: Test Handoff
