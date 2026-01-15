@@ -10,14 +10,51 @@ import logging
 import time
 import json
 import asyncio
-from typing import Any, Dict, List, Optional, Union, AsyncIterator, Iterator, Callable, Tuple
-from openai import OpenAI, AsyncOpenAI
-from openai.types.chat import ChatCompletionChunk
+from typing import Any, Dict, List, Optional, Union, AsyncIterator, Iterator, Callable, Tuple, TYPE_CHECKING
 from pydantic import BaseModel
 from dataclasses import dataclass
-from rich.console import Console
-from rich.live import Live
 import inspect
+
+# Lazy imports for optional dependencies
+_openai_module = None
+_rich_console = None
+_rich_live = None
+
+def _get_openai():
+    """Lazy import openai module."""
+    global _openai_module
+    if _openai_module is None:
+        try:
+            import openai as _openai
+            _openai_module = _openai
+        except ImportError:
+            raise ImportError(
+                "openai is required for OpenAI client. "
+                "Install with: pip install openai"
+            )
+    return _openai_module
+
+def _get_openai_classes():
+    """Get OpenAI and AsyncOpenAI classes lazily."""
+    openai = _get_openai()
+    return openai.OpenAI, openai.AsyncOpenAI
+
+def _get_rich_console():
+    """Lazy import rich Console."""
+    global _rich_console
+    if _rich_console is None:
+        from rich.console import Console
+        _rich_console = Console
+    return _rich_console
+
+def _get_rich_live():
+    """Lazy import rich Live."""
+    global _rich_live
+    if _rich_live is None:
+        from rich.live import Live
+        _rich_live = Live
+    return _rich_live
+
 
 # Import display_tool_call for callback support (lazy import to avoid circular imports)
 _display_tool_call = None
@@ -258,21 +295,23 @@ class OpenAIClient:
     def console(self):
         """Lazily initialize Rich Console only when needed."""
         if self._console is None:
-            from rich.console import Console
+            Console = _get_rich_console()
             self._console = Console()
         return self._console
     
     @property
-    def sync_client(self) -> OpenAI:
+    def sync_client(self):
         """Get the synchronous OpenAI client (lazy initialization)."""
         if self._sync_client is None:
+            OpenAI, _ = _get_openai_classes()
             self._sync_client = OpenAI(api_key=self.api_key, base_url=self.base_url)
         return self._sync_client
     
     @property
-    def async_client(self) -> AsyncOpenAI:
+    def async_client(self):
         """Get the asynchronous OpenAI client (lazy initialization)."""
         if self._async_client is None:
+            _, AsyncOpenAI = _get_openai_classes()
             self._async_client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
         return self._async_client
     
@@ -579,7 +618,7 @@ class OpenAIClient:
         temperature: float = 1.0,
         tools: Optional[List[Dict]] = None,
         start_time: Optional[float] = None,
-        console: Optional[Console] = None,
+        console: Optional[Any] = None,
         display_fn: Optional[Callable] = None,
         reasoning_steps: bool = False,
         stream_callback: Optional[Callable] = None,
@@ -653,6 +692,7 @@ class OpenAIClient:
             
             # If display function provided, use Live display
             if display_fn:
+                Live = _get_rich_live()
                 with Live(
                     display_fn("", start_time),
                     console=console,
@@ -788,7 +828,7 @@ class OpenAIClient:
         temperature: float = 1.0,
         tools: Optional[List[Dict]] = None,
         start_time: Optional[float] = None,
-        console: Optional[Console] = None,
+        console: Optional[Any] = None,
         display_fn: Optional[Callable] = None,
         reasoning_steps: bool = False,
         stream_callback: Optional[Callable] = None,
@@ -875,6 +915,7 @@ class OpenAIClient:
             
             # If display function provided, use Live display
             if display_fn:
+                Live = _get_rich_live()
                 with Live(
                     display_fn("", start_time),
                     console=console,
@@ -995,7 +1036,7 @@ class OpenAIClient:
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
         **kwargs
-    ) -> Union[Any, Iterator[ChatCompletionChunk]]:
+    ) -> Union[Any, Iterator[Any]]:
         """
         Create a chat completion using the synchronous client.
         
@@ -1040,7 +1081,7 @@ class OpenAIClient:
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
         **kwargs
-    ) -> Union[Any, AsyncIterator[ChatCompletionChunk]]:
+    ) -> Union[Any, AsyncIterator[Any]]:
         """
         Create a chat completion using the asynchronous client.
         
@@ -1084,7 +1125,7 @@ class OpenAIClient:
         tools: Optional[List[Any]] = None,
         execute_tool_fn: Optional[Callable] = None,
         stream: bool = True,
-        console: Optional[Console] = None,
+        console: Optional[Any] = None,
         display_fn: Optional[Callable] = None,
         reasoning_steps: bool = False,
         verbose: bool = True,
@@ -1150,6 +1191,7 @@ class OpenAIClient:
                     try:
                         request_start_perf = time.perf_counter()
                         ttft_logged = False
+                        Live = _get_rich_live()
                         with Live(display_fn("", start_time), console=console, refresh_per_second=10, transient=True) as live:
                             # Use streaming when display_fn is provided for progressive display
                             response_stream = self.create_completion(
@@ -1307,7 +1349,7 @@ class OpenAIClient:
         tools: Optional[List[Any]] = None,
         execute_tool_fn: Optional[Callable] = None,
         stream: bool = True,
-        console: Optional[Console] = None,
+        console: Optional[Any] = None,
         display_fn: Optional[Callable] = None,
         reasoning_steps: bool = False,
         verbose: bool = True,
@@ -1361,6 +1403,7 @@ class OpenAIClient:
                 if display_fn and console:
                     # When verbose (display_fn provided), use streaming for better UX
                     try:
+                        Live = _get_rich_live()
                         with Live(display_fn("", start_time), console=console, refresh_per_second=4, transient=True) as live:
                             # Use streaming when display_fn is provided for progressive display
                             response_stream = await self.acreate_completion(

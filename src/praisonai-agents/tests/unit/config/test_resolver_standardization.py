@@ -420,20 +420,26 @@ class TestNamingStandardization:
         assert step.guardrails is my_guardrail or step.guardrail is my_guardrail
     
     def test_workflowstep_guardrail_singular_compat(self):
-        """WorkflowStep should accept guardrail= (singular) for compatibility."""
+        """WorkflowStep should accept guardrail= (singular) for backward compatibility."""
         from praisonaiagents.workflows.workflows import WorkflowStep
+        import warnings
         
         def my_guardrail(result):
             return (True, result)
         
         # Should still accept guardrail= (singular) for backward compat
-        step = WorkflowStep(
-            name="test",
-            guardrail=my_guardrail,
-        )
+        # This triggers a deprecation warning
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            step = WorkflowStep(
+                name="test",
+                guardrail=my_guardrail,  # Using deprecated singular form
+            )
+            # Should have raised deprecation warning
+            assert len(w) >= 1
         
-        # Should work (backward compat)
-        assert step.guardrail is my_guardrail
+        # Should map to guardrails (plural) attribute
+        assert step.guardrails is my_guardrail
 
 
 # =============================================================================

@@ -13,10 +13,35 @@ from typing import Dict, Set, Optional, Callable, Any, Literal, List
 from functools import wraps
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from rich.console import Console
-from rich.panel import Panel
-from rich.text import Text
-from rich.prompt import Confirm
+
+# Lazy import for rich components
+_rich_console = None
+_rich_panel = None
+_rich_confirm = None
+
+def _get_rich_console():
+    """Lazy import rich Console."""
+    global _rich_console
+    if _rich_console is None:
+        from rich.console import Console
+        _rich_console = Console
+    return _rich_console
+
+def _get_rich_panel():
+    """Lazy import rich Panel."""
+    global _rich_panel
+    if _rich_panel is None:
+        from rich.panel import Panel
+        _rich_panel = Panel
+    return _rich_panel
+
+def _get_rich_confirm():
+    """Lazy import rich Confirm."""
+    global _rich_confirm
+    if _rich_confirm is None:
+        from rich.prompt import Confirm
+        _rich_confirm = Confirm
+    return _rich_confirm
 
 # Global registries for approval requirements
 APPROVAL_REQUIRED_TOOLS: Set[str] = set()
@@ -308,6 +333,10 @@ def console_approval_callback(function_name: str, arguments: Dict[str, Any], ris
     
     Displays tool information and prompts user for approval via console.
     """
+    Console = _get_rich_console()
+    Panel = _get_rich_panel()
+    Confirm = _get_rich_confirm()
+    
     console = Console()
     
     # Create risk level styling

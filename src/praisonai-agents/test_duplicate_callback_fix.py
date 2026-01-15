@@ -139,12 +139,12 @@ def test_single_display_with_self_reflection():
                 
                 mock_completion.side_effect = mock_streaming
                 
-                llm = LLM(model="gpt-4o-mini", verbose=False, self_reflect=True, min_reflect=1, max_reflect=2)
+                llm = LLM(model="gpt-4o-mini", verbose=False, reflection=True, min_reflect=1, max_reflect=2)
                 response = llm.get_response(
                     prompt="Test prompt",
                     verbose=True,
                     stream=True,
-                    self_reflect=True,
+                    reflection=True,
                     min_reflect=1,
                     max_reflect=2
                 )

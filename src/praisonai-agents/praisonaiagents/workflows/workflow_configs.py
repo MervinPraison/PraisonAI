@@ -401,19 +401,20 @@ def resolve_step_context_config(value: Any) -> Optional[WorkflowStepContextConfi
 
 def resolve_step_output_config(value: Any) -> Optional[WorkflowStepOutputConfig]:
     """Resolve step output parameter using canonical resolver."""
-    from ..config.param_resolver import resolve
-    
-    result = resolve(
-        value=value,
-        param_name="output",
-        config_class=WorkflowStepOutputConfig,
-        string_mode="path_as_source",  # String treated as output file
-        default=None,
-    )
-    # Handle string -> file conversion for backward compatibility
-    if isinstance(value, str) and result is None:
+    # Handle string -> file conversion directly (string = output file path)
+    if isinstance(value, str):
         return WorkflowStepOutputConfig(file=value)
-    return result
+    
+    # Handle config instance
+    if isinstance(value, WorkflowStepOutputConfig):
+        return value
+    
+    # Handle dict
+    if isinstance(value, dict):
+        return WorkflowStepOutputConfig(**value)
+    
+    # None or other
+    return None
 
 
 def resolve_step_execution_config(value: Any) -> WorkflowStepExecutionConfig:

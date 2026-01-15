@@ -233,19 +233,41 @@ def _run_alternative_engine(
     max_steps: int,
     headless: bool,
     verbose: bool,
+    max_retries: int = 3,
+    enable_vision: bool = False,
+    screenshot_dir: Optional[str] = None,
+    record_session: bool = True,
 ):
-    """Run browser automation using alternative engines (CDP or Playwright)."""
+    """Run browser automation using alternative engines (CDP, Playwright, or Hybrid)."""
     import asyncio
     
     console.print(f"[bold blue]🚀 Starting browser agent ({engine} mode)[/bold blue]")
     console.print(f"   Goal: {goal}")
     console.print(f"   URL: {url}")
     console.print(f"   Model: {model}")
-    console.print(f"   Headless: {headless}")
+    if enable_vision:
+        console.print(f"   [cyan]Vision mode: ON[/cyan]")
+    if screenshot_dir:
+        console.print(f"   [dim]Screenshots: {screenshot_dir}[/dim]")
     console.print()
     
     async def run():
-        if engine == "cdp":
+        if engine == "hybrid":
+            try:
+                from .cdp_agent import run_hybrid
+            except ImportError as e:
+                console.print(f"[red]Hybrid mode not available:[/red] {e}")
+                raise typer.Exit(1)
+            
+            result = await run_hybrid(
+                goal=goal,
+                url=url,
+                model=model,
+                max_steps=max_steps,
+                verbose=verbose,
+            )
+            
+        elif engine == "cdp":
             try:
                 from .cdp_agent import run_cdp_only
             except ImportError as e:
@@ -259,6 +281,10 @@ def _run_alternative_engine(
                 model=model,
                 max_steps=max_steps,
                 verbose=verbose,
+                max_retries=max_retries,
+                enable_vision=enable_vision,
+                record_session=record_session,
+                screenshot_dir=screenshot_dir,
             )
             
         elif engine == "playwright":
@@ -287,7 +313,14 @@ def _run_alternative_engine(
             if result.get("summary"):
                 console.print(f"   {result['summary']}")
             console.print(f"   Final URL: {result.get('final_url', 'N/A')}")
+            if result.get("engine"):
+                console.print(f"   [dim]Engine used: {result['engine']}[/dim]")
+            if result.get("total_retries", 0) > 0:
+                console.print(f"   [dim]Retries: {result['total_retries']}[/dim]")
+            if result.get("session_id"):
+                console.print(f"   [dim]Session: {result['session_id'][:8]}...[/dim]")
             if result.get("screenshot"):
+                console.print(f"   [dim]Screenshot saved[/dim]")
                 console.print(f"   Screenshot: {result['screenshot']}")
         else:
             console.print(f"\n[red]❌ Task failed:[/red] {result.get('error', 'Unknown error')}")
@@ -305,9 +338,13 @@ def run_agent(
     max_steps: int = typer.Option(20, "--max-steps", help="Maximum steps"),
     timeout: int = typer.Option(120, "--timeout", "-t", help="Timeout in seconds"),
     headless: bool = typer.Option(False, "--headless", help="Run headless (experimental)"),
-    engine: str = typer.Option("extension", "--engine", help="Automation engine: extension, cdp, playwright"),
+    engine: str = typer.Option("extension", "--engine", help="Automation engine: extension, cdp, playwright, hybrid"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging"),
     debug: bool = typer.Option(False, "--debug", "-d", help="Debug mode - show all events"),
+    max_retries: int = typer.Option(3, "--max-retries", help="Max retries per action on failure"),
+    enable_vision: bool = typer.Option(False, "--vision", help="Enable vision-based element detection"),
+    screenshot_dir: str = typer.Option(None, "--screenshots", help="Directory to save step screenshots"),
+    record: bool = typer.Option(True, "--record/--no-record", help="Record session to database"),
 ):
     """Run browser agent with a goal.
     
@@ -317,11 +354,19 @@ def run_agent(
         extension (default): Uses Chrome extension + bridge server
         cdp: Direct Chrome DevTools Protocol (no extension needed)
         playwright: Cross-browser automation via Playwright
+        hybrid: Auto-select best available engine
+    
+    Features:
+        --max-retries: Automatic retry with alternative selectors on failures
+        --vision: Enable vision-based element detection (requires gpt-4o)
+        --screenshots: Save screenshots of each step for debugging
+        --no-record: Disable session recording to database
     
     Example:
         praisonai browser run "Search for PraisonAI on Google"
         praisonai browser run "task" --engine cdp --headless
-        praisonai browser run "task" --engine playwright
+        praisonai browser run "task" --engine hybrid --vision
+        praisonai browser run "task" --screenshots ./screenshots
     """
     import logging
     import json
@@ -334,7 +379,7 @@ def run_agent(
         logging.basicConfig(level=logging.INFO)
     
     # Handle alternative engines
-    if engine in ("cdp", "playwright"):
+    if engine in ("cdp", "playwright", "hybrid"):
         _run_alternative_engine(
             engine=engine,
             goal=goal,
@@ -343,6 +388,10 @@ def run_agent(
             max_steps=max_steps,
             headless=headless,
             verbose=verbose,
+            max_retries=max_retries,
+            enable_vision=enable_vision,
+            screenshot_dir=screenshot_dir,
+            record_session=record,
         )
         return
     
@@ -1433,6 +1482,14 @@ def doctor_all(
             doctor_db()
         except typer.Exit:
             pass
+
+
+# Register benchmark commands
+try:
+    from .benchmark import add_benchmark_commands
+    add_benchmark_commands(app)
+except ImportError:
+    pass  # Benchmark module not available
 
 
 if __name__ == "__main__":

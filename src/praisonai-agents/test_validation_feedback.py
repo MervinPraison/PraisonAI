@@ -17,7 +17,7 @@ def test_example_one():
         name="validator_agent",
         instructions="You are a helpful assistant",
         llm="gemini/gemini-2.5-flash",
-        self_reflect=False,
+        reflection=False,
         verbose=True
     )
 
@@ -25,7 +25,7 @@ def test_example_one():
         name="quote_agent",
         instructions="You are a helpful assistant who is a pro at quoting philosophers",
         llm="gemini/gemini-2.5-flash",
-        self_reflect=False,
+        reflection=False,
         verbose=False
     )
 
@@ -85,7 +85,7 @@ def test_example_two():
         name="agent",
         instructions="You are a helpful assistant",
         llm="gemini/gemini-2.5-flash",
-        self_reflect=False,
+        reflection=False,
         verbose=True
     )
 
@@ -95,7 +95,7 @@ def test_example_two():
         goal="Search the web for relevant information",
         instructions="You are a helpful assistant. You can use the tools provided to you to help the user.",
         llm="gemini/gemini-2.5-flash",
-        self_reflect=False,
+        reflection=False,
         verbose=False,
         tools=[mock_web_search]
     )

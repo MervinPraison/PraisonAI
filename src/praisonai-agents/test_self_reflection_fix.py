@@ -35,7 +35,7 @@ def test_self_reflection_with_tools():
         role="Senior Research Analyst",
         goal="Analyze and provide insights on given topics",
         backstory="You are an expert analyst with strong critical thinking skills",
-        self_reflect=True,
+        reflection=True,
         llm="gpt-4o-mini",  # Using OpenAI model for testing
         verbose=True,
         tools=[mock_tool],
@@ -75,7 +75,7 @@ def test_self_reflection_without_tools():
         role="Senior Research Analyst",
         goal="Analyze and provide insights on given topics",
         backstory="You are an expert analyst with strong critical thinking skills",
-        self_reflect=True,
+        reflection=True,
         llm="gpt-4o-mini",  # Using OpenAI model for testing
         verbose=True,
         max_reflect=2,  # Keep it small for testing
@@ -128,7 +128,7 @@ def test_llm_directly():
         response = llm.get_response(
             prompt="Analyze the importance of AI in modern business",
             tools=[mock_tool],
-            self_reflect=True,
+            reflection=True,
             max_reflect=2,
             min_reflect=1,
             verbose=True,

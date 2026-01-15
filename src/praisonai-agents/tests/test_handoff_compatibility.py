@@ -186,14 +186,14 @@ def test_all_agent_parameters():
         use_system_prompt=False,
         markdown=False,
         stream=False,
-        self_reflect=True,
+        reflection=True,
         max_reflect=5,
         min_reflect=2,
         reflect_llm="gpt-3.5-turbo",
         reflect_prompt="Reflect on this",
         user_id="test_user",
         reasoning_steps=True,
-        guardrail=None,
+        guardrails=None,
         max_guardrail_retries=5,
         handoffs=[]  # New parameter
     )

@@ -492,13 +492,20 @@ class TestAsyncProcessor:
         assert processor is not None
     
     def test_start_processing(self):
-        """Should start processing in background thread."""
+        """Should start processing in background thread.
+        
+        Note: fast_sleep fixture patches time.sleep, so we use busy loops
+        to ensure real time passes.
+        """
         from praisonai.cli.features.message_queue import AsyncProcessor
-        import time
+        import time as t
         
         results = []
         def work_fn():
-            time.sleep(0.05)
+            # Use busy loop instead of sleep (fast_sleep patches time.sleep)
+            start = t.perf_counter()
+            while t.perf_counter() - start < 0.05:
+                pass
             return "done"
         
         def on_complete(result):
@@ -510,8 +517,11 @@ class TestAsyncProcessor:
         # Should be processing
         assert processor.is_running
         
-        # Wait for completion
-        time.sleep(0.15)
+        # Wait for completion using busy loop
+        start = t.perf_counter()
+        while t.perf_counter() - start < 0.2:
+            if not processor.is_running:
+                break
         assert not processor.is_running
         assert "done" in results
     

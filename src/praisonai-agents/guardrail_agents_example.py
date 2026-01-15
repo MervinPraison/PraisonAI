@@ -12,7 +12,7 @@ agent = Agent(
 
 task = Task(
     description="Write a welcome message",
-    guardrail=validate_content,
+    guardrails=validate_content,
     agent=agent
 )
 

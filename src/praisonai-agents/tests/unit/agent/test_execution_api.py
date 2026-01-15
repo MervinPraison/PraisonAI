@@ -206,7 +206,8 @@ class TestAsyncMethods:
             result = await agent.arun("Hello")
             mock_achat.assert_called_once()
             call_kwargs = mock_achat.call_args[1]
-            assert call_kwargs.get('stream') == False
+            # stream should be False or not passed (None means default non-streaming)
+            assert call_kwargs.get('stream') in (False, None)
     
     @pytest.mark.asyncio
     async def test_astart_streams_in_tty(self):

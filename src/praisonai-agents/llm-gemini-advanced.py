@@ -34,7 +34,7 @@ agent = Agent(
     llm=llm_config,                  # Pass the detailed configuration
     output="verbose",                    # Enable detailed output
     markdown=True,                   # Format responses in markdown
-    self_reflect=True,              # Enable self-reflection
+    reflection=True,              # Enable self-reflection
     max_reflect=3,                  # Maximum reflection iterations
     min_reflect=1                   # Minimum reflection iterations
 )

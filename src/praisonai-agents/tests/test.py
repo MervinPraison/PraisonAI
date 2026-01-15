@@ -27,7 +27,7 @@ planner_agent = Agent(
     backstory="Expert storyteller skilled in narrative structure and plot development",
     verbose=True,
     llm="gpt-4o-mini",
-    self_reflect=False
+    reflection=False
 )
 
 # Create the writer agent
@@ -38,7 +38,7 @@ writer_agent = Agent(
     backstory="Experienced writer skilled in bringing stories to life with vivid details and engaging narrative",
     verbose=True,
     llm="gpt-4o-mini",
-    self_reflect=False
+    reflection=False
 )
 
 # Story title

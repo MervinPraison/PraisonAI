@@ -19,7 +19,7 @@ def test_streaming():
     agent = Agent(
         instructions="You are a helpful assistant",
         llm="mock",  # Use mock model for testing
-        self_reflect=False,
+        reflection=False,
         verbose=False,
         stream=True
     )
@@ -46,7 +46,7 @@ def test_backward_compatibility():
     agent = Agent(
         instructions="You are a helpful assistant",
         llm="mock",
-        self_reflect=False,
+        reflection=False,
         verbose=False,
         stream=False
     )
@@ -58,7 +58,7 @@ def test_backward_compatibility():
     agent2 = Agent(
         instructions="You are a helpful assistant",
         llm="mock",
-        self_reflect=False,
+        reflection=False,
         verbose=False,
         stream=True
     )

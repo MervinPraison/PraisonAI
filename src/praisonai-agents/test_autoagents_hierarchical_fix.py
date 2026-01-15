@@ -47,7 +47,7 @@ def test_hierarchical_without_openai():
             tools=[get_stock_price],
             process="hierarchical",
             llm="gemini/gemini-2.5-flash-lite-preview-06-17",
-            self_reflect=True,
+            reflection=True,
             verbose=True,
             max_agents=3  # Maximum number of agents to create
         )

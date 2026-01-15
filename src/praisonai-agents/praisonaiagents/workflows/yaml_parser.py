@@ -255,20 +255,19 @@ class YAMLWorkflowParser:
         steps_data = data.get('steps', [])
         steps = self._parse_steps(steps_data)
         
-        # Create workflow
+        # Create workflow - use only valid Workflow dataclass fields
+        # Build planning config if planning_llm is specified
+        planning_value = planning
+        if planning_llm:
+            from .workflow_configs import WorkflowPlanningConfig
+            planning_value = WorkflowPlanningConfig(enabled=bool(planning), llm=planning_llm, reasoning=reasoning)
+        
         workflow = Workflow(
             name=name,
             steps=steps,
             variables=variables,
-            planning=planning,
-            planning_llm=planning_llm,
+            planning=planning_value,
             default_llm=default_llm,
-            reasoning=reasoning,
-            verbose=verbose,
-            memory_config=memory_config,
-            on_workflow_start=self._callbacks.get('on_workflow_start'),
-            on_step_complete=self._callbacks.get('on_step_complete'),
-            on_workflow_complete=self._callbacks.get('on_workflow_complete'),
         )
         
         # Store additional attributes for feature parity with agents.yaml

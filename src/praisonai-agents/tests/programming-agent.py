@@ -4,7 +4,7 @@ from praisonaiagents.tools import execute_command, list_processes, kill_process,
 from praisonaiagents.tools import duckduckgo # Web Search Tool
 
 agent = Agent(
-    instructions="You are a Programming Agent", self_reflect=True, min_reflect=5, max_reflect=10, 
+    instructions="You are a Programming Agent", reflection=True, min_reflect=5, max_reflect=10, 
     tools=[execute_code, analyze_code, format_code, lint_code, disassemble_code, execute_command, list_processes, kill_process, get_system_info, duckduckgo]
 )
 agent.start(

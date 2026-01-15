@@ -36,7 +36,7 @@ def test_function_guardrail():
         description="Write a simple hello message",
         expected_output="A friendly greeting message",
         agent=agent,
-        guardrail=validate_output,
+        guardrails=validate_output,
         max_retries=2
     )
     
@@ -103,7 +103,7 @@ def test_string_guardrail():
         description="Write a simple hello message",
         expected_output="A friendly greeting message",
         agent=agent,
-        guardrail="Check if the output is professional and does not contain errors",
+        guardrails="Check if the output is professional and does not contain errors",
         max_retries=2
     )
     

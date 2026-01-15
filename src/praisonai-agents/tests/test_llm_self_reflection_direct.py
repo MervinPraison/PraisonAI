@@ -33,7 +33,7 @@ def test_llm_direct():
             prompt="Calculate 15 * 23 and verify your answer",
             system_prompt="You are a helpful math assistant. Use tools when needed.",
             tools=[calculator],
-            self_reflect=True,
+            reflection=True,
             min_reflect=1,
             max_reflect=2,
             verbose=True

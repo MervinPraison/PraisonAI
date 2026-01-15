@@ -119,7 +119,7 @@ sync_agent = Agent(
     goal="Perform synchronous searches and return structured results",
     backstory="Expert in sync operations and data organization",
     tools=[sync_search_tool],
-    self_reflect=False,
+    reflection=False,
     verbose=True,
     markdown=True
 )
@@ -130,7 +130,7 @@ async_agent = Agent(
     goal="Perform asynchronous searches and return structured results",
     backstory="Expert in async operations and data organization",
     tools=[async_search_tool],
-    self_reflect=False,
+    reflection=False,
     verbose=True,
     markdown=True
 )

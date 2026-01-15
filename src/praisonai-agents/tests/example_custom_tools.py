@@ -112,7 +112,7 @@ data_agent = Agent(
     goal="Perform internet searches to collect relevant information.",
     backstory="Expert in finding and organizing internet data from multiple sources.",
     tools=[internet_search_tool, youtube_search_tool, wikipedia_search_tool],
-    self_reflect=False
+    reflection=False
 )
 
 # 3. Tasks

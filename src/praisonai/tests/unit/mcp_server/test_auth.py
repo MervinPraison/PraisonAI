@@ -103,10 +103,17 @@ class TestAPIKeyAuth:
         
         assert len(keys) == 2
     
-    def test_key_expiration(self):
-        """Test key expiration."""
+    def test_key_expiration(self, monkeypatch):
+        """Test key expiration.
+        
+        Note: We mock time.time to simulate expiration instead of using
+        time.sleep which is patched by fast_sleep fixture.
+        """
         from praisonai.mcp_server.auth.api_key import APIKeyAuth
         import time
+        
+        # Track the current time for mocking
+        current_time = [time.time()]
         
         auth = APIKeyAuth(allow_env_key=False)
         raw_key, api_key = auth.generate_key(expires_in=1)
@@ -115,10 +122,15 @@ class TestAPIKeyAuth:
         is_valid, _ = auth.validate(raw_key)
         assert is_valid is True
         
-        # Wait for expiration
-        time.sleep(1.1)
+        # Mock time.time to return a time after expiration
+        def mock_time():
+            return current_time[0] + 2  # 2 seconds later
         
-        # Key should be expired
+        # Patch time.time in the api_key module
+        import praisonai.mcp_server.auth.api_key as api_key_module
+        monkeypatch.setattr(api_key_module.time, 'time', mock_time)
+        
+        # Key should be expired now
         is_valid, _ = auth.validate(raw_key)
         assert is_valid is False
 

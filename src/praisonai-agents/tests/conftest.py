@@ -10,7 +10,13 @@ Provides fixtures and markers for testing, including:
 import asyncio
 import inspect
 import os
+import sys
 import pytest
+
+# Add the local package to the path for development testing
+_package_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _package_root not in sys.path:
+    sys.path.insert(0, _package_root)
 
 # Check if pytest-asyncio is installed (without importing it)
 import importlib.util

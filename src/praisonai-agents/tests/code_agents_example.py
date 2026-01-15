@@ -25,13 +25,13 @@ code_agent = Agent(
     name="code_agent",
     llm="gpt-4o-mini",
     backstory="Expert in writing Python scripts",
-    self_reflect=False
+    reflection=False
 )
 execution_agent = Agent(
     name="execution_agent",
     llm="gpt-4o-mini",
     backstory="Expert in executing Python scripts",
-    self_reflect=False,
+    reflection=False,
     tools=[code_interpreter]
 )
 

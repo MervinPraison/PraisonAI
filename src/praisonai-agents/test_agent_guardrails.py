@@ -21,7 +21,7 @@ def test_agent_guardrails():
         agent1 = Agent(
             name="TestAgent1",
             instructions="You are a test agent",
-            guardrail=test_guardrail,
+            guardrails=test_guardrail,
             max_guardrail_retries=2
         )
         print("✓ Agent with function guardrail created successfully")
@@ -33,7 +33,7 @@ def test_agent_guardrails():
         agent2 = Agent(
             name="TestAgent2",
             instructions="You are a test agent",
-            guardrail="Ensure the response is polite and professional",
+            guardrails="Ensure the response is polite and professional",
             max_guardrail_retries=3
         )
         print("✓ Agent with LLM guardrail created successfully")

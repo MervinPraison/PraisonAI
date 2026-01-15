@@ -15,7 +15,7 @@ researcher = Agent(
     verbose=True,
     llm="gpt-4o-mini",
     tools=[Tools.internet_search],
-    self_reflect=False
+    reflection=False
 )
 
 # Create an analyst agent
@@ -26,7 +26,7 @@ analyst = Agent(
     backstory="Senior data analyst with expertise in pattern recognition",
     verbose=True,
     llm="gpt-4o-mini",
-    self_reflect=False
+    reflection=False
 )
 
 # Define structured tasks

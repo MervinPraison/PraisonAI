@@ -62,7 +62,7 @@ def main():
         description="Write a professional email to a client about project completion",
         expected_output="A well-formatted professional email",
         agent=agent,
-        guardrail=email_validator,  # Function-based guardrail
+        guardrails=email_validator,  # Function-based guardrail
         max_retries=2
     )
     
@@ -110,7 +110,7 @@ Project Team""",
         description="Write a marketing email for a new product launch",
         expected_output="Engaging marketing content",
         agent=agent,
-        guardrail="Ensure the content is professional, engaging, includes a clear call-to-action, and is free of errors",
+        guardrails="Ensure the content is professional, engaging, includes a clear call-to-action, and is free of errors",
         max_retries=3
     )
     
