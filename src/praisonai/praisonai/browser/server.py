@@ -241,6 +241,15 @@ class BrowserServer:
             "session_id": session_id,
         }
         sent_to_extension = False
+        
+        # First, log all connections for debugging
+        logger.info(f"Looking for available extension. Connections: {len(self._connections)}")
+        for client_id, client_conn in self._connections.items():
+            has_session = "has session" if client_conn.session_id else "no session"
+            is_caller = "caller" if client_conn == conn else "not caller"
+            logger.debug(f"  Client {client_id[:8]}: {has_session}, {is_caller}")
+        
+        # Try to find an available extension
         for client_id, client_conn in self._connections.items():
             # Only send to extensions (not CLI) that don't have an active session
             if client_conn != conn and client_conn.websocket and not client_conn.session_id:
@@ -253,6 +262,30 @@ class BrowserServer:
                     break  # Only send to ONE extension
                 except Exception as e:
                     logger.error(f"Failed to send start_automation to {client_id}: {e}")
+        
+        # *** FIX: If no extension found, it might have stale session_id - clear and retry ***
+        if not sent_to_extension:
+            logger.warning("No available extension found. Clearing stale session_ids and retrying...")
+            for client_id, client_conn in self._connections.items():
+                if client_conn != conn and client_conn.session_id:
+                    logger.info(f"Clearing stale session_id on client {client_id[:8]}")
+                    client_conn.session_id = None
+            
+            # Wait for extension to complete CDP cleanup
+            import asyncio
+            await asyncio.sleep(1.0)
+            
+            # Retry
+            for client_id, client_conn in self._connections.items():
+                if client_conn != conn and client_conn.websocket:
+                    try:
+                        await client_conn.websocket.send_json(start_msg)
+                        client_conn.session_id = session_id
+                        logger.info(f"Retry: Sent start_automation to extension {client_id[:8]}")
+                        sent_to_extension = True
+                        break
+                    except Exception as e:
+                        logger.error(f"Retry failed for {client_id}: {e}")
         
         return {
             "type": "status",
@@ -360,7 +393,13 @@ class BrowserServer:
                 del self._agents[session_id]
             if self._sessions:
                 self._sessions.update_session(session_id, status="stopped")
-            conn.session_id = None
+            
+            # *** FIX: Clear session_id on ALL connections with this session ***
+            # This allows subsequent sessions to find available extensions
+            for client_id, client_conn in self._connections.items():
+                if client_conn.session_id == session_id:
+                    logger.info(f"Clearing session_id on client {client_id[:8]}")
+                    client_conn.session_id = None
         
         return {
             "type": "status",

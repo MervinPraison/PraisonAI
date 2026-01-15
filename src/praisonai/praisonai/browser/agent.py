@@ -4,10 +4,125 @@ Uses PraisonAI agents to decide browser actions based on observations.
 """
 
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Literal
 
 logger = logging.getLogger("praisonai.browser.agent")
 
+
+# Pydantic model for structured browser action response
+# Lazy import to avoid import-time overhead
+def _get_browser_action_model():
+    """Lazily create BrowserAction Pydantic model."""
+    try:
+        from pydantic import BaseModel, Field
+    except ImportError:
+        return None
+    
+    class BrowserAction(BaseModel):
+        """Structured response for browser automation actions."""
+        thought: str = Field(description="Brief reasoning for this action")
+        action: Literal["type", "submit", "click", "scroll", "navigate", "done", "wait"] = Field(
+            description="Action to perform"
+        )
+        selector: Optional[str] = Field(None, description="CSS selector for target element")
+        value: Optional[str] = Field(None, description="Text value for type action")
+        url: Optional[str] = Field(None, description="URL for navigate action")
+        direction: Optional[str] = Field(None, description="Scroll direction: up or down")
+        done: bool = Field(False, description="Whether the task is complete")
+        summary: Optional[str] = Field(
+            None, 
+            description="Summary of what was accomplished (required when done=true)"
+        )
+    
+    return BrowserAction
+
+
+# Cache the model after first creation
+_browser_action_model = None
+
+def get_browser_action_model():
+    """Get the BrowserAction model, creating it lazily if needed."""
+    global _browser_action_model
+    if _browser_action_model is None:
+        _browser_action_model = _get_browser_action_model()
+    return _browser_action_model
+
+
+# Action name normalization - LLM often returns freeform text instead of exact action names
+ACTION_MAPPING = {
+    # Valid actions (identity)
+    "type": "type",
+    "submit": "submit", 
+    "click": "click",
+    "scroll": "scroll",
+    "navigate": "navigate",
+    "done": "done",
+    "wait": "wait",
+    "input": "type",
+    
+    # Common LLM variations -> normalized
+    "enter text": "type",
+    "enter text and submit": "type",
+    "enter": "type",
+    "fill": "type",
+    "write": "type",
+    "text": "type",
+    
+    "press enter": "submit",
+    "submit search": "submit",
+    "hit enter": "submit",
+    "search": "submit",
+    
+    "click button": "click",
+    "click link": "click",
+    "press button": "click",
+    "tap": "click",
+    "select": "click",
+    "press": "click",
+    
+    "scroll down": "scroll",
+    "scroll up": "scroll",
+    
+    "go to": "navigate",
+    "open": "navigate",
+    "visit": "navigate",
+    "goto": "navigate",
+    
+    "complete": "done",
+    "finish": "done",
+    "goal achieved": "done",
+    "task complete": "done",
+}
+
+
+def normalize_action(action_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize action name to valid CDP action type.
+    
+    LLMs often return freeform action descriptions like 'enter text and submit'
+    instead of exact action types like 'type'. This normalizes them.
+    """
+    if not action_dict or "action" not in action_dict:
+        action_dict["action"] = "wait"
+        return action_dict
+    
+    raw_action = str(action_dict.get("action", "")).lower().strip()
+    
+    # Direct match
+    if raw_action in ACTION_MAPPING:
+        action_dict["action"] = ACTION_MAPPING[raw_action]
+        return action_dict
+    
+    # Fuzzy match - check if any pattern is contained in the action
+    for pattern, normalized in ACTION_MAPPING.items():
+        if pattern in raw_action:
+            action_dict["action"] = normalized
+            logger.debug(f"Normalized action '{raw_action}' -> '{normalized}'")
+            return action_dict
+    
+    # Unknown action - log warning and default to wait
+    logger.warning(f"Unknown action: '{raw_action}', defaulting to 'wait'")
+    action_dict["action"] = "wait"
+    return action_dict
 
 # System prompt for browser automation
 BROWSER_AGENT_SYSTEM_PROMPT = """You are a precise browser automation agent. Complete tasks in the FEWEST steps possible.
@@ -18,10 +133,24 @@ BROWSER_AGENT_SYSTEM_PROMPT = """You are a precise browser automation agent. Com
 - **click**: Click BUTTON or LINK. Use the EXACT selector from the element list.
 - **scroll**: Scroll page (direction: "up" or "down")
 - **navigate**: Go to URL directly (use for known URLs)
-- **done**: Task complete - ONLY use when goal is achieved
+- **done**: Task complete - use when goal is achieved
+
+## CRITICAL: When to Use "done"
+
+Set "done": true and "action": "done" when:
+- **Search completed**: You typed a query AND submitted AND the results page is showing
+- **Navigation completed**: You reached the target URL/page
+- **Information visible**: The requested information is now visible on screen
+- **Task statement fulfilled**: The goal text describes what you see
+
+### Examples of DONE states:
+- Goal "search praisonai on Google" → DONE when URL shows `/search?q=praisonai`
+- Goal "go to github" → DONE when URL shows `github.com`
+- Goal "find contact page" → DONE when contact page is visible
+
+⚠️ DO NOT keep clicking links or typing after goal is achieved!
 
 ## Element Types in Observation
-Elements are marked with types:
 - INPUT → type text here
 - BUTTON → click to submit
 - LINK → click to navigate to another page
@@ -33,8 +162,6 @@ When user says "search X and inside that search Y":
 3. Click a LINK in results to navigate to that website
 4. Then search for "Y" on the new page
 
-DO NOT keep typing in the same search box. Click LINKs to navigate!
-
 ## Response Format (JSON only)
 ```json
 {
@@ -42,9 +169,14 @@ DO NOT keep typing in the same search box. Click LINKs to navigate!
   "action": "type|submit|click|scroll|navigate|done",
   "selector": "exact selector from element list",
   "value": "text to type (for type action)",
-  "done": false
+  "done": true or false,
+  "summary": "What was accomplished (REQUIRED when done=true)"
 }
 ```
+
+When task is complete, always include a summary of what you did, e.g.:
+- "Searched for 'praisonai' on Google and found results"
+- "Navigated to github.com homepage"
 
 CRITICAL: After typing a search query, use "submit" action to press Enter.
 """
@@ -62,6 +194,7 @@ class BrowserAgent:
         model: str = "gpt-4o-mini",
         max_steps: int = 20,
         verbose: bool = False,
+        session_id: Optional[str] = None,
     ):
         """Initialize browser agent.
         
@@ -69,10 +202,12 @@ class BrowserAgent:
             model: LLM model to use (e.g., "gpt-4o", "gemini/gemini-2.0-flash")
             max_steps: Maximum steps before stopping
             verbose: Enable verbose logging
+            session_id: Session ID for Agent memory isolation
         """
         self.model = model
         self.max_steps = max_steps
         self.verbose = verbose
+        self.session_id = session_id
         self._agent = None
         self._current_goal: Optional[str] = None
     
@@ -95,6 +230,7 @@ class BrowserAgent:
             backstory="You are an expert at navigating websites and performing automated actions.",
             instructions=BROWSER_AGENT_SYSTEM_PROMPT,
             llm=self.model,
+            session_id=self.session_id,  # Session isolation for memory
         )
     
     def process_observation(
@@ -119,6 +255,7 @@ class BrowserAgent:
                 - text: Text to type (if applicable)
                 - thought: Agent's reasoning
                 - done: Whether goal is complete
+                - summary: What was accomplished (when done=true)
         """
         self._ensure_agent()
         
@@ -128,10 +265,31 @@ class BrowserAgent:
         if self.verbose:
             logger.info(f"Processing observation for step {observation.get('step_number', 0)}")
         
-        # Get agent response
+        # Get agent response with structured output if available
         try:
-            response = self._agent.chat(prompt)
-            action = self._parse_response(response)
+            action_model = get_browser_action_model()
+            
+            if action_model is not None:
+                # Use Pydantic model for guaranteed structured output
+                response = self._agent.chat(prompt, output_pydantic=action_model)
+                
+                # If response is already a dict (parsed by Agent), use it
+                if isinstance(response, dict):
+                    action = response
+                elif hasattr(response, 'model_dump'):
+                    # Pydantic v2
+                    action = response.model_dump()
+                elif hasattr(response, 'dict'):
+                    # Pydantic v1
+                    action = response.dict()
+                else:
+                    # String response - needs parsing
+                    action = self._parse_response(str(response))
+            else:
+                # Fallback to string parsing
+                response = self._agent.chat(prompt)
+                action = self._parse_response(response)
+                
         except Exception as e:
             logger.error(f"Agent error: {e}")
             action = {
@@ -140,6 +298,10 @@ class BrowserAgent:
                 "done": False,
                 "error": str(e),
             }
+        
+        # Normalize action name to valid CDP action type
+        # LLMs often return freeform text like "enter text and submit" instead of "type"
+        action = normalize_action(action)
         
         return action
     
@@ -170,6 +332,26 @@ class BrowserAgent:
                 status = "✓" if ah.get('success') else "✗"
                 parts.append(f"  {status} {ah.get('action')}: {ah.get('selector', '')[:40]}")
         
+        # *** AUTO-DEBUG: Detect stuck agent patterns ***
+        step = observation.get('step_number', 0)
+        elements = observation.get("elements", [])
+        
+        # Check if agent seems stuck (high step count, low element count, recent failures)
+        recent_failures = sum(1 for ah in action_history[-3:] if not ah.get('success', True)) if action_history else 0
+        if step > 5 and (len(elements) == 0 or recent_failures >= 2):
+            parts.append("\n" + "⚠️" * 20)
+            parts.append("🔧 AUTO-DEBUG DIAGNOSTICS:")
+            parts.append(f"   • Step count: {step} (high)")
+            parts.append(f"   • Elements found: {len(elements)}")
+            parts.append(f"   • Recent failures: {recent_failures}")
+            if len(elements) == 0:
+                parts.append("   → NO ELEMENTS: Page may not be loaded or is blocking automation")
+                parts.append("   → Try: wait action, or navigate to a different URL")
+            if recent_failures >= 2:
+                parts.append("   → REPEATED FAILURES: Change your approach!")
+                parts.append("   → Try: different selector, different action, or mark done")
+            parts.append("⚠️" * 20)
+        
         # CRITICAL: Show last action error prominently
         last_error = observation.get('last_action_error')
         if last_error:
@@ -181,7 +363,6 @@ class BrowserAgent:
             parts.append("!" * 50)
         
         # Add elements
-        elements = observation.get("elements", [])
         if elements:
             parts.append("\n**Actionable Elements:**")
             for i, elem in enumerate(elements[:20]):  # Limit to 20 elements
@@ -189,15 +370,27 @@ class BrowserAgent:
                 text = elem.get("text", "")[:50]  # Truncate
                 tag = elem.get("tag", "")
                 parts.append(f"  {i+1}. [{tag}] {selector} — \"{text}\"")
+        else:
+            parts.append("\n**⚠️ NO ACTIONABLE ELEMENTS FOUND**")
+            parts.append("   The page may be loading or blocking automation.")
         
         # Add error if present
         if observation.get("error"):
             parts.append(f"\n**Error:** {observation['error']}")
         
-        # Add self-correction warning
+        # EXPLICIT completion check instruction
+        current_url = observation.get('url', '')
         parts.append("\n" + "=" * 50)
-        parts.append("⚠️ CHECK: Does the current page match the ORIGINAL GOAL?")
-        parts.append("   If I'm on the wrong page, I should navigate back or start over.")
+        parts.append("🔍 COMPLETION CHECK:")
+        parts.append(f"   Current URL: {current_url}")
+        
+        # Check if this looks like a search results page
+        if 'search?q=' in current_url or '/search?' in current_url:
+            parts.append("   ✅ URL shows SEARCH RESULTS PAGE!")
+            parts.append("   → If goal was 'search X', respond with {\"action\": \"done\", \"done\": true}")
+        
+        parts.append("\n   ⚠️ If the GOAL is achieved, you MUST respond with:")
+        parts.append('   {"thought": "Goal achieved", "action": "done", "done": true}')
         parts.append("=" * 50)
         
         parts.append("\nWhat action should I take next? Respond with JSON.")
@@ -260,7 +453,19 @@ class BrowserAgent:
         import asyncio
         return await asyncio.to_thread(self.process_observation, observation)
     
-    def reset(self):
-        """Reset agent state for new session."""
+    def reset(self, new_session_id: Optional[str] = None):
+        """Reset agent state for new session.
+        
+        Args:
+            new_session_id: Optional new session ID. If provided, updates session.
+        """
         self._current_goal = None
-        # Note: We don't reset _agent to preserve initialization
+        
+        # Clear Agent's chat_history to prevent context pollution between sessions
+        if self._agent is not None:
+            self._agent.chat_history = []
+            logger.info(f"Cleared chat_history for new session")
+        
+        # Update session_id if provided
+        if new_session_id:
+            self.session_id = new_session_id

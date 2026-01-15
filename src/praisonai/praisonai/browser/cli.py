@@ -219,6 +219,77 @@ def clear_sessions(
     manager.close()
 
 
+def _run_alternative_engine(
+    engine: str,
+    goal: str,
+    url: str,
+    model: str,
+    max_steps: int,
+    headless: bool,
+    verbose: bool,
+):
+    """Run browser automation using alternative engines (CDP or Playwright)."""
+    import asyncio
+    
+    console.print(f"[bold blue]🚀 Starting browser agent ({engine} mode)[/bold blue]")
+    console.print(f"   Goal: {goal}")
+    console.print(f"   URL: {url}")
+    console.print(f"   Model: {model}")
+    console.print(f"   Headless: {headless}")
+    console.print()
+    
+    async def run():
+        if engine == "cdp":
+            try:
+                from .cdp_agent import run_cdp_only
+            except ImportError as e:
+                console.print(f"[red]CDP agent not available:[/red] {e}")
+                console.print("Install: pip install aiohttp websockets")
+                raise typer.Exit(1)
+            
+            result = await run_cdp_only(
+                goal=goal,
+                url=url,
+                model=model,
+                max_steps=max_steps,
+                verbose=verbose,
+            )
+            
+        elif engine == "playwright":
+            try:
+                from .playwright_agent import run_playwright
+            except ImportError as e:
+                console.print(f"[red]Playwright not available:[/red] {e}")
+                console.print("Install: pip install playwright && playwright install chromium")
+                raise typer.Exit(1)
+            
+            result = await run_playwright(
+                goal=goal,
+                url=url,
+                model=model,
+                headless=headless,
+                max_steps=max_steps,
+                verbose=verbose,
+            )
+        else:
+            console.print(f"[red]Unknown engine: {engine}[/red]")
+            raise typer.Exit(1)
+        
+        # Display result
+        if result.get("success"):
+            console.print(f"\n[green]✅ Task completed in {result.get('steps', '?')} steps[/green]")
+            if result.get("summary"):
+                console.print(f"   {result['summary']}")
+            console.print(f"   Final URL: {result.get('final_url', 'N/A')}")
+            if result.get("screenshot"):
+                console.print(f"   Screenshot: {result['screenshot']}")
+        else:
+            console.print(f"\n[red]❌ Task failed:[/red] {result.get('error', 'Unknown error')}")
+            raise typer.Exit(1)
+    
+    asyncio.run(run())
+
+
 @app.command("run")
 def run_agent(
     goal: str = typer.Argument(..., help="Goal to execute"),
@@ -228,6 +299,7 @@ def run_agent(
     max_steps: int = typer.Option(20, "--max-steps", help="Maximum steps"),
     timeout: int = typer.Option(120, "--timeout", "-t", help="Timeout in seconds"),
     headless: bool = typer.Option(False, "--headless", help="Run headless (experimental)"),
+    engine: str = typer.Option("extension", "--engine", help="Automation engine: extension, cdp, playwright"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging"),
     debug: bool = typer.Option(False, "--debug", "-d", help="Debug mode - show all events"),
 ):
@@ -235,10 +307,15 @@ def run_agent(
     
     Launches Chrome with the PraisonAI extension and executes the goal.
     
+    Engines:
+        extension (default): Uses Chrome extension + bridge server
+        cdp: Direct Chrome DevTools Protocol (no extension needed)
+        playwright: Cross-browser automation via Playwright
+    
     Example:
         praisonai browser run "Search for PraisonAI on Google"
-        praisonai browser run "Go to google.com and search praisonai" --url https://google.com
-        praisonai browser run "task" --debug   # Shows all events
+        praisonai browser run "task" --engine cdp --headless
+        praisonai browser run "task" --engine playwright
     """
     import logging
     import json
@@ -249,6 +326,19 @@ def run_agent(
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
+    
+    # Handle alternative engines
+    if engine in ("cdp", "playwright"):
+        _run_alternative_engine(
+            engine=engine,
+            goal=goal,
+            url=url,
+            model=model,
+            max_steps=max_steps,
+            headless=headless,
+            verbose=verbose,
+        )
+        return
     
     console.print(f"[bold blue]🚀 Starting browser agent[/bold blue]")
     console.print(f"   Goal: {goal}")
@@ -549,6 +639,211 @@ def manage_tabs(
     
     console.print(table)
     console.print(f"\n[dim]Total: {len(pages)} tabs[/dim]")
+
+
+@app.command("pages")
+def list_pages(
+    port: int = typer.Option(9222, "--port", "-p", help="Chrome debug port"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """List all browser pages/tabs (like Antigravity's list_browser_pages).
+    
+    Example:
+        praisonai browser pages
+        praisonai browser pages --json
+    """
+    try:
+        from .cdp_utils import get_pages_sync
+    except ImportError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        console.print("Install: pip install aiohttp websockets")
+        raise typer.Exit(1)
+    
+    try:
+        pages = get_pages_sync(port)
+    except Exception as e:
+        console.print(f"[red]Failed to get pages:[/red] {e}")
+        console.print("[dim]Is Chrome running with --remote-debugging-port=9222?[/dim]")
+        raise typer.Exit(1)
+    
+    if json_output:
+        import json
+        console.print(json.dumps([p.to_dict() for p in pages], indent=2))
+        return
+    
+    table = Table(title="Browser Pages")
+    table.add_column("#", style="dim")
+    table.add_column("Type", style="cyan", max_width=10)
+    table.add_column("Title", max_width=40)
+    table.add_column("URL", max_width=50)
+    table.add_column("ID (use with other commands)", style="green")
+    
+    for i, page in enumerate(pages, 1):
+        table.add_row(
+            str(i),
+            page.type[:10],
+            page.title[:40] if page.title else "[dim]untitled[/dim]",
+            page.url[:50] if page.url else "",
+            page.id,
+        )
+    
+    console.print(table)
+    console.print(f"\n[dim]Total: {len(pages)} pages[/dim]")
+
+
+@app.command("dom")
+def get_dom_cmd(
+    page_id: str = typer.Argument(..., help="Page ID from 'pages' command"),
+    port: int = typer.Option(9222, "--port", "-p", help="Chrome debug port"),
+    depth: int = typer.Option(4, "--depth", "-d", help="DOM tree depth"),
+):
+    """Get DOM tree from a browser page (like Antigravity's browser_get_dom).
+    
+    Example:
+        praisonai browser pages  # Get page ID
+        praisonai browser dom <page-id>
+    """
+    import asyncio
+    try:
+        from .cdp_utils import get_dom
+    except ImportError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    
+    try:
+        dom = asyncio.run(get_dom(page_id, port, depth))
+    except Exception as e:
+        console.print(f"[red]Failed to get DOM:[/red] {e}")
+        raise typer.Exit(1)
+    
+    # Pretty print DOM structure
+    def print_node(node, indent=0):
+        name = node.get("nodeName", "")
+        attrs = node.get("attributes", [])
+        attr_str = ""
+        if attrs:
+            pairs = [f'{attrs[i]}="{attrs[i+1]}"' for i in range(0, len(attrs), 2)]
+            attr_str = " " + " ".join(pairs[:3])  # Limit attributes shown
+        
+        if name and not name.startswith("#"):
+            console.print(" " * indent + f"[cyan]<{name.lower()}{attr_str}>[/cyan]")
+        
+        children = node.get("children", [])
+        for child in children[:10]:  # Limit children shown
+            print_node(child, indent + 2)
+    
+    console.print("[bold]DOM Tree:[/bold]")
+    print_node(dom)
+
+
+@app.command("content")
+def read_content(
+    page_id: str = typer.Argument(..., help="Page ID from 'pages' command"),
+    port: int = typer.Option(9222, "--port", "-p", help="Chrome debug port"),
+    limit: int = typer.Option(2000, "--limit", "-l", help="Max characters to show"),
+):
+    """Read page content as text (like Antigravity's read_browser_page).
+    
+    Example:
+        praisonai browser pages  # Get page ID
+        praisonai browser content <page-id>
+    """
+    import asyncio
+    try:
+        from .cdp_utils import read_page
+    except ImportError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    
+    try:
+        content = asyncio.run(read_page(page_id, port))
+    except Exception as e:
+        console.print(f"[red]Failed to read page:[/red] {e}")
+        raise typer.Exit(1)
+    
+    console.print(f"[bold]Page Content:[/bold]\n")
+    console.print(content[:limit])
+    if len(content) > limit:
+        console.print(f"\n[dim]... ({len(content) - limit} more characters)[/dim]")
+
+
+@app.command("console")
+def get_console_logs(
+    page_id: str = typer.Argument(..., help="Page ID from 'pages' command"),
+    port: int = typer.Option(9222, "--port", "-p", help="Chrome debug port"),
+    timeout: float = typer.Option(2.0, "--timeout", "-t", help="Capture duration"),
+):
+    """Get console logs from a page (like Antigravity's capture_browser_console_logs).
+    
+    Example:
+        praisonai browser pages  # Get page ID
+        praisonai browser console <page-id>
+    """
+    import asyncio
+    try:
+        from .cdp_utils import get_console
+    except ImportError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    
+    console.print(f"[dim]Capturing console logs for {timeout}s...[/dim]")
+    
+    try:
+        logs = asyncio.run(get_console(page_id, port, timeout))
+    except Exception as e:
+        console.print(f"[red]Failed to get console:[/red] {e}")
+        raise typer.Exit(1)
+    
+    if not logs:
+        console.print("[dim]No console logs captured[/dim]")
+        return
+    
+    console.print(f"[bold]Console Logs ({len(logs)}):[/bold]\n")
+    for log in logs:
+        level = log.get("level", "log").upper()
+        text = log.get("text", "")
+        if level == "ERROR":
+            console.print(f"[red][{level}][/red] {text}")
+        elif level == "WARN":
+            console.print(f"[yellow][{level}][/yellow] {text}")
+        else:
+            console.print(f"[dim][{level}][/dim] {text}")
+
+
+@app.command("js")
+def execute_javascript(
+    page_id: str = typer.Argument(..., help="Page ID from 'pages' command"),
+    code: str = typer.Argument(..., help="JavaScript code to execute"),
+    port: int = typer.Option(9222, "--port", "-p", help="Chrome debug port"),
+):
+    """Execute JavaScript in a page (like Antigravity's execute_browser_javascript).
+    
+    Example:
+        praisonai browser pages  # Get page ID
+        praisonai browser js <page-id> "document.title"
+        praisonai browser js <page-id> "document.querySelectorAll('a').length"
+    """
+    import asyncio
+    try:
+        from .cdp_utils import execute_js
+    except ImportError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    
+    try:
+        result = asyncio.run(execute_js(page_id, code, port))
+    except Exception as e:
+        console.print(f"[red]JavaScript error:[/red] {e}")
+        raise typer.Exit(1)
+    
+    console.print(f"[bold]Result:[/bold]")
+    
+    import json
+    try:
+        # Pretty print if it's JSON-serializable
+        console.print(json.dumps(result, indent=2))
+    except (TypeError, ValueError):
+        console.print(str(result))
 
 
 @app.command("navigate")
@@ -891,6 +1186,241 @@ def capture_screenshot(
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
+
+
+# ============================================================
+# RELOAD COMMAND - Reload Chrome extension
+# ============================================================
+
+@app.command("reload")
+def reload_extension(
+    port: int = typer.Option(9222, "--port", "-p", help="Chrome debug port"),
+):
+    """Reload the PraisonAI Chrome extension.
+    
+    Connects to Chrome via CDP and triggers extension reload.
+    Chrome must be running with --remote-debugging-port.
+    
+    Example:
+        praisonai browser reload
+    """
+    import asyncio
+    
+    async def do_reload():
+        try:
+            import aiohttp
+            import websockets
+            import json
+        except ImportError as e:
+            console.print(f"[red]Missing dependencies:[/red] {e}")
+            console.print("Install with: pip install aiohttp websockets")
+            raise typer.Exit(1)
+        
+        try:
+            # Get Chrome targets
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f'http://localhost:{port}/json', timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status != 200:
+                        console.print(f"[red]Chrome not responding on port {port}[/red]")
+                        raise typer.Exit(1)
+                    targets = await resp.json()
+            
+            # Find PraisonAI extension service worker
+            sw = next((t for t in targets if t.get('type') == 'service_worker' 
+                       and 'praisonai' in t.get('url', '').lower()), None)
+            
+            if not sw:
+                # Try by extension ID
+                sw = next((t for t in targets if t.get('type') == 'service_worker' 
+                           and 'fkmfdklcegbbpipbcimbokpfcfamhpdc' in t.get('url', '')), None)
+            
+            if not sw:
+                console.print("[yellow]⚠️ PraisonAI extension not found[/yellow]")
+                console.print("  Make sure the extension is installed and Chrome has remote debugging enabled")
+                raise typer.Exit(1)
+            
+            console.print(f"[dim]Found extension: {sw['url'][:60]}...[/dim]")
+            
+            # Reload via CDP
+            async with websockets.connect(sw['webSocketDebuggerUrl']) as ws:
+                await ws.send(json.dumps({"id": 1, "method": "Runtime.enable"}))
+                await asyncio.sleep(0.5)
+                await ws.send(json.dumps({
+                    "id": 2,
+                    "method": "Runtime.evaluate",
+                    "params": {"expression": "chrome.runtime.reload()"}
+                }))
+            
+            console.print("[green]✅ Extension reloaded successfully[/green]")
+            
+        except Exception as e:
+            console.print(f"[red]Error reloading extension:[/red] {e}")
+            raise typer.Exit(1)
+    
+    asyncio.run(do_reload())
+
+
+# ============================================================
+# DOCTOR COMMAND GROUP - Health diagnostics
+# ============================================================
+
+doctor_app = typer.Typer(help="Browser health diagnostics")
+app.add_typer(doctor_app, name="doctor")
+
+
+@doctor_app.command("server")
+def doctor_server(
+    host: str = typer.Option("localhost", "--host", "-H", help="Server host"),
+    port: int = typer.Option(8765, "--port", "-p", help="Server port"),
+):
+    """Check bridge server status."""
+    import requests
+    
+    try:
+        resp = requests.get(f"http://{host}:{port}/health", timeout=5)
+        data = resp.json()
+        console.print(f"[green]✅ Server: {data['status']}[/green]")
+        console.print(f"   Connections: {data.get('connections', 0)}")
+        console.print(f"   Sessions: {data.get('sessions', 0)}")
+    except requests.exceptions.ConnectionError:
+        console.print(f"[red]❌ Server not running on {host}:{port}[/red]")
+        console.print("   Start with: praisonai browser start")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]❌ Server error:[/red] {e}")
+        raise typer.Exit(1)
+
+
+@doctor_app.command("chrome")
+def doctor_chrome(
+    port: int = typer.Option(9222, "--port", "-p", help="Chrome debug port"),
+):
+    """Check Chrome remote debugging."""
+    import requests
+    
+    try:
+        resp = requests.get(f"http://localhost:{port}/json/version", timeout=5)
+        data = resp.json()
+        console.print(f"[green]✅ Chrome: {data.get('Browser', 'Unknown')}[/green]")
+        console.print(f"   WebSocket: {data.get('webSocketDebuggerUrl', 'N/A')[:50]}...")
+    except requests.exceptions.ConnectionError:
+        console.print(f"[red]❌ Chrome not running with --remote-debugging-port={port}[/red]")
+        console.print("   Start Chrome with:")
+        console.print(f'   google-chrome --remote-debugging-port={port}')
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]❌ Chrome error:[/red] {e}")
+        raise typer.Exit(1)
+
+
+@doctor_app.command("extension")
+def doctor_extension(
+    port: int = typer.Option(9222, "--port", "-p", help="Chrome debug port"),
+):
+    """Check PraisonAI extension status."""
+    import requests
+    
+    try:
+        resp = requests.get(f"http://localhost:{port}/json", timeout=5)
+        targets = resp.json()
+        
+        # Find extension service worker
+        sw = next((t for t in targets if t.get('type') == 'service_worker' 
+                   and ('praisonai' in t.get('url', '').lower() or 
+                        'fkmfdklcegbbpipbcimbokpfcfamhpdc' in t.get('url', ''))), None)
+        
+        if sw:
+            console.print("[green]✅ Extension loaded[/green]")
+            console.print(f"   URL: {sw['url'][:60]}...")
+            console.print(f"   Status: {sw.get('type', 'unknown')}")
+        else:
+            console.print("[yellow]⚠️ Extension not found[/yellow]")
+            console.print("   Install from: chrome://extensions (load unpacked)")
+            
+    except requests.exceptions.ConnectionError:
+        console.print(f"[red]❌ Cannot connect to Chrome on port {port}[/red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]❌ Error checking extension:[/red] {e}")
+        raise typer.Exit(1)
+
+
+@doctor_app.command("db")
+def doctor_db():
+    """Check session database status."""
+    from pathlib import Path
+    import sqlite3
+    
+    db_path = Path.home() / ".praisonai" / "browser_sessions.db"
+    
+    if not db_path.exists():
+        console.print("[yellow]⚠️ Session database not found[/yellow]")
+        console.print(f"   Expected: {db_path}")
+        console.print("   Will be created on first session")
+        return
+    
+    try:
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
+        
+        c.execute("SELECT COUNT(*) FROM sessions")
+        session_count = c.fetchone()[0]
+        
+        c.execute("SELECT COUNT(*) FROM steps")
+        step_count = c.fetchone()[0]
+        
+        c.execute("SELECT status, COUNT(*) FROM sessions GROUP BY status")
+        status_counts = dict(c.fetchall())
+        
+        conn.close()
+        
+        console.print(f"[green]✅ Session database[/green]")
+        console.print(f"   Path: {db_path}")
+        console.print(f"   Sessions: {session_count}")
+        console.print(f"   Steps: {step_count}")
+        for status, count in status_counts.items():
+            console.print(f"   - {status}: {count}")
+            
+    except Exception as e:
+        console.print(f"[red]❌ Database error:[/red] {e}")
+        raise typer.Exit(1)
+
+
+@doctor_app.callback(invoke_without_command=True)
+def doctor_all(
+    ctx: typer.Context,
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Run all browser health checks."""
+    if ctx.invoked_subcommand is None:
+        console.print("[bold]Browser Health Check[/bold]\n")
+        
+        # Run all checks with explicit defaults
+        try:
+            doctor_server(host="localhost", port=8765)
+        except typer.Exit:
+            pass
+        
+        console.print()
+        
+        try:
+            doctor_chrome(port=9222)
+        except typer.Exit:
+            pass
+        
+        console.print()
+        
+        try:
+            doctor_extension(port=9222)
+        except typer.Exit:
+            pass
+        
+        console.print()
+        
+        try:
+            doctor_db()
+        except typer.Exit:
+            pass
 
 
 if __name__ == "__main__":
