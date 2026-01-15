@@ -36,21 +36,135 @@ jobs:
         pip install .[dev]
       shell: bash
 
+    # ==================== CORE IMPORTS ====================
     - name: Test core imports
       run: |
         python -c "from praisonaiagents import Agent, Agents, Workflow; print('Core imports OK')"
         python -c "from praisonaiagents import tool, Tools; print('Tool imports OK')"
         python -c "from praisonaiagents import Task, WorkflowStep; print('Task/Step imports OK')"
 
-    - name: Test Agent instantiation
-      run: python -c "from praisonaiagents import Agent; a = Agent(name='Test', instructions='You are helpful'); print('Agent created:', a.name)"
+    # ==================== AGENT FEATURES ====================
+    - name: Test Agent instantiation and features
+      run: |
+        python -c "
+        from praisonaiagents import Agent
+        # Basic agent
+        a = Agent(name='Test', instructions='You are helpful')
+        print('Agent created:', a.name)
+        # Agent with tools
+        a2 = Agent(name='ToolAgent', instructions='Use tools', tools=[])
+        print('Agent with tools:', a2.name)
+        "
 
     - name: Test Agents orchestration
-      run: python -c "from praisonaiagents import Agent, Agents; a = Agent(name='Test', instructions='Hi'); agents = Agents(agents=[a]); print('Agents created:', len(agents.agents))"
+      run: |
+        python -c "
+        from praisonaiagents import Agent, Agents, Task
+        a1 = Agent(name='Agent1', instructions='First agent')
+        a2 = Agent(name='Agent2', instructions='Second agent')
+        t = Task(description='Do something', agent=a1)
+        agents = Agents(agents=[a1, a2], tasks=[t])
+        print('Agents:', len(agents.agents), 'Tasks:', len(agents.tasks))
+        "
 
-    - name: Test Workflow creation
-      run: python -c "from praisonaiagents import Workflow, WorkflowStep; w = Workflow(name='test'); s = WorkflowStep(name='step1'); print('Workflow:', w.name, 'Step:', s.name)"
+    # ==================== WORKFLOW FEATURES ====================
+    - name: Test Workflow and WorkflowStep
+      run: |
+        python -c "
+        from praisonaiagents import Workflow, WorkflowStep
+        from praisonaiagents.workflows import WorkflowOutputConfig, WorkflowPlanningConfig
+        
+        # Basic workflow
+        w = Workflow(name='test')
+        s1 = WorkflowStep(name='step1')
+        s2 = WorkflowStep(name='step2', context=['step1'])
+        print('Workflow:', w.name)
+        print('Steps:', s1.name, s2.name)
+        
+        # With config
+        cfg = WorkflowOutputConfig(verbose=True, stream=False)
+        w2 = Workflow(name='configured', output=cfg)
+        print('Configured workflow verbose:', w2.verbose)
+        "
 
+    # ==================== MEMORY FEATURES ====================
+    - name: Test Memory classes
+      run: |
+        python -c "
+        from praisonaiagents.memory import FileMemory, MemoryConfig
+        
+        # MemoryConfig
+        cfg = MemoryConfig(provider='file', short_term=True, long_term=True)
+        print('MemoryConfig provider:', cfg.provider)
+        
+        # FileMemory (the one we fixed for Windows)
+        mem = FileMemory(user_id='test_user', base_path='.praison/test_memory')
+        print('FileMemory user:', mem.user_id)
+        "
+
+    # ==================== TOOL DECORATOR ====================
+    - name: Test tool decorator
+      run: |
+        python -c "
+        from praisonaiagents import tool
+        
+        @tool
+        def my_tool(query: str) -> str:
+            '''A test tool that echoes input'''
+            return f'Echo: {query}'
+        
+        result = my_tool('hello')
+        print('Tool result:', result)
+        "
+
+    # ==================== CONFIG CLASSES ====================
+    - name: Test config classes
+      run: |
+        python -c "
+        from praisonaiagents.config import OutputConfig, ExecutionConfig, PlanningConfig
+        
+        out_cfg = OutputConfig(verbose=True, stream=True)
+        print('OutputConfig verbose:', out_cfg.verbose)
+        
+        exec_cfg = ExecutionConfig(max_retries=3, timeout=60)
+        print('ExecutionConfig retries:', exec_cfg.max_retries)
+        
+        plan_cfg = PlanningConfig(enabled=True)
+        print('PlanningConfig enabled:', plan_cfg.enabled)
+        "
+
+    # ==================== HANDOFF ====================
+    - name: Test Handoff
+      run: |
+        python -c "
+        from praisonaiagents import Handoff, handoff, Agent
+        
+        a1 = Agent(name='Agent1', instructions='First')
+        a2 = Agent(name='Agent2', instructions='Second')
+        
+        # Create handoff
+        h = Handoff(agent=a2, condition='when needed')
+        print('Handoff to:', h.agent.name)
+        "
+
+    # ==================== ASYNC FEATURES ====================
+    - name: Test async imports
+      run: |
+        python -c "
+        import asyncio
+        from praisonaiagents import Agent
+        
+        async def test_async():
+            agent = Agent(name='AsyncAgent', instructions='Test')
+            # Just verify async methods exist
+            assert hasattr(agent, 'arun'), 'Missing arun'
+            assert hasattr(agent, 'astart'), 'Missing astart'
+            print('Async methods available')
+        
+        asyncio.run(test_async())
+        "
+
+    # ==================== CLI COMMANDS ====================
     - name: Test CLI help
       run: praisonai --help
 
@@ -62,6 +176,7 @@ jobs:
       run: praisonai queue ls
       continue-on-error: true
 
+    # ==================== REAL API TEST ====================
     - name: Real API test - Agent run
       if: env.OPENAI_API_KEY != ''
       run: |
@@ -71,4 +186,21 @@ jobs:
         result = agent.run('Say WINDOWS_OK')
         print('Result:', result)
         print('Real API test passed')
+        "
+
+    - name: Real API test - Multi-agent
+      if: env.OPENAI_API_KEY != ''
+      run: |
+        python -c "
+        from praisonaiagents import Agent, Agents, Task
+        
+        researcher = Agent(name='Researcher', instructions='You research topics', llm='gpt-4o-mini')
+        writer = Agent(name='Writer', instructions='You write content', llm='gpt-4o-mini')
+        
+        task = Task(description='Say hello world', agent=researcher)
+        
+        agents = Agents(agents=[researcher, writer], tasks=[task])
+        result = agents.start()
+        print('Multi-agent result type:', type(result))
+        print('Multi-agent test passed')
         "
