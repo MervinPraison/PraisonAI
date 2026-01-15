@@ -90,8 +90,8 @@ jobs:
         from praisonaiagents.memory import FileMemory
         from praisonaiagents.config import MemoryConfig
         
-        cfg = MemoryConfig(provider='file', short_term=True, long_term=True)
-        print('MemoryConfig provider:', cfg.provider)
+        cfg = MemoryConfig(backend='file', user_id='test_user')
+        print('MemoryConfig backend:', cfg.backend)
         
         mem = FileMemory(user_id='test_user', base_path='.praison/test_memory')
         print('FileMemory user:', mem.user_id)
