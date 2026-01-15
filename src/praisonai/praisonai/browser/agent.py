@@ -230,7 +230,7 @@ class BrowserAgent:
             backstory="You are an expert at navigating websites and performing automated actions.",
             instructions=BROWSER_AGENT_SYSTEM_PROMPT,
             llm=self.model,
-            session_id=self.session_id,  # Session isolation for memory
+            memory=True,  # Enable short-term memory for context between steps
         )
     
     def process_observation(
