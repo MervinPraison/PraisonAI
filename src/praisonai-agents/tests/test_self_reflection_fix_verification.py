@@ -31,7 +31,7 @@ def test_self_reflection_fix_verification():
         goal="Solve mathematical problems accurately",
         backstory="You are a helpful math assistant who double-checks calculations",
         tools=[calculator],
-        self_reflect=True,  # This should now work with tools
+        reflection=True,  # This should now work with tools
         min_reflect=1,
         max_reflect=2,
         verbose=True

@@ -32,7 +32,7 @@ class TestLearnConfig:
         assert config.decisions is False
         assert config.feedback is False
         assert config.improvements is False
-        assert config.scope == LearnScope.USER
+        assert config.scope == LearnScope.PRIVATE
         assert config.auto_consolidate is True
         assert config.retention_days is None
     
@@ -42,12 +42,12 @@ class TestLearnConfig:
             persona=False,
             insights=True,
             patterns=True,
-            scope=LearnScope.TEAM,
+            scope=LearnScope.SHARED,
             retention_days=30,
         )
         assert config.persona is False
         assert config.patterns is True
-        assert config.scope == LearnScope.TEAM
+        assert config.scope == LearnScope.SHARED
         assert config.retention_days == 30
     
     def test_to_dict(self):
@@ -56,7 +56,7 @@ class TestLearnConfig:
         d = config.to_dict()
         assert d["persona"] is True
         assert d["insights"] is True
-        assert d["scope"] == "user"
+        assert d["scope"] == "private"
 
 
 class TestMemoryConfigWithLearn:

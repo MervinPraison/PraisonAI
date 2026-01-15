@@ -15,7 +15,7 @@ agent = Agent(
     instructions="You are a helpful assistant. Be concise and clear.",
     llm=llm_config,
     output="verbose",
-    self_reflect=True,
+    reflection=True,
     max_reflect=2,
     min_reflect=1
 )

@@ -39,7 +39,7 @@ def get_hackathon_judge():
         You excel at evaluating innovation, technical implementation, and presentation quality.
         You provide constructive feedback and identify both strengths and areas for improvement.""",
         llm="gpt-4o-mini",  # Using vision-capable model
-        self_reflect=False,
+        reflection=False,
         knowledge=""
     )
 

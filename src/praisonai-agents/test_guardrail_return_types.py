@@ -68,7 +68,7 @@ def test_guardrail_return_types():
                 description="Test task",
                 expected_output="Test output",
                 agent=agent,
-                guardrail=guardrail_func
+                guardrails=guardrail_func
             )
             print(f"✓ Task created successfully with {test_name}")
             
@@ -121,7 +121,7 @@ def test_guardrail_result_handling():
     task1 = Task(
         description="Test",
         agent=agent,
-        guardrail=return_guardrailresult
+        guardrails=return_guardrailresult
     )
     
     result1 = task1._process_guardrail(test_output)
@@ -136,7 +136,7 @@ def test_guardrail_result_handling():
     task2 = Task(
         description="Test",
         agent=agent,
-        guardrail=return_tuple
+        guardrails=return_tuple
     )
     
     result2 = task2._process_guardrail(test_output)

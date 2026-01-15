@@ -23,39 +23,102 @@ def trace(self, message, *args, **kwargs):
 
 logging.Logger.trace = trace
 
-try:
-    import chromadb
-    from chromadb.config import Settings as ChromaSettings
-    CHROMADB_AVAILABLE = True
-except ImportError:
-    CHROMADB_AVAILABLE = False
-    pass
+# Lazy availability flags and cached imports
+_chromadb_cache = {"available": None, "module": None, "settings": None}
+_mem0_cache = {"available": None, "module": None}
+_openai_cache = {"available": None, "module": None}
+_litellm_cache = {"available": None, "module": None}
+_pymongo_cache = {"available": None, "module": None, "client": None}
 
-try:
-    import mem0
-    MEM0_AVAILABLE = True
-except ImportError:
-    MEM0_AVAILABLE = False
+def _check_chromadb():
+    """Lazily check chromadb availability and cache."""
+    if _chromadb_cache["available"] is None:
+        try:
+            import chromadb
+            from chromadb.config import Settings as ChromaSettings
+            _chromadb_cache["available"] = True
+            _chromadb_cache["module"] = chromadb
+            _chromadb_cache["settings"] = ChromaSettings
+        except ImportError:
+            _chromadb_cache["available"] = False
+    return _chromadb_cache["available"]
 
-try:
-    import openai
-    OPENAI_AVAILABLE = True
-except ImportError:
-    OPENAI_AVAILABLE = False
+def _get_chromadb():
+    """Get chromadb module (lazy load)."""
+    if not _check_chromadb():
+        raise ImportError("chromadb is required. Install with: pip install chromadb")
+    return _chromadb_cache["module"], _chromadb_cache["settings"]
 
-try:
-    import litellm
-    litellm.telemetry = False  # Disable telemetry
-    LITELLM_AVAILABLE = True
-except ImportError:
-    LITELLM_AVAILABLE = False
+def _check_mem0():
+    """Lazily check mem0 availability."""
+    if _mem0_cache["available"] is None:
+        try:
+            import mem0
+            _mem0_cache["available"] = True
+            _mem0_cache["module"] = mem0
+        except ImportError:
+            _mem0_cache["available"] = False
+    return _mem0_cache["available"]
 
-try:
-    import pymongo
-    from pymongo import MongoClient
-    PYMONGO_AVAILABLE = True
-except ImportError:
-    PYMONGO_AVAILABLE = False
+def _get_mem0():
+    """Get mem0 module (lazy load)."""
+    if not _check_mem0():
+        raise ImportError("mem0 is required. Install with: pip install mem0ai")
+    return _mem0_cache["module"]
+
+def _check_openai():
+    """Lazily check openai availability."""
+    if _openai_cache["available"] is None:
+        try:
+            import openai
+            _openai_cache["available"] = True
+            _openai_cache["module"] = openai
+        except ImportError:
+            _openai_cache["available"] = False
+    return _openai_cache["available"]
+
+def _get_openai():
+    """Get openai module (lazy load)."""
+    if not _check_openai():
+        raise ImportError("openai is required. Install with: pip install openai")
+    return _openai_cache["module"]
+
+def _check_litellm():
+    """Lazily check litellm availability."""
+    if _litellm_cache["available"] is None:
+        try:
+            import litellm
+            litellm.telemetry = False
+            _litellm_cache["available"] = True
+            _litellm_cache["module"] = litellm
+        except ImportError:
+            _litellm_cache["available"] = False
+    return _litellm_cache["available"]
+
+def _get_litellm():
+    """Get litellm module (lazy load)."""
+    if not _check_litellm():
+        raise ImportError("litellm is required. Install with: pip install litellm")
+    return _litellm_cache["module"]
+
+def _check_pymongo():
+    """Lazily check pymongo availability."""
+    if _pymongo_cache["available"] is None:
+        try:
+            import pymongo
+            from pymongo import MongoClient
+            _pymongo_cache["available"] = True
+            _pymongo_cache["module"] = pymongo
+            _pymongo_cache["client"] = MongoClient
+        except ImportError:
+            _pymongo_cache["available"] = False
+    return _pymongo_cache["available"]
+
+def _get_pymongo():
+    """Get pymongo module and MongoClient (lazy load)."""
+    if not _check_pymongo():
+        raise ImportError("pymongo is required. Install with: pip install pymongo")
+    return _pymongo_cache["module"], _pymongo_cache["client"]
 
 
 
@@ -142,9 +205,9 @@ class Memory:
         logging.getLogger('litellm.utils').setLevel(logging.WARNING)
             
         self.provider = self.cfg.get("provider", "rag")
-        self.use_mem0 = (self.provider.lower() == "mem0") and MEM0_AVAILABLE
-        self.use_rag = (self.provider.lower() == "rag") and CHROMADB_AVAILABLE and self.cfg.get("use_embedding", False)
-        self.use_mongodb = (self.provider.lower() == "mongodb") and PYMONGO_AVAILABLE
+        self.use_mem0 = (self.provider.lower() == "mem0") and _check_mem0()
+        self.use_rag = (self.provider.lower() == "rag") and _check_chromadb() and self.cfg.get("use_embedding", False)
+        self.use_mongodb = (self.provider.lower() == "mongodb") and _check_pymongo()
         self.graph_enabled = False  # Initialize graph support flag
         self._learn_manager = None  # Lazy-loaded LearnManager
         self._learn_config = self.cfg.get("learn", None)  # Learn configuration
@@ -274,6 +337,9 @@ class Memory:
             rag_path = self.cfg.get("rag_db_path", "chroma_db")
             os.makedirs(rag_path, exist_ok=True)
 
+            # Get chromadb lazily
+            chromadb, ChromaSettings = _get_chromadb()
+
             # Initialize ChromaDB with persistent storage
             self.chroma_client = chromadb.PersistentClient(
                 path=rag_path,
@@ -399,7 +465,7 @@ class Memory:
     def _get_embedding(self, text: str) -> List[float]:
         """Get embedding for text using available embedding services."""
         try:
-            if LITELLM_AVAILABLE:
+            if _check_litellm():
                 # Use LiteLLM for consistency with the rest of the codebase
                 import litellm
                 
@@ -408,7 +474,7 @@ class Memory:
                     input=text
                 )
                 return response.data[0]["embedding"]
-            elif OPENAI_AVAILABLE:
+            elif _check_openai():
                 # Fallback to OpenAI client
                 from openai import OpenAI
                 client = OpenAI()
@@ -624,7 +690,7 @@ class Memory:
             
         elif self.use_rag and hasattr(self, "chroma_col"):
             try:
-                if LITELLM_AVAILABLE:
+                if _check_litellm():
                     # Use LiteLLM for consistency with the rest of the codebase
                     import litellm
                     
@@ -633,7 +699,7 @@ class Memory:
                         input=query
                     )
                     query_embedding = response.data[0]["embedding"]
-                elif OPENAI_AVAILABLE:
+                elif _check_openai():
                     # Fallback to OpenAI client
                     from openai import OpenAI
                     client = OpenAI()
@@ -787,7 +853,7 @@ class Memory:
         # Store in vector database if enabled
         if self.use_rag and hasattr(self, "chroma_col"):
             try:
-                if LITELLM_AVAILABLE:
+                if _check_litellm():
                     # Use LiteLLM for consistency with the rest of the codebase
                     import litellm
                     
@@ -802,7 +868,7 @@ class Memory:
                     logger.info("Successfully got embeddings from LiteLLM")
                     logger.trace(f"Received embedding of length: {len(embedding)}")
                     
-                elif OPENAI_AVAILABLE:
+                elif _check_openai():
                     # Fallback to OpenAI client
                     from openai import OpenAI
                     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -940,7 +1006,7 @@ class Memory:
 
         elif self.use_rag and hasattr(self, "chroma_col"):
             try:
-                if LITELLM_AVAILABLE:
+                if _check_litellm():
                     # Use LiteLLM for consistency with the rest of the codebase
                     import litellm
                     
@@ -949,7 +1015,7 @@ class Memory:
                         input=query
                     )
                     query_embedding = response.data[0]["embedding"]
-                elif OPENAI_AVAILABLE:
+                elif _check_openai():
                     # Fallback to OpenAI client
                     from openai import OpenAI
                     client = OpenAI()
@@ -1439,7 +1505,7 @@ class Memory:
         """
 
         try:
-            if LITELLM_AVAILABLE:
+            if _check_litellm():
                 # Use LiteLLM for consistency with the rest of the codebase
                 import litellm
                 
@@ -1455,7 +1521,7 @@ class Memory:
                     response_format={"type": "json_object"},
                     temperature=0.3
                 )
-            elif OPENAI_AVAILABLE:
+            elif _check_openai():
                 # Fallback to OpenAI client
                 from openai import OpenAI
                 client = OpenAI()

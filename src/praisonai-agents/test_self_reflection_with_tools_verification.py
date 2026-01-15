@@ -42,7 +42,7 @@ def test_llm_self_reflection_with_tools():
         prompt="Calculate 5 + 3 and then reflect on your answer",
         system_prompt="You are a helpful assistant with access to a calculator tool.",
         tools=[simple_calculator],
-        self_reflect=True,
+        reflection=True,
         min_reflect=1,
         max_reflect=2,
         verbose=True,
@@ -59,7 +59,7 @@ def test_llm_self_reflection_without_tools():
     response = llm.get_response(
         prompt="Calculate 5 + 3 and then reflect on your answer",
         system_prompt="You are a helpful assistant.",
-        self_reflect=True,
+        reflection=True,
         min_reflect=1,
         max_reflect=2,
         verbose=True
@@ -74,7 +74,7 @@ def test_agent_self_reflection_with_tools():
         name="CalculatorAgent",
         instructions="You are a helpful assistant with access to a calculator tool.",
         llm="gpt-4o-mini",
-        self_reflect=True,
+        reflection=True,
         min_reflect=1,
         max_reflect=2,
         tools=[simple_calculator]
@@ -91,7 +91,7 @@ def test_agent_self_reflection_without_tools():
         name="BasicAgent",
         instructions="You are a helpful assistant.",
         llm="gpt-4o-mini",
-        self_reflect=True,
+        reflection=True,
         min_reflect=1,
         max_reflect=2
     )

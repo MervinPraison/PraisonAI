@@ -13,7 +13,7 @@ def test_self_reflection_with_tools():
         role="Senior Research Analyst",
         goal="Analyze and provide insights on given topics",
         backstory="You are an expert analyst with strong critical thinking skills",
-        self_reflect=True,
+        reflection=True,
         llm="gemini/gemini-2.5-flash-lite-preview-06-17",
         verbose=True,
         tools=[duckduckgo_search]
@@ -47,7 +47,7 @@ def test_self_reflection_without_tools():
         role="Senior Research Analyst",
         goal="Analyze and provide insights on given topics",
         backstory="You are an expert analyst with strong critical thinking skills",
-        self_reflect=True,
+        reflection=True,
         llm="gemini/gemini-2.5-flash-lite-preview-06-17",
         verbose=True
     )

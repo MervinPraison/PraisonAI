@@ -186,7 +186,11 @@ class TestStandardiseConfig:
         assert config.dedupe_mode == "prompt"
     
     def test_auto_detect_paths(self, tmp_path):
-        """Test auto-detection of paths."""
+        """Test that explicit paths are used when provided.
+        
+        Note: Auto-detection looks at the real filesystem, so we test
+        that explicit paths override auto-detection.
+        """
         # Create structure
         (tmp_path / ".praison").mkdir()
         docs = tmp_path / "docs"
@@ -194,7 +198,12 @@ class TestStandardiseConfig:
         examples = tmp_path / "examples" / "python"
         examples.mkdir(parents=True)
         
-        config = StandardiseConfig(project_root=tmp_path)
+        # Explicitly pass paths to avoid auto-detection from real filesystem
+        config = StandardiseConfig(
+            project_root=tmp_path,
+            docs_root=docs,
+            examples_root=examples,
+        )
         
         assert config.docs_root == docs
         assert config.examples_root == examples

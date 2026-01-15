@@ -2308,7 +2308,7 @@ Context:
                 # Inherit from original task if available
                 memory=original_task.memory if original_task else None,
                 callback=original_task.callback if original_task else None,
-                guardrail=original_task.guardrail if original_task else None,
+                guardrails=original_task.guardrail if original_task else None,
                 max_retries=original_task.max_retries if original_task else 3,
                 output_json=original_task.output_json if original_task else None,
                 output_pydantic=original_task.output_pydantic if original_task else None,

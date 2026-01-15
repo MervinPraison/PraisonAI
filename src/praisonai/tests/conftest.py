@@ -39,8 +39,15 @@ def cleanup_async_resources():
     except RuntimeError:
         pass  # No event loop, nothing to clean up
 
-# Add the source path to sys.path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'praisonai-agents'))
+# Add the source paths to sys.path for imports
+# praisonai-agents package (core SDK)
+_agents_path = os.path.join(os.path.dirname(__file__), '..', '..', 'praisonai-agents')
+if _agents_path not in sys.path:
+    sys.path.insert(0, _agents_path)
+# praisonai wrapper package
+_wrapper_path = os.path.join(os.path.dirname(__file__), '..')
+if _wrapper_path not in sys.path:
+    sys.path.insert(0, _wrapper_path)
 
 @pytest.fixture
 def mock_llm_response():

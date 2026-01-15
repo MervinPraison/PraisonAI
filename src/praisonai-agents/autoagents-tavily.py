@@ -52,7 +52,7 @@ agents = AutoAgents(
     tools=[evaluate, get_stock_price],
     process="sequential",
     llm="gemini/gemini-2.5-flash-lite-preview-06-17",
-    self_reflect=False,
+    reflection=False,
     verbose=False,
     max_agents=3  # Maximum number of agents to create
 )

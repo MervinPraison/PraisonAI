@@ -105,7 +105,7 @@ class TestStreamPresetWithOverrides:
         
         assert isinstance(result, OutputConfig)
         assert result.stream is True
-        assert result.metrics is True  # verbose preset has metrics=True
+        assert result.metrics is False  # verbose preset has metrics=False (debug has metrics=True)
 
 
 class TestStreamPrecedence:

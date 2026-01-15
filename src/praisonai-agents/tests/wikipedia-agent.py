@@ -4,7 +4,7 @@ from praisonaiagents.tools import wiki_search, wiki_summary, wiki_page, wiki_ran
 agent = Agent(
     instructions="You are a Wikipedia Agent", 
     tools=[wiki_search, wiki_summary, wiki_page, wiki_random, wiki_language],
-    self_reflect=True,
+    reflection=True,
     min_reflect=3,
     max_reflect=5,
     llm="gpt-4o-mini"

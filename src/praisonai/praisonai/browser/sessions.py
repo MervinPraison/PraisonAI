@@ -65,7 +65,9 @@ class SessionManager:
                     started_at REAL NOT NULL,
                     ended_at REAL,
                     error TEXT,
-                    metadata TEXT DEFAULT '{}'
+                    metadata TEXT DEFAULT '{}',
+                    engine TEXT DEFAULT 'cdp',
+                    total_retries INTEGER DEFAULT 0
                 )
             """)
             conn.execute("""
@@ -76,6 +78,10 @@ class SessionManager:
                     observation TEXT,
                     action TEXT,
                     thought TEXT DEFAULT '',
+                    action_result TEXT,
+                    success INTEGER DEFAULT 1,
+                    retry_count INTEGER DEFAULT 0,
+                    screenshot_path TEXT,
                     timestamp REAL NOT NULL,
                     FOREIGN KEY (session_id) REFERENCES sessions(session_id)
                 )
@@ -84,6 +90,33 @@ class SessionManager:
                 CREATE INDEX IF NOT EXISTS idx_steps_session 
                 ON steps(session_id, step_number)
             """)
+            
+            # Migrate existing tables - add new columns if they don't exist
+            self._migrate_schema(conn)
+    
+    def _migrate_schema(self, conn):
+        """Add missing columns to existing tables."""
+        # Check and add columns to sessions table
+        cursor = conn.execute("PRAGMA table_info(sessions)")
+        session_columns = {row[1] for row in cursor.fetchall()}
+        
+        if "engine" not in session_columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN engine TEXT DEFAULT 'cdp'")
+        if "total_retries" not in session_columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN total_retries INTEGER DEFAULT 0")
+        
+        # Check and add columns to steps table
+        cursor = conn.execute("PRAGMA table_info(steps)")
+        step_columns = {row[1] for row in cursor.fetchall()}
+        
+        if "action_result" not in step_columns:
+            conn.execute("ALTER TABLE steps ADD COLUMN action_result TEXT")
+        if "success" not in step_columns:
+            conn.execute("ALTER TABLE steps ADD COLUMN success INTEGER DEFAULT 1")
+        if "retry_count" not in step_columns:
+            conn.execute("ALTER TABLE steps ADD COLUMN retry_count INTEGER DEFAULT 0")
+        if "screenshot_path" not in step_columns:
+            conn.execute("ALTER TABLE steps ADD COLUMN screenshot_path TEXT")
     
     def create_session(self, goal: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Create a new browser session.
@@ -216,6 +249,10 @@ class SessionManager:
         observation: Optional[Dict[str, Any]] = None,
         action: Optional[Dict[str, Any]] = None,
         thought: str = "",
+        action_result: Optional[Dict[str, Any]] = None,
+        success: bool = True,
+        retry_count: int = 0,
+        screenshot_path: Optional[str] = None,
     ) -> None:
         """Add a step to session history.
         
@@ -225,12 +262,17 @@ class SessionManager:
             observation: Observation dict
             action: Action dict
             thought: Agent's reasoning
+            action_result: Result of action execution
+            success: Whether the action succeeded
+            retry_count: Number of retries for this action
+            screenshot_path: Path to screenshot file
         """
         with self._db() as conn:
             conn.execute(
                 """
-                INSERT INTO steps (session_id, step_number, observation, action, thought, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO steps (session_id, step_number, observation, action, thought, 
+                                   action_result, success, retry_count, screenshot_path, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
@@ -238,6 +280,10 @@ class SessionManager:
                     json.dumps(observation) if observation else None,
                     json.dumps(action) if action else None,
                     thought,
+                    json.dumps(action_result) if action_result else None,
+                    1 if success else 0,
+                    retry_count,
+                    screenshot_path,
                     time.time(),
                 )
             )

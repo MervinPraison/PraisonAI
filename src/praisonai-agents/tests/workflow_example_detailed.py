@@ -158,7 +158,7 @@ data_agent = Agent(
     goal="Collect and validate data about individuals",
     backstory="Expert in gathering and validating demographic data",
     tools=[random_data_of_individuals],
-    self_reflect=False
+    reflection=False
 )
 
 process_agent = Agent(
@@ -167,7 +167,7 @@ process_agent = Agent(
     goal="Process and categorize individual data",
     backstory="Expert in data analysis and categorization",
     tools=[process_data_of_individuals],
-    self_reflect=False
+    reflection=False
 )
 
 # Modify tasks to use Pydantic models

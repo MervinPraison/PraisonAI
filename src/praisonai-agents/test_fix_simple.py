@@ -13,7 +13,7 @@ def test_self_reflection_fix():
         role="Math Assistant",
         goal="Solve math problems accurately",
         backstory="You are a helpful math assistant",
-        self_reflect=True,
+        reflection=True,
         llm="gpt-4o-mini",  # Use a more widely available model
         verbose=True,
         tools=[evaluate],

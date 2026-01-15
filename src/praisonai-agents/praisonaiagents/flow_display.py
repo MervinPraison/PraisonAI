@@ -7,19 +7,35 @@ Visual display with agents in center and tools on sides.
 from typing import Dict, List, Set, Tuple
 from collections import defaultdict
 import threading
-from rich.console import Console
-from rich.panel import Panel
-from rich.text import Text
-from rich.align import Align
-from rich.columns import Columns
-from rich.table import Table
-from rich import box
+
+# Lazy imports for rich components
+_rich_cache = {}
+
+def _get_rich_components():
+    """Lazy import all rich components."""
+    if not _rich_cache:
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.text import Text
+        from rich.align import Align
+        from rich.columns import Columns
+        from rich.table import Table
+        from rich import box
+        _rich_cache['Console'] = Console
+        _rich_cache['Panel'] = Panel
+        _rich_cache['Text'] = Text
+        _rich_cache['Align'] = Align
+        _rich_cache['Columns'] = Columns
+        _rich_cache['Table'] = Table
+        _rich_cache['box'] = box
+    return _rich_cache
 
 class FlowDisplay:
     """Displays agent workflow with agents centered and tools on sides."""
     
     def __init__(self):
-        self.console = Console()
+        rich = _get_rich_components()
+        self.console = rich['Console']()
         self.agents = []  # List of agents in order
         self.agent_tools = defaultdict(list)  # agent -> [tools]
         self.tracking = False
@@ -98,6 +114,13 @@ class FlowDisplay:
         
     def _display_agent_with_tools(self, agent: str):
         """Display agent with tools on the sides."""
+        rich = _get_rich_components()
+        Table = rich['Table']
+        Panel = rich['Panel']
+        Text = rich['Text']
+        Align = rich['Align']
+        box = rich['box']
+        
         tools = self.agent_tools.get(agent, [])
         
         if not tools:
@@ -149,8 +172,13 @@ class FlowDisplay:
                     
                 self.console.print(Align.center(Text("".join(arrow_parts))))
                 
-    def _create_tools_panel(self, tools: List[str]) -> Panel:
+    def _create_tools_panel(self, tools: List[str]):
         """Create a panel for tools."""
+        rich = _get_rich_components()
+        Panel = rich['Panel']
+        Text = rich['Text']
+        box = rich['box']
+        
         if not tools:
             return ""
             
@@ -173,6 +201,12 @@ class FlowDisplay:
             
     def _display_centered_node(self, label: str, color: str):
         """Display a centered node."""
+        rich = _get_rich_components()
+        Panel = rich['Panel']
+        Text = rich['Text']
+        Align = rich['Align']
+        box = rich['box']
+        
         panel = Panel(
             Text(label, style=f"white on {color}", justify="center"),
             style=f"white on {color}",
@@ -183,6 +217,9 @@ class FlowDisplay:
         
     def _display_arrow_down(self):
         """Display a downward arrow."""
+        rich = _get_rich_components()
+        Align = rich['Align']
+        
         self.console.print()
         self.console.print(Align.center("↓"))
         self.console.print()

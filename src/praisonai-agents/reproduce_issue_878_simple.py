@@ -132,12 +132,12 @@ def test_llm_with_self_reflection():
     register_display_callback('interaction', track_callback, is_async=False)
     
     try:
-        llm = LLM(model="gemini/gemini-2.5-flash-lite-preview-06-17", verbose=False, self_reflect=True)
+        llm = LLM(model="gemini/gemini-2.5-flash-lite-preview-06-17", verbose=False, reflection=True)
         
         response = llm.get_response(
             prompt="Say exactly: Hello World",
             verbose=True,    # This should trigger the callback
-            self_reflect=True,
+            reflection=True,
             min_reflect=1,
             max_reflect=1
         )

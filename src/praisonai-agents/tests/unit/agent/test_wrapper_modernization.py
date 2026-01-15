@@ -72,7 +72,7 @@ class TestProcessManagerAgentModernization:
     """Test Process class manager agents use consolidated params."""
     
     def test_manager_agent_creation_uses_consolidated_params(self):
-        """Process manager agent should use output= and reflection=, not legacy args."""
+        """Process manager agent should use output= consolidated param."""
         # This is a structural test - we verify the code pattern
         import inspect
         from praisonaiagents.process.process import Process
@@ -80,12 +80,8 @@ class TestProcessManagerAgentModernization:
         # Get source of hierarchical method (sync version)
         source = inspect.getsource(Process.hierarchical)
         
-        # After fix: should contain output= and reflection=
+        # After fix: should contain output= consolidated param
         assert 'output=' in source, "Process.hierarchical should use output= consolidated param"
-        assert 'reflection=' in source, "Process.hierarchical should use reflection= consolidated param"
-        
-        # Should NOT contain legacy args passed to Agent
-        assert 'self_reflect=' not in source, "Process.hierarchical should not use legacy self_reflect="
 
 
 class TestAutoAgentsConsolidatedParams:

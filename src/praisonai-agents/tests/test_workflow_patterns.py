@@ -657,7 +657,7 @@ class TestGuardrails:
         def step1(ctx): return StepResult(output="Valid output")
         
         workflow = Workflow(steps=[
-            WorkflowStep(name="step1", handler=step1, guardrail=validator)
+            WorkflowStep(name="step1", handler=step1, guardrails=validator)
         ])
         result = workflow.start("test")
         
@@ -678,7 +678,7 @@ class TestGuardrails:
             return StepResult(output=f"Output attempt {attempt[0]}")
         
         workflow = Workflow(steps=[
-            WorkflowStep(name="step1", handler=step1, guardrail=validator, execution=WorkflowStepExecutionConfig(max_retries=5))
+            WorkflowStep(name="step1", handler=step1, guardrails=validator, execution=WorkflowStepExecutionConfig(max_retries=5))
         ])
         result = workflow.start("test")
         
@@ -697,7 +697,7 @@ class TestGuardrails:
             return StepResult(output=f"Attempt {attempt[0]}")
         
         workflow = Workflow(steps=[
-            WorkflowStep(name="step1", handler=step1, guardrail=validator, execution=WorkflowStepExecutionConfig(max_retries=2))
+            WorkflowStep(name="step1", handler=step1, guardrails=validator, execution=WorkflowStepExecutionConfig(max_retries=2))
         ])
         result = workflow.start("test")
         
@@ -721,7 +721,7 @@ class TestGuardrails:
             return StepResult(output="initial")
         
         workflow = Workflow(steps=[
-            WorkflowStep(name="step1", handler=step1, guardrail=validator, execution=WorkflowStepExecutionConfig(max_retries=3))
+            WorkflowStep(name="step1", handler=step1, guardrails=validator, execution=WorkflowStepExecutionConfig(max_retries=3))
         ])
         result = workflow.start("test")
         
@@ -1013,7 +1013,7 @@ class TestDocumentationExamples:
             return (False, "Please fix the output")
         
         workflow = Workflow(steps=[
-            WorkflowStep(name="gen", handler=generator, guardrail=validator, execution=WorkflowStepExecutionConfig(max_retries=3))
+            WorkflowStep(name="gen", handler=generator, guardrails=validator, execution=WorkflowStepExecutionConfig(max_retries=3))
         ])
         
         result = workflow.start("test")

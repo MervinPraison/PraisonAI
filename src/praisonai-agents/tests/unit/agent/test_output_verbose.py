@@ -105,13 +105,14 @@ class TestReasoningContentLogic:
 class TestVerbosePresetConfig:
     """Test that the verbose preset has the expected configuration."""
 
-    def test_verbose_preset_has_reasoning_steps_true(self):
-        """Verify that the verbose preset enables reasoning_steps."""
+    def test_verbose_preset_has_reasoning_steps_false(self):
+        """Verify that the verbose preset has reasoning_steps=False (debug has True)."""
         from praisonaiagents.config.presets import OUTPUT_PRESETS
         
         verbose_preset = OUTPUT_PRESETS.get("verbose")
         assert verbose_preset is not None, "verbose preset should exist"
-        assert verbose_preset.get("reasoning_steps") == True, "verbose preset should have reasoning_steps=True"
+        # verbose preset has reasoning_steps=False; debug preset has reasoning_steps=True
+        assert verbose_preset.get("reasoning_steps") == False, "verbose preset should have reasoning_steps=False"
 
     def test_verbose_preset_has_verbose_true(self):
         """Verify that the verbose preset enables verbose output."""

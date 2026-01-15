@@ -24,7 +24,7 @@ def test_user_code_pattern_with_tools():
         role="Senior Research Analyst",
         goal="Analyze and provide insights on given topics",
         backstory="You are an expert analyst with strong critical thinking skills",
-        self_reflect=True,
+        reflection=True,
         llm="gpt-4o-mini",  # Using OpenAI instead of Gemini for testing
         verbose=True,
         tools=[google_web_search_llm]
@@ -66,7 +66,7 @@ def test_user_code_pattern_without_tools():
         role="Senior Research Analyst",
         goal="Analyze and provide insights on given topics",
         backstory="You are an expert analyst with strong critical thinking skills",
-        self_reflect=True,
+        reflection=True,
         llm="gpt-4o-mini",  # Using OpenAI instead of Gemini for testing
         verbose=True
     )

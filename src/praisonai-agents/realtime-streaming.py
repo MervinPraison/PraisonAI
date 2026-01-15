@@ -3,7 +3,7 @@ from praisonaiagents import Agent
 agent = Agent(
     instructions="You are a helpful assistant",
     llm="gemini/gemini-2.0-flash",
-    self_reflect=False,
+    reflection=False,
     verbose=False,
     stream=True
 )

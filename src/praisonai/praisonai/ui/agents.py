@@ -439,7 +439,7 @@ async def ui_run_praisonai(config, topic, tools_dict):
                 max_execution_time=details.get('max_execution_time'),
                 cache=details.get('cache', True),
                 step_callback=step_callback_sync,
-                self_reflect=details.get('self_reflect', False)
+                reflection=details.get('self_reflect', False)
             )
             agents_map[role] = agent
 

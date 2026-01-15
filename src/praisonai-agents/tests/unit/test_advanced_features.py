@@ -543,22 +543,21 @@ class TestGitAttribution:
 # ============================================================================
 
 class TestSourcegraphTool:
-    """Tests for Sourcegraph integration tool."""
+    """Tests for Sourcegraph integration tool.
     
+    Note: sourcegraph_tools has been moved to praisonai-tools package.
+    These tests are skipped as the tool is no longer in core SDK.
+    """
+    
+    @pytest.mark.skip(reason="sourcegraph_tools moved to praisonai-tools package")
     def test_tool_creation(self):
         """Test Sourcegraph tool can be created."""
-        from praisonaiagents.tools.sourcegraph_tools import SourcegraphTools
+        pass
         
-        tools = SourcegraphTools()
-        assert tools is not None
-        
+    @pytest.mark.skip(reason="sourcegraph_tools moved to praisonai-tools package")
     def test_search_method_exists(self):
         """Test search method exists."""
-        from praisonaiagents.tools.sourcegraph_tools import SourcegraphTools
-        
-        tools = SourcegraphTools()
-        assert hasattr(tools, 'search')
-        assert callable(tools.search)
+        pass
 
 
 # ============================================================================

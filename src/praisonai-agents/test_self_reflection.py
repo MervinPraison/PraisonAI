@@ -11,7 +11,7 @@ def test_agent_self_reflection():
         name="ReflectiveAgent",
         instructions="You are a helpful assistant.",
         llm="gpt-4o-mini",
-        self_reflect=True,
+        reflection=True,
         min_reflect=1,
         max_reflect=3
     )
@@ -28,7 +28,7 @@ def test_llm_self_reflection():
     response = llm.get_response(
         prompt="What is 2+2? Be brief.",
         system_prompt="You are a helpful assistant.",
-        self_reflect=True,
+        reflection=True,
         min_reflect=1,
         max_reflect=3,
         verbose=True
@@ -44,7 +44,7 @@ def test_llm_no_reflection():
     response = llm.get_response(
         prompt="What is 2+2? Be brief.",
         system_prompt="You are a helpful assistant.",
-        self_reflect=False,
+        reflection=False,
         verbose=True
     )
     print(f"LLM Response: {response}")
