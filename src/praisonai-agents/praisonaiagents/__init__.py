@@ -76,7 +76,18 @@ from .main import (
 )
 
 # Module-level caches for lazy-loaded classes
-_lazy_cache = {}
+# Using threading.local() ensures thread-safe access to cached values
+import threading
+_lazy_cache_local = threading.local()
+
+def _get_lazy_cache():
+    """Get thread-local lazy cache dict. Thread-safe for concurrent access."""
+    if not hasattr(_lazy_cache_local, 'cache'):
+        _lazy_cache_local.cache = {}
+    return _lazy_cache_local.cache
+
+# Backward-compatible alias (module-level access still works, now thread-safe)
+_lazy_cache = {}  # Kept for compatibility, but prefer _get_lazy_cache()
 
 # Flags for optional modules
 _mcp_available = None

@@ -65,6 +65,52 @@ def process_video(video_path: str, seconds_per_frame=2):
     video.release()
     return base64_frames
 
+
+def get_multimodal_message(text_prompt: str, images: list) -> list:
+    """
+    Build multimodal message content for LLM with text and images.
+    
+    DRY helper - replaces duplicate _get_multimodal_message in aexecute_task/execute_task.
+    
+    Args:
+        text_prompt: The text content of the message
+        images: List of image paths (local or URL)
+        
+    Returns:
+        List of content items for multimodal LLM message
+    """
+    content = [{"type": "text", "text": text_prompt}]
+    
+    for img in images:
+        # If local file path for a valid image
+        if os.path.exists(img):
+            ext = os.path.splitext(img)[1].lower()
+            # If it's a .mp4, convert to frames
+            if ext == ".mp4":
+                frames = process_video(img, seconds_per_frame=1)
+                content.append({"type": "text", "text": "These are frames from the video."})
+                for f in frames:
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpg;base64,{f}"}
+                    })
+            else:
+                encoded = encode_file_to_base64(img)
+                content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/{ext.lstrip('.')};base64,{encoded}"
+                    }
+                })
+        else:
+            # Treat as a remote URL
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": img}
+            })
+    return content
+
+
 def process_task_context(context_item, verbose=0, user_id=None):
     """
     Process a single context item for task execution.
@@ -609,40 +655,9 @@ Context:
         logger.debug(f"Starting execution of task {task_id} with prompt:\n{task_prompt}")
 
         if task.images:
-            def _get_multimodal_message(text_prompt, images):
-                content = [{"type": "text", "text": text_prompt}]
-
-                for img in images:
-                    # If local file path for a valid image
-                    if os.path.exists(img):
-                        ext = os.path.splitext(img)[1].lower()
-                        # If it's a .mp4, convert to frames
-                        if ext == ".mp4":
-                            frames = process_video(img, seconds_per_frame=1)
-                            content.append({"type": "text", "text": "These are frames from the video."})
-                            for f in frames:
-                                content.append({
-                                    "type": "image_url",
-                                    "image_url": {"url": f"data:image/jpg;base64,{f}"}
-                                })
-                        else:
-                            encoded = encode_file_to_base64(img)
-                            content.append({
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/{ext.lstrip('.')};base64,{encoded}"
-                                }
-                            })
-                    else:
-                        # Treat as a remote URL
-                        content.append({
-                            "type": "image_url",
-                            "image_url": {"url": img}
-                        })
-                return content
-
+            # Use shared multimodal helper (DRY - defined at module level)
             agent_output = await executor_agent.achat(
-                _get_multimodal_message(task_prompt, task.images),
+                get_multimodal_message(task_prompt, task.images),
                 tools=tools,
                 output_json=task.output_json,
                 output_pydantic=task.output_pydantic,
@@ -971,40 +986,9 @@ Context:
         logger.debug(f"Starting execution of task {task_id} with prompt:\n{task_prompt}")
 
         if task.images:
-            def _get_multimodal_message(text_prompt, images):
-                content = [{"type": "text", "text": text_prompt}]
-
-                for img in images:
-                    # If local file path for a valid image
-                    if os.path.exists(img):
-                        ext = os.path.splitext(img)[1].lower()
-                        # If it's a .mp4, convert to frames
-                        if ext == ".mp4":
-                            frames = process_video(img, seconds_per_frame=1)
-                            content.append({"type": "text", "text": "These are frames from the video."})
-                            for f in frames:
-                                content.append({
-                                    "type": "image_url",
-                                    "image_url": {"url": f"data:image/jpg;base64,{f}"}
-                                })
-                        else:
-                            encoded = encode_file_to_base64(img)
-                            content.append({
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/{ext.lstrip('.')};base64,{encoded}"
-                                }
-                            })
-                    else:
-                        # Treat as a remote URL
-                        content.append({
-                            "type": "image_url",
-                            "image_url": {"url": img}
-                        })
-                return content
-
+            # Use shared multimodal helper (DRY - defined at module level)
             agent_output = executor_agent.chat(
-                _get_multimodal_message(task_prompt, task.images),
+                get_multimodal_message(task_prompt, task.images),
                 tools=task.tools,
                 output_json=task.output_json,
                 output_pydantic=task.output_pydantic,

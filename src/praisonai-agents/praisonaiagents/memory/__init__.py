@@ -18,6 +18,11 @@ This module provides memory management capabilities including:
 - Docs management (like Cursor docs)
 - MCP config management (like Cursor .cursor/mcp/)
 
+Protocols:
+- MemoryProtocol: Minimal interface for memory implementations
+- AsyncMemoryProtocol: Async interface for memory
+- ResettableMemoryProtocol: Interface with reset methods
+
 Memory Providers:
 - FileMemory: Zero-dependency JSON file-based storage (default)
 - Memory: Full-featured with SQLite, ChromaDB, Mem0, MongoDB support
@@ -33,6 +38,13 @@ from .file_memory import FileMemory, create_memory
 from .rules_manager import RulesManager, Rule, create_rules_manager
 from .docs_manager import DocsManager, Doc
 from .mcp_config import MCPConfigManager, MCPConfig
+from .protocols import (
+    MemoryProtocol, 
+    AsyncMemoryProtocol, 
+    ResettableMemoryProtocol,
+    EntityMemoryProtocol,
+)
+
 
 # Lazy imports for optional modules to avoid dependency issues and improve startup time
 def __getattr__(name):
@@ -187,4 +199,9 @@ __all__ = [
     "DecisionStore",
     "FeedbackStore",
     "ImprovementStore",
+    # Protocols
+    "MemoryProtocol",
+    "AsyncMemoryProtocol",
+    "ResettableMemoryProtocol",
+    "EntityMemoryProtocol",
 ] 

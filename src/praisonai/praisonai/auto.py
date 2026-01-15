@@ -1170,7 +1170,7 @@ Example structure:
             'description': data.get('description', ''),
             'framework': 'praisonai',
             'workflow': {
-                'verbose': True,
+                'output': 'verbose',  # Use output= instead of deprecated verbose=
                 'planning': False,
                 'reasoning': False
             },

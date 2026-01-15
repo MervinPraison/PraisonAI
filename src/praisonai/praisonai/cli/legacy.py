@@ -20,7 +20,7 @@ LEGACY_COMMANDS = {
     'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos',
     'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api',
     'doctor', 'registry', 'package', 'install', 'uninstall', 'acp', 'debug',
-    'lsp', 'diag', 'persistence',
+    'lsp', 'diag', 'persistence', 'browser',
 }
 
 # Typer commands that have been implemented
@@ -184,6 +184,18 @@ def main_with_legacy_support():
         from praisonai.version import __version__
         print(f"PraisonAI version {__version__}")
         return
+    
+    # Handle 'browser' command directly - delegate to browser Typer app
+    # This must be done BEFORE is_legacy_invocation to avoid argparse capturing --help/--engine
+    if argv and argv[0] == 'browser':
+        try:
+            from praisonai.browser.cli import app as browser_app
+            # Browser Typer app expects 'run', 'sessions', etc as first arg, not 'browser'
+            sys.argv = ['praisonai-browser'] + argv[1:]
+            browser_app()
+            return
+        except SystemExit as e:
+            sys.exit(e.code if isinstance(e.code, int) else 0)
     
     # IMPORTANT: Check for legacy invocation FIRST before trying Typer
     # This ensures legacy commands like 'chat' and flags like '--framework' work

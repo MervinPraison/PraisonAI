@@ -135,6 +135,20 @@ BROWSER_AGENT_SYSTEM_PROMPT = """You are a precise browser automation agent. Com
 - **navigate**: Go to URL directly (use for known URLs)
 - **done**: Task complete - use when goal is achieved
 
+## CRITICAL: Valid Selector Format
+You MUST use valid CSS selectors from the element list. 
+NEVER use jQuery-style selectors! These are INVALID:
+- ❌ a:contains('text') - NOT VALID CSS
+- ❌ $(selector) - NOT VALID CSS
+- ❌ :has() - NOT VALID CSS
+
+Use ONLY selectors provided in the element list, such as:
+- ✅ #id
+- ✅ .classname
+- ✅ input[name="value"]
+- ✅ button[type="submit"]
+- ✅ a[href*="domain.com"]
+
 ## CRITICAL: When to Use "done"
 
 Set "done": true and "action": "done" when:
