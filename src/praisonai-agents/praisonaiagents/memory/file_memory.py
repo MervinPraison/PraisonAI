@@ -18,7 +18,7 @@ Storage Structure:
 
 import json
 import time
-import fcntl
+import sys
 import hashlib
 import logging
 from pathlib import Path
@@ -26,7 +26,15 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, asdict, field
 
+# fcntl is Unix-only; on Windows, skip file locking (acceptable for single-process usage)
+if sys.platform != 'win32':
+    import fcntl
+    _HAS_FCNTL = True
+else:
+    _HAS_FCNTL = False
+
 logger = logging.getLogger(__name__)
+
 
 
 @dataclass
@@ -178,35 +186,41 @@ class FileMemory:
     # -------------------------------------------------------------------------
     
     def _read_json(self, filepath: Path, default: Any = None) -> Any:
-        """Read JSON file with file locking."""
+        """Read JSON file with file locking (Unix only)."""
         if not filepath.exists():
             return default if default is not None else []
         
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
-                fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+                if _HAS_FCNTL:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_SH)
                 try:
                     data = json.load(f)
                 finally:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                    if _HAS_FCNTL:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
                 return data
         except (json.JSONDecodeError, IOError) as e:
             self._log(f"Error reading {filepath}: {e}", logging.WARNING)
             return default if default is not None else []
+
     
     def _write_json(self, filepath: Path, data: Any) -> bool:
-        """Write JSON file with file locking."""
+        """Write JSON file with file locking (Unix only)."""
         try:
             with open(filepath, 'w', encoding='utf-8') as f:
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                if _HAS_FCNTL:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
                 try:
                     json.dump(data, f, indent=2, ensure_ascii=False)
                 finally:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                    if _HAS_FCNTL:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
             return True
         except IOError as e:
             self._log(f"Error writing {filepath}: {e}", logging.ERROR)
             return False
+
     
     def _load_config(self, overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Load or create configuration."""
