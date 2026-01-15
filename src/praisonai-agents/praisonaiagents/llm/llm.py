@@ -3756,9 +3756,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         output_json = override_params.get('output_json')
         output_pydantic = override_params.get('output_pydantic')
         
-        # Always remove these from params as they're not native litellm parameters
-        params.pop('output_json', None)
-        params.pop('output_pydantic', None)
+        # Always remove internal PraisonAI parameters that are not native litellm parameters
+        # These are used internally by PraisonAI but should not be passed to the LLM API
+        internal_params = [
+            'output_json', 'output_pydantic',  # Structured output handling
+            'reflection', 'self_reflect', 'max_reflect', 'min_reflect', 'reflect_llm',  # Self-reflection
+            'verbose', 'markdown',  # Display options
+            'agent_name', 'agent_role', 'agent_tools',  # Agent metadata
+            'task_name', 'task_description', 'task_id',  # Task metadata
+            'execute_tool_fn', 'stream_callback', 'emit_events',  # Callbacks
+            'console',  # Rich console
+        ]
+        for param in internal_params:
+            params.pop(param, None)
         
         if output_json or output_pydantic:
             
@@ -3777,18 +3787,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     logging.debug(f"Using Gemini native structured output with schema: {json.dumps(schema, indent=2)}")
         
         # Add tool_choice="auto" when tools are provided (unless already specified)
+        # This encourages the model to use tools when appropriate
         if 'tools' in params and params['tools'] and 'tool_choice' not in params:
-            # For Gemini models, use tool_choice to encourage tool usage
-            if self._is_gemini_model():
-                try:
-                    import litellm
-                    # Check if model supports function calling before setting tool_choice
-                    if litellm.supports_function_calling(model=self.model):
-                        params['tool_choice'] = 'auto'
-                except Exception as e:
-                    # If check fails, still set tool_choice for known Gemini models
-                    logging.debug(f"Could not verify function calling support: {e}. Setting tool_choice anyway.")
+            try:
+                import litellm
+                # Check if model supports function calling before setting tool_choice
+                if litellm.supports_function_calling(model=self.model):
                     params['tool_choice'] = 'auto'
+                    logging.debug(f"Set tool_choice='auto' for model {self.model}")
+            except Exception as e:
+                # If check fails, still set tool_choice to encourage tool usage
+                logging.debug(f"Could not verify function calling support: {e}. Setting tool_choice='auto' anyway.")
+                params['tool_choice'] = 'auto'
         
         # Add web_search_options if web_search is enabled and model supports it
         if self.web_search and self._supports_web_search():

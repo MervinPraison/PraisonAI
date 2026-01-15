@@ -7,7 +7,7 @@ agent = Agent(
     instructions="You are a helpful assistant",
     llm="gpt-4o-mini",
     tools=[get_weather],
-    output="debug"
+    output="status"
 )
 
 agent.start("What is the weather in Tokyo?")

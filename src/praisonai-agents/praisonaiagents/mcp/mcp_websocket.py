@@ -26,6 +26,9 @@ from typing import Any, Dict, Optional, List
 
 logger = logging.getLogger("mcp-websocket")
 
+# Import shared utilities for thread-safe event loop and schema fixing
+from .mcp_schema_utils import ThreadLocalEventLoop, fix_array_schemas
+
 
 def is_websocket_url(url: str) -> bool:
     """
@@ -58,18 +61,13 @@ def calculate_backoff(attempt: int, base_delay: float = 1.0, max_delay: float = 
     return min(delay, max_delay)
 
 
-# Global event loop for WebSocket operations (similar to other MCP transports)
-_event_loop = None
-_loop_lock = threading.Lock()
+# Thread-local event loop for WebSocket operations (thread-safe)
+_event_loop_manager = ThreadLocalEventLoop()
 
 
 def get_event_loop():
-    """Get or create a global event loop for WebSocket operations."""
-    global _event_loop
-    with _loop_lock:
-        if _event_loop is None or _event_loop.is_closed():
-            _event_loop = asyncio.new_event_loop()
-        return _event_loop
+    """Get or create a thread-local event loop for WebSocket operations."""
+    return _event_loop_manager.get_loop()
 
 
 class WebSocketTransport:
@@ -359,36 +357,10 @@ class WebSocketMCPTool:
             logger.error(f"Error in _async_call for {self.name}: {e}")
             raise
     
-    def _fix_array_schemas(self, schema: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Fix array schemas by adding missing 'items' attribute.
-        
-        OpenAI requires array types to specify item types.
-        """
-        if not isinstance(schema, dict):
-            return schema
-        
-        fixed_schema = schema.copy()
-        
-        # Fix array types at current level
-        if fixed_schema.get("type") == "array" and "items" not in fixed_schema:
-            fixed_schema["items"] = {"type": "string"}
-        
-        # Recursively fix nested schemas
-        if "properties" in fixed_schema:
-            fixed_properties = {}
-            for prop_name, prop_schema in fixed_schema["properties"].items():
-                fixed_properties[prop_name] = self._fix_array_schemas(prop_schema)
-            fixed_schema["properties"] = fixed_properties
-        
-        if "items" in fixed_schema:
-            fixed_schema["items"] = self._fix_array_schemas(fixed_schema["items"])
-        
-        return fixed_schema
-    
     def to_openai_tool(self) -> Dict[str, Any]:
         """Convert the tool to OpenAI function calling format."""
-        fixed_schema = self._fix_array_schemas(self.input_schema)
+        # Fix array schemas to include 'items' attribute (using shared utility)
+        fixed_schema = fix_array_schemas(self.input_schema)
         
         return {
             "type": "function",

@@ -45,6 +45,15 @@ def __getattr__(name):
     elif name == "python_type_to_json_schema":
         from .mcp_utils import python_type_to_json_schema
         return python_type_to_json_schema
+    elif name == "fix_array_schemas":
+        from .mcp_schema_utils import fix_array_schemas
+        return fix_array_schemas
+    elif name == "ThreadLocalEventLoop":
+        from .mcp_schema_utils import ThreadLocalEventLoop
+        return ThreadLocalEventLoop
+    elif name == "get_thread_local_event_loop":
+        from .mcp_schema_utils import get_thread_local_event_loop
+        return get_thread_local_event_loop
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
@@ -57,6 +66,10 @@ __all__ = [
     "function_to_mcp_schema",
     "get_tool_metadata",
     "python_type_to_json_schema",
+    # Schema utilities (lazy loaded)
+    "fix_array_schemas",
+    "ThreadLocalEventLoop",
+    "get_thread_local_event_loop",
     # Transport components (lazy loaded)
     "WebSocketMCPClient",
     "SessionManager",

@@ -507,6 +507,26 @@ class MCP:
         """
         return iter(self._tools)
     
+    def get_tools(self) -> List[Callable]:
+        """
+        Get the list of tool functions from this MCP instance.
+        
+        This method provides explicit access to the tools list, which is useful
+        when you need to inspect or manipulate the tools programmatically.
+        
+        Returns:
+            List[Callable]: List of tool functions that can be called
+            
+        Example:
+            ```python
+            mcp = MCP("npx -y @modelcontextprotocol/server-time")
+            tools = mcp.get_tools()
+            for tool in tools:
+                print(f"Tool: {tool.__name__}")
+            ```
+        """
+        return self._tools
+    
     def _fix_array_schemas(self, schema):
         """
         Fix array schemas by adding missing 'items' attribute required by OpenAI.
