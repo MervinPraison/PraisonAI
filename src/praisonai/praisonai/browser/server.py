@@ -233,6 +233,27 @@ class BrowserServer:
         
         logger.info(f"Started session {session_id}: {goal[:50]}...")
         
+        # Send start_automation to ONE extension client (first available without a session)
+        # Only send to ONE to prevent duplicate debugger attachment
+        start_msg = {
+            "type": "start_automation",
+            "goal": goal,
+            "session_id": session_id,
+        }
+        sent_to_extension = False
+        for client_id, client_conn in self._connections.items():
+            # Only send to extensions (not CLI) that don't have an active session
+            if client_conn != conn and client_conn.websocket and not client_conn.session_id:
+                try:
+                    await client_conn.websocket.send_json(start_msg)
+                    # Set the extension's session_id so we can broadcast actions to CLI
+                    client_conn.session_id = session_id
+                    logger.info(f"Sent start_automation to extension {client_id[:8]}, set session_id")
+                    sent_to_extension = True
+                    break  # Only send to ONE extension
+                except Exception as e:
+                    logger.error(f"Failed to send start_automation to {client_id}: {e}")
+        
         return {
             "type": "status",
             "status": "running",
@@ -289,11 +310,42 @@ class BrowserServer:
                 status = "completed" if action.get("done") else "stopped"
                 self._sessions.update_session(session_id, status=status)
         
-        return {
+        # Build action response
+        action_response = {
             "type": "action",
             "session_id": session_id,
             **action,
         }
+        
+        # Broadcast action to ALL clients that have this session
+        # This includes CLI client that initiated the session
+        logger.info(f"Broadcasting action for session {session_id[:8]} to {len(self._connections)} connections")
+        for client_id, client_conn in self._connections.items():
+            logger.info(f"  Client {client_id[:8]}: session={client_conn.session_id[:8] if client_conn.session_id else 'None'}, match={client_conn.session_id == session_id}, sender={client_conn == conn}")
+            if client_conn.session_id == session_id and client_conn != conn:
+                try:
+                    await client_conn.websocket.send_json(action_response)
+                    logger.info(f"  -> Sent action to client {client_id[:8]}")
+                except Exception as e:
+                    logger.error(f"Failed to broadcast action: {e}")
+        
+        # Also send completion status if done
+        if action.get("done") or message.get("step_number", 0) >= self.max_steps:
+            status = "completed" if action.get("done") else "stopped"
+            status_msg = {
+                "type": "status",
+                "status": status,
+                "session_id": session_id,
+                "message": action.get("thought", "Task complete"),
+            }
+            for client_id, client_conn in self._connections.items():
+                if client_conn.session_id == session_id:
+                    try:
+                        await client_conn.websocket.send_json(status_msg)
+                    except Exception:
+                        pass
+        
+        return action_response
     
     async def _handle_stop_session(
         self,
