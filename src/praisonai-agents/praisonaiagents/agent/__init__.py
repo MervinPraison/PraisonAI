@@ -30,6 +30,13 @@ from .prompt_expander_agent import (
     ExpandStrategy,
     ExpandResult
 )
+from .protocols import (
+    AgentProtocol,
+    RunnableAgentProtocol,
+    ToolAwareAgentProtocol,
+    MemoryAwareAgentProtocol,
+    FullAgentProtocol,
+)
 
 __all__ = [
     'Agent',
@@ -64,5 +71,11 @@ __all__ = [
     'RewriteResult',
     'PromptExpanderAgent',
     'ExpandStrategy',
-    'ExpandResult'
+    'ExpandResult',
+    # Protocols
+    'AgentProtocol',
+    'RunnableAgentProtocol',
+    'ToolAwareAgentProtocol',
+    'MemoryAwareAgentProtocol',
+    'FullAgentProtocol',
 ]

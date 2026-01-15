@@ -1510,11 +1510,13 @@ class PraisonAI:
                 sys.exit(exit_code)
             
             elif args.command == 'browser':
-                # Browser agent command - bridge server for Chrome extension
+                # Browser agent command - delegate to browser CLI Typer app
+                # Uses sys.argv replacement for proper arg passthrough (matches profile command pattern)
                 from praisonai.browser.cli import app as browser_app
-                import typer
+                import sys as _sys
+                _sys.argv = ['praisonai', 'browser'] + unknown_args
                 try:
-                    browser_app(args=unknown_args if unknown_args else None)
+                    browser_app()
                 except SystemExit as e:
                     sys.exit(e.code if e.code else 0)
                 sys.exit(0)

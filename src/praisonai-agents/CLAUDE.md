@@ -60,7 +60,7 @@ python tests/mcp-sse-direct-client.py  # Connect to server
 - Delegation support for hierarchical agent structures
 
 ### Multi-Agent Orchestration (`praisonaiagents/agents/`)
-- **PraisonAIAgents**: Main orchestrator for managing multiple agents and tasks
+- **Agents**: Main orchestrator for managing multiple agents and tasks (PraisonAIAgents is deprecated alias)
 - **AutoAgents**: Automatic agent creation and management
 - Process types: `sequential`, `hierarchical`, `parallel`
 - Context passing between agents and task dependency management
@@ -240,11 +240,11 @@ agent = Agent(
 
 ### Multi-Agent Workflow
 ```python
-workflow = PraisonAIAgents(
+workflow = Agents(
     agents=[agent1, agent2],
     tasks=[task1, task2],
     process="sequential",  # or "hierarchical", "parallel"
-    verbose=True,
+    output="verbose",  # Use output= instead of deprecated verbose=
     manager_agent=manager_agent  # For hierarchical process
 )
 result = workflow.start()
