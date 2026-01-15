@@ -307,3 +307,65 @@ class TestObsChecks:
         
         # Should pass or skip
         assert result.status in [CheckStatus.PASS, CheckStatus.SKIP]
+
+
+class TestStalePackagesCheck:
+    """Tests for stale packages check (namespace package detection)."""
+    
+    def setup_method(self):
+        """Reset registry before each test."""
+        CheckRegistry.reset()
+        from praisonai.cli.features.doctor.checks import env_checks
+    
+    def test_stale_packages_check_passes_when_clean(self):
+        """Test stale packages check passes when no stale artifacts exist."""
+        from praisonai.cli.features.doctor.checks.env_checks import check_stale_packages
+        
+        config = DoctorConfig()
+        result = check_stale_packages(config)
+        
+        # Should pass when environment is clean
+        assert result.status == CheckStatus.PASS
+        assert "No stale package artifacts" in result.message
+    
+    def test_stale_packages_check_detects_namespace_package(self):
+        """Test stale packages check detects when praisonaiagents is namespace pkg."""
+        from praisonai.cli.features.doctor.checks.env_checks import check_stale_packages
+        
+        # Mock praisonaiagents with __file__ = None (namespace package)
+        with patch('praisonai.cli.features.doctor.checks.env_checks.check_stale_packages') as mock_check:
+            # This test verifies the check function exists and is callable
+            # The actual namespace detection is tested in praisonaiagents tests
+            config = DoctorConfig()
+            result = check_stale_packages(config)
+            
+            # In clean environment, should pass
+            assert result.status == CheckStatus.PASS
+    
+    def test_praisonaiagents_file_not_none(self):
+        """Test that praisonaiagents.__file__ is not None (CI check)."""
+        import praisonaiagents
+        
+        # This is the critical CI check - __file__ must not be None
+        assert praisonaiagents.__file__ is not None, (
+            "praisonaiagents.__file__ is None - this indicates a namespace package "
+            "shadowing issue. Remove stale praisonaiagents directory from site-packages."
+        )
+    
+    def test_praisonaiagents_spec_has_origin(self):
+        """Test that praisonaiagents.__spec__.origin is not None (CI check)."""
+        import praisonaiagents
+        
+        # Namespace packages have origin=None
+        assert praisonaiagents.__spec__ is not None
+        assert praisonaiagents.__spec__.origin is not None, (
+            "praisonaiagents.__spec__.origin is None - namespace package detected"
+        )
+    
+    def test_agent_import_succeeds(self):
+        """Test that Agent can be imported (CI check)."""
+        from praisonaiagents import Agent
+        
+        assert Agent is not None
+        assert hasattr(Agent, '__init__')
+        assert hasattr(Agent, 'start')

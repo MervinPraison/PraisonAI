@@ -4762,9 +4762,11 @@ Write the complete compiled report:"""
                     )
                     console.print(response_panel)
                     
-                    # Show tool activity summary if tools were called
+                    # Show tool activity summary if tools were called (deduplicated)
                     if tools_called:
-                        tools_summary = ", ".join(tools_called)
+                        # Use dict.fromkeys to preserve order while removing duplicates
+                        unique_tools = list(dict.fromkeys(tools_called))
+                        tools_summary = ", ".join(unique_tools)
                         console.print(f"[dim]🔧 Tools used: {tools_summary}[/dim]")
                 else:
                     result = self.chat(prompt, **kwargs)

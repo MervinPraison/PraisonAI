@@ -206,47 +206,82 @@ def mcp_test(
 @app.command("sync")
 def mcp_sync(
     server: Optional[str] = typer.Argument(None, help="Server name (None for all)"),
+    timeout: float = typer.Option(30.0, "--timeout", "-t", help="Timeout in seconds"),
 ):
     """Sync tool schemas from MCP servers to local index."""
     output = get_output_controller()
+    loader = get_config_loader()
+    config = loader.load()
     
-    try:
-        from praisonai.mcp_server.tool_index import MCPToolIndex
+    servers_to_sync = []
+    if server:
+        if server not in config.mcp.servers:
+            output.print_error(f"Server not found: {server}")
+            raise typer.Exit(1)
+        servers_to_sync = [server]
+    else:
+        servers_to_sync = list(config.mcp.servers.keys())
+    
+    if not servers_to_sync:
+        output.print_info("No MCP servers configured")
+        return
+    
+    total_tools = 0
+    synced_servers = []
+    failed_servers = []
+    
+    for srv in servers_to_sync:
+        output.print_info(f"Syncing {srv}...")
+        srv_config = config.mcp.servers[srv]
         
-        index = MCPToolIndex()
-        loader = get_config_loader()
-        config = loader.load()
-        
-        servers_to_sync = []
-        if server:
-            if server not in config.mcp.servers:
-                output.print_error(f"Server not found: {server}")
-                raise typer.Exit(1)
-            servers_to_sync = [server]
-        else:
-            servers_to_sync = list(config.mcp.servers.keys())
-        
-        if not servers_to_sync:
-            output.print_info("No MCP servers configured")
-            return
-        
-        total_tools = 0
-        for srv in servers_to_sync:
-            output.print_info(f"Syncing {srv}...")
-            # Note: This would need actual MCP connection to fetch tools
-            # For now, we just create the index structure
-            count = index.sync(srv, tools=[])
-            total_tools += count
-            output.print(f"  Synced {count} tools")
-        
-        if output.is_json_mode:
-            output.print_json({"synced_servers": servers_to_sync, "total_tools": total_tools})
-        else:
-            output.print_success(f"Synced {len(servers_to_sync)} servers, {total_tools} tools total")
+        try:
+            # Actually connect to MCP server and fetch tools
+            from praisonaiagents.mcp import MCP
             
-    except ImportError as e:
-        output.print_error(f"Error: {e}")
-        raise typer.Exit(1)
+            # Build command string
+            cmd_parts = [srv_config.command] + srv_config.args
+            cmd_string = " ".join(cmd_parts)
+            
+            # Create MCP instance with env vars
+            mcp = MCP(cmd_string, timeout=int(timeout), env=srv_config.env or {})
+            
+            # Get tools
+            tools = mcp.get_tools()
+            openai_tools = mcp.to_openai_tool() or []
+            
+            tool_count = len(tools)
+            total_tools += tool_count
+            synced_servers.append(srv)
+            
+            output.print(f"  Found {tool_count} tools:")
+            for tool_def in openai_tools:
+                if isinstance(tool_def, dict) and "function" in tool_def:
+                    name = tool_def["function"].get("name", "unknown")
+                    desc = tool_def["function"].get("description", "")[:40]
+                    output.print(f"    - {name}: {desc}...")
+            
+            # Clean up
+            mcp.shutdown()
+            
+        except ImportError:
+            output.print_error("  MCP package not installed. Install with: pip install praisonaiagents[mcp]")
+            failed_servers.append(srv)
+        except Exception as e:
+            output.print_error(f"  Failed to sync: {e}")
+            failed_servers.append(srv)
+    
+    # Summary
+    if output.is_json_mode:
+        output.print_json({
+            "synced_servers": synced_servers,
+            "failed_servers": failed_servers,
+            "total_tools": total_tools
+        })
+    else:
+        if synced_servers:
+            output.print_success(f"Synced {len(synced_servers)} server(s), {total_tools} tools total")
+        if failed_servers:
+            output.print_error(f"Failed to sync {len(failed_servers)} server(s): {', '.join(failed_servers)}")
 
 
 @app.command("tools")
@@ -358,6 +393,107 @@ def mcp_status(
             
     except ImportError as e:
         output.print_error(f"Error: {e}")
+        raise typer.Exit(1)
+
+
+@app.command("run")
+def mcp_run(
+    name: str = typer.Argument(..., help="Server name to run"),
+    port: int = typer.Option(8080, "--port", "-p", help="Port for SSE transport"),
+    host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host to bind to"),
+    transport: str = typer.Option("stdio", "--transport", "-T", help="Transport type: stdio or sse"),
+):
+    """Run an MCP server from configuration.
+    
+    This command starts an MCP server using the configuration stored
+    for the given server name. It can run in stdio mode (default) or
+    as an SSE server.
+    
+    Examples:
+        praisonai mcp run my-server
+        praisonai mcp run my-server --transport sse --port 8080
+    """
+    output = get_output_controller()
+    loader = get_config_loader()
+    
+    config = loader.load()
+    if name not in config.mcp.servers:
+        output.print_error(f"Server not found: {name}")
+        raise typer.Exit(1)
+    
+    server = config.mcp.servers[name]
+    
+    if transport not in ("stdio", "sse"):
+        output.print_error(f"Invalid transport: {transport}. Use 'stdio' or 'sse'")
+        raise typer.Exit(1)
+    
+    output.print_info(f"Starting MCP server: {name}")
+    output.print(f"  Command: {server.command} {' '.join(server.args)}")
+    output.print(f"  Transport: {transport}")
+    
+    if transport == "sse":
+        output.print(f"  Endpoint: http://{host}:{port}/sse")
+    
+    import subprocess
+    import os
+    import sys
+    
+    try:
+        cmd = [server.command] + server.args
+        
+        # Build environment
+        env = os.environ.copy()
+        if server.env:
+            env.update(server.env)
+        
+        if transport == "stdio":
+            # Run in stdio mode - pass through stdin/stdout
+            output.print_info("Running in stdio mode. Press Ctrl+C to stop.")
+            proc = subprocess.Popen(
+                cmd,
+                stdin=sys.stdin,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+                env=env,
+            )
+            proc.wait()
+        else:
+            # SSE mode - would need to wrap the server
+            # For now, just run the server and let it handle SSE
+            output.print_info(f"Running in SSE mode on http://{host}:{port}")
+            output.print_info("Press Ctrl+C to stop.")
+            
+            # Try to use praisonaiagents MCP server wrapper
+            try:
+                from praisonaiagents.mcp import MCP
+                
+                # Build command string
+                cmd_string = " ".join(cmd)
+                mcp = MCP(cmd_string, timeout=60, env=server.env or {})
+                
+                # Get tools and expose via SSE
+                tools = mcp.get_tools()
+                output.print(f"  Exposing {len(tools)} tools via SSE")
+                
+                # Use ToolsMCPServer to expose tools
+                from praisonaiagents.mcp import ToolsMCPServer
+                
+                mcp_server = ToolsMCPServer(name=name, tools=tools)
+                mcp_server.run_sse(host=host, port=port)
+                
+            except ImportError:
+                output.print_error("MCP package not installed. Install with: pip install praisonaiagents[mcp]")
+                raise typer.Exit(1)
+            except KeyboardInterrupt:
+                output.print_info("\nServer stopped.")
+    
+    except FileNotFoundError:
+        output.print_error(f"Command not found: {server.command}")
+        raise typer.Exit(1)
+    except KeyboardInterrupt:
+        output.print_info("\nServer stopped.")
+    except Exception as e:
+        output.print_error(f"Failed to start server: {e}")
         raise typer.Exit(1)
 
 

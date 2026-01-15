@@ -5,6 +5,29 @@ This module uses lazy loading to minimize import time and memory usage.
 Heavy dependencies like litellm are only loaded when actually needed.
 """
 
+# =============================================================================
+# NAMESPACE PACKAGE GUARD
+# =============================================================================
+# Detect if we're loaded as a namespace package (which indicates stale artifacts
+# in site-packages). This happens when there's a praisonaiagents/ directory in
+# site-packages without an __init__.py file.
+#
+# Root cause: Partial uninstall or version mismatch leaves directories that
+# Python's PathFinder treats as namespace packages, shadowing the real package.
+# =============================================================================
+if __file__ is None:
+    import warnings as _ns_warnings
+    _ns_warnings.warn(
+        "praisonaiagents is loaded as a namespace package, which indicates "
+        "stale artifacts in site-packages. This will cause import errors. "
+        "Fix: Remove the stale directory with:\n"
+        "  rm -rf $(python -c \"import site; print(site.getsitepackages()[0])\")/praisonaiagents/\n"
+        "Then reinstall: pip install praisonaiagents",
+        ImportWarning,
+        stacklevel=1
+    )
+    del _ns_warnings
+
 # Apply warning patch BEFORE any imports to intercept warnings at the source
 from . import _warning_patch  # noqa: F401
 

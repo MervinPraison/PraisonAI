@@ -30,20 +30,19 @@ except ImportError:
 
 logger = logging.getLogger("mcp-http-stream")
 
-# Global event loop for async operations
-_event_loop = None
+# Import shared utilities for thread-safe event loop and schema fixing
+from .mcp_schema_utils import ThreadLocalEventLoop, fix_array_schemas
+
+# Thread-local event loop for async operations (thread-safe)
+_event_loop_manager = ThreadLocalEventLoop()
 
 # Global registry of active clients for cleanup
 _active_clients = weakref.WeakSet()
 _cleanup_registered = False
 
 def get_event_loop():
-    """Get or create a global event loop."""
-    global _event_loop
-    if _event_loop is None or _event_loop.is_closed():
-        _event_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(_event_loop)
-    return _event_loop
+    """Get or create a thread-local event loop."""
+    return _event_loop_manager.get_loop()
 
 
 def _cleanup_all_clients():
@@ -148,47 +147,10 @@ class HTTPStreamMCPTool:
             logger.error(f"Error in _async_call for {self.name}: {e}")
             raise
     
-    def _fix_array_schemas(self, schema):
-        """
-        Fix array schemas by adding missing 'items' attribute required by OpenAI.
-        
-        This ensures compatibility with OpenAI's function calling format which
-        requires array types to specify the type of items they contain.
-        
-        Args:
-            schema: The schema dictionary to fix
-            
-        Returns:
-            dict: The fixed schema
-        """
-        if not isinstance(schema, dict):
-            return schema
-            
-        # Create a copy to avoid modifying the original
-        fixed_schema = schema.copy()
-        
-        # Fix array types at the current level
-        if fixed_schema.get("type") == "array" and "items" not in fixed_schema:
-            # Add a default items schema for arrays without it
-            fixed_schema["items"] = {"type": "string"}
-            
-        # Recursively fix nested schemas
-        if "properties" in fixed_schema:
-            fixed_properties = {}
-            for prop_name, prop_schema in fixed_schema["properties"].items():
-                fixed_properties[prop_name] = self._fix_array_schemas(prop_schema)
-            fixed_schema["properties"] = fixed_properties
-            
-        # Fix items schema if it exists
-        if "items" in fixed_schema:
-            fixed_schema["items"] = self._fix_array_schemas(fixed_schema["items"])
-            
-        return fixed_schema
-    
     def to_openai_tool(self):
         """Convert the tool to OpenAI format."""
-        # Fix array schemas to include 'items' attribute
-        fixed_schema = self._fix_array_schemas(self.input_schema)
+        # Fix array schemas to include 'items' attribute (using shared utility)
+        fixed_schema = fix_array_schemas(self.input_schema)
         
         return {
             "type": "function",

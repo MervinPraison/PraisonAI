@@ -505,6 +505,91 @@ def check_optional_deps(config: DoctorConfig) -> CheckResult:
 
 
 @register_check(
+    id="stale_packages",
+    title="Stale Package Artifacts",
+    description="Check for stale praisonaiagents artifacts in site-packages",
+    category=CheckCategory.ENVIRONMENT,
+    severity=CheckSeverity.CRITICAL,
+)
+def check_stale_packages(config: DoctorConfig) -> CheckResult:
+    """
+    Check for stale praisonaiagents artifacts in site-packages.
+    
+    This detects namespace package shadowing issues where a stale directory
+    in site-packages (without __init__.py) shadows the real package.
+    """
+    import site
+    
+    stale_dirs = []
+    
+    # Check all site-packages directories
+    try:
+        site_packages = site.getsitepackages()
+    except AttributeError:
+        # Some environments don't have getsitepackages
+        site_packages = []
+    
+    # Also check user site-packages
+    user_site = site.getusersitepackages() if hasattr(site, 'getusersitepackages') else None
+    if user_site:
+        site_packages = list(site_packages) + [user_site]
+    
+    for sp in site_packages:
+        praisonai_dir = os.path.join(sp, 'praisonaiagents')
+        if os.path.isdir(praisonai_dir):
+            init_path = os.path.join(praisonai_dir, '__init__.py')
+            if not os.path.exists(init_path):
+                # This is a stale namespace package directory
+                stale_dirs.append(praisonai_dir)
+    
+    if stale_dirs:
+        return CheckResult(
+            id="stale_packages",
+            title="Stale Package Artifacts",
+            category=CheckCategory.ENVIRONMENT,
+            status=CheckStatus.FAIL,
+            message=f"Found {len(stale_dirs)} stale praisonaiagents directory(ies)",
+            details=f"Stale directories: {', '.join(stale_dirs)}",
+            remediation=(
+                "Remove stale directories to fix import errors:\n"
+                f"  rm -rf {stale_dirs[0]}\n"
+                "Then reinstall: pip install praisonaiagents"
+            ),
+            severity=CheckSeverity.CRITICAL,
+            metadata={"stale_dirs": stale_dirs},
+        )
+    
+    # Also verify the package loads correctly (not as namespace)
+    try:
+        import praisonaiagents
+        if praisonaiagents.__file__ is None:
+            return CheckResult(
+                id="stale_packages",
+                title="Stale Package Artifacts",
+                category=CheckCategory.ENVIRONMENT,
+                status=CheckStatus.FAIL,
+                message="praisonaiagents loaded as namespace package",
+                details="__file__ is None, indicating namespace package shadowing",
+                remediation=(
+                    "Remove stale praisonaiagents directory from site-packages:\n"
+                    "  rm -rf $(python -c \"import site; print(site.getsitepackages()[0])\")/praisonaiagents/\n"
+                    "Then reinstall: pip install praisonaiagents"
+                ),
+                severity=CheckSeverity.CRITICAL,
+            )
+    except ImportError:
+        pass  # Package not installed - handled by praisonaiagents_package check
+    
+    return CheckResult(
+        id="stale_packages",
+        title="Stale Package Artifacts",
+        category=CheckCategory.ENVIRONMENT,
+        status=CheckStatus.PASS,
+        message="No stale package artifacts found",
+    )
+
+
+@register_check(
     id="model_env_vars",
     title="Model Configuration",
     description="Check model-related environment variables",
