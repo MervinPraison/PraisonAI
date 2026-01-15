@@ -199,6 +199,7 @@ Methods:
 * <code title="cli">praisonai docs run-all <a href="./src/praisonai/praisonai/cli/commands/docs.py">--help</a></code>
 * <code title="cli">praisonai docs serve <a href="./src/praisonai/praisonai/cli/commands/docs.py">--help</a></code>
 * <code title="cli">praisonai docs stats <a href="./src/praisonai/praisonai/cli/commands/docs.py">--help</a></code>
+* <code title="cli">praisonai doctor cleanup <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor config <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor db <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor doctor-callback <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
@@ -208,6 +209,7 @@ Methods:
 * <code title="cli">praisonai doctor performance <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor selftest <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor tools <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
+* <code title="cli">praisonai doctor troubleshoot <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai endpoints list <a href="./src/praisonai/praisonai/cli/commands/endpoints.py">--help</a></code>
 * <code title="cli">praisonai endpoints test <a href="./src/praisonai/praisonai/cli/commands/endpoints.py">--help</a></code>
 * <code title="cli">praisonai environment check <a href="./src/praisonai/praisonai/cli/commands/environment.py">--help</a></code>
@@ -238,6 +240,7 @@ Methods:
 * <code title="cli">praisonai mcp list <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
 * <code title="cli">praisonai mcp mcp-callback <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
 * <code title="cli">praisonai mcp remove <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
+* <code title="cli">praisonai mcp run <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
 * <code title="cli">praisonai mcp status <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
 * <code title="cli">praisonai mcp sync <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
 * <code title="cli">praisonai mcp test <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
