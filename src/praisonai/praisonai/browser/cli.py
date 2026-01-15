@@ -89,6 +89,7 @@ def list_sessions(
     table.add_column("Session ID", style="cyan")
     table.add_column("Goal", max_width=40)
     table.add_column("Status", style="bold")
+    table.add_column("Steps", justify="right")
     table.add_column("Started")
     table.add_column("URL", max_width=30)
     
@@ -103,10 +104,15 @@ def list_sessions(
             "stopped": "yellow",
         }.get(session["status"], "white")
         
+        # Get step count from manager
+        steps = manager.get_step_count(session["session_id"])
+        step_display = f"[green]{steps}[/green]" if steps > 0 else "[dim]0[/dim]"
+        
         table.add_row(
             session["session_id"][:8],
             session["goal"][:40] + ("..." if len(session["goal"]) > 40 else ""),
             f"[{status_style}]{session['status']}[/{status_style}]",
+            step_display,
             started,
             session.get("current_url", "")[:30] or "-",
         )
@@ -376,6 +382,12 @@ def run_agent(
                         try:
                             message = await asyncio.wait_for(ws.recv(), timeout=5)
                             data = json.loads(message)
+                            
+                            # Handle case where server sends non-dict data
+                            if not isinstance(data, dict):
+                                console.print(f"[dim]Non-dict message: {str(data)[:50]}[/dim]")
+                                continue
+                            
                             msg_type = data.get("type", "unknown")
                             
                             if msg_type == "status":

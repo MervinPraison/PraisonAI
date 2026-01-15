@@ -242,6 +242,21 @@ class SessionManager:
                 )
             )
     
+    def get_step_count(self, session_id: str) -> int:
+        """Get number of steps for a session.
+        
+        Args:
+            session_id: Session identifier
+            
+        Returns:
+            Number of steps in the session
+        """
+        with self._db() as conn:
+            c = conn.cursor()
+            c.execute("SELECT COUNT(*) FROM steps WHERE session_id = ?", (session_id,))
+            result = c.fetchone()
+            return result[0] if result else 0
+    
     def list_sessions(
         self,
         status: Optional[str] = None,
