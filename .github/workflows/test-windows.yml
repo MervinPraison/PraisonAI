@@ -124,11 +124,9 @@ jobs:
         exec_cfg = ExecutionConfig(max_iter=50, max_retry_limit=5)
         print('ExecutionConfig max_iter:', exec_cfg.max_iter)
         
-        plan_cfg = PlanningConfig(enabled=True)
-        print('PlanningConfig enabled:', plan_cfg.enabled)
+        plan_cfg = PlanningConfig(reasoning=True, auto_approve=False)
+        print('PlanningConfig reasoning:', plan_cfg.reasoning)
         "
-
-
     # ==================== HANDOFF ====================
     - name: Test Handoff
       run: |
