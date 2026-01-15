@@ -44,14 +44,12 @@ jobs:
         python -c "from praisonaiagents import Task, WorkflowStep; print('Task/Step imports OK')"
 
     # ==================== AGENT FEATURES ====================
-    - name: Test Agent instantiation and features
+    - name: Test Agent instantiation
       run: |
         python -c "
         from praisonaiagents import Agent
-        # Basic agent
         a = Agent(name='Test', instructions='You are helpful')
         print('Agent created:', a.name)
-        # Agent with tools
         a2 = Agent(name='ToolAgent', instructions='Use tools', tools=[])
         print('Agent with tools:', a2.name)
         "
@@ -72,16 +70,14 @@ jobs:
       run: |
         python -c "
         from praisonaiagents import Workflow, WorkflowStep
-        from praisonaiagents.workflows import WorkflowOutputConfig, WorkflowPlanningConfig
+        from praisonaiagents.workflows import WorkflowOutputConfig
         
-        # Basic workflow
         w = Workflow(name='test')
         s1 = WorkflowStep(name='step1')
         s2 = WorkflowStep(name='step2', context=['step1'])
         print('Workflow:', w.name)
         print('Steps:', s1.name, s2.name)
         
-        # With config
         cfg = WorkflowOutputConfig(verbose=True, stream=False)
         w2 = Workflow(name='configured', output=cfg)
         print('Configured workflow verbose:', w2.verbose)
@@ -91,13 +87,12 @@ jobs:
     - name: Test Memory classes
       run: |
         python -c "
-        from praisonaiagents.memory import FileMemory, MemoryConfig
+        from praisonaiagents.memory import FileMemory
+        from praisonaiagents.config import MemoryConfig
         
-        # MemoryConfig
         cfg = MemoryConfig(provider='file', short_term=True, long_term=True)
         print('MemoryConfig provider:', cfg.provider)
         
-        # FileMemory (the one we fixed for Windows)
         mem = FileMemory(user_id='test_user', base_path='.praison/test_memory')
         print('FileMemory user:', mem.user_id)
         "
@@ -110,7 +105,7 @@ jobs:
         
         @tool
         def my_tool(query: str) -> str:
-            '''A test tool that echoes input'''
+            '''A test tool'''
             return f'Echo: {query}'
         
         result = my_tool('hello')
@@ -137,12 +132,11 @@ jobs:
     - name: Test Handoff
       run: |
         python -c "
-        from praisonaiagents import Handoff, handoff, Agent
+        from praisonaiagents import Handoff, Agent
         
         a1 = Agent(name='Agent1', instructions='First')
         a2 = Agent(name='Agent2', instructions='Second')
         
-        # Create handoff
         h = Handoff(agent=a2, condition='when needed')
         print('Handoff to:', h.agent.name)
         "
@@ -156,7 +150,6 @@ jobs:
         
         async def test_async():
             agent = Agent(name='AsyncAgent', instructions='Test')
-            # Just verify async methods exist
             assert hasattr(agent, 'arun'), 'Missing arun'
             assert hasattr(agent, 'astart'), 'Missing astart'
             print('Async methods available')
@@ -176,7 +169,7 @@ jobs:
       run: praisonai queue ls
       continue-on-error: true
 
-    # ==================== REAL API TEST ====================
+    # ==================== REAL API TESTS ====================
     - name: Real API test - Agent run
       if: env.OPENAI_API_KEY != ''
       run: |
