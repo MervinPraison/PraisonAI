@@ -131,14 +131,20 @@ jobs:
     - name: Test Handoff
       run: |
         python -c "
-        from praisonaiagents import Handoff, Agent
+        from praisonaiagents import Handoff, handoff, Agent
         
         a1 = Agent(name='Agent1', instructions='First')
         a2 = Agent(name='Agent2', instructions='Second')
         
-        h = Handoff(agent=a2, condition='when needed')
-        print('Handoff to:', h.agent.name)
+        # Using Handoff class directly
+        h = Handoff(agent=a2)
+        print('Handoff tool name:', h.tool_name)
+        
+        # Using handoff function
+        h2 = handoff(a1, tool_name_override='custom_handoff')
+        print('Custom handoff name:', h2.tool_name)
         "
+
 
     # ==================== ASYNC FEATURES ====================
     - name: Test async imports
