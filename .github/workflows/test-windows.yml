@@ -167,11 +167,11 @@ jobs:
       run: praisonai --help
 
     - name: Test CLI session list
-      run: praisonai session ls
+      run: praisonai session list
       continue-on-error: true
 
     - name: Test CLI queue list
-      run: praisonai queue ls
+      run: praisonai queue list
       continue-on-error: true
 
     # ==================== REAL API TESTS ====================
