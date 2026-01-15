@@ -1,0 +1,98 @@
+name: Windows Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  test-windows:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+    
+    - name: Install praisonaiagents
+      run: |
+        python -m pip install --upgrade pip
+        cd src/praisonai-agents
+        pip install .
+    
+    - name: Install praisonai wrapper
+      run: |
+        cd src/praisonai
+        pip install .[dev]
+    
+    - name: Set environment variables
+      run: |
+        echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> $env:GITHUB_ENV
+        echo "OPENAI_MODEL_NAME=gpt-4o-mini" >> $env:GITHUB_ENV
+
+    - name: Test core imports
+      run: |
+        python -c "from praisonaiagents import Agent, Agents, Workflow; print('✅ Core imports OK')"
+        python -c "from praisonaiagents import tool, Tools; print('✅ Tool imports OK')"
+        python -c "from praisonaiagents import Task, WorkflowStep; print('✅ Task/Step imports OK')"
+
+    - name: Test Agent instantiation
+      run: |
+        python -c "
+        from praisonaiagents import Agent
+        agent = Agent(name='Test', instructions='You are helpful')
+        print(f'✅ Agent created: {agent.name}')
+        "
+
+    - name: Test Agents orchestration
+      run: |
+        python -c "
+        from praisonaiagents import Agent, Agents, Task
+        agent = Agent(name='Test', instructions='You are helpful')
+        agents = Agents(agents=[agent])
+        print(f'✅ Agents created with {len(agents.agents)} agent(s)')
+        "
+
+    - name: Test Workflow creation
+      run: |
+        python -c "
+        from praisonaiagents import Workflow, WorkflowStep
+        workflow = Workflow(name='test')
+        step = WorkflowStep(name='step1')
+        print(f'✅ Workflow: {workflow.name}, Step: {step.name}')
+        "
+
+    - name: Test CLI help
+      run: praisonai --help
+
+    - name: Test CLI session list
+      run: praisonai session ls
+      continue-on-error: true
+
+    - name: Test CLI queue list
+      run: praisonai queue ls
+      continue-on-error: true
+
+    - name: Real API test - Agent run
+      if: ${{ secrets.OPENAI_API_KEY != '' }}
+      run: |
+        python -c "
+        import os
+        from praisonaiagents import Agent
+        
+        agent = Agent(
+            name='TestAgent',
+            instructions='Reply with exactly: WINDOWS_OK',
+            llm='gpt-4o-mini'
+        )
+        result = agent.run('Say WINDOWS_OK')
+        print(f'Result: {result}')
+        assert len(str(result)) > 0, 'Empty response'
+        print('✅ Real API test passed')
+        "
