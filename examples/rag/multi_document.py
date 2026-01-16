@@ -112,7 +112,7 @@ def multi_document_rag():
         
         REPORTS:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     # Questions that require multi-document synthesis
@@ -157,7 +157,7 @@ def cross_reference_example():
         
         REPORTS:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     query = """
@@ -185,7 +185,7 @@ def document_filtering():
         
         POLICY REPORT:
         {POLICY_REPORT['content']}""",
-        verbose=False
+        output="silent"
     )
     
     tech_agent = Agent(
@@ -194,7 +194,7 @@ def document_filtering():
         
         TECHNOLOGY REPORT:
         {TECH_REPORT['content']}""",
-        verbose=False
+        output="silent"
     )
     
     query = "What progress has been made in addressing climate change?"

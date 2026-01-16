@@ -26,7 +26,7 @@ def test_user_code_pattern_with_tools():
         backstory="You are an expert analyst with strong critical thinking skills",
         reflection=True,
         llm="gpt-4o-mini",  # Using OpenAI instead of Gemini for testing
-        verbose=True,
+        output="verbose",
         tools=[google_web_search_llm]
     )
 
@@ -68,7 +68,7 @@ def test_user_code_pattern_without_tools():
         backstory="You are an expert analyst with strong critical thinking skills",
         reflection=True,
         llm="gpt-4o-mini",  # Using OpenAI instead of Gemini for testing
-        verbose=True
+        output="verbose"
     )
 
     # Create a task

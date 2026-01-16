@@ -24,7 +24,7 @@ def test_streaming_telemetry_fix():
             instructions="You are a helpful assistant that provides brief responses.",
             llm="test/mock-model",  # Mock model to avoid API calls
             stream=True,
-            verbose=False  # Reduce output noise
+            output="silent"  # Reduce output noise
         )
         
         print("✅ Agent created successfully")
@@ -87,7 +87,7 @@ def test_telemetry_integration():
             instructions="Test agent",
             llm="test/mock-model",
             stream=True,
-            verbose=False
+            output="silent"
         )
         
         # Instrument the agent (this should happen automatically)

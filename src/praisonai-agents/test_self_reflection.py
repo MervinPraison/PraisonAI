@@ -31,7 +31,7 @@ def test_llm_self_reflection():
         reflection=True,
         min_reflect=1,
         max_reflect=3,
-        verbose=True
+        output="verbose"
     )
     print(f"LLM Response: {response}")
     print()
@@ -45,7 +45,7 @@ def test_llm_no_reflection():
         prompt="What is 2+2? Be brief.",
         system_prompt="You are a helpful assistant.",
         reflection=False,
-        verbose=True
+        output="verbose"
     )
     print(f"LLM Response: {response}")
     print()

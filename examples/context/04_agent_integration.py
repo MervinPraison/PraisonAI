@@ -37,7 +37,7 @@ def main():
         name="CodeAssistant",
         instructions="You are a helpful code assistant.",
         context=config,
-        verbose=False
+        output="silent"
     )
     
     print(f"   Agent name: {agent.name}")

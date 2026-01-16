@@ -151,7 +151,7 @@ async def test_sequential_async_execution():
             agents=[async_agent, sync_agent],
             tasks=tasks,
             process="sequential",
-            verbose=True
+            output="verbose"
         )
         
         # Run the workflow

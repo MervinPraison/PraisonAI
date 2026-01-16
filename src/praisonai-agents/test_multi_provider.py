@@ -60,7 +60,7 @@ def test_router_agent():
         goal="Test multi-model functionality",
         models=["gpt-4o-mini"],  # Using single model for testing
         routing_strategy="auto",
-        verbose=False
+        output="silent"
     )
     
     print(f"Agent created: {agent.name}")
@@ -88,7 +88,7 @@ def test_integration():
         goal="Test the integration",
         models=["gpt-4o-mini"],  # Single model for testing
         routing_strategy="manual",  # Use manual to avoid complexity
-        verbose=False
+        output="silent"
     )
     
     # Create a simple task
@@ -104,7 +104,7 @@ def test_integration():
         agents=[agent],
         tasks=[task],
         process="sequential",
-        verbose=False
+        output="silent"
     )
     
     print("Created Agents with RouterAgent")

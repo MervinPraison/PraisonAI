@@ -21,7 +21,7 @@ def test_stream_parameter():
         backstory="A test agent for verifying stream parameter handling",
         llm="gpt-4o-mini",
         stream=True,  # Default to streaming
-        verbose=True
+        output="verbose"
     )
     
     print("Test 1: Agent has stream=True, but we pass stream=False to chat()")
@@ -52,7 +52,7 @@ def test_stream_parameter():
         backstory="A test agent for verifying non-stream parameter handling",
         llm="gpt-4o-mini",
         stream=False,  # Default to non-streaming
-        verbose=True
+        output="verbose"
     )
     
     print("Test 3: Agent has stream=False, but we pass stream=True to chat()")

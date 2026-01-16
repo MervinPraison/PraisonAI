@@ -93,7 +93,7 @@ def example_3_execute_yaml_directly():
     result = manager.execute_yaml(
         yaml_file,
         input_data="The future of AI",
-        verbose=True
+        output="verbose"
     )
     
     print(f"Status: {result['status']}")

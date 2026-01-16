@@ -15,9 +15,7 @@ agent = Agent(
     instructions="You are a helpful assistant. Be concise and clear.",
     llm=llm_config,
     output="verbose",
-    reflection=True,
-    max_reflect=2,
-    min_reflect=1
+    reflection=True  # Use simplest form - enables defaults
 )
 
 # Test with a simple prompt

@@ -35,7 +35,7 @@ def run_quick_comparison():
         prompt="What is 2+2?",
         iterations=2,
         paths=["openai_sdk", "praisonai_agent"],
-        verbose=True
+        output="verbose"
     )
     
     # Print comparison table
@@ -56,7 +56,7 @@ def run_full_benchmark():
     report = handler.run_full_benchmark(
         prompt="Hi",
         iterations=3,
-        verbose=True
+        output="verbose"
     )
     
     # Print full report
@@ -78,7 +78,7 @@ def run_agent_benchmark():
         prompt="Explain Python in one sentence",
         iterations=3,
         paths=["openai_sdk", "praisonai_agent"],
-        verbose=True
+        output="verbose"
     )
     
     # Show timeline diagrams

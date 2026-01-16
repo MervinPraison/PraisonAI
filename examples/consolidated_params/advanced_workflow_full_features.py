@@ -32,7 +32,7 @@ workflow = Workflow(
         ),
     ],
     # Workflow-level consolidated params
-    output=WorkflowOutputConfig(verbose=True, stream=True),
+    output=WorkflowOutputConfig(output="verbose", stream=True),
     planning=WorkflowPlanningConfig(enabled=True, reasoning=True),
     memory=WorkflowMemoryConfig(backend="file"),
     # Agent-like params

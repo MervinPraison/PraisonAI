@@ -16,7 +16,7 @@ agent = Agent(
     name="Assistant",
     instructions="You are a helpful assistant with access to documents.",
     knowledge=["./docs/guide.pdf"],  # Add your documents here
-    knowledge_config={
+    knowledge={
         "vector_store": "pinecone",
         "api_key": api_key,
         "environment": "us-east-1"

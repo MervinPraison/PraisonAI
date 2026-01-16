@@ -528,7 +528,7 @@ def docs_run_all(
     # Track overall results
     overall_results = {
         'passed': 0, 'failed': 0, 'skipped': 0,
-        'timeout': 0, 'not_run': 0, 'total': 0,
+        'timeout': 0, 'not_run': 0, 'total': 0, 'xfail': 0,
     }
     group_summaries = []
     
@@ -541,7 +541,7 @@ def docs_run_all(
             return {
                 'group': group_name,
                 'total': 0, 'passed': 0, 'failed': 0,
-                'skipped': 0, 'timeout': 0, 'not_run': 0,
+                'skipped': 0, 'timeout': 0, 'not_run': 0, 'xfail': 0,
             }
         
         group_report_dir = output_dir / group_name
@@ -587,14 +587,14 @@ def docs_run_all(
                         if ci:
                             print(
                                 f"PASS {group_name}: "
-                                f"PASS:{summary['passed']} FAIL:{summary['failed']} "
-                                f"SKIP:{summary['skipped']} TIMEOUT:{summary['timeout']} NOT_RUN:{summary['not_run']}"
+                                f"PASS:{summary.get('passed', 0)} FAIL:{summary.get('failed', 0)} "
+                                f"SKIP:{summary.get('skipped', 0)} TIMEOUT:{summary.get('timeout', 0)} XFAIL:{summary.get('xfail', 0)}"
                             )
                         else:
                             typer.echo(
                                 f"✅ {group_name}: "
-                                f"✅{summary['passed']} ❌{summary['failed']} "
-                                f"⏭️{summary['skipped']} ⏱️{summary['timeout']} 📝{summary['not_run']}"
+                                f"✅{summary.get('passed', 0)} ❌{summary.get('failed', 0)} "
+                                f"⏭️{summary.get('skipped', 0)} ⏱️{summary.get('timeout', 0)} ⚠️{summary.get('xfail', 0)}"
                             )
                 except Exception as e:
                     if ci:
@@ -669,35 +669,35 @@ def docs_run_all(
         print("=" * 80)
         print("FINAL REPORT - ALL GROUPS")
         print("=" * 80)
-        print(f"{'Group':<20} {'Total':>8} {'Passed':>8} {'Failed':>8} {'Skip':>8} {'Timeout':>8} {'NotRun':>8}")
+        print(f"{'Group':<20} {'Total':>8} {'Passed':>8} {'Failed':>8} {'Skip':>8} {'Timeout':>8} {'XFail':>8}")
         print("-" * 80)
         for gs in sorted(group_summaries, key=lambda x: x['group']):
             print(
-                f"{gs['group']:<20} {gs['total']:>8} {gs['passed']:>8} {gs['failed']:>8} "
-                f"{gs['skipped']:>8} {gs['timeout']:>8} {gs['not_run']:>8}"
+                f"{gs['group']:<20} {gs.get('total', 0):>8} {gs.get('passed', 0):>8} {gs.get('failed', 0):>8} "
+                f"{gs.get('skipped', 0):>8} {gs.get('timeout', 0):>8} {gs.get('xfail', 0):>8}"
             )
         print("-" * 80)
         print(
-            f"{'TOTAL':<20} {overall_results['total']:>8} {overall_results['passed']:>8} "
-            f"{overall_results['failed']:>8} {overall_results['skipped']:>8} "
-            f"{overall_results['timeout']:>8} {overall_results['not_run']:>8}"
+            f"{'TOTAL':<20} {overall_results.get('total', 0):>8} {overall_results.get('passed', 0):>8} "
+            f"{overall_results.get('failed', 0):>8} {overall_results.get('skipped', 0):>8} "
+            f"{overall_results.get('timeout', 0):>8} {overall_results.get('xfail', 0):>8}"
         )
     else:
         typer.echo("\n" + "=" * 80)
         typer.echo("FINAL REPORT - ALL GROUPS")
         typer.echo("=" * 80)
-        typer.echo(f"\n{'Group':<20} {'Total':>8} {'Passed':>8} {'Failed':>8} {'Skip':>8} {'Timeout':>8} {'NotRun':>8}")
+        typer.echo(f"\n{'Group':<20} {'Total':>8} {'Passed':>8} {'Failed':>8} {'Skip':>8} {'Timeout':>8} {'XFail':>8}")
         typer.echo("-" * 80)
         for gs in sorted(group_summaries, key=lambda x: x['group']):
             typer.echo(
-                f"{gs['group']:<20} {gs['total']:>8} {gs['passed']:>8} {gs['failed']:>8} "
-                f"{gs['skipped']:>8} {gs['timeout']:>8} {gs['not_run']:>8}"
+                f"{gs['group']:<20} {gs.get('total', 0):>8} {gs.get('passed', 0):>8} {gs.get('failed', 0):>8} "
+                f"{gs.get('skipped', 0):>8} {gs.get('timeout', 0):>8} {gs.get('xfail', 0):>8}"
             )
         typer.echo("-" * 80)
         typer.echo(
-            f"{'TOTAL':<20} {overall_results['total']:>8} {overall_results['passed']:>8} "
-            f"{overall_results['failed']:>8} {overall_results['skipped']:>8} "
-            f"{overall_results['timeout']:>8} {overall_results['not_run']:>8}"
+            f"{'TOTAL':<20} {overall_results.get('total', 0):>8} {overall_results.get('passed', 0):>8} "
+            f"{overall_results.get('failed', 0):>8} {overall_results.get('skipped', 0):>8} "
+            f"{overall_results.get('timeout', 0):>8} {overall_results.get('xfail', 0):>8}"
         )
     
     # Save final summary

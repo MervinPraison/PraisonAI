@@ -134,7 +134,7 @@ def policy_based_retrieval():
         
         IT SUPPORT DOCS:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     query = "How do I set up VPN?"
@@ -217,7 +217,7 @@ def priority_based_retrieval():
         
         HIGH PRIORITY DOCS:
         {high_context}""",
-        verbose=False
+        output="silent"
     )
     
     # Full knowledge agent
@@ -227,7 +227,7 @@ def priority_based_retrieval():
         
         IT SUPPORT DOCS:
         {full_context}""",
-        verbose=False
+        output="silent"
     )
     
     query = "I'm locked out of my account!"

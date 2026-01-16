@@ -27,7 +27,7 @@ agent = Agent(
     instructions="You are a helpful assistant. You can use the tools provided to you to help the user.",
     llm="gemini/gemini-2.5-flash-lite-preview-06-17",
     reflection=False,
-    verbose=True,
+    output="verbose",
     tools=[get_stock_price, multiply],
     stream=False  # Force non-streaming mode - use stream parameter directly
 )
@@ -41,7 +41,7 @@ agent2 = Agent(
     instructions="You are a helpful assistant. You can use the tools provided to you to help the user.",
     llm="gemini/gemini-2.5-flash-lite-preview-06-17",
     reflection=False,
-    verbose=True,
+    output="verbose",
     tools=[get_stock_price, multiply]
 )
 

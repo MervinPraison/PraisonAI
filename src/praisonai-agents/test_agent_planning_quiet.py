@@ -10,7 +10,7 @@ agent = Agent(
     planning=True,
     planning_tools=[search_web],
     planning_reasoning=True,
-    verbose=False  # Quiet mode
+    output="silent"  # Quiet mode
 )
 
 result = agent.start("Research AI trends in 2025 and write a 2 sentence summary")

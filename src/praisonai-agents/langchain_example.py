@@ -24,7 +24,7 @@ task = Task(
 agents = Agents(
     agents=[agent],
     tasks=[task],
-    verbose=True
+    output="verbose"
 )
 
 agents.start()

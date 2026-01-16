@@ -6,6 +6,8 @@ which will apply to all tasks executed by that agent.
 """
 from typing import Tuple, Any
 from praisonaiagents import Agent, TaskOutput
+
+
 def validate_content_length(task_output: TaskOutput) -> Tuple[bool, Any]:
     """
     Validate that task output content meets minimum length requirement.
@@ -17,6 +19,8 @@ def validate_content_length(task_output: TaskOutput) -> Tuple[bool, Any]:
     if len(task_output.raw) < 50:
         return False, "Content too short - must be at least 50 characters"
     return True, task_output
+
+
 def validate_professional_tone(task_output: TaskOutput) -> Tuple[bool, Any]:
     """
     Validate that the content has a professional tone.
@@ -31,14 +35,17 @@ def validate_professional_tone(task_output: TaskOutput) -> Tuple[bool, Any]:
         if word in content:
             return False, f"Content contains unprofessional word: '{word}'"
     return True, task_output
+
+
 def main():
     """Demonstrate Agent-level guardrails with function-based and LLM-based validation."""
     print("=== Agent Guardrail Examples ===\n")
+    
     # Example 1: Function-based guardrail
     print("1. Function-based guardrail (content length validation):")
     agent1 = Agent(
-        name="ContentWriter"
-        instructions="You are a professional content writer who creates detailed responses"
+        name="ContentWriter",
+        instructions="You are a professional content writer who creates detailed responses",
         guardrails=validate_content_length
     )
     try:
@@ -46,11 +53,12 @@ def main():
         print(f"Result: {result1}\n")
     except Exception as e:
         print(f"Error: {e}\n")
+    
     # Example 2: LLM-based guardrail (string description)
     print("2. LLM-based guardrail (professional tone validation):")
     agent2 = Agent(
         name="BusinessWriter", 
-        instructions="You are a business communication expert"
+        instructions="You are a business communication expert",
         guardrails="Ensure the content is professional, formal, and suitable for business communication. No casual language or slang."
     )
     try:
@@ -58,11 +66,12 @@ def main():
         print(f"Result: {result2}\n")
     except Exception as e:
         print(f"Error: {e}\n")
+    
     # Example 3: Multiple agents with different guardrails
     print("3. Professional tone function-based guardrail:")
     agent3 = Agent(
-        name="ProfessionalWriter"
-        instructions="Write professional business content"
+        name="ProfessionalWriter",
+        instructions="Write professional business content",
         guardrails=validate_professional_tone
     )
     try:
@@ -70,6 +79,9 @@ def main():
         print(f"Result: {result3}\n")
     except Exception as e:
         print(f"Error: {e}\n")
+    
     print("=== Agent Guardrails Demonstration Complete ===")
+
+
 if __name__ == "__main__":
     main()

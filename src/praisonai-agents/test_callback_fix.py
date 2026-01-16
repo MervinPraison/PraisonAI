@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test script to verify callbacks work with verbose=False"""
+"""Test script to verify callbacks work with output="silent""""
 
 import sys
 sys.path.insert(0, 'src/praisonai-agents')
@@ -27,15 +27,15 @@ def simple_callback(message=None, response=None, **kwargs):
 # Register callback
 register_display_callback('interaction', simple_callback, is_async=False)
 
-# Test with verbose=False
-print("Testing with verbose=False...")
+# Test with output="silent"
+print("Testing with output="silent"...")
 agent = Agent(
     name="TestAgent",
     role="Assistant",
     goal="Help with tasks",
     backstory="I am a helpful assistant",
     llm="gpt-4o-mini",  # Using a simple model for testing
-    verbose=False
+    output="silent"
 )
 
 task = Task(
@@ -47,7 +47,7 @@ task = Task(
 
 # Clear the log file
 with open('callback_test_log.txt', 'w') as f:
-    f.write("Starting test with verbose=False\n")
+    f.write("Starting test with output="silent"\n")
 
 # Run the agent
 try:
@@ -61,9 +61,9 @@ try:
     
     # Check if callback was executed
     if callback_executed:
-        print("✅ SUCCESS: Callback was executed with verbose=False!")
+        print("✅ SUCCESS: Callback was executed with output="silent"!")
     else:
-        print("❌ FAILED: Callback was NOT executed with verbose=False")
+        print("❌ FAILED: Callback was NOT executed with output="silent"")
         
 except Exception as e:
     print(f"Error during test: {e}")

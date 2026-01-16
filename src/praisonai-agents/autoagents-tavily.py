@@ -11,7 +11,7 @@ agents = AutoAgents(
     instructions="Search for information about AI Agents",
     tools=[tavily],
     process="sequential",
-    verbose=True,
+    output="verbose",
     max_agents=3  # Maximum number of agents to create
 )
 
@@ -53,7 +53,7 @@ agents = AutoAgents(
     process="sequential",
     llm="gemini/gemini-2.5-flash-lite-preview-06-17",
     reflection=False,
-    verbose=False,
+    output="silent",
     max_agents=3  # Maximum number of agents to create
 )
 

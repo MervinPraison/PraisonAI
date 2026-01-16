@@ -44,7 +44,7 @@ def main():
         role="Research Analyst",
         goal="Research topics thoroughly and provide accurate information",
         backstory="Expert researcher with access to vast knowledge bases",
-        verbose=True
+        output="verbose"
     )
     
     writer = Agent(
@@ -52,7 +52,7 @@ def main():
         role="Content Writer", 
         goal="Write clear, engaging, and well-structured content",
         backstory="Professional writer skilled in creating compelling narratives",
-        verbose=True
+        output="verbose"
     )
     
     print("✅ Agents created: Researcher, Writer\n")

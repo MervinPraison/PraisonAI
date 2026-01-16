@@ -94,7 +94,7 @@ def main():
         agents=[research_agent],
         tasks=research_tasks,
         memory=True,
-        memory_config=mongodb_memory_config, output="verbose"
+        memory=mongodb_memory_config, output="verbose"
     )
     
     # Execute the research pipeline

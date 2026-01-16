@@ -124,7 +124,7 @@ def main():
         
         KNOWLEDGE:
         {SAMPLE_KNOWLEDGE}""",
-        verbose=False
+        output="silent"
     )
     
     # Get test queries

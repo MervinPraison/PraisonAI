@@ -43,7 +43,7 @@ def test_gemini_embedding():
     agents_openai = Agents(
         agents=[agent],
         tasks=[task],
-        verbose=5,
+        output="debug",
         memory=True
     )
     
@@ -72,7 +72,7 @@ def test_gemini_embedding():
     agents_openai_explicit = Agents(
         agents=[agent2],
         tasks=[task2],
-        verbose=5,
+        output="debug",
         memory=True,
         embedder={
             "provider": "openai",
@@ -108,7 +108,7 @@ def test_gemini_embedding():
     agents_gemini = Agents(
         agents=[agent3],
         tasks=[task3],
-        verbose=5,
+        output="debug",
         memory=True,
         embedder={
             "provider": "gemini",

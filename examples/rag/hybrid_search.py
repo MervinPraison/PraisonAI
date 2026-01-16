@@ -156,7 +156,7 @@ def hybrid_rag_example():
         
         TROUBLESHOOTING KNOWLEDGE BASE:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     # Test with different query types
@@ -204,7 +204,7 @@ def compare_retrieval_modes():
         
         KNOWLEDGE BASE:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     print(f"\n📝 Query: {query}")

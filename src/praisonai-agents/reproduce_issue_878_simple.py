@@ -6,12 +6,12 @@ This script directly tests the LLM class to determine where the duplicate callba
 ROOT CAUSE IDENTIFIED:
 In llm.py, there are two separate callback execution paths:
 1. execute_sync_callback() called directly (lines 851-857, 885-891, etc.)
-2. display_interaction() called when verbose=True (line 896, etc.)
+2. display_interaction() called when output="verbose" (line 896, etc.)
 
 Since display_interaction() ALSO executes sync callbacks internally (main.py lines 164-190),
 this results in duplicate callback execution for the same LLM response.
 
-The issue occurs specifically when verbose=True because both callback paths are active.
+The issue occurs specifically when output="verbose" because both callback paths are active.
 """
 
 import os
@@ -74,11 +74,11 @@ def test_llm_streaming():
     register_display_callback('interaction', track_callback, is_async=False)
     
     try:
-        llm = LLM(model="gemini/gemini-2.5-flash-lite-preview-06-17", verbose=False)
+        llm = LLM(model="gemini/gemini-2.5-flash-lite-preview-06-17", output="silent")
         
         response = llm.get_response(
             prompt="Say exactly: Hello World",
-            verbose=True,  # This should trigger the callback
+            output="verbose",  # This should trigger the callback
             stream=True    # Test with streaming
         )
         
@@ -103,11 +103,11 @@ def test_llm_non_streaming():
     register_display_callback('interaction', track_callback, is_async=False)
     
     try:
-        llm = LLM(model="gemini/gemini-2.5-flash-lite-preview-06-17", verbose=False)
+        llm = LLM(model="gemini/gemini-2.5-flash-lite-preview-06-17", output="silent")
         
         response = llm.get_response(
             prompt="Say exactly: Hello World",
-            verbose=True,  # This should trigger the callback
+            output="verbose",  # This should trigger the callback
             stream=False   # Test without streaming
         )
         
@@ -132,11 +132,11 @@ def test_llm_with_self_reflection():
     register_display_callback('interaction', track_callback, is_async=False)
     
     try:
-        llm = LLM(model="gemini/gemini-2.5-flash-lite-preview-06-17", verbose=False, reflection=True)
+        llm = LLM(model="gemini/gemini-2.5-flash-lite-preview-06-17", output="silent", reflection=True)
         
         response = llm.get_response(
             prompt="Say exactly: Hello World",
-            verbose=True,    # This should trigger the callback
+            output="verbose",    # This should trigger the callback
             reflection=True,
             min_reflect=1,
             max_reflect=1
@@ -152,25 +152,25 @@ def test_llm_with_self_reflection():
         return -1
 
 def test_verbose_vs_non_verbose():
-    """Test the key difference: verbose=True vs verbose=False to isolate the duplicate issue."""
+    """Test the key difference: output="verbose" vs output="silent" to isolate the duplicate issue."""
     print("🧪 TEST 4: Verbose vs Non-Verbose (Key Test for Duplicate Issue)")
     print("-" * 60)
     
     global callback_invocations
     
-    # Test with verbose=False (should trigger callback once via execute_sync_callback)
-    print("  🔹 Testing with verbose=False:")
+    # Test with output="silent" (should trigger callback once via execute_sync_callback)
+    print("  🔹 Testing with output="silent":")
     callback_invocations = []
     register_display_callback('interaction', track_callback, is_async=False)
     
     try:
-        llm = LLM(model="gemini/gemini-2.5-flash-lite-preview-06-17", verbose=False)
+        llm = LLM(model="gemini/gemini-2.5-flash-lite-preview-06-17", output="silent")
         response = llm.get_response(
             prompt="Say exactly: Test Non-Verbose",
-            verbose=False  # This should only trigger execute_sync_callback
+            output="silent"  # This should only trigger execute_sync_callback
         )
         print(f"    Response: {response}")
-        print(f"    Callbacks with verbose=False: {len(callback_invocations)}")
+        print(f"    Callbacks with output="silent": {len(callback_invocations)}")
         non_verbose_count = len(callback_invocations)
     except Exception as e:
         print(f"    ❌ Error: {e}")
@@ -178,19 +178,19 @@ def test_verbose_vs_non_verbose():
     
     print()
     
-    # Test with verbose=True (should trigger callback twice: execute_sync_callback + display_interaction)
-    print("  🔹 Testing with verbose=True:")
+    # Test with output="verbose" (should trigger callback twice: execute_sync_callback + display_interaction)
+    print("  🔹 Testing with output="verbose":")
     callback_invocations = []
     register_display_callback('interaction', track_callback, is_async=False)
     
     try:
-        llm = LLM(model="gemini/gemini-2.5-flash-lite-preview-06-17", verbose=False)
+        llm = LLM(model="gemini/gemini-2.5-flash-lite-preview-06-17", output="silent")
         response = llm.get_response(
             prompt="Say exactly: Test Verbose",
-            verbose=True  # This should trigger BOTH execute_sync_callback AND display_interaction
+            output="verbose"  # This should trigger BOTH execute_sync_callback AND display_interaction
         )
         print(f"    Response: {response}")
-        print(f"    Callbacks with verbose=True: {len(callback_invocations)}")
+        print(f"    Callbacks with output="verbose": {len(callback_invocations)}")
         verbose_count = len(callback_invocations)
         
         # Show the call stack differences
@@ -204,12 +204,12 @@ def test_verbose_vs_non_verbose():
         verbose_count = -1
     
     print(f"\n  📊 RESULT:")
-    print(f"    verbose=False: {non_verbose_count} callback(s)")
-    print(f"    verbose=True:  {verbose_count} callback(s)")
+    print(f"    output="silent": {non_verbose_count} callback(s)")
+    print(f"    output="verbose":  {verbose_count} callback(s)")
     
     if verbose_count > non_verbose_count and verbose_count > 1:
         print(f"    🚨 DUPLICATE ISSUE CONFIRMED!")
-        print(f"       verbose=True triggers {verbose_count - non_verbose_count} extra callback(s)")
+        print(f"       output="verbose" triggers {verbose_count - non_verbose_count} extra callback(s)")
     
     return verbose_count
 
@@ -225,13 +225,13 @@ def test_multiple_calls():
     register_display_callback('interaction', track_callback, is_async=False)
     
     try:
-        llm = LLM(model="gemini/gemini-2.5-flash-lite-preview-06-17", verbose=False)
+        llm = LLM(model="gemini/gemini-2.5-flash-lite-preview-06-17", output="silent")
         
         for i in range(3):
             print(f"  Call {i+1}:")
             response = llm.get_response(
                 prompt=f"Say exactly: Call {i+1}",
-                verbose=True
+                output="verbose"
             )
             print(f"    Response: {response}")
         
@@ -319,10 +319,10 @@ if __name__ == "__main__":
             if count > expected * 1.5:  # Allow some tolerance
                 issues_detected.append(f"{test_name}: {count} > expected {expected}")
         elif test_name == 'verbose_vs_nonverbose':
-            # This is the key test - verbose=True should show the duplicate issue
-            print(f"{test_name}: {count} invocations (this test shows verbose=True duplicates)")
+            # This is the key test - output="verbose" should show the duplicate issue
+            print(f"{test_name}: {count} invocations (this test shows output="verbose" duplicates)")
             if count > 1:
-                issues_detected.append(f"{test_name}: verbose=True triggered {count} callbacks (duplicate issue)")
+                issues_detected.append(f"{test_name}: output="verbose" triggered {count} callbacks (duplicate issue)")
         else:
             expected = 1
             print(f"{test_name}: {count} invocations (expected {expected})")

@@ -4,8 +4,7 @@ agent = Agent(
     instructions="You are a helpful assistant",
     llm="gemini/gemini-2.0-flash",
     reflection=False,
-    verbose=False,
-    stream=True
+    output="stream"
 )
 
 # Use return_generator=True to get the raw generator for custom streaming handling

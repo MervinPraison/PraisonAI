@@ -9,7 +9,7 @@ from praisonai.cli.features import SandboxExecutorHandler
 from praisonai.cli.features.sandbox_executor import SandboxMode
 
 # Initialize with basic sandbox
-handler = SandboxExecutorHandler(verbose=True)
+handler = SandboxExecutorHandler(output="verbose")
 sandbox = handler.initialize(mode="basic")
 
 print(f"Sandbox mode: {handler.get_mode()}")

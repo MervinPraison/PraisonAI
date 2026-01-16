@@ -176,9 +176,9 @@ def test_llm_console_lazy_loading():
     print("\n6. Testing LLM console lazy loading...")
     
     # LLM without verbose (console not needed)
-    llm1 = LLM(model="gemini/gemini-2.0-flash-exp", verbose=False)
+    llm1 = LLM(model="gemini/gemini-2.0-flash-exp", output="silent")
     console_created_before = hasattr(llm1, '_console') and llm1._console is not None
-    print(f"   Console created before access (verbose=False): {console_created_before}")
+    print(f"   Console created before access (output="silent"): {console_created_before}")
     
     # Access console
     _ = llm1.console

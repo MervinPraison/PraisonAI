@@ -37,7 +37,7 @@ def main():
         collections, and analyze data patterns. You excel at using MongoDB tools 
         for data management and retrieval.""",
         tools=[mongodb_tools],
-        verbose=True,
+        output="verbose",
         llm="gpt-4o-mini"
     )
     
@@ -50,7 +50,7 @@ def main():
         from MongoDB databases. You can query data, perform aggregations, and 
         identify patterns and trends in the stored information.""",
         tools=[mongodb_tools],
-        verbose=True,
+        output="verbose",
         llm="gpt-4o-mini"
     )
     
@@ -116,7 +116,7 @@ def main():
     mongodb_system = Agents(
         agents=[db_agent, analysis_agent],
         tasks=mongodb_tasks,
-        verbose=True
+        output="verbose"
     )
     
     # Execute the MongoDB operations pipeline

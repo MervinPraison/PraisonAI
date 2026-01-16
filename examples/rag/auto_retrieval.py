@@ -58,7 +58,7 @@ def auto_rag_basic():
         
         KNOWLEDGE BASE:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     # Wrap with AutoRagAgent for intelligent retrieval
@@ -105,7 +105,7 @@ def auto_rag_with_policies():
         
         KNOWLEDGE BASE:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     print("\n" + "=" * 60)
@@ -153,7 +153,7 @@ def auto_rag_config_options():
         
         KNOWLEDGE BASE:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     print("\n" + "=" * 60)

@@ -139,7 +139,7 @@ def main():
         name="AI Research Assistant",
         instructions="You are an AI research assistant. Use your knowledge base to answer questions about artificial intelligence topics.",
         knowledge=sample_documents,  # Will use default knowledge config
-        knowledge_config=rerank_config,  # Use reranking config
+        knowledge=rerank_config,  # Use reranking config
         llm="gpt-4o-mini"
     )
     

@@ -43,7 +43,7 @@ def test_callback_enhancement():
         goal="Help with testing callbacks",
         backstory="I am a helpful assistant for testing purposes",
         llm="openai/gpt-5-nano",
-        verbose=True  
+        output="verbose"  
     )
 
     # Create a task with detailed information
@@ -59,7 +59,7 @@ def test_callback_enhancement():
         agents = Agents(
             agents=[agent],
             tasks=[task],
-            verbose=True
+            output="verbose"
         )
         result = agents.start()
         print(f"Test completed successfully! Result: {result}")

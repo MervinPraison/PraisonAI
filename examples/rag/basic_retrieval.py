@@ -79,7 +79,7 @@ def rag_with_query_context():
     agent = Agent(
         name="Research Assistant",
         instructions="You answer questions based on the context provided in each query.",
-        verbose=False
+        output="silent"
     )
     
     # Simulate retrieved context (in real RAG, this comes from vector search)

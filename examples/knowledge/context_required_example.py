@@ -68,7 +68,7 @@ Answer questions based ONLY on the provided knowledge context.
 If the answer is not in the context, say 'I don't have that information.'
 Be precise and quote exact values when asked about codes or numbers.""",
             knowledge=[temp_dir],
-            user_id="demo_user",
+            memory={"user_id": "demo_user"},
             output="verbose",
         )
         

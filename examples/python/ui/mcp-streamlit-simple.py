@@ -50,5 +50,5 @@ with st.expander("🔧 Troubleshooting"):
     **If you still have issues:**
     - Make sure you have Node.js installed for the MCP server
     - Set your OpenAI API key: `export OPENAI_API_KEY="your-key"`
-    - Try the debug mode by setting `verbose=True`
+    - Try the debug mode by setting `output="verbose"`
     """)

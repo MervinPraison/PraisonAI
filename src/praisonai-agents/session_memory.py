@@ -10,7 +10,7 @@ agent = session.Agent(
     name="Assistant",
     instructions="You are a helpful assistant with memory.",
     llm="gemini/gemini-2.5-flash-lite-preview-06-17",
-    verbose=False,
+    output="silent",
     memory=True
 )
 
@@ -33,7 +33,7 @@ anotherAgent = anotherSession.Agent(
     name="Assistant",
     instructions="You are a helpful assistant with memory.",
     llm="gemini/gemini-2.5-flash-lite-preview-06-17",
-    verbose=False,
+    output="silent",
     memory=True
 )
 
