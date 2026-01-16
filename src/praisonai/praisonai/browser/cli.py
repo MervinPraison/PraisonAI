@@ -8,6 +8,7 @@ Commands:
 
 import typer
 from typing import Optional
+from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
@@ -1322,6 +1323,402 @@ def reload_extension(
 
 
 # ============================================================
+# CHROME MANAGEMENT COMMANDS - Start Chrome, load extension
+# ============================================================
+
+chrome_app = typer.Typer(help="Chrome browser management")
+app.add_typer(chrome_app, name="chrome")
+
+
+@chrome_app.command("start")
+def chrome_start(
+    port: int = typer.Option(9222, "--port", "-p", help="Remote debugging port"),
+    headless: bool = typer.Option(False, "--headless", help="Run in headless mode"),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Chrome profile directory"),
+    new_window: bool = typer.Option(True, "--new/--existing", help="Open new window or use existing"),
+):
+    """Start Chrome with remote debugging enabled.
+    
+    Launches Chrome with --remote-debugging-port for CDP automation.
+    
+    Example:
+        praisonai browser chrome start              # Default port 9222
+        praisonai browser chrome start -p 9333      # Custom port
+        praisonai browser chrome start --headless   # Headless mode
+    """
+    import subprocess
+    import platform
+    import shutil
+    
+    system = platform.system()
+    
+    # Find Chrome executable
+    if system == "Darwin":  # macOS
+        chrome_paths = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ]
+    elif system == "Linux":
+        chrome_paths = [
+            shutil.which("google-chrome"),
+            shutil.which("google-chrome-stable"),
+            shutil.which("chromium"),
+            shutil.which("chromium-browser"),
+            "/usr/bin/google-chrome",
+            "/usr/bin/chromium-browser",
+        ]
+    elif system == "Windows":
+        chrome_paths = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        ]
+    else:
+        console.print(f"[red]Unsupported platform:[/red] {system}")
+        raise typer.Exit(1)
+    
+    chrome_path = None
+    for path in chrome_paths:
+        if path and Path(path).exists():
+            chrome_path = path
+            break
+    
+    if not chrome_path:
+        console.print("[red]Chrome not found.[/red] Install Google Chrome first.")
+        raise typer.Exit(1)
+    
+    # Build command
+    cmd = [chrome_path]
+    cmd.append(f"--remote-debugging-port={port}")
+    cmd.append("--no-first-run")
+    cmd.append("--no-default-browser-check")
+    
+    if headless:
+        cmd.append("--headless=new")
+    
+    if profile:
+        cmd.append(f"--user-data-dir={profile}")
+    
+    if new_window:
+        cmd.append("--new-window")
+    
+    # Check if Chrome is already listening on this port
+    import asyncio
+    
+    async def check_port():
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"http://localhost:{port}/json/version", timeout=aiohttp.ClientTimeout(total=2)) as resp:
+                    if resp.status == 200:
+                        return True
+        except Exception:
+            pass
+        return False
+    
+    if asyncio.run(check_port()):
+        console.print(f"[green]Chrome is already running with debug port {port}[/green]")
+        return
+    
+    console.print(f"[cyan]Starting Chrome on port {port}...[/cyan]")
+    console.print(f"[dim]{' '.join(cmd[:3])}...[/dim]")
+    
+    try:
+        # Start Chrome in background
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        
+        # Wait and verify CDP is working
+        import time
+        max_attempts = 5
+        for attempt in range(max_attempts):
+            time.sleep(1)
+            if asyncio.run(check_port()):
+                console.print(f"[green]✓ Chrome started successfully[/green]")
+                console.print(f"  Debug URL: http://localhost:{port}")
+                console.print(f"  PID: {process.pid}")
+                console.print("")
+                console.print("[dim]Next steps:[/dim]")
+                console.print(f"  praisonai browser chrome status -p {port}")
+                console.print(f"  praisonai browser extension load -p {port}")
+                return
+        
+        # Chrome didn't respond - check if it's still running but on wrong port
+        if process.poll() is not None:
+            stderr = process.stderr.read().decode() if process.stderr else ""
+            console.print("[yellow]Chrome exited immediately.[/yellow]")
+            console.print("This usually means Chrome is already running.")
+            if "already running" in stderr.lower() or stderr:
+                console.print(f"[dim]{stderr[:200]}[/dim]")
+            console.print("")
+            console.print("[bold]To fix:[/bold]")
+            console.print("  1. Close all Chrome windows completely")
+            console.print("  2. Or restart Chrome with debug port manually:")
+            console.print(f"     /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port={port} &")
+        else:
+            console.print("[yellow]Chrome started but CDP not responding.[/yellow]")
+            console.print("The debug port may be blocked or Chrome crashed.")
+            
+        raise typer.Exit(1)
+            
+    except Exception as e:
+        console.print(f"[red]Error starting Chrome:[/red] {e}")
+        raise typer.Exit(1)
+
+
+@chrome_app.command("status")
+def chrome_status(
+    port: int = typer.Option(9222, "--port", "-p", help="Chrome debug port"),
+):
+    """Check if Chrome is running with debug port.
+    
+    Example:
+        praisonai browser chrome status
+        praisonai browser chrome status -p 9333
+    """
+    import asyncio
+    
+    async def check():
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"http://localhost:{port}/json/version", timeout=aiohttp.ClientTimeout(total=3)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        console.print(f"[green]✓ Chrome is running on port {port}[/green]")
+                        console.print(f"  Browser: {data.get('Browser', 'Unknown')}")
+                        console.print(f"  V8: {data.get('V8-Version', 'Unknown')[:20]}")
+                        return True
+        except Exception:
+            pass
+        
+        console.print(f"[red]✗ Chrome not responding on port {port}[/red]")
+        console.print(f"  Start with: praisonai browser chrome start -p {port}")
+        return False
+    
+    asyncio.run(check())
+
+
+@chrome_app.command("stop")
+def chrome_stop(
+    port: int = typer.Option(9222, "--port", "-p", help="Chrome debug port"),
+):
+    """Stop Chrome browser via CDP.
+    
+    Example:
+        praisonai browser chrome stop
+    """
+    import asyncio
+    
+    async def stop():
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"http://localhost:{port}/json/close", timeout=aiohttp.ClientTimeout(total=3)) as resp:
+                    if resp.status == 200:
+                        console.print(f"[green]Chrome stopped[/green]")
+                        return
+        except Exception:
+            pass
+        
+        console.print(f"[yellow]Could not stop Chrome on port {port}[/yellow]")
+        console.print("Chrome may not be running or may need manual termination.")
+    
+    asyncio.run(stop())
+
+
+# Extension management commands
+extension_app = typer.Typer(help="Chrome extension management")
+app.add_typer(extension_app, name="extension")
+
+
+@extension_app.command("load")
+def extension_load(
+    path: Optional[str] = typer.Argument(None, help="Extension directory path"),
+    port: int = typer.Option(9222, "--port", "-p", help="Chrome debug port"),
+    validate: bool = typer.Option(True, "--validate/--no-validate", help="Validate manifest before loading"),
+):
+    """Load PraisonAI extension into Chrome.
+    
+    Validates the manifest and provides instructions for loading.
+    Chrome doesn't support programmatic extension loading, so this
+    command validates and opens chrome://extensions for manual loading.
+    
+    Example:
+        praisonai browser extension load              # Default path
+        praisonai browser extension load ~/my-ext     # Custom path
+    """
+    from pathlib import Path
+    import json
+    import webbrowser
+    import asyncio
+    
+    # Default extension path
+    if path is None:
+        path = str(Path.home() / "praisonai-chrome-extension" / "dist")
+    
+    ext_path = Path(path)
+    
+    # Check if path exists
+    if not ext_path.exists():
+        console.print(f"[red]Extension path not found:[/red] {ext_path}")
+        console.print("")
+        console.print("Expected location: ~/praisonai-chrome-extension/dist")
+        console.print("Build the extension first:")
+        console.print("  cd ~/praisonai-chrome-extension && npm run build")
+        raise typer.Exit(1)
+    
+    # Check for manifest.json
+    manifest_path = ext_path / "manifest.json"
+    if not manifest_path.exists():
+        console.print(f"[red]manifest.json not found in:[/red] {ext_path}")
+        raise typer.Exit(1)
+    
+    # Validate manifest if requested
+    if validate:
+        errors = _validate_manifest(manifest_path)
+        if errors:
+            console.print("[red]Manifest validation errors:[/red]")
+            for error in errors:
+                console.print(f"  • {error}")
+            raise typer.Exit(1)
+        console.print("[green]✓ Manifest is valid[/green]")
+    
+    # Check Chrome status
+    async def check_chrome():
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"http://localhost:{port}/json/version", timeout=aiohttp.ClientTimeout(total=3)) as resp:
+                    return resp.status == 200
+        except Exception:
+            return False
+    
+    chrome_running = asyncio.run(check_chrome())
+    
+    if not chrome_running:
+        console.print(f"[yellow]Chrome not running on port {port}[/yellow]")
+        console.print(f"Start Chrome first: praisonai browser chrome start -p {port}")
+        raise typer.Exit(1)
+    
+    # Open chrome://extensions
+    console.print("")
+    console.print(f"[cyan]Extension ready to load:[/cyan] {ext_path}")
+    console.print("")
+    console.print("[bold]To load the extension:[/bold]")
+    console.print("  1. Go to chrome://extensions")
+    console.print("  2. Enable 'Developer mode' (top right)")
+    console.print("  3. Click 'Load unpacked'")
+    console.print(f"  4. Select: {ext_path}")
+    console.print("")
+    
+    open_browser = typer.confirm("Open chrome://extensions now?", default=True)
+    if open_browser:
+        webbrowser.open("chrome://extensions")
+        console.print("[green]Opened chrome://extensions[/green]")
+
+
+@extension_app.command("validate")
+def extension_validate(
+    path: Optional[str] = typer.Argument(None, help="Extension directory path"),
+):
+    """Validate Chrome extension manifest.
+    
+    Checks for common manifest errors before loading.
+    
+    Example:
+        praisonai browser extension validate
+        praisonai browser extension validate ~/my-ext/dist
+    """
+    from pathlib import Path
+    
+    # Default extension path
+    if path is None:
+        path = str(Path.home() / "praisonai-chrome-extension" / "dist")
+    
+    ext_path = Path(path)
+    manifest_path = ext_path / "manifest.json"
+    
+    if not manifest_path.exists():
+        # Try parent directory
+        manifest_path = ext_path / "manifest.json"
+        if not manifest_path.exists():
+            console.print(f"[red]manifest.json not found in:[/red] {ext_path}")
+            raise typer.Exit(1)
+    
+    errors = _validate_manifest(manifest_path)
+    
+    if errors:
+        console.print("[red]Validation failed:[/red]")
+        for error in errors:
+            console.print(f"  ✗ {error}")
+        raise typer.Exit(1)
+    else:
+        console.print("[green]✓ Manifest is valid[/green]")
+        console.print(f"  Path: {manifest_path}")
+
+
+def _validate_manifest(manifest_path: Path) -> list:
+    """Validate Chrome extension manifest.json and return list of errors."""
+    import json
+    
+    errors = []
+    
+    try:
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+    except json.JSONDecodeError as e:
+        return [f"Invalid JSON: {e}"]
+    
+    # Required fields
+    required = ["manifest_version", "name", "version"]
+    for field in required:
+        if field not in manifest:
+            errors.append(f"Missing required field: {field}")
+    
+    # Manifest version
+    if manifest.get("manifest_version") not in [2, 3]:
+        errors.append(f"Invalid manifest_version: {manifest.get('manifest_version')}")
+    
+    # Commands validation (the problematic area)
+    commands = manifest.get("commands", {})
+    valid_modifiers = {"Ctrl", "Alt", "Shift", "Command", "MacCtrl"}
+    
+    for cmd_name, cmd_data in commands.items():
+        if "suggested_key" in cmd_data:
+            suggested = cmd_data["suggested_key"]
+            
+            # Check mac key format
+            if "mac" in suggested:
+                mac_key = suggested["mac"]
+                # Chrome MV3 uses Command/Option/etc, not Option alone with certain keys
+                # Option+S specifically can cause issues
+                if "Option+" in mac_key:
+                    key = mac_key.split("+")[-1]
+                    if key.upper() in ["S", "N", "T", "W"]:  # Reserved keys
+                        errors.append(f"commands.{cmd_name}.mac: '{mac_key}' may conflict with Chrome shortcuts. Use Command+Shift+{key} instead.")
+            
+            # Check default key format
+            if "default" in suggested:
+                default_key = suggested["default"]
+                parts = default_key.split("+")
+                if len(parts) < 2:
+                    errors.append(f"commands.{cmd_name}.default: invalid format '{default_key}'")
+    
+    # Check for service_worker in MV3
+    if manifest.get("manifest_version") == 3:
+        background = manifest.get("background", {})
+        if "scripts" in background:
+            errors.append("MV3 requires 'service_worker' in background, not 'scripts'")
+    
+    return errors
+
+
+# ============================================================
 # DOCTOR COMMAND GROUP - Health diagnostics
 # ============================================================
 
@@ -1482,6 +1879,302 @@ def doctor_all(
             doctor_db()
         except typer.Exit:
             pass
+
+
+# ============================================================
+# LAUNCH COMMAND - All-in-one browser automation setup
+# ============================================================
+
+@app.command("launch")
+def launch_browser(
+    goal: Optional[str] = typer.Argument(None, help="Goal to execute (optional)"),
+    url: str = typer.Option("https://www.google.com", "--url", "-u", help="Start URL"),
+    extension_path: Optional[str] = typer.Option(None, "--extension", "-e", help="Extension dist path"),
+    model: str = typer.Option("gpt-4o-mini", "--model", "-m", help="LLM model"),
+    max_steps: int = typer.Option(20, "--max-steps", help="Maximum steps"),
+    port: int = typer.Option(9222, "--port", "-p", help="Chrome debug port"),
+    server_port: int = typer.Option(8765, "--server-port", help="Bridge server port"),
+    headless: bool = typer.Option(False, "--headless", help="Run headless"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging"),
+    debug: bool = typer.Option(False, "--debug", "-d", help="Debug mode"),
+    no_server: bool = typer.Option(False, "--no-server", help="Don't start bridge server"),
+):
+    """Launch Chrome with extension and optionally run a goal.
+    
+    This is an all-in-one command that:
+    1. Finds the PraisonAI Chrome extension
+    2. Starts the bridge server (unless --no-server)
+    3. Launches Chrome with the extension loaded via --load-extension
+    4. Optionally runs a browser automation goal
+    
+    The extension is loaded using Chrome's --load-extension flag, which
+    bypasses the need to manually enable developer mode.
+    
+    Examples:
+        praisonai browser launch                           # Just launch Chrome with extension
+        praisonai browser launch "Search for AI"           # Launch and run goal
+        praisonai browser launch "Search" --url https://google.com
+        praisonai browser launch --headless --no-server    # Headless mode, no server
+    """
+    import subprocess
+    import platform
+    import shutil
+    import tempfile
+    import time
+    import asyncio
+    import os
+    from pathlib import Path
+    
+    # Find Chrome executable
+    system = platform.system()
+    chrome_path = None
+    
+    if system == "Darwin":  # macOS
+        candidates = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+        ]
+    elif system == "Windows":
+        candidates = [
+            os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+        ]
+    else:  # Linux
+        candidates = [
+            shutil.which("google-chrome"),
+            shutil.which("google-chrome-stable"),
+            shutil.which("chromium"),
+            shutil.which("chromium-browser"),
+            "/usr/bin/google-chrome",
+            "/usr/bin/chromium-browser",
+        ]
+    
+    for candidate in candidates:
+        if candidate and Path(candidate).exists():
+            chrome_path = candidate
+            break
+    
+    if not chrome_path:
+        console.print("[red]Chrome not found.[/red] Install Google Chrome first.")
+        raise typer.Exit(1)
+    
+    # Find extension path
+    if extension_path is None:
+        ext_candidates = [
+            Path.home() / "praisonai-chrome-extension" / "dist",
+            Path.cwd() / "praisonai-chrome-extension" / "dist",
+            Path(__file__).parent.parent.parent.parent.parent / "praisonai-chrome-extension" / "dist",
+        ]
+        for candidate in ext_candidates:
+            if candidate.exists() and (candidate / "manifest.json").exists():
+                extension_path = str(candidate)
+                break
+    
+    if not extension_path or not Path(extension_path).exists():
+        console.print("[red]Extension not found.[/red]")
+        console.print("Expected location: ~/praisonai-chrome-extension/dist")
+        console.print("Build the extension first:")
+        console.print("  cd ~/praisonai-chrome-extension && npm run build")
+        raise typer.Exit(1)
+    
+    console.print(f"[bold blue]🚀 PraisonAI Browser Launch[/bold blue]")
+    console.print(f"   Chrome: {chrome_path[:50]}...")
+    console.print(f"   Extension: {extension_path}")
+    if goal:
+        console.print(f"   Goal: {goal}")
+    console.print()
+    
+    # Start bridge server if needed
+    server_process = None
+    if not no_server:
+        # Check if server is already running
+        async def check_server():
+            try:
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(f"http://localhost:{server_port}/health", timeout=aiohttp.ClientTimeout(total=2)) as resp:
+                        return resp.status == 200
+            except Exception:
+                return False
+        
+        server_running = asyncio.run(check_server())
+        
+        if not server_running:
+            console.print(f"[cyan]Starting bridge server on port {server_port}...[/cyan]")
+            # Start server in background
+            import sys
+            server_process = subprocess.Popen(
+                [sys.executable, "-m", "praisonai.browser.server", "--port", str(server_port)],
+                stdout=subprocess.PIPE if not verbose else None,
+                stderr=subprocess.PIPE if not verbose else None,
+                start_new_session=True,
+            )
+            time.sleep(2)  # Give server time to start
+            
+            # Verify server started
+            if asyncio.run(check_server()):
+                console.print(f"[green]✓ Bridge server started[/green]")
+            else:
+                console.print("[yellow]⚠️ Bridge server may not have started properly[/yellow]")
+        else:
+            console.print(f"[green]✓ Bridge server already running on port {server_port}[/green]")
+    
+    # Create temp profile for Chrome
+    temp_profile = tempfile.mkdtemp(prefix="praisonai_chrome_")
+    
+    # Build Chrome command with --load-extension
+    chrome_args = [
+        chrome_path,
+        f"--load-extension={extension_path}",
+        f"--user-data-dir={temp_profile}",
+        f"--remote-debugging-port={port}",
+        "--enable-extensions",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-default-apps",
+        "--disable-popup-blocking",
+        "--disable-translate",
+        "--disable-background-timer-throttling",
+        "--disable-renderer-backgrounding",
+        "--disable-device-discovery-notifications",
+        url,
+    ]
+    
+    if headless:
+        chrome_args.insert(1, "--headless=new")
+    
+    console.print(f"[cyan]Launching Chrome with extension...[/cyan]")
+    if debug:
+        console.print(f"[dim]{' '.join(chrome_args[:5])}...[/dim]")
+    
+    chrome_process = subprocess.Popen(
+        chrome_args,
+        stdout=subprocess.PIPE if not verbose else None,
+        stderr=subprocess.PIPE if not verbose else None,
+    )
+    
+    # Wait for Chrome to start
+    time.sleep(3)
+    
+    # Verify Chrome is running with CDP
+    async def check_chrome():
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"http://localhost:{port}/json/version", timeout=aiohttp.ClientTimeout(total=3)) as resp:
+                    return resp.status == 200
+        except Exception:
+            return False
+    
+    if asyncio.run(check_chrome()):
+        console.print(f"[green]✓ Chrome started with debug port {port}[/green]")
+        console.print(f"[green]✓ Extension loaded via --load-extension[/green]")
+    else:
+        console.print("[yellow]⚠️ Chrome may not have started properly[/yellow]")
+    
+    # If goal provided, run it
+    if goal:
+        console.print()
+        console.print(f"[bold]Running goal:[/bold] {goal}")
+        console.print()
+        
+        try:
+            from .cdp_agent import run_cdp_only
+            
+            async def run_goal():
+                result = await run_cdp_only(
+                    goal=goal,
+                    url=url,
+                    model=model,
+                    port=port,
+                    max_steps=max_steps,
+                    verbose=verbose,
+                    debug=debug,
+                )
+                return result
+            
+            result = asyncio.run(run_goal())
+            
+            if result.get("success"):
+                console.print(f"\n[green]✅ Task completed in {result.get('steps', '?')} steps[/green]")
+                if result.get("summary"):
+                    console.print(f"   {result['summary']}")
+                console.print(f"   Final URL: {result.get('final_url', 'N/A')}")
+            else:
+                console.print(f"\n[red]❌ Task failed:[/red] {result.get('error', 'Unknown error')}")
+                
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Interrupted[/yellow]")
+        except Exception as e:
+            console.print(f"[red]Error:[/red] {e}")
+        
+        # Cleanup
+        console.print("\n[dim]Cleaning up...[/dim]")
+        try:
+            chrome_process.terminate()
+            chrome_process.wait(timeout=5)
+        except Exception:
+            try:
+                chrome_process.kill()
+            except Exception:
+                pass
+        
+        if server_process:
+            try:
+                server_process.terminate()
+                server_process.wait(timeout=5)
+            except Exception:
+                pass
+        
+        # Clean temp profile
+        try:
+            shutil.rmtree(temp_profile)
+        except Exception:
+            pass
+        
+        console.print("[green]Done[/green]")
+    else:
+        # No goal - just keep Chrome running
+        console.print()
+        console.print("[bold green]Chrome is ready![/bold green]")
+        console.print()
+        console.print("The extension is loaded. You can now:")
+        console.print("  1. Open the PraisonAI side panel in Chrome")
+        console.print("  2. Run browser commands:")
+        console.print(f"     praisonai browser run \"your goal\" --engine cdp -p {port}")
+        console.print()
+        console.print("[dim]Press Ctrl+C to stop Chrome and cleanup[/dim]")
+        
+        try:
+            # Wait for user to stop
+            chrome_process.wait()
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Stopping...[/yellow]")
+            try:
+                chrome_process.terminate()
+                chrome_process.wait(timeout=5)
+            except Exception:
+                try:
+                    chrome_process.kill()
+                except Exception:
+                    pass
+            
+            if server_process:
+                try:
+                    server_process.terminate()
+                    server_process.wait(timeout=5)
+                except Exception:
+                    pass
+            
+            # Clean temp profile
+            try:
+                shutil.rmtree(temp_profile)
+            except Exception:
+                pass
+            
+            console.print("[green]Cleanup complete[/green]")
 
 
 # Register benchmark commands
