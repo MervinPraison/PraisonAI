@@ -1,155 +1,155 @@
 {
-  "timestamp": "2025-12-31T18:45:38.187539Z",
+  "timestamp": "2026-01-16T05:23:04.919943Z",
   "metadata": {
     "python_version": "3.12.11",
-    "platform": "macOS-15.7.4-arm64-arm-64bit",
-    "praisonai_version": "2.9.2",
-    "timestamp": "2025-12-31T18:45:38.226558Z"
+    "platform": "macOS-26.3-arm64-arm-64bit",
+    "praisonai_version": "3.9.2",
+    "timestamp": "2026-01-16T05:23:04.932474Z"
   },
   "startup": {
-    "cold_ms": 80.9305000002496,
-    "warm_ms": 55.266541996388696
+    "cold_ms": 27.866583000104583,
+    "warm_ms": 27.75670800019725
   },
   "import_analysis": [
     {
       "module": "praisonaiagents",
-      "self_us": 2419,
-      "cumulative_us": 1645390,
-      "self_ms": 2.419,
-      "cumulative_ms": 1645.39
+      "self_us": 403,
+      "cumulative_us": 188329,
+      "self_ms": 0.403,
+      "cumulative_ms": 188.329
     },
     {
       "module": "praisonaiagents.workflows",
-      "self_us": 670,
-      "cumulative_us": 1375919,
-      "self_ms": 0.67,
-      "cumulative_ms": 1375.919
+      "self_us": 106,
+      "cumulative_us": 112180,
+      "self_ms": 0.106,
+      "cumulative_ms": 112.18
     },
     {
       "module": "praisonaiagents.workflows.yaml_parser",
-      "self_us": 775,
-      "cumulative_us": 1369435,
-      "self_ms": 0.775,
-      "cumulative_ms": 1369.435
+      "self_us": 217,
+      "cumulative_us": 107210,
+      "self_ms": 0.217,
+      "cumulative_ms": 107.21
     },
     {
       "module": "praisonaiagents.agent.agent",
-      "self_us": 19,
-      "cumulative_us": 1349174,
-      "self_ms": 0.019,
-      "cumulative_ms": 1349.174
+      "self_us": 15,
+      "cumulative_us": 98811,
+      "self_ms": 0.015,
+      "cumulative_ms": 98.811
     },
     {
       "module": "praisonaiagents.agent",
-      "self_us": 537,
-      "cumulative_us": 1349155,
-      "self_ms": 0.537,
-      "cumulative_ms": 1349.155
+      "self_us": 146,
+      "cumulative_us": 98796,
+      "self_ms": 0.146,
+      "cumulative_ms": 98.796
     },
     {
       "module": "praisonaiagents.agent.agent",
-      "self_us": 1453,
-      "cumulative_us": 1285299,
-      "self_ms": 1.453,
-      "cumulative_ms": 1285.299
-    },
-    {
-      "module": "praisonaiagents.llm.openai_client",
-      "self_us": 7887,
-      "cumulative_us": 1123578,
-      "self_ms": 7.887,
-      "cumulative_ms": 1123.578
-    },
-    {
-      "module": "openai",
-      "self_us": 1083,
-      "cumulative_us": 1115692,
-      "self_ms": 1.083,
-      "cumulative_ms": 1115.692
-    },
-    {
-      "module": "openai.types",
-      "self_us": 2606,
-      "cumulative_us": 957990,
-      "self_ms": 2.606,
-      "cumulative_ms": 957.99
-    },
-    {
-      "module": "openai.types.batch",
-      "self_us": 1787,
-      "cumulative_us": 485667,
-      "self_ms": 1.787,
-      "cumulative_ms": 485.667
-    },
-    {
-      "module": "openai._models",
-      "self_us": 13423,
-      "cumulative_us": 450798,
-      "self_ms": 13.423,
-      "cumulative_ms": 450.798
-    },
-    {
-      "module": "openai.types.eval_create_params",
-      "self_us": 644,
-      "cumulative_us": 393275,
-      "self_ms": 0.644,
-      "cumulative_ms": 393.275
-    },
-    {
-      "module": "openai.types.graders.grader_inputs_param",
-      "self_us": 17,
-      "cumulative_us": 359515,
-      "self_ms": 0.017,
-      "cumulative_ms": 359.515
-    },
-    {
-      "module": "openai.types.graders",
-      "self_us": 392,
-      "cumulative_us": 359498,
-      "self_ms": 0.392,
-      "cumulative_ms": 359.498
-    },
-    {
-      "module": "openai.types.graders.multi_grader",
-      "self_us": 3847,
-      "cumulative_us": 351251,
-      "self_ms": 3.847,
-      "cumulative_ms": 351.251
-    },
-    {
-      "module": "openai.types.graders.label_model_grader",
-      "self_us": 5450,
-      "cumulative_us": 337291,
-      "self_ms": 5.45,
-      "cumulative_ms": 337.291
-    },
-    {
-      "module": "openai.types.graders.grader_inputs",
-      "self_us": 545,
-      "cumulative_us": 331841,
-      "self_ms": 0.545,
-      "cumulative_ms": 331.841
-    },
-    {
-      "module": "openai.types.responses.response_input_text",
-      "self_us": 21,
-      "cumulative_us": 331297,
-      "self_ms": 0.021,
-      "cumulative_ms": 331.297
-    },
-    {
-      "module": "openai.types.responses",
-      "self_us": 1301,
-      "cumulative_us": 331277,
-      "self_ms": 1.301,
-      "cumulative_ms": 331.277
+      "self_us": 1027,
+      "cumulative_us": 86223,
+      "self_ms": 1.027,
+      "cumulative_ms": 86.223
     },
     {
       "module": "rich.logging",
-      "self_us": 1066,
-      "cumulative_us": 238256,
-      "self_ms": 1.066,
-      "cumulative_ms": 238.256
+      "self_us": 282,
+      "cumulative_us": 53009,
+      "self_ms": 0.282,
+      "cumulative_ms": 53.009
+    },
+    {
+      "module": "praisonaiagents.main",
+      "self_us": 18784,
+      "cumulative_us": 45759,
+      "self_ms": 18.784,
+      "cumulative_ms": 45.759
+    },
+    {
+      "module": "praisonaiagents.llm.openai_client",
+      "self_us": 2470,
+      "cumulative_us": 28251,
+      "self_ms": 2.47,
+      "cumulative_ms": 28.251
+    },
+    {
+      "module": "rich.traceback",
+      "self_us": 1478,
+      "cumulative_us": 18788,
+      "self_ms": 1.478,
+      "cumulative_ms": 18.788
+    },
+    {
+      "module": "rich.console",
+      "self_us": 1737,
+      "cumulative_us": 18587,
+      "self_ms": 1.737,
+      "cumulative_ms": 18.587
+    },
+    {
+      "module": "pygments.lexers",
+      "self_us": 242,
+      "cumulative_us": 15427,
+      "self_ms": 0.242,
+      "cumulative_ms": 15.427
+    },
+    {
+      "module": "rich.markdown",
+      "self_us": 409,
+      "cumulative_us": 13987,
+      "self_ms": 0.409,
+      "cumulative_ms": 13.987
+    },
+    {
+      "module": "pygments.plugin",
+      "self_us": 85,
+      "cumulative_us": 13503,
+      "self_ms": 0.085,
+      "cumulative_ms": 13.503
+    },
+    {
+      "module": "importlib.metadata",
+      "self_us": 637,
+      "cumulative_us": 13419,
+      "self_ms": 0.637,
+      "cumulative_ms": 13.419
+    },
+    {
+      "module": "rich._log_render",
+      "self_us": 145,
+      "cumulative_us": 13380,
+      "self_ms": 0.145,
+      "cumulative_ms": 13.38
+    },
+    {
+      "module": "markdown_it",
+      "self_us": 172,
+      "cumulative_us": 13339,
+      "self_ms": 0.172,
+      "cumulative_ms": 13.339
+    },
+    {
+      "module": "rich.text",
+      "self_us": 582,
+      "cumulative_us": 13236,
+      "self_ms": 0.582,
+      "cumulative_ms": 13.236
+    },
+    {
+      "module": "markdown_it.main",
+      "self_us": 298,
+      "cumulative_us": 13168,
+      "self_ms": 0.298,
+      "cumulative_ms": 13.168
+    },
+    {
+      "module": "pydantic",
+      "self_us": 223,
+      "cumulative_us": 11119,
+      "self_ms": 0.223,
+      "cumulative_ms": 11.119
     }
   ],
   "scenarios": [
@@ -162,28 +162,22 @@
         "iterations": 2
       },
       "import_time_stats": {
-        "mean": 0.008833496394800022,
-        "min": 0.005916997906751931,
-        "max": 0.011749994882848114,
-        "stdev": 0.0041245517164382375,
-        "median": 0.008833496394800022
+        "mean": 0,
+        "min": 0,
+        "max": 0,
+        "stdev": 0,
+        "median": 0
       },
       "total_time_stats": {
-        "mean": 1727.4090415012324,
-        "min": 1367.2264170018025,
-        "max": 2087.5916660006624,
-        "stdev": 509.3751524982296,
-        "median": 1727.4090415012324
+        "mean": 0,
+        "min": 0,
+        "max": 0,
+        "stdev": 0,
+        "median": 0
       },
       "first_token_stats": null,
-      "raw_import_times_ms": [
-        0.011749994882848114,
-        0.005916997906751931
-      ],
-      "raw_total_times_ms": [
-        1367.2264170018025,
-        2087.5916660006624
-      ]
+      "raw_import_times_ms": [],
+      "raw_total_times_ms": []
     },
     {
       "name": "simple_stream",
@@ -194,34 +188,22 @@
         "iterations": 2
       },
       "import_time_stats": {
-        "mean": 0.008792001608526334,
-        "min": 0.006375004886649549,
-        "max": 0.01120899833040312,
-        "stdev": 0.0034181495442894613,
-        "median": 0.008792001608526334
+        "mean": 0,
+        "min": 0,
+        "max": 0,
+        "stdev": 0,
+        "median": 0
       },
       "total_time_stats": {
-        "mean": 2321.0982290001994,
-        "min": 1697.1089580038097,
-        "max": 2945.087499996589,
-        "stdev": 882.4540898183949,
-        "median": 2321.0982290001994
+        "mean": 0,
+        "min": 0,
+        "max": 0,
+        "stdev": 0,
+        "median": 0
       },
-      "first_token_stats": {
-        "mean": 2312.8511880022415,
-        "min": 1681.2440420035273,
-        "max": 2944.458334000956,
-        "stdev": 893.2273919631452,
-        "median": 2312.8511880022415
-      },
-      "raw_import_times_ms": [
-        0.01120899833040312,
-        0.006375004886649549
-      ],
-      "raw_total_times_ms": [
-        2945.087499996589,
-        1697.1089580038097
-      ]
+      "first_token_stats": null,
+      "raw_import_times_ms": [],
+      "raw_total_times_ms": []
     }
   ]
 }
