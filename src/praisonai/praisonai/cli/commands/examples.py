@@ -492,6 +492,11 @@ def examples_run_all(
         "--quiet", "-q",
         help="Minimal output",
     ),
+    ci: bool = typer.Option(
+        False,
+        "--ci",
+        help="CI-friendly output (no colors, proper exit codes)",
+    ),
 ):
     """
     Run all examples group-by-group.
@@ -505,7 +510,7 @@ def examples_run_all(
         praisonai examples run-all --workers 8 --timeout 120
     """
     import json
-    from concurrent.futures import ProcessPoolExecutor, as_completed
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     from praisonai.suite_runner import ExamplesSource, SuiteExecutor, RunResult
     
     examples_path = path or _get_default_examples_path()
@@ -519,9 +524,16 @@ def examples_run_all(
     source = ExamplesSource(root=examples_path)
     all_groups = sorted(source.get_groups())
     
-    typer.echo(f"Found {len(all_groups)} groups to process")
-    typer.echo(f"Mode: {'parallel' if parallel else 'sequential'}")
-    typer.echo("=" * 60)
+    if ci:
+        print(f"Found {len(all_groups)} groups to process")
+        print(f"Mode: {'parallel' if parallel else 'sequential'}")
+        print(f"Workers: {max_workers}")
+        print(f"Timeout: {timeout}s")
+        print("=" * 60)
+    else:
+        typer.echo(f"Found {len(all_groups)} groups to process")
+        typer.echo(f"Mode: {'parallel' if parallel else 'sequential'}")
+        typer.echo("=" * 60)
     
     # Track overall results
     overall_results = {
@@ -566,8 +578,8 @@ def examples_run_all(
         }
     
     if parallel and len(all_groups) > 1:
-        # Parallel execution
-        with ProcessPoolExecutor(max_workers=min(max_workers, len(all_groups))) as pool:
+        # Parallel execution using ThreadPoolExecutor (ProcessPoolExecutor cannot pickle nested functions)
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(all_groups))) as pool:
             futures = {pool.submit(run_group, g): g for g in all_groups}
             
             for future in as_completed(futures):
@@ -582,13 +594,23 @@ def examples_run_all(
                             overall_results[key] += summary[key]
                     
                     if not quiet:
-                        typer.echo(
-                            f"✅ {group_name}: "
-                            f"✅{summary['passed']} ❌{summary['failed']} "
-                            f"⏭️{summary['skipped']} ⏱️{summary['timeout']} ⚠️{summary.get('xfail', 0)}"
-                        )
+                        if ci:
+                            print(
+                                f"PASS {group_name}: "
+                                f"PASS:{summary['passed']} FAIL:{summary['failed']} "
+                                f"SKIP:{summary['skipped']} TIMEOUT:{summary['timeout']} XFAIL:{summary.get('xfail', 0)}"
+                            )
+                        else:
+                            typer.echo(
+                                f"✅ {group_name}: "
+                                f"✅{summary['passed']} ❌{summary['failed']} "
+                                f"⏭️{summary['skipped']} ⏱️{summary['timeout']} ⚠️{summary.get('xfail', 0)}"
+                            )
                 except Exception as e:
-                    typer.echo(f"❌ {group_name}: Error - {e}")
+                    if ci:
+                        print(f"FAIL {group_name}: Error - {e}")
+                    else:
+                        typer.echo(f"❌ {group_name}: Error - {e}")
     else:
         # Sequential execution with real-time output
         for group_name in all_groups:
@@ -652,25 +674,41 @@ def examples_run_all(
                 )
     
     # Final report
-    typer.echo("\n" + "=" * 80)
-    typer.echo("FINAL REPORT - ALL GROUPS")
-    typer.echo("=" * 80)
-    
-    typer.echo(f"\n{'Group':<20} {'Total':>8} {'Passed':>8} {'Failed':>8} {'Skip':>8} {'Timeout':>8} {'XFail':>8}")
-    typer.echo("-" * 80)
-    
-    for gs in sorted(group_summaries, key=lambda x: x['group']):
-        typer.echo(
-            f"{gs['group']:<20} {gs['total']:>8} {gs['passed']:>8} {gs['failed']:>8} "
-            f"{gs['skipped']:>8} {gs['timeout']:>8} {gs.get('xfail', 0):>8}"
+    if ci:
+        print("")
+        print("=" * 80)
+        print("FINAL REPORT - ALL GROUPS")
+        print("=" * 80)
+        print(f"{'Group':<20} {'Total':>8} {'Passed':>8} {'Failed':>8} {'Skip':>8} {'Timeout':>8} {'XFail':>8}")
+        print("-" * 80)
+        for gs in sorted(group_summaries, key=lambda x: x['group']):
+            print(
+                f"{gs['group']:<20} {gs['total']:>8} {gs['passed']:>8} {gs['failed']:>8} "
+                f"{gs['skipped']:>8} {gs['timeout']:>8} {gs.get('xfail', 0):>8}"
+            )
+        print("-" * 80)
+        print(
+            f"{'TOTAL':<20} {overall_results['total']:>8} {overall_results['passed']:>8} "
+            f"{overall_results['failed']:>8} {overall_results['skipped']:>8} "
+            f"{overall_results['timeout']:>8} {overall_results.get('xfail', 0):>8}"
         )
-    
-    typer.echo("-" * 80)
-    typer.echo(
-        f"{'TOTAL':<20} {overall_results['total']:>8} {overall_results['passed']:>8} "
-        f"{overall_results['failed']:>8} {overall_results['skipped']:>8} "
-        f"{overall_results['timeout']:>8} {overall_results.get('xfail', 0):>8}"
-    )
+    else:
+        typer.echo("\n" + "=" * 80)
+        typer.echo("FINAL REPORT - ALL GROUPS")
+        typer.echo("=" * 80)
+        typer.echo(f"\n{'Group':<20} {'Total':>8} {'Passed':>8} {'Failed':>8} {'Skip':>8} {'Timeout':>8} {'XFail':>8}")
+        typer.echo("-" * 80)
+        for gs in sorted(group_summaries, key=lambda x: x['group']):
+            typer.echo(
+                f"{gs['group']:<20} {gs['total']:>8} {gs['passed']:>8} {gs['failed']:>8} "
+                f"{gs['skipped']:>8} {gs['timeout']:>8} {gs.get('xfail', 0):>8}"
+            )
+        typer.echo("-" * 80)
+        typer.echo(
+            f"{'TOTAL':<20} {overall_results['total']:>8} {overall_results['passed']:>8} "
+            f"{overall_results['failed']:>8} {overall_results['skipped']:>8} "
+            f"{overall_results['timeout']:>8} {overall_results.get('xfail', 0):>8}"
+        )
     
     # Save final summary
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -682,8 +720,12 @@ def examples_run_all(
             'groups': group_summaries,
         }, f, indent=2)
     
-    typer.echo(f"\n📁 Final summary saved to: {summary_path}")
-    typer.echo(f"📁 Individual group reports in: {output_dir}")
+    if ci:
+        print(f"Final summary: {summary_path}")
+        print(f"Group reports: {output_dir}")
+    else:
+        typer.echo(f"\n📁 Final summary saved to: {summary_path}")
+        typer.echo(f"📁 Individual group reports in: {output_dir}")
     
     # Exit code
     if overall_results['failed'] > 0 or overall_results['timeout'] > 0:
