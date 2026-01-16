@@ -19,6 +19,24 @@ from dataclasses import dataclass
 logger = logging.getLogger("praisonai.browser.cdp_agent")
 
 
+# Site-specific fallback selectors for common websites
+GOOGLE_SEARCH_SELECTORS = [
+    'textarea[name="q"]',
+    'input[name="q"]',
+    '#APjFqb',
+    '[aria-label="Search"]',
+    'input[type="text"]',
+    'textarea[title="Search"]',
+]
+
+GOOGLE_SUBMIT_SELECTORS = [
+    'input[name="btnK"]',
+    'button[type="submit"]',
+    '[aria-label="Google Search"]',
+    'input[value="Google Search"]',
+]
+
+
 @dataclass
 class CDPPageState:
     """Page state captured via CDP."""
@@ -52,6 +70,7 @@ class CDPBrowserAgent:
         enable_vision: bool = False,
         record_session: bool = True,
         screenshot_dir: Optional[str] = None,
+        debug: bool = False,
     ):
         """Initialize CDP Browser Agent.
         
@@ -64,6 +83,7 @@ class CDPBrowserAgent:
             enable_vision: Enable vision-based element detection
             record_session: Log all actions to session database
             screenshot_dir: Directory to save screenshots (optional)
+            debug: Enable debug mode with detailed logging
         """
         self.port = port
         self.model = model
@@ -73,12 +93,15 @@ class CDPBrowserAgent:
         self.enable_vision = enable_vision
         self.record_session = record_session
         self.screenshot_dir = screenshot_dir
+        self.debug = debug
         self.ws = None
         self._message_id = 0
         self._pending: Dict[int, asyncio.Future] = {}
         self._session_manager = None
         self._current_session_id: Optional[str] = None
         self._total_retries = 0
+        self._action_history: List[Dict[str, Any]] = []  # Track actions for stuck detection
+        self._last_url: str = ""  # Track URL changes
     
     async def _get_targets(self) -> List[Dict]:
         """Get Chrome debugger targets."""
@@ -102,10 +125,15 @@ class CDPBrowserAgent:
         
         targets = await self._get_targets()
         
-        # Find an existing page or background page
+        # Find an existing page target
+        # Accept even chrome:// pages like newtab since we'll navigate away
         page = None
         for t in targets:
-            if t.get("type") == "page" and not t.get("url", "").startswith("chrome"):
+            if t.get("type") == "page":
+                url = t.get("url", "")
+                # Skip extension pages but allow newtab and other regular pages
+                if url.startswith("chrome-extension://"):
+                    continue
                 page = t
                 break
         
@@ -273,6 +301,67 @@ class CDPBrowserAgent:
             viewport=viewport
         )
     
+    def _is_stuck(self, current_url: str) -> bool:
+        """Detect if agent is stuck in a loop.
+        
+        Returns True if:
+        - Same URL for 3+ steps with failures
+        - Same selector attempted 3+ times
+        - No URL change in 5+ steps
+        """
+        if len(self._action_history) < 3:
+            return False
+        
+        last_3 = self._action_history[-3:]
+        
+        # Check for same selector 3 times
+        selectors = [a.get("selector") for a in last_3 if a.get("selector")]
+        if len(selectors) >= 3 and len(set(selectors)) == 1:
+            if self.debug:
+                logger.info(f"[DEBUG] Stuck: Same selector 3 times: {selectors[0]}")
+            return True
+        
+        # Check for 3 consecutive failures
+        failures = sum(1 for a in last_3 if not a.get("success", True))
+        if failures >= 3:
+            if self.debug:
+                logger.info("[DEBUG] Stuck: 3 consecutive failures")
+            return True
+        
+        # Check for no URL change in 5+ steps
+        if len(self._action_history) >= 5:
+            last_5_urls = [a.get("url") for a in self._action_history[-5:]]
+            if len(set(last_5_urls)) == 1 and last_5_urls[0] == current_url:
+                # Only stuck if we've had failures
+                recent_failures = sum(1 for a in self._action_history[-5:] if not a.get("success", True))
+                if recent_failures >= 2:
+                    if self.debug:
+                        logger.info("[DEBUG] Stuck: Same URL for 5 steps with failures")
+                    return True
+        
+        return False
+    
+    def _get_site_specific_selector(self, action: Dict, url: str) -> Optional[str]:
+        """Get site-specific fallback selector for common websites."""
+        action_type = action.get("action", "").lower()
+        
+        # Google-specific selectors
+        if "google.com" in url:
+            if action_type == "type":
+                # Try Google search box selectors
+                for selector in GOOGLE_SEARCH_SELECTORS:
+                    if self.debug:
+                        logger.info(f"[DEBUG] Trying Google selector: {selector}")
+                    return selector
+            elif action_type == "click" and "search" in action.get("thought", "").lower():
+                # Try Google submit button selectors
+                for selector in GOOGLE_SUBMIT_SELECTORS:
+                    if self.debug:
+                        logger.info(f"[DEBUG] Trying Google submit selector: {selector}")
+                    return selector
+        
+        return None
+    
     async def _execute_action(self, action: Dict) -> Dict[str, Any]:
         """Execute action via CDP."""
         action_type = action.get("action", "").lower()
@@ -419,13 +508,21 @@ class CDPBrowserAgent:
                 agent_model = "gpt-4o"  # Upgrade to vision-capable model
             agent = BrowserAgent(model=agent_model, max_steps=self.max_steps, verbose=self.verbose)
             
+            # Reset action history for this run
+            self._action_history = []
+            
             # Main automation loop
             for step in range(self.max_steps):
                 # Get page state
                 state = await self._get_page_state()
                 
-                if self.verbose:
+                if self.verbose or self.debug:
                     logger.info(f"Step {step}: {state.url}")
+                
+                if self.debug:
+                    logger.info(f"[DEBUG] Elements found: {len(state.elements)}")
+                    for i, el in enumerate(state.elements[:5]):
+                        logger.info(f"[DEBUG]   [{i}] {el.get('tag')} - {el.get('text', '')[:30]} - {el.get('selector', '')}")
                 
                 # Update session URL
                 if self.record_session and self._session_manager:
@@ -467,12 +564,40 @@ class CDPBrowserAgent:
                 if self.enable_vision and screenshot_base64:
                     observation["screenshot"] = screenshot_base64
                 
-                # Get action from agent
-                action = agent.process_observation(observation)
-                action = normalize_action(action)
+                # Check if stuck and try site-specific fallback
+                if self._is_stuck(state.url):
+                    if self.debug:
+                        logger.info("[DEBUG] Agent appears stuck, trying site-specific fallback")
+                    # Try a submit action if we've been typing
+                    last_action = self._action_history[-1] if self._action_history else {}
+                    if last_action.get("action") == "type":
+                        # Force a submit
+                        action = {"action": "submit", "thought": "Submitting form after typing"}
+                        if self.debug:
+                            logger.info("[DEBUG] Forcing submit action after stuck detection")
+                    else:
+                        # Get site-specific selector
+                        fallback_selector = self._get_site_specific_selector(
+                            {"action": "type", "thought": "search"}, state.url
+                        )
+                        if fallback_selector:
+                            action = {"action": "type", "selector": fallback_selector, "value": goal.split()[-1] if goal else "test"}
+                            if self.debug:
+                                logger.info(f"[DEBUG] Using site-specific selector: {fallback_selector}")
+                        else:
+                            # Get action from agent normally
+                            action = agent.process_observation(observation)
+                            action = normalize_action(action)
+                else:
+                    # Get action from agent
+                    action = agent.process_observation(observation)
+                    action = normalize_action(action)
                 
-                if self.verbose:
+                if self.verbose or self.debug:
                     logger.info(f"  Action: {action.get('action')} | Done: {action.get('done')}")
+                
+                if self.debug:
+                    logger.info(f"[DEBUG] Full action: {action}")
                 
                 # Check for completion
                 if action.get("done"):
@@ -561,6 +686,15 @@ class CDPBrowserAgent:
                     else:
                         logger.warning(f"Action failed after {self.max_retries + 1} attempts: {result.get('error')}")
                 
+                # Track action in history for stuck detection
+                self._action_history.append({
+                    "action": action.get("action"),
+                    "selector": action.get("selector"),
+                    "url": state.url,
+                    "success": action_success,
+                    "step": step,
+                })
+                
                 # Record step
                 if self.record_session and self._session_manager:
                     self._session_manager.add_step(
@@ -619,6 +753,7 @@ async def run_cdp_only(
     enable_vision: bool = False,
     record_session: bool = True,
     screenshot_dir: Optional[str] = None,
+    debug: bool = False,
 ) -> Dict[str, Any]:
     """Run browser agent using direct CDP (no extension required).
     
@@ -633,6 +768,7 @@ async def run_cdp_only(
         enable_vision: Enable vision-based analysis
         record_session: Log to session database
         screenshot_dir: Save screenshots to directory
+        debug: Enable debug mode with detailed logging
         
     Returns:
         Result with success status and summary
@@ -652,6 +788,7 @@ async def run_cdp_only(
         enable_vision=enable_vision,
         record_session=record_session,
         screenshot_dir=screenshot_dir,
+        debug=debug,
     )
     return await agent.run(goal, url)
 

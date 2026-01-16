@@ -67,6 +67,8 @@ class BrowserTestResult:
     error: str = ""
     session_id: str = ""
     engine: str = "cdp"
+    video_url: str = ""  # Path to recorded video (WebM)
+    screenshots_dir: str = ""  # Directory with step screenshots
     
     @property
     def efficiency(self) -> float:
@@ -95,6 +97,8 @@ class BrowserTestResult:
             "error": self.error,
             "session_id": self.session_id,
             "engine": self.engine,
+            "video_url": self.video_url,
+            "screenshots_dir": self.screenshots_dir,
         }
 
 
@@ -283,7 +287,14 @@ QUICK_TEST_SCENARIOS = [
 
 
 class BrowserBenchmark:
-    """Browser automation benchmark runner."""
+    """Browser automation benchmark runner.
+    
+    Features:
+    - Screenshot capture per test
+    - Video recording (via extension)
+    - CSV file input for custom scenarios
+    - Ideal vs actual step tracking
+    """
     
     def __init__(
         self,
@@ -291,17 +302,56 @@ class BrowserBenchmark:
         port: int = 9222,
         model: str = "gpt-4o-mini",
         verbose: bool = False,
+        capture_screenshots: bool = True,
+        debug: bool = False,
     ):
         self.engine = engine
         self.port = port
         self.model = model
         self.verbose = verbose
+        self.capture_screenshots = capture_screenshots
+        self.debug = debug
         self.results_dir = Path.home() / ".praisonai" / "browser_benchmarks"
         self.results_dir.mkdir(parents=True, exist_ok=True)
+        self.videos_dir = self.results_dir / "videos"
+        self.videos_dir.mkdir(parents=True, exist_ok=True)
+        self.screenshots_base = self.results_dir / "screenshots"
+        self.screenshots_base.mkdir(parents=True, exist_ok=True)
     
-    async def run_single_test(self, test_case: BrowserTestCase) -> BrowserTestResult:
-        """Run a single test case."""
+    @staticmethod
+    def load_from_csv(csv_path: str) -> List[BrowserTestCase]:
+        """Load test scenarios from CSV file.
+        
+        CSV format:
+            name,goal,url,ideal_steps,max_steps,category
+            
+        Example:
+            Simple Google,Go to google.com,https://google.com,1,10,simple
+        """
+        import csv
+        scenarios = []
+        
+        with open(csv_path, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                scenarios.append(BrowserTestCase(
+                    name=row.get('name', 'Unnamed Test'),
+                    goal=row.get('goal', ''),
+                    url=row.get('url', 'https://www.google.com'),
+                    ideal_steps=int(row.get('ideal_steps', 3)),
+                    max_steps=int(row.get('max_steps', 20)),
+                    category=row.get('category', 'custom'),
+                ))
+        
+        if not scenarios:
+            raise ValueError(f"No test scenarios found in {csv_path}")
+        
+        return scenarios
+    
+    async def run_single_test(self, test_case: BrowserTestCase, test_index: int = 0) -> BrowserTestResult:
+        """Run a single test case with screenshot capture."""
         from .cdp_agent import CDPBrowserAgent
+        import os
         
         if self.verbose:
             print(f"\n{'='*60}")
@@ -309,6 +359,14 @@ class BrowserBenchmark:
             print(f"Goal: {test_case.goal[:60]}...")
             print(f"Ideal steps: {test_case.ideal_steps}")
             print(f"{'='*60}")
+        
+        # Setup screenshots directory for this test
+        test_screenshots_dir = None
+        if self.capture_screenshots:
+            test_safe_name = test_case.name.replace(" ", "_").replace("/", "_")[:30]
+            timestamp = datetime.now().strftime("%H%M%S")
+            test_screenshots_dir = str(self.screenshots_base / f"{test_index:02d}_{test_safe_name}_{timestamp}")
+            os.makedirs(test_screenshots_dir, exist_ok=True)
         
         start_time = time.perf_counter()
         
@@ -320,11 +378,16 @@ class BrowserBenchmark:
                 verbose=self.verbose,
                 max_retries=3,
                 record_session=True,
+                screenshot_dir=test_screenshots_dir,  # Enable screenshot capture
+                debug=self.debug,
             )
             
             result = await agent.run(test_case.goal, test_case.url)
             
             duration_ms = (time.perf_counter() - start_time) * 1000
+            
+            # Get video URL if available (from session)
+            video_url = result.get("video_url", "")
             
             test_result = BrowserTestResult(
                 test_case=test_case,
@@ -337,6 +400,8 @@ class BrowserBenchmark:
                 error=result.get("error", ""),
                 session_id=result.get("session_id", ""),
                 engine=self.engine,
+                video_url=video_url,
+                screenshots_dir=test_screenshots_dir or "",
             )
             
             if self.verbose:
@@ -346,6 +411,10 @@ class BrowserBenchmark:
                 print(f"  Efficiency: {test_result.efficiency:.0%}")
                 print(f"  Retries: {test_result.total_retries}")
                 print(f"  Duration: {test_result.duration_ms:.0f}ms")
+                if test_screenshots_dir:
+                    print(f"  Screenshots: {test_screenshots_dir}")
+                if video_url:
+                    print(f"  Video: {video_url}")
             
             return test_result
             
@@ -362,7 +431,9 @@ class BrowserBenchmark:
                 duration_ms=duration_ms,
                 error=str(e),
                 engine=self.engine,
+                screenshots_dir=test_screenshots_dir or "",
             )
+
     
     async def run_all_tests(self, scenarios: Optional[List[BrowserTestCase]] = None) -> BrowserBenchmarkReport:
         """Run all test scenarios."""
@@ -374,8 +445,8 @@ class BrowserBenchmark:
             engine=self.engine,
         )
         
-        for test_case in scenarios:
-            result = await self.run_single_test(test_case)
+        for idx, test_case in enumerate(scenarios):
+            result = await self.run_single_test(test_case, test_index=idx)
             report.results.append(result)
             
             # Brief pause between tests
@@ -435,7 +506,7 @@ class BrowserBenchmark:
         return report
     
     def print_report(self, report: BrowserBenchmarkReport):
-        """Print formatted benchmark report."""
+        """Print formatted benchmark report with media links."""
         print("\n" + "="*70)
         print("BROWSER BENCHMARK REPORT")
         print("="*70)
@@ -465,7 +536,7 @@ class BrowserBenchmark:
                 print(f"{cat:<15} {stats['success_rate']:.0%} ({stats['passed']}/{stats['total']})   {stats['mean_efficiency']:.0%}           {stats['mean_overhead']:+.1f}")
             print()
         
-        # Individual results
+        # Individual results with media
         print(f"{'INDIVIDUAL RESULTS':^70}")
         print("-"*70)
         print(f"{'Test Name':<30} {'Status':<8} {'Steps':<12} {'Eff':<8}")
@@ -475,10 +546,31 @@ class BrowserBenchmark:
             steps = f"{r.actual_steps}/{r.test_case.ideal_steps}" if r.success else "N/A"
             eff = f"{r.efficiency:.0%}" if r.success else "-"
             print(f"{r.test_case.name[:28]:<30} {status:<8} {steps:<12} {eff:<8}")
+            
+            # Show error for failures
             if not r.success and r.error:
                 print(f"  └─ Error: {r.error[:60]}")
+            
+            # Show media links
+            if r.screenshots_dir:
+                print(f"  📸 Screenshots: {r.screenshots_dir}")
+            if r.video_url:
+                print(f"  🎬 Video: {r.video_url}")
         
         print("="*70)
+        
+        # Media summary
+        videos = [r for r in report.results if r.video_url]
+        screenshots = [r for r in report.results if r.screenshots_dir]
+        if videos or screenshots:
+            print(f"\n{'MEDIA FILES':^70}")
+            print("-"*70)
+            if screenshots:
+                print(f"  Screenshots: {len(screenshots)} test(s) with screenshots")
+                print(f"  Base Dir: {self.screenshots_base}")
+            if videos:
+                print(f"  Videos: {len(videos)} test(s) with video recording")
+            print("="*70)
 
 
 # CLI commands for browser benchmark
@@ -490,17 +582,50 @@ def add_benchmark_commands(app):
     
     @benchmark_app.command("run")
     def run_benchmark(
+        csv_file: Optional[str] = typer.Argument(None, help="Optional CSV file with test scenarios"),
         quick: bool = typer.Option(False, "--quick", "-q", help="Run quick test (3 scenarios)"),
         verbose: bool = typer.Option(True, "--verbose", "-v", help="Verbose output"),
         engine: str = typer.Option("cdp", "--engine", help="Engine: cdp, extension, hybrid"),
         output: Optional[str] = typer.Option(None, "--output", "-o", help="Save JSON to file"),
+        no_screenshots: bool = typer.Option(False, "--no-screenshots", help="Disable screenshot capture"),
+        debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode with detailed logging"),
     ):
-        """Run browser automation benchmark suite."""
+        """Run browser automation benchmark suite.
+        
+        Examples:
+            praisonai browser benchmark run                    # Run all built-in tests
+            praisonai browser benchmark run --quick            # Run 3 quick tests
+            praisonai browser benchmark run tests.csv          # Run tests from CSV file
+            praisonai browser benchmark run --output results.json
+        
+        CSV Format (with header):
+            name,goal,url,ideal_steps,max_steps,category
+            My Test,Go to google,https://google.com,1,10,simple
+        """
+        
+        import logging
+        if debug:
+            logging.basicConfig(level=logging.DEBUG)
+            logging.getLogger("praisonai.browser.cdp_agent").setLevel(logging.DEBUG)
         
         async def _run():
-            benchmark = BrowserBenchmark(engine=engine, verbose=verbose)
+            benchmark = BrowserBenchmark(
+                engine=engine, 
+                verbose=verbose,
+                capture_screenshots=not no_screenshots,
+                debug=debug,
+            )
             
-            if quick:
+            # Load scenarios from CSV or use built-in
+            if csv_file:
+                try:
+                    scenarios = BrowserBenchmark.load_from_csv(csv_file)
+                    print(f"Loaded {len(scenarios)} test scenarios from {csv_file}")
+                except Exception as e:
+                    print(f"Error loading CSV: {e}")
+                    return
+                report = await benchmark.run_all_tests(scenarios)
+            elif quick:
                 report = await benchmark.run_quick()
             else:
                 report = await benchmark.run_all_tests()
@@ -553,4 +678,35 @@ def add_benchmark_commands(app):
         print("-"*70)
         print(f"Total: {len(BROWSER_TEST_SCENARIOS)} scenarios")
     
+    @benchmark_app.command("template")
+    def generate_template(
+        output: str = typer.Argument("browser_tests.csv", help="Output CSV filename"),
+    ):
+        """Generate a CSV template for custom test scenarios.
+        
+        Example:
+            praisonai browser benchmark template my_tests.csv
+        """
+        import csv
+        
+        with open(output, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            # Header
+            writer.writerow(['name', 'goal', 'url', 'ideal_steps', 'max_steps', 'category'])
+            # Example rows
+            writer.writerow(['Simple Google', 'Go to google.com and confirm page loaded', 'https://www.google.com', '1', '10', 'simple'])
+            writer.writerow(['Google Search', 'Type "PraisonAI" in search box, press Enter, confirm results', 'https://www.google.com', '3', '15', 'search'])
+            writer.writerow(['Wikipedia Article', 'Search for AI, click article, scroll down', 'https://www.wikipedia.org', '5', '20', 'navigation'])
+        
+        print(f"CSV template saved to: {output}")
+        print("\nTemplate contains 3 example test scenarios. Edit this file to add your own.")
+        print("\nColumns:")
+        print("  name        - Test name (displayed in report)")
+        print("  goal        - Task description for the browser agent")
+        print("  url         - Starting URL")
+        print("  ideal_steps - Expected number of steps for ideal completion")
+        print("  max_steps   - Maximum allowed steps before failure")
+        print("  category    - Test category (simple, search, navigation, form, spa)")
+    
     app.add_typer(benchmark_app, name="benchmark")
+
