@@ -16,7 +16,7 @@ from praisonaiagents.config import OutputConfig
 agent = Agent(
     instructions="You are a helpful assistant",
     llm="gpt-4o-mini",
-    output=OutputConfig(output="verbose")  # Show generation progress
+    output="verbose"  # Show generation progress
 )
 
 # Run the agent - verbose mode shows streaming progress via Rich Live display

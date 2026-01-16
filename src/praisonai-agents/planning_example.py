@@ -8,7 +8,7 @@ researcher = Agent(name="Researcher", role="Research Analyst", output="verbose")
 writer = Agent(name="Writer", role="Content Writer", output="verbose")
 
 # Step 2: Create a plan using PlanningAgent
-planner = PlanningAgent(llm="gpt-4o-mini", output="status")
+planner = PlanningAgent(llm="gpt-4o-mini")
 plan = planner.create_plan_sync(
     request="Write a short article about the top 3 benefits of meditation",
     agents=[researcher, writer],
