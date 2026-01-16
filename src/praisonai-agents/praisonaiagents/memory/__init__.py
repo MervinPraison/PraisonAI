@@ -42,6 +42,8 @@ from .protocols import (
     MemoryProtocol, 
     AsyncMemoryProtocol, 
     ResettableMemoryProtocol,
+    DeletableMemoryProtocol,
+    AsyncDeletableMemoryProtocol,
     EntityMemoryProtocol,
 )
 
@@ -203,5 +205,7 @@ __all__ = [
     "MemoryProtocol",
     "AsyncMemoryProtocol",
     "ResettableMemoryProtocol",
+    "DeletableMemoryProtocol",
+    "AsyncDeletableMemoryProtocol",
     "EntityMemoryProtocol",
 ] 

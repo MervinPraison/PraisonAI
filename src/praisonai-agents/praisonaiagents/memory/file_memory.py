@@ -806,6 +806,220 @@ class FileMemory:
         
         self._log("Cleared all memory")
     
+    # -------------------------------------------------------------------------
+    #                          Selective Deletion
+    # -------------------------------------------------------------------------
+    
+    def delete_short_term(self, memory_id: str) -> bool:
+        """
+        Delete a specific short-term memory by ID.
+        
+        Args:
+            memory_id: The unique ID of the memory to delete
+            
+        Returns:
+            True if memory was found and deleted, False otherwise
+        """
+        for i, item in enumerate(self._short_term):
+            if item.id == memory_id:
+                del self._short_term[i]
+                self._save_short_term()
+                self._log(f"Deleted short-term memory: {memory_id}")
+                return True
+        return False
+    
+    def delete_long_term(self, memory_id: str) -> bool:
+        """
+        Delete a specific long-term memory by ID.
+        
+        Args:
+            memory_id: The unique ID of the memory to delete
+            
+        Returns:
+            True if memory was found and deleted, False otherwise
+        """
+        for i, item in enumerate(self._long_term):
+            if item.id == memory_id:
+                del self._long_term[i]
+                self._save_long_term()
+                self._log(f"Deleted long-term memory: {memory_id}")
+                return True
+        return False
+    
+    def delete_entity(self, name: str) -> bool:
+        """
+        Delete an entity by name.
+        
+        Args:
+            name: The name of the entity to delete
+            
+        Returns:
+            True if entity was found and deleted, False otherwise
+        """
+        # Find entity by name using existing helper
+        entity = self._find_entity_by_name(name)
+        if entity:
+            # Delete by entity's ID (which is the dict key)
+            if entity.id in self._entities:
+                del self._entities[entity.id]
+                self._save_entities()
+                self._log(f"Deleted entity: {name}")
+                return True
+        
+        # Try direct ID match as fallback (in case name IS the ID)
+        if name in self._entities:
+            del self._entities[name]
+            self._save_entities()
+            self._log(f"Deleted entity by ID: {name}")
+            return True
+        
+        return False
+    
+    def delete_episodic(self, memory_id: str, date: Optional[str] = None) -> bool:
+        """
+        Delete a specific episodic memory by ID.
+        
+        Args:
+            memory_id: The unique ID of the memory to delete
+            date: Optional date string (YYYY-MM-DD) to narrow search
+            
+        Returns:
+            True if memory was found and deleted, False otherwise
+        """
+        from datetime import datetime, timedelta
+        
+        # Determine which files to search
+        if date:
+            dates_to_check = [date]
+        else:
+            # Check last 30 days
+            dates_to_check = [
+                (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+                for i in range(30)
+            ]
+        
+        for check_date in dates_to_check:
+            episodic_file = self.episodic_path / f"{check_date}.json"
+            if episodic_file.exists():
+                data = self._read_json(episodic_file, [])
+                for i, item in enumerate(data):
+                    if item.get("id") == memory_id:
+                        del data[i]
+                        self._write_json(episodic_file, data)
+                        self._log(f"Deleted episodic memory: {memory_id}")
+                        return True
+        
+        return False
+    
+    def delete_memory(
+        self, 
+        memory_id: str, 
+        memory_type: Optional[str] = None
+    ) -> bool:
+        """
+        Delete a specific memory by ID.
+        
+        This is the unified deletion method that searches across all memory types.
+        Use this when you have a memory ID but don't know its type.
+        
+        Particularly useful for:
+        - Cleaning up image-based memories after processing to free context window
+        - Removing outdated or incorrect information
+        - Privacy compliance (selective erasure)
+        
+        Args:
+            memory_id: The unique ID of the memory to delete
+            memory_type: Optional type hint to narrow search:
+                        'short_term', 'long_term', 'entity', 'episodic'
+                        If None, searches all types.
+            
+        Returns:
+            True if memory was found and deleted, False otherwise
+        
+        Example:
+            # Delete a specific memory after processing an image
+            memory.delete_memory("abc123def456")
+            
+            # Delete with type hint for faster lookup
+            memory.delete_memory("abc123", memory_type="short_term")
+        """
+        # If type specified, only search that type
+        if memory_type == "short_term":
+            return self.delete_short_term(memory_id)
+        elif memory_type == "long_term":
+            return self.delete_long_term(memory_id)
+        elif memory_type == "entity":
+            return self.delete_entity(memory_id)
+        elif memory_type == "episodic":
+            return self.delete_episodic(memory_id)
+        
+        # Search all types
+        if self.delete_short_term(memory_id):
+            return True
+        if self.delete_long_term(memory_id):
+            return True
+        if self.delete_entity(memory_id):
+            return True
+        if self.delete_episodic(memory_id):
+            return True
+        
+        return False
+    
+    def delete_memories(self, memory_ids: List[str]) -> int:
+        """
+        Delete multiple memories by their IDs.
+        
+        Args:
+            memory_ids: List of memory IDs to delete
+            
+        Returns:
+            Number of memories successfully deleted
+        """
+        count = 0
+        for memory_id in memory_ids:
+            if self.delete_memory(memory_id):
+                count += 1
+        return count
+    
+    def delete_memories_matching(
+        self, 
+        query: str, 
+        memory_types: Optional[List[str]] = None,
+        limit: int = 10
+    ) -> int:
+        """
+        Delete memories matching a search query.
+        
+        Useful for bulk cleanup of related memories, e.g., all image-related
+        context after finishing an image analysis session.
+        
+        Args:
+            query: Search query to match memories
+            memory_types: Optional list of types to search
+            limit: Maximum number of memories to delete
+            
+        Returns:
+            Number of memories deleted
+        """
+        # Search for matching memories
+        results = self.search(query, memory_types=memory_types, limit=limit)
+        
+        # Extract IDs and delete
+        deleted = 0
+        for result in results:
+            item = result.get("item", {})
+            memory_id = item.get("id")
+            memory_type = result.get("type")
+            
+            if memory_id:
+                if self.delete_memory(memory_id, memory_type=memory_type):
+                    deleted += 1
+        
+        if deleted:
+            self._log(f"Deleted {deleted} memories matching '{query}'")
+        
+        return deleted
+    
     def get_stats(self) -> Dict[str, Any]:
         """Get memory statistics."""
         episodic_count = sum(1 for _ in self.episodic_path.glob("*.json"))
@@ -1222,6 +1436,66 @@ Summary:"""
             else:
                 return {"error": "Usage: /memory clear [short|all]"}
         
+        elif action == "delete":
+            if not args:
+                return {"error": "Usage: /memory delete <id> or /memory delete --query <search_query>"}
+            
+            # Handle --query flag for bulk deletion
+            if args.startswith("--query "):
+                query = args[8:]  # Remove "--query " prefix
+                if not query:
+                    return {"error": "Usage: /memory delete --query <search_query>"}
+                deleted = self.delete_memories_matching(query, limit=10)
+                return {
+                    "action": "delete", 
+                    "type": "query", 
+                    "query": query, 
+                    "deleted_count": deleted
+                }
+            
+            # Single ID deletion
+            success = self.delete_memory(args)
+            return {
+                "action": "delete", 
+                "type": "single",
+                "id": args, 
+                "success": success
+            }
+        
+        elif action == "list":
+            # List memories with IDs for easy deletion reference
+            memory_type = args.lower() if args else "all"
+            items = []
+            
+            if memory_type in ("all", "short", "short_term"):
+                for item in self.get_short_term(limit=20):
+                    items.append({
+                        "type": "short_term",
+                        "id": item.id,
+                        "content": item.content[:100] + "..." if len(item.content) > 100 else item.content,
+                        "importance": item.importance
+                    })
+            
+            if memory_type in ("all", "long", "long_term"):
+                for item in self.get_long_term(limit=20):
+                    items.append({
+                        "type": "long_term",
+                        "id": item.id,
+                        "content": item.content[:100] + "..." if len(item.content) > 100 else item.content,
+                        "importance": item.importance
+                    })
+            
+            if memory_type in ("all", "entity", "entities"):
+                for name, entity in self._entities.items():
+                    items.append({
+                        "type": "entity",
+                        "id": name,
+                        "name": entity.name,
+                        "entity_type": entity.entity_type
+                    })
+            
+            return {"action": "list", "filter": memory_type, "items": items}
+        
         elif action == "search":
             if not args:
                 return {"error": "Usage: /memory search <query>"}
@@ -1274,8 +1548,11 @@ Summary:"""
                 "action": "help",
                 "commands": {
                     "/memory show": "Display memory stats and recent items",
+                    "/memory list [short|long|entity]": "List memories with IDs for deletion",
                     "/memory add <content>": "Add to long-term memory",
-                    "/memory clear [short|all]": "Clear memory",
+                    "/memory delete <id>": "Delete a specific memory by ID",
+                    "/memory delete --query <q>": "Delete memories matching query",
+                    "/memory clear [short|all]": "Clear all memory (bulk)",
                     "/memory search <query>": "Search memories",
                     "/memory save <name>": "Save session",
                     "/memory resume <name>": "Resume session",

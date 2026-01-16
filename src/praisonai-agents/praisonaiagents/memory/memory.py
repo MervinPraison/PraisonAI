@@ -1118,6 +1118,213 @@ class Memory:
             self._init_chroma()         # re-init fresh
 
     # -------------------------------------------------------------------------
+    #                       Selective Deletion Methods
+    # -------------------------------------------------------------------------
+    
+    def delete_short_term(self, memory_id: str) -> bool:
+        """
+        Delete a specific short-term memory by ID.
+        
+        Args:
+            memory_id: The unique ID of the memory to delete
+            
+        Returns:
+            True if memory was found and deleted, False otherwise
+        """
+        deleted = False
+        
+        # Delete from SQLite
+        try:
+            conn = sqlite3.connect(self.short_db)
+            cursor = conn.execute(
+                "DELETE FROM short_mem WHERE id = ?", (memory_id,)
+            )
+            if cursor.rowcount > 0:
+                deleted = True
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            self._log_verbose(f"Error deleting from SQLite short-term: {e}", logging.ERROR)
+        
+        # Delete from MongoDB if enabled
+        if self.use_mongodb and hasattr(self, "mongo_short_term"):
+            try:
+                result = self.mongo_short_term.delete_one({"_id": memory_id})
+                if result.deleted_count > 0:
+                    deleted = True
+            except Exception as e:
+                self._log_verbose(f"Error deleting from MongoDB short-term: {e}", logging.ERROR)
+        
+        if deleted:
+            self._log_verbose(f"Deleted short-term memory: {memory_id}")
+        
+        return deleted
+    
+    def delete_long_term(self, memory_id: str) -> bool:
+        """
+        Delete a specific long-term memory by ID.
+        
+        Works across all backends: SQLite, ChromaDB, Mem0, and MongoDB.
+        
+        Args:
+            memory_id: The unique ID of the memory to delete
+            
+        Returns:
+            True if memory was found and deleted, False otherwise
+        """
+        deleted = False
+        
+        # Delete from SQLite
+        try:
+            conn = sqlite3.connect(self.long_db)
+            cursor = conn.execute(
+                "DELETE FROM long_mem WHERE id = ?", (memory_id,)
+            )
+            if cursor.rowcount > 0:
+                deleted = True
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            self._log_verbose(f"Error deleting from SQLite long-term: {e}", logging.ERROR)
+        
+        # Delete from ChromaDB if enabled
+        if self.use_rag and hasattr(self, "chroma_col"):
+            try:
+                # ChromaDB delete by ID
+                self.chroma_col.delete(ids=[memory_id])
+                deleted = True  # ChromaDB doesn't raise on non-existent ID
+            except Exception as e:
+                self._log_verbose(f"Error deleting from ChromaDB: {e}", logging.ERROR)
+        
+        # Delete from Mem0 if enabled
+        if self.use_mem0 and hasattr(self, "mem0_client"):
+            try:
+                # Mem0 has a delete method
+                self.mem0_client.delete(memory_id)
+                deleted = True
+            except Exception as e:
+                self._log_verbose(f"Error deleting from Mem0: {e}", logging.ERROR)
+        
+        # Delete from MongoDB if enabled
+        if self.use_mongodb and hasattr(self, "mongo_long_term"):
+            try:
+                result = self.mongo_long_term.delete_one({"_id": memory_id})
+                if result.deleted_count > 0:
+                    deleted = True
+            except Exception as e:
+                self._log_verbose(f"Error deleting from MongoDB long-term: {e}", logging.ERROR)
+        
+        if deleted:
+            self._log_verbose(f"Deleted long-term memory: {memory_id}")
+        
+        return deleted
+    
+    def delete_memory(
+        self, 
+        memory_id: str, 
+        memory_type: Optional[str] = None
+    ) -> bool:
+        """
+        Delete a specific memory by ID.
+        
+        This is the unified deletion method that searches across all memory types
+        and all backends (SQLite, ChromaDB, Mem0, MongoDB).
+        
+        Particularly useful for:
+        - Cleaning up image-based memories after processing to free context window
+        - Removing outdated or incorrect information
+        - Privacy compliance (selective erasure)
+        
+        Args:
+            memory_id: The unique ID of the memory to delete
+            memory_type: Optional type hint to narrow search:
+                        'short_term', 'long_term'
+                        If None, searches all types.
+            
+        Returns:
+            True if memory was found and deleted, False otherwise
+        
+        Example:
+            # Delete a specific image analysis memory
+            memory.delete_memory("1705123456789")
+            
+            # Delete with type hint for faster lookup
+            memory.delete_memory("1705123456789", memory_type="short_term")
+        """
+        # If type specified, only search that type
+        if memory_type == "short_term":
+            return self.delete_short_term(memory_id)
+        elif memory_type == "long_term":
+            return self.delete_long_term(memory_id)
+        
+        # Search both types
+        if self.delete_short_term(memory_id):
+            return True
+        if self.delete_long_term(memory_id):
+            return True
+        
+        return False
+    
+    def delete_memories(self, memory_ids: List[str]) -> int:
+        """
+        Delete multiple memories by their IDs.
+        
+        Args:
+            memory_ids: List of memory IDs to delete
+            
+        Returns:
+            Number of memories successfully deleted
+        """
+        count = 0
+        for memory_id in memory_ids:
+            if self.delete_memory(memory_id):
+                count += 1
+        return count
+    
+    def delete_memories_matching(
+        self, 
+        query: str, 
+        memory_type: Optional[str] = None,
+        limit: int = 10
+    ) -> int:
+        """
+        Delete memories matching a search query.
+        
+        Useful for bulk cleanup of related memories, e.g., all image-related
+        context after finishing an image analysis session.
+        
+        Args:
+            query: Search query to match memories
+            memory_type: Optional type ('short_term' or 'long_term')
+            limit: Maximum number of memories to delete
+            
+        Returns:
+            Number of memories deleted
+        """
+        deleted = 0
+        
+        # Search short-term if applicable
+        if memory_type in (None, "short_term"):
+            results = self.search_short_term(query, limit=limit)
+            for result in results:
+                memory_id = result.get("id")
+                if memory_id and self.delete_short_term(memory_id):
+                    deleted += 1
+        
+        # Search long-term if applicable
+        if memory_type in (None, "long_term"):
+            results = self.search_long_term(query, limit=limit)
+            for result in results:
+                memory_id = result.get("id")
+                if memory_id and self.delete_long_term(memory_id):
+                    deleted += 1
+        
+        if deleted:
+            self._log_verbose(f"Deleted {deleted} memories matching '{query}'")
+        
+        return deleted
+
+    # -------------------------------------------------------------------------
     #                       Entity Memory Methods
     # -------------------------------------------------------------------------
     def store_entity(self, name: str, type_: str, desc: str, relations: str):

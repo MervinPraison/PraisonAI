@@ -12,6 +12,9 @@ class Chunking:
         'semantic': ['chunk_size', 'embedding_model'],
         'sdpm': ['chunk_size', 'embedding_model'],
         'late': ['chunk_size', 'embedding_model'],
+        'code': ['chunk_size', 'tokenizer_or_token_counter'],
+        'neural': ['chunk_size', 'tokenizer_or_token_counter'],
+        'slumber': ['chunk_size', 'genie'],
     }
     
     @cached_property
@@ -24,7 +27,10 @@ class Chunking:
                 SemanticChunker,
                 SDPMChunker,
                 LateChunker,
-                RecursiveChunker
+                RecursiveChunker,
+                CodeChunker,
+                NeuralChunker,
+                SlumberChunker
             )
         except ImportError:
             raise ImportError(
@@ -37,7 +43,10 @@ class Chunking:
             'semantic': SemanticChunker,
             'sdpm': SDPMChunker,
             'late': LateChunker,
-            'recursive': RecursiveChunker
+            'recursive': RecursiveChunker,
+            'code': CodeChunker,
+            'neural': NeuralChunker,
+            'slumber': SlumberChunker
         }
 
     def __init__(

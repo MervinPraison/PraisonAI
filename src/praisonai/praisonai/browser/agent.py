@@ -125,7 +125,7 @@ def normalize_action(action_dict: Dict[str, Any]) -> Dict[str, Any]:
     return action_dict
 
 # System prompt for browser automation
-BROWSER_AGENT_SYSTEM_PROMPT = """You are a precise browser automation agent. Complete tasks in the FEWEST steps possible.
+BROWSER_AGENT_SYSTEM_PROMPT = """You are a precise browser automation agent. Complete ALL parts of multi-step tasks.
 
 ## Available Actions
 - **type**: Type text into INPUT element. Use the EXACT selector from the element list.
@@ -133,7 +133,18 @@ BROWSER_AGENT_SYSTEM_PROMPT = """You are a precise browser automation agent. Com
 - **click**: Click BUTTON or LINK. Use the EXACT selector from the element list.
 - **scroll**: Scroll page (direction: "up" or "down")
 - **navigate**: Go to URL directly (use for known URLs)
-- **done**: Task complete - use when goal is achieved
+- **done**: Task complete - use ONLY when ALL parts of the goal are achieved
+
+## CRITICAL: Cookie Consent / Overlay Dialogs
+
+⚠️ **IMPORTANT**: If you see elements marked as `consent_button` or with text like "Accept all", "Reject all", "I agree", or similar - you MUST click them FIRST before doing anything else!
+
+These dialogs block all other interactions. Look for:
+- Buttons with text containing: "Accept", "Reject", "Agree", "Consent", "OK", "Got it"
+- Elements with type="consent_button" in the element list
+- Elements at the TOP of the list (consent buttons are prioritized)
+
+**If overlay_info shows detected=true**, you are seeing a consent dialog. Click a consent button immediately!
 
 ## CRITICAL: Valid Selector Format
 You MUST use valid CSS selectors from the element list. 
@@ -149,37 +160,53 @@ Use ONLY selectors provided in the element list, such as:
 - ✅ button[type="submit"]
 - ✅ a[href*="domain.com"]
 
+## CRITICAL: Multi-Step Goals - DO NOT MARK DONE EARLY!
+
+⚠️ **IMPORTANT**: If the goal contains multiple parts separated by commas or "and", you MUST complete ALL parts before marking done!
+
+### Example Multi-Step Goals:
+- "go to google, search for AI, click the first link" = 3 STEPS REQUIRED:
+  1. Navigate to google.com
+  2. Type "AI" and submit search
+  3. Click first search result link
+  → Only mark done AFTER clicking the link!
+
+- "search for Python and click Wikipedia" = 2 STEPS REQUIRED:
+  1. Search for Python
+  2. Click Wikipedia link in results
+  → Only mark done AFTER clicking Wikipedia!
+
+### How to Parse Goals:
+1. Split goal by commas and "and"
+2. Count the number of distinct actions
+3. Track which actions you've completed
+4. Only mark done when ALL actions are complete
+
 ## CRITICAL: When to Use "done"
 
-Set "done": true and "action": "done" when:
-- **Search completed**: You typed a query AND submitted AND the results page is showing
-- **Navigation completed**: You reached the target URL/page
-- **Information visible**: The requested information is now visible on screen
-- **Task statement fulfilled**: The goal text describes what you see
+Set "done": true ONLY when ALL of these are true:
+- **Every part of the goal is complete** - not just the first part!
+- **You can see evidence** that the final action succeeded
+- **The URL/page reflects** the final state requested
 
-### Examples of DONE states:
-- Goal "search praisonai on Google" → DONE when URL shows `/search?q=praisonai`
-- Goal "go to github" → DONE when URL shows `github.com`
-- Goal "find contact page" → DONE when contact page is visible
+### Examples:
+- Goal "go to google" → DONE when URL shows `google.com`
+- Goal "search AI on google" → DONE when URL shows `/search?q=AI`
+- Goal "go to google, search AI, click first link" → DONE when you're on a NEW page after clicking a search result (NOT on google.com/search)
 
-⚠️ DO NOT keep clicking links or typing after goal is achieved!
+⚠️ DO NOT mark done after just navigating if the goal includes searching!
+⚠️ DO NOT mark done after just searching if the goal includes clicking!
 
 ## Element Types in Observation
-- INPUT → type text here
+- INPUT/TEXTAREA → type text here
 - BUTTON → click to submit
-- LINK → click to navigate to another page
-
-## Multi-Step Tasks
-When user says "search X and inside that search Y":
-1. Type "X" in the search INPUT
-2. Press submit (Enter) to search
-3. Click a LINK in results to navigate to that website
-4. Then search for "Y" on the new page
+- LINK (a) → click to navigate to another page
+- consent_button → CLICK FIRST to dismiss blocking dialog
 
 ## Response Format (JSON only)
 ```json
 {
-  "thought": "Brief reasoning (1 sentence)",
+  "thought": "Brief reasoning - what part of the goal am I working on?",
   "action": "type|submit|click|scroll|navigate|done",
   "selector": "exact selector from element list",
   "value": "text to type (for type action)",
@@ -188,9 +215,9 @@ When user says "search X and inside that search Y":
 }
 ```
 
-When task is complete, always include a summary of what you did, e.g.:
-- "Searched for 'praisonai' on Google and found results"
-- "Navigated to github.com homepage"
+When task is complete, always include a summary of ALL steps you did, e.g.:
+- "Navigated to Google, searched for 'AI', and clicked the first result"
+- "Searched for 'Python' and clicked the Wikipedia link"
 
 CRITICAL: After typing a search query, use "submit" action to press Enter.
 """
@@ -244,7 +271,7 @@ class BrowserAgent:
             backstory="You are an expert at navigating websites and performing automated actions.",
             instructions=BROWSER_AGENT_SYSTEM_PROMPT,
             llm=self.model,
-            memory=True,  # Enable short-term memory for context between steps
+            memory=False,  # Disabled: Each step is a fresh LLM call - prevents token explosion
         )
     
     def process_observation(
@@ -279,11 +306,45 @@ class BrowserAgent:
         if self.verbose:
             logger.info(f"Processing observation for step {observation.get('step_number', 0)}")
         
+        # Check if we have a screenshot for vision-based decision making
+        screenshot_base64 = observation.get('screenshot')
+        use_vision = screenshot_base64 and 'gpt' in self.model.lower()
+        
         # Get agent response with structured output if available
         try:
             action_model = get_browser_action_model()
             
-            if action_model is not None:
+            if use_vision:
+                # Use LiteLLM directly for vision-enabled call
+                from litellm import completion
+                
+                if self.verbose:
+                    logger.info(f"[VISION] Using screenshot for decision making")
+                
+                messages = [
+                    {"role": "system", "content": BROWSER_AGENT_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{screenshot_base64}"}
+                            },
+                        ],
+                    }
+                ]
+                
+                response = completion(
+                    model=self.model,
+                    messages=messages,
+                    max_tokens=500,
+                )
+                
+                response_text = response.choices[0].message.content.strip()
+                action = self._parse_response(response_text)
+                
+            elif action_model is not None:
                 # Use Pydantic model for guaranteed structured output
                 response = self._agent.chat(prompt, output_pydantic=action_model)
                 
@@ -323,15 +384,37 @@ class BrowserAgent:
         """Build prompt from observation with full context."""
         # Start with prominent goal reminder
         original_goal = observation.get('original_goal') or observation.get('task', '')
+        
+        # Parse multi-step goal into parts
+        goal_parts = []
+        if original_goal:
+            # Split by comma and "and" to identify sub-goals
+            import re
+            # Split by comma or " and " but keep track
+            raw_parts = re.split(r',\s*|\s+and\s+', original_goal.lower())
+            goal_parts = [p.strip() for p in raw_parts if p.strip()]
+        
         parts = [
             "=" * 50,
             f"🎯 ORIGINAL GOAL: {original_goal}",
+        ]
+        
+        # Show goal breakdown for multi-step tasks
+        if len(goal_parts) > 1:
+            parts.append("")
+            parts.append("📋 GOAL BREAKDOWN (complete ALL parts):")
+            for i, gp in enumerate(goal_parts, 1):
+                parts.append(f"   {i}. {gp}")
+            parts.append("")
+            parts.append("⚠️ DO NOT mark done until ALL parts above are complete!")
+        
+        parts.extend([
             "=" * 50,
             "",
             f"**Current URL:** {observation.get('url', '')}",
             f"**Page Title:** {observation.get('title', '')}",
             f"**Step:** {observation.get('step_number', 0)} / {self.max_steps}",
-        ]
+        ])
         
         # Add progress notes if present
         progress = observation.get('progress_notes', '')
@@ -345,6 +428,20 @@ class BrowserAgent:
             for ah in action_history[-5:]:  # Last 5 actions
                 status = "✓" if ah.get('success') else "✗"
                 parts.append(f"  {status} {ah.get('action')}: {ah.get('selector', '')[:40]}")
+        
+        # *** OVERLAY/CONSENT DIALOG DETECTION ***
+        overlay_info = observation.get('overlay_info')
+        if overlay_info and overlay_info.get('detected'):
+            parts.append("\n" + "🚨" * 20)
+            parts.append("🍪 COOKIE CONSENT / OVERLAY DIALOG DETECTED!")
+            parts.append(f"   Type: {overlay_info.get('type', 'unknown')}")
+            if overlay_info.get('selector'):
+                parts.append(f"   Selector: {overlay_info.get('selector')}")
+            parts.append("")
+            parts.append("   ⚠️ YOU MUST CLICK A CONSENT BUTTON FIRST!")
+            parts.append("   Look for buttons with text like 'Accept all', 'Reject all', 'I agree'")
+            parts.append("   These are typically at the TOP of the element list with type='consent_button'")
+            parts.append("🚨" * 20)
         
         # *** AUTO-DEBUG: Detect stuck agent patterns ***
         step = observation.get('step_number', 0)

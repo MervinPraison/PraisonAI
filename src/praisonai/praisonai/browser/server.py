@@ -476,3 +476,238 @@ class BrowserServer:
         
         self._agents.clear()
         self._connections.clear()
+
+
+async def run_browser_agent(
+    goal: str,
+    url: str = "https://www.google.com",
+    model: str = "gpt-4o-mini",
+    max_steps: int = 20,
+    timeout: float = 120.0,
+    debug: bool = False,
+    port: int = 8765,
+) -> Dict:
+    """Run browser agent via extension bridge server.
+    
+    This function connects to the bridge server WebSocket and sends
+    goals to be executed by the Chrome extension.
+    
+    Args:
+        goal: Task to accomplish
+        url: Starting URL
+        model: LLM model to use
+        max_steps: Maximum steps
+        timeout: Timeout in seconds
+        debug: Enable debug logging
+        port: Bridge server port
+        
+    Returns:
+        Dict with success, summary, steps, etc.
+        
+    Example:
+        result = await run_browser_agent(
+            goal="Search for PraisonAI",
+            url="https://google.com"
+        )
+    """
+    import json
+    import asyncio
+    import uuid
+    
+    if debug:
+        logger.setLevel(logging.DEBUG)
+        logger.info(f"[DEBUG] run_browser_agent: goal='{goal}', url='{url}', model='{model}'")
+    
+    session_id = str(uuid.uuid4())
+    result = {
+        "success": False,
+        "summary": "",
+        "steps": 0,
+        "error": "",
+        "session_id": session_id,
+        "engine": "extension",
+    }
+    
+    try:
+        import websockets
+    except ImportError:
+        result["error"] = "websockets package required. Install with: pip install websockets"
+        logger.error(result["error"])
+        return result
+    
+    ws_url = f"ws://localhost:{port}/ws"
+    
+    if debug:
+        logger.info(f"[DEBUG] Connecting to bridge server at {ws_url}")
+    
+    try:
+        async with websockets.connect(ws_url, close_timeout=10) as ws:
+            if debug:
+                logger.info(f"[DEBUG] Connected to bridge server")
+            
+            # Wait for welcome message
+            welcome = await asyncio.wait_for(ws.recv(), timeout=5.0)
+            welcome_data = json.loads(welcome)
+            if debug:
+                logger.info(f"[DEBUG] Welcome: {welcome_data}")
+            
+            # Start session
+            start_msg = {
+                "type": "start_session",
+                "goal": goal,
+                "url": url,
+                "model": model,
+                "max_steps": max_steps,
+                "session_id": session_id,
+            }
+            
+            if debug:
+                logger.info(f"[DEBUG] Sending start_session: {start_msg}")
+            
+            await ws.send(json.dumps(start_msg))
+            
+            # Wait for session response
+            response = await asyncio.wait_for(ws.recv(), timeout=timeout)
+            response_data = json.loads(response)
+            
+            if debug:
+                logger.info(f"[DEBUG] Response: {response_data}")
+            
+            if response_data.get("type") == "error":
+                result["error"] = response_data.get("error", "Unknown error")
+                return result
+            
+            # Extract result
+            result["success"] = response_data.get("status") == "completed"
+            result["summary"] = response_data.get("summary", "")
+            result["steps"] = response_data.get("steps", 0)
+            result["final_url"] = response_data.get("final_url", "")
+            
+            if debug:
+                logger.info(f"[DEBUG] Result: success={result['success']}, steps={result['steps']}")
+            
+            return result
+            
+    except asyncio.TimeoutError:
+        result["error"] = f"Timeout after {timeout}s waiting for bridge server response"
+        logger.error(result["error"])
+        return result
+    except ConnectionRefusedError:
+        result["error"] = f"Cannot connect to bridge server at {ws_url}. Is it running?"
+        logger.error(result["error"])
+        return result
+    except Exception as e:
+        result["error"] = str(e)
+        logger.error(f"Extension mode error: {e}")
+        return result
+
+
+async def test_extension_mode(
+    goal: str = "Go to google.com and confirm the page loaded",
+    url: str = "https://www.google.com",
+    debug: bool = True,
+    timeout: float = 60.0,
+) -> Dict:
+    """Test extension mode end-to-end.
+    
+    This is a diagnostic function to verify extension mode works:
+    1. Check if bridge server is running
+    2. Send a simple goal
+    3. Report success/failure with detailed debug info
+    
+    Args:
+        goal: Test goal to execute
+        url: Starting URL
+        debug: Enable debug output
+        timeout: Timeout in seconds
+        
+    Returns:
+        Test result with diagnostics
+    """
+    import aiohttp
+    
+    result = {
+        "bridge_server_running": False,
+        "extension_connected": False,
+        "goal_executed": False,
+        "success": False,
+        "error": "",
+        "diagnostics": [],
+    }
+    
+    # Step 1: Check bridge server
+    logger.info("[TEST] Checking bridge server...")
+    result["diagnostics"].append("Checking bridge server on localhost:8765")
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get("http://localhost:8765/health", timeout=aiohttp.ClientTimeout(total=3)) as resp:
+                if resp.status == 200:
+                    health = await resp.json()
+                    result["bridge_server_running"] = True
+                    result["diagnostics"].append(f"✓ Bridge server running: {health}")
+                    logger.info(f"[TEST] ✓ Bridge server: {health}")
+                else:
+                    result["diagnostics"].append(f"✗ Bridge server returned {resp.status}")
+                    result["error"] = "Bridge server not healthy"
+                    return result
+    except Exception as e:
+        result["diagnostics"].append(f"✗ Cannot connect to bridge server: {e}")
+        result["error"] = f"Bridge server not reachable: {e}"
+        logger.error(f"[TEST] ✗ Bridge server: {e}")
+        return result
+    
+    # Step 2: Try to execute goal via extension
+    logger.info(f"[TEST] Executing goal: '{goal}'")
+    result["diagnostics"].append(f"Sending goal: '{goal}'")
+    
+    try:
+        exec_result = await run_browser_agent(
+            goal=goal,
+            url=url,
+            debug=debug,
+            timeout=timeout,
+        )
+        
+        result["goal_executed"] = True
+        result["success"] = exec_result.get("success", False)
+        result["steps"] = exec_result.get("steps", 0)
+        result["summary"] = exec_result.get("summary", "")
+        result["error"] = exec_result.get("error", "")
+        
+        if result["success"]:
+            result["diagnostics"].append(f"✓ Goal completed in {result['steps']} steps")
+            logger.info(f"[TEST] ✓ Goal completed: {result['summary']}")
+        else:
+            result["diagnostics"].append(f"✗ Goal failed: {result['error']}")
+            logger.warning(f"[TEST] ✗ Goal failed: {result['error']}")
+            
+    except Exception as e:
+        result["diagnostics"].append(f"✗ Execution error: {e}")
+        result["error"] = str(e)
+        logger.error(f"[TEST] ✗ Execution error: {e}")
+    
+    return result
+
+
+
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="PraisonAI Browser Server")
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
+    parser.add_argument("--port", type=int, default=8765, help="Port to listen on")
+    parser.add_argument("--model", default="gpt-4o-mini", help="LLM model")
+    parser.add_argument("--max-steps", type=int, default=20, help="Max steps per session")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
+    
+    args = parser.parse_args()
+    
+    server = BrowserServer(
+        host=args.host,
+        port=args.port,
+        model=args.model,
+        max_steps=args.max_steps,
+        verbose=args.verbose,
+    )
+    server.start()

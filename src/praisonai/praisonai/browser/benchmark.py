@@ -317,6 +317,212 @@ class BrowserBenchmark:
         self.videos_dir.mkdir(parents=True, exist_ok=True)
         self.screenshots_base = self.results_dir / "screenshots"
         self.screenshots_base.mkdir(parents=True, exist_ok=True)
+        
+        # Process references for cleanup
+        self._server_process = None
+        self._chrome_process = None
+        self._temp_profile = None
+        self._bridge_port = 8765
+    
+    async def _check_bridge_server(self) -> bool:
+        """Check if bridge server is running."""
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"http://localhost:{self._bridge_port}/health", 
+                                       timeout=aiohttp.ClientTimeout(total=2)) as resp:
+                    return resp.status == 200
+        except Exception:
+            return False
+    
+    async def _check_cdp_available(self) -> bool:
+        """Check if Chrome CDP is available."""
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"http://localhost:{self.port}/json", 
+                                       timeout=aiohttp.ClientTimeout(total=2)) as resp:
+                    if resp.status == 200:
+                        targets = await resp.json()
+                        return len(targets) > 0
+                    return False
+        except Exception:
+            return False
+    
+    async def _ensure_bridge_server(self) -> bool:
+        """Ensure bridge server is running, start if not."""
+        import subprocess
+        import sys
+        
+        if await self._check_bridge_server():
+            if self.verbose:
+                print(f"✓ Bridge server already running on port {self._bridge_port}")
+            return True
+        
+        if self.verbose:
+            print(f"Starting bridge server on port {self._bridge_port}...")
+        
+        try:
+            self._server_process = subprocess.Popen(
+                [sys.executable, "-m", "praisonai.browser.server", "--port", str(self._bridge_port)],
+                stdout=subprocess.PIPE if not self.debug else None,
+                stderr=subprocess.PIPE if not self.debug else None,
+                start_new_session=True,
+            )
+            
+            # Wait for server to start
+            for _ in range(10):
+                await asyncio.sleep(0.5)
+                if await self._check_bridge_server():
+                    if self.verbose:
+                        print("✓ Bridge server started")
+                    return True
+            
+            print("⚠️ Bridge server may not have started properly")
+            return False
+            
+        except Exception as e:
+            print(f"❌ Failed to start bridge server: {e}")
+            return False
+    
+    async def _ensure_chrome_with_extension(self) -> bool:
+        """Ensure Chrome is running with the extension loaded."""
+        import subprocess
+        import platform
+        import tempfile
+        import os
+        
+        # First check if CDP is already available with extension
+        if await self._check_cdp_available():
+            if self.verbose:
+                print(f"✓ Chrome already running with CDP on port {self.port}")
+            return True
+        
+        # Find Chrome
+        system = platform.system()
+        chrome_path = None
+        if system == "Darwin":
+            for path in ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                         "/Applications/Chromium.app/Contents/MacOS/Chromium"]:
+                if os.path.exists(path):
+                    chrome_path = path
+                    break
+        elif system == "Linux":
+            for name in ["google-chrome", "chromium", "chromium-browser"]:
+                import shutil
+                path = shutil.which(name)
+                if path:
+                    chrome_path = path
+                    break
+        
+        if not chrome_path:
+            print("❌ Chrome not found")
+            return False
+        
+        # Find extension
+        extension_path = None
+        candidates = [
+            os.path.expanduser("~/praisonai-chrome-extension/dist"),
+            str(Path(__file__).parent.parent.parent.parent.parent / "praisonai-chrome-extension" / "dist"),
+        ]
+        for cand in candidates:
+            if os.path.isdir(cand) and os.path.exists(os.path.join(cand, "manifest.json")):
+                extension_path = os.path.abspath(cand)
+                break
+        
+        if not extension_path:
+            print("❌ Extension not found. Build it with: cd ~/praisonai-chrome-extension && npm run build")
+            return False
+        
+        # Create temp profile
+        self._temp_profile = tempfile.mkdtemp(prefix="praisonai_benchmark_")
+        
+        # Build Chrome args
+        chrome_args = [
+            chrome_path,
+            f"--load-extension={extension_path}",
+            f"--user-data-dir={self._temp_profile}",
+            f"--remote-debugging-port={self.port}",
+            "--enable-extensions",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-default-apps",
+            "--disable-popup-blocking",
+            "--disable-translate",
+            "--disable-background-timer-throttling",
+            "--disable-renderer-backgrounding",
+            "https://www.google.com",
+        ]
+        
+        if self.verbose:
+            print(f"Launching Chrome with extension from {extension_path}...")
+        
+        try:
+            self._chrome_process = subprocess.Popen(
+                chrome_args,
+                stdout=subprocess.PIPE if not self.debug else None,
+                stderr=subprocess.PIPE if not self.debug else None,
+            )
+            
+            # Wait for Chrome to start
+            for _ in range(15):
+                await asyncio.sleep(0.5)
+                if await self._check_cdp_available():
+                    if self.verbose:
+                        print("✓ Chrome started with extension")
+                    return True
+            
+            print("⚠️ Chrome may not have started properly")
+            return False
+            
+        except Exception as e:
+            print(f"❌ Failed to start Chrome: {e}")
+            return False
+    
+    async def _setup_extension_mode(self) -> bool:
+        """Setup extension mode infrastructure: bridge server + Chrome with extension."""
+        if self.verbose:
+            print("\n[Extension Mode Setup]")
+        
+        # Start bridge server
+        if not await self._ensure_bridge_server():
+            return False
+        
+        # Start Chrome with extension
+        if not await self._ensure_chrome_with_extension():
+            return False
+        
+        # Wait a bit for extension to initialize
+        await asyncio.sleep(2)
+        
+        if self.verbose:
+            print("✓ Extension mode ready\n")
+        
+        return True
+    
+    def _cleanup_extension_mode(self):
+        """Cleanup extension mode processes."""
+        import shutil
+        
+        if self._chrome_process:
+            try:
+                self._chrome_process.terminate()
+                self._chrome_process.wait(timeout=5)
+            except Exception:
+                pass
+        
+        if self._server_process:
+            try:
+                self._server_process.terminate()
+                self._server_process.wait(timeout=5)
+            except Exception:
+                pass
+        
+        if self._temp_profile:
+            try:
+                shutil.rmtree(self._temp_profile, ignore_errors=True)
+            except Exception:
+                pass
     
     @staticmethod
     def load_from_csv(csv_path: str) -> List[BrowserTestCase]:
@@ -371,18 +577,38 @@ class BrowserBenchmark:
         start_time = time.perf_counter()
         
         try:
-            agent = CDPBrowserAgent(
-                port=self.port,
-                model=self.model,
-                max_steps=test_case.max_steps,
-                verbose=self.verbose,
-                max_retries=3,
-                record_session=True,
-                screenshot_dir=test_screenshots_dir,  # Enable screenshot capture
-                debug=self.debug,
-            )
-            
-            result = await agent.run(test_case.goal, test_case.url)
+            # Choose engine based on configuration
+            if self.engine in ("extension", "hybrid"):
+                # Use run_hybrid for extension/hybrid mode
+                from .cdp_agent import run_hybrid
+                if self.verbose:
+                    print(f"  Engine: {self.engine} (via run_hybrid)")
+                
+                result = await run_hybrid(
+                    goal=test_case.goal,
+                    url=test_case.url,
+                    model=self.model,
+                    max_steps=test_case.max_steps,
+                    verbose=self.verbose,
+                    prefer_extension=(self.engine == "extension"),
+                )
+            else:
+                # Use CDP agent directly for cdp mode
+                from .cdp_agent import CDPBrowserAgent
+                if self.verbose:
+                    print(f"  Engine: cdp (CDPBrowserAgent)")
+                
+                agent = CDPBrowserAgent(
+                    port=self.port,
+                    model=self.model,
+                    max_steps=test_case.max_steps,
+                    verbose=self.verbose,
+                    max_retries=3,
+                    record_session=True,
+                    screenshot_dir=test_screenshots_dir,  # Enable screenshot capture
+                    debug=self.debug,
+                )
+                result = await agent.run(test_case.goal, test_case.url)
             
             duration_ms = (time.perf_counter() - start_time) * 1000
             
@@ -440,22 +666,34 @@ class BrowserBenchmark:
         if scenarios is None:
             scenarios = BROWSER_TEST_SCENARIOS
         
+        # Setup extension mode infrastructure if needed
+        needs_extension_setup = self.engine in ("extension", "hybrid")
+        if needs_extension_setup:
+            if not await self._setup_extension_mode():
+                print("❌ Failed to setup extension mode, falling back to CDP")
+                self.engine = "cdp"
+        
         report = BrowserBenchmarkReport(
             timestamp=datetime.now().isoformat(),
             engine=self.engine,
         )
         
-        for idx, test_case in enumerate(scenarios):
-            result = await self.run_single_test(test_case, test_index=idx)
-            report.results.append(result)
+        try:
+            for idx, test_case in enumerate(scenarios):
+                result = await self.run_single_test(test_case, test_index=idx)
+                report.results.append(result)
+                
+                # Brief pause between tests
+                await asyncio.sleep(1)
             
-            # Brief pause between tests
-            await asyncio.sleep(1)
-        
-        report.compute_stats()
-        
-        # Save results
-        self._save_report(report)
+            report.compute_stats()
+            
+            # Save results
+            self._save_report(report)
+        finally:
+            # Cleanup if we started extension infrastructure
+            if needs_extension_setup:
+                self._cleanup_extension_mode()
         
         return report
     
@@ -589,6 +827,7 @@ def add_benchmark_commands(app):
         output: Optional[str] = typer.Option(None, "--output", "-o", help="Save JSON to file"),
         no_screenshots: bool = typer.Option(False, "--no-screenshots", help="Disable screenshot capture"),
         debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode with detailed logging"),
+        record_video: bool = typer.Option(False, "--record-video", help="Create video from screenshots after benchmark"),
     ):
         """Run browser automation benchmark suite.
         
