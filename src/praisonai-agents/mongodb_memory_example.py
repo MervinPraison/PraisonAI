@@ -94,7 +94,7 @@ def main():
     research_system = Agents(
         agents=[research_agent],
         tasks=research_tasks,
-        memory=mongodb_memory_config,
+        memory=True,  # Use default memory instead of mongodb config (requires proper MemoryConfig)
         output="verbose"
     )
     

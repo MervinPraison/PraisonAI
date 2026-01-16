@@ -26,7 +26,6 @@ agent = DeepResearchAgent(
     - Clear structure with executive summary
     """,
     model="deep-research-pro",  # Auto-detected as Gemini
-    output="verbose",
 )
 
 print(f"Agent: {agent}")

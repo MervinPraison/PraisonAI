@@ -3,6 +3,9 @@
 Agent-level guardrails example.
 This example demonstrates how to use guardrails at the Agent level
 which will apply to all tasks executed by that agent.
+
+Note: Agent guardrails only support function-based validation or preset strings
+(permissive, safety, strict). For LLM-based guardrails, use Task guardrails.
 """
 from typing import Tuple, Any
 from praisonaiagents import Agent, TaskOutput
@@ -38,10 +41,10 @@ def validate_professional_tone(task_output: TaskOutput) -> Tuple[bool, Any]:
 
 
 def main():
-    """Demonstrate Agent-level guardrails with function-based and LLM-based validation."""
+    """Demonstrate Agent-level guardrails with function-based validation."""
     print("=== Agent Guardrail Examples ===\n")
     
-    # Example 1: Function-based guardrail
+    # Example 1: Function-based guardrail for content length
     print("1. Function-based guardrail (content length validation):")
     agent1 = Agent(
         name="ContentWriter",
@@ -54,12 +57,12 @@ def main():
     except Exception as e:
         print(f"Error: {e}\n")
     
-    # Example 2: LLM-based guardrail (string description)
-    print("2. LLM-based guardrail (professional tone validation):")
+    # Example 2: Function-based guardrail for professional tone
+    print("2. Function-based guardrail (professional tone validation):")
     agent2 = Agent(
         name="BusinessWriter", 
-        instructions="You are a business communication expert",
-        guardrails="Ensure the content is professional, formal, and suitable for business communication. No casual language or slang."
+        instructions="You are a business communication expert. Write formal, professional content.",
+        guardrails=validate_professional_tone
     )
     try:
         result2 = agent2.start("Write a welcome message for new employees")
@@ -67,20 +70,22 @@ def main():
     except Exception as e:
         print(f"Error: {e}\n")
     
-    # Example 3: Multiple agents with different guardrails
-    print("3. Professional tone function-based guardrail:")
+    # Example 3: Using preset guardrails (built-in options)
+    print("3. Using preset guardrail ('safety'):")
     agent3 = Agent(
-        name="ProfessionalWriter",
-        instructions="Write professional business content",
-        guardrails=validate_professional_tone
+        name="SafeWriter",
+        instructions="Write helpful content",
+        guardrails="safety"  # Valid presets: permissive, safety, strict
     )
     try:
-        result3 = agent3.start("Write a casual greeting message")
+        result3 = agent3.start("Write a friendly greeting message")
         print(f"Result: {result3}\n")
     except Exception as e:
         print(f"Error: {e}\n")
     
     print("=== Agent Guardrails Demonstration Complete ===")
+    print("\nNote: For LLM-based guardrails with custom descriptions,")
+    print("use Task-level guardrails instead of Agent-level guardrails.")
 
 
 if __name__ == "__main__":

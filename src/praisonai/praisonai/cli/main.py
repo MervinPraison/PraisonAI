@@ -2880,7 +2880,8 @@ class PraisonAI:
             action_args: Additional arguments for the action
         """
         # Code validation commands - delegate to typer app
-        code_validation_actions = {'run', 'run-all', 'stats', 'report', 'generate', 'serve'}
+        # Also handle 'cli' subcommand group for CLI validation
+        code_validation_actions = {'run', 'run-all', 'stats', 'report', 'generate', 'serve', 'cli'}
         if action in code_validation_actions:
             from praisonai.cli.commands.docs import app as docs_app
             import typer
@@ -2888,8 +2889,8 @@ class PraisonAI:
             typer_args = [action] + action_args
             try:
                 typer.main.get_command(docs_app)(typer_args)
-            except SystemExit:
-                pass  # typer raises SystemExit on completion
+            except SystemExit as e:
+                sys.exit(e.code if e.code is not None else 0)
             return
         
         try:

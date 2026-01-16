@@ -25,7 +25,6 @@ agent = DeepResearchAgent(
     - Clear, structured responses
     """,
     model="o4-mini-deep-research",  # or "o3-deep-research" for higher quality
-    output="verbose"
 )
 
 print(f"Agent: {agent}")
