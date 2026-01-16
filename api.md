@@ -148,6 +148,10 @@ Methods:
 * <code title="cli">praisonai agents info <a href="./src/praisonai/praisonai/cli/commands/agents.py">--help</a></code>
 * <code title="cli">praisonai agents list <a href="./src/praisonai/praisonai/cli/commands/agents.py">--help</a></code>
 * <code title="cli">praisonai audit agent-centric <a href="./src/praisonai/praisonai/cli/commands/audit.py">--help</a></code>
+* <code title="cli">praisonai batch batch-run <a href="./src/praisonai/praisonai/cli/commands/batch.py">--help</a></code>
+* <code title="cli">praisonai batch list <a href="./src/praisonai/praisonai/cli/commands/batch.py">--help</a></code>
+* <code title="cli">praisonai batch report <a href="./src/praisonai/praisonai/cli/commands/batch.py">--help</a></code>
+* <code title="cli">praisonai batch stats <a href="./src/praisonai/praisonai/cli/commands/batch.py">--help</a></code>
 * <code title="cli">praisonai benchmark agent <a href="./src/praisonai/praisonai/cli/commands/benchmark.py">--help</a></code>
 * <code title="cli">praisonai benchmark benchmark-callback <a href="./src/praisonai/praisonai/cli/commands/benchmark.py">--help</a></code>
 * <code title="cli">praisonai benchmark cli <a href="./src/praisonai/praisonai/cli/commands/benchmark.py">--help</a></code>
