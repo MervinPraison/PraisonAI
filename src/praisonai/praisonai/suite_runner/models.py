@@ -59,6 +59,9 @@ class RunItem:
     uses_agents: bool = False  # Agents() / PraisonAIAgents class
     uses_workflow: bool = False  # Workflow class
     
+    # Server detection
+    is_server: bool = False  # Contains server code (uvicorn, Flask, streamlit, etc.)
+    
     @property
     def agent_type(self) -> str:
         """Get agent type used in this item."""
