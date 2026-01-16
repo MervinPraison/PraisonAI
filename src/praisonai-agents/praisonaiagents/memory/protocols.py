@@ -139,6 +139,77 @@ class ResettableMemoryProtocol(MemoryProtocol, Protocol):
 
 
 @runtime_checkable
+class DeletableMemoryProtocol(MemoryProtocol, Protocol):
+    """
+    Protocol for memory that supports selective deletion.
+    
+    Enables removing specific memories by ID without clearing all data.
+    Essential for:
+    - Privacy compliance (GDPR right to erasure)
+    - Context window management (removing large image-based memories)
+    - Correcting outdated information
+    
+    Example:
+        ```python
+        class MyMemory:
+            def delete_memory(self, memory_id: str) -> bool:
+                if memory_id in self._store:
+                    del self._store[memory_id]
+                    return True
+                return False
+            
+            def delete_memories(self, memory_ids: List[str]) -> int:
+                count = 0
+                for mid in memory_ids:
+                    if self.delete_memory(mid):
+                        count += 1
+                return count
+        ```
+    """
+    
+    def delete_memory(self, memory_id: str, memory_type: Optional[str] = None) -> bool:
+        """
+        Delete a specific memory by ID.
+        
+        Args:
+            memory_id: The unique identifier of the memory to delete
+            memory_type: Optional type hint (short_term, long_term, entity)
+                        If None, searches all types.
+            
+        Returns:
+            True if memory was found and deleted, False otherwise
+        """
+        ...
+    
+    def delete_memories(self, memory_ids: List[str]) -> int:
+        """
+        Delete multiple memories by their IDs.
+        
+        Args:
+            memory_ids: List of memory IDs to delete
+            
+        Returns:
+            Number of memories successfully deleted
+        """
+        ...
+
+
+@runtime_checkable
+class AsyncDeletableMemoryProtocol(Protocol):
+    """
+    Async Protocol for memory deletion operations.
+    """
+    
+    async def adelete_memory(self, memory_id: str, memory_type: Optional[str] = None) -> bool:
+        """Async delete a specific memory by ID."""
+        ...
+    
+    async def adelete_memories(self, memory_ids: List[str]) -> int:
+        """Async delete multiple memories by their IDs."""
+        ...
+
+
+@runtime_checkable
 class AsyncMemoryProtocol(Protocol):
     """
     Async Protocol for memory implementations.
@@ -207,6 +278,9 @@ class EntityMemoryProtocol(Protocol):
 __all__ = [
     'MemoryProtocol',
     'ResettableMemoryProtocol',
+    'DeletableMemoryProtocol',
+    'AsyncDeletableMemoryProtocol',
     'AsyncMemoryProtocol',
     'EntityMemoryProtocol',
 ]
+

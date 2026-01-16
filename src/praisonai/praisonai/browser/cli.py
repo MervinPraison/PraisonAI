@@ -238,9 +238,13 @@ def _run_alternative_engine(
     enable_vision: bool = False,
     screenshot_dir: Optional[str] = None,
     record_session: bool = True,
+    record_video: bool = False,
+    debug: bool = False,
 ):
     """Run browser automation using alternative engines (CDP, Playwright, or Hybrid)."""
     import asyncio
+    from pathlib import Path
+    from datetime import datetime
     
     console.print(f"[bold blue]🚀 Starting browser agent ({engine} mode)[/bold blue]")
     console.print(f"   Goal: {goal}")
@@ -248,8 +252,15 @@ def _run_alternative_engine(
     console.print(f"   Model: {model}")
     if enable_vision:
         console.print(f"   [cyan]Vision mode: ON[/cyan]")
-    if screenshot_dir:
-        console.print(f"   [dim]Screenshots: {screenshot_dir}[/dim]")
+    
+    # Auto-create screenshot dir when record_video is enabled
+    actual_screenshot_dir = screenshot_dir
+    if record_video and not actual_screenshot_dir:
+        actual_screenshot_dir = str(Path.home() / ".praisonai" / "browser_screenshots" / datetime.now().strftime("%Y%m%d_%H%M%S"))
+        Path(actual_screenshot_dir).mkdir(parents=True, exist_ok=True)
+        console.print(f"   [green]📹 Recording to: {actual_screenshot_dir}[/green]")
+    elif actual_screenshot_dir:
+        console.print(f"   [dim]Screenshots: {actual_screenshot_dir}[/dim]")
     console.print()
     
     async def run():
@@ -281,11 +292,12 @@ def _run_alternative_engine(
                 url=url,
                 model=model,
                 max_steps=max_steps,
-                verbose=verbose,
+                verbose=verbose or debug,
                 max_retries=max_retries,
-                enable_vision=enable_vision,
+                enable_vision=enable_vision or record_video,
                 record_session=record_session,
-                screenshot_dir=screenshot_dir,
+                screenshot_dir=actual_screenshot_dir,
+                debug=debug,
             )
             
         elif engine == "playwright":
@@ -346,6 +358,7 @@ def run_agent(
     enable_vision: bool = typer.Option(False, "--vision", help="Enable vision-based element detection"),
     screenshot_dir: str = typer.Option(None, "--screenshots", help="Directory to save step screenshots"),
     record: bool = typer.Option(True, "--record/--no-record", help="Record session to database"),
+    record_video: bool = typer.Option(False, "--record-video", help="Record video of browser session (creates GIF)"),
 ):
     """Run browser agent with a goal.
     
@@ -393,6 +406,8 @@ def run_agent(
             enable_vision=enable_vision,
             screenshot_dir=screenshot_dir,
             record_session=record,
+            record_video=record_video,
+            debug=debug,
         )
         return
     
@@ -1803,6 +1818,83 @@ def doctor_extension(
         raise typer.Exit(1)
 
 
+@doctor_app.command("test-extension")
+def doctor_test_extension(
+    goal: str = typer.Option("Go to google.com and confirm the page loaded", "--goal", "-g", help="Test goal to execute"),
+    url: str = typer.Option("https://www.google.com", "--url", "-u", help="Starting URL"),
+    timeout: int = typer.Option(60, "--timeout", "-t", help="Timeout in seconds"),
+    debug: bool = typer.Option(True, "--debug/--no-debug", help="Enable debug output"),
+):
+    """Test extension mode end-to-end.
+    
+    This command verifies that extension mode works:
+    1. Check if bridge server is running
+    2. Send a test goal via WebSocket
+    3. Report success/failure with diagnostics
+    
+    Examples:
+        praisonai browser doctor test-extension
+        praisonai browser doctor test-extension --goal "Search for AI"
+        praisonai browser doctor test-extension --timeout 30
+    """
+    import asyncio
+    from rich.table import Table
+    
+    console.print("[bold]Extension Mode Test[/bold]\n")
+    
+    async def run_test():
+        from .server import test_extension_mode
+        return await test_extension_mode(
+            goal=goal,
+            url=url,
+            debug=debug,
+            timeout=float(timeout),
+        )
+    
+    try:
+        result = asyncio.run(run_test())
+        
+        # Display diagnostics
+        console.print("[dim]Diagnostics:[/dim]")
+        for diag in result.get("diagnostics", []):
+            console.print(f"  {diag}")
+        console.print()
+        
+        # Summary table
+        table = Table(show_header=False)
+        table.add_column("Check", style="cyan")
+        table.add_column("Status")
+        
+        table.add_row("Bridge Server", "✅ Running" if result.get("bridge_server_running") else "❌ Not running")
+        table.add_row("Goal Executed", "✅ Yes" if result.get("goal_executed") else "❌ No")
+        table.add_row("Success", "✅ Yes" if result.get("success") else "❌ No")
+        
+        if result.get("steps"):
+            table.add_row("Steps", str(result.get("steps")))
+        
+        console.print(table)
+        
+        if result.get("error"):
+            console.print(f"\n[red]Error:[/red] {result['error']}")
+        
+        if result.get("summary"):
+            console.print(f"\n[green]Summary:[/green] {result['summary']}")
+        
+        if result.get("success"):
+            console.print("\n[green]✅ Extension mode is working![/green]")
+        else:
+            console.print("\n[yellow]⚠️ Extension mode test failed[/yellow]")
+            console.print("Make sure:")
+            console.print("  1. Bridge server is running: praisonai browser start")
+            console.print("  2. Chrome extension is loaded")
+            console.print("  3. Side panel is open in Chrome")
+            raise typer.Exit(1)
+            
+    except Exception as e:
+        console.print(f"[red]❌ Test failed:[/red] {e}")
+        raise typer.Exit(1)
+
+
 @doctor_app.command("db")
 def doctor_db():
     """Check session database status."""
@@ -1896,8 +1988,11 @@ def launch_browser(
     server_port: int = typer.Option(8765, "--server-port", help="Bridge server port"),
     headless: bool = typer.Option(False, "--headless", help="Run headless"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging"),
-    debug: bool = typer.Option(False, "--debug", "-d", help="Debug mode"),
+    debug: bool = typer.Option(False, "--debug", "-d", help="Debug mode with detailed logging"),
     no_server: bool = typer.Option(False, "--no-server", help="Don't start bridge server"),
+    record_video: bool = typer.Option(False, "--record-video", help="Record video of browser session"),
+    screenshot: bool = typer.Option(False, "--screenshot", help="Capture screenshots per step"),
+    log_file: Optional[str] = typer.Option(None, "--log-file", help="Save debug logs to file (auto-generated if --debug without path)"),
 ):
     """Launch Chrome with extension and optionally run a goal.
     
@@ -1923,7 +2018,44 @@ def launch_browser(
     import time
     import asyncio
     import os
+    import logging
     from pathlib import Path
+    from datetime import datetime
+    
+    # Setup logging for debug mode
+    log_dir = Path.home() / ".praisonai" / "browser_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Setup screenshot directory if enabled
+    screenshot_dir = None
+    if screenshot or debug:
+        screenshot_dir = Path.home() / ".praisonai" / "browser_screenshots" / datetime.now().strftime("%Y%m%d_%H%M%S")
+        screenshot_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Setup log file
+    actual_log_file = None
+    if debug:
+        if log_file:
+            actual_log_file = Path(log_file)
+        else:
+            actual_log_file = log_dir / f"launch_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        
+        # Configure logging to file and console
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(actual_log_file),
+                logging.StreamHandler(),
+            ]
+        )
+        logging.getLogger("praisonai.browser.cdp_agent").setLevel(logging.DEBUG)
+        logging.getLogger("praisonai.browser.agent").setLevel(logging.DEBUG)
+        console.print(f"[cyan]Debug logging enabled[/cyan]")
+        console.print(f"   Log file: {actual_log_file}")
+        if screenshot_dir:
+            console.print(f"   Screenshots: {screenshot_dir}")
+        console.print()
     
     # Find Chrome executable
     system = platform.system()
@@ -2068,9 +2200,43 @@ def launch_browser(
         except Exception:
             return False
     
-    if asyncio.run(check_chrome()):
+    # Verify extension is loaded by checking chrome://extensions page
+    async def verify_extension_loaded():
+        """Verify extension loaded by checking for extension pages in CDP targets."""
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"http://localhost:{port}/json/list", timeout=aiohttp.ClientTimeout(total=3)) as resp:
+                    if resp.status == 200:
+                        targets = await resp.json()
+                        # Look for extension-related targets
+                        for target in targets:
+                            target_url = target.get("url", "")
+                            target_title = target.get("title", "")
+                            if "chrome-extension://" in target_url or "PraisonAI" in target_title:
+                                return True, target_url
+                        # Extension may be loaded but no visible targets yet
+                        return True, None
+        except Exception as e:
+            if debug:
+                logging.debug(f"Extension verification error: {e}")
+            return False, str(e)
+        return False, "No extension targets found"
+    
+    chrome_ok = asyncio.run(check_chrome())
+    if chrome_ok:
         console.print(f"[green]✓ Chrome started with debug port {port}[/green]")
-        console.print(f"[green]✓ Extension loaded via --load-extension[/green]")
+        
+        # Verify extension
+        ext_loaded, ext_info = asyncio.run(verify_extension_loaded())
+        if ext_loaded:
+            console.print("[green]✓ Extension loaded via --load-extension[/green]")
+            if ext_info and debug:
+                console.print(f"   Extension URL: {ext_info}")
+        else:
+            console.print("[yellow]⚠️ Extension may not have loaded properly[/yellow]")
+            if debug and ext_info:
+                console.print(f"   Details: {ext_info}")
     else:
         console.print("[yellow]⚠️ Chrome may not have started properly[/yellow]")
     
@@ -2083,6 +2249,15 @@ def launch_browser(
         try:
             from .cdp_agent import run_cdp_only
             
+            # Enable vision mode for dynamic screenshot analysis when recording or debug
+            enable_vision = record_video or debug
+            
+            # Force screenshot capture if recording video
+            if record_video and not screenshot_dir:
+                screenshot_dir = Path.home() / ".praisonai" / "browser_screenshots" / datetime.now().strftime("%Y%m%d_%H%M%S")
+                screenshot_dir.mkdir(parents=True, exist_ok=True)
+                console.print(f"[cyan]Recording screenshots to: {screenshot_dir}[/cyan]")
+            
             async def run_goal():
                 result = await run_cdp_only(
                     goal=goal,
@@ -2090,12 +2265,38 @@ def launch_browser(
                     model=model,
                     port=port,
                     max_steps=max_steps,
-                    verbose=verbose,
+                    verbose=verbose or debug,
                     debug=debug,
+                    screenshot_dir=str(screenshot_dir) if screenshot_dir else None,
+                    enable_vision=enable_vision,  # Dynamic screenshot analysis
+                    record_video=record_video,  # Real-time WebM video recording
                 )
                 return result
             
             result = asyncio.run(run_goal())
+            
+            # Check for video output - prefer WebM from CDP screencast over GIF fallback
+            if record_video and screenshot_dir:
+                webm_path = Path(screenshot_dir) / "recording.webm"
+                gif_path = Path(screenshot_dir) / "recording.gif"
+                
+                # Check if WebM was created by CDP screencast (real video)
+                if webm_path.exists():
+                    console.print(f"[green]📹 Video recording saved: {webm_path}[/green]")
+                else:
+                    # Fallback: create GIF from screenshots
+                    try:
+                        from .video import create_video_from_screenshots, check_ffmpeg_available
+                        if not check_ffmpeg_available():
+                            console.print("[yellow]FFmpeg not installed - creating GIF fallback[/yellow]")
+                        video_path = create_video_from_screenshots(str(screenshot_dir))
+                        if video_path:
+                            console.print(f"[green]📹 Video recording saved: {video_path}[/green]")
+                        else:
+                            console.print(f"[yellow]Screenshots saved to: {screenshot_dir}[/yellow]")
+                    except Exception as e:
+                        console.print(f"[yellow]Video creation failed: {e}[/yellow]")
+                        console.print(f"[dim]Screenshots saved to: {screenshot_dir}[/dim]")
             
             if result.get("success"):
                 console.print(f"\n[green]✅ Task completed in {result.get('steps', '?')} steps[/green]")
@@ -2136,45 +2337,126 @@ def launch_browser(
         
         console.print("[green]Done[/green]")
     else:
-        # No goal - just keep Chrome running
+        # No goal - run interactive chat mode
         console.print()
         console.print("[bold green]Chrome is ready![/bold green]")
         console.print()
-        console.print("The extension is loaded. You can now:")
-        console.print("  1. Open the PraisonAI side panel in Chrome")
-        console.print("  2. Run browser commands:")
-        console.print(f"     praisonai browser run \"your goal\" --engine cdp -p {port}")
+        console.print("[bold]Interactive Browser Mode[/bold]")
+        console.print("Type goals to execute (or 'exit', 'quit', 'q' to stop)")
         console.print()
-        console.print("[dim]Press Ctrl+C to stop Chrome and cleanup[/dim]")
         
+        # Interactive chat loop
+        goal_count = 0
+        while True:
+            try:
+                # Prompt for goal
+                goal_input = console.input("[bold cyan]Goal> [/bold cyan]")
+                goal_input = goal_input.strip()
+                
+                # Exit commands
+                if goal_input.lower() in ("exit", "quit", "q", ""):
+                    if goal_input == "":
+                        continue  # Empty input, keep waiting
+                    console.print("\n[yellow]Exiting...[/yellow]")
+                    break
+                
+                # Help command
+                if goal_input.lower() in ("help", "?"):
+                    console.print()
+                    console.print("[bold]Commands:[/bold]")
+                    console.print("  [cyan]<goal>[/cyan]  - Execute a browser goal")
+                    console.print("  [cyan]exit[/cyan]   - Stop and cleanup")
+                    console.print("  [cyan]help[/cyan]   - Show this help")
+                    console.print()
+                    console.print("[bold]Example goals:[/bold]")
+                    console.print('  "Search for PraisonAI on Google"')
+                    console.print('  "Click the first result"')
+                    console.print('  "Go to wikipedia.org"')
+                    console.print()
+                    continue
+                
+                # Execute goal
+                goal_count += 1
+                console.print(f"\n[dim]Executing goal #{goal_count}...[/dim]\n")
+                
+                try:
+                    from .cdp_agent import run_cdp_only
+                    
+                    # Setup screenshot dir for this goal if recording
+                    goal_screenshot_dir = None
+                    if record_video or screenshot:
+                        goal_screenshot_dir = Path.home() / ".praisonai" / "browser_screenshots" / f"goal_{goal_count}_{datetime.now().strftime('%H%M%S')}"
+                        goal_screenshot_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    async def run_goal():
+                        return await run_cdp_only(
+                            goal=goal_input,
+                            url=None,  # Use current page
+                            model=model,
+                            port=port,
+                            max_steps=max_steps,
+                            verbose=verbose or debug,
+                            debug=debug,
+                            screenshot_dir=str(goal_screenshot_dir) if goal_screenshot_dir else None,
+                            enable_vision=debug or record_video,
+                        )
+                    
+                    result = asyncio.run(run_goal())
+                    
+                    # Create video if recording
+                    if record_video and goal_screenshot_dir:
+                        try:
+                            from .video import create_video_from_screenshots
+                            video_path = create_video_from_screenshots(str(goal_screenshot_dir))
+                            if video_path:
+                                console.print(f"[green]📹 Video: {video_path}[/green]")
+                        except Exception as e:
+                            if debug:
+                                console.print(f"[dim]Video creation failed: {e}[/dim]")
+                    
+                    # Show result
+                    if result.get("success"):
+                        console.print(f"[green]✅ Done in {result.get('steps', '?')} steps[/green]")
+                        if result.get("summary"):
+                            console.print(f"   {result['summary'][:100]}")
+                    else:
+                        console.print(f"[red]❌ Failed: {result.get('error', 'Unknown')[:80]}[/red]")
+                    
+                    console.print()
+                    
+                except Exception as e:
+                    console.print(f"[red]Error: {e}[/red]\n")
+                
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Interrupted. Type 'exit' to quit.[/yellow]\n")
+            except EOFError:
+                break
+        
+        # Cleanup
+        console.print("\n[dim]Cleaning up...[/dim]")
         try:
-            # Wait for user to stop
-            chrome_process.wait()
-        except KeyboardInterrupt:
-            console.print("\n[yellow]Stopping...[/yellow]")
+            chrome_process.terminate()
+            chrome_process.wait(timeout=5)
+        except Exception:
             try:
-                chrome_process.terminate()
-                chrome_process.wait(timeout=5)
-            except Exception:
-                try:
-                    chrome_process.kill()
-                except Exception:
-                    pass
-            
-            if server_process:
-                try:
-                    server_process.terminate()
-                    server_process.wait(timeout=5)
-                except Exception:
-                    pass
-            
-            # Clean temp profile
-            try:
-                shutil.rmtree(temp_profile)
+                chrome_process.kill()
             except Exception:
                 pass
-            
-            console.print("[green]Cleanup complete[/green]")
+        
+        if server_process:
+            try:
+                server_process.terminate()
+                server_process.wait(timeout=5)
+            except Exception:
+                pass
+        
+        # Clean temp profile
+        try:
+            shutil.rmtree(temp_profile)
+        except Exception:
+            pass
+        
+        console.print(f"[green]Completed {goal_count} goal(s)[/green]")
 
 
 # Register benchmark commands

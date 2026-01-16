@@ -247,3 +247,102 @@ class TestBrowserAgentAsync:
             
             assert action["action"] == "click"
             mock_process.assert_called_once_with(observation)
+
+
+class TestConsentDialogHandling:
+    """Tests for cookie consent dialog detection and handling."""
+    
+    def test_build_prompt_with_overlay_info(self):
+        """Test that overlay info is included in prompt when detected."""
+        agent = BrowserAgent()
+        
+        observation = {
+            "task": "Search for AI on Google",
+            "url": "https://google.com",
+            "title": "Google",
+            "step_number": 1,
+            "elements": [
+                {"selector": "button.accept", "tag": "button", "text": "Accept all", "type": "consent_button"},
+                {"selector": "#search", "tag": "input", "text": ""},
+            ],
+            "overlay_info": {
+                "detected": True,
+                "type": "consent_dialog",
+                "selector": '[role="dialog"]',
+            },
+        }
+        
+        prompt = agent._build_prompt(observation)
+        
+        # Should contain overlay warning
+        assert "COOKIE CONSENT" in prompt or "OVERLAY" in prompt
+        assert "consent_dialog" in prompt or "consent" in prompt.lower()
+    
+    def test_build_prompt_with_action_history(self):
+        """Test that action history is included in prompt."""
+        agent = BrowserAgent()
+        
+        observation = {
+            "task": "Test",
+            "url": "https://test.com",
+            "title": "Test",
+            "step_number": 3,
+            "elements": [],
+            "action_history": [
+                {"action": "navigate", "selector": "", "success": True},
+                {"action": "click", "selector": "#btn", "success": False},
+            ],
+        }
+        
+        prompt = agent._build_prompt(observation)
+        
+        # Should contain action history section
+        assert "Recent Actions" in prompt
+        assert "navigate" in prompt
+        assert "click" in prompt
+    
+    def test_build_prompt_with_consent_elements_first(self):
+        """Test that consent elements are highlighted when present."""
+        agent = BrowserAgent()
+        
+        observation = {
+            "task": "Test",
+            "url": "https://google.com",
+            "title": "Google",
+            "step_number": 1,
+            "elements": [
+                {"selector": "[jsname='abc']", "tag": "button", "text": "Accept all", "type": "consent_button", "isConsentButton": True},
+                {"selector": "#search", "tag": "input", "text": "", "type": ""},
+            ],
+            "overlay_info": {"detected": True, "type": "consent_dialog"},
+        }
+        
+        prompt = agent._build_prompt(observation)
+        
+        # Should show consent dialog detected prominently
+        assert "🚨" in prompt or "COOKIE" in prompt or "CONSENT" in prompt
+    
+    def test_system_prompt_contains_consent_instructions(self):
+        """Test that system prompt includes consent handling instructions."""
+        assert "consent" in BROWSER_AGENT_SYSTEM_PROMPT.lower() or "cookie" in BROWSER_AGENT_SYSTEM_PROMPT.lower()
+        assert "Accept" in BROWSER_AGENT_SYSTEM_PROMPT or "accept" in BROWSER_AGENT_SYSTEM_PROMPT.lower()
+        assert "overlay" in BROWSER_AGENT_SYSTEM_PROMPT.lower() or "dialog" in BROWSER_AGENT_SYSTEM_PROMPT.lower()
+    
+    def test_build_prompt_with_last_action_error(self):
+        """Test that last action error is shown prominently."""
+        agent = BrowserAgent()
+        
+        observation = {
+            "task": "Test",
+            "url": "https://test.com",
+            "title": "Test",
+            "step_number": 2,
+            "elements": [],
+            "last_action_error": "Element not found: #missing-button",
+        }
+        
+        prompt = agent._build_prompt(observation)
+        
+        # Should contain the error prominently
+        assert "Element not found" in prompt or "FAILED" in prompt
+
