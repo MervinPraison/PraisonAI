@@ -60,7 +60,7 @@ def test_agent_streaming_setup():
             instructions="Test agent",
             llm="test/model",  # Mock model that won't make real API calls
             stream=True,
-            verbose=False
+            output="silent"
         )
         
         print("✅ Agent creation successful")

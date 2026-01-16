@@ -11,7 +11,7 @@ agent1 = Agent(
     name="Assistant",
     llm="gpt-4o-mini",
     planning=True,
-    verbose=False
+    output="silent"
 )
 result1 = agent1.start("Write 2 sentences about AI in healthcare")
 print(f"\nResult: {result1[:200]}...")
@@ -25,7 +25,7 @@ agent2 = Agent(
     llm="gpt-4o-mini",
     planning=True,
     planning_tools=[search_web],
-    verbose=False
+    output="silent"
 )
 result2 = agent2.start("Write 2 sentences about AI trends")
 print(f"\nResult: {result2[:200]}...")
@@ -40,7 +40,7 @@ agent3 = Agent(
     planning=True,
     planning_tools=[search_web],
     planning_reasoning=True,
-    verbose=False
+    output="silent"
 )
 result3 = agent3.start("Write 2 sentences about AI trends")
 print(f"\nResult: {result3[:200]}...")
@@ -52,7 +52,7 @@ print("=" * 60)
 agent4 = Agent(
     name="Assistant",
     llm="gpt-4o-mini",
-    verbose=False
+    output="silent"
 )
 result4 = agent4.start("Write 2 sentences about AI trends")
 print(f"\nResult: {result4[:200]}...")

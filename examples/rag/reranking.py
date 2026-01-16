@@ -131,7 +131,7 @@ def rag_with_reranking():
         
         RESEARCH PAPERS:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     queries = [
@@ -170,7 +170,7 @@ def compare_with_without_reranking():
         
         RESEARCH PAPERS:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     print(f"\n📝 Query: {query}")
@@ -196,7 +196,7 @@ def reranking_configuration():
     agent = Agent(
         name="My Agent",
         knowledge=documents,
-        knowledge_config={
+        knowledge={
             # Enable reranking
             "rerank": True,
             

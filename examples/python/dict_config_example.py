@@ -16,7 +16,7 @@ def example_dict_output_config():
     """Example: Using dict for output configuration."""
     from praisonaiagents import Agent
     
-    # Dict shorthand - equivalent to OutputConfig(verbose=True, stream=False)
+    # Dict shorthand - equivalent to OutputConfig(output="verbose", stream=False)
     agent = Agent(
         name="Assistant",
         instructions="You are a helpful assistant.",

@@ -105,7 +105,7 @@ def example_agent_with_default_tools():
         name="InteractiveAgent",
         instructions="You are a helpful coding assistant with file and code analysis capabilities.",
         tools=tools,
-        verbose=False
+        output="silent"
     )
     
     print(f"Agent created with {len(tools)} tools")

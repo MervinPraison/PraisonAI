@@ -13,7 +13,7 @@ def main():
     # Initialize the agent
     agent = QueryRewriterAgent(
         model="gpt-4o-mini",
-        verbose=True
+        output="verbose"
     )
     
     print("=" * 60)

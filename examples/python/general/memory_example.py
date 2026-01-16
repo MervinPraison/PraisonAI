@@ -104,11 +104,13 @@ def main():
     agents = Agents(
         agents=[researcher, retriever],
         tasks=[store_task, verify_task, query_task, query_both_task],  # Use same verbose level as memory
-        memory=True,
-        embedder={
-            "provider": "openai",
-            "config": {
-                "model": "text-embedding-3-small"
+        memory={
+            "provider": "rag",
+            "embedder": {
+                "provider": "openai",
+                "config": {
+                    "model": "text-embedding-3-small"
+                }
             }
         }
     )

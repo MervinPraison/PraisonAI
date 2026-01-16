@@ -143,7 +143,7 @@ def simulate_complex_workflow():
             agents=[planner, executor, reviewer],
             tasks=[planning_task, execution_task, review_task],
             process="sequential",
-            verbose=False
+            output="silent"
         )
         
         result = workflow.start()

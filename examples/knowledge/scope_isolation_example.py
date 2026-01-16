@@ -50,7 +50,7 @@ Only authorized personnel with code WRENCH-992 may access this project.
             instructions="You ingest and store knowledge.",
             knowledge=[temp_dir],
             user_id="user_alice",  # Scoped to Alice
-            verbose=False,
+            output="silent",
         )
         
         # Ensure knowledge is processed
@@ -104,7 +104,7 @@ Only authorized personnel with code WRENCH-992 may access this project.
             instructions="Answer questions based on the provided knowledge. If you don't have the information, say so.",
             knowledge=[temp_dir],
             user_id="user_alice",  # Same scope as Agent A
-            verbose=False,
+            output="silent",
         )
         
         response = agent_b.chat("What is the secret access code for Project PHOENIX?")

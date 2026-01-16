@@ -7,15 +7,14 @@ will be automatically displayed when tasks complete!
 from praisonaiagents import Agents, Agent, Task
 
 def main():
-    # Create a simple agent with metrics=True - that's it!
+    # Create a simple agent with output="debug" - includes metrics!
     research_agent = Agent(
         name="Research Agent",
         role="Research Specialist", 
         goal="Find information about a topic",
         backstory="You are an expert researcher who finds comprehensive information.",
-        output="verbose",
+        output="debug",  # 🎯 SIMPLIFIED: debug preset includes metrics!
         llm="gpt-4o-mini",  # Use a cost-effective model for examples
-        metrics=True  # 🎯 SIMPLIFIED: Just add this parameter!
     )
     
     # Create a simple task

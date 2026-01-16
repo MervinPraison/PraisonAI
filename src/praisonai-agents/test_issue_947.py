@@ -23,7 +23,7 @@ article_agent = Agent(
     goal="Fetch the user's favorite morning article",
     tools=[fetch_favorite_article],
     llm="gemini/gemini-2.5-flash-lite-preview-06-17",
-    verbose=True
+    output="verbose"
 )
 
 news_agent = Agent(
@@ -32,7 +32,7 @@ news_agent = Agent(
     goal="Search for trending news in Kenya",
     tools=[search_trending_kenya],
     llm="gemini/gemini-2.5-flash-lite-preview-06-17",
-    verbose=True
+    output="verbose"
 )
 
 twitter_agent = Agent(
@@ -41,7 +41,7 @@ twitter_agent = Agent(
     goal="Fetch the latest Twitter feed",
     tools=[fetch_twitter_feed],
     llm="gemini/gemini-2.5-flash-lite-preview-06-17",
-    verbose=True
+    output="verbose"
 )
 
 aggregator = Agent(
@@ -49,7 +49,7 @@ aggregator = Agent(
     role="Result Aggregator",
     goal="Aggregate and summarize all results",
     llm="gemini/gemini-2.5-flash-lite-preview-06-17",
-    verbose=True
+    output="verbose"
 )
 
 # Tasks for each agent
@@ -94,7 +94,7 @@ async def main():
         agents=[article_agent, news_agent, twitter_agent, aggregator],
         tasks=[article_task, news_task, twitter_task, aggregate_task],
         process="workflow",
-        verbose=True
+        output="verbose"
     )
     results = await workflow.astart()
 

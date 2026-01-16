@@ -204,7 +204,7 @@ def rag_with_section_chunks():
         
         PRODUCT DOCUMENTATION:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     queries = [

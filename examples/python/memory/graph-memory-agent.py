@@ -153,7 +153,7 @@ def main():
         agents=[researcher],
         tasks=[build_knowledge_task, query_knowledge_task, expand_knowledge_task],
         memory=True,
-        memory_config=memory_config
+        memory=memory_config
     )
     
     print("\n🚀 Starting graph memory demonstration...")

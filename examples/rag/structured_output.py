@@ -110,7 +110,7 @@ def json_output_rag():
         
         PRODUCT CATALOG:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     # Request structured product info
@@ -154,7 +154,7 @@ def pydantic_guided_rag():
         
         PRODUCT CATALOG:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     query = "Compare the UltraWidget Pro and SmartHome Hub. Which should I buy?"
@@ -184,7 +184,7 @@ def table_format_rag():
         
         PRODUCT CATALOG:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     query = "Show me all products in a table with name, price, and rating."
@@ -212,7 +212,7 @@ def list_format_rag():
         
         PRODUCT CATALOG:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     queries = [
@@ -321,7 +321,7 @@ def multi_format_rag():
             
             PRODUCT CATALOG:
             {context}""",
-            verbose=False
+            output="silent"
         )
         
         response = agent.chat(query)

@@ -61,7 +61,7 @@ agents_system = Agents(
     agents=[knowledge_agent],
     tasks=[build_task, query_task],
     memory=True,
-    memory_config=memory_config, output="verbose"
+    memory=memory_config, output="verbose"
 )
 
 print("Starting graph memory demonstration...")

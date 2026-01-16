@@ -61,7 +61,7 @@ def main():
         
         KNOWLEDGE BASE:
         {SHARED_KNOWLEDGE}""",
-        verbose=False
+        output="silent"
     )
     
     summarizer = Agent(
@@ -75,7 +75,7 @@ def main():
         
         KNOWLEDGE BASE:
         {SHARED_KNOWLEDGE}""",
-        verbose=False
+        output="silent"
     )
     
     writer = Agent(
@@ -89,7 +89,7 @@ def main():
         
         KNOWLEDGE BASE:
         {SHARED_KNOWLEDGE}""",
-        verbose=False
+        output="silent"
     )
     
     # Define tasks
@@ -118,7 +118,7 @@ def main():
         agents=[researcher, summarizer, writer],
         tasks=[research_task, summary_task, report_task],
         process="sequential",
-        verbose=False
+        output="silent"
     )
     
     result = agents.start()

@@ -17,7 +17,7 @@ try:
         instructions="You are a helpful assistant",
         llm="gemini/gemini-2.5-flash",
         stream=True,
-        verbose=False  # Reduce noise during testing
+        output="silent"  # Reduce noise during testing
     )
     
     print("Starting streaming test...")

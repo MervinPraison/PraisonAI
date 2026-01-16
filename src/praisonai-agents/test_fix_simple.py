@@ -15,7 +15,7 @@ def test_self_reflection_fix():
         backstory="You are a helpful math assistant",
         reflection=True,
         llm="gpt-4o-mini",  # Use a more widely available model
-        verbose=True,
+        output="verbose",
         tools=[evaluate],
         min_reflect=1,
         max_reflect=2

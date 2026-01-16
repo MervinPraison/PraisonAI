@@ -2876,9 +2876,22 @@ class PraisonAI:
         Handle docs subcommand actions.
         
         Args:
-            action: The docs action (list, show, create, delete)
+            action: The docs action (list, show, create, delete, run, run-all, stats, etc.)
             action_args: Additional arguments for the action
         """
+        # Code validation commands - delegate to typer app
+        code_validation_actions = {'run', 'run-all', 'stats', 'report', 'generate', 'serve'}
+        if action in code_validation_actions:
+            from praisonai.cli.commands.docs import app as docs_app
+            import typer
+            # Build args list for typer
+            typer_args = [action] + action_args
+            try:
+                typer.main.get_command(docs_app)(typer_args)
+            except SystemExit:
+                pass  # typer raises SystemExit on completion
+            return
+        
         try:
             from praisonaiagents.memory import DocsManager
             from rich import print

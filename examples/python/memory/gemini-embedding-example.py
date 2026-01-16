@@ -85,13 +85,13 @@ def main():
     agents = Agents(
         agents=[researcher, retriever],
         tasks=[store_task, retrieve_task],
-        memory=True,
-        embedder={
-            "provider": "gemini",
-            "config": {
-                "model": "text-embedding-004",
-                # Optional: specify task type for better results
-                # "task_type": "RETRIEVAL_DOCUMENT"  
+        memory={
+            "provider": "rag",
+            "embedder": {
+                "provider": "gemini",
+                "config": {
+                    "model": "text-embedding-004",
+                }
             }
         }
     )

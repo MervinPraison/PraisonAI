@@ -49,7 +49,7 @@ def main():
         You excel at maintaining context across multiple research sessions and can 
         retrieve relevant information from your persistent memory store.""",
         memory=True,
-        verbose=True,
+        output="verbose",
         llm="gpt-4o-mini"
     )
     
@@ -94,9 +94,8 @@ def main():
     research_system = Agents(
         agents=[research_agent],
         tasks=research_tasks,
-        memory=True,
-        memory_config=mongodb_memory_config,
-        verbose=True
+        memory=mongodb_memory_config,
+        output="verbose"
     )
     
     # Execute the research pipeline

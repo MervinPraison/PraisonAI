@@ -26,7 +26,7 @@ pdf_agent = Agent(
     backstory="You are an expert at reading, analyzing, and answering questions about PDF documents. You provide accurate, detailed answers based on the document content.",
     instructions="Read the provided PDF document and answer questions about its content. Be specific and cite relevant sections when possible.",
     knowledge=["document.pdf"],  # Replace with your PDF file path
-    knowledge_config=config,
+    knowledge=config,
     reflection=True,
     
     

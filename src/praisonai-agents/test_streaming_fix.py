@@ -20,7 +20,7 @@ def test_streaming():
         instructions="You are a helpful assistant",
         llm="mock",  # Use mock model for testing
         reflection=False,
-        verbose=False,
+        output="silent",
         stream=True
     )
     
@@ -47,7 +47,7 @@ def test_backward_compatibility():
         instructions="You are a helpful assistant",
         llm="mock",
         reflection=False,
-        verbose=False,
+        output="silent",
         stream=False
     )
     
@@ -59,7 +59,7 @@ def test_backward_compatibility():
         instructions="You are a helpful assistant",
         llm="mock",
         reflection=False,
-        verbose=False,
+        output="silent",
         stream=True
     )
     

@@ -26,7 +26,7 @@ agent = DeepResearchAgent(
     - Clear structure with executive summary
     """,
     model="deep-research-pro",  # Auto-detected as Gemini
-    verbose=True,
+    output="verbose",
 )
 
 print(f"Agent: {agent}")
@@ -39,7 +39,7 @@ result = agent.research(
     # stream=True is the default, set stream=False to disable
 )
 
-# The report is already printed during streaming when verbose=True
+# The report is already printed during streaming when output="verbose"
 # But we can also access it programmatically:
 print("\n" + "=" * 60)
 print(f"Report length: {len(result.report)} characters")

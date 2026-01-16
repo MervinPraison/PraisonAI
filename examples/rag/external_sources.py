@@ -125,7 +125,7 @@ def web_augmented_rag():
         
         COMPANY KNOWLEDGE:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     # Simulate web-augmented queries
@@ -171,7 +171,7 @@ def database_augmented_rag():
         
         COMPANY KNOWLEDGE:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     queries = [
@@ -249,7 +249,7 @@ def hybrid_source_rag():
         
         COMPANY KNOWLEDGE:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     query = "Give me a complete business briefing for today"

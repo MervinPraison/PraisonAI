@@ -37,7 +37,7 @@ def test_self_reflection_with_tools():
         backstory="You are an expert analyst with strong critical thinking skills",
         reflection=True,
         llm="gpt-4o-mini",  # Using OpenAI model for testing
-        verbose=True,
+        output="verbose",
         tools=[mock_tool],
         max_reflect=2,  # Keep it small for testing
         min_reflect=1
@@ -77,7 +77,7 @@ def test_self_reflection_without_tools():
         backstory="You are an expert analyst with strong critical thinking skills",
         reflection=True,
         llm="gpt-4o-mini",  # Using OpenAI model for testing
-        verbose=True,
+        output="verbose",
         max_reflect=2,  # Keep it small for testing
         min_reflect=1
     )
@@ -131,7 +131,7 @@ def test_llm_directly():
             reflection=True,
             max_reflect=2,
             min_reflect=1,
-            verbose=True,
+            output="verbose",
             execute_tool_fn=mock_tool_executor
         )
         

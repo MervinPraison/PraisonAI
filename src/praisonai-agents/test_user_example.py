@@ -20,7 +20,7 @@ def test_user_example():
         instructions="You are a helpful assistant",
         llm="mock",  # Use mock model for testing
         reflection=False,
-        verbose=False,
+        output="silent",
         stream=True
     )
 

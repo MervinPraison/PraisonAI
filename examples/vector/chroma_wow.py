@@ -6,7 +6,7 @@ agent = Agent(
     name="Assistant",
     instructions="You are a helpful assistant with access to documents.",
     knowledge=["./docs/guide.pdf"],  # Add your documents here
-    knowledge_config={
+    knowledge={
         "vector_store": "chroma",
         "path": "/tmp/chroma_demo"
     }

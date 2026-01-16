@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Test script to reproduce and verify the fix for issue #877
-where callbacks only work when verbose=True.
+where callbacks only work when output="verbose".
 """
 
 import sys
@@ -36,11 +36,11 @@ with open('callback_log.txt', 'w') as f:
 register_display_callback('interaction', simple_callback, is_async=False)
 
 print("=" * 60)
-print("Testing Issue #877: Callbacks Only Work When verbose=True")
+print("Testing Issue #877: Callbacks Only Work When output="verbose"")
 print("=" * 60)
 
-# Test Case 1: verbose=False
-print("\nTest Case 1: verbose=False")
+# Test Case 1: output="silent"
+print("\nTest Case 1: output="silent"")
 print("-" * 30)
 callback_log.clear()
 
@@ -50,7 +50,7 @@ agent1 = Agent(
     goal="Help with tasks",
     backstory="I am a helpful assistant",
     llm="gemini/gemini-2.5-flash-lite-preview-06-17",  # Using the same model as in the issue
-    verbose=False  
+    output="silent"  
 )
 
 task1 = Task(
@@ -68,17 +68,17 @@ try:
     result1 = agents1.start()
     print(f"Task completed. Callbacks executed: {len(callback_log)}")
     if len(callback_log) > 0:
-        print("✅ SUCCESS: Callbacks were executed with verbose=False!")
+        print("✅ SUCCESS: Callbacks were executed with output="silent"!")
         print(f"   First callback: message='{callback_log[0]['message'][:50]}...', response='{callback_log[0]['response'][:50]}...'")
     else:
-        print("❌ FAILED: No callbacks were executed with verbose=False")
+        print("❌ FAILED: No callbacks were executed with output="silent"")
 except Exception as e:
     print(f"❌ ERROR during test: {e}")
     import traceback
     traceback.print_exc()
 
-# Test Case 2: verbose=True (for comparison)
-print("\n\nTest Case 2: verbose=True (for comparison)")
+# Test Case 2: output="verbose" (for comparison)
+print("\n\nTest Case 2: output="verbose" (for comparison)")
 print("-" * 30)
 callback_log.clear()
 
@@ -88,7 +88,7 @@ agent2 = Agent(
     goal="Help with tasks",
     backstory="I am a helpful assistant",
     llm="gemini/gemini-2.5-flash-lite-preview-06-17",
-    verbose=True  
+    output="verbose"  
 )
 
 task2 = Task(
@@ -106,10 +106,10 @@ try:
     result2 = agents2.start()
     print(f"\nTask completed. Callbacks executed: {len(callback_log)}")
     if len(callback_log) > 0:
-        print("✅ Callbacks were executed with verbose=True as expected")
+        print("✅ Callbacks were executed with output="verbose" as expected")
         print(f"   First callback: message='{callback_log[0]['message'][:50]}...', response='{callback_log[0]['response'][:50]}...'")
     else:
-        print("⚠️  WARNING: No callbacks were executed even with verbose=True")
+        print("⚠️  WARNING: No callbacks were executed even with output="verbose"")
 except Exception as e:
     print(f"❌ ERROR during test: {e}")
     import traceback

@@ -45,7 +45,7 @@ def test_llm_self_reflection_with_tools():
         reflection=True,
         min_reflect=1,
         max_reflect=2,
-        verbose=True,
+        output="verbose",
         execute_tool_fn=mock_tool_executor
     )
     print(f"LLM Response with tools: {response}")
@@ -62,7 +62,7 @@ def test_llm_self_reflection_without_tools():
         reflection=True,
         min_reflect=1,
         max_reflect=2,
-        verbose=True
+        output="verbose"
     )
     print(f"LLM Response without tools: {response}")
     print()

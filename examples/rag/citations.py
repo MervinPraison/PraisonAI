@@ -103,7 +103,7 @@ def basic_citations():
         
         POLICY DOCUMENTS:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     queries = [
@@ -146,7 +146,7 @@ def structured_citations():
         
         POLICY DOCUMENTS:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     query = "What are the requirements for remote work eligibility?"
@@ -183,7 +183,7 @@ def inline_citations():
         
         POLICY DOCUMENTS:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     query = "Summarize the key employee benefits."
@@ -267,7 +267,7 @@ def multi_source_synthesis():
         
         POLICY DOCUMENTS:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     query = "Give me a complete overview of employee benefits and policies."

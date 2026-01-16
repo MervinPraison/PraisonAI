@@ -85,9 +85,9 @@ def batch_run(
         help="Stop on first failure",
     ),
     parallel: bool = typer.Option(
-        False,
-        "--parallel", "--async",
-        help="Run in parallel with async reporting (background)",
+        True,
+        "--parallel/--sequential",
+        help="Run in parallel (default: parallel)",
     ),
     max_workers: int = typer.Option(
         4,

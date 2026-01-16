@@ -43,10 +43,10 @@ def test_single_display_no_tools():
                 MagicMock(choices=[MagicMock(delta=MagicMock(content="!"))])
             ]
             
-            llm = LLM(model="gpt-4o-mini", verbose=False)
+            llm = LLM(model="gpt-4o-mini", output="silent")
             response = llm.get_response(
                 prompt="Test prompt",
-                verbose=True,
+                output="verbose",
                 stream=True
             )
             
@@ -82,10 +82,10 @@ def test_single_display_with_reasoning():
                 }]
             }
             
-            llm = LLM(model="o1-preview", verbose=False, reasoning_steps=True)
+            llm = LLM(model="o1-preview", output="silent", reasoning_steps=True)
             response = llm.get_response(
                 prompt="What is the meaning of life?",
-                verbose=True,
+                output="verbose",
                 stream=False,
                 reasoning_steps=True
             )
@@ -139,10 +139,10 @@ def test_single_display_with_self_reflection():
                 
                 mock_completion.side_effect = mock_streaming
                 
-                llm = LLM(model="gpt-4o-mini", verbose=False, reflection=True, min_reflect=1, max_reflect=2)
+                llm = LLM(model="gpt-4o-mini", output="silent", reflection=True, min_reflect=1, max_reflect=2)
                 response = llm.get_response(
                     prompt="Test prompt",
-                    verbose=True,
+                    output="verbose",
                     stream=True,
                     reflection=True,
                     min_reflect=1,
@@ -179,10 +179,10 @@ def test_async_single_display():
             
             mock_acompletion.return_value = async_generator()
             
-            llm = LLM(model="gpt-4o-mini", verbose=False)
+            llm = LLM(model="gpt-4o-mini", output="silent")
             response = await llm.get_response_async(
                 prompt="Test async",
-                verbose=True,
+                output="verbose",
                 stream=True
             )
             

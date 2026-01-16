@@ -67,7 +67,7 @@ def main():
         
         DOCUMENT:
         {DOCUMENT_CONTENT}""",
-        verbose=False
+        output="silent"
     )
     
     query = "What are the main topics covered in this document?"
@@ -88,7 +88,7 @@ def main():
         
         DOCUMENT:
         {DOCUMENT_CONTENT}""",
-        verbose=False
+        output="silent"
     )
     
     queries = [
@@ -114,7 +114,7 @@ def main():
         
         DOCUMENT:
         {DOCUMENT_CONTENT}""",
-        verbose=False
+        output="silent"
     )
     
     analysis_query = "Compare the benefits vs challenges of remote work based on this study"

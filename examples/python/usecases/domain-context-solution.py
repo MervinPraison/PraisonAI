@@ -265,7 +265,7 @@ agents = Agents(
     process="hierarchical",
     manager_llm="gpt-4o-mini",
     memory=True,  # Enable shared memory for domain context
-    memory_config={
+    memory={
         "provider": "rag",
         "config": {
             "collection_name": f"{domain.replace('.', '_')}_security_analysis"

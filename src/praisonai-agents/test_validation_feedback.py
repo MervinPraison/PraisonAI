@@ -18,7 +18,7 @@ def test_example_one():
         instructions="You are a helpful assistant",
         llm="gemini/gemini-2.5-flash",
         reflection=False,
-        verbose=True
+        output="verbose"
     )
 
     quote_agent = Agent(
@@ -26,7 +26,7 @@ def test_example_one():
         instructions="You are a helpful assistant who is a pro at quoting philosophers",
         llm="gemini/gemini-2.5-flash",
         reflection=False,
-        verbose=False
+        output="silent"
     )
 
     collect_task = Task(
@@ -86,7 +86,7 @@ def test_example_two():
         instructions="You are a helpful assistant",
         llm="gemini/gemini-2.5-flash",
         reflection=False,
-        verbose=True
+        output="verbose"
     )
 
     web_search_agent = Agent(
@@ -96,7 +96,7 @@ def test_example_two():
         instructions="You are a helpful assistant. You can use the tools provided to you to help the user.",
         llm="gemini/gemini-2.5-flash",
         reflection=False,
-        verbose=False,
+        output="silent",
         tools=[mock_web_search]
     )
 

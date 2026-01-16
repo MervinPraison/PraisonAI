@@ -81,7 +81,7 @@ def main():
         backstory="""You are a knowledge management specialist who excels at 
         organizing, categorizing, and retrieving information from the knowledge base. 
         You ensure that knowledge is properly stored, indexed, and accessible.""",
-        knowledge_config=mongodb_knowledge_config,
+        knowledge=mongodb_knowledge_config,
         memory=True,
         llm="gpt-4o-mini"
     )
@@ -107,7 +107,7 @@ def main():
         backstory="""You are a customer service representative who uses the 
         knowledge base and customer data to provide excellent support. You can 
         access customer history, product information, and troubleshooting guides.""",
-        knowledge_config=mongodb_knowledge_config,
+        knowledge=mongodb_knowledge_config,
         tools=[mongodb_tools],
         memory=True,
         llm="gpt-4o-mini"
@@ -190,7 +190,7 @@ def main():
         agents=[data_manager, knowledge_curator, business_analyst, customer_service],
         tasks=business_tasks,
         memory=True,
-        memory_config=mongodb_memory_config, output="verbose"
+        memory=mongodb_memory_config, output="verbose"
     )
     
     # Execute the comprehensive business pipeline

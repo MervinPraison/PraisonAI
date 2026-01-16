@@ -124,7 +124,7 @@ def graph_aware_rag():
         
         KNOWLEDGE GRAPH:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     # Relationship-focused queries
@@ -167,7 +167,7 @@ def multi_hop_reasoning():
         
         KNOWLEDGE GRAPH:
         {context}""",
-        verbose=False
+        output="silent"
     )
     
     # Multi-hop query requiring traversal
@@ -200,7 +200,7 @@ def entity_type_filtering():
         
         SCIENTISTS:
         {people_context}""",
-        verbose=False
+        output="silent"
     )
     
     # Filter to only concepts
@@ -213,7 +213,7 @@ def entity_type_filtering():
         
         CONCEPTS:
         {concepts_context}""",
-        verbose=False
+        output="silent"
     )
     
     query = "Tell me about the major developments in early 20th century physics."

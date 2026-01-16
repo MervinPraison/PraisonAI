@@ -39,7 +39,7 @@ agent = Agent(
     instructions="You are a helpful assistant. Keep responses brief.",
     db=db_instance,
     session_id="demo-session-001",  # Same session_id = resume conversation
-    verbose=False
+    output="silent"
 )
 
 # Chat with persistence

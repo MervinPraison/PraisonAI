@@ -74,7 +74,7 @@ def example_agent_locks():
     agent = Agent(
         name="LockTestAgent",
         instructions="Test agent",
-        verbose=False
+        output="silent"
     )
     
     # Check for locks
@@ -112,7 +112,7 @@ def example_concurrent_real_api():
         name="ConcurrentAgent",
         instructions="Reply with one word only.",
         llm="gpt-4o-mini",
-        verbose=False
+        output="silent"
     )
     
     results = []

@@ -35,10 +35,10 @@ def main():
     print("Observing the display behavior for each combination\n")
     
     # Test all 4 combinations
-    test_combination(verbose=True, stream=True, test_name="Verbose ON, Stream ON")
-    test_combination(verbose=True, stream=False, test_name="Verbose ON, Stream OFF")
-    test_combination(verbose=False, stream=True, test_name="Verbose OFF, Stream ON")
-    test_combination(verbose=False, stream=False, test_name="Verbose OFF, Stream OFF")
+    test_combination(output="verbose", stream=True, test_name="Verbose ON, Stream ON")
+    test_combination(output="verbose", stream=False, test_name="Verbose ON, Stream OFF")
+    test_combination(output="silent", stream=True, test_name="Verbose OFF, Stream ON")
+    test_combination(output="silent", stream=False, test_name="Verbose OFF, Stream OFF")
     
     print("\n\nNow testing with explicit stream parameter in chat() method:")
     
@@ -53,7 +53,7 @@ def main():
         goal="Test display behavior",
         backstory="A test agent",
         llm="gpt-4o-mini",
-        verbose=True,
+        output="verbose",
         stream=True  # Agent default is streaming
     )
     
