@@ -33,7 +33,7 @@ TYPER_COMMANDS = {
     'chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research',
     'memory', 'workflow', 'tools', 'knowledge', 'deploy', 'agents', 'skills',
     'eval', 'templates', 'recipe', 'todo', 'docs', 'commit', 'hooks', 'rules',
-    'registry', 'package', 'endpoints',
+    'registry', 'package', 'endpoints', 'test', 'examples', 'batch',
     # Standardisation commands
     'standardise', 'standardize',
 }

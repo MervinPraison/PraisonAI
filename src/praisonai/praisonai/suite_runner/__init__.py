@@ -25,6 +25,7 @@ __all__ = [
     # Sources
     "ExamplesSource",
     "DocsSource",
+    "BatchSource",
     # Executor
     "SuiteExecutor",
 ]
@@ -55,6 +56,10 @@ def __getattr__(name: str):
     if name == "DocsSource":
         from .docs_source import DocsSource
         return DocsSource
+    
+    if name == "BatchSource":
+        from .batch_source import BatchSource
+        return BatchSource
     
     if name == "SuiteExecutor":
         from .executor import SuiteExecutor
