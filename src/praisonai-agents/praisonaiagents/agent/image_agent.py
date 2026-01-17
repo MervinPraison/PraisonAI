@@ -183,6 +183,16 @@ class ImageAgent(Agent):
     async def agenerate_image(self, prompt: str, **kwargs) -> Dict[str, Any]:
         """Async wrapper for generate_image."""
         return self.generate_image(prompt, **kwargs)
+    
+    # Aliases for consistency with other agents
+    def generate(self, prompt: str, **kwargs) -> Dict[str, Any]:
+        """Alias for generate_image() - for consistency with VideoAgent/AudioAgent."""
+        return self.generate_image(prompt, **kwargs)
+    
+    async def agenerate(self, prompt: str, **kwargs) -> Dict[str, Any]:
+        """Async alias for generate_image()."""
+        return self.generate_image(prompt, **kwargs)
+
     def chat(self, prompt: str, **kwargs) -> Dict[str, Any]:
         """Generate an image from the prompt."""
         try:
@@ -216,3 +226,153 @@ class ImageAgent(Agent):
             if self.verbose:
                 self.console.print(f"[red]{error_msg}[/red]")
             return {"error": str(e)}
+
+    def edit(
+        self,
+        image: str,
+        prompt: str,
+        mask: Optional[str] = None,
+        n: int = 1,
+        size: Optional[str] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Edit an existing image with a prompt.
+        
+        Args:
+            image: Path or URL to the image to edit
+            prompt: Description of the desired edits
+            mask: Optional mask image (transparent areas will be edited)
+            n: Number of images to generate
+            size: Output image size
+            **kwargs: Additional provider-specific parameters
+            
+        Returns:
+            ImageResponse with edited image(s)
+            
+        Example:
+            ```python
+            agent = ImageAgent(llm="openai/dall-e-2")
+            result = agent.edit("photo.png", "Add a sunset in the background")
+            ```
+        """
+        try:
+            import litellm
+            litellm.telemetry = False
+            
+            model_name = self.llm or self.model or "dall-e-2"
+            
+            config = {
+                "model": model_name,
+                "image": image,
+                "prompt": prompt,
+                "n": n,
+            }
+            if mask:
+                config["mask"] = mask
+            if size:
+                config["size"] = size
+            if self.image_config.api_key:
+                config["api_key"] = self.image_config.api_key
+            if self.image_config.api_base:
+                config["api_base"] = self.image_config.api_base
+            
+            config.update(kwargs)
+            
+            if self.verbose:
+                self.console.print(f"[cyan]Editing image with {model_name}...[/cyan]")
+            
+            response = litellm.image_edit(**config)
+            
+            if self.verbose:
+                self.console.print(f"[green]✓ Image edited successfully[/green]")
+            
+            return response
+        except Exception as e:
+            error_msg = f"Error editing image: {str(e)}"
+            if self.verbose:
+                self.console.print(f"[red]{error_msg}[/red]")
+            raise
+
+    async def aedit(
+        self,
+        image: str,
+        prompt: str,
+        mask: Optional[str] = None,
+        n: int = 1,
+        size: Optional[str] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Async version of edit()."""
+        return self.edit(image, prompt, mask, n, size, **kwargs)
+
+    def variation(
+        self,
+        image: str,
+        n: int = 1,
+        size: Optional[str] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Generate variations of an existing image.
+        
+        Args:
+            image: Path or URL to the source image
+            n: Number of variations to generate
+            size: Output image size
+            **kwargs: Additional provider-specific parameters
+            
+        Returns:
+            ImageResponse with image variations
+            
+        Example:
+            ```python
+            agent = ImageAgent(llm="openai/dall-e-2")
+            result = agent.variation("original.png", n=3)
+            ```
+        """
+        try:
+            import litellm
+            litellm.telemetry = False
+            
+            model_name = self.llm or self.model or "dall-e-2"
+            
+            config = {
+                "model": model_name,
+                "image": image,
+                "n": n,
+            }
+            if size:
+                config["size"] = size
+            if self.image_config.api_key:
+                config["api_key"] = self.image_config.api_key
+            if self.image_config.api_base:
+                config["api_base"] = self.image_config.api_base
+            
+            config.update(kwargs)
+            
+            if self.verbose:
+                self.console.print(f"[cyan]Generating variations with {model_name}...[/cyan]")
+            
+            response = litellm.image_variation(**config)
+            
+            if self.verbose:
+                self.console.print(f"[green]✓ Variations generated successfully[/green]")
+            
+            return response
+        except Exception as e:
+            error_msg = f"Error generating variations: {str(e)}"
+            if self.verbose:
+                self.console.print(f"[red]{error_msg}[/red]")
+            raise
+
+    async def avariation(
+        self,
+        image: str,
+        n: int = 1,
+        size: Optional[str] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Async version of variation()."""
+        return self.variation(image, n, size, **kwargs)
+

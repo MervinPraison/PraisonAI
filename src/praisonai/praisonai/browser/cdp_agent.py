@@ -116,6 +116,7 @@ class CDPBrowserAgent:
         debug: bool = False,
         record_video: bool = False,
         video_fps: int = 5,
+        verify_actions: bool = True,
     ):
         """Initialize CDP Browser Agent.
         
@@ -131,6 +132,7 @@ class CDPBrowserAgent:
             debug: Enable debug mode with detailed logging
             record_video: Enable real-time video recording via CDP screencast
             video_fps: Frames per second for video recording (default 5)
+            verify_actions: Verify actions with before/after screenshots (default True)
         """
         self.port = port
         self.model = model
@@ -143,6 +145,7 @@ class CDPBrowserAgent:
         self.debug = debug
         self.record_video = record_video
         self.video_fps = video_fps
+        self.verify_actions = verify_actions
         self.ws = None
         self._message_id = 0
         self._pending: Dict[int, asyncio.Future] = {}
@@ -1092,6 +1095,11 @@ Respond in this exact JSON format:
                 import time as _time
                 step_start = _time.perf_counter()
                 
+                # Start profiler step context if enabled
+                step_ctx = profiler.step(step) if profiler else None
+                if step_ctx:
+                    step_ctx.__enter__()
+                
                 # Capture video frame (polling mode for reliable capture)
                 if self._screencast_active:
                     await self._capture_screencast_frame()
@@ -1110,9 +1118,10 @@ Respond in this exact JSON format:
                 if self.record_session and self._session_manager:
                     self._session_manager.update_session(self._current_session_id, current_url=state.url)
                 
-                # Capture screenshot if enabled
+                # Capture screenshot if enabled (with profiling)
                 screenshot_path = None
                 screenshot_base64 = None
+                screenshot_start = _time.perf_counter()
                 if self.screenshot_dir or self.enable_vision:
                     try:
                         result = await self._send("Runtime.evaluate", {
@@ -1131,6 +1140,7 @@ Respond in this exact JSON format:
                                     f.write(base64.b64decode(screenshot_base64))
                     except Exception as e:
                         logger.debug(f"Screenshot capture failed: {e}")
+                screenshot_duration = _time.perf_counter() - screenshot_start
                 
                 # Build observation with action history and overlay info
                 observation = {
@@ -1167,8 +1177,10 @@ Respond in this exact JSON format:
                 
                 # FULLY DYNAMIC: Let LLM decide ALL actions including consent handling
                 # LLM has access to: screenshot, elements (including consent buttons), action history
+                llm_start = _time.perf_counter()
                 action = agent.process_observation(observation)
                 action = normalize_action(action)
+                llm_duration = _time.perf_counter() - llm_start
                 
                 if self.verbose or self.debug:
                     logger.info(f"  Action: {action.get('action')} | Done: {action.get('done')}")
@@ -1178,6 +1190,13 @@ Respond in this exact JSON format:
                 
                 # Check for completion
                 if action.get("done"):
+                    # Record final step timing before returning
+                    if profiler and step_ctx:
+                        if profiler._current_step:
+                            profiler._current_step.llm_time = llm_duration
+                            profiler._current_step.screenshot_time = screenshot_duration
+                        step_ctx.__exit__(None, None, None)
+                    
                     # Record final step
                     if self.record_session and self._session_manager:
                         self._session_manager.add_step(
@@ -1205,17 +1224,20 @@ Respond in this exact JSON format:
                     }
                 
                 # Execute action with retry logic (multi-strategy)
+                action_start = _time.perf_counter()
                 result = None
                 retry_count = 0
                 action_success = False
                 original_action = action.copy()
                 
-                # Phase 1: Capture BEFORE screenshot for action verification
+                # Phase 1: Capture BEFORE screenshot for action verification (if enabled)
                 screenshot_before = None
-                if self.enable_vision:
+                if self.verify_actions and self.enable_vision:
                     screenshot_before = await self._capture_vision_screenshot(f"before_step_{step}")
                     if self.debug and screenshot_before:
                         logger.info(f"[DEBUG] <SCREENSHOT_BEFORE step={step}> captured ({len(screenshot_before)//1024}KB)")
+                elif self.debug and not self.verify_actions:
+                    logger.info("[DEBUG] Skipping BEFORE screenshot (--no-verify)")
                 
                 for attempt in range(self.max_retries + 1):
                     result = await self._execute_action(action)
@@ -1270,10 +1292,13 @@ Respond in this exact JSON format:
                     else:
                         logger.warning(f"Action failed after {self.max_retries + 1} attempts: {result.get('error')}")
                 
-                # Phase 1: Capture AFTER screenshot and verify action success
+                # Track action execution time
+                action_duration = _time.perf_counter() - action_start
+                
+                # Phase 2: Capture AFTER screenshot and verify action success (if enabled)
                 screenshot_after = None
                 verification_result = None
-                if self.enable_vision and action_success:
+                if self.verify_actions and self.enable_vision and action_success:
                     # Wait for page to stabilize before capturing AFTER screenshot
                     screenshot_after = await self._wait_for_stable_frame(max_wait=1.5, stability_threshold=0.3)
                     if self.debug and screenshot_after:
@@ -1292,7 +1317,7 @@ Respond in this exact JSON format:
                         except Exception as e:
                             logger.debug(f"Failed to save AFTER screenshot: {e}")
                     
-                    # Phase 2: Verify action success using LLM vision
+                    # Verify action success using LLM vision
                     if screenshot_before and screenshot_after:
                         verification_result = await self._verify_action_success(
                             action=action,
@@ -1307,6 +1332,8 @@ Respond in this exact JSON format:
                         # If verification fails with high confidence, log warning
                         if verification_result and not verification_result.get("success") and verification_result.get("confidence", 0) > 0.7:
                             logger.warning(f"Action may have failed: {verification_result.get('reason', 'Unknown')}")
+                elif self.debug and not self.verify_actions:
+                    logger.info("[DEBUG] Skipping AFTER screenshot and verification (--no-verify)")
                 
                 # Track action in history for stuck detection and reporting
                 import time as time_module
@@ -1340,14 +1367,14 @@ Respond in this exact JSON format:
                 
                 # Record step timing to profiler if enabled
                 step_duration = _time.perf_counter() - step_start
-                if profiler:
-                    # Add step profile directly
-                    from .profiling import StepProfile
-                    step_profile = StepProfile(
-                        step=step,
-                        total_time=step_duration,
-                    )
-                    profiler._step_profiles.append(step_profile)
+                if profiler and step_ctx:
+                    # Update step profile with detailed timings
+                    if profiler._current_step:
+                        profiler._current_step.llm_time = llm_duration if 'llm_duration' in dir() else 0
+                        profiler._current_step.screenshot_time = screenshot_duration if 'screenshot_duration' in dir() else 0
+                        profiler._current_step.action_time = action_duration if 'action_duration' in dir() else 0
+                    # Exit step context to record total time
+                    step_ctx.__exit__(None, None, None)
                 
                 # Brief pause between steps - capture video frames during wait
                 if self._screencast_active:
@@ -1356,7 +1383,7 @@ Respond in this exact JSON format:
                         await self._capture_screencast_frame()
                         await asyncio.sleep(0.2)
                 else:
-                    await asyncio.sleep(1)  # Normal pause if not recording
+                    await asyncio.sleep(0.5)  # Reduced pause for faster iteration
             
             # Max steps reached
             if self.record_session and self._session_manager:
@@ -1430,6 +1457,7 @@ async def run_cdp_only(
     debug: bool = False,
     record_video: bool = False,
     video_fps: int = 5,
+    verify_actions: bool = True,
 ) -> Dict[str, Any]:
     """Run browser agent using direct CDP (no extension required).
     
@@ -1447,6 +1475,7 @@ async def run_cdp_only(
         debug: Enable debug mode with detailed logging
         record_video: Enable real-time video recording (requires FFmpeg)
         video_fps: Frames per second for video (default 5)
+        verify_actions: Verify each action with before/after screenshots (default True)
         
     Returns:
         Result with success status and summary
@@ -1469,6 +1498,7 @@ async def run_cdp_only(
         debug=debug,
         record_video=record_video,
         video_fps=video_fps,
+        verify_actions=verify_actions,
     )
     return await agent.run(goal, url)
 

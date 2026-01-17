@@ -17,3 +17,9 @@ export * from './builtins';
 // Export tools facade
 export { tools, registerBuiltinTools } from './tools';
 export type { default as ToolsFacade } from './tools';
+
+// Export Subagent Tool (agent-as-tool pattern)
+export {
+    SubagentTool, createSubagentTool, createSubagentTools, createDelegator,
+    type SubagentToolConfig, type SubagentToolSchema, type DelegatorConfig
+} from './subagent';

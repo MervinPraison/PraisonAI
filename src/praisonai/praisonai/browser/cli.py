@@ -1996,6 +1996,7 @@ def launch_browser(
     engine: str = typer.Option("auto", "--engine", help="Automation engine: extension, cdp, auto (default: auto)"),
     profile: bool = typer.Option(False, "--profile", help="Enable performance profiling with timing summary"),
     deep_profile: bool = typer.Option(False, "--deep-profile", help="Enable deep profiling with cProfile trace"),
+    no_verify: bool = typer.Option(False, "--no-verify", help="Disable action verification (faster but less reliable)"),
 ):
     """Launch Chrome with extension and optionally run a goal.
     
@@ -2339,6 +2340,7 @@ def launch_browser(
                     screenshot_dir=str(screenshot_dir) if screenshot_dir else None,
                     enable_vision=enable_vision,
                     record_video=record_video,
+                    verify_actions=not no_verify,  # Pass verify flag
                 )
                 return result
             
@@ -2354,12 +2356,143 @@ def launch_browser(
                 if selected_engine == "extension":
                     console.print("[cyan]Using Extension mode (via bridge server)[/cyan]")
                     
+                    # CRITICAL: Navigate to start URL first to trigger content script
+                    # Content scripts don't run on about:blank, so we need to navigate
+                    # to an actual page to wake the service worker
+                    console.print(f"[dim]Navigating to {url} to wake extension...[/dim]")
+                    try:
+                        import aiohttp
+                        async with aiohttp.ClientSession() as session:
+                            # Get page target
+                            async with session.get(f"http://localhost:{port}/json") as resp:
+                                if resp.status == 200:
+                                    targets = await resp.json()
+                                    page_target = next((t for t in targets if t.get('type') == 'page'), None)
+                                    if page_target:
+                                        ws_url = page_target.get('webSocketDebuggerUrl')
+                                        if ws_url:
+                                            import websockets
+                                            async with websockets.connect(ws_url) as ws:
+                                                # Enable Page events
+                                                await ws.send('{"id":1,"method":"Page.enable"}')
+                                                await ws.recv()
+                                                
+                                                # Navigate to start URL
+                                                await ws.send('{"id":2,"method":"Page.navigate","params":{"url":"' + url + '"}}')
+                                                await ws.recv()
+                                                if debug:
+                                                    console.print(f"[dim]   [DEBUG] Navigated to {url} via CDP[/dim]")
+                                                
+                                                # Wait for page load (up to 5 seconds)
+                                                try:
+                                                    import async_timeout
+                                                    async with async_timeout.timeout(5):
+                                                        while True:
+                                                            msg = await ws.recv()
+                                                            if 'Page.loadEventFired' in msg:
+                                                                if debug:
+                                                                    console.print("[dim]   [DEBUG] Page loaded, content script should be active[/dim]")
+                                                                break
+                                                except:
+                                                    if debug:
+                                                        console.print("[dim]   [DEBUG] Page load event timeout, continuing anyway[/dim]")
+                                                
+                                                # Wait for content script to inject
+                                                await asyncio.sleep(2)
+                    except Exception as e:
+                        if debug:
+                            console.print(f"[dim]   [DEBUG] CDP navigation failed: {e}[/dim]")
+                    
+                    # CRITICAL: Attach to extension service worker and trigger connection
+                    if debug:
+                        console.print("[dim]   [DEBUG] Attempting to wake extension service worker via CDP...[/dim]")
+                    try:
+                        import aiohttp
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(f"http://localhost:{port}/json") as resp:
+                                if resp.status == 200:
+                                    targets = await resp.json()
+                                    # Find the PraisonAI extension service worker or background
+                                    # Service workers appear in /json/list with type 'service_worker'
+                                    extension_target = None
+                                    for t in targets:
+                                        target_url = t.get('url', '')
+                                        target_type = t.get('type', '')
+                                        
+                                        if debug:
+                                            if 'chrome-extension' in target_url:
+                                                console.print(f"[dim]   [DEBUG] Extension target: {target_type} - {target_url[:60]}[/dim]")
+                                        
+                                        # Prefer service_worker type, fall back to background_page
+                                        if 'chrome-extension' in target_url and 'PraisonAI' not in target_url:
+                                            # Skip built-in extensions like TTS
+                                            if 'fignfifoniblkonapihmkfakmlgkbkcf' in target_url:
+                                                continue
+                                            # Found a non-builtin extension target
+                                            if target_type == 'service_worker' or extension_target is None:
+                                                extension_target = t
+                                    
+                                    if extension_target:
+                                        ws_url = extension_target.get('webSocketDebuggerUrl')
+                                        target_url = extension_target.get('url', '')[:50]
+                                        target_type = extension_target.get('type', '')
+                                        if ws_url:
+                                            if debug:
+                                                console.print(f"[green]   [DEBUG] Using target: {target_type} - {target_url}[/green]")
+                                                try:
+                                                    import websockets
+                                                    async with websockets.connect(ws_url) as ws:
+                                                        # Enable Runtime and trigger bridge connection
+                                                        await ws.send('{"id":1,"method":"Runtime.enable"}')
+                                                        await ws.recv()
+                                                        import json
+                                                        wake_expr = 'console.log("[CDP-WAKE] Triggering bridge connection..."); typeof initBridgeConnection !== "undefined" ? initBridgeConnection() : "initBridgeConnection not found";'
+                                                        wake_cmd = json.dumps({"id": 2, "method": "Runtime.evaluate", "params": {"expression": wake_expr, "awaitPromise": True}})
+                                                        await ws.send(wake_cmd)
+                                                        response = await ws.recv()
+                                                        if debug:
+                                                            console.print(f"[dim]   [DEBUG] Runtime.evaluate response: {response[:200]}...[/dim]")
+                                                            console.print("[green]   [DEBUG] ✓ Sent wake command to extension service worker[/green]")
+                                                except Exception as we:
+                                                    if debug:
+                                                        console.print(f"[dim]   [DEBUG] Could not connect to extension target: {we}[/dim]")
+                    except Exception as e:
+                        if debug:
+                            console.print(f"[dim]   [DEBUG] Extension wake attempt failed: {e}[/dim]")
+                    
+                    # Wait for extension to process the wake command and connect
+                    await asyncio.sleep(3)
+                    
                     # Wait for extension to connect to bridge server
                     extension_connected = False
                     wait_start = asyncio.get_event_loop().time()
-                    max_wait = 15.0  # Wait up to 15 seconds for extension to connect
+                    max_wait = 30.0  # Wait up to 30 seconds for extension to connect
                     
                     console.print("[dim]Waiting for extension to connect to bridge server...[/dim]")
+                    
+                    # Detailed logging for debugging
+                    if debug:
+                        console.print("[dim]   [DEBUG] Bridge server URL: http://localhost:{server_port}/health[/dim]")
+                        console.print("[dim]   [DEBUG] Checking CDP targets for service worker...[/dim]")
+                        try:
+                            import aiohttp
+                            async with aiohttp.ClientSession() as session:
+                                async with session.get(f"http://localhost:{port}/json", timeout=aiohttp.ClientTimeout(total=2)) as resp:
+                                    if resp.status == 200:
+                                        targets = await resp.json()
+                                        console.print(f"[dim]   [DEBUG] CDP targets found: {len(targets)}[/dim]")
+                                        for t in targets:
+                                            target_type = t.get('type', 'unknown')
+                                            target_url = t.get('url', '')[:60]
+                                            console.print(f"[dim]   [DEBUG]   - [{target_type}] {target_url}[/dim]")
+                                        # Check for service worker specifically
+                                        sw_targets = [t for t in targets if t.get('type') == 'service_worker']
+                                        if sw_targets:
+                                            console.print(f"[green]   [DEBUG] ✓ Service worker found: {len(sw_targets)}[/green]")
+                                        else:
+                                            console.print("[yellow]   [DEBUG] ⚠ No service_worker targets found - extension may not have loaded[/yellow]")
+                        except Exception as e:
+                            console.print(f"[dim]   [DEBUG] CDP target check failed: {e}[/dim]")
                     
                     import aiohttp
                     check_count = 0
@@ -2373,18 +2506,22 @@ def launch_browser(
                                     if resp.status == 200:
                                         health = await resp.json()
                                         connections = health.get("connections", 0)
+                                        sessions = health.get("sessions", 0)
                                         if connections >= 1:
                                             extension_connected = True
-                                            console.print(f"[green]✓ Extension connected ({connections} connection(s))[/green]")
+                                            console.print(f"[green]✓ Extension connected ({connections} connection(s), {sessions} session(s))[/green]")
                                             break
                                         else:
                                             check_count += 1
                                             if check_count == 1 or (check_count % 3 == 0):
                                                 elapsed = int(asyncio.get_event_loop().time() - wait_start)
                                                 console.print(f"[dim]   No extension connections yet ({elapsed}s)...[/dim]")
+                                                if debug and check_count == 1:
+                                                    console.print("[dim]   [DEBUG] Extension service worker may not be running[/dim]")
+                                                    console.print("[dim]   [DEBUG] Try: chrome://extensions/ -> PraisonAI -> Click 'Reload'[/dim]")
                         except Exception as e:
                             if debug:
-                                console.print(f"[dim]   Health check error: {e}[/dim]")
+                                console.print(f"[dim]   [DEBUG] Health check error: {e}[/dim]")
                         
                         await asyncio.sleep(1.0)  # Check every second
                     
@@ -2392,6 +2529,13 @@ def launch_browser(
                         elapsed = int(asyncio.get_event_loop().time() - wait_start)
                         console.print(f"[red]✗ Extension did not connect after {elapsed}s[/red]")
                         console.print("[yellow]Hint: Open Chrome DevTools -> Extensions -> PraisonAI -> Background page to check console[/yellow]")
+                        
+                        # Additional debug info
+                        if debug:
+                            console.print("[dim]   [DEBUG] Root cause: Chrome MV3 service workers are lazy-loaded[/dim]")
+                            console.print("[dim]   [DEBUG] The service worker may terminate before connecting to bridge[/dim]")
+                            console.print("[dim]   [DEBUG] Workaround: Use --engine cdp for reliable automation[/dim]")
+                        
                         raise Exception(f"Extension not connected to bridge server after {elapsed}s. Try: 1) Reload the extension 2) Check extension console for errors")
                     
                     try:

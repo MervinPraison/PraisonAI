@@ -143,6 +143,30 @@ def __getattr__(name):
         from .agent.image_agent import ImageAgent
         _lazy_cache[name] = ImageAgent
         return ImageAgent
+    elif name == "VideoAgent":
+        from .agent.video_agent import VideoAgent
+        _lazy_cache[name] = VideoAgent
+        return VideoAgent
+    elif name == "VideoConfig":
+        from .agent.video_agent import VideoConfig
+        _lazy_cache[name] = VideoConfig
+        return VideoConfig
+    elif name == "AudioAgent":
+        from .agent.audio_agent import AudioAgent
+        _lazy_cache[name] = AudioAgent
+        return AudioAgent
+    elif name == "AudioConfig":
+        from .agent.audio_agent import AudioConfig
+        _lazy_cache[name] = AudioConfig
+        return AudioConfig
+    elif name == "OCRAgent":
+        from .agent.ocr_agent import OCRAgent
+        _lazy_cache[name] = OCRAgent
+        return OCRAgent
+    elif name == "OCRConfig":
+        from .agent.ocr_agent import OCRConfig
+        _lazy_cache[name] = OCRConfig
+        return OCRConfig
     elif name == "ContextAgent":
         from .agent.context_agent import ContextAgent
         _lazy_cache[name] = ContextAgent
