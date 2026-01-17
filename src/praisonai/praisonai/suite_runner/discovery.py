@@ -155,6 +155,60 @@ class FileDiscovery:
         
         return sorted(groups)
     
+    def discover_by_folder(
+        self,
+        folders: Optional[List[str]] = None,
+    ) -> List[Path]:
+        """
+        Discover files in specific nested folders.
+        
+        Args:
+            folders: Paths like 'examples/agent-recipes' to filter by.
+            
+        Returns:
+            List of files that match any of the folder prefixes.
+        """
+        all_files = self.discover()
+        if not folders:
+            return all_files
+        
+        # Normalize folder paths
+        normalized_folders = [f.rstrip('/').rstrip('\\') for f in folders]
+        
+        result = []
+        for path in all_files:
+            rel_path = path.relative_to(self.root).as_posix()
+            for folder in normalized_folders:
+                # Match if rel_path starts with folder/ or equals folder
+                if rel_path.startswith(folder + '/') or rel_path == folder:
+                    result.append(path)
+                    break
+        return result
+    
+    def get_folders(self, max_depth: int = 3) -> List[str]:
+        """
+        Get list of all available folders (including nested).
+        
+        Args:
+            max_depth: Maximum folder depth to include.
+            
+        Returns:
+            Sorted list of folder paths like 'examples/agent-recipes'.
+        """
+        folders = set()
+        
+        for path in self.discover():
+            rel_path = path.relative_to(self.root)
+            parts = rel_path.parts[:-1]  # Exclude filename
+            
+            # Add all folder levels up to max_depth
+            for depth in range(1, min(len(parts) + 1, max_depth + 1)):
+                folder_path = '/'.join(parts[:depth])
+                if folder_path:
+                    folders.add(folder_path)
+        
+        return sorted(folders)
+    
     @staticmethod
     def get_group_for_path(path: Path, root: Path) -> str:
         """

@@ -1,8 +1,10 @@
 /**
- * Memory command - Manage agent memory
+ * Memory command - Manage agent memory with optional persistence
  */
 
 import { Memory, createMemory, MemoryEntry, SearchResult } from '../../memory/memory';
+import { db } from '../../db';
+import { ENV_VARS } from '../spec/cli-spec';
 import { outputJson, formatSuccess, formatError } from '../output/json';
 import * as pretty from '../output/pretty';
 import { EXIT_CODES } from '../spec/cli-spec';
@@ -13,22 +15,101 @@ export interface MemoryOptions {
   verbose?: boolean;
   output?: 'json' | 'text' | 'pretty';
   json?: boolean;
+  db?: string;
+}
+
+// Get database URL from option or env var
+function getDbUrl(options: MemoryOptions): string | undefined {
+  return options.db || process.env[ENV_VARS.PRAISONAI_DB];
+}
+
+// Persistent memory storage using db adapter
+class PersistentMemory {
+  private adapter: any;
+  private sessionId: string;
+
+  constructor(dbUrl: string, userId?: string) {
+    this.adapter = db(dbUrl);
+    this.sessionId = userId || 'default-memory';
+  }
+
+  async initialize(): Promise<void> {
+    if (this.adapter.initialize) {
+      await this.adapter.initialize();
+    }
+    // Create session if doesn't exist
+    if (this.adapter.createSession) {
+      try {
+        await this.adapter.createSession(this.sessionId, { type: 'memory' });
+      } catch (e) {
+        // Session might already exist
+      }
+    }
+  }
+
+  async add(content: string, role: string = 'user'): Promise<void> {
+    await this.initialize();
+    const id = `mem_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    if (this.adapter.addMessage) {
+      await this.adapter.addMessage({
+        id,
+        sessionId: this.sessionId,
+        role: role as any,
+        content,
+        createdAt: Date.now()
+      });
+    }
+  }
+
+  async getAll(): Promise<MemoryEntry[]> {
+    await this.initialize();
+    if (this.adapter.getMessages) {
+      const messages = await this.adapter.getMessages(this.sessionId);
+      return messages.map((m: any) => ({
+        id: m.id,
+        content: m.content,
+        role: m.role,
+        timestamp: m.createdAt,
+        metadata: m.metadata ? JSON.parse(m.metadata) : undefined
+      }));
+    }
+    return [];
+  }
+
+  async search(query: string): Promise<SearchResult[]> {
+    const all = await this.getAll();
+    const queryLower = query.toLowerCase();
+    return all
+      .filter(e => e.content.toLowerCase().includes(queryLower))
+      .map(entry => ({ entry, score: 1.0 }));
+  }
+
+  async clear(): Promise<void> {
+    await this.initialize();
+    if (this.adapter.clear) {
+      await this.adapter.clear();
+    }
+  }
 }
 
 export async function execute(args: string[], options: MemoryOptions): Promise<void> {
   const action = args[0] || 'list';
   const actionArgs = args.slice(1);
   const outputFormat = options.json ? 'json' : (options.output || 'pretty');
+  const dbUrl = getDbUrl(options);
 
   try {
-    const memory = createMemory();
+    // Use persistent or in-memory based on --db flag
+    const memory = dbUrl
+      ? new PersistentMemory(dbUrl, options.userId)
+      : createMemory();
 
     switch (action) {
       case 'list':
-        await listMemories(memory, outputFormat);
+        await listMemories(memory, outputFormat, !!dbUrl);
         break;
       case 'add':
-        await addMemory(memory, actionArgs, outputFormat);
+        await addMemory(memory, actionArgs, outputFormat, !!dbUrl);
         break;
       case 'search':
         await searchMemory(memory, actionArgs, outputFormat);
@@ -51,22 +132,26 @@ export async function execute(args: string[], options: MemoryOptions): Promise<v
   }
 }
 
-async function listMemories(memory: Memory, outputFormat: string): Promise<void> {
-  const entries = memory.getAll();
-  
+async function listMemories(memory: Memory | PersistentMemory, outputFormat: string, isPersistent: boolean): Promise<void> {
+  const entries = await memory.getAll();
+
   if (outputFormat === 'json') {
     outputJson(formatSuccess({
       memories: entries,
-      count: entries.length
+      count: entries.length,
+      persistent: isPersistent
     }));
   } else {
     await pretty.heading('Memory Entries');
+    if (isPersistent) {
+      await pretty.dim('(persistent storage)');
+    }
     if (entries.length === 0) {
       await pretty.info('No memories stored');
     } else {
       for (const entry of entries) {
         await pretty.plain(`  • ${entry.content.substring(0, 100)}${entry.content.length > 100 ? '...' : ''}`);
-        if (entry.metadata) {
+        if (entry.timestamp) {
           await pretty.dim(`    Created: ${new Date(entry.timestamp).toISOString()}`);
         }
       }
@@ -76,7 +161,7 @@ async function listMemories(memory: Memory, outputFormat: string): Promise<void>
   }
 }
 
-async function addMemory(memory: Memory, args: string[], outputFormat: string): Promise<void> {
+async function addMemory(memory: Memory | PersistentMemory, args: string[], outputFormat: string, isPersistent: boolean): Promise<void> {
   const content = args.join(' ');
   if (!content) {
     if (outputFormat === 'json') {
@@ -88,15 +173,15 @@ async function addMemory(memory: Memory, args: string[], outputFormat: string): 
   }
 
   await memory.add(content, 'user');
-  
+
   if (outputFormat === 'json') {
-    outputJson(formatSuccess({ added: content }));
+    outputJson(formatSuccess({ added: content, persistent: isPersistent }));
   } else {
-    await pretty.success('Memory added successfully');
+    await pretty.success(`Memory added${isPersistent ? ' (persistent)' : ''}`);
   }
 }
 
-async function searchMemory(memory: Memory, args: string[], outputFormat: string): Promise<void> {
+async function searchMemory(memory: Memory | PersistentMemory, args: string[], outputFormat: string): Promise<void> {
   const query = args.join(' ');
   if (!query) {
     if (outputFormat === 'json') {
@@ -108,7 +193,7 @@ async function searchMemory(memory: Memory, args: string[], outputFormat: string
   }
 
   const results = await memory.search(query);
-  
+
   if (outputFormat === 'json') {
     outputJson(formatSuccess({
       query,
@@ -131,9 +216,9 @@ async function searchMemory(memory: Memory, args: string[], outputFormat: string
   }
 }
 
-async function clearMemory(memory: Memory, outputFormat: string): Promise<void> {
-  memory.clear();
-  
+async function clearMemory(memory: Memory | PersistentMemory, outputFormat: string): Promise<void> {
+  await memory.clear();
+
   if (outputFormat === 'json') {
     outputJson(formatSuccess({ cleared: true }));
   } else {
@@ -152,6 +237,7 @@ async function showHelp(outputFormat: string): Promise<void> {
       { name: 'help', description: 'Show this help' }
     ],
     options: [
+      { name: '--db <url>', description: 'Database URL for persistence (sqlite:./data.db)' },
       { name: '--user-id', description: 'User ID for memory isolation' }
     ]
   };
@@ -170,5 +256,9 @@ async function showHelp(outputFormat: string): Promise<void> {
     for (const opt of help.options) {
       await pretty.plain(`  ${opt.name.padEnd(20)} ${opt.description}`);
     }
+    await pretty.newline();
+    await pretty.dim('Examples:');
+    await pretty.dim('  praisonai-ts memory add "Remember this" --db sqlite:./data.db');
+    await pretty.dim('  praisonai-ts memory list --db sqlite:./data.db');
   }
 }

@@ -83,6 +83,9 @@ class BrowserLauncher:
         result = launcher.run("Search for PraisonAI", start_url="https://google.com")
     """
     
+    # Default persistent profile path
+    DEFAULT_PROFILE_PATH = os.path.expanduser("~/.praisonai/browser_profile")
+    
     def __init__(
         self,
         extension_path: Optional[str] = None,
@@ -92,6 +95,7 @@ class BrowserLauncher:
         max_steps: int = 20,
         verbose: bool = False,
         profile_path: Optional[str] = None,
+        use_temp_profile: bool = False,
     ):
         """Initialize browser launcher.
         
@@ -102,8 +106,8 @@ class BrowserLauncher:
             model: LLM model to use
             max_steps: Maximum steps per session
             verbose: Enable verbose logging
-            profile_path: Persistent Chrome profile path (default: temp dir)
-                          Set to ~/.praisonai/browser_profile for persistence
+            profile_path: Chrome profile path (default: ~/.praisonai/browser_profile)
+            use_temp_profile: If True, use temp profile instead of persistent (deleted after run)
         """
         self.extension_path = extension_path or find_extension_path()
         self.chrome_path = chrome_path or find_chrome_executable()
@@ -111,12 +115,18 @@ class BrowserLauncher:
         self.model = model
         self.max_steps = max_steps
         self.verbose = verbose
-        self.profile_path = profile_path  # User-specified persistent profile
+        self.use_temp_profile = use_temp_profile
+        
+        # Default to persistent profile unless use_temp_profile is True
+        if use_temp_profile:
+            self.profile_path = None  # Will be set to temp dir later
+        else:
+            self.profile_path = profile_path or self.DEFAULT_PROFILE_PATH
         
         self._chrome_process: Optional[subprocess.Popen] = None
         self._server_process: Optional[subprocess.Popen] = None
         self._temp_profile: Optional[str] = None
-        self._using_persistent_profile: bool = False
+        self._using_persistent_profile: bool = not use_temp_profile
         
         if not self.extension_path:
             raise ValueError(

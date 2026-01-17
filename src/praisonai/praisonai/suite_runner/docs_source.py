@@ -70,6 +70,7 @@ class DocsSource:
         include_patterns: Optional[List[str]] = None,
         exclude_patterns: Optional[List[str]] = None,
         groups: Optional[List[str]] = None,
+        folders: Optional[List[str]] = None,
         workspace_dir: Optional[Path] = None,
     ):
         """
@@ -80,7 +81,8 @@ class DocsSource:
             languages: Languages to extract (default: ['python']).
             include_patterns: Glob patterns to include.
             exclude_patterns: Glob patterns to exclude.
-            groups: Specific groups (subdirs) to include.
+            groups: Specific groups (top-level subdirs) to include.
+            folders: Specific folders (nested paths like 'examples/agent-recipes').
             workspace_dir: Directory for extracted scripts.
         """
         self.root = Path(root).resolve()
@@ -88,6 +90,7 @@ class DocsSource:
         self.include_patterns = include_patterns
         self.exclude_patterns = exclude_patterns
         self.groups = groups
+        self.folders = folders
         
         if workspace_dir:
             self.workspace_dir = Path(workspace_dir)
@@ -109,7 +112,10 @@ class DocsSource:
         Returns:
             List of RunItem objects.
         """
-        if self.groups:
+        # Start with files filtered by folders (nested paths) or groups (top-level)
+        if self.folders:
+            files = self._discovery.discover_by_folder(self.folders)
+        elif self.groups:
             grouped = self._discovery.discover_by_group(self.groups)
             files = []
             for group_files in grouped.values():
@@ -349,8 +355,12 @@ class DocsSource:
         return script_path
     
     def get_groups(self) -> List[str]:
-        """Get available groups."""
+        """Get available groups (top-level directories)."""
         return self._discovery.get_groups()
+    
+    def get_folders(self, max_depth: int = 3) -> List[str]:
+        """Get available folders (including nested paths)."""
+        return self._discovery.get_folders(max_depth)
     
     def get_pythonpath(self) -> List[str]:
         """Get PYTHONPATH additions for dev mode."""

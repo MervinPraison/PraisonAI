@@ -67,6 +67,11 @@ def docs_run(
         "--group", "-g",
         help="Run only specific groups (top-level dirs), can be repeated",
     ),
+    folder: Optional[List[str]] = typer.Option(
+        None,
+        "--folder", "-f",
+        help="Run only specific folders (nested paths like examples/agent-recipes), can be repeated",
+    ),
     languages: str = typer.Option(
         "python",
         "--languages", "-l",
@@ -166,6 +171,7 @@ def docs_run(
         include_patterns=list(include) if include else None,
         exclude_patterns=list(exclude) if exclude else None,
         groups=list(group) if group else None,
+        folders=list(folder) if folder else None,
     )
     
     # Discover items
@@ -234,6 +240,8 @@ def docs_run(
         typer.echo(f"Mode: {mode}")
         if group:
             typer.echo(f"Groups: {', '.join(group)}")
+        if folder:
+            typer.echo(f"Folders: {', '.join(folder)}")
         typer.echo(f"Reports: {output_dir}")
         typer.echo(f"Items: {len(items)}")
     
@@ -250,6 +258,9 @@ def docs_run(
     if group:
         for g in group:
             report.cli_args.append(f"--group={g}")
+    if folder:
+        for f in folder:
+            report.cli_args.append(f"--folder={f}")
     
     # Print summary
     totals = report.totals
@@ -316,7 +327,12 @@ def docs_list(
     show_groups: bool = typer.Option(
         False,
         "--groups",
-        help="Show available groups only",
+        help="Show available groups only (top-level dirs)",
+    ),
+    show_folders: bool = typer.Option(
+        False,
+        "--folders",
+        help="Show available folders (including nested paths)",
     ),
 ):
     """
@@ -352,6 +368,15 @@ def docs_list(
         typer.echo(f"Available groups in {docs}:\n")
         for g in groups:
             typer.echo(f"  - {g}")
+        return
+    
+    # Show folders (including nested paths)
+    if show_folders:
+        folders = source.get_folders(max_depth=3)
+        typer.echo(f"Available folders in {docs}:\n")
+        for f in folders:
+            typer.echo(f"  - {f}")
+        typer.echo(f"\nTotal: {len(folders)} folders")
         return
     
     items = source.discover()
