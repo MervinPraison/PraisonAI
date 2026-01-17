@@ -44,8 +44,8 @@ export class TelemetryCollector {
 
   private checkEnabled(): boolean {
     const disabled = process.env.PRAISONAI_TELEMETRY_DISABLED === 'true' ||
-                     process.env.PRAISONAI_DISABLE_TELEMETRY === 'true' ||
-                     process.env.DO_NOT_TRACK === 'true';
+      process.env.PRAISONAI_DISABLE_TELEMETRY === 'true' ||
+      process.env.DO_NOT_TRACK === 'true';
     return !disabled;
   }
 
@@ -290,24 +290,24 @@ export class AgentTelemetry {
     try {
       const result = await fn();
       const duration = Date.now() - startTime;
-      
+
       this.stats.successfulChats++;
       this.stats.totalDuration += duration;
       this.stats.avgDuration = this.stats.totalDuration / this.stats.totalChats;
-      
+
       this.collector.trackAgentExecution(this.agentName, duration, true);
-      
+
       return result;
     } catch (error) {
       const duration = Date.now() - startTime;
-      
+
       this.stats.failedChats++;
       this.stats.totalDuration += duration;
       this.stats.avgDuration = this.stats.totalDuration / this.stats.totalChats;
-      
+
       this.collector.trackAgentExecution(this.agentName, duration, false);
       this.collector.trackError(String(error), { agent: this.agentName });
-      
+
       throw error;
     }
   }
@@ -376,3 +376,28 @@ export class AgentTelemetry {
 export function createAgentTelemetry(agentName: string, config?: TelemetryConfig): AgentTelemetry {
   return new AgentTelemetry(agentName, config);
 }
+
+// Re-export PerformanceMonitor
+export {
+  PerformanceMonitor,
+  createPerformanceMonitor,
+  type MetricType,
+  type MetricEntry,
+  type TimerResult,
+  type PerformanceStats,
+  type PerformanceMonitorConfig,
+} from './performance';
+
+// Re-export TelemetryIntegration
+export {
+  TelemetryIntegration,
+  createTelemetryIntegration,
+  ConsoleSink,
+  HTTPSink,
+  createConsoleSink,
+  createHTTPSink,
+  type TelemetryRecord,
+  type TelemetrySink,
+  type TelemetrySinkType,
+  type TelemetryIntegrationConfig,
+} from './integration';

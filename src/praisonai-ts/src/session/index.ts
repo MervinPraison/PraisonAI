@@ -319,3 +319,23 @@ export function getSessionManager(): SessionManager {
   }
   return defaultManager;
 }
+
+// Re-export HierarchicalSession for Phase 6 features
+export {
+  HierarchicalSession,
+  createHierarchicalSession,
+  type HierarchicalSessionConfig,
+  type SessionScope,
+} from './hierarchy';
+
+// Re-export SessionStore for Phase 6 features  
+export {
+  MemorySessionStore, FileSessionStore, createSessionStore, createStoredSession,
+  type StoredSession, type SessionStoreConfig, type ISessionStore
+} from './store';
+
+// Re-export SessionParts for Phase 6 features
+export {
+  SessionParts, createSessionParts,
+  type SessionPart, type SessionPartType, type SessionPartsConfig
+} from './parts';

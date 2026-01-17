@@ -91,6 +91,7 @@ class BrowserLauncher:
         model: str = "gpt-4o-mini",
         max_steps: int = 20,
         verbose: bool = False,
+        profile_path: Optional[str] = None,
     ):
         """Initialize browser launcher.
         
@@ -101,6 +102,8 @@ class BrowserLauncher:
             model: LLM model to use
             max_steps: Maximum steps per session
             verbose: Enable verbose logging
+            profile_path: Persistent Chrome profile path (default: temp dir)
+                          Set to ~/.praisonai/browser_profile for persistence
         """
         self.extension_path = extension_path or find_extension_path()
         self.chrome_path = chrome_path or find_chrome_executable()
@@ -108,10 +111,12 @@ class BrowserLauncher:
         self.model = model
         self.max_steps = max_steps
         self.verbose = verbose
+        self.profile_path = profile_path  # User-specified persistent profile
         
         self._chrome_process: Optional[subprocess.Popen] = None
         self._server_process: Optional[subprocess.Popen] = None
         self._temp_profile: Optional[str] = None
+        self._using_persistent_profile: bool = False
         
         if not self.extension_path:
             raise ValueError(
@@ -179,15 +184,25 @@ class BrowserLauncher:
         if extension_already_connected:
             logger.info("Extension already connected, using existing Chrome")
         else:
-            # Create temp profile for Chrome
-            self._temp_profile = tempfile.mkdtemp(prefix="praisonai_chrome_")
+            # Use persistent profile if specified, otherwise create temp profile
+            if self.profile_path:
+                # Create persistent profile directory if it doesn't exist
+                os.makedirs(self.profile_path, exist_ok=True)
+                profile_dir = self.profile_path
+                self._using_persistent_profile = True
+                logger.info(f"Using persistent profile: {profile_dir}")
+            else:
+                # Create temp profile for Chrome
+                self._temp_profile = tempfile.mkdtemp(prefix="praisonai_chrome_")
+                profile_dir = self._temp_profile
             
             # Launch Chrome with extension
             logger.info(f"Launching Chrome with extension: {self.extension_path}")
             chrome_args = [
                 self.chrome_path,
                 f"--load-extension={self.extension_path}",
-                f"--user-data-dir={self._temp_profile}",
+                f"--disable-extensions-except={self.extension_path}",  # Critical: only load our extension
+                f"--user-data-dir={profile_dir}",
                 "--enable-extensions",
                 "--no-first-run",
                 "--no-default-browser-check",
@@ -308,7 +323,7 @@ class BrowserLauncher:
             }
     
     def _cleanup(self):
-        """Clean up Chrome process and temp profile."""
+        """Clean up Chrome process and temp profile (preserves persistent profiles)."""
         if self._chrome_process:
             try:
                 self._chrome_process.terminate()
@@ -320,7 +335,8 @@ class BrowserLauncher:
                     pass
             self._chrome_process = None
         
-        if self._temp_profile and os.path.exists(self._temp_profile):
+        # Only delete temp profiles, preserve persistent profiles
+        if self._temp_profile and os.path.exists(self._temp_profile) and not self._using_persistent_profile:
             try:
                 shutil.rmtree(self._temp_profile)
             except Exception:

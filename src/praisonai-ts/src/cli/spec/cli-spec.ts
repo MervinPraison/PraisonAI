@@ -101,7 +101,7 @@ export const COMMANDS: Record<string, Command> = {
     description: 'AI SDK provider management and testing',
     subcommands: {
       providers: { description: 'List available AI SDK providers' },
-      test: { 
+      test: {
         description: 'Test connectivity to a provider',
         args: [{ name: 'provider', type: 'string', required: false, position: 0 }]
       },
@@ -538,6 +538,16 @@ export const COMMANDS: Record<string, Command> = {
       { name: 'backend', type: 'string', description: 'Backend to test (ai-sdk, native, both)' },
       { name: 'real', type: 'boolean', description: 'Use real API calls (requires keys)' }
     ]
+  },
+  hooks: {
+    description: 'Manage hooks and callbacks',
+    subcommands: {
+      list: { description: 'List all available hook events' },
+      events: { description: 'List hook events (alias for list)' },
+      'display-types': { description: 'List display callback types' },
+      stats: { description: 'Show hooks statistics' },
+      clear: { description: 'Clear all registered callbacks' }
+    }
   }
 };
 
