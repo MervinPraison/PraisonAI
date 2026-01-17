@@ -12,6 +12,10 @@
 export { Agent, PraisonAIAgents, Agents } from './simple';
 export type { SimpleAgentConfig, PraisonAIAgentsConfig } from './simple';
 
+// AudioAgent - Speech synthesis and transcription
+export { AudioAgent, createAudioAgent } from './audio';
+export type { AudioAgentConfig, SpeakOptions, TranscribeOptions, SpeakResult, TranscribeResult, AudioProvider } from './audio';
+
 // Router exports
 export { Router, RouterAgent, createRouter, routeConditions } from './router';
 export type { RouterConfig, RouteConfig, RouteContext, SimpleRouterConfig, SimpleRouteConfig } from './router';

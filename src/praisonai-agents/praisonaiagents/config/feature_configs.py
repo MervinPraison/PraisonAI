@@ -211,6 +211,15 @@ class KnowledgeConfig:
             retrieval_k=5,
             rerank=True,
         ))
+        
+        # With chunker config
+        Agent(knowledge={
+            "sources": ["docs/"],
+            "chunker": {
+                "type": "semantic",
+                "chunk_size": 512
+            }
+        })
     """
     # Knowledge sources (files, directories, URLs)
     sources: List[str] = field(default_factory=list)
@@ -219,10 +228,14 @@ class KnowledgeConfig:
     embedder: str = "openai"
     embedder_config: Optional[Dict[str, Any]] = None
     
-    # Chunking
+    # Chunking (direct fields)
     chunking_strategy: Union[str, ChunkingStrategy] = ChunkingStrategy.SEMANTIC
     chunk_size: int = 1000
     chunk_overlap: int = 200
+    
+    # Chunker config dict (alternative to direct fields)
+    # Supports: {"type": "semantic", "chunk_size": 512, ...}
+    chunker: Optional[Dict[str, Any]] = None
     
     # Retrieval
     retrieval_k: int = 5
@@ -234,6 +247,10 @@ class KnowledgeConfig:
     
     # Auto-retrieval (inject context automatically)
     auto_retrieve: bool = True
+    
+    # Vector store config dict (for vector database settings)
+    # Supports: {"provider": "qdrant", "url": "...", ...}
+    vector_store: Optional[Dict[str, Any]] = None
     
     # Full config dict (for advanced use)
     config: Optional[Dict[str, Any]] = None
@@ -247,11 +264,13 @@ class KnowledgeConfig:
             "chunking_strategy": self.chunking_strategy.value if isinstance(self.chunking_strategy, ChunkingStrategy) else self.chunking_strategy,
             "chunk_size": self.chunk_size,
             "chunk_overlap": self.chunk_overlap,
+            "chunker": self.chunker,
             "retrieval_k": self.retrieval_k,
             "retrieval_threshold": self.retrieval_threshold,
             "rerank": self.rerank,
             "rerank_model": self.rerank_model,
             "auto_retrieve": self.auto_retrieve,
+            "vector_store": self.vector_store,
             "config": self.config,
         }
 

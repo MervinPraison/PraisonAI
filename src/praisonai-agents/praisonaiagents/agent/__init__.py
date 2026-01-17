@@ -1,6 +1,9 @@
 """Agent module for AI agents"""
 from .agent import Agent
 from .image_agent import ImageAgent
+from .video_agent import VideoAgent, VideoConfig
+from .audio_agent import AudioAgent, AudioConfig
+from .ocr_agent import OCRAgent, OCRConfig
 from .context_agent import ContextAgent, create_context_agent
 from .handoff import (
     Handoff, handoff, handoff_filters, 
@@ -41,6 +44,12 @@ from .protocols import (
 __all__ = [
     'Agent',
     'ImageAgent',
+    'VideoAgent',
+    'VideoConfig',
+    'AudioAgent',
+    'AudioConfig',
+    'OCRAgent',
+    'OCRConfig',
     'ContextAgent',
     'create_context_agent',
     'Handoff',

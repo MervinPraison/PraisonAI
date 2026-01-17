@@ -46,8 +46,18 @@ export { Agent, Agents, PraisonAIAgents, Router } from './agent';
 export type { SimpleAgentConfig, PraisonAIAgentsConfig, SimpleRouterConfig, SimpleRouteConfig } from './agent';
 
 // Workflow - Step-based workflow execution
-export { Workflow, parallel, route, loop, repeat } from './workflows';
-export type { WorkflowStep, WorkflowContext, StepResult } from './workflows';
+export {
+  Workflow, parallel, route, loop, repeat,
+  // New: Python-parity Loop and Repeat classes
+  Loop, loopPattern, Repeat, repeatPattern,
+  // WorkflowStep class
+  WorkflowStep,
+} from './workflows';
+export type {
+  WorkflowContext, StepResult, WorkflowStepConfig,
+  LoopConfig, LoopResult, RepeatConfig, RepeatResult, RepeatContext,
+  StepContextConfig, StepOutputConfig, StepExecutionConfig, StepRoutingConfig
+} from './workflows';
 
 // Database factory - Python-like db() shortcut
 export { db, createDbAdapter, getDefaultDbAdapter, setDefaultDbAdapter } from './db';
@@ -56,10 +66,13 @@ export type { DbAdapter, DbConfig, DbMessage, DbRun, DbTrace } from './db';
 // ============================================================================
 // TOOLS - Function tools and tool registry
 // ============================================================================
-export { 
+export {
   BaseTool, ToolResult, ToolValidationError, validateTool, createTool,
   FunctionTool, tool, ToolRegistry, getRegistry, registerTool, getTool,
-  type ToolConfig, type ToolContext, type ToolParameters
+  // Subagent Tool (agent-as-tool pattern)
+  SubagentTool, createSubagentTool, createSubagentTools, createDelegator,
+  type ToolConfig, type ToolContext, type ToolParameters,
+  type SubagentToolConfig, type DelegatorConfig
 } from './tools';
 export * from './tools/arxivTools';
 export * from './tools/mcpSse';
@@ -104,6 +117,16 @@ export * from './session';
 export * from './knowledge';
 
 // ============================================================================
+// MCP (Model Context Protocol) - Client and Server Classes
+// ============================================================================
+export {
+  MCPClient, createMCPClient, getMCPTools,
+  MCPServer, createMCPServer,
+  type MCPClientConfig, type MCPSession, type MCPTransportType,
+  type MCPServerConfig, type MCPServerTool
+} from './mcp';
+
+// ============================================================================
 // LLM PROVIDERS
 // ============================================================================
 export * from './llm';
@@ -145,15 +168,37 @@ export type { MemoryEntry, MemoryConfig } from './memory/memory';
 export { FileMemory, createFileMemory, type FileMemoryConfig, type FileMemoryEntry } from './memory/file-memory';
 
 // Export AutoMemory
-export { 
+export {
   AutoMemory, createAutoMemory, createLLMSummarizer,
   DEFAULT_POLICIES,
   type AutoMemoryConfig, type AutoMemoryPolicy, type AutoMemoryContext,
   type VectorStoreAdapter as AutoMemoryVectorStore, type KnowledgeBaseAdapter as AutoMemoryKnowledgeBase
 } from './memory/auto-memory';
 
+// Export MemoryHooks (pre/post hooks for memory operations)
+export {
+  MemoryHooks, createMemoryHooks, createLoggingHooks, createValidationHooks, createEncryptionHooks,
+  type MemoryHooksConfig, type BeforeStoreHook, type AfterStoreHook,
+  type BeforeRetrieveHook, type AfterRetrieveHook,
+  type BeforeDeleteHook, type AfterDeleteHook,
+  type BeforeSearchHook, type AfterSearchHook
+} from './memory/hooks';
+
+// Export RulesManager (agent rules and policies)
+export {
+  RulesManager, createRulesManager, createSafetyRules,
+  type Rule, type RuleAction, type RulePriority, type RuleContext, type RuleResult,
+  type RulesEvaluation, type RulesManagerConfig
+} from './memory/rules-manager';
+
+// Export DocsManager (document management)
+export {
+  DocsManager, createDocsManager,
+  type Doc, type DocChunk, type DocSearchResult, type DocsManagerConfig
+} from './memory/docs-manager';
+
 // Export Telemetry (Agent-focused)
-export { 
+export {
   TelemetryCollector, AgentTelemetry,
   getTelemetry, enableTelemetry, disableTelemetry, cleanupTelemetry, createAgentTelemetry,
   type TelemetryEvent, type TelemetryConfig, type AgentStats
@@ -164,6 +209,17 @@ export { AutoAgents, createAutoAgents, type AgentConfig, type TaskConfig, type T
 
 // Export ImageAgent
 export { ImageAgent, createImageAgent, type ImageAgentConfig, type ImageGenerationConfig, type ImageAnalysisConfig } from './agent/image';
+
+// Export AudioAgent (AI SDK TTS/STT wrapper)
+export { AudioAgent, createAudioAgent } from './agent/audio';
+export type {
+  AudioAgentConfig,
+  SpeakOptions as AudioSpeakOptions,
+  TranscribeOptions as AudioTranscribeOptions,
+  SpeakResult as AudioSpeakResult,
+  TranscribeResult as AudioTranscribeResult,
+  AudioProvider
+} from './agent/audio';
 
 // Export DeepResearchAgent
 export { DeepResearchAgent, createDeepResearchAgent, type DeepResearchConfig, type ResearchResponse, type Citation, type ReasoningStep } from './agent/research';
@@ -179,8 +235,8 @@ export { PromptExpanderAgent, createPromptExpanderAgent, type PromptExpanderConf
 export { LLMGuardrail, createLLMGuardrail, type LLMGuardrailConfig, type LLMGuardrailResult } from './guardrails/llm-guardrail';
 
 // Export Planning (simplified API)
-export { 
-  Plan, PlanStep, TodoList, TodoItem, PlanStorage, 
+export {
+  Plan, PlanStep, TodoList, TodoItem, PlanStorage,
   PlanningAgent, TaskAgent,
   createPlan, createTodoList, createPlanStorage, createPlanningAgent, createTaskAgent,
   type PlanConfig, type PlanStepConfig, type TodoItemConfig, type PlanStatus, type TodoStatus,
@@ -200,7 +256,7 @@ export { parseYAMLWorkflow, createWorkflowFromYAML, loadWorkflowFromFile, valida
 export { SQLiteAdapter, createSQLiteAdapter, type SQLiteConfig } from './db/sqlite';
 
 // Export Redis Adapter
-export { 
+export {
   UpstashRedisAdapter, MemoryRedisAdapter,
   createUpstashRedis, createMemoryRedis,
   type RedisConfig, type RedisAdapter
@@ -214,7 +270,7 @@ export {
 } from './db/postgres';
 
 // Export Integrations - Vector Stores
-export { 
+export {
   BaseVectorStore, MemoryVectorStore, createMemoryVectorStore,
   PineconeVectorStore, createPineconeStore,
   WeaviateVectorStore, createWeaviateStore,
@@ -478,7 +534,7 @@ export {
   closeAllMCPClients,
   mcpToolsToAITools,
   type MCPConfig,
-  type MCPClient,
+  type MCPClient as MCPClientType,
   type MCPTool,
   type MCPResource,
   type MCPPrompt,
