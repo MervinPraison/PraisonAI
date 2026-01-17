@@ -2,15 +2,12 @@ import os
 import time
 import json
 import logging
-from typing import Any, Dict, Optional, List, Callable
-from pydantic import BaseModel
-from rich.text import Text
-from rich.panel import Panel
+from typing import Any, Dict, Optional, List
 from rich.console import Console
-from ..main import display_error, TaskOutput, error_logs
+from ..main import display_error, TaskOutput
 from ..agent.agent import Agent
 from ..task.task import Task
-from ..process.process import Process, LoopItems
+from ..process.process import Process
 import asyncio
 import uuid
 from enum import Enum
@@ -601,9 +598,9 @@ class Agents:
         # Only import multimodal dependencies if task has images
         if task.images and task.status == "not started":
             try:
-                import cv2
-                import base64
-                from moviepy import VideoFileClip
+                import cv2  # noqa: F401 - availability check
+                import base64  # noqa: F401 - availability check
+                from moviepy import VideoFileClip  # noqa: F401 - availability check
             except ImportError as e:
                 display_error(f"Error: Missing required dependencies for image/video processing: {e}")
                 display_error("Please install with: pip install opencv-python moviepy")
@@ -618,7 +615,7 @@ class Agents:
         # Set current agent for token tracking
         llm = getattr(executor_agent, 'llm', None) or getattr(executor_agent, 'llm_instance', None)
         if llm and hasattr(llm, 'set_current_agent'):
-            llm.set_current_agent(executor_agent.name)
+            llm.set_current_agent(executor_agent.display_name)
 
         # Ensure tools are available from both task and agent
         tools = task.tools or []
@@ -651,7 +648,7 @@ Context:
         task_prompt += "Please provide only the final result of your work. Do not add any conversation or extra explanation."
 
         if self.verbose >= 2:
-            logger.info(f"Executing task {task_id}: {task.description} using {executor_agent.name}")
+            logger.info(f"Executing task {task_id}: {task.description} using {executor_agent.display_name}")
         logger.debug(f"Starting execution of task {task_id} with prompt:\n{task_prompt}")
 
         if task.images:
@@ -681,7 +678,7 @@ Context:
                 description=task.description,
                 summary=task.description[:10],
                 raw=agent_output,
-                agent=executor_agent.name,
+                agent=executor_agent.display_name,
                 output_format="RAW"
             )
             
@@ -697,7 +694,7 @@ Context:
                     parsed = json.loads(cleaned)
                     task_output.json_dict = parsed
                     task_output.output_format = "JSON"
-                except:
+                except Exception:
                     logger.warning(f"Warning: Could not parse output of task {task_id} as JSON")
                     logger.debug(f"Output that failed JSON parsing: {agent_output}")
 
@@ -708,7 +705,7 @@ Context:
                     pyd_obj = task.output_pydantic(**parsed)
                     task_output.pydantic = pyd_obj
                     task_output.output_format = "Pydantic"
-                except:
+                except Exception:
                     logger.warning(f"Warning: Could not parse output of task {task_id} as Pydantic Model")
                     logger.debug(f"Output that failed Pydantic parsing: {agent_output}")
 
@@ -913,9 +910,9 @@ Context:
         # Only import multimodal dependencies if task has images
         if task.images and task.status == "not started":
             try:
-                import cv2
-                import base64
-                from moviepy import VideoFileClip
+                import cv2  # noqa: F401 - availability check
+                import base64  # noqa: F401 - availability check
+                from moviepy import VideoFileClip  # noqa: F401 - availability check
             except ImportError as e:
                 display_error(f"Error: Missing required dependencies for image/video processing: {e}")
                 display_error("Please install with: pip install opencv-python moviepy")
@@ -935,7 +932,7 @@ Context:
         # Set current agent for token tracking
         llm = getattr(executor_agent, 'llm', None) or getattr(executor_agent, 'llm_instance', None)
         if llm and hasattr(llm, 'set_current_agent'):
-            llm.set_current_agent(executor_agent.name)
+            llm.set_current_agent(executor_agent.display_name)
 
         # Substitute variables in task description if provided
         task_description = task.description
@@ -982,7 +979,7 @@ Context:
         task_prompt += "Please provide only the final result of your work. Do not add any conversation or extra explanation."
 
         if self.verbose >= 2:
-            logger.info(f"Executing task {task_id}: {task.description} using {executor_agent.name}")
+            logger.info(f"Executing task {task_id}: {task.description} using {executor_agent.display_name}")
         logger.debug(f"Starting execution of task {task_id} with prompt:\n{task_prompt}")
 
         if task.images:
@@ -1014,7 +1011,7 @@ Context:
                 try:
                     task.store_in_memory(
                         content=agent_output,
-                        agent_name=executor_agent.name,
+                        agent_name=executor_agent.display_name,
                         task_id=task_id
                     )
                 except Exception as e:
@@ -1024,7 +1021,7 @@ Context:
                 description=task.description,
                 summary=task.description[:10],
                 raw=agent_output,
-                agent=executor_agent.name,
+                agent=executor_agent.display_name,
                 output_format="RAW"
             )
             
@@ -1040,7 +1037,7 @@ Context:
                     parsed = json.loads(cleaned)
                     task_output.json_dict = parsed
                     task_output.output_format = "JSON"
-                except:
+                except Exception:
                     logger.warning(f"Warning: Could not parse output of task {task_id} as JSON")
                     logger.debug(f"Output that failed JSON parsing: {agent_output}")
 
@@ -1051,7 +1048,7 @@ Context:
                     pyd_obj = task.output_pydantic(**parsed)
                     task_output.pydantic = pyd_obj
                     task_output.output_format = "Pydantic"
-                except:
+                except Exception:
                     logger.warning(f"Warning: Could not parse output of task {task_id} as Pydantic Model")
                     logger.debug(f"Output that failed Pydantic parsing: {agent_output}")
 
@@ -1245,12 +1242,11 @@ Context:
         # ─────────────────────────────────────────────────────────────
         if show_verbose and is_tty:
             from rich.panel import Panel
-            from rich.text import Text
             console = Console()
             import time as time_module
             
             # Show workflow overview panel
-            agent_names = " → ".join([a.name for a in self.agents])
+            agent_names = " → ".join([a.display_name for a in self.agents])
             workflow_info = f"[bold {PRAISON_COLORS['metrics']}]Process:[/] {self.process}\n"
             workflow_info += f"[bold {PRAISON_COLORS['metrics']}]Agents:[/] {agent_names}"
             
@@ -1268,7 +1264,7 @@ Context:
             
             for idx, (task_id, task) in enumerate(self.tasks.items(), 1):
                 agent = task.agent
-                agent_name = agent.name if agent else "Unknown"
+                agent_name = agent.display_name if agent else "Unknown"
                 agent_model = getattr(agent, 'llm', 'gpt-4o-mini') if agent else "unknown"
                 
                 # Show agent task panel with model info
@@ -1448,7 +1444,7 @@ Context:
                 "user_id": self.user_id,
                 "run_id": self.run_id,
                 "state": self._state,
-                "agents": [agent.name for agent in self.agents],
+                "agents": [agent.display_name for agent in self.agents],
                 "process": self.process
             }
             self.shared_memory.store_short_term(
@@ -1660,7 +1656,7 @@ Context:
                         if "query" not in request_data:
                             raise HTTPException(status_code=400, detail="Missing 'query' field in request")
                         query = request_data["query"]
-                    except:
+                    except Exception:
                         # Fallback to form data or query params
                         form_data = await request.form()
                         if "query" in form_data:
@@ -1688,16 +1684,16 @@ Context:
                             
                             # Store this agent's result
                             results.append({
-                                "agent": agent_instance.name,
+                                "agent": agent_instance.display_name,
                                 "response": response
                             })
                             
                             # Use this response as input to the next agent
                             current_input = response
                         except Exception as e:
-                            logging.error(f"Error with agent {agent_instance.name}: {str(e)}", exc_info=True)
+                            logging.error(f"Error with agent {agent_instance.display_name}: {str(e)}", exc_info=True)
                             results.append({
-                                "agent": agent_instance.name,
+                                "agent": agent_instance.display_name,
                                 "error": str(e)
                             })
                             # Decide error handling: continue with original input, last good input, or stop? 
@@ -1720,19 +1716,19 @@ Context:
                     )
             
             print(f"🚀 Multi-Agent HTTP API available at http://{host}:{port}{path}")
-            agent_names = ", ".join([agent.name for agent in self.agents])
+            agent_names = ", ".join([agent.display_name for agent in self.agents])
             print(f"📊 Available agents for this endpoint ({len(self.agents)}): {agent_names}")
             
             # Create per-agent endpoints for individual agent access
             # This allows n8n and other tools to call specific agents
-            agents_dict = {agent.name.lower().replace(' ', '_'): agent for agent in self.agents}
+            agents_dict = {agent.display_name.lower().replace(' ', '_'): agent for agent in self.agents}
             
             # Add GET endpoint to list available agents
             @_agents_shared_apps[port].get(f"{path}/list")
             async def list_agents():
                 return {
                     "agents": [
-                        {"name": agent.name, "id": agent.name.lower().replace(' ', '_')}
+                        {"name": agent.display_name, "id": agent.display_name.lower().replace(' ', '_')}
                         for agent in self.agents
                     ]
                 }
@@ -1749,7 +1745,7 @@ Context:
                             query = request_data.get("query", "")
                             if not query:
                                 raise HTTPException(status_code=400, detail="Missing 'query' field")
-                        except:
+                        except Exception:
                             raise HTTPException(status_code=400, detail="Invalid JSON body")
                         
                         try:
@@ -1760,12 +1756,12 @@ Context:
                                 response = await loop.run_in_executor(None, lambda q=query: agent.chat(q))
                             
                             return {
-                                "agent": agent.name,
+                                "agent": agent.display_name,
                                 "query": query,
                                 "response": response
                             }
                         except Exception as e:
-                            logging.error(f"Error with agent {agent.name}: {str(e)}", exc_info=True)
+                            logging.error(f"Error with agent {agent.display_name}: {str(e)}", exc_info=True)
                             return JSONResponse(
                                 status_code=500,
                                 content={"error": f"Agent error: {str(e)}"}
@@ -1888,23 +1884,23 @@ Context:
 
                 for agent_instance in self.agents:
                     try:
-                        logging.debug(f"Processing with agent: {agent_instance.name}")
+                        logging.debug(f"Processing with agent: {agent_instance.display_name}")
                         if hasattr(agent_instance, 'achat') and asyncio.iscoroutinefunction(agent_instance.achat):
                             response = await agent_instance.achat(current_input, tools=agent_instance.tools, task_name=None, task_description=None, task_id=None)
                         elif hasattr(agent_instance, 'chat'): # Fallback to sync chat if achat not suitable
                             loop = asyncio.get_running_loop()
                             response = await loop.run_in_executor(None, lambda ci=current_input: agent_instance.chat(ci, tools=agent_instance.tools))
                         else:
-                            logging.warning(f"Agent {agent_instance.name} has no suitable chat or achat method.")
-                            response = f"Error: Agent {agent_instance.name} has no callable chat method."
+                            logging.warning(f"Agent {agent_instance.display_name} has no suitable chat or achat method.")
+                            response = f"Error: Agent {agent_instance.display_name} has no callable chat method."
                         
                         current_input = response if response is not None else "Agent returned no response."
                         final_response = current_input # Keep track of the last valid response
-                        logging.debug(f"Agent {agent_instance.name} responded. Current intermediate output: {current_input}")
+                        logging.debug(f"Agent {agent_instance.display_name} responded. Current intermediate output: {current_input}")
 
                     except Exception as e:
-                        logging.error(f"Error during agent {agent_instance.name} execution in MCP workflow: {str(e)}", exc_info=True)
-                        current_input = f"Error from agent {agent_instance.name}: {str(e)}"
+                        logging.error(f"Error during agent {agent_instance.display_name} execution in MCP workflow: {str(e)}", exc_info=True)
+                        current_input = f"Error from agent {agent_instance.display_name}: {str(e)}"
                         final_response = current_input # Update final response to show error
                         # Optionally break or continue based on desired error handling for the workflow
                         # For now, we continue, and the error is passed to the next agent or returned.
@@ -1943,7 +1939,7 @@ Context:
             # Instead of trying to extract tool names, hardcode the known tool name
             mcp_tool_names = [actual_mcp_tool_name]  # Use the determined dynamic tool name
             print(f"🛠️ Available MCP tools: {', '.join(mcp_tool_names)}")
-            agent_names_in_workflow = ", ".join([a.name for a in self.agents])
+            agent_names_in_workflow = ", ".join([a.display_name for a in self.agents])
             print(f"🔄 Agents in MCP workflow: {agent_names_in_workflow}")
 
             def run_praison_mcp_server():
@@ -2253,7 +2249,7 @@ Context:
         console.print("\n[bold blue]🚀 EXECUTION PHASE[/bold blue]\n")
         
         # Map agent names to agent instances
-        agent_map = {agent.name: agent for agent in self.agents}
+        agent_map = {agent.display_name: agent for agent in self.agents}
         
         # Store original tasks and create new tasks from plan
         original_tasks = self.tasks.copy()
@@ -2293,7 +2289,7 @@ Context:
             # Find matching original task for additional config (memory, callbacks, etc.)
             original_task = None
             for orig_task in original_tasks.values():
-                if orig_task.agent and orig_task.agent.name == agent.name:
+                if orig_task.agent and orig_task.agent.display_name == agent.display_name:
                     original_task = orig_task
                     break
             
@@ -2334,7 +2330,7 @@ Context:
                 console.print(f"[dim]Progress: [{bar}] {progress * 100:.0f}%[/dim]")
                 
                 console.print(f"\n[bold]📌 Step {i + 1}/{len(self.tasks)}:[/bold] {task.description[:60]}...")
-                console.print(f"[dim]   Agent: {task.agent.name if task.agent else 'Unknown'}[/dim]")
+                console.print(f"[dim]   Agent: {task.agent.display_name if task.agent else 'Unknown'}[/dim]")
                 
                 # Mark as in progress
                 self._todo_list.start(item.id)

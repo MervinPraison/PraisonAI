@@ -67,6 +67,9 @@ export async function execute(args: string[], options: LLMOptions): Promise<void
     case 'json':
       await jsonCommand(args.slice(1), options, outputFormat);
       break;
+    case 'help':
+      await helpCommand(outputFormat);
+      break;
     default:
       if (outputFormat === 'json') {
         outputJson(formatError(ERROR_CODES.INVALID_ARGS, `Unknown subcommand: ${subcommand}`));
@@ -83,18 +86,18 @@ export async function execute(args: string[], options: LLMOptions): Promise<void
  */
 async function providersCommand(args: string[], options: LLMOptions, outputFormat: string): Promise<void> {
   try {
-    const { 
-      listSupportedProviders, 
-      AISDK_PROVIDERS, 
+    const {
+      listSupportedProviders,
+      AISDK_PROVIDERS,
       validateProviderApiKey,
       isAISDKAvailable,
       getAISDKVersion
     } = await import('../../llm/providers/ai-sdk');
-    
+
     const providers = listSupportedProviders();
     const aiSdkAvailable = await isAISDKAvailable();
     const aiSdkVersion = await getAISDKVersion();
-    
+
     const providerDetails = providers.map((id: string) => {
       const info = AISDK_PROVIDERS[id as keyof typeof AISDK_PROVIDERS];
       const hasApiKey = validateProviderApiKey(id);
@@ -116,26 +119,26 @@ async function providersCommand(args: string[], options: LLMOptions, outputForma
       }));
     } else {
       await pretty.heading('AI SDK Providers');
-      
+
       if (aiSdkAvailable) {
         await pretty.success(`AI SDK: ${aiSdkVersion || 'installed'}`);
       } else {
         await pretty.warn('AI SDK not installed. Run: npm install ai');
       }
-      
+
       await pretty.newline();
       await pretty.plain('  Available Providers:');
-      
+
       for (const p of providerDetails) {
         const status = p.hasApiKey ? '✅' : '⚠️';
         const keyInfo = p.hasApiKey ? '🔑' : `Missing ${p.envKey}`;
         await pretty.plain(`    ${status} ${p.id.padEnd(20)} ${keyInfo}`);
-        
+
         if (options.verbose) {
           await pretty.dim(`        Package: ${p.package}`);
         }
       }
-      
+
       await pretty.newline();
       await pretty.info('Set API keys via environment variables');
       await pretty.dim('  Example: export OPENAI_API_KEY=sk-...');
@@ -150,7 +153,7 @@ async function providersCommand(args: string[], options: LLMOptions, outputForma
  */
 async function testCommand(args: string[], options: LLMOptions, outputFormat: string): Promise<void> {
   const providerId = args[0] || options.provider;
-  
+
   if (!providerId) {
     if (outputFormat === 'json') {
       outputJson(formatError(ERROR_CODES.MISSING_ARG, 'Provider ID required'));
@@ -163,13 +166,13 @@ async function testCommand(args: string[], options: LLMOptions, outputFormat: st
   }
 
   try {
-    const { 
-      createAISDKBackend, 
+    const {
+      createAISDKBackend,
       validateProviderApiKey,
       getMissingApiKeyMessage,
       isProviderSupported
     } = await import('../../llm/providers/ai-sdk');
-    
+
     // Check if provider is supported
     if (!isProviderSupported(providerId)) {
       if (outputFormat === 'json') {
@@ -180,7 +183,7 @@ async function testCommand(args: string[], options: LLMOptions, outputFormat: st
       process.exit(LLM_EXIT_CODES.PROVIDER_NOT_FOUND);
       return;
     }
-    
+
     // Check API key
     if (!validateProviderApiKey(providerId)) {
       const msg = getMissingApiKeyMessage(providerId);
@@ -192,7 +195,7 @@ async function testCommand(args: string[], options: LLMOptions, outputFormat: st
       process.exit(LLM_EXIT_CODES.AUTH_ERROR);
       return;
     }
-    
+
     // Determine test model based on provider
     const testModels: Record<string, string> = {
       openai: 'gpt-4o-mini',
@@ -203,20 +206,20 @@ async function testCommand(args: string[], options: LLMOptions, outputFormat: st
       cohere: 'command-light',
       deepseek: 'deepseek-chat',
     };
-    
+
     const modelId = options.model || testModels[providerId] || 'default';
     const modelString = `${providerId}/${modelId}`;
-    
+
     if (outputFormat !== 'json') {
       await pretty.info(`Testing ${modelString}...`);
     }
-    
+
     const startTime = Date.now();
     const backend = createAISDKBackend(modelString, {
       timeout: options.timeout || 30000,
       maxRetries: 0, // No retries for test
     });
-    
+
     const result = await backend.generateText({
       messages: [
         { role: 'user', content: 'Say "OK" and nothing else.' }
@@ -224,9 +227,9 @@ async function testCommand(args: string[], options: LLMOptions, outputFormat: st
       maxTokens: 10,
       temperature: 0,
     });
-    
+
     const duration = Date.now() - startTime;
-    
+
     if (outputFormat === 'json') {
       outputJson(formatSuccess({
         provider: providerId,
@@ -255,7 +258,7 @@ async function testCommand(args: string[], options: LLMOptions, outputFormat: st
  */
 async function validateCommand(args: string[], options: LLMOptions, outputFormat: string): Promise<void> {
   const providerId = args[0] || options.provider;
-  
+
   if (!providerId) {
     if (outputFormat === 'json') {
       outputJson(formatError(ERROR_CODES.MISSING_ARG, 'Provider ID required'));
@@ -267,16 +270,16 @@ async function validateCommand(args: string[], options: LLMOptions, outputFormat
   }
 
   try {
-    const { 
+    const {
       isProviderSupported,
       validateProviderApiKey,
       getProviderEnvKey,
       getProviderPackage,
       isAISDKAvailable
     } = await import('../../llm/providers/ai-sdk');
-    
+
     const checks: Array<{ name: string; passed: boolean; message: string }> = [];
-    
+
     // Check AI SDK availability
     const aiSdkAvailable = await isAISDKAvailable();
     checks.push({
@@ -284,7 +287,7 @@ async function validateCommand(args: string[], options: LLMOptions, outputFormat
       passed: aiSdkAvailable,
       message: aiSdkAvailable ? 'AI SDK is installed' : 'AI SDK not found. Run: npm install ai'
     });
-    
+
     // Check provider support
     const isSupported = isProviderSupported(providerId);
     checks.push({
@@ -292,7 +295,7 @@ async function validateCommand(args: string[], options: LLMOptions, outputFormat
       passed: isSupported,
       message: isSupported ? `Provider '${providerId}' is supported` : `Provider '${providerId}' is not supported`
     });
-    
+
     if (isSupported) {
       // Check provider package
       const pkg = getProviderPackage(providerId);
@@ -310,21 +313,21 @@ async function validateCommand(args: string[], options: LLMOptions, outputFormat
           message: pkgInstalled ? `${pkg} is installed` : `${pkg} not found. Run: npm install ${pkg}`
         });
       }
-      
+
       // Check API key
       const hasApiKey = validateProviderApiKey(providerId);
       const envKey = getProviderEnvKey(providerId);
       checks.push({
         name: 'API Key',
         passed: hasApiKey,
-        message: hasApiKey 
-          ? `${envKey} is set` 
+        message: hasApiKey
+          ? `${envKey} is set`
           : `${envKey} is not set`
       });
     }
-    
+
     const allPassed = checks.every(c => c.passed);
-    
+
     if (outputFormat === 'json') {
       outputJson(formatSuccess({
         provider: providerId,
@@ -333,12 +336,12 @@ async function validateCommand(args: string[], options: LLMOptions, outputFormat
       }));
     } else {
       await pretty.heading(`Validation: ${providerId}`);
-      
+
       for (const check of checks) {
         const icon = check.passed ? '✅' : '❌';
         await pretty.plain(`  ${icon} ${check.name}: ${check.message}`);
       }
-      
+
       await pretty.newline();
       if (allPassed) {
         await pretty.success('All checks passed!');
@@ -357,7 +360,7 @@ async function validateCommand(args: string[], options: LLMOptions, outputFormat
  */
 async function runCommand(args: string[], options: LLMOptions, outputFormat: string): Promise<void> {
   const prompt = args.join(' ');
-  
+
   if (!prompt) {
     if (outputFormat === 'json') {
       outputJson(formatError(ERROR_CODES.MISSING_ARG, 'Prompt required'));
@@ -368,16 +371,16 @@ async function runCommand(args: string[], options: LLMOptions, outputFormat: str
     process.exit(LLM_EXIT_CODES.INVALID_ARGS);
     return;
   }
-  
+
   const modelString = options.model || 'openai/gpt-4o-mini';
 
   try {
     const { createAISDKBackend } = await import('../../llm/providers/ai-sdk');
-    
+
     const backend = createAISDKBackend(modelString, {
       timeout: options.timeout || 60000,
     });
-    
+
     if (options.stream) {
       // Streaming mode
       if (outputFormat === 'json') {
@@ -385,9 +388,9 @@ async function runCommand(args: string[], options: LLMOptions, outputFormat: str
         const stream = await backend.streamText({
           messages: [{ role: 'user', content: prompt }],
         });
-        
+
         process.stdout.write('{"type":"stream_start"}\n');
-        
+
         let fullText = '';
         for await (const chunk of stream) {
           if (chunk.text) {
@@ -395,21 +398,21 @@ async function runCommand(args: string[], options: LLMOptions, outputFormat: str
             process.stdout.write(JSON.stringify({ type: 'text', text: chunk.text }) + '\n');
           }
           if (chunk.finishReason) {
-            process.stdout.write(JSON.stringify({ 
-              type: 'finish', 
+            process.stdout.write(JSON.stringify({
+              type: 'finish',
               finishReason: chunk.finishReason,
-              usage: chunk.usage 
+              usage: chunk.usage
             }) + '\n');
           }
         }
-        
+
         process.stdout.write(JSON.stringify({ type: 'stream_end', fullText }) + '\n');
       } else {
         // Pretty streaming - output text directly
         const stream = await backend.streamText({
           messages: [{ role: 'user', content: prompt }],
         });
-        
+
         for await (const chunk of stream) {
           if (chunk.text) {
             process.stdout.write(chunk.text);
@@ -424,7 +427,7 @@ async function runCommand(args: string[], options: LLMOptions, outputFormat: str
         messages: [{ role: 'user', content: prompt }],
       });
       const duration = Date.now() - startTime;
-      
+
       if (outputFormat === 'json') {
         outputJson(formatSuccess({
           model: modelString,
@@ -435,7 +438,7 @@ async function runCommand(args: string[], options: LLMOptions, outputFormat: str
         }));
       } else {
         await pretty.plain(result.text);
-        
+
         if (options.verbose) {
           await pretty.newline();
           await pretty.dim(`Model: ${modelString}`);
@@ -460,7 +463,7 @@ async function runCommand(args: string[], options: LLMOptions, outputFormat: str
 async function modelsCommand(args: string[], options: LLMOptions, outputFormat: string): Promise<void> {
   try {
     const { listSupportedProviders, AISDK_PROVIDERS } = await import('../../llm/providers/ai-sdk');
-    
+
     // Common models per provider (not exhaustive)
     const commonModels: Record<string, string[]> = {
       openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo', 'o1', 'o1-mini'],
@@ -488,14 +491,14 @@ async function modelsCommand(args: string[], options: LLMOptions, outputFormat: 
     } else {
       await pretty.heading('Common Models by Provider');
       await pretty.dim('Note: This is not exhaustive. Check provider docs for all models.\n');
-      
+
       for (const p of modelsData) {
         await pretty.plain(`  ${p.provider}:`);
         for (const model of p.models) {
           await pretty.dim(`    - ${model}`);
         }
       }
-      
+
       await pretty.newline();
       await pretty.info('Usage: praisonai-ts llm run "prompt" --model provider/model');
     }
@@ -510,7 +513,7 @@ async function modelsCommand(args: string[], options: LLMOptions, outputFormat: 
 async function configCommand(args: string[], options: LLMOptions, outputFormat: string): Promise<void> {
   try {
     const { SAFE_DEFAULTS, AISDK_PROVIDERS, PROVIDER_ALIASES } = await import('../../llm/providers/ai-sdk');
-    
+
     // Gather environment config (redacted)
     const envConfig: Record<string, string> = {};
     for (const [id, info] of Object.entries(AISDK_PROVIDERS)) {
@@ -532,19 +535,19 @@ async function configCommand(args: string[], options: LLMOptions, outputFormat: 
       outputJson(formatSuccess(config));
     } else {
       await pretty.heading('AI SDK Configuration');
-      
+
       await pretty.plain('  Defaults:');
       await pretty.dim(`    timeout: ${SAFE_DEFAULTS.timeout}ms`);
       await pretty.dim(`    maxRetries: ${SAFE_DEFAULTS.maxRetries}`);
       await pretty.dim(`    maxOutputTokens: ${SAFE_DEFAULTS.maxOutputTokens}`);
       await pretty.dim(`    redactLogs: ${SAFE_DEFAULTS.redactLogs}`);
-      
+
       await pretty.newline();
       await pretty.plain('  Provider Aliases:');
       for (const [alias, target] of Object.entries(PROVIDER_ALIASES)) {
         await pretty.dim(`    ${alias} → ${target}`);
       }
-      
+
       await pretty.newline();
       await pretty.plain('  Environment (redacted):');
       if (Object.keys(envConfig).length === 0) {
@@ -566,9 +569,9 @@ async function configCommand(args: string[], options: LLMOptions, outputFormat: 
 async function traceCommand(args: string[], options: LLMOptions, outputFormat: string): Promise<void> {
   try {
     const { createAISDKBackend, createAttributionMiddleware } = await import('../../llm/providers/ai-sdk');
-    
+
     const modelString = options.model || 'openai/gpt-4o-mini';
-    
+
     // Generate demo attribution context
     const attribution = {
       agentId: `agent-${Date.now().toString(36)}`,
@@ -576,7 +579,7 @@ async function traceCommand(args: string[], options: LLMOptions, outputFormat: s
       traceId: `trace-${Math.random().toString(36).slice(2, 10)}`,
       sessionId: options.verbose ? `session-demo` : undefined,
     };
-    
+
     if (outputFormat !== 'json') {
       await pretty.heading('Attribution Trace Demo');
       await pretty.info(`Running with model: ${modelString}`);
@@ -595,19 +598,19 @@ async function traceCommand(args: string[], options: LLMOptions, outputFormat: s
       await pretty.dim(`    X-Trace-Id: ${attribution.traceId}`);
       await pretty.newline();
     }
-    
+
     const backend = createAISDKBackend(modelString, {
       timeout: options.timeout || 30000,
       attribution,
     });
-    
+
     const startTime = Date.now();
     const result = await backend.generateText({
       messages: [{ role: 'user', content: 'Say "Trace OK" and nothing else.' }],
       maxTokens: 10,
     });
     const duration = Date.now() - startTime;
-    
+
     if (outputFormat === 'json') {
       outputJson(formatSuccess({
         attribution,
@@ -637,7 +640,7 @@ async function traceCommand(args: string[], options: LLMOptions, outputFormat: s
 async function toolsCommand(args: string[], options: LLMOptions, outputFormat: string): Promise<void> {
   try {
     const modelString = options.model || 'openai/gpt-4o-mini';
-    
+
     if (outputFormat !== 'json') {
       await pretty.heading('Tool Calling Demo');
       await pretty.info(`Model: ${modelString}`);
@@ -688,7 +691,7 @@ async function toolsCommand(args: string[], options: LLMOptions, outputFormat: s
 async function jsonCommand(args: string[], options: LLMOptions, outputFormat: string): Promise<void> {
   try {
     const modelString = options.model || 'openai/gpt-4o-mini';
-    
+
     if (outputFormat !== 'json') {
       await pretty.heading('Structured Output (JSON) Demo');
       await pretty.info(`Model: ${modelString}`);
@@ -732,19 +735,68 @@ async function jsonCommand(args: string[], options: LLMOptions, outputFormat: st
 }
 
 /**
+ * Show help for LLM subcommands
+ */
+async function helpCommand(outputFormat: string): Promise<void> {
+  const help = {
+    command: 'llm',
+    description: 'AI SDK provider management and testing',
+    subcommands: [
+      { name: 'providers', description: 'List available AI SDK providers' },
+      { name: 'test <provider>', description: 'Test connectivity to a provider' },
+      { name: 'validate <provider>', description: 'Validate provider configuration' },
+      { name: 'run "<prompt>"', description: 'Run a prompt with a specific model' },
+      { name: 'models', description: 'List common models by provider' },
+      { name: 'config', description: 'Show resolved configuration' },
+      { name: 'trace', description: 'Demo attribution/trace headers' },
+      { name: 'tools', description: 'Demo tool calling' },
+      { name: 'json', description: 'Demo structured output' },
+      { name: 'help', description: 'Show this help' }
+    ],
+    flags: [
+      { name: '--model', description: 'Model to use (provider/model format)' },
+      { name: '--stream', description: 'Enable streaming output' },
+      { name: '--timeout', description: 'Request timeout in ms' },
+      { name: '--verbose', description: 'Show detailed output' }
+    ]
+  };
+
+  if (outputFormat === 'json') {
+    outputJson(formatSuccess(help));
+  } else {
+    await pretty.heading('LLM Command');
+    await pretty.plain(help.description + '\n');
+    await pretty.plain('Subcommands:');
+    for (const cmd of help.subcommands) {
+      await pretty.plain(`  ${cmd.name.padEnd(25)} ${cmd.description}`);
+    }
+    await pretty.newline();
+    await pretty.plain('Flags:');
+    for (const flag of help.flags) {
+      await pretty.plain(`  ${flag.name.padEnd(20)} ${flag.description}`);
+    }
+    await pretty.newline();
+    await pretty.dim('Examples:');
+    await pretty.dim('  praisonai-ts llm providers');
+    await pretty.dim('  praisonai-ts llm test openai');
+    await pretty.dim('  praisonai-ts llm run "Hello" --model openai/gpt-4o-mini');
+  }
+}
+
+/**
  * Handle errors with proper exit codes and formatting
  */
 async function handleError(error: unknown, outputFormat: string, context: string): Promise<never> {
   const { AISDKError } = await import('../../llm/providers/ai-sdk');
-  
+
   let exitCode: number = LLM_EXIT_CODES.GENERAL_ERROR;
   let errorCode = 'UNKNOWN_ERROR';
   let message = context;
-  
+
   if (error instanceof AISDKError) {
     message = `${context}: ${error.message}`;
     errorCode = error.code;
-    
+
     switch (error.code) {
       case 'AUTHENTICATION':
         exitCode = 3; // AUTH_ERROR
@@ -766,12 +818,12 @@ async function handleError(error: unknown, outputFormat: string, context: string
   } else if (error instanceof Error) {
     message = `${context}: ${error.message}`;
   }
-  
+
   if (outputFormat === 'json') {
     outputJson(formatError(errorCode, message));
   } else {
     await pretty.error(message);
   }
-  
+
   process.exit(exitCode);
 }

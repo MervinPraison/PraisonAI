@@ -1,8 +1,10 @@
 /**
- * Knowledge command - Manage knowledge base
+ * Knowledge command - Manage knowledge base with optional persistence
  */
 
 import { BaseKnowledgeBase, Knowledge } from '../../knowledge';
+import { db } from '../../db';
+import { ENV_VARS } from '../spec/cli-spec';
 import { outputJson, formatSuccess, formatError } from '../output/json';
 import * as pretty from '../output/pretty';
 import { EXIT_CODES } from '../spec/cli-spec';
@@ -15,9 +17,86 @@ export interface KnowledgeOptions {
   verbose?: boolean;
   output?: 'json' | 'text' | 'pretty';
   json?: boolean;
+  db?: string;
 }
 
-// Singleton knowledge base instance
+// Get database URL from option or env var
+function getDbUrl(options: KnowledgeOptions): string | undefined {
+  return options.db || process.env[ENV_VARS.PRAISONAI_DB];
+}
+
+// Persistent knowledge base using db adapter
+class PersistentKnowledgeBase {
+  private adapter: any;
+  private sessionId: string = 'knowledge-base';
+
+  constructor(dbUrl: string) {
+    this.adapter = db(dbUrl);
+  }
+
+  async initialize(): Promise<void> {
+    if (this.adapter.initialize) {
+      await this.adapter.initialize();
+    }
+    // Create knowledge session if doesn't exist
+    if (this.adapter.createSession) {
+      try {
+        await this.adapter.createSession(this.sessionId, { type: 'knowledge' });
+      } catch (e) {
+        // Session might already exist
+      }
+    }
+  }
+
+  async addKnowledge(knowledge: Knowledge): Promise<void> {
+    await this.initialize();
+    if (this.adapter.addMessage) {
+      const content = typeof knowledge.content === 'string'
+        ? knowledge.content
+        : JSON.stringify(knowledge.content);
+      await this.adapter.addMessage({
+        id: knowledge.id,
+        sessionId: this.sessionId,
+        role: 'system',
+        content,
+        createdAt: Date.now(),
+        metadata: JSON.stringify({
+          type: knowledge.type,
+          source: knowledge.metadata?.source,
+          ...knowledge.metadata
+        })
+      });
+    }
+  }
+
+  async searchKnowledge(query: string): Promise<Knowledge[]> {
+    await this.initialize();
+    if (this.adapter.getMessages) {
+      const messages = await this.adapter.getMessages(this.sessionId);
+      const queryLower = query.toLowerCase();
+      return messages
+        .filter((m: any) => {
+          if (!query) return true;
+          return m.content.toLowerCase().includes(queryLower);
+        })
+        .map((m: any) => {
+          let metadata = {};
+          try {
+            metadata = m.metadata ? JSON.parse(m.metadata) : {};
+          } catch (e) { }
+          return {
+            id: m.id,
+            type: (metadata as any).type || 'text',
+            content: m.content,
+            metadata
+          };
+        });
+    }
+    return [];
+  }
+}
+
+// Singleton in-memory knowledge base
 let kbInstance: BaseKnowledgeBase | null = null;
 function getKnowledgeBase(): BaseKnowledgeBase {
   if (!kbInstance) {
@@ -30,19 +109,23 @@ export async function execute(args: string[], options: KnowledgeOptions): Promis
   const action = args[0] || 'help';
   const actionArgs = args.slice(1);
   const outputFormat = options.json ? 'json' : (options.output || 'pretty');
+  const dbUrl = getDbUrl(options);
 
   try {
-    const kb = getKnowledgeBase();
+    const kb = dbUrl
+      ? new PersistentKnowledgeBase(dbUrl)
+      : getKnowledgeBase();
+    const isPersistent = !!dbUrl;
 
     switch (action) {
       case 'add':
-        await addKnowledge(kb, actionArgs, outputFormat);
+        await addKnowledge(kb, actionArgs, outputFormat, isPersistent);
         break;
       case 'search':
         await searchKnowledge(kb, actionArgs, outputFormat);
         break;
       case 'list':
-        await listKnowledge(kb, outputFormat);
+        await listKnowledge(kb, outputFormat, isPersistent);
         break;
       case 'help':
       default:
@@ -59,7 +142,7 @@ export async function execute(args: string[], options: KnowledgeOptions): Promis
   }
 }
 
-async function addKnowledge(kb: BaseKnowledgeBase, args: string[], outputFormat: string): Promise<void> {
+async function addKnowledge(kb: BaseKnowledgeBase | PersistentKnowledgeBase, args: string[], outputFormat: string, isPersistent: boolean): Promise<void> {
   const source = args[0];
   if (!source) {
     if (outputFormat === 'json') {
@@ -89,23 +172,24 @@ async function addKnowledge(kb: BaseKnowledgeBase, args: string[], outputFormat:
     content,
     metadata: { source: sourceName, addedAt: new Date().toISOString() }
   };
-  
-  kb.addKnowledge(knowledge);
-  
+
+  await kb.addKnowledge(knowledge);
+
   if (outputFormat === 'json') {
-    outputJson(formatSuccess({ 
-      added: true, 
+    outputJson(formatSuccess({
+      added: true,
       id: knowledge.id,
       source: sourceName,
-      contentLength: content.length 
+      contentLength: content.length,
+      persistent: isPersistent
     }));
   } else {
-    await pretty.success(`Knowledge added from: ${sourceName}`);
+    await pretty.success(`Knowledge added from: ${sourceName}${isPersistent ? ' (persistent)' : ''}`);
     await pretty.dim(`Content length: ${content.length} characters`);
   }
 }
 
-async function searchKnowledge(kb: BaseKnowledgeBase, args: string[], outputFormat: string): Promise<void> {
+async function searchKnowledge(kb: BaseKnowledgeBase | PersistentKnowledgeBase, args: string[], outputFormat: string): Promise<void> {
   const query = args.join(' ');
   if (!query) {
     if (outputFormat === 'json') {
@@ -116,8 +200,8 @@ async function searchKnowledge(kb: BaseKnowledgeBase, args: string[], outputForm
     process.exit(EXIT_CODES.INVALID_ARGUMENTS);
   }
 
-  const results = kb.searchKnowledge(query);
-  
+  const results = await kb.searchKnowledge(query);
+
   if (outputFormat === 'json') {
     outputJson(formatSuccess({
       query,
@@ -146,10 +230,10 @@ async function searchKnowledge(kb: BaseKnowledgeBase, args: string[], outputForm
   }
 }
 
-async function listKnowledge(kb: BaseKnowledgeBase, outputFormat: string): Promise<void> {
+async function listKnowledge(kb: BaseKnowledgeBase | PersistentKnowledgeBase, outputFormat: string, isPersistent: boolean): Promise<void> {
   // Search with empty string to get all
-  const entries = kb.searchKnowledge('');
-  
+  const entries = await kb.searchKnowledge('');
+
   if (outputFormat === 'json') {
     outputJson(formatSuccess({
       entries: entries.map((e: Knowledge) => ({
@@ -158,10 +242,14 @@ async function listKnowledge(kb: BaseKnowledgeBase, outputFormat: string): Promi
         contentPreview: typeof e.content === 'string' ? e.content.substring(0, 100) : JSON.stringify(e.content).substring(0, 100),
         source: e.metadata?.source
       })),
-      count: entries.length
+      count: entries.length,
+      persistent: isPersistent
     }));
   } else {
     await pretty.heading('Knowledge Base Entries');
+    if (isPersistent) {
+      await pretty.dim('(persistent storage)');
+    }
     if (entries.length === 0) {
       await pretty.info('No knowledge entries found');
     } else {
@@ -185,8 +273,10 @@ async function showHelp(outputFormat: string): Promise<void> {
       { name: 'add <file|text>', description: 'Add knowledge from file or text' },
       { name: 'search <query>', description: 'Search knowledge base' },
       { name: 'list', description: 'List all knowledge entries' },
-      { name: 'clear', description: 'Clear all knowledge' },
       { name: 'help', description: 'Show this help' }
+    ],
+    options: [
+      { name: '--db <url>', description: 'Database URL for persistence (sqlite:./data.db)' }
     ]
   };
 
@@ -199,5 +289,14 @@ async function showHelp(outputFormat: string): Promise<void> {
     for (const cmd of help.subcommands) {
       await pretty.plain(`  ${cmd.name.padEnd(25)} ${cmd.description}`);
     }
+    await pretty.newline();
+    await pretty.plain('Options:');
+    for (const opt of help.options) {
+      await pretty.plain(`  ${opt.name.padEnd(20)} ${opt.description}`);
+    }
+    await pretty.newline();
+    await pretty.dim('Examples:');
+    await pretty.dim('  praisonai-ts knowledge add "Important fact" --db sqlite:./data.db');
+    await pretty.dim('  praisonai-ts knowledge list --db sqlite:./data.db');
   }
 }

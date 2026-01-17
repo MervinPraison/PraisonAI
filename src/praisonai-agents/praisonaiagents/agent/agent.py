@@ -1,39 +1,28 @@
 import os
 import time
 import json
-import copy
 import logging
 import asyncio
 import threading
 import contextlib
-from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Tuple, Generator
+from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Generator
 from rich.console import Console
 from rich.live import Live
 from ..llm import (
     get_openai_client,
-    ChatCompletionMessage,
-    Choice,
-    CompletionTokensDetails,
-    PromptTokensDetails,
-    CompletionUsage,
-    ChatCompletion,
-    ToolCall,
     process_stream_chunks
 )
 from ..main import (
     display_error,
-    display_tool_call,
     display_instruction,
     display_interaction,
     display_generating,
     display_self_reflection,
     ReflectionOutput,
     adisplay_instruction,
-    approval_callback,
     execute_sync_callback
 )
 import inspect
-import uuid
 
 # Global variables for API server
 _server_started = {}  # Dict of port -> started boolean
@@ -44,11 +33,13 @@ _shared_apps = {}  # Dict of port -> FastAPI app
 
 if TYPE_CHECKING:
     from ..task.task import Task
-    from ..main import TaskOutput
     from .handoff import Handoff, HandoffConfig, HandoffResult
     from ..rag.models import RAGResult, ContextPack
 
 class Agent:
+    # Class-level counter for generating unique display names for nameless agents
+    _agent_counter = 0
+    
     @classmethod
     def _configure_logging(cls):
         """Configure logging settings once for all agent instances."""
@@ -377,8 +368,8 @@ class Agent:
         # Add check at start if memory is requested
         if memory is not None:
             try:
-                from ..memory.memory import Memory
-                MEMORY_AVAILABLE = True
+                from ..memory.memory import Memory  # noqa: F401
+                _ = Memory  # Silence unused import warning - we just check availability
             except ImportError:
                 raise ImportError(
                     "Memory features requested in Agent but memory dependencies not installed. "
@@ -806,10 +797,14 @@ class Agent:
             # instructions like "You are a helpful assistant"
             if name:
                 self.name = name
+                self._agent_index = None  # Named agents don't need an index
             else:
                 # Don't auto-generate - None signals "no explicit name provided"
                 # Display logic will skip Agent Info panel when name is None
                 self.name = None
+                # Assign unique index for display_name
+                Agent._agent_counter += 1
+                self._agent_index = Agent._agent_counter
             self.role = role or "Assistant"
             self.goal = goal or instructions
             self.backstory = backstory or instructions
@@ -818,6 +813,7 @@ class Agent:
         else:
             # Use provided values or defaults
             self.name = name or "Agent"
+            self._agent_index = None  # Named agents don't need an index
             self.role = role or "Assistant"
             self.goal = goal or "Help the user with their tasks"
             self.backstory = backstory or "I am an AI assistant"
@@ -842,7 +838,6 @@ class Agent:
         # LLM CONSOLIDATION: Handle model= alias and deprecation warnings
         # Precedence: llm= > model= > default
         # ============================================================
-        import warnings
         
         # Handle model= alias for llm= (NO warnings - both are valid)
         if llm is None and model is not None:
@@ -1351,6 +1346,20 @@ Your Goal: {self.goal}
             self._agent_id = str(uuid.uuid4())
         return self._agent_id
     
+    @property
+    def display_name(self) -> str:
+        """Safe display name that never returns None.
+        
+        Returns the agent's name if set, otherwise returns 'Agent N' where N is a unique index.
+        Use this for UI display, logging, and string operations where None would cause errors.
+        """
+        if self.name:
+            return self.name
+        # Use unique index for nameless agents
+        if hasattr(self, '_agent_index') and self._agent_index is not None:
+            return f"Agent {self._agent_index}"
+        return "Agent"
+    
     def _init_autonomy(self, autonomy: Any, verification_hooks: Optional[List[Any]] = None) -> None:
         """Initialize autonomy features (agent-centric escalation/doom-loop).
         
@@ -1643,7 +1652,7 @@ Your Goal: {self.goal}
                 print(result.response)
             ```
         """
-        from .handoff import Handoff, HandoffConfig, HandoffResult
+        from .handoff import Handoff, HandoffConfig
         
         handoff_obj = Handoff(
             agent=target_agent,
@@ -1680,7 +1689,7 @@ Your Goal: {self.goal}
                 print(result.response)
             ```
         """
-        from .handoff import Handoff, HandoffConfig, HandoffResult
+        from .handoff import Handoff, HandoffConfig
         
         handoff_obj = Handoff(
             agent=target_agent,
@@ -1757,7 +1766,7 @@ Your Goal: {self.goal}
             return self.tools
             
         # Filter to read-only tools only
-        from ..planning import READ_ONLY_TOOLS, RESTRICTED_TOOLS
+        from ..planning import RESTRICTED_TOOLS
         
         filtered_tools = []
         for tool in self.tools:
@@ -2890,7 +2899,7 @@ Your Goal: {self.goal}"""
         # Do NOT call it here to avoid duplicate output
         
         # Set up injection context for tools with Injected parameters
-        from ..tools.injected import AgentState, with_injection_context
+        from ..tools.injected import AgentState
         state = AgentState(
             agent_id=self.name,
             run_id=getattr(self, '_current_run_id', 'unknown'),
@@ -2913,7 +2922,7 @@ Your Goal: {self.goal}"""
         """Internal tool execution implementation."""
 
         # Check if approval is required for this tool
-        from ..approval import is_approval_required, console_approval_callback, get_risk_level, mark_approved, ApprovalDecision, get_approval_callback
+        from ..approval import is_approval_required, console_approval_callback, get_risk_level, mark_approved, get_approval_callback
         if is_approval_required(function_name):
             risk_level = get_risk_level(function_name)
             logging.debug(f"Tool {function_name} requires approval (risk level: {risk_level})")
@@ -4806,9 +4815,6 @@ Write the complete compiled report:"""
                 
                 # Show animated status during LLM call if verbose
                 if self.verbose and is_tty:
-                    from rich.live import Live
-                    from rich.console import Group
-                    from rich.status import Status
                     from ..main import PRAISON_COLORS, sync_display_callbacks
                     import threading
                     import time as time_module
@@ -5470,7 +5476,7 @@ Write the complete compiled report:"""
                         if "query" not in request_data:
                             raise HTTPException(status_code=400, detail="Missing 'query' field in request")
                         query = request_data["query"]
-                    except:
+                    except Exception:
                         # Fallback to form data or query params
                         form_data = await request.form()
                         if "query" in form_data:
@@ -5574,7 +5580,7 @@ Write the complete compiled report:"""
                 from starlette.applications import Starlette
                 from starlette.requests import Request
                 from starlette.routing import Mount, Route
-                from mcp.server import Server as MCPServer # Alias to avoid conflict
+                from mcp.server import Server as MCPServer  # noqa: F401 - imported for availability check
                 import threading
                 import time
                 import inspect

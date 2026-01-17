@@ -70,18 +70,18 @@ export class ImageAgent {
    */
   async analyze(config: ImageAnalysisConfig): Promise<string> {
     const prompt = config.prompt || 'Describe this image in detail.';
-    
+
     const messages: Message[] = [
       {
         role: 'user',
         content: [
           { type: 'text', text: prompt },
-          { 
-            type: 'image_url', 
-            image_url: { 
+          {
+            type: 'image_url',
+            image_url: {
               url: config.imageUrl,
               detail: config.detail || 'auto'
-            } 
+            }
           }
         ] as any
       }
@@ -89,7 +89,7 @@ export class ImageAgent {
 
     const provider = await this.getProvider();
     const result = await provider.generateText({ messages });
-    
+
     if (this.verbose) {
       console.log(`[ImageAgent] Analysis: ${result.text.substring(0, 100)}...`);
     }
@@ -101,13 +101,37 @@ export class ImageAgent {
    * Generate an image (requires OpenAI DALL-E)
    */
   async generate(config: ImageGenerationConfig): Promise<string[]> {
-    // This would require direct OpenAI API call for image generation
-    // For now, return a placeholder
     if (this.verbose) {
       console.log(`[ImageAgent] Generating image: ${config.prompt}`);
     }
 
-    throw new Error('Image generation requires direct OpenAI API integration. Use the OpenAI SDK directly for DALL-E.');
+    // Try to use OpenAI SDK directly for image generation
+    try {
+      const OpenAI = (await import('openai')).default;
+      const client = new OpenAI();
+
+      const response = await client.images.generate({
+        model: this.imageModel,
+        prompt: config.prompt,
+        n: config.n || 1,
+        size: config.size || '1024x1024',
+        quality: config.quality || 'standard',
+        style: config.style || 'vivid',
+      });
+
+      const urls = response.data.map(img => img.url).filter((url): url is string => !!url);
+
+      if (this.verbose) {
+        console.log(`[ImageAgent] Generated ${urls.length} image(s)`);
+      }
+
+      return urls;
+    } catch (error: any) {
+      if (error.code === 'MODULE_NOT_FOUND' || error.message?.includes('Cannot find module')) {
+        throw new Error('Image generation requires the OpenAI SDK. Run: npm install openai');
+      }
+      throw error;
+    }
   }
 
   /**
@@ -131,7 +155,7 @@ export class ImageAgent {
    */
   async compare(imageUrl1: string, imageUrl2: string, prompt?: string): Promise<string> {
     const comparePrompt = prompt || 'Compare these two images and describe the differences and similarities.';
-    
+
     const messages: Message[] = [
       {
         role: 'user',
