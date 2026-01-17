@@ -602,6 +602,214 @@ async def run_browser_agent(
         return result
 
 
+async def run_browser_agent_with_progress(
+    goal: str,
+    url: str = "https://www.google.com",
+    model: str = "gpt-4o-mini",
+    max_steps: int = 20,
+    timeout: float = 120.0,
+    debug: bool = False,
+    port: int = 8765,
+    on_step: Optional[callable] = None,
+) -> Dict:
+    """Run browser agent via extension with progress callbacks.
+    
+    This function connects to the bridge server and waits for task completion
+    by listening for all status updates and action responses.
+    
+    Args:
+        goal: Task to accomplish
+        url: Starting URL
+        model: LLM model to use
+        max_steps: Maximum steps
+        timeout: Timeout in seconds
+        debug: Enable debug logging
+        port: Bridge server port
+        on_step: Callback for step progress (receives step number)
+        
+    Returns:
+        Dict with success, summary, steps, final_url, engine
+    """
+    import json
+    import asyncio
+    import time
+    
+    if debug:
+        logger.setLevel(logging.DEBUG)
+        logger.info(f"[Extension] Starting: goal='{goal[:50]}...', url='{url}'")
+    
+    result = {
+        "success": False,
+        "summary": "",
+        "steps": 0,
+        "error": "",
+        "final_url": "",
+        "engine": "extension",
+    }
+    
+    try:
+        import websockets
+    except ImportError:
+        result["error"] = "websockets package required. Install with: pip install websockets"
+        return result
+    
+    ws_url = f"ws://localhost:{port}/ws"
+    start_time = time.time()
+    
+    # Wait for extension to connect to bridge server before sending goal
+    max_wait_for_extension = 15.0  # Wait up to 15 seconds for extension
+    extension_connected = False
+    
+    try:
+        import aiohttp
+        wait_start = time.time()
+        while time.time() - wait_start < max_wait_for_extension:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"http://localhost:{port}/health",
+                        timeout=aiohttp.ClientTimeout(total=2)
+                    ) as resp:
+                        if resp.status == 200:
+                            health = await resp.json()
+                            connections = health.get("connections", 0)
+                            if debug:
+                                logger.debug(f"[Extension] Health: {connections} connections")
+                            if connections >= 1:  # At least one extension connected
+                                extension_connected = True
+                                if debug:
+                                    logger.info(f"[Extension] Extension connected!")
+                                break
+            except Exception as e:
+                if debug:
+                    logger.debug(f"[Extension] Health check: {e}")
+            await asyncio.sleep(1.0)
+        
+        if not extension_connected:
+            elapsed = int(time.time() - wait_start)
+            result["error"] = f"Extension did not connect to bridge server within {elapsed}s"
+            if debug:
+                logger.warning(f"[Extension] No extension connected after {elapsed}s")
+            return result
+    except ImportError:
+        if debug:
+            logger.warning("[Extension] aiohttp not available, skipping extension check")
+    
+    try:
+        async with websockets.connect(ws_url, close_timeout=10, ping_interval=30) as ws:
+            if debug:
+                logger.info(f"[Extension] Connected to bridge server")
+            
+            # Wait for welcome message
+            welcome = await asyncio.wait_for(ws.recv(), timeout=5.0)
+            welcome_data = json.loads(welcome)
+            
+            if welcome_data.get("type") == "status" and welcome_data.get("status") == "connected":
+                if debug:
+                    logger.info(f"[Extension] Received welcome")
+            
+            # Send start_session
+            start_msg = {
+                "type": "start_session",
+                "goal": goal,
+                "url": url,
+                "model": model,
+                "max_steps": max_steps,
+            }
+            await ws.send(json.dumps(start_msg))
+            
+            if debug:
+                logger.info(f"[Extension] Sent start_session")
+            
+            session_id = None
+            step_count = 0
+            last_thought = ""
+            
+            # Listen for messages until completion or timeout
+            while time.time() - start_time < timeout:
+                try:
+                    msg = await asyncio.wait_for(ws.recv(), timeout=10.0)
+                    data = json.loads(msg)
+                    msg_type = data.get("type", "")
+                    
+                    if debug:
+                        logger.debug(f"[Extension] Received: type={msg_type}, keys={list(data.keys())}")
+                    
+                    if msg_type == "status":
+                        status = data.get("status", "")
+                        session_id = data.get("session_id", session_id)
+                        
+                        if status == "running":
+                            if debug:
+                                logger.info(f"[Extension] Session {session_id[:8] if session_id else '?'}... started")
+                        
+                        elif status in ("completed", "stopped", "failed"):
+                            result["success"] = status == "completed"
+                            result["summary"] = data.get("message", last_thought)
+                            result["steps"] = step_count
+                            result["session_id"] = session_id
+                            
+                            if debug:
+                                logger.info(f"[Extension] Task {status}: {result['summary'][:50]}...")
+                            
+                            # Try to get final URL
+                            if not result["final_url"]:
+                                result["final_url"] = url
+                            
+                            return result
+                    
+                    elif msg_type == "action":
+                        step_count += 1
+                        action = data.get("action", "unknown")
+                        thought = data.get("thought", "")
+                        done = data.get("done", False)
+                        
+                        if thought:
+                            last_thought = thought
+                        
+                        if on_step:
+                            try:
+                                on_step(step_count)
+                            except Exception:
+                                pass
+                        
+                        if debug:
+                            logger.info(f"[Extension] Step {step_count}: {action} (done={done})")
+                        
+                        if done:
+                            result["success"] = True
+                            result["summary"] = thought or f"Task completed in {step_count} steps"
+                            result["steps"] = step_count
+                            result["session_id"] = session_id
+                            return result
+                    
+                    elif msg_type == "error":
+                        result["error"] = data.get("error", "Unknown error")
+                        logger.error(f"[Extension] Error: {result['error']}")
+                        return result
+                    
+                except asyncio.TimeoutError:
+                    # No message in 10s, continue waiting
+                    if debug:
+                        logger.debug(f"[Extension] Waiting... ({int(time.time() - start_time)}s elapsed)")
+                    continue
+            
+            # Timeout reached
+            result["error"] = f"Timeout after {timeout}s"
+            result["steps"] = step_count
+            if step_count > 0:
+                result["summary"] = f"Partial completion: {step_count} steps before timeout"
+            return result
+            
+    except ConnectionRefusedError:
+        result["error"] = f"Cannot connect to bridge server at {ws_url}"
+        return result
+    except Exception as e:
+        result["error"] = str(e)
+        logger.error(f"[Extension] Error: {e}")
+        return result
+
+
 async def test_extension_mode(
     goal: str = "Go to google.com and confirm the page loaded",
     url: str = "https://www.google.com",

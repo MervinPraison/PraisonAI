@@ -341,7 +341,10 @@ class BrowserAgent:
                     max_tokens=500,
                 )
                 
-                response_text = response.choices[0].message.content.strip()
+                response_content = response.choices[0].message.content
+                if response_content is None:
+                    raise ValueError("LLM returned empty response")
+                response_text = response_content.strip()
                 action = self._parse_response(response_text)
                 
             elif action_model is not None:
@@ -421,17 +424,30 @@ class BrowserAgent:
         if progress:
             parts.append(f"\n**{progress}**")
         
-        # Add action history for context
+        # Add action history for context - use readable summary if available
+        action_summary = observation.get('action_summary', '')
         action_history = observation.get('action_history', [])
-        if action_history:
+        
+        if action_summary:
+            parts.append(f"\n**{action_summary}**")
+        elif action_history:
             parts.append("\n**Recent Actions:**")
             for ah in action_history[-5:]:  # Last 5 actions
                 status = "✓" if ah.get('success') else "✗"
                 parts.append(f"  {status} {ah.get('action')}: {ah.get('selector', '')[:40]}")
         
+        # Check if consent was already handled
+        consent_already_handled = any(
+            'consent' in str(ah.get('selector', '')).lower() or 
+            'consent' in str(ah.get('thought', '')).lower() or
+            'accept' in str(ah.get('selector', '')).lower() or
+            'reject' in str(ah.get('selector', '')).lower()
+            for ah in action_history if ah.get('success', True)
+        )
+        
         # *** OVERLAY/CONSENT DIALOG DETECTION ***
         overlay_info = observation.get('overlay_info')
-        if overlay_info and overlay_info.get('detected'):
+        if overlay_info and overlay_info.get('detected') and not consent_already_handled:
             parts.append("\n" + "🚨" * 20)
             parts.append("🍪 COOKIE CONSENT / OVERLAY DIALOG DETECTED!")
             parts.append(f"   Type: {overlay_info.get('type', 'unknown')}")
@@ -442,6 +458,8 @@ class BrowserAgent:
             parts.append("   Look for buttons with text like 'Accept all', 'Reject all', 'I agree'")
             parts.append("   These are typically at the TOP of the element list with type='consent_button'")
             parts.append("🚨" * 20)
+        elif consent_already_handled:
+            parts.append("\n✅ CONSENT ALREADY HANDLED - Do NOT click consent buttons again. Proceed with your task.")
         
         # *** AUTO-DEBUG: Detect stuck agent patterns ***
         step = observation.get('step_number', 0)
