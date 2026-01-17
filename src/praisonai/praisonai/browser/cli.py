@@ -1993,6 +1993,9 @@ def launch_browser(
     record_video: bool = typer.Option(False, "--record-video", help="Record video of browser session"),
     screenshot: bool = typer.Option(False, "--screenshot", help="Capture screenshots per step"),
     log_file: Optional[str] = typer.Option(None, "--log-file", help="Save debug logs to file (auto-generated if --debug without path)"),
+    engine: str = typer.Option("auto", "--engine", help="Automation engine: extension, cdp, auto (default: auto)"),
+    profile: bool = typer.Option(False, "--profile", help="Enable performance profiling with timing summary"),
+    deep_profile: bool = typer.Option(False, "--deep-profile", help="Enable deep profiling with cProfile trace"),
 ):
     """Launch Chrome with extension and optionally run a goal.
     
@@ -2000,15 +2003,21 @@ def launch_browser(
     1. Finds the PraisonAI Chrome extension
     2. Starts the bridge server (unless --no-server)
     3. Launches Chrome with the extension loaded via --load-extension
-    4. Optionally runs a browser automation goal
+    4. Runs browser automation goal using the extension (or CDP as fallback)
     
-    The extension is loaded using Chrome's --load-extension flag, which
-    bypasses the need to manually enable developer mode.
+    Engine modes:
+        extension: Use Chrome extension via bridge server (recommended)
+        cdp:       Direct Chrome DevTools Protocol (no extension)
+        auto:      Try extension first, fall back to CDP if unavailable
+    
+    The extension provides better reliability, visual feedback, and
+    enhanced element detection compared to pure CDP mode.
     
     Examples:
         praisonai browser launch                           # Just launch Chrome with extension
-        praisonai browser launch "Search for AI"           # Launch and run goal
-        praisonai browser launch "Search" --url https://google.com
+        praisonai browser launch "Search for AI"           # Launch and run goal (uses extension)
+        praisonai browser launch "Search" --engine cdp     # Force CDP mode
+        praisonai browser launch "Search" --engine extension  # Force extension mode
         praisonai browser launch --headless --no-server    # Headless mode, no server
     """
     import subprocess
@@ -2202,20 +2211,55 @@ def launch_browser(
     
     # Verify extension is loaded by checking chrome://extensions page
     async def verify_extension_loaded():
-        """Verify extension loaded by checking for extension pages in CDP targets."""
+        """Verify PraisonAI extension loaded by checking CDP targets and bridge connection."""
         try:
             import aiohttp
             async with aiohttp.ClientSession() as session:
+                # Get CDP targets
                 async with session.get(f"http://localhost:{port}/json/list", timeout=aiohttp.ClientTimeout(total=3)) as resp:
                     if resp.status == 200:
                         targets = await resp.json()
-                        # Look for extension-related targets
+                        
+                        # Collect unique extension IDs
+                        extension_ids = set()
                         for target in targets:
                             target_url = target.get("url", "")
                             target_title = target.get("title", "")
-                            if "chrome-extension://" in target_url or "PraisonAI" in target_title:
+                            
+                            # Quick check for PraisonAI in title
+                            if "PraisonAI" in target_title:
                                 return True, target_url
-                        # Extension may be loaded but no visible targets yet
+                            
+                            # Extract extension ID from chrome-extension:// URLs
+                            if "chrome-extension://" in target_url:
+                                # Extract ID: chrome-extension://<id>/...
+                                parts = target_url.replace("chrome-extension://", "").split("/")
+                                if parts:
+                                    extension_ids.add(parts[0])
+                        
+                        # Check each extension's manifest to find PraisonAI
+                        for ext_id in extension_ids:
+                            try:
+                                manifest_url = f"http://localhost:{port}/json"
+                                # Fetch manifest via extension's background page or direct check
+                                # For now, check bridge server health for connection count
+                                pass
+                            except Exception:
+                                pass
+                        
+                        # Check if bridge server has extension connected
+                        try:
+                            async with session.get(f"http://localhost:{server_port}/health", timeout=aiohttp.ClientTimeout(total=2)) as health_resp:
+                                if health_resp.status == 200:
+                                    health = await health_resp.json()
+                                    if health.get("connections", 0) > 0:
+                                        return True, f"Extension connected to bridge (connections: {health.get('connections')})"
+                        except Exception:
+                            pass
+                        
+                        # Extension may be loaded but no bridge connection yet - still consider success if we have extension targets
+                        if extension_ids:
+                            return True, f"Extension IDs found: {', '.join(list(extension_ids)[:2])}"
                         return True, None
         except Exception as e:
             if debug:
@@ -2244,13 +2288,19 @@ def launch_browser(
     if goal:
         console.print()
         console.print(f"[bold]Running goal:[/bold] {goal}")
+        console.print(f"   [dim]Engine: {engine}[/dim]")
         console.print()
         
         try:
-            from .cdp_agent import run_cdp_only
-            
             # Enable vision mode for dynamic screenshot analysis when recording or debug
             enable_vision = record_video or debug
+            
+            # Initialize profiler if enabled
+            profiler_instance = None
+            if profile or deep_profile:
+                from .profiling import init_profiler
+                profiler_instance = init_profiler(enabled=True, deep_profile=deep_profile)
+                console.print(f"[cyan]📊 Profiling {'(deep)' if deep_profile else ''} enabled[/cyan]")
             
             # Force screenshot capture if recording video
             if record_video and not screenshot_dir:
@@ -2258,7 +2308,26 @@ def launch_browser(
                 screenshot_dir.mkdir(parents=True, exist_ok=True)
                 console.print(f"[cyan]Recording screenshots to: {screenshot_dir}[/cyan]")
             
-            async def run_goal():
+            async def run_with_extension():
+                """Run goal using extension via bridge server."""
+                from .server import run_browser_agent_with_progress
+                
+                result = await run_browser_agent_with_progress(
+                    goal=goal,
+                    url=url,
+                    model=model,
+                    max_steps=max_steps,
+                    timeout=120.0,
+                    debug=debug,
+                    port=server_port,
+                    on_step=lambda step: console.print(f"   [dim]Step {step}...[/dim]") if debug else None,
+                )
+                return result
+            
+            async def run_with_cdp():
+                """Run goal using direct CDP (fallback)."""
+                from .cdp_agent import run_cdp_only
+                
                 result = await run_cdp_only(
                     goal=goal,
                     url=url,
@@ -2268,10 +2337,126 @@ def launch_browser(
                     verbose=verbose or debug,
                     debug=debug,
                     screenshot_dir=str(screenshot_dir) if screenshot_dir else None,
-                    enable_vision=enable_vision,  # Dynamic screenshot analysis
-                    record_video=record_video,  # Real-time WebM video recording
+                    enable_vision=enable_vision,
+                    record_video=record_video,
                 )
                 return result
+            
+            async def run_goal():
+                """Run goal with engine selection logic."""
+                selected_engine = engine.lower()
+                
+                # Handle explicit engine selection
+                if selected_engine == "cdp":
+                    console.print("[cyan]Using CDP mode (direct Chrome DevTools Protocol)[/cyan]")
+                    return await run_with_cdp()
+                
+                if selected_engine == "extension":
+                    console.print("[cyan]Using Extension mode (via bridge server)[/cyan]")
+                    
+                    # Wait for extension to connect to bridge server
+                    extension_connected = False
+                    wait_start = asyncio.get_event_loop().time()
+                    max_wait = 15.0  # Wait up to 15 seconds for extension to connect
+                    
+                    console.print("[dim]Waiting for extension to connect to bridge server...[/dim]")
+                    
+                    import aiohttp
+                    check_count = 0
+                    while asyncio.get_event_loop().time() - wait_start < max_wait:
+                        try:
+                            async with aiohttp.ClientSession() as session:
+                                async with session.get(
+                                    f"http://localhost:{server_port}/health",
+                                    timeout=aiohttp.ClientTimeout(total=2)
+                                ) as resp:
+                                    if resp.status == 200:
+                                        health = await resp.json()
+                                        connections = health.get("connections", 0)
+                                        if connections >= 1:
+                                            extension_connected = True
+                                            console.print(f"[green]✓ Extension connected ({connections} connection(s))[/green]")
+                                            break
+                                        else:
+                                            check_count += 1
+                                            if check_count == 1 or (check_count % 3 == 0):
+                                                elapsed = int(asyncio.get_event_loop().time() - wait_start)
+                                                console.print(f"[dim]   No extension connections yet ({elapsed}s)...[/dim]")
+                        except Exception as e:
+                            if debug:
+                                console.print(f"[dim]   Health check error: {e}[/dim]")
+                        
+                        await asyncio.sleep(1.0)  # Check every second
+                    
+                    if not extension_connected:
+                        elapsed = int(asyncio.get_event_loop().time() - wait_start)
+                        console.print(f"[red]✗ Extension did not connect after {elapsed}s[/red]")
+                        console.print("[yellow]Hint: Open Chrome DevTools -> Extensions -> PraisonAI -> Background page to check console[/yellow]")
+                        raise Exception(f"Extension not connected to bridge server after {elapsed}s. Try: 1) Reload the extension 2) Check extension console for errors")
+                    
+                    try:
+                        result = await run_with_extension()
+                        if not result.get("error"):
+                            return result
+                        console.print(f"[yellow]Extension mode failed: {result.get('error')}[/yellow]")
+                        raise Exception(result.get("error", "Extension mode failed"))
+                    except Exception as e:
+                        console.print(f"[red]Extension mode error: {e}[/red]")
+                        raise
+                
+                # Auto mode: try extension first, fall back to CDP
+                if selected_engine == "auto":
+                    # Check if extension is connected to bridge server
+                    extension_available = False
+                    try:
+                        import aiohttp
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(
+                                f"http://localhost:{server_port}/health",
+                                timeout=aiohttp.ClientTimeout(total=2)
+                            ) as resp:
+                                if resp.status == 200:
+                                    health = await resp.json()
+                                    # Need at least 1 connection (the extension)
+                                    # Note: CLI will add another connection when it sends the goal
+                                    extension_available = health.get("connections", 0) >= 1
+                                    if debug:
+                                        console.print(f"[dim]Bridge server: {health}[/dim]")
+                    except Exception as e:
+                        if debug:
+                            console.print(f"[dim]Bridge server check failed: {e}[/dim]")
+                    
+                    if extension_available:
+                        console.print("[green]🧩 Using Extension mode (extension connected)[/green]")
+                        try:
+                            # Wait a moment for extension to fully initialize
+                            await asyncio.sleep(0.5)
+                            result = await run_with_extension()
+                            if result.get("success") or not result.get("error"):
+                                result["engine"] = "extension"
+                                return result
+                            # Extension returned error, try CDP
+                            console.print(f"[yellow]Extension mode incomplete, falling back to CDP[/yellow]")
+                            if debug:
+                                console.print(f"[dim]Extension error: {result.get('error')}[/dim]")
+                        except asyncio.TimeoutError:
+                            console.print("[yellow]Extension timed out, falling back to CDP[/yellow]")
+                        except Exception as e:
+                            console.print(f"[yellow]Extension error, falling back to CDP: {e}[/yellow]")
+                            if debug:
+                                import traceback
+                                traceback.print_exc()
+                    else:
+                        console.print("[cyan]🔌 Using CDP mode (extension not connected)[/cyan]")
+                    
+                    # Fallback to CDP
+                    result = await run_with_cdp()
+                    result["engine"] = "cdp"
+                    return result
+                
+                # Unknown engine, use CDP
+                console.print(f"[yellow]Unknown engine '{engine}', using CDP[/yellow]")
+                return await run_with_cdp()
             
             result = asyncio.run(run_goal())
             
@@ -2299,12 +2484,26 @@ def launch_browser(
                         console.print(f"[dim]Screenshots saved to: {screenshot_dir}[/dim]")
             
             if result.get("success"):
+                engine_used = result.get("engine", "cdp")
+                engine_icon = "🧩" if engine_used == "extension" else "🔌"
                 console.print(f"\n[green]✅ Task completed in {result.get('steps', '?')} steps[/green]")
                 if result.get("summary"):
                     console.print(f"   {result['summary']}")
                 console.print(f"   Final URL: {result.get('final_url', 'N/A')}")
+                console.print(f"   [dim]Engine: {engine_icon} {engine_used.upper()}[/dim]")
             else:
                 console.print(f"\n[red]❌ Task failed:[/red] {result.get('error', 'Unknown error')}")
+            
+            # Show profiling report if enabled
+            if profile or deep_profile:
+                try:
+                    from .profiling import stop_profiler
+                    profile_report = stop_profiler()
+                    if profile_report:
+                        console.print(profile_report)
+                except Exception as e:
+                    if debug:
+                        console.print(f"[dim]Profiling report error: {e}[/dim]")
                 
         except KeyboardInterrupt:
             console.print("\n[yellow]Interrupted[/yellow]")
@@ -2377,19 +2576,46 @@ def launch_browser(
                 
                 # Execute goal
                 goal_count += 1
-                console.print(f"\n[dim]Executing goal #{goal_count}...[/dim]\n")
+                console.print(f"\n[dim]Executing goal #{goal_count} ({engine})...[/dim]\n")
                 
                 try:
-                    from .cdp_agent import run_cdp_only
-                    
                     # Setup screenshot dir for this goal if recording
                     goal_screenshot_dir = None
                     if record_video or screenshot:
                         goal_screenshot_dir = Path.home() / ".praisonai" / "browser_screenshots" / f"goal_{goal_count}_{datetime.now().strftime('%H%M%S')}"
                         goal_screenshot_dir.mkdir(parents=True, exist_ok=True)
                     
-                    async def run_goal():
-                        return await run_cdp_only(
+                    async def run_interactive_goal():
+                        """Run goal with engine selection for interactive mode."""
+                        selected_engine = engine.lower()
+                        
+                        # Extension mode
+                        if selected_engine in ("extension", "auto"):
+                            try:
+                                from .server import run_browser_agent_with_progress
+                                result = await run_browser_agent_with_progress(
+                                    goal=goal_input,
+                                    url=url,  # Can use current page context
+                                    model=model,
+                                    max_steps=max_steps,
+                                    timeout=120.0,
+                                    debug=debug,
+                                    port=server_port,
+                                )
+                                if result.get("success") or not result.get("error"):
+                                    result["engine"] = "extension"
+                                    return result
+                                # Fall through to CDP on error
+                                if selected_engine == "extension":
+                                    return result  # Don't fallback if explicitly requested
+                            except Exception as e:
+                                console.print(f"[dim]Extension: {e}[/dim]")
+                                if selected_engine == "extension":
+                                    raise
+                        
+                        # CDP fallback
+                        from .cdp_agent import run_cdp_only
+                        result = await run_cdp_only(
                             goal=goal_input,
                             url=None,  # Use current page
                             model=model,
@@ -2400,8 +2626,10 @@ def launch_browser(
                             screenshot_dir=str(goal_screenshot_dir) if goal_screenshot_dir else None,
                             enable_vision=debug or record_video,
                         )
+                        result["engine"] = "cdp"
+                        return result
                     
-                    result = asyncio.run(run_goal())
+                    result = asyncio.run(run_interactive_goal())
                     
                     # Create video if recording
                     if record_video and goal_screenshot_dir:
@@ -2416,7 +2644,8 @@ def launch_browser(
                     
                     # Show result
                     if result.get("success"):
-                        console.print(f"[green]✅ Done in {result.get('steps', '?')} steps[/green]")
+                        engine_icon = "🧩" if result.get("engine") == "extension" else "🔌"
+                        console.print(f"[green]✅ Done in {result.get('steps', '?')} steps ({engine_icon})[/green]")
                         if result.get("summary"):
                             console.print(f"   {result['summary'][:100]}")
                     else:

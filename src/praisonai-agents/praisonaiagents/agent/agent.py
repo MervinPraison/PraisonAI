@@ -5,6 +5,7 @@ import copy
 import logging
 import asyncio
 import threading
+import contextlib
 from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Tuple, Generator
 from rich.console import Console
 from rich.live import Live
@@ -3071,6 +3072,160 @@ Your Goal: {self.goal}"""
     def clear_history(self):
         self.chat_history = []
 
+    # -------------------------------------------------------------------------
+    #                       History Management Methods
+    # -------------------------------------------------------------------------
+    
+    def prune_history(self, keep_last: int = 5) -> int:
+        """
+        Prune chat history to keep only the last N messages.
+        
+        Useful for cleaning up large history after image analysis sessions
+        to prevent context window saturation.
+        
+        Args:
+            keep_last: Number of recent messages to keep
+            
+        Returns:
+            Number of messages deleted
+        """
+        with self._history_lock:
+            if len(self.chat_history) <= keep_last:
+                return 0
+            
+            deleted_count = len(self.chat_history) - keep_last
+            self.chat_history = self.chat_history[-keep_last:]
+            return deleted_count
+    
+    def delete_history(self, index: int) -> bool:
+        """
+        Delete a specific message from chat history by index.
+        
+        Supports negative indexing (-1 for last message, etc.).
+        
+        Args:
+            index: Message index (0-based, supports negative indexing)
+            
+        Returns:
+            True if deleted, False if index out of range
+        """
+        with self._history_lock:
+            try:
+                del self.chat_history[index]
+                return True
+            except IndexError:
+                return False
+    
+    def delete_history_matching(self, pattern: str) -> int:
+        """
+        Delete all messages matching a pattern.
+        
+        Useful for removing all image-related messages after processing.
+        
+        Args:
+            pattern: Substring to match in message content
+            
+        Returns:
+            Number of messages deleted
+        """
+        with self._history_lock:
+            original_len = len(self.chat_history)
+            self.chat_history = [
+                msg for msg in self.chat_history
+                if pattern.lower() not in msg.get("content", "").lower()
+            ]
+            return original_len - len(self.chat_history)
+    
+    def get_history_size(self) -> int:
+        """Get the current number of messages in chat history."""
+        return len(self.chat_history)
+    
+    @contextlib.contextmanager
+    def ephemeral(self):
+        """
+        Context manager for ephemeral conversations.
+        
+        Messages within this block are NOT permanently stored in chat_history.
+        History is restored to pre-block state after exiting.
+        
+        Example:
+            with agent.ephemeral():
+                response = agent.chat("[IMAGE] Analyze this")
+                # After block, history is restored - image NOT persisted
+        """
+        # Save current history state
+        with self._history_lock:
+            saved_history = self.chat_history.copy()
+        
+        try:
+            yield
+        finally:
+            # Restore history to pre-block state
+            with self._history_lock:
+                self.chat_history = saved_history
+    
+    def _build_multimodal_prompt(
+        self, 
+        prompt: str, 
+        attachments: Optional[List[str]] = None
+    ) -> Union[str, List[Dict[str, Any]]]:
+        """
+        Build a multimodal prompt from text and attachments.
+        
+        This is a DRY helper used by chat/achat/run/arun/start/astart.
+        Attachments are ephemeral - only text is stored in history.
+        
+        Args:
+            prompt: Text query (ALWAYS stored in chat_history)
+            attachments: Image/file paths for THIS turn only (NEVER stored)
+            
+        Returns:
+            Either a string (no attachments) or multimodal message list
+        """
+        if not attachments:
+            return prompt
+        
+        # Build multimodal content list
+        content = [{"type": "text", "text": prompt}]
+        
+        for attachment in attachments:
+            # Handle image files
+            if isinstance(attachment, str):
+                import os
+                import base64
+                
+                if os.path.isfile(attachment):
+                    # File path - read and encode
+                    ext = os.path.splitext(attachment)[1].lower()
+                    if ext in ('.jpg', '.jpeg', '.png', '.gif', '.webp'):
+                        try:
+                            with open(attachment, 'rb') as f:
+                                data = base64.b64encode(f.read()).decode('utf-8')
+                            media_type = {
+                                '.jpg': 'image/jpeg',
+                                '.jpeg': 'image/jpeg',
+                                '.png': 'image/png',
+                                '.gif': 'image/gif',
+                                '.webp': 'image/webp',
+                            }.get(ext, 'image/jpeg')
+                            content.append({
+                                "type": "image_url",
+                                "image_url": {"url": f"data:{media_type};base64,{data}"}
+                            })
+                        except Exception as e:
+                            logging.warning(f"Failed to load attachment {attachment}: {e}")
+                elif attachment.startswith(('http://', 'https://', 'data:')):
+                    # URL or data URI
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {"url": attachment}
+                    })
+            elif isinstance(attachment, dict):
+                # Already structured content
+                content.append(attachment)
+        
+        return content
+
     def __str__(self):
         return f"Agent(name='{self.name}', role='{self.role}', goal='{self.goal}')"
 
@@ -3471,10 +3626,24 @@ Your Goal: {self.goal}"""
         """Get the current session ID."""
         return self._session_id
 
-    def chat(self, prompt, temperature=1.0, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=None, task_name=None, task_description=None, task_id=None, config=None, force_retrieval=False, skip_retrieval=False):
+    def chat(self, prompt, temperature=1.0, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=None, task_name=None, task_description=None, task_id=None, config=None, force_retrieval=False, skip_retrieval=False, attachments=None):
+        """
+        Chat with the agent.
+        
+        Args:
+            prompt: Text query that WILL be stored in chat_history
+            attachments: Optional list of image/file paths that are ephemeral
+                        (used for THIS turn only, NEVER stored in history).
+                        Supports: file paths, URLs, or data URIs.
+            ...other args...
+        """
         # Apply rate limiter if configured (before any LLM call)
         if self._rate_limiter is not None:
             self._rate_limiter.acquire()
+        
+        # Process ephemeral attachments (DRY - builds multimodal prompt)
+        # IMPORTANT: Original text 'prompt' is stored in history, attachments are NOT
+        llm_prompt = self._build_multimodal_prompt(prompt, attachments) if attachments else prompt
         
         # Initialize DB session on first chat (lazy)
         self._init_db_session()
@@ -3916,8 +4085,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             cleaned = cleaned[:-3].strip()
         return cleaned  
 
-    async def achat(self, prompt: str, temperature=1.0, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None):
-        """Async version of chat method with self-reflection support.""" 
+    async def achat(self, prompt: str, temperature=1.0, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, attachments=None):
+        """Async version of chat method with self-reflection support.
+        
+        Args:
+            prompt: Text query that WILL be stored in chat_history
+            attachments: Optional list of image/file paths that are ephemeral
+                        (used for THIS turn only, NEVER stored in history).
+        """ 
+        # Process ephemeral attachments (DRY - builds multimodal prompt)
+        # IMPORTANT: Original text 'prompt' is stored in history, attachments are NOT
+        llm_prompt = self._build_multimodal_prompt(prompt, attachments) if attachments else prompt
+        
         # Track execution via telemetry
         if hasattr(self, '_telemetry') and self._telemetry:
             self._telemetry.track_agent_execution(self.name, success=True)

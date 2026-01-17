@@ -506,6 +506,38 @@ class CDPBrowserAgent:
         
         return False
     
+    def _format_action_history(self) -> str:
+        """Format action history as readable text for LLM context.
+        
+        Returns:
+            Human-readable summary of previous actions with success/failure status.
+        """
+        if not self._action_history:
+            return "No previous actions taken."
+        
+        lines = ["Previous actions in this session:"]
+        for i, a in enumerate(self._action_history[-10:]):
+            status = "✓" if a.get("success", True) else "✗"
+            action = a.get("action", "unknown")
+            selector = a.get("selector", "")
+            if selector and len(selector) > 25:
+                selector = selector[:25] + "..."
+            text = a.get("text", "")
+            if text and len(text) > 20:
+                text = text[:20] + "..."
+            
+            # Build concise step description
+            if action == "type" and text:
+                desc = f'{action}("{text}")'
+            elif selector:
+                desc = f'{action}({selector})'
+            else:
+                desc = action
+            
+            lines.append(f"  {i+1}. {status} {desc}")
+        
+        return "\n".join(lines)
+    
     def _get_site_specific_selector(self, action: Dict, url: str, overlay_info: Optional[Dict] = None) -> Optional[str]:
         """Get site-specific fallback selector for common websites.
         
@@ -1027,6 +1059,13 @@ Respond in this exact JSON format:
         
         self._total_retries = 0
         
+        # Get profiler if enabled
+        try:
+            from .profiling import get_profiler
+            profiler = get_profiler()
+        except ImportError:
+            profiler = None
+        
         try:
             # Connect to Chrome
             logger.info(f"Connecting to Chrome on port {self.port}")
@@ -1049,6 +1088,10 @@ Respond in this exact JSON format:
             
             # Main automation loop
             for step in range(self.max_steps):
+                # Track step start time for profiling
+                import time as _time
+                step_start = _time.perf_counter()
+                
                 # Capture video frame (polling mode for reliable capture)
                 if self._screencast_active:
                     await self._capture_screencast_frame()
@@ -1097,11 +1140,13 @@ Respond in this exact JSON format:
                     "title": state.title,
                     "elements": state.elements,
                     "step_number": step,
-                    "action_history": self._action_history[-10:],  # Last 10 actions for context
+                    "action_history": self._action_history[-10:],  # Raw for parsing
+                    "action_summary": self._format_action_history(),  # Readable for LLM
                     "overlay_info": state.overlay_info,  # Pass overlay detection info
                     "max_steps": self.max_steps,
                     "steps_remaining": self.max_steps - step,
                     "mode": "cdp",  # Technology mode: cdp or extension
+                    "vision_enabled": self.enable_vision,
                 }
                 
                 # Add last action error if available
@@ -1112,31 +1157,18 @@ Respond in this exact JSON format:
                 if self.enable_vision and screenshot_base64:
                     observation["screenshot"] = screenshot_base64
                 
-                # DYNAMIC AGENT: Let LLM handle consent/overlays using visual context
-                # Only intervene if we have EXPLICIT consent buttons with valid selectors in elements
-                consent_elements = [el for el in state.elements if el.get("isConsentButton") or el.get("type") == "consent_button"]
-                
-                if consent_elements and consent_elements[0].get("selector"):
-                    # We have real consent buttons with selectors - click the first one
-                    target_btn = consent_elements[0]
-                    if self.debug:
-                        logger.info(f"[DEBUG] Found consent button in elements: {target_btn.get('text', '')[:30]}")
-                    action = {"action": "click", "selector": target_btn["selector"], "thought": f"Clicking consent button: {target_btn.get('text', '')[:30]}"}
-                
                 # Check if agent is stuck (repeated same-URL actions with failures)  
-                elif self._is_stuck(state.url):
+                if self._is_stuck(state.url):
                     if self.debug:
-                        logger.info("[DEBUG] Agent appears stuck, letting LLM decide with extra context")
+                        logger.info("[DEBUG] Agent appears stuck, adding extra context")
                     # Add stuck context to observation for LLM
                     observation["stuck_detected"] = True
-                    observation["last_action_error"] = "Agent appears stuck. Try a different approach."
-                    # Let LLM decide
-                    action = agent.process_observation(observation)
-                    action = normalize_action(action)
-                else:
-                    # DYNAMIC: Let LLM decide based on observation (including screenshot if vision enabled)
-                    action = agent.process_observation(observation)
-                    action = normalize_action(action)
+                    observation["last_action_error"] = "Agent appears stuck. Try a different approach or action."
+                
+                # FULLY DYNAMIC: Let LLM decide ALL actions including consent handling
+                # LLM has access to: screenshot, elements (including consent buttons), action history
+                action = agent.process_observation(observation)
+                action = normalize_action(action)
                 
                 if self.verbose or self.debug:
                     logger.info(f"  Action: {action.get('action')} | Done: {action.get('done')}")
@@ -1305,6 +1337,17 @@ Respond in this exact JSON format:
                         retry_count=retry_count,
                         screenshot_path=screenshot_path,
                     )
+                
+                # Record step timing to profiler if enabled
+                step_duration = _time.perf_counter() - step_start
+                if profiler:
+                    # Add step profile directly
+                    from .profiling import StepProfile
+                    step_profile = StepProfile(
+                        step=step,
+                        total_time=step_duration,
+                    )
+                    profiler._step_profiles.append(step_profile)
                 
                 # Brief pause between steps - capture video frames during wait
                 if self._screencast_active:
