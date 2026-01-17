@@ -45,11 +45,11 @@ export class FileMemory {
     try {
       const fs = await import('fs/promises');
       const content = await fs.readFile(this.filePath, 'utf-8').catch(() => '');
-      
+
       if (content) {
         const lines = content.trim().split('\n').filter(Boolean);
         let deletedCount = 0;
-        
+
         for (const line of lines) {
           try {
             const entry: FileMemoryEntry = JSON.parse(line);
@@ -166,13 +166,13 @@ export class FileMemory {
    */
   async delete(id: string): Promise<boolean> {
     await this.initialize();
-    
+
     const entry = this.entries.get(id);
     if (!entry || entry.deleted) return false;
 
     entry.deleted = true;
     await this.appendEntry({ id, deleted: true } as FileMemoryEntry);
-    
+
     return true;
   }
 
@@ -181,7 +181,7 @@ export class FileMemory {
    */
   async clear(): Promise<void> {
     await this.initialize();
-    
+
     const fs = await import('fs/promises');
     await fs.writeFile(this.filePath, '');
     this.entries.clear();
@@ -195,7 +195,7 @@ export class FileMemory {
 
     const fs = await import('fs/promises');
     const activeEntries = Array.from(this.entries.values()).filter(e => !e.deleted);
-    
+
     const content = activeEntries
       .map(e => JSON.stringify(e))
       .join('\n') + (activeEntries.length ? '\n' : '');
@@ -270,17 +270,17 @@ export class FileMemory {
 
   private cosineSimilarity(a: number[], b: number[]): number {
     if (a.length !== b.length) return 0;
-    
+
     let dotProduct = 0;
     let normA = 0;
     let normB = 0;
-    
+
     for (let i = 0; i < a.length; i++) {
       dotProduct += a[i] * b[i];
       normA += a[i] * a[i];
       normB += b[i] * b[i];
     }
-    
+
     const denominator = Math.sqrt(normA) * Math.sqrt(normB);
     return denominator === 0 ? 0 : dotProduct / denominator;
   }
@@ -297,6 +297,223 @@ export class FileMemory {
         oldest.deleted = true;
       }
     }
+  }
+
+  // ============================================================================
+  // VERSIONING SUPPORT (Phase 3.4)
+  // ============================================================================
+
+  private versions: Map<string, MemoryEntry[]> = new Map();
+
+  /**
+   * Get version history for an entry
+   */
+  async getVersions(id: string): Promise<MemoryEntry[]> {
+    await this.initialize();
+    return this.versions.get(id) ?? [];
+  }
+
+  /**
+   * Update entry with versioning
+   */
+  async update(id: string, content: string, metadata?: Record<string, any>): Promise<MemoryEntry | null> {
+    await this.initialize();
+
+    const existing = this.entries.get(id);
+    if (!existing || existing.deleted) return null;
+
+    // Save current version
+    if (!this.versions.has(id)) {
+      this.versions.set(id, []);
+    }
+    this.versions.get(id)!.push({ ...existing });
+
+    // Update entry
+    existing.content = content;
+    existing.timestamp = Date.now();
+    if (metadata) {
+      existing.metadata = { ...existing.metadata, ...metadata };
+    }
+
+    if (this.embeddingProvider) {
+      existing.embedding = await this.embeddingProvider.embed(content);
+    }
+
+    await this.appendEntry(existing);
+    return existing;
+  }
+
+  /**
+   * Restore to a specific version
+   */
+  async restore(id: string, versionIndex: number): Promise<MemoryEntry | null> {
+    const versions = await this.getVersions(id);
+    if (versionIndex < 0 || versionIndex >= versions.length) return null;
+
+    const version = versions[versionIndex];
+    return this.update(id, version.content, version.metadata);
+  }
+
+  // ============================================================================
+  // ENHANCED SEARCH/QUERY (Phase 3.4)
+  // ============================================================================
+
+  /**
+   * Query with filters
+   */
+  async query(options: {
+    role?: 'user' | 'assistant' | 'system';
+    since?: number;
+    until?: number;
+    metadata?: Record<string, any>;
+    limit?: number;
+  }): Promise<MemoryEntry[]> {
+    await this.initialize();
+
+    let results = Array.from(this.entries.values()).filter(e => !e.deleted);
+
+    if (options.role) {
+      results = results.filter(e => e.role === options.role);
+    }
+
+    if (options.since) {
+      results = results.filter(e => e.timestamp >= options.since!);
+    }
+
+    if (options.until) {
+      results = results.filter(e => e.timestamp <= options.until!);
+    }
+
+    if (options.metadata) {
+      results = results.filter(e => {
+        if (!e.metadata) return false;
+        for (const [key, value] of Object.entries(options.metadata!)) {
+          if (e.metadata[key] !== value) return false;
+        }
+        return true;
+      });
+    }
+
+    results.sort((a, b) => b.timestamp - a.timestamp);
+
+    if (options.limit) {
+      results = results.slice(0, options.limit);
+    }
+
+    return results;
+  }
+
+  /**
+   * Full-text search with ranking
+   */
+  async searchText(query: string, options?: { limit?: number; fuzzy?: boolean }): Promise<SearchResult[]> {
+    await this.initialize();
+
+    const limit = options?.limit ?? 10;
+    const queryLower = query.toLowerCase();
+    const queryWords = queryLower.split(/\s+/).filter(Boolean);
+    const results: SearchResult[] = [];
+
+    for (const entry of this.entries.values()) {
+      if (entry.deleted) continue;
+
+      const contentLower = entry.content.toLowerCase();
+      let score = 0;
+
+      // Exact phrase match (highest score)
+      if (contentLower.includes(queryLower)) {
+        score += 0.5;
+      }
+
+      // Word matches
+      for (const word of queryWords) {
+        if (contentLower.includes(word)) {
+          score += 0.1;
+        }
+      }
+
+      if (score > 0) {
+        results.push({ entry, score: Math.min(score, 1) });
+      }
+    }
+
+    return results
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+  }
+
+  // ============================================================================
+  // FILE-BASED INDEXING (Phase 3.4)
+  // ============================================================================
+
+  private index: Map<string, Set<string>> = new Map();
+
+  /**
+   * Build search index
+   */
+  async buildIndex(): Promise<void> {
+    await this.initialize();
+    this.index.clear();
+
+    for (const entry of this.entries.values()) {
+      if (entry.deleted) continue;
+      this.indexEntry(entry);
+    }
+  }
+
+  /**
+   * Index single entry
+   */
+  private indexEntry(entry: MemoryEntry): void {
+    const words = entry.content.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    for (const word of words) {
+      if (!this.index.has(word)) {
+        this.index.set(word, new Set());
+      }
+      this.index.get(word)!.add(entry.id);
+    }
+  }
+
+  /**
+   * Search using index
+   */
+  async indexSearch(query: string, limit: number = 10): Promise<MemoryEntry[]> {
+    await this.initialize();
+
+    if (this.index.size === 0) {
+      await this.buildIndex();
+    }
+
+    const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    const idScores = new Map<string, number>();
+
+    for (const word of queryWords) {
+      const ids = this.index.get(word);
+      if (ids) {
+        for (const id of ids) {
+          idScores.set(id, (idScores.get(id) ?? 0) + 1);
+        }
+      }
+    }
+
+    return Array.from(idScores.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([id]) => this.entries.get(id)!)
+      .filter(e => e && !e.deleted);
+  }
+
+  /**
+   * Get stats
+   */
+  getStats(): { entryCount: number; deletedCount: number; indexSize: number; versionedEntries: number } {
+    const entries = Array.from(this.entries.values());
+    return {
+      entryCount: entries.filter(e => !e.deleted).length,
+      deletedCount: entries.filter(e => e.deleted).length,
+      indexSize: this.index.size,
+      versionedEntries: this.versions.size,
+    };
   }
 }
 

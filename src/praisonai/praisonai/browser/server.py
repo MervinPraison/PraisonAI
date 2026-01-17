@@ -188,6 +188,10 @@ class BrowserServer:
         elif msg_type == "ping":
             return {"type": "pong"}
         
+        elif msg_type == "heartbeat":
+            # Extension sends heartbeat every 20s to keep WebSocket alive
+            return {"type": "heartbeat_ack", "status": "ok"}
+        
         else:
             return {
                 "type": "error",

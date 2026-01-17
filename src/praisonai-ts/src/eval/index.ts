@@ -42,10 +42,10 @@ export interface ReliabilityEvalConfig {
 export async function accuracyEval(config: AccuracyEvalConfig): Promise<EvalResult> {
   const start = Date.now();
   const threshold = config.threshold ?? 0.8;
-  
+
   const similarity = calculateSimilarity(config.expectedOutput, config.actualOutput);
   const passed = similarity >= threshold;
-  
+
   return {
     passed,
     score: similarity,
@@ -66,12 +66,12 @@ export async function performanceEval(config: PerformanceEvalConfig): Promise<Pe
   const iterations = config.iterations ?? 10;
   const warmupRuns = config.warmupRuns ?? 2;
   const times: number[] = [];
-  
+
   // Warmup runs
   for (let i = 0; i < warmupRuns; i++) {
     await config.func();
   }
-  
+
   // Actual runs
   const start = Date.now();
   for (let i = 0; i < iterations; i++) {
@@ -79,14 +79,14 @@ export async function performanceEval(config: PerformanceEvalConfig): Promise<Pe
     await config.func();
     times.push(Date.now() - runStart);
   }
-  
+
   const sortedTimes = [...times].sort((a, b) => a - b);
   const avgTime = times.reduce((a, b) => a + b, 0) / times.length;
   const minTime = sortedTimes[0];
   const maxTime = sortedTimes[sortedTimes.length - 1];
   const p95Index = Math.floor(sortedTimes.length * 0.95);
   const p95Time = sortedTimes[p95Index] || maxTime;
-  
+
   return {
     passed: true,
     score: 1,
@@ -108,17 +108,17 @@ export async function performanceEval(config: PerformanceEvalConfig): Promise<Pe
  */
 export async function reliabilityEval(config: ReliabilityEvalConfig): Promise<EvalResult> {
   const start = Date.now();
-  
+
   const expected = new Set(config.expectedToolCalls);
   const actual = new Set(config.actualToolCalls);
-  
+
   const matched = config.expectedToolCalls.filter(t => actual.has(t));
   const missing = config.expectedToolCalls.filter(t => !actual.has(t));
   const extra = config.actualToolCalls.filter(t => !expected.has(t));
-  
+
   const score = expected.size > 0 ? matched.length / expected.size : 1;
   const passed = missing.length === 0;
-  
+
   return {
     passed,
     score,
@@ -140,10 +140,10 @@ export async function reliabilityEval(config: ReliabilityEvalConfig): Promise<Ev
 function calculateSimilarity(a: string, b: string): number {
   const wordsA = new Set(a.toLowerCase().split(/\s+/));
   const wordsB = new Set(b.toLowerCase().split(/\s+/));
-  
+
   const intersection = new Set([...wordsA].filter(x => wordsB.has(x)));
   const union = new Set([...wordsA, ...wordsB]);
-  
+
   return union.size > 0 ? intersection.size / union.size : 0;
 }
 
@@ -178,10 +178,10 @@ export class EvalSuite {
   getSummary(): { total: number; passed: number; failed: number; avgScore: number } {
     const results = Array.from(this.results.values());
     const passed = results.filter(r => r.passed).length;
-    const avgScore = results.length > 0 
-      ? results.reduce((a, b) => a + b.score, 0) / results.length 
+    const avgScore = results.length > 0
+      ? results.reduce((a, b) => a + b.score, 0) / results.length
       : 0;
-    
+
     return {
       total: results.length,
       passed,
@@ -197,7 +197,7 @@ export class EvalSuite {
     console.log(`Passed: ${summary.passed}`);
     console.log(`Failed: ${summary.failed}`);
     console.log(`Avg Score: ${(summary.avgScore * 100).toFixed(1)}%`);
-    
+
     console.log('\nResults:');
     for (const [name, result] of this.results) {
       const status = result.passed ? '✅' : '❌';
@@ -205,3 +205,27 @@ export class EvalSuite {
     }
   }
 }
+
+// Re-export base Evaluator with criteria
+export {
+  Evaluator,
+  createEvaluator,
+  createDefaultEvaluator,
+  relevanceCriterion,
+  lengthCriterion,
+  containsKeywordsCriterion,
+  noHarmfulContentCriterion,
+  type EvalCriteria,
+  type EvalResult as BaseEvalResult,
+  type EvalSummary,
+  type EvaluatorConfig,
+} from './base';
+
+// Re-export EvalResults
+export {
+  EvalResults,
+  createEvalResults,
+  type TestResult,
+  type AggregatedResults,
+  type TrendPoint,
+} from './results';

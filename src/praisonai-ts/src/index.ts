@@ -117,13 +117,21 @@ export * from './session';
 export * from './knowledge';
 
 // ============================================================================
+// CONTEXT MANAGEMENT
+// ============================================================================
+export * from './context';
+
+// ============================================================================
 // MCP (Model Context Protocol) - Client and Server Classes
 // ============================================================================
 export {
   MCPClient, createMCPClient, getMCPTools,
   MCPServer, createMCPServer,
+  MCPSession as MCPSessionManager, createMCPSession,
+  MCPSecurity, createMCPSecurity, createApiKeyPolicy, createRateLimitPolicy,
   type MCPClientConfig, type MCPSession, type MCPTransportType,
-  type MCPServerConfig, type MCPServerTool
+  type MCPServerConfig, type MCPServerTool,
+  type SecurityPolicy, type SecurityResult
 } from './mcp';
 
 // ============================================================================
@@ -150,7 +158,15 @@ export { ContextAgent, createContextAgent, type ContextAgentConfig, type Context
 
 
 // Export evaluation framework
-export { accuracyEval, performanceEval, reliabilityEval, EvalSuite, type EvalResult, type PerformanceResult, type AccuracyEvalConfig, type PerformanceEvalConfig, type ReliabilityEvalConfig } from './eval';
+export {
+  accuracyEval, performanceEval, reliabilityEval, EvalSuite,
+  Evaluator, createEvaluator, createDefaultEvaluator,
+  EvalResults, createEvalResults,
+  relevanceCriterion, lengthCriterion, containsKeywordsCriterion, noHarmfulContentCriterion,
+  type EvalResult, type PerformanceResult, type AccuracyEvalConfig,
+  type PerformanceEvalConfig, type ReliabilityEvalConfig, type EvalCriteria, type EvaluatorConfig,
+  type TestResult, type AggregatedResults
+} from './eval';
 
 // Note: Observability exports are at the bottom of this file with the full 14+ integrations
 
@@ -197,11 +213,46 @@ export {
   type Doc, type DocChunk, type DocSearchResult, type DocsManagerConfig
 } from './memory/docs-manager';
 
+// ============================================================================
+// HOOKS - Complete hooks and callbacks system (Python + CrewAI/Agno parity)
+// ============================================================================
+
+// HooksManager - Cascade hooks for operations (20 hook events)
+export {
+  HooksManager, createHooksManager,
+  createLoggingHooks as createLoggingOperationHooks,
+  createValidationHooks as createValidationOperationHooks,
+  type HookEvent, type HookHandler, type HookResult, type HookConfig, type HooksManagerConfig
+} from './hooks';
+
+// Callback Registry - Display and approval callbacks
+export {
+  registerDisplayCallback, unregisterDisplayCallback,
+  registerApprovalCallback, clearApprovalCallback,
+  executeSyncCallback, executeCallback, requestApproval,
+  hasApprovalCallback, getRegisteredDisplayTypes, clearAllCallbacks,
+  DisplayTypes,
+  type DisplayCallbackFn, type DisplayCallbackData,
+  type ApprovalRequest, type ApprovalDecision, type ApprovalCallbackFn, type DisplayType
+} from './hooks';
+
+// Workflow Hooks - Lifecycle hooks
+export {
+  WorkflowHooksExecutor, createWorkflowHooks,
+  createLoggingWorkflowHooks, createTimingWorkflowHooks,
+  type WorkflowHooksConfig, type WorkflowRef, type StepContext
+} from './hooks';
+
 // Export Telemetry (Agent-focused)
+
 export {
   TelemetryCollector, AgentTelemetry,
   getTelemetry, enableTelemetry, disableTelemetry, cleanupTelemetry, createAgentTelemetry,
-  type TelemetryEvent, type TelemetryConfig, type AgentStats
+  PerformanceMonitor, createPerformanceMonitor,
+  TelemetryIntegration, createTelemetryIntegration, createConsoleSink, createHTTPSink,
+  type TelemetryEvent, type TelemetryConfig, type AgentStats,
+  type MetricEntry, type PerformanceStats, type PerformanceMonitorConfig,
+  type TelemetryRecord, type TelemetrySink
 } from './telemetry';
 
 // Export AutoAgents

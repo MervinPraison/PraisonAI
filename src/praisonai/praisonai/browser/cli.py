@@ -1997,6 +1997,7 @@ def launch_browser(
     profile: bool = typer.Option(False, "--profile", help="Enable performance profiling with timing summary"),
     deep_profile: bool = typer.Option(False, "--deep-profile", help="Enable deep profiling with cProfile trace"),
     no_verify: bool = typer.Option(False, "--no-verify", help="Disable action verification (faster but less reliable)"),
+    chrome_profile: Optional[str] = typer.Option(None, "--chrome-profile", help="Persistent Chrome profile dir (default: temp). Use ~/.praisonai/browser_profile for persistence"),
 ):
     """Launch Chrome with extension and optionally run a goal.
     
@@ -2163,14 +2164,24 @@ def launch_browser(
         else:
             console.print(f"[green]✓ Bridge server already running on port {server_port}[/green]")
     
-    # Create temp profile for Chrome
-    temp_profile = tempfile.mkdtemp(prefix="praisonai_chrome_")
+    # Use persistent profile if specified, otherwise create temp profile
+    using_persistent_profile = False
+    if chrome_profile:
+        # Create persistent profile directory if it doesn't exist
+        os.makedirs(chrome_profile, exist_ok=True)
+        profile_dir = chrome_profile
+        using_persistent_profile = True
+        console.print(f"[cyan]Using persistent Chrome profile: {profile_dir}[/cyan]")
+    else:
+        # Create temp profile for Chrome
+        profile_dir = tempfile.mkdtemp(prefix="praisonai_chrome_")
     
     # Build Chrome command with --load-extension
     chrome_args = [
         chrome_path,
         f"--load-extension={extension_path}",
-        f"--user-data-dir={temp_profile}",
+        f"--disable-extensions-except={extension_path}",  # Critical: only load our extension
+        f"--user-data-dir={profile_dir}",
         f"--remote-debugging-port={port}",
         "--enable-extensions",
         "--no-first-run",

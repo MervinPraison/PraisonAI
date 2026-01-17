@@ -466,3 +466,23 @@ export {
     type MCPServerTool, type MCPResource as MCPServerResource,
     type MCPPrompt as MCPServerPrompt, type MCPServerConfig
 } from './server';
+
+// Re-export MCP Session (aliased to avoid conflict with MCPSession interface)
+export {
+    MCPSession as MCPSessionManager,
+    createMCPSession,
+    SessionManager as MCPClientSessionManager,
+    createSessionManager,
+    type MCPSessionConfig,
+    type SessionState,
+    type SessionContext,
+    type SessionEvent
+} from './session';
+
+// Re-export MCP Security
+export {
+    MCPSecurity, createMCPSecurity,
+    createApiKeyPolicy, createRateLimitPolicy,
+    type SecurityPolicy, type SecurityResult, type SecurityContext,
+    type RateLimitConfig, type AuthMethod, type SecurityPolicyType
+} from './security';

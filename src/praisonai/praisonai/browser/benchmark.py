@@ -441,6 +441,7 @@ class BrowserBenchmark:
         chrome_args = [
             chrome_path,
             f"--load-extension={extension_path}",
+            f"--disable-extensions-except={extension_path}",  # Critical: only load our extension
             f"--user-data-dir={self._temp_profile}",
             f"--remote-debugging-port={self.port}",
             "--enable-extensions",
