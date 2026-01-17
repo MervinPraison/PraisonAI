@@ -399,9 +399,10 @@ export type { DbAdapter, DbConfig, DbMessage, DbRun, DbTrace } from "./db";
 export { MemoryPostgresAdapter, NeonPostgresAdapter, PostgresSessionStorage, createMemoryPostgres, createNeonPostgres, createPostgresSessionStorage } from "./db/postgres";
 export { MemoryRedisAdapter, UpstashRedisAdapter, createMemoryRedis, createUpstashRedis } from "./db/redis";
 export { SQLiteAdapter, createSQLiteAdapter } from "./db/sqlite";
-export { EvalSuite, accuracyEval, performanceEval, reliabilityEval } from "./eval";
+export { EvalResults, EvalSuite, Evaluator, accuracyEval, containsKeywordsCriterion, createDefaultEvaluator, createEvalResults, createEvaluator, lengthCriterion, noHarmfulContentCriterion, performanceEval, relevanceCriterion, reliabilityEval } from "./eval";
 export { AgentEventBus, AgentEvents, EventEmitterPubSub, PubSub, createEventBus, createPubSub } from "./events";
 export { LLMGuardrail, createLLMGuardrail } from "./guardrails/llm-guardrail";
+export { DisplayTypes, HooksManager, WorkflowHooksExecutor, clearAllCallbacks, clearApprovalCallback, createHooksManager, createLoggingOperationHooks, createLoggingWorkflowHooks, createTimingWorkflowHooks, createValidationOperationHooks, createWorkflowHooks, executeCallback, executeSyncCallback, getRegisteredDisplayTypes, hasApprovalCallback, registerApprovalCallback, registerDisplayCallback, requestApproval, unregisterDisplayCallback } from "./hooks";
 export { // Computer Use
   createComputerUse, ComputerUseClient, createCLIApprovalPrompt, createComputerUseAgent } from "./integrations/computer-use";
 export { BaseObservabilityProvider, ConsoleObservabilityProvider, LangfuseObservabilityProvider, MemoryObservabilityProvider, ObservabilityTraceContext, createConsoleObservability, createLangfuseObservability, createMemoryObservability } from "./integrations/observability";
@@ -419,7 +420,7 @@ export { // Provider classes
   ProviderRegistry, // Types
   type LLMProvider, AnthropicProvider, BaseProvider, GoogleProvider, ProviderMessage, ProviderToolDefinition, createProviderRegistry, getAvailableProviders, getDefaultProvider, getDefaultRegistry, hasProvider, isProviderAvailable, listProviders, parseModelString, registerBuiltinProviders, registerProvider, unregisterProvider } from "./llm/providers";
 export { ADAPTERS, AISDK_PROVIDERS, COMMUNITY_PROVIDERS, PROVIDER_ALIASES } from "./llm/providers/ai-sdk/types";
-export { MCPClient, MCPServer, createMCPClient, createMCPServer, getMCPTools } from "./mcp";
+export { MCPClient, MCPSecurity, MCPServer, MCPSessionManager, createApiKeyPolicy, createMCPClient, createMCPSecurity, createMCPServer, createMCPSession, createRateLimitPolicy, getMCPTools } from "./mcp";
 export { AutoMemory, AutoMemoryKnowledgeBase, AutoMemoryVectorStore, DEFAULT_POLICIES, createAutoMemory, createLLMSummarizer } from "./memory/auto-memory";
 export { DocsManager, createDocsManager } from "./memory/docs-manager";
 export { FileMemory, createFileMemory } from "./memory/file-memory";
@@ -434,7 +435,7 @@ export { // Adapters
   type SpanKind, ConsoleObservabilityAdapter, MemoryObservabilityAdapter, clearAdapterCache, createConsoleAdapter, createMemoryAdapter, createObservabilityAdapter, getObservabilityAdapter, getObservabilityToolInfo, hasObservabilityToolEnvVar, listObservabilityTools, noopAdapter, resetObservabilityAdapter, trace } from "./observability";
 export { Plan, PlanStep, PlanStorage, PlanningAgent, TaskAgent, TodoItem, TodoList, createPlan, createPlanStorage, createPlanningAgent, createTaskAgent, createTodoList } from "./planning";
 export { SkillManager, createSkillManager, parseSkillFile } from "./skills";
-export { AgentTelemetry, TelemetryCollector, cleanupTelemetry, createAgentTelemetry, disableTelemetry, enableTelemetry, getTelemetry } from "./telemetry";
+export { AgentTelemetry, PerformanceMonitor, TelemetryCollector, TelemetryIntegration, cleanupTelemetry, createAgentTelemetry, createConsoleSink, createHTTPSink, createPerformanceMonitor, createTelemetryIntegration, disableTelemetry, enableTelemetry, getTelemetry } from "./telemetry";
 export { // Subagent Tool (agent-as-tool pattern)
   SubagentTool, BaseTool, FunctionTool, ToolRegistry, ToolResult, ToolValidationError, createDelegator, createSubagentTool, createSubagentTools, createTool, getRegistry, getTool, registerTool, tool, validateTool } from "./tools";
 export { airweaveSearch, bedrockBrowserClick, bedrockBrowserFill, bedrockBrowserNavigate, bedrockCodeInterpreter, codeExecution, codeMode, createCustomTool, exaSearch, firecrawlCrawl, firecrawlScrape, parallelSearch, perplexitySearch, registerCustomTool, registerLocalTool, registerNpmTool, superagentGuard, superagentRedact, superagentVerify, tavilyCrawl, tavilyExtract, tavilySearch, valyuBioSearch, valyuCompanyResearch, valyuEconomicsSearch, valyuFinanceSearch, valyuPaperSearch, valyuPatentSearch, valyuSecSearch, valyuWebSearch } from "./tools/builtins";
