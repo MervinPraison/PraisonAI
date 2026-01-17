@@ -563,6 +563,17 @@ export const COMMANDS: Record<string, Command> = {
       stats: { description: 'Show hooks statistics' },
       clear: { description: 'Clear all registered callbacks' }
     }
+  },
+  agent: {
+    description: 'Create and run a single agent',
+    args: [
+      { name: 'task', type: 'string', required: false, position: 0, description: 'Task for the agent to complete' }
+    ],
+    flags: [
+      { name: 'instructions', short: 'i', type: 'string', description: 'Agent instructions' },
+      { name: 'model', short: 'm', type: 'string', description: 'Model to use' },
+      { name: 'tools', short: 't', type: 'string', description: 'Comma-separated list of tools' }
+    ]
   }
 };
 

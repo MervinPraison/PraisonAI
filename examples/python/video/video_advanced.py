@@ -1,6 +1,6 @@
 from praisonaiagents import VideoAgent
 
-agent = VideoAgent(llm="openai/sora-2")
+agent = VideoAgent(llm="gemini/veo-3.1-generate-preview")
 
 # Generate video
 video = agent.generate("A sunset timelapse", seconds="8", size="1920x1080")

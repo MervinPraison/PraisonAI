@@ -1,6 +1,6 @@
 {
   "name": "praisonai",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "description": "PraisonAI TypeScript AI Agents Framework - Node.js, npm, and Javascript AI Agents Framework",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -75,6 +75,7 @@
     "@airweave/sdk": ">=0.1.0",
     "@mendable/firecrawl-js": ">=1.0.0",
     "bedrock-agentcore": ">=0.1.0",
+    "better-sqlite3": "^12.6.2",
     "boxen": "^7.1.1",
     "chalk": "^4.1.2",
     "cli-table3": "^0.6.3",

@@ -2074,9 +2074,17 @@ def launch_browser(
     chrome_path = None
     
     if system == "Darwin":  # macOS
+        # Chrome 137+ removed --load-extension for branded Chrome
+        # Prioritize Chrome for Testing which still supports it
+        home = os.path.expanduser("~")
         candidates = [
-            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            # Chrome for Testing (supports --load-extension in Chrome 137+)
+            os.path.join(home, ".praisonai/chrome-for-testing/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"),
+            os.path.join(home, ".praisonai/chrome-for-testing/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"),
+            # Chromium also supports --load-extension
             "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            # Fallback to branded Chrome (--load-extension may not work on 137+)
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
             "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
         ]
     elif system == "Windows":
