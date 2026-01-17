@@ -310,6 +310,12 @@ class BrowserAgent:
         screenshot_base64 = observation.get('screenshot')
         use_vision = screenshot_base64 and 'gpt' in self.model.lower()
         
+        # *** DEBUG: Log screenshot presence ***
+        if screenshot_base64:
+            logger.info(f"[SCREENSHOT] Screenshot present: {len(screenshot_base64)} chars, vision={use_vision}")
+        else:
+            logger.info(f"[SCREENSHOT] No screenshot in observation")
+        
         # Get agent response with structured output if available
         try:
             action_model = get_browser_action_model()
