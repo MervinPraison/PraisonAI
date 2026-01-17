@@ -1997,7 +1997,8 @@ def launch_browser(
     profile: bool = typer.Option(False, "--profile", help="Enable performance profiling with timing summary"),
     deep_profile: bool = typer.Option(False, "--deep-profile", help="Enable deep profiling with cProfile trace"),
     no_verify: bool = typer.Option(False, "--no-verify", help="Disable action verification (faster but less reliable)"),
-    chrome_profile: Optional[str] = typer.Option(None, "--chrome-profile", help="Persistent Chrome profile dir (default: temp). Use ~/.praisonai/browser_profile for persistence"),
+    temp_profile: bool = typer.Option(False, "--temp-profile", help="Use temporary profile (deleted after run). Default: ~/.praisonai/browser_profile"),
+    chrome_profile: Optional[str] = typer.Option(None, "--chrome-profile", help="Custom Chrome profile dir. Default: ~/.praisonai/browser_profile"),
 ):
     """Launch Chrome with extension and optionally run a goal.
     
@@ -2164,17 +2165,22 @@ def launch_browser(
         else:
             console.print(f"[green]✓ Bridge server already running on port {server_port}[/green]")
     
-    # Use persistent profile if specified, otherwise create temp profile
-    using_persistent_profile = False
-    if chrome_profile:
-        # Create persistent profile directory if it doesn't exist
-        os.makedirs(chrome_profile, exist_ok=True)
-        profile_dir = chrome_profile
+    # Default persistent profile path
+    DEFAULT_PROFILE_PATH = os.path.expanduser("~/.praisonai/browser_profile")
+    
+    # Determine profile to use: --temp-profile = temp, else persistent (default or custom)
+    if temp_profile:
+        # Use temp profile (deleted after run)
+        profile_dir = tempfile.mkdtemp(prefix="praisonai_chrome_")
+        using_persistent_profile = False
+        if debug:
+            console.print(f"[dim]Using temp profile: {profile_dir}[/dim]")
+    else:
+        # Use persistent profile (default or custom)
+        profile_dir = chrome_profile or DEFAULT_PROFILE_PATH
+        os.makedirs(profile_dir, exist_ok=True)
         using_persistent_profile = True
         console.print(f"[cyan]Using persistent Chrome profile: {profile_dir}[/cyan]")
-    else:
-        # Create temp profile for Chrome
-        profile_dir = tempfile.mkdtemp(prefix="praisonai_chrome_")
     
     # Build Chrome command with --load-extension
     chrome_args = [
@@ -2683,11 +2689,12 @@ def launch_browser(
             except Exception:
                 pass
         
-        # Clean temp profile
-        try:
-            shutil.rmtree(temp_profile)
-        except Exception:
-            pass
+        # Clean temp profile (preserve persistent profiles)
+        if not using_persistent_profile:
+            try:
+                shutil.rmtree(profile_dir)
+            except Exception:
+                pass
         
         console.print("[green]Done[/green]")
     else:
@@ -2834,11 +2841,12 @@ def launch_browser(
             except Exception:
                 pass
         
-        # Clean temp profile
-        try:
-            shutil.rmtree(temp_profile)
-        except Exception:
-            pass
+        # Clean temp profile (preserve persistent profiles)
+        if not using_persistent_profile:
+            try:
+                shutil.rmtree(profile_dir)
+            except Exception:
+                pass
         
         console.print(f"[green]Completed {goal_count} goal(s)[/green]")
 

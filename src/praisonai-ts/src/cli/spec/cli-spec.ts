@@ -67,7 +67,22 @@ export const COMMANDS: Record<string, Command> = {
       { name: 'parallel', type: 'boolean', default: false, description: 'Run workflow steps in parallel where possible' }
     ]
   },
+  agents: {
+    description: 'Run multi-agent orchestration',
+    args: [
+      { name: 'task', type: 'string', required: false, position: 0, description: 'Task for agents to complete' }
+    ],
+    subcommands: {
+      run: { description: 'Run multiple agents', args: [{ name: 'task', type: 'string', required: true, position: 0 }] }
+    },
+    flags: [
+      { name: 'agents', short: 'a', type: 'string', description: 'Comma-separated agent instructions' },
+      { name: 'process', short: 'p', type: 'string', enum: ['sequential', 'parallel'], default: 'sequential', description: 'Process mode' },
+      { name: 'model', short: 'm', type: 'string', description: 'Model for all agents' }
+    ]
+  },
   eval: {
+
     description: 'Evaluate agent performance',
     subcommands: {
       accuracy: {
@@ -556,7 +571,8 @@ export const GLOBAL_FLAGS: CommandFlag[] = [
   { name: 'config', short: 'c', type: 'string', description: 'Path to config file' },
   { name: 'profile', short: 'p', type: 'string', description: 'Profile name to use' },
   { name: 'output', short: 'o', type: 'string', enum: ['json', 'text', 'pretty'], default: 'pretty', description: 'Output format' },
-  { name: 'json', type: 'boolean', default: false, description: 'Shorthand for --output json' }
+  { name: 'json', type: 'boolean', default: false, description: 'Shorthand for --output json' },
+  { name: 'db', type: 'string', description: 'Database URL for persistence (sqlite:./data.db, postgres://, redis://)' }
 ];
 
 export const EXIT_CODES = {
@@ -599,6 +615,7 @@ export const ENV_VARS = {
   PRAISONAI_PROFILE: 'PRAISONAI_PROFILE',
   PRAISONAI_VERBOSE: 'PRAISONAI_VERBOSE',
   PRAISONAI_CONFIG: 'PRAISONAI_CONFIG',
+  PRAISONAI_DB: 'PRAISONAI_DB',
   OPENAI_API_KEY: 'OPENAI_API_KEY',
   ANTHROPIC_API_KEY: 'ANTHROPIC_API_KEY',
   GOOGLE_API_KEY: 'GOOGLE_API_KEY'
