@@ -352,6 +352,8 @@ Types/Exports:
 ```ts
 export { Agent, Agents, PraisonAIAgents, Router } from "./agent";
 export type { PraisonAIAgentsConfig, SimpleAgentConfig, SimpleRouteConfig, SimpleRouterConfig } from "./agent";
+export { AudioAgent, createAudioAgent } from "./agent/audio";
+export type { AudioAgentConfig, AudioProvider, AudioSpeakOptions, AudioSpeakResult, AudioTranscribeOptions, AudioTranscribeResult } from "./agent/audio";
 export { ContextAgent, createContextAgent } from "./agent/context";
 export { Handoff, handoff, handoffFilters } from "./agent/handoff";
 export { ImageAgent, createImageAgent } from "./agent/image";
@@ -373,7 +375,7 @@ export { // Agent loop
   configureTelemetry, // Tool Approval (AI SDK v6 parity)
   ApprovalManager, // Tools
   defineTool, // UI Message (AI SDK v6 parity)
-  convertToModelMessages, AIAgentStep, AIEmbedManyResult, AIEmbedOptions, AIEmbedResult, AIFilePart, AIGenerateImageOptions, AIGenerateImageResult, AIGenerateObjectOptions, AIGenerateObjectResult, AIGenerateTextOptions, AIGenerateTextResult, AIImagePart, AIMiddleware, AIMiddlewareConfig, AIModelMessage, AISpan, AISpanKind, AISpanOptions, AISpanStatus, AIStreamObjectOptions, AIStreamObjectResult, AIStreamTextOptions, AIStreamTextResult, AITelemetryEvent, AITelemetrySettings, AITextPart, AIToolDefinition, AITracer, AgentLoop, DANGEROUS_PATTERNS, MODEL_ALIASES, SPEECH_MODELS, TRANSCRIPTION_MODELS, ToolApprovalDeniedError, ToolApprovalTimeoutError, aiEmbed, aiEmbedMany, aiGenerateImage, aiGenerateObject, aiGenerateText, aiStreamObject, aiStreamText, applyMiddleware, autoEnableDevTools, base64ToUint8Array, clearAICache, clearEvents, closeAllMCPClients, closeMCPClient, convertToUIMessages, createAILoggingMiddleware, createAISpan, createApprovalResponse, createDangerousPatternChecker, createDevToolsMiddleware, createExpressHandler, createFastifyHandler, createFilePart, createHonoHandler, createMultimodalMessage, createNestHandler, createPagesHandler, createPdfPart, createSystemMessage, createTelemetryMiddleware, createTelemetrySettings, createTextMessage, createTextPart, createToolSet, disableAITelemetry, disableDevTools, enableAITelemetry, functionToTool, getAICacheStats, getApprovalManager, getDevToolsState, getDevToolsUrl, getEvents, getMCPClient, getModel, getTelemetrySettings, getToolsNeedingApproval, getTracer, hasModelAlias, hasPendingApprovals, initOpenTelemetry, isDangerous, isDataUrl, isDevToolsEnabled, isTelemetryEnabled, isUrl, listModelAliases, mcpToolsToAITools, parseModel, pipeUIMessageStreamToResponse, recordEvent, resolveModelAlias, safeValidateUIMessages, setApprovalManager, stopAfterSteps, stopWhen, stopWhenNoToolCalls, toMessageContent, toUIMessageStreamResponse, transcribe, uint8ArrayToBase64, validateUIMessages, withApproval, withSpan, wrapModel } from "./ai";
+  convertToModelMessages, AIAgentStep, AIEmbedManyResult, AIEmbedOptions, AIEmbedResult, AIFilePart, AIGenerateImageOptions, AIGenerateImageResult, AIGenerateObjectOptions, AIGenerateObjectResult, AIGenerateTextOptions, AIGenerateTextResult, AIImagePart, AIMiddleware, AIMiddlewareConfig, AIModelMessage, AISpan, AISpanKind, AISpanOptions, AISpanStatus, AIStreamObjectOptions, AIStreamObjectResult, AIStreamTextOptions, AIStreamTextResult, AITelemetryEvent, AITelemetrySettings, AITextPart, AIToolDefinition, AITracer, AgentLoop, DANGEROUS_PATTERNS, MCPClientType, MODEL_ALIASES, SPEECH_MODELS, TRANSCRIPTION_MODELS, ToolApprovalDeniedError, ToolApprovalTimeoutError, aiEmbed, aiEmbedMany, aiGenerateImage, aiGenerateObject, aiGenerateText, aiStreamObject, aiStreamText, applyMiddleware, autoEnableDevTools, base64ToUint8Array, clearAICache, clearEvents, closeAllMCPClients, closeMCPClient, convertToUIMessages, createAILoggingMiddleware, createAISpan, createApprovalResponse, createDangerousPatternChecker, createDevToolsMiddleware, createExpressHandler, createFastifyHandler, createFilePart, createHonoHandler, createMultimodalMessage, createNestHandler, createPagesHandler, createPdfPart, createSystemMessage, createTelemetryMiddleware, createTelemetrySettings, createTextMessage, createTextPart, createToolSet, disableAITelemetry, disableDevTools, enableAITelemetry, functionToTool, getAICacheStats, getApprovalManager, getDevToolsState, getDevToolsUrl, getEvents, getMCPClient, getModel, getTelemetrySettings, getToolsNeedingApproval, getTracer, hasModelAlias, hasPendingApprovals, initOpenTelemetry, isDangerous, isDataUrl, isDevToolsEnabled, isTelemetryEnabled, isUrl, listModelAliases, mcpToolsToAITools, parseModel, pipeUIMessageStreamToResponse, recordEvent, resolveModelAlias, safeValidateUIMessages, setApprovalManager, stopAfterSteps, stopWhen, stopWhenNoToolCalls, toMessageContent, toUIMessageStreamResponse, transcribe, uint8ArrayToBase64, validateUIMessages, withApproval, withSpan, wrapModel } from "./ai";
 export { AutoAgents, createAutoAgents } from "./auto";
 export { BaseCache, FileCache, MemoryCache, createFileCache, createMemoryCache } from "./cache";
 export { CLI_SPEC_VERSION, executeCommand, parseArgs } from "./cli";
@@ -417,10 +419,14 @@ export { // Provider classes
   ProviderRegistry, // Types
   type LLMProvider, AnthropicProvider, BaseProvider, GoogleProvider, ProviderMessage, ProviderToolDefinition, createProviderRegistry, getAvailableProviders, getDefaultProvider, getDefaultRegistry, hasProvider, isProviderAvailable, listProviders, parseModelString, registerBuiltinProviders, registerProvider, unregisterProvider } from "./llm/providers";
 export { ADAPTERS, AISDK_PROVIDERS, COMMUNITY_PROVIDERS, PROVIDER_ALIASES } from "./llm/providers/ai-sdk/types";
+export { MCPClient, MCPServer, createMCPClient, createMCPServer, getMCPTools } from "./mcp";
 export { AutoMemory, AutoMemoryKnowledgeBase, AutoMemoryVectorStore, DEFAULT_POLICIES, createAutoMemory, createLLMSummarizer } from "./memory/auto-memory";
+export { DocsManager, createDocsManager } from "./memory/docs-manager";
 export { FileMemory, createFileMemory } from "./memory/file-memory";
+export { MemoryHooks, createEncryptionHooks, createLoggingHooks, createMemoryHooks, createValidationHooks } from "./memory/hooks";
 export { Memory, createMemory } from "./memory/memory";
 export type { MemoryConfig, MemoryEntry } from "./memory/memory";
+export { RulesManager, createRulesManager, createSafetyRules } from "./memory/rules-manager";
 export { // Adapters
   NoopObservabilityAdapter, // Constants
   OBSERVABILITY_TOOLS, // Global adapter management
@@ -429,13 +435,16 @@ export { // Adapters
 export { Plan, PlanStep, PlanStorage, PlanningAgent, TaskAgent, TodoItem, TodoList, createPlan, createPlanStorage, createPlanningAgent, createTaskAgent, createTodoList } from "./planning";
 export { SkillManager, createSkillManager, parseSkillFile } from "./skills";
 export { AgentTelemetry, TelemetryCollector, cleanupTelemetry, createAgentTelemetry, disableTelemetry, enableTelemetry, getTelemetry } from "./telemetry";
-export { BaseTool, FunctionTool, ToolRegistry, ToolResult, ToolValidationError, createTool, getRegistry, getTool, registerTool, tool, validateTool } from "./tools";
+export { // Subagent Tool (agent-as-tool pattern)
+  SubagentTool, BaseTool, FunctionTool, ToolRegistry, ToolResult, ToolValidationError, createDelegator, createSubagentTool, createSubagentTools, createTool, getRegistry, getTool, registerTool, tool, validateTool } from "./tools";
 export { airweaveSearch, bedrockBrowserClick, bedrockBrowserFill, bedrockBrowserNavigate, bedrockCodeInterpreter, codeExecution, codeMode, createCustomTool, exaSearch, firecrawlCrawl, firecrawlScrape, parallelSearch, perplexitySearch, registerCustomTool, registerLocalTool, registerNpmTool, superagentGuard, superagentRedact, superagentVerify, tavilyCrawl, tavilyExtract, tavilySearch, valyuBioSearch, valyuCompanyResearch, valyuEconomicsSearch, valyuFinanceSearch, valyuPaperSearch, valyuPatentSearch, valyuSecSearch, valyuWebSearch } from "./tools/builtins";
 export { MissingDependencyError, MissingEnvVarError, ToolsRegistry, composeMiddleware, createLoggingMiddleware, createRateLimitMiddleware, createRedactionMiddleware, createRetryMiddleware, createTimeoutMiddleware, createToolsRegistry, createTracingMiddleware, createValidationMiddleware, getToolsRegistry, resetToolsRegistry } from "./tools/registry";
 export type { InstallHints, PraisonTool, RedactionHooks, RegisteredTool, ToolCapabilities, ToolExecutionContext, ToolExecutionResult, ToolFactory, ToolHooks, ToolInstallStatus, ToolLimits, ToolLogger, ToolMetadata, ToolMiddleware, ToolParameterProperty, ToolParameterSchema } from "./tools/registry";
 export { registerBuiltinTools, tools } from "./tools/tools";
-export { Workflow, loop, parallel, repeat, route } from "./workflows";
-export type { StepResult, WorkflowContext, WorkflowStep } from "./workflows";
+export { // New: Python-parity Loop and Repeat classes
+  Loop, // WorkflowStep class
+  WorkflowStep, Repeat, Workflow, loop, loopPattern, parallel, repeat, repeatPattern, route } from "./workflows";
+export type { LoopConfig, LoopResult, RepeatConfig, RepeatContext, RepeatResult, StepContextConfig, StepExecutionConfig, StepOutputConfig, StepResult, StepRoutingConfig, WorkflowContext, WorkflowStepConfig } from "./workflows";
 export { createWorkflowFromYAML, loadWorkflowFromFile, parseYAMLWorkflow, validateWorkflowDefinition } from "./workflows/yaml-parser";
 ```
 
