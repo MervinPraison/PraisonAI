@@ -246,15 +246,31 @@ class BrowserServer:
         }
         sent_to_extension = False
         
+        # *** FIX: Aggressively clear ALL stale session_ids before looking ***
+        # This handles crashed CLI runs that leave stale state
+        for client_id, client_conn in self._connections.items():
+            # Clear session_id on all connections that aren't the current CLI caller
+            # This ensures fresh state for each new CLI run
+            if client_conn != conn and client_conn.session_id:
+                logger.info(f"Clearing stale session_id on client {client_id[:8]}")
+                client_conn.session_id = None
+        
         # First, log all connections for debugging
         logger.info(f"Looking for available extension. Connections: {len(self._connections)}")
         for client_id, client_conn in self._connections.items():
             has_session = "has session" if client_conn.session_id else "no session"
             is_caller = "caller" if client_conn == conn else "not caller"
             logger.debug(f"  Client {client_id[:8]}: {has_session}, {is_caller}")
-        
+
+
         # Try to find an available extension
+        logger.info(f"[DEBUG] Scanning {len(self._connections)} connections for available extension")
         for client_id, client_conn in self._connections.items():
+            is_self = client_conn == conn
+            has_websocket = client_conn.websocket is not None
+            has_session = client_conn.session_id is not None
+            logger.info(f"[DEBUG] Client {client_id[:8]}: is_self={is_self}, websocket={has_websocket}, session={has_session}")
+
             # Only send to extensions (not CLI) that don't have an active session
             if client_conn != conn and client_conn.websocket and not client_conn.session_id:
                 try:
