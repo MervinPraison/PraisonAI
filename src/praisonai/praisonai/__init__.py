@@ -10,9 +10,6 @@ os.environ["EC_TELEMETRY"] = "false"
 # Version is lightweight, import directly
 from .version import __version__
 
-# Re-export embedding from llm module for convenience: praisonai.embedding()
-from .llm import embedding
-
 # Define __all__ for lazy loading
 __all__ = [
     'PraisonAI',
@@ -47,6 +44,9 @@ def __getattr__(name):
     elif name == 'recipe':
         from .recipe import core as recipe_module
         return recipe_module
+    elif name == 'embedding':
+        from .llm import embedding
+        return embedding
     
     # Try praisonaiagents exports
     try:
@@ -57,5 +57,6 @@ def __getattr__(name):
         pass
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 
