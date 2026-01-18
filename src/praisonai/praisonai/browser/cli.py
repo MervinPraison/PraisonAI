@@ -1936,41 +1936,273 @@ def doctor_db():
         raise typer.Exit(1)
 
 
+@doctor_app.command("bridge")
+def doctor_bridge(
+    host: str = typer.Option("localhost", "--host", "-H", help="Server host"),
+    port: int = typer.Option(8765, "--port", "-p", help="Server port"),
+):
+    """Test bridge WebSocket connectivity.
+    
+    Performs:
+    1. HTTP health check
+    2. WebSocket handshake test
+    3. Welcome message validation
+    
+    Examples:
+        praisonai browser doctor bridge
+        praisonai browser doctor bridge --port 8766
+    """
+    import asyncio
+    from .diagnostics import check_bridge_server, check_bridge_websocket
+    
+    console.print("[bold]Bridge Server Test[/bold]\n")
+    
+    async def run_checks():
+        results = []
+        results.append(await check_bridge_server(host, port))
+        results.append(await check_bridge_websocket(host, port))
+        return results
+    
+    results = asyncio.run(run_checks())
+    
+    all_pass = True
+    for r in results:
+        if r.status.value == "pass":
+            console.print(f"[green]✅ {r.name}:[/green] {r.message}")
+        elif r.status.value == "fail":
+            console.print(f"[red]❌ {r.name}:[/red] {r.message}")
+            all_pass = False
+        else:
+            console.print(f"[yellow]⚠️ {r.name}:[/yellow] {r.message}")
+        
+        if r.details:
+            for k, v in r.details.items():
+                console.print(f"   {k}: {v}")
+    
+    if not all_pass:
+        raise typer.Exit(1)
+
+
+@doctor_app.command("api-keys")
+def doctor_api_keys(
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Test specific model API"),
+    validate: bool = typer.Option(False, "--validate", "-V", help="Actually call API to validate key"),
+):
+    """Check API key configuration.
+    
+    Verifies:
+    - OPENAI_API_KEY
+    - GEMINI_API_KEY
+    - ANTHROPIC_API_KEY
+    
+    Examples:
+        praisonai browser doctor api-keys
+        praisonai browser doctor api-keys --validate
+        praisonai browser doctor api-keys --model gemini/gemini-2.0-flash --validate
+    """
+    from .diagnostics import check_api_keys, check_api_key_valid
+    
+    console.print("[bold]API Key Check[/bold]\n")
+    
+    results = check_api_keys()
+    
+    all_pass = True
+    for r in results:
+        provider = r.details.get('provider', r.name)
+        if r.status.value == "pass":
+            console.print(f"[green]✅ {provider}:[/green] {r.message}")
+        elif r.status.value == "fail":
+            console.print(f"[red]❌ {provider}:[/red] {r.message}")
+            all_pass = False
+        else:
+            console.print(f"[yellow]⚠️ {provider}:[/yellow] {r.message}")
+
+    
+    # Validate with actual API call
+    if validate:
+        console.print("\n[dim]Validating with API call...[/dim]")
+        test_model = model or "gpt-4o-mini"
+        result = check_api_key_valid(test_model)
+        
+        if result.status.value == "pass":
+            console.print(f"[green]✅ API validation:[/green] {result.message}")
+        else:
+            console.print(f"[red]❌ API validation:[/red] {result.message}")
+            if result.details.get("error"):
+                console.print(f"   Error: {result.details['error'][:100]}")
+            all_pass = False
+    
+    if not all_pass:
+        raise typer.Exit(1)
+
+
+@doctor_app.command("env")
+def doctor_env():
+    """Show environment configuration.
+    
+    Displays:
+    - Python version
+    - Platform
+    - API key status
+    - Working directory
+    
+    Examples:
+        praisonai browser doctor env
+    """
+    from .diagnostics import get_environment_info
+    
+    console.print("[bold]Environment Configuration[/bold]\n")
+    
+    result = get_environment_info()
+    details = result.details
+    
+    console.print(f"Python: {details.get('python_version', 'unknown')}")
+    console.print(f"Platform: {details.get('platform', 'unknown')}")
+    console.print(f"Home: {details.get('home', 'unknown')}")
+    console.print(f"CWD: {details.get('cwd', 'unknown')}")
+    
+    console.print("\n[bold]API Keys:[/bold]")
+    api_keys = details.get("api_keys_set", {})
+    for key, is_set in api_keys.items():
+        if key == "OPENAI_BASE_URL":
+            console.print(f"  {key}: {is_set}")
+        elif is_set:
+            console.print(f"  [green]✅ {key}[/green]: Set")
+        else:
+            console.print(f"  [yellow]⚠️ {key}[/yellow]: Not set")
+
+
+@doctor_app.command("agent")
+def doctor_agent(
+    model: str = typer.Option("gpt-4o-mini", "--model", "-m", help="LLM model to test"),
+):
+    """Test agent LLM capability.
+    
+    Sends a mock observation and verifies agent returns valid action.
+    This tests the full LLM call path.
+    
+    Examples:
+        praisonai browser doctor agent
+        praisonai browser doctor agent --model gemini/gemini-2.0-flash
+    """
+    import asyncio
+    from .diagnostics import check_agent_llm, check_vision_capability
+    
+    console.print(f"[bold]Agent LLM Test ({model})[/bold]\n")
+    
+    # Check vision capability
+    vision_result = check_vision_capability(model)
+    if vision_result.status.value == "pass":
+        console.print(f"[green]✅ Vision:[/green] {vision_result.message}")
+    else:
+        console.print(f"[yellow]⚠️ Vision:[/yellow] {vision_result.message}")
+    
+    # Test LLM call
+    console.print("\n[dim]Testing LLM call...[/dim]")
+    result = asyncio.run(check_agent_llm(model))
+    
+    if result.status.value == "pass":
+        console.print(f"[green]✅ Agent:[/green] {result.message}")
+        if result.details.get("thought"):
+            console.print(f"   Thought: {result.details['thought'][:80]}...")
+    elif result.status.value == "fail":
+        console.print(f"[red]❌ Agent:[/red] {result.message}")
+        if result.details.get("error"):
+            console.print(f"   Error: {result.details['error'][:150]}")
+        raise typer.Exit(1)
+    else:
+        console.print(f"[yellow]⚠️ Agent:[/yellow] {result.message}")
+
+
+@doctor_app.command("flow")
+def doctor_flow(
+    bridge_port: int = typer.Option(8765, "--bridge-port", help="Bridge server port"),
+    chrome_port: int = typer.Option(9222, "--chrome-port", help="Chrome debug port"),
+    model: str = typer.Option("gpt-4o-mini", "--model", "-m", help="LLM model"),
+    skip_llm: bool = typer.Option(False, "--skip-llm", help="Skip LLM API test"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Run full automation flow diagnostics.
+    
+    Tests all components in sequence:
+    1. Environment & API keys
+    2. Bridge server connectivity
+    3. Chrome CDP & extension
+    4. Agent LLM capability
+    
+    Examples:
+        praisonai browser doctor flow
+        praisonai browser doctor flow --json
+        praisonai browser doctor flow --skip-llm
+    """
+    import asyncio
+    import json as json_lib
+    from .diagnostics import run_all_diagnostics
+    
+    if not json_output:
+        console.print("[bold]Full Automation Flow Diagnostics[/bold]\n")
+    
+    results = asyncio.run(run_all_diagnostics(
+        bridge_port=bridge_port,
+        chrome_port=chrome_port,
+        model=model,
+        skip_llm=skip_llm,
+    ))
+    
+    if json_output:
+        console.print(json_lib.dumps(results, indent=2))
+        return
+    
+    # Display results
+    for r in results["results"]:
+        status = r["status"]
+        name = r["name"]
+        message = r["message"]
+        
+        if status == "pass":
+            console.print(f"[green]✅ {name}:[/green] {message}")
+        elif status == "fail":
+            console.print(f"[red]❌ {name}:[/red] {message}")
+        elif status == "warn":
+            console.print(f"[yellow]⚠️ {name}:[/yellow] {message}")
+        else:
+            console.print(f"[dim]⏭️ {name}:[/dim] {message}")
+    
+    # Summary
+    summary = results["summary"]
+    console.print(f"\n[bold]Summary:[/bold] {summary['passed']}/{summary['total']} passed")
+    
+    if summary["failed"] > 0:
+        console.print(f"[red]  ❌ {summary['failed']} failed[/red]")
+    if summary["warned"] > 0:
+        console.print(f"[yellow]  ⚠️ {summary['warned']} warnings[/yellow]")
+    
+    if not summary["all_pass"]:
+        raise typer.Exit(1)
+
+
 @doctor_app.callback(invoke_without_command=True)
 def doctor_all(
     ctx: typer.Context,
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ):
-    """Run all browser health checks."""
+    """Run all browser health checks.
+    
+    Runs comprehensive diagnostics on all components.
+    
+    Examples:
+        praisonai browser doctor
+        praisonai browser doctor --json
+    """
     if ctx.invoked_subcommand is None:
-        console.print("[bold]Browser Health Check[/bold]\n")
-        
-        # Run all checks with explicit defaults
-        try:
-            doctor_server(host="localhost", port=8765)
-        except typer.Exit:
-            pass
-        
-        console.print()
-        
-        try:
-            doctor_chrome(port=9222)
-        except typer.Exit:
-            pass
-        
-        console.print()
-        
-        try:
-            doctor_extension(port=9222)
-        except typer.Exit:
-            pass
-        
-        console.print()
-        
-        try:
-            doctor_db()
-        except typer.Exit:
-            pass
+        # Use full flow diagnostics
+        doctor_flow(
+            bridge_port=8765,
+            chrome_port=9222,
+            model="gpt-4o-mini",
+            skip_llm=True,  # Skip by default for speed
+            json_output=json_output,
+        )
 
 
 # ============================================================

@@ -313,11 +313,12 @@ class BrowserAgent:
         vision_capable = any(m in model_lower for m in ['gpt-4', 'gpt-4o', 'gemini', 'claude'])
         use_vision = screenshot_base64 and vision_capable
         
-        # *** DEBUG: Log screenshot presence ***
+        # Structured debug logging for automation flow tracing
+        logger.debug(f"[AGENT][VISION] process_observation:agent.py model={self.model} vision_capable={vision_capable} use_vision={use_vision}")
         if screenshot_base64:
-            logger.info(f"[SCREENSHOT] Screenshot present: {len(screenshot_base64)} chars, vision={use_vision}, model={model_lower}")
+            logger.debug(f"[AGENT][VISION] Screenshot present: {len(screenshot_base64)} chars")
         else:
-            logger.info(f"[SCREENSHOT] No screenshot in observation")
+            logger.debug(f"[AGENT][VISION] No screenshot in observation")
 
         
         # Get agent response with structured output if available

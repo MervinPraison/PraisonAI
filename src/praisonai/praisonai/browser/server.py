@@ -175,6 +175,7 @@ class BrowserServer:
     ) -> Optional[Dict]:
         """Process incoming WebSocket message."""
         msg_type = message.get("type", "")
+        logger.debug(f"[SERVER][MSG] _process_message:server.py type={msg_type}")
         
         if msg_type == "start_session":
             return await self._handle_start_session(message, conn)
@@ -246,6 +247,9 @@ class BrowserServer:
         }
         sent_to_extension = False
         
+        print(f"[SERVER] Preparing to send start_automation, checking {len(self._connections)} connections")
+
+        
         # *** FIX: Aggressively clear ALL stale session_ids before looking ***
         # This handles crashed CLI runs that leave stale state
         for client_id, client_conn in self._connections.items():
@@ -274,18 +278,20 @@ class BrowserServer:
             # Only send to extensions (not CLI) that don't have an active session
             if client_conn != conn and client_conn.websocket and not client_conn.session_id:
                 try:
+                    logger.info(f"[SERVER][START] _handle_start_session:server.py → Sending start_automation to extension {client_id[:8]}")
                     await client_conn.websocket.send_json(start_msg)
                     # Set the extension's session_id so we can broadcast actions to CLI
                     client_conn.session_id = session_id
-                    logger.info(f"Sent start_automation to extension {client_id[:8]}, set session_id")
+                    logger.info(f"[SERVER][START] start_automation sent successfully to {client_id[:8]}, session={session_id[:8]}")
                     sent_to_extension = True
                     break  # Only send to ONE extension
                 except Exception as e:
-                    logger.error(f"Failed to send start_automation to {client_id}: {e}")
+                    logger.error(f"[SERVER][START] Failed to send start_automation to {client_id[:8]}: {e}")
         
         # *** FIX: If no extension found, it might have stale session_id - clear and retry ***
         if not sent_to_extension:
-            logger.warning("No available extension found. Clearing stale session_ids and retrying...")
+            logger.warning("[SERVER][START] No available extension found. Clearing stale session_ids and retrying...")
+
             for client_id, client_conn in self._connections.items():
                 if client_conn != conn and client_conn.session_id:
                     logger.info(f"Clearing stale session_id on client {client_id[:8]}")
@@ -320,9 +326,12 @@ class BrowserServer:
         conn: ClientConnection,
     ) -> Dict:
         """Process observation and return action."""
+        print(f"[SERVER DEBUG] _handle_observation called with step_number={message.get('step_number', 'N/A')}")
+        
         session_id = message.get("session_id", conn.session_id)
         
         if not session_id or session_id not in self._agents:
+            print(f"[SERVER DEBUG] No active session: session_id={session_id}, in_agents={session_id in self._agents if session_id else False}")
             return {
                 "type": "error",
                 "error": "No active session",
@@ -330,18 +339,22 @@ class BrowserServer:
             }
         
         agent = self._agents[session_id]
+        logger.debug(f"[SERVER][OBS] _handle_observation:server.py agent={type(agent).__name__}, model={getattr(agent, 'model', 'unknown')}")
         
         # Process observation through agent
         try:
+            logger.debug(f"[SERVER][OBS] Calling agent.aprocess_observation() for step {message.get('step_number', 0)}")
             action = await agent.aprocess_observation(message)
+            logger.info(f"[SERVER][OBS] Agent returned action={action.get('action', 'N/A')} done={action.get('done', False)}")
         except Exception as e:
-            logger.error(f"Agent error: {e}")
+            logger.error(f"[SERVER][OBS] Agent error: {e}")
             action = {
                 "action": "wait",
                 "thought": f"Error: {e}",
                 "done": False,
                 "error": str(e),
             }
+
         
         # Update session
         if self._sessions:
