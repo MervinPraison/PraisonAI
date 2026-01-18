@@ -328,8 +328,7 @@ class BrowserAgent:
                 # Use LiteLLM directly for vision-enabled call
                 from litellm import completion
                 
-                if self.verbose:
-                    logger.info(f"[VISION] Using screenshot for decision making")
+                logger.info(f"[VISION] Calling vision LLM: {self.model}")
                 
                 messages = [
                     {"role": "system", "content": BROWSER_AGENT_SYSTEM_PROMPT},
@@ -352,10 +351,14 @@ class BrowserAgent:
                 )
                 
                 response_content = response.choices[0].message.content
+                logger.info(f"[VISION] LLM response: {response_content[:200] if response_content else 'None'}...")
+                
                 if response_content is None:
                     raise ValueError("LLM returned empty response")
                 response_text = response_content.strip()
                 action = self._parse_response(response_text)
+                logger.info(f"[VISION] Parsed action: {action}")
+
                 
             elif action_model is not None:
                 # Use Pydantic model for guaranteed structured output
