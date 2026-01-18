@@ -71,6 +71,7 @@ class DocsSource:
         exclude_patterns: Optional[List[str]] = None,
         groups: Optional[List[str]] = None,
         folders: Optional[List[str]] = None,
+        exclude_groups: Optional[List[str]] = None,
         workspace_dir: Optional[Path] = None,
     ):
         """
@@ -83,6 +84,7 @@ class DocsSource:
             exclude_patterns: Glob patterns to exclude.
             groups: Specific groups (top-level subdirs) to include.
             folders: Specific folders (nested paths like 'examples/agent-recipes').
+            exclude_groups: Groups to exclude (e.g., ['js'] to skip JavaScript docs).
             workspace_dir: Directory for extracted scripts.
         """
         self.root = Path(root).resolve()
@@ -91,6 +93,7 @@ class DocsSource:
         self.exclude_patterns = exclude_patterns
         self.groups = groups
         self.folders = folders
+        self.exclude_groups = exclude_groups
         
         if workspace_dir:
             self.workspace_dir = Path(workspace_dir)
@@ -123,6 +126,15 @@ class DocsSource:
             files = sorted(files, key=lambda p: p.relative_to(self.root).as_posix())
         else:
             files = self._discovery.discover()
+        
+        # Filter out excluded groups
+        if self.exclude_groups:
+            filtered_files = []
+            for f in files:
+                group = FileDiscovery.get_group_for_path(f, self.root)
+                if group not in self.exclude_groups:
+                    filtered_files.append(f)
+            files = filtered_files
         
         items = []
         for doc_path in files:

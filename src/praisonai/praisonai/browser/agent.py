@@ -20,9 +20,10 @@ def _get_browser_action_model():
     
     class BrowserAction(BaseModel):
         """Structured response for browser automation actions."""
+        # === CORE ACTION FIELDS ===
         thought: str = Field(description="Brief reasoning for this action")
-        action: Literal["type", "submit", "click", "scroll", "navigate", "done", "wait"] = Field(
-            description="Action to perform"
+        action: Literal["type", "submit", "click", "scroll", "navigate", "done", "wait", "clear_input"] = Field(
+            description="Action to perform. Use 'clear_input' to fix garbled text in input fields."
         )
         selector: Optional[str] = Field(None, description="CSS selector for target element")
         value: Optional[str] = Field(None, description="Text value for type action")
@@ -33,8 +34,49 @@ def _get_browser_action_model():
             None, 
             description="Summary of what was accomplished (required when done=true)"
         )
+        
+        # === GOAL PROGRESS TRACKING ===
+        goal_progress: Optional[int] = Field(
+            None,
+            description="Estimated % progress toward goal (0-100). E.g. 50 if halfway done."
+        )
+        page_summary: Optional[str] = Field(
+            None,
+            description="Brief description of what's visible on the page relevant to the goal"
+        )
+        on_track: Optional[bool] = Field(
+            None,
+            description="True if progressing toward goal as planned, False if off track"
+        )
+        
+        # === ERROR/ANOMALY DETECTION (CRITICAL!) ===
+        error_detected: Optional[bool] = Field(
+            None,
+            description="True if you notice ANY error: garbled text in inputs, wrong page loaded, element missing, popup blocking, etc."
+        )
+        error_description: Optional[str] = Field(
+            None,
+            description="Description of the error if error_detected=True. E.g. 'Input field shows garbled text: abc123abc' or 'Expected Wikipedia but still on Google'"
+        )
+        input_field_value: Optional[str] = Field(
+            None,
+            description="EXACT text you see in any input field on the page (copy what's visible, including if garbled)"
+        )
+        expected_vs_actual: Optional[str] = Field(
+            None,
+            description="What you expected to see vs what you actually see. E.g. 'Expected: wikipedia | Actual: googlegoogle'"
+        )
+        blockers: Optional[str] = Field(
+            None,
+            description="Anything blocking progress: popups, consent dialogs, captchas, login walls, etc."
+        )
+        retry_reason: Optional[str] = Field(
+            None,
+            description="If retrying a failed action, explain what went wrong and why retrying"
+        )
     
     return BrowserAction
+
 
 
 # Cache the model after first creation
@@ -58,6 +100,7 @@ ACTION_MAPPING = {
     "navigate": "navigate",
     "done": "done",
     "wait": "wait",
+    "clear_input": "clear_input",  # New: for fixing garbled input text
     "input": "type",
     
     # Common LLM variations -> normalized
@@ -133,7 +176,43 @@ BROWSER_AGENT_SYSTEM_PROMPT = """You are a precise browser automation agent. Com
 - **click**: Click BUTTON or LINK. Use the EXACT selector from the element list.
 - **scroll**: Scroll page (direction: "up" or "down")
 - **navigate**: Go to URL directly (use for known URLs)
+- **clear_input**: Clear an input field completely (use when you see garbled/duplicated text!)
 - **done**: Task complete - use ONLY when ALL parts of the goal are achieved
+
+## CRITICAL: Error Detection AND RECOVERY (YOU MUST DO THIS!)
+
+⚠️ **LOOK AT THE SCREENSHOT CAREFULLY!** Before each action, check for:
+
+1. **Input Field Errors**: Is there GARBLED or DUPLICATED text in any input field?
+   - Example of ERROR: "search termsearch termsearch term" (duplicated!)
+   - Example of ERROR: "wikipediawikipedia" (typed twice!)
+   - If you see garbled text: 
+     a) Set `error_detected: true` and describe in `error_description`
+     b) Set `input_field_value` to EXACTLY what you see
+     c) **USE `clear_input` ACTION TO FIX IT!** Don't keep typing - CLEAR FIRST!
+
+2. **Wrong Page/State**: Did the previous action work?
+   - Are you on the expected page? If not, report in `expected_vs_actual`
+   - Example: "Expected: Wikipedia homepage | Actual: Still on Google search results"
+   - **If wrong page, try clicking the correct link again!**
+
+3. **Progress Tracking**: How close are you to completing the goal?
+   - Set `goal_progress` to 0-100 (percentage complete)
+   - Set `on_track: false` if something went wrong
+
+4. **Blockers**: Is anything blocking you?
+   - Report popups, consent dialogs, login walls in `blockers`
+
+## CRITICAL: ERROR RECOVERY - DON'T JUST REPORT, FIX!
+
+If you detect an error, you MUST take corrective action:
+- **Garbled text in input** → Use `clear_input` action to clear it, then type again
+- **Clicked link but still on same page** → Try clicking again or use a different selector
+- **Typed but text didn't appear** → Clear and retype
+- **Submit didn't work** → Try clicking the submit button instead
+
+DO NOT keep repeating the same failed action. ADAPT!
+
 
 ## CRITICAL: Cookie Consent / Overlay Dialogs
 
@@ -203,7 +282,7 @@ Set "done": true ONLY when ALL of these are true:
 - LINK (a) → click to navigate to another page
 - consent_button → CLICK FIRST to dismiss blocking dialog
 
-## Response Format (JSON only)
+## Response Format (COMPLETE JSON with ALL fields!)
 ```json
 {
   "thought": "Brief reasoning - what part of the goal am I working on?",
@@ -211,7 +290,14 @@ Set "done": true ONLY when ALL of these are true:
   "selector": "exact selector from element list",
   "value": "text to type (for type action)",
   "done": true or false,
-  "summary": "What was accomplished (REQUIRED when done=true)"
+  "summary": "What was accomplished (REQUIRED when done=true)",
+  "goal_progress": 0-100,
+  "on_track": true or false,
+  "error_detected": true if you see ANY error (garbled text, wrong page, etc),
+  "error_description": "Describe the error if error_detected is true",
+  "input_field_value": "EXACT text visible in any input field on the page",
+  "expected_vs_actual": "What you expected vs what you actually see",
+  "blockers": "Any popups/dialogs/issues blocking progress"
 }
 ```
 
@@ -221,6 +307,8 @@ When task is complete, always include a summary of ALL steps you did, e.g.:
 
 CRITICAL: After typing a search query, use "submit" action to press Enter.
 """
+
+
 
 
 class BrowserAgent:
@@ -252,6 +340,8 @@ class BrowserAgent:
         self.session_id = session_id
         self._agent = None
         self._current_goal: Optional[str] = None
+        # Track action history internally - prevents duplicate actions
+        self._action_history: List[Dict[str, Any]] = []
         logger.debug(f"[AGENT][EXIT] __init__:agent.py → BrowserAgent created")
     
     def _ensure_agent(self):
@@ -279,6 +369,23 @@ class BrowserAgent:
             memory=False,  # Disabled: Each step is a fresh LLM call - prevents token explosion
         )
         logger.debug(f"[AGENT][EXIT] _ensure_agent:agent.py → Agent created successfully")
+    
+    def set_goal(self, goal: str) -> None:
+        """Set current goal and clear history if goal changed.
+        
+        Call this before process_observation when starting a new goal.
+        Clears action history so old actions don't confuse the agent.
+        """
+        if goal != self._current_goal:
+            logger.info(f"[AGENT][GOAL] set_goal:agent.py → New goal, clearing history. old='{self._current_goal}', new='{goal[:50]}...'")
+            self._action_history = []
+        self._current_goal = goal
+    
+    def clear_history(self) -> None:
+        """Clear action history explicitly."""
+        self._action_history = []
+        logger.debug(f"[AGENT][CLEAR] clear_history:agent.py → History cleared")
+
     
     def process_observation(
         self,
@@ -337,10 +444,11 @@ class BrowserAgent:
             action_model = get_browser_action_model()
             
             if use_vision:
-                # Use LiteLLM directly for vision-enabled call
+                # Use LiteLLM directly for vision with structured output
+                # Agent.chat(attachments+output_pydantic) combo doesn't work reliably
                 from litellm import completion
                 
-                logger.info(f"[AGENT][CALL] litellm.completion:agent.py model={self.model}, mode=vision")
+                logger.info(f"[AGENT][CALL] litellm.completion:agent.py model={self.model}, mode=vision+structured")
                 
                 messages = [
                     {"role": "system", "content": BROWSER_AGENT_SYSTEM_PROMPT},
@@ -357,25 +465,40 @@ class BrowserAgent:
                 ]
                 
                 llm_start = time.time()
-                response = completion(
-                    model=self.model,
-                    messages=messages,
-                    max_tokens=500,
-                )
-                llm_elapsed = time.time() - llm_start
-                
-                response_content = response.choices[0].message.content
-                usage = getattr(response, 'usage', None)
-                tokens_used = usage.total_tokens if usage else 0
-                
-                logger.info(f"[AGENT][RECV] litellm.completion:agent.py time={llm_elapsed:.2f}s, tokens={tokens_used}")
-                logger.debug(f"[AGENT][DATA] litellm.completion:agent.py response_preview='{response_content[:150] if response_content else 'None'}...'")
-                
-                if response_content is None:
-                    raise ValueError("LLM returned empty response")
-                response_text = response_content.strip()
-                action = self._parse_response(response_text)
-                logger.debug(f"[AGENT][DATA] _parse_response:agent.py action={action.get('action', 'N/A')}, selector={action.get('selector', 'N/A')[:30] if action.get('selector') else 'N/A'}")
+                try:
+                    # Use response_format for structured output if model supports it
+                    if action_model is not None:
+                        response = completion(
+                            model=self.model,
+                            messages=messages,
+                            max_tokens=500,
+                            response_format=action_model,  # Structured output!
+                        )
+                    else:
+                        response = completion(
+                            model=self.model,
+                            messages=messages,
+                            max_tokens=500,
+                        )
+                    llm_elapsed = time.time() - llm_start
+                    
+                    response_content = response.choices[0].message.content
+                    usage = getattr(response, 'usage', None)
+                    tokens_used = usage.total_tokens if usage else 0
+                    
+                    logger.info(f"[AGENT][RECV] litellm.completion:agent.py time={llm_elapsed:.2f}s, tokens={tokens_used}")
+                    
+                    if response_content is None:
+                        raise ValueError("LLM returned empty response")
+                    
+                    # Parse response - could be JSON string
+                    action = self._parse_response(response_content.strip())
+                    logger.debug(f"[AGENT][DATA] parsed action={action.get('action', 'N/A')}, selector={action.get('selector', 'N/A')[:30] if action.get('selector') else 'N/A'}")
+                    
+                except Exception as vision_error:
+                    logger.warning(f"[AGENT][WARN] Vision failed, falling back to text-only: {vision_error}")
+                    response = self._agent.chat(prompt)
+                    action = self._parse_response(str(response))
 
                 
             elif action_model is not None:
@@ -416,6 +539,19 @@ class BrowserAgent:
         # Normalize action name to valid CDP action type
         # LLMs often return freeform text like "enter text and submit" instead of "type"
         action = normalize_action(action)
+        
+        # Record action to internal history for deduplication
+        step_number = observation.get('step_number', 0)
+        self._action_history.append({
+            'step': step_number,
+            'action': action.get('action'),
+            'selector': action.get('selector', ''),
+            'value': action.get('value', ''),
+            'done': action.get('done', False),
+        })
+        # Keep only last 10 actions to prevent memory bloat
+        if len(self._action_history) > 10:
+            self._action_history = self._action_history[-10:]
         
         elapsed = time.time() - start_time
         logger.info(f"[AGENT][EXIT] process_observation:agent.py → action={action.get('action', 'N/A')}, done={action.get('done', False)}, elapsed={elapsed:.2f}s")
@@ -463,13 +599,32 @@ class BrowserAgent:
         if progress:
             parts.append(f"\n**{progress}**")
         
-        # Add action history for context - use readable summary if available
+        # ===== INTERNAL ACTION HISTORY (prevents duplicate actions) =====
+        # Use our internal _action_history which tracks all actions across steps
+        if self._action_history:
+            parts.append("\n" + "=" * 40)
+            parts.append("📜 YOUR PREVIOUS ACTIONS (DO NOT REPEAT UNNECESSARILY):")
+            for ah in self._action_history[-5:]:  # Last 5 actions
+                step = ah.get('step', '?')
+                action_type = ah.get('action', 'unknown')
+                selector = ah.get('selector', '')[:35]
+                value = ah.get('value', '')
+                if value:
+                    parts.append(f"   Step {step}: {action_type} → {selector} = \"{value}\"")
+                else:
+                    parts.append(f"   Step {step}: {action_type} → {selector}")
+            parts.append("")
+            parts.append("⚠️ If you already typed text in an input, do NOT type again!")
+            parts.append("⚠️ If you already submitted, check if you need to click next!")
+            parts.append("=" * 40)
+        
+        # Add action history from observation if present (fallback)
         action_summary = observation.get('action_summary', '')
         action_history = observation.get('action_history', [])
         
         if action_summary:
             parts.append(f"\n**{action_summary}**")
-        elif action_history:
+        elif action_history and not self._action_history:
             parts.append("\n**Recent Actions:**")
             for ah in action_history[-5:]:  # Last 5 actions
                 status = "✓" if ah.get('success') else "✗"
