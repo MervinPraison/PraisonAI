@@ -2216,6 +2216,7 @@ def launch_browser(
     extension_path: Optional[str] = typer.Option(None, "--extension", "-e", help="Extension dist path"),
     model: str = typer.Option("gpt-4o-mini", "--model", "-m", help="LLM model"),
     max_steps: int = typer.Option(20, "--max-steps", help="Maximum steps"),
+    timeout: float = typer.Option(120.0, "--timeout", "-t", help="Timeout in seconds for automation"),
     port: int = typer.Option(9222, "--port", "-p", help="Chrome debug port"),
     server_port: int = typer.Option(8765, "--server-port", help="Bridge server port"),
     headless: bool = typer.Option(False, "--headless", help="Run headless"),
@@ -2284,22 +2285,54 @@ def launch_browser(
         else:
             actual_log_file = log_dir / f"launch_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
         
-        # Configure logging to file and console
+        # Configure clean, user-friendly logging
+        # Use Rich handler for colored console output
+        from rich.logging import RichHandler
+        
+        # File handler for full debug logs (includes all details)
+        file_handler = logging.FileHandler(actual_log_file)
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        
+        # Rich console handler for clean, readable output
+        console_handler = RichHandler(
+            rich_tracebacks=True,
+            show_time=False,  # Cleaner output
+            show_path=False,  # Hide file paths
+            markup=True,
+        )
+        console_handler.setLevel(logging.DEBUG)
+        
         logging.basicConfig(
             level=logging.DEBUG,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(actual_log_file),
-                logging.StreamHandler(),
-            ]
+            handlers=[file_handler, console_handler],
         )
-        logging.getLogger("praisonai.browser.cdp_agent").setLevel(logging.DEBUG)
+        
+        # ===== NOISE FILTERING =====
+        # Silence noisy third-party loggers (they flood the output)
+        logging.getLogger("websockets").setLevel(logging.WARNING)
+        logging.getLogger("websockets.client").setLevel(logging.WARNING)
+        logging.getLogger("asyncio").setLevel(logging.WARNING)
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+        logging.getLogger("urllib3").setLevel(logging.WARNING)
+        
+        # ===== PRAISONAI BROWSER LOGS =====
+        # Enable DEBUG only for PraisonAI browser components
+        logging.getLogger("praisonai.browser").setLevel(logging.DEBUG)
+        logging.getLogger("praisonai.browser.server").setLevel(logging.DEBUG)
         logging.getLogger("praisonai.browser.agent").setLevel(logging.DEBUG)
+        logging.getLogger("praisonai.browser.sessions").setLevel(logging.DEBUG)
+        logging.getLogger("praisonai.browser.cdp_agent").setLevel(logging.DEBUG)
+        logging.getLogger("praisonai.browser.diagnostics").setLevel(logging.DEBUG)
+        
         console.print(f"[cyan]Debug logging enabled[/cyan]")
         console.print(f"   Log file: {actual_log_file}")
+        console.print(f"   [dim]Full websocket logs saved to file only[/dim]")
         if screenshot_dir:
             console.print(f"   Screenshots: {screenshot_dir}")
         console.print()
+
     
     # Find Chrome executable
     system = platform.system()
@@ -2369,6 +2402,30 @@ def launch_browser(
     if goal:
         console.print(f"   Goal: {goal}")
     console.print()
+    
+    # =========================================================================
+    # PRE-FLIGHT CHECK: Validate API key for the selected model
+    # =========================================================================
+    model_lower = model.lower()
+    api_key_warning = None
+    
+    if "gemini" in model_lower:
+        if not os.environ.get("GEMINI_API_KEY"):
+            api_key_warning = "GEMINI_API_KEY"
+    elif "gpt" in model_lower or "openai" in model_lower:
+        if not os.environ.get("OPENAI_API_KEY"):
+            api_key_warning = "OPENAI_API_KEY"
+    elif "claude" in model_lower or "anthropic" in model_lower:
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            api_key_warning = "ANTHROPIC_API_KEY"
+    
+    if api_key_warning:
+        console.print(f"[bold red]⚠️  WARNING: {api_key_warning} is not set![/bold red]")
+        console.print(f"[red]   Model '{model}' requires this API key to work.[/red]")
+        console.print(f"[yellow]   Set it with: export {api_key_warning}=\"your-key-here\"[/yellow]")
+        console.print()
+        # Give user a chance to see the warning
+        time.sleep(1)
     
     # Start bridge server if needed
     server_process = None
@@ -2575,7 +2632,7 @@ def launch_browser(
                     url=url,
                     model=model,
                     max_steps=max_steps,
-                    timeout=120.0,
+                    timeout=timeout,  # Use CLI timeout parameter
                     debug=debug,
                     port=server_port,
                     on_step=lambda step: console.print(f"   [dim]Step {step}...[/dim]") if debug else None,
@@ -3000,7 +3057,7 @@ def launch_browser(
                                     url=url,  # Can use current page context
                                     model=model,
                                     max_steps=max_steps,
-                                    timeout=120.0,
+                                    timeout=timeout,  # Use CLI timeout parameter
                                     debug=debug,
                                     port=server_port,
                                 )

@@ -1,3 +1,6 @@
+# Image Generation with DALL-E
+# Requires: export OPENAI_API_KEY=your-key
+
 from praisonaiagents import ImageAgent
 
 agent = ImageAgent(llm="openai/dall-e-3")
