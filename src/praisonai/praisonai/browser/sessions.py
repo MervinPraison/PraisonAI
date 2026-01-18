@@ -5,12 +5,15 @@ Provides persistence for browser automation sessions using SQLite.
 
 import os
 import json
+import logging
 import sqlite3
 import time
 import uuid
 import threading
 from typing import List, Optional, Dict, Any
 from contextlib import contextmanager
+
+logger = logging.getLogger("praisonai.browser.sessions")
 
 
 class SessionManager:
@@ -131,6 +134,8 @@ class SessionManager:
         session_id = str(uuid.uuid4())
         started_at = time.time()
         
+        logger.info(f"[SESSION][ENTRY] create_session:sessions.py goal='{goal[:40]}...', session_id={session_id}")
+        
         with self._db() as conn:
             conn.execute(
                 """
@@ -139,6 +144,8 @@ class SessionManager:
                 """,
                 (session_id, goal, started_at, json.dumps(metadata or {}))
             )
+        
+        logger.debug(f"[SESSION][EXIT] create_session:sessions.py → session_id={session_id}")
         
         return {
             "session_id": session_id,
@@ -213,6 +220,8 @@ class SessionManager:
             current_url: Current page URL
             error: Error message if failed
         """
+        logger.debug(f"[SESSION][ENTRY] update_session:sessions.py session_id={session_id[:8]}, status={status}, url={current_url[:30] if current_url else None}")
+        
         updates = []
         params = []
         
@@ -230,6 +239,7 @@ class SessionManager:
         if error is not None:
             updates.append("error = ?")
             params.append(error)
+            logger.error(f"[SESSION][ERROR] update_session:sessions.py session_id={session_id[:8]}, error={error}")
         
         if not updates:
             return

@@ -245,21 +245,26 @@ class BrowserAgent:
             verbose: Enable verbose logging
             session_id: Session ID for Agent memory isolation
         """
+        logger.info(f"[AGENT][ENTRY] __init__:agent.py model={model}, max_steps={max_steps}, session_id={session_id}")
         self.model = model
         self.max_steps = max_steps
         self.verbose = verbose
         self.session_id = session_id
         self._agent = None
         self._current_goal: Optional[str] = None
+        logger.debug(f"[AGENT][EXIT] __init__:agent.py → BrowserAgent created")
     
     def _ensure_agent(self):
         """Lazily initialize the PraisonAI agent."""
         if self._agent is not None:
             return
         
+        logger.debug(f"[AGENT][CALL] _ensure_agent:agent.py → Creating PraisonAI Agent with model={self.model}")
+        
         try:
             from praisonaiagents import Agent
         except ImportError:
+            logger.error(f"[AGENT][ERROR] _ensure_agent:agent.py → praisonaiagents not installed")
             raise ImportError(
                 "praisonaiagents is required. Install it with: pip install praisonaiagents"
             )
@@ -273,6 +278,7 @@ class BrowserAgent:
             llm=self.model,
             memory=False,  # Disabled: Each step is a fresh LLM call - prevents token explosion
         )
+        logger.debug(f"[AGENT][EXIT] _ensure_agent:agent.py → Agent created successfully")
     
     def process_observation(
         self,
@@ -300,11 +306,18 @@ class BrowserAgent:
         """
         self._ensure_agent()
         
-        # Build observation prompt
-        prompt = self._build_prompt(observation)
+        import time
+        start_time = time.time()
+        step_number = observation.get('step_number', 0)
+        url = observation.get('url', 'unknown')[:40]
+        elements_count = len(observation.get('elements', []))
         
-        if self.verbose:
-            logger.info(f"Processing observation for step {observation.get('step_number', 0)}")
+        logger.info(f"[AGENT][ENTRY] process_observation:agent.py step={step_number}, url='{url}...', elements={elements_count}")
+        
+        # Build observation prompt
+        logger.debug(f"[AGENT][CALL] _build_prompt:agent.py elements={elements_count}")
+        prompt = self._build_prompt(observation)
+        logger.debug(f"[AGENT][DATA] _build_prompt:agent.py prompt_length={len(prompt)} chars")
         
         # Check if we have a screenshot for vision-based decision making
         screenshot_base64 = observation.get('screenshot')
@@ -313,12 +326,10 @@ class BrowserAgent:
         vision_capable = any(m in model_lower for m in ['gpt-4', 'gpt-4o', 'gemini', 'claude'])
         use_vision = screenshot_base64 and vision_capable
         
-        # Structured debug logging for automation flow tracing
-        logger.debug(f"[AGENT][VISION] process_observation:agent.py model={self.model} vision_capable={vision_capable} use_vision={use_vision}")
+        # Flow tracing for vision decision
+        logger.info(f"[AGENT][DECISION] process_observation:agent.py model={self.model}, vision_capable={vision_capable}, has_screenshot={bool(screenshot_base64)}, use_vision={use_vision}")
         if screenshot_base64:
-            logger.debug(f"[AGENT][VISION] Screenshot present: {len(screenshot_base64)} chars")
-        else:
-            logger.debug(f"[AGENT][VISION] No screenshot in observation")
+            logger.debug(f"[AGENT][DATA] process_observation:agent.py screenshot_size={len(screenshot_base64)} chars")
 
         
         # Get agent response with structured output if available
@@ -329,7 +340,7 @@ class BrowserAgent:
                 # Use LiteLLM directly for vision-enabled call
                 from litellm import completion
                 
-                logger.info(f"[VISION] Calling vision LLM: {self.model}")
+                logger.info(f"[AGENT][CALL] litellm.completion:agent.py model={self.model}, mode=vision")
                 
                 messages = [
                     {"role": "system", "content": BROWSER_AGENT_SYSTEM_PROMPT},
@@ -345,24 +356,31 @@ class BrowserAgent:
                     }
                 ]
                 
+                llm_start = time.time()
                 response = completion(
                     model=self.model,
                     messages=messages,
                     max_tokens=500,
                 )
+                llm_elapsed = time.time() - llm_start
                 
                 response_content = response.choices[0].message.content
-                logger.info(f"[VISION] LLM response: {response_content[:200] if response_content else 'None'}...")
+                usage = getattr(response, 'usage', None)
+                tokens_used = usage.total_tokens if usage else 0
+                
+                logger.info(f"[AGENT][RECV] litellm.completion:agent.py time={llm_elapsed:.2f}s, tokens={tokens_used}")
+                logger.debug(f"[AGENT][DATA] litellm.completion:agent.py response_preview='{response_content[:150] if response_content else 'None'}...'")
                 
                 if response_content is None:
                     raise ValueError("LLM returned empty response")
                 response_text = response_content.strip()
                 action = self._parse_response(response_text)
-                logger.info(f"[VISION] Parsed action: {action}")
+                logger.debug(f"[AGENT][DATA] _parse_response:agent.py action={action.get('action', 'N/A')}, selector={action.get('selector', 'N/A')[:30] if action.get('selector') else 'N/A'}")
 
                 
             elif action_model is not None:
                 # Use Pydantic model for guaranteed structured output
+                logger.info(f"[AGENT][CALL] Agent.chat:agent.py model={self.model}, mode=pydantic")
                 response = self._agent.chat(prompt, output_pydantic=action_model)
                 
                 # If response is already a dict (parsed by Agent), use it
@@ -377,13 +395,17 @@ class BrowserAgent:
                 else:
                     # String response - needs parsing
                     action = self._parse_response(str(response))
+                logger.debug(f"[AGENT][RECV] Agent.chat:agent.py action={action.get('action', 'N/A')}")
             else:
                 # Fallback to string parsing
+                logger.info(f"[AGENT][CALL] Agent.chat:agent.py model={self.model}, mode=string")
                 response = self._agent.chat(prompt)
                 action = self._parse_response(response)
+                logger.debug(f"[AGENT][RECV] Agent.chat:agent.py action={action.get('action', 'N/A')}")
                 
         except Exception as e:
-            logger.error(f"Agent error: {e}")
+            elapsed = time.time() - start_time
+            logger.error(f"[AGENT][ERROR] process_observation:agent.py → {type(e).__name__}: {e}, elapsed={elapsed:.2f}s")
             action = {
                 "thought": f"Error processing observation: {e}",
                 "action": "wait",
@@ -394,6 +416,9 @@ class BrowserAgent:
         # Normalize action name to valid CDP action type
         # LLMs often return freeform text like "enter text and submit" instead of "type"
         action = normalize_action(action)
+        
+        elapsed = time.time() - start_time
+        logger.info(f"[AGENT][EXIT] process_observation:agent.py → action={action.get('action', 'N/A')}, done={action.get('done', False)}, elapsed={elapsed:.2f}s")
         
         return action
     

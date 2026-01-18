@@ -2,13 +2,11 @@ from praisonaiagents import OCRAgent
 
 agent = OCRAgent()
 
-# Extract with page selection
-result = agent.extract("document.pdf", pages=[1, 2, 3])
+# Extract with page selection (pages is 0-indexed)
+result = agent.extract("https://arxiv.org/pdf/2201.04234", pages=[0, 1])
 for page in result.pages:
-    print(f"Page {page.index}: {page.markdown[:100]}")
+    print(f"Page {page.index}: {page.markdown[:200]}")
 
-# From image
-text = agent.read("screenshot.png")
-
-# From URL
-text = agent.read("https://example.com/doc.pdf")
+# Quick read - just get the text
+text = agent.read("https://arxiv.org/pdf/2201.04234")
+print(f"Total length: {len(text)} chars")

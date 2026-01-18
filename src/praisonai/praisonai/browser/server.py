@@ -123,7 +123,7 @@ class BrowserServer:
         )
         self._connections[conn_id] = conn
         
-        logger.info(f"Client connected: {conn_id}")
+        logger.info(f"[SERVER][ENTRY] _handle_connection:server.py client_id={conn_id}, total_connections={len(self._connections)}")
         
         # Send welcome message
         await websocket.send_json({
@@ -158,9 +158,9 @@ class BrowserServer:
                     })
         
         except WebSocketDisconnect:
-            logger.info(f"Client disconnected: {conn_id}")
+            logger.info(f"[SERVER][EXIT] _handle_connection:server.py client_id={conn_id} disconnected normally")
         except Exception as e:
-            logger.error(f"WebSocket error: {e}")
+            logger.error(f"[SERVER][ERROR] _handle_connection:server.py client_id={conn_id} error={e}")
         finally:
             # Cleanup
             if conn_id in self._connections:
@@ -211,8 +211,12 @@ class BrowserServer:
         
         goal = message.get("goal", "")
         model = message.get("model", self.model)
+        max_steps = message.get("max_steps", self.max_steps)
+        
+        logger.info(f"[SERVER][ENTRY] _handle_start_session:server.py goal='{goal[:50]}...', model={model}, max_steps={max_steps}")
         
         if not goal:
+            logger.error(f"[SERVER][ERROR] _handle_start_session:server.py → Missing goal")
             return {
                 "type": "error",
                 "error": "Goal is required",
@@ -224,19 +228,21 @@ class BrowserServer:
             self._sessions = SessionManager()
         
         # Create session
+        logger.debug(f"[SERVER][CALL] SessionManager.create_session:server.py goal='{goal[:30]}...'")
         session = self._sessions.create_session(goal)
         session_id = session["session_id"]
         conn.session_id = session_id
         
         # Create agent for this session
+        logger.debug(f"[SERVER][CALL] BrowserAgent.__init__:server.py model={model}, max_steps={max_steps}")
         agent = BrowserAgent(
             model=model,
-            max_steps=self.max_steps,
+            max_steps=max_steps,
             verbose=self.verbose,
         )
         self._agents[session_id] = agent
         
-        logger.info(f"Started session {session_id}: {goal[:50]}...")
+        logger.info(f"[SERVER][DATA] _handle_start_session:server.py session_id={session_id}, agent_model={agent.model}")
         
         # Send start_automation to ONE extension client (first available without a session)
         # Only send to ONE to prevent duplicate debugger attachment
@@ -247,8 +253,7 @@ class BrowserServer:
         }
         sent_to_extension = False
         
-        print(f"[SERVER] Preparing to send start_automation, checking {len(self._connections)} connections")
-
+        logger.debug(f"[SERVER][SCAN] _handle_start_session:server.py checking {len(self._connections)} connections for available extension")
         
         # *** FIX: Aggressively clear ALL stale session_ids before looking ***
         # This handles crashed CLI runs that leave stale state
@@ -326,12 +331,20 @@ class BrowserServer:
         conn: ClientConnection,
     ) -> Dict:
         """Process observation and return action."""
-        print(f"[SERVER DEBUG] _handle_observation called with step_number={message.get('step_number', 'N/A')}")
+        import time
+        start_time = time.time()
+        
+        step_number = message.get('step_number', 0)
+        url = message.get('url', 'unknown')[:50]
+        has_screenshot = bool(message.get('screenshot'))
+        elements_count = len(message.get('elements', []))
+        
+        logger.info(f"[SERVER][ENTRY] _handle_observation:server.py step={step_number}, url='{url}...', screenshot={has_screenshot}, elements={elements_count}")
         
         session_id = message.get("session_id", conn.session_id)
         
         if not session_id or session_id not in self._agents:
-            print(f"[SERVER DEBUG] No active session: session_id={session_id}, in_agents={session_id in self._agents if session_id else False}")
+            logger.error(f"[SERVER][ERROR] _handle_observation:server.py → No active session: session_id={session_id}, exists_in_agents={session_id in self._agents if session_id else False}")
             return {
                 "type": "error",
                 "error": "No active session",
@@ -339,15 +352,17 @@ class BrowserServer:
             }
         
         agent = self._agents[session_id]
-        logger.debug(f"[SERVER][OBS] _handle_observation:server.py agent={type(agent).__name__}, model={getattr(agent, 'model', 'unknown')}")
+        logger.debug(f"[SERVER][DATA] _handle_observation:server.py agent_type={type(agent).__name__}, agent_model={getattr(agent, 'model', 'unknown')}")
         
         # Process observation through agent
         try:
-            logger.debug(f"[SERVER][OBS] Calling agent.aprocess_observation() for step {message.get('step_number', 0)}")
+            logger.debug(f"[SERVER][CALL] agent.aprocess_observation:server.py step={step_number}")
             action = await agent.aprocess_observation(message)
-            logger.info(f"[SERVER][OBS] Agent returned action={action.get('action', 'N/A')} done={action.get('done', False)}")
+            elapsed = time.time() - start_time
+            logger.info(f"[SERVER][RECV] agent.aprocess_observation:server.py → action={action.get('action', 'N/A')}, done={action.get('done', False)}, time={elapsed:.2f}s")
         except Exception as e:
-            logger.error(f"[SERVER][OBS] Agent error: {e}")
+            elapsed = time.time() - start_time
+            logger.error(f"[SERVER][ERROR] agent.aprocess_observation:server.py → {type(e).__name__}: {e}, time={elapsed:.2f}s")
             action = {
                 "action": "wait",
                 "thought": f"Error: {e}",
@@ -385,15 +400,14 @@ class BrowserServer:
         
         # Broadcast action to ALL clients that have this session
         # This includes CLI client that initiated the session
-        logger.info(f"Broadcasting action for session {session_id[:8]} to {len(self._connections)} connections")
+        logger.debug(f"[SERVER][SEND] _handle_observation:server.py broadcasting to {len(self._connections)} connections")
         for client_id, client_conn in self._connections.items():
-            logger.info(f"  Client {client_id[:8]}: session={client_conn.session_id[:8] if client_conn.session_id else 'None'}, match={client_conn.session_id == session_id}, sender={client_conn == conn}")
             if client_conn.session_id == session_id and client_conn != conn:
                 try:
                     await client_conn.websocket.send_json(action_response)
-                    logger.info(f"  -> Sent action to client {client_id[:8]}")
+                    logger.debug(f"[SERVER][SEND] _handle_observation:server.py → sent to client {client_id[:8]}")
                 except Exception as e:
-                    logger.error(f"Failed to broadcast action: {e}")
+                    logger.error(f"[SERVER][ERROR] broadcast:server.py → {e}")
         
         # Also send completion status if done
         if action.get("done") or message.get("step_number", 0) >= self.max_steps:
@@ -796,6 +810,7 @@ async def run_browser_agent_with_progress(
                         action = data.get("action", "unknown")
                         thought = data.get("thought", "")
                         done = data.get("done", False)
+                        error = data.get("error", "")  # Capture error from action
                         
                         if thought:
                             last_thought = thought
@@ -808,6 +823,11 @@ async def run_browser_agent_with_progress(
                         
                         if debug:
                             logger.info(f"[Extension] Step {step_count}: {action} (done={done})")
+                            # === CRITICAL: Show error content if present ===
+                            if error:
+                                # Truncate long errors for readability, show first 200 chars
+                                error_preview = error[:200] + "..." if len(error) > 200 else error
+                                logger.error(f"[Extension] ⚠️ LLM Error: {error_preview}")
                         
                         if done:
                             result["success"] = True
