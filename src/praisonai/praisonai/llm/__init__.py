@@ -63,4 +63,56 @@ __all__ = [
     "list_llm_providers",
     "create_llm_provider",
     "parse_model_string",
+    "embedding",
 ]
+
+
+def embedding(text, model="text-embedding-3-small", **kwargs):
+    """
+    Get embedding vector for text.
+    
+    Args:
+        text: Text string or list of strings to embed
+        model: Embedding model name (default: text-embedding-3-small)
+        **kwargs: Additional arguments passed to litellm.embedding()
+    
+    Returns:
+        List[float] for single text, or List[List[float]] for multiple texts
+    
+    Example:
+        from praisonai.llm import embedding
+        
+        # Single text
+        emb = embedding("Hello world")
+        
+        # Multiple texts
+        embs = embedding(["Hello", "World"])
+        
+        # Different model
+        emb = embedding("Hello", model="text-embedding-3-large")
+    
+    Note:
+        Requires litellm. Install with: pip install praisonai[llm]
+    """
+    try:
+        import litellm
+    except ImportError:
+        raise ImportError(
+            "litellm is required for embedding(). "
+            "Install with: pip install praisonai[llm] or pip install litellm"
+        )
+    
+    # Handle single string vs list
+    if isinstance(text, str):
+        input_data = [text]
+        single = True
+    else:
+        input_data = list(text)
+        single = False
+    
+    response = litellm.embedding(model=model, input=input_data, **kwargs)
+    
+    embeddings = [item["embedding"] for item in response.data]
+    
+    return embeddings[0] if single else embeddings
+
