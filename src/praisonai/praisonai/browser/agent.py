@@ -210,8 +210,41 @@ If you detect an error, you MUST take corrective action:
 - **Clicked link but still on same page** → Try clicking again or use a different selector
 - **Typed but text didn't appear** → Clear and retype
 - **Submit didn't work** → Try clicking the submit button instead
+- **On unexpected/wrong page** → Use `navigate` action to go back to the right URL!
+  - Example: Goal is "search on google" but you see amazon.com → navigate to google.com
+  - Example: You were clicking a link but ended up on random page → navigate back
 
 DO NOT keep repeating the same failed action. ADAPT!
+
+## CRITICAL: ANTI-LOOP RULES (NEVER VIOLATE!)
+
+⚠️ **NEVER repeat the EXACT SAME action twice in a row!** If you just did:
+- `type → #searchInput = "term"` → NEXT must be `submit` or `click`, NOT another type!
+- `click → a.link` → Don't click the same link again if it didn't work
+- `submit → #form` → Don't submit again if page didn't change
+
+### Type + Submit Workflow
+After typing text into an input field, you MUST either:
+1. Use `submit` action to press Enter, OR
+2. Click a search/submit button
+
+WRONG: type → type → type → type (stuck in loop!)
+RIGHT: type → submit → click → done
+
+If you've typed the SAME value 2+ times without result:
+→ The input probably worked! Use `submit` or `click` a button to proceed!
+
+
+## CRITICAL: Recovery from Unexpected Navigation
+
+If the current URL doesn't match what you expect for your goal:
+1. Set `error_detected: true`
+2. Set `expected_vs_actual` to describe the mismatch (e.g., "Expected: google.com | Actual: amazon.com")
+3. Set `on_track: false`
+4. Use `navigate` action to go to the correct URL
+
+Example: If your goal is "search for python on google" but the page shows facebook.com:
+→ Use `navigate` with `url: "https://www.google.com"` to get back on track!
 
 
 ## CRITICAL: Cookie Consent / Overlay Dialogs
