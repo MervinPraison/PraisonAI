@@ -771,6 +771,7 @@ async def run_browser_agent_with_progress(
             session_id = None
             step_count = 0
             last_thought = ""
+            session_start_time = time.time()  # Track start time for elapsed timestamps
             
             # Listen for messages until completion or timeout
             while time.time() - start_time < timeout:
@@ -825,8 +826,11 @@ async def run_browser_agent_with_progress(
                         
                         if debug:
                             # === SHOW FULL AGENT DECISION ===
-                            # Action summary line
-                            action_info = f"[Extension] Step {step_count}: {action}"
+                            # Calculate elapsed time from COMMAND start (not session start)
+                            elapsed = time.time() - start_time
+                            
+                            # Action summary line with timestamp
+                            action_info = f"[+{elapsed:.1f}s] Step {step_count}: {action}"
                             if selector:
                                 selector_preview = selector[:40] + "..." if len(selector) > 40 else selector
                                 action_info += f" → {selector_preview}"
