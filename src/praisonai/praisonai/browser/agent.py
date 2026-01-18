@@ -308,13 +308,17 @@ class BrowserAgent:
         
         # Check if we have a screenshot for vision-based decision making
         screenshot_base64 = observation.get('screenshot')
-        use_vision = screenshot_base64 and 'gpt' in self.model.lower()
+        # Enable vision for models that support it: GPT-4, GPT-4o, Gemini, Claude, etc.
+        model_lower = self.model.lower()
+        vision_capable = any(m in model_lower for m in ['gpt-4', 'gpt-4o', 'gemini', 'claude'])
+        use_vision = screenshot_base64 and vision_capable
         
         # *** DEBUG: Log screenshot presence ***
         if screenshot_base64:
-            logger.info(f"[SCREENSHOT] Screenshot present: {len(screenshot_base64)} chars, vision={use_vision}")
+            logger.info(f"[SCREENSHOT] Screenshot present: {len(screenshot_base64)} chars, vision={use_vision}, model={model_lower}")
         else:
             logger.info(f"[SCREENSHOT] No screenshot in observation")
+
         
         # Get agent response with structured output if available
         try:
