@@ -810,7 +810,9 @@ async def run_browser_agent_with_progress(
                         action = data.get("action", "unknown")
                         thought = data.get("thought", "")
                         done = data.get("done", False)
-                        error = data.get("error", "")  # Capture error from action
+                        error = data.get("error", "")
+                        selector = data.get("selector", "")
+                        value = data.get("value", "")
                         
                         if thought:
                             last_thought = thought
@@ -822,12 +824,56 @@ async def run_browser_agent_with_progress(
                                 pass
                         
                         if debug:
-                            logger.info(f"[Extension] Step {step_count}: {action} (done={done})")
-                            # === CRITICAL: Show error content if present ===
+                            # === SHOW FULL AGENT DECISION ===
+                            # Action summary line
+                            action_info = f"[Extension] Step {step_count}: {action}"
+                            if selector:
+                                selector_preview = selector[:40] + "..." if len(selector) > 40 else selector
+                                action_info += f" → {selector_preview}"
+                            if value:
+                                value_preview = value[:30] + "..." if len(value) > 30 else value
+                                action_info += f" = \"{value_preview}\""
+                            action_info += f" (done={done})"
+                            logger.info(action_info)
+                            
+                            # Show agent's thought process (WHY this decision)
+                            if thought:
+                                thought_preview = thought[:120] + "..." if len(thought) > 120 else thought
+                                logger.debug(f"   💭 Thought: {thought_preview}")
+                            
+                            # === ANOMALY/ERROR DETECTION (CRITICAL!) ===
+                            error_detected = data.get("error_detected")
+                            if error_detected:
+                                error_desc = data.get("error_description", "No description")
+                                logger.warning(f"   ⚠️ ERROR DETECTED: {error_desc}")
+                            
+                            input_field_value = data.get("input_field_value")
+                            if input_field_value:
+                                logger.info(f"   📝 Input field shows: \"{input_field_value}\"")
+                            
+                            expected_vs_actual = data.get("expected_vs_actual")
+                            if expected_vs_actual:
+                                logger.warning(f"   ❌ Mismatch: {expected_vs_actual}")
+                            
+                            blockers = data.get("blockers")
+                            if blockers:
+                                logger.warning(f"   🚧 Blockers: {blockers}")
+                            
+                            retry_reason = data.get("retry_reason")
+                            if retry_reason:
+                                logger.info(f"   🔄 Retry: {retry_reason}")
+                            
+                            goal_progress = data.get("goal_progress")
+                            if goal_progress is not None:
+                                on_track = data.get("on_track", True)
+                                track_icon = "✓" if on_track else "✗"
+                                logger.info(f"   📊 Progress: {goal_progress}% [{track_icon} on track]")
+                            
+                            # Show error if present (from LLM error)
                             if error:
-                                # Truncate long errors for readability, show first 200 chars
                                 error_preview = error[:200] + "..." if len(error) > 200 else error
-                                logger.error(f"[Extension] ⚠️ LLM Error: {error_preview}")
+                                logger.error(f"   ⚠️ LLM Error: {error_preview}")
+
                         
                         if done:
                             result["success"] = True

@@ -72,6 +72,11 @@ def docs_run(
         "--folder", "-f",
         help="Run only specific folders (nested paths like examples/agent-recipes), can be repeated",
     ),
+    exclude_groups: Optional[List[str]] = typer.Option(
+        ["js"],
+        "--exclude-groups", "-xg",
+        help="Exclude specific groups (default: js). Use --exclude-groups '' to include all",
+    ),
     languages: str = typer.Option(
         "python",
         "--languages", "-l",
@@ -172,6 +177,7 @@ def docs_run(
         exclude_patterns=list(exclude) if exclude else None,
         groups=list(group) if group else None,
         folders=list(folder) if folder else None,
+        exclude_groups=list(exclude_groups) if exclude_groups and exclude_groups != [''] else None,
     )
     
     # Discover items
