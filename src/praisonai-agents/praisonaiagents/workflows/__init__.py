@@ -18,12 +18,14 @@ from .workflows import (
     Parallel,
     Loop,
     Repeat,
+    Include,
     
     # Convenience functions
     route,
     parallel,
     loop,
     repeat,
+    include,
     
     # Backward compatibility aliases
     StepInput,
@@ -74,10 +76,12 @@ __all__ = [
     "Parallel",
     "Loop",
     "Repeat",
+    "Include",
     "route",
     "parallel",
     "loop",
     "repeat",
+    "include",
     
     # Workflow Config Classes
     "WorkflowOutputConfig",
