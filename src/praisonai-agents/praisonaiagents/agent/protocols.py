@@ -142,10 +142,97 @@ class FullAgentProtocol(RunnableAgentProtocol, ToolAwareAgentProtocol, MemoryAwa
     pass
 
 
+@runtime_checkable
+class ContextEngineerProtocol(Protocol):
+    """
+    Protocol for Context Engineering agents.
+    
+    Defines the interface for agents that perform codebase analysis,
+    PRP (Product Requirements Prompt) generation, and implementation planning.
+    
+    This protocol enables:
+    - Lightweight core with protocol definition only
+    - Heavy implementations in wrapper/tools
+    - Easy mocking for tests
+    
+    Example:
+        ```python
+        class MockContextEngineer:
+            def analyze_codebase(self, path: str) -> Dict[str, Any]:
+                return {"project": path, "patterns": []}
+            
+            def generate_prp(self, request: str, analysis: Dict = None) -> str:
+                return f"PRP for: {request}"
+            
+            async def aanalyze_codebase(self, path: str) -> Dict[str, Any]:
+                return await self.analyze_codebase(path)
+        ```
+    """
+    
+    def analyze_codebase(self, project_path: str) -> Dict[str, Any]:
+        """
+        Analyze a codebase and extract patterns, structure, and conventions.
+        
+        Args:
+            project_path: Path to the project directory
+            
+        Returns:
+            Analysis results including patterns, architecture, conventions
+        """
+        ...
+    
+    def generate_prp(
+        self, 
+        feature_request: str, 
+        context_analysis: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """
+        Generate a Product Requirements Prompt (PRP) for a feature.
+        
+        Args:
+            feature_request: Description of the feature to implement
+            context_analysis: Optional codebase analysis to include
+            
+        Returns:
+            Comprehensive PRP document as string
+        """
+        ...
+    
+    def create_implementation_blueprint(
+        self,
+        feature_request: str,
+        context_analysis: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Create a step-by-step implementation blueprint.
+        
+        Args:
+            feature_request: Description of the feature
+            context_analysis: Optional codebase analysis
+            
+        Returns:
+            Blueprint with implementation steps, files to modify, etc.
+        """
+        ...
+    
+    async def aanalyze_codebase(self, project_path: str) -> Dict[str, Any]:
+        """Async version of analyze_codebase."""
+        ...
+    
+    async def agenerate_prp(
+        self,
+        feature_request: str,
+        context_analysis: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """Async version of generate_prp."""
+        ...
+
+
 __all__ = [
     'AgentProtocol',
     'RunnableAgentProtocol', 
     'ToolAwareAgentProtocol',
     'MemoryAwareAgentProtocol',
     'FullAgentProtocol',
+    'ContextEngineerProtocol',
 ]

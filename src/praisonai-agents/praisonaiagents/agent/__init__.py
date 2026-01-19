@@ -39,6 +39,7 @@ from .protocols import (
     ToolAwareAgentProtocol,
     MemoryAwareAgentProtocol,
     FullAgentProtocol,
+    ContextEngineerProtocol,
 )
 
 __all__ = [
@@ -87,4 +88,5 @@ __all__ = [
     'ToolAwareAgentProtocol',
     'MemoryAwareAgentProtocol',
     'FullAgentProtocol',
+    'ContextEngineerProtocol',
 ]

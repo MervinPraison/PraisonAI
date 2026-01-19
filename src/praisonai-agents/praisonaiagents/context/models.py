@@ -245,6 +245,20 @@ class ContextConfig:
     Complete context management configuration.
     
     Merges settings from CLI flags, env vars, and config files.
+    
+    Example:
+        # Enable with defaults
+        agent = Agent(instructions="...", context=True)
+        
+        # Custom configuration
+        agent = Agent(
+            instructions="...",
+            context=ContextConfig(
+                auto_compact=True,
+                session_tracking=True,      # Track goal/plan/progress
+                aggregate_memory=True,       # Concurrent multi-memory fetch
+            )
+        )
     """
     # Auto-compaction
     auto_compact: bool = True
@@ -265,6 +279,22 @@ class ContextConfig:
     
     # Sliding window
     keep_recent_turns: int = 5
+    
+    # Session tracking (Agno pattern)
+    session_tracking: bool = False     # Enable goal/plan/progress tracking
+    track_summary: bool = True         # Auto-extract conversation summary
+    track_goal: bool = True            # Track user's objective
+    track_plan: bool = True            # Track steps to achieve goal
+    track_progress: bool = True        # Track completed steps
+    
+    # Multi-memory aggregation (CrewAI pattern)
+    aggregate_memory: bool = False     # Enable concurrent multi-source fetch
+    aggregate_sources: List[str] = field(default_factory=lambda: [
+        "memory",      # Short-term memory
+        "knowledge",   # Long-term knowledge base
+        "rag",         # RAG retrieval
+    ])
+    aggregate_max_tokens: int = 4000   # Max tokens for aggregated context
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""

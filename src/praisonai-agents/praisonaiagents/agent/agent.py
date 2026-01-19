@@ -4572,6 +4572,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if 'stream' not in kwargs:
             kwargs['stream'] = False
         
+        # Substitute dynamic variables ({{today}}, {{now}}, {{uuid}}, etc.)
+        if prompt and "{{" in prompt:
+            from praisonaiagents.utils.variables import substitute_variables
+            prompt = substitute_variables(prompt, {})
+        
         # Load history context
         self._load_history_context()
         
@@ -4758,6 +4763,11 @@ Write the complete compiled report:"""
         # If no prompt provided, use instructions as the task
         if prompt is None:
             prompt = self.instructions or "Hello"
+        
+        # Substitute dynamic variables ({{today}}, {{now}}, {{uuid}}, etc.)
+        if prompt and "{{" in prompt:
+            from praisonaiagents.utils.variables import substitute_variables
+            prompt = substitute_variables(prompt, {})
         
         # Load history from past sessions
         self._load_history_context()
