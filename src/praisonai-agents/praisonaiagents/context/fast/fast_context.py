@@ -58,6 +58,7 @@ class FastContext:
     ENV_TIMEOUT = "FAST_CONTEXT_TIMEOUT"
     ENV_CACHE_ENABLED = "FAST_CONTEXT_CACHE"
     ENV_CACHE_TTL = "FAST_CONTEXT_CACHE_TTL"
+    ENV_SEARCH_BACKEND = "FAST_CONTEXT_BACKEND"
     
     def __init__(
         self,
@@ -68,7 +69,12 @@ class FastContext:
         timeout: Optional[float] = None,
         cache_enabled: Optional[bool] = None,
         cache_ttl: Optional[int] = None,
-        verbose: bool = False
+        verbose: bool = False,
+        # New optimization parameters
+        search_backend: Optional[str] = None,
+        enable_indexing: bool = False,
+        index_path: Optional[str] = None,
+        compression: Optional[str] = None
     ):
         """Initialize FastContext.
         
@@ -82,6 +88,7 @@ class FastContext:
             FAST_CONTEXT_TIMEOUT: Timeout in seconds (default: 30.0)
             FAST_CONTEXT_CACHE: Enable caching (default: true)
             FAST_CONTEXT_CACHE_TTL: Cache TTL in seconds (default: 300)
+            FAST_CONTEXT_BACKEND: Search backend (default: auto)
         
         Args:
             workspace_path: Root directory for searches (defaults to cwd)
@@ -92,6 +99,10 @@ class FastContext:
             cache_enabled: Whether to cache search results
             cache_ttl: Cache time-to-live in seconds
             verbose: If True, print debug information
+            search_backend: Search backend ("auto", "python", "ripgrep")
+            enable_indexing: Enable incremental file indexing
+            index_path: Custom path for index file
+            compression: Compression strategy ("truncate", "smart", None)
         """
         self.workspace_path = os.path.abspath(workspace_path or os.getcwd())
         
@@ -108,11 +119,20 @@ class FastContext:
         
         self.verbose = verbose
         
+        # Optimization settings (all optional with graceful fallback)
+        self.search_backend = search_backend or os.environ.get(self.ENV_SEARCH_BACKEND, "auto")
+        self.enable_indexing = enable_indexing
+        self.index_path = index_path
+        self.compression = compression
+        
         # Cache storage
         self._cache: Dict[str, Dict[str, Any]] = {}
         
-        # Agent instance (lazy loaded)
+        # Lazy-loaded components
         self._agent: Optional[FastContextAgent] = None
+        self._backend = None  # SearchBackend instance
+        self._index = None    # FileIndex instance
+        self._compressor = None  # ContextCompressor instance
     
     def _get_agent(self) -> FastContextAgent:
         """Get or create FastContextAgent instance."""
@@ -126,6 +146,31 @@ class FastContext:
                 verbose=self.verbose
             )
         return self._agent
+    
+    def _get_backend(self):
+        """Get or create SearchBackend instance (lazy)."""
+        if self._backend is None:
+            from praisonaiagents.context.fast.search_backends import get_search_backend
+            self._backend = get_search_backend(self.search_backend)
+        return self._backend
+    
+    def _get_index(self):
+        """Get or create FileIndex instance (lazy)."""
+        if not self.enable_indexing:
+            return None
+        if self._index is None:
+            from praisonaiagents.context.fast.index_manager import FileIndex
+            self._index = FileIndex.load_or_create(self.workspace_path)
+        return self._index
+    
+    def _get_compressor(self):
+        """Get or create ContextCompressor instance (lazy)."""
+        if not self.compression:
+            return None
+        if self._compressor is None:
+            from praisonaiagents.context.fast.compressor import get_compressor
+            self._compressor = get_compressor(self.compression)
+        return self._compressor
     
     def _get_cache_key(self, query: str, **kwargs) -> str:
         """Generate cache key for a query."""
