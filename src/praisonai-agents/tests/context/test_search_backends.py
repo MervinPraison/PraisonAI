@@ -132,5 +132,62 @@ class TestBackendSelection:
             get_search_backend("invalid_backend")
 
 
+class TestSmartBackend:
+    """Tests for SmartBackend auto-selection based on codebase size."""
+    
+    def test_smart_backend_available(self):
+        """SmartBackend should always be available."""
+        from praisonaiagents.context.fast.search_backends import SmartBackend
+        
+        backend = SmartBackend()
+        assert backend.is_available() is True
+    
+    def test_small_workspace_uses_python(self, temp_workspace):
+        """Small workspace (<500 files) should use Python backend."""
+        from praisonaiagents.context.fast.search_backends import SmartBackend
+        
+        backend = SmartBackend(workspace_path=temp_workspace)
+        # Force check by doing a search
+        results = backend.grep(temp_workspace, "def")
+        
+        # Should have results and used Python (fast)
+        assert len(results) > 0
+        # Check internal state - should not have selected ripgrep
+        assert backend._use_ripgrep is False
+    
+    def test_count_files_fast(self, temp_workspace):
+        """Helper should count files quickly with limit."""
+        from praisonaiagents.context.fast.search_backends import _count_files_fast
+        
+        count = _count_files_fast(temp_workspace, limit=100)
+        assert count >= 2  # We created at least 2 files
+        assert count < 100  # Should be below limit
+    
+    def test_count_files_fast_skips_gitignore_dirs(self):
+        """Should skip .git, node_modules, etc."""
+        from praisonaiagents.context.fast.search_backends import _count_files_fast
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create files in regular dir
+            Path(tmpdir, "src").mkdir()
+            Path(tmpdir, "src", "file.py").write_text("code")
+            
+            # Create files in ignored dir
+            Path(tmpdir, "node_modules").mkdir()
+            Path(tmpdir, "node_modules", "pkg").mkdir()
+            for i in range(10):
+                Path(tmpdir, "node_modules", "pkg", f"file{i}.js").write_text("code")
+            
+            count = _count_files_fast(tmpdir)
+            # Should only count src/file.py, not node_modules files
+            assert count == 1
+    
+    def test_threshold_constant(self):
+        """Threshold should be 500 files based on profiling."""
+        from praisonaiagents.context.fast.search_backends import RIPGREP_FILE_THRESHOLD
+        
+        assert RIPGREP_FILE_THRESHOLD == 500
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

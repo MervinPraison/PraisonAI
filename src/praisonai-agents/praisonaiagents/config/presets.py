@@ -334,16 +334,11 @@ WORKFLOW_STEP_EXECUTION_PRESETS: Dict[str, Dict[str, Any]] = {
 
 
 # =============================================================================
-# Workflow Output Presets
+# Workflow Output Presets - DEPRECATED, use OUTPUT_PRESETS instead (DRY)
 # =============================================================================
-
-WORKFLOW_OUTPUT_PRESETS: Dict[str, Dict[str, Any]] = {
-    "silent": {"verbose": False, "stream": False},
-    "minimal": {"verbose": False, "stream": True},
-    "normal": {"verbose": False, "stream": True},
-    "verbose": {"verbose": True, "stream": True},
-    "debug": {"verbose": True, "stream": True},
-}
+# Workflows now use the same OUTPUT_PRESETS as Agent for consistency.
+# This alias is kept for backward compatibility only.
+WORKFLOW_OUTPUT_PRESETS = OUTPUT_PRESETS
 
 
 # =============================================================================

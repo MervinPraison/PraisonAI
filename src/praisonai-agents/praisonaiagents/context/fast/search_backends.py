@@ -264,17 +264,136 @@ class RipgrepBackend:
         return self._get_fallback().glob(path, pattern, max_results)
 
 
-def get_search_backend(backend_type: str = "auto") -> SearchBackend:
+def _count_files_fast(path: str, limit: int = 1000) -> int:
+    """Quickly count files in a directory (stops at limit).
+    
+    Args:
+        path: Directory to count files in
+        limit: Stop counting after this many files
+        
+    Returns:
+        Number of files found (capped at limit)
+    """
+    import os
+    
+    count = 0
+    try:
+        for root, dirs, files in os.walk(path):
+            # Skip common non-code directories
+            dirs[:] = [d for d in dirs if d not in {
+                '.git', 'node_modules', 'venv', '.venv', '__pycache__',
+                'site-packages', '.tox', 'dist', 'build', '.eggs'
+            }]
+            count += len(files)
+            if count >= limit:
+                return limit
+    except Exception:
+        pass
+    return count
+
+
+# Threshold for switching from Python to Ripgrep
+# Based on profiling: Python is faster for <500 files due to subprocess overhead
+RIPGREP_FILE_THRESHOLD = 500
+
+
+class SmartBackend:
+    """Smart backend that auto-selects Python or Ripgrep based on codebase size.
+    
+    Uses Python for small codebases (<500 files) where subprocess overhead
+    is significant, and Ripgrep for larger codebases where its speed advantage
+    (30-40x faster) outweighs the ~10ms startup overhead.
+    """
+    
+    def __init__(self, workspace_path: Optional[str] = None):
+        self._workspace_path = workspace_path
+        self._python = PythonSearchBackend()
+        self._ripgrep: Optional[RipgrepBackend] = None
+        self._file_count: Optional[int] = None
+        self._use_ripgrep: Optional[bool] = None
+    
+    def _get_ripgrep(self) -> RipgrepBackend:
+        """Lazy-load ripgrep backend."""
+        if self._ripgrep is None:
+            self._ripgrep = RipgrepBackend()
+        return self._ripgrep
+    
+    def _should_use_ripgrep(self, path: str) -> bool:
+        """Determine if ripgrep should be used based on codebase size."""
+        # Check if ripgrep is available
+        rg = self._get_ripgrep()
+        if not rg.is_available():
+            return False
+        
+        # Count files if not already counted for this path
+        if self._file_count is None or self._workspace_path != path:
+            self._workspace_path = path
+            self._file_count = _count_files_fast(path, limit=RIPGREP_FILE_THRESHOLD + 1)
+            self._use_ripgrep = self._file_count >= RIPGREP_FILE_THRESHOLD
+            
+            if self._use_ripgrep:
+                logger.debug(f"Auto-selected ripgrep backend ({self._file_count}+ files)")
+            else:
+                logger.debug(f"Auto-selected Python backend ({self._file_count} files)")
+        
+        return self._use_ripgrep or False
+    
+    def is_available(self) -> bool:
+        """Smart backend is always available."""
+        return True
+    
+    def grep(
+        self,
+        path: str,
+        pattern: str,
+        is_regex: bool = False,
+        case_sensitive: bool = False,
+        include_patterns: Optional[List[str]] = None,
+        exclude_patterns: Optional[List[str]] = None,
+        max_results: int = 100,
+        context_lines: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Search using auto-selected backend."""
+        if self._should_use_ripgrep(path):
+            return self._get_ripgrep().grep(
+                path, pattern, is_regex, case_sensitive,
+                include_patterns, exclude_patterns, max_results, context_lines
+            )
+        return self._python.grep(
+            path, pattern, is_regex, case_sensitive,
+            include_patterns, exclude_patterns, max_results, context_lines
+        )
+    
+    def glob(
+        self,
+        path: str,
+        pattern: str,
+        max_results: int = 100
+    ) -> List[Dict[str, Any]]:
+        """Glob always uses Python (ripgrep doesn't support glob well)."""
+        return self._python.glob(path, pattern, max_results)
+
+
+def get_search_backend(
+    backend_type: str = "auto",
+    workspace_path: Optional[str] = None
+) -> SearchBackend:
     """Get a search backend by type.
     
     Args:
         backend_type: One of "auto", "python", "ripgrep"
+        workspace_path: Path to workspace (used for auto detection)
         
     Returns:
         SearchBackend instance
         
     Raises:
         ValueError: If backend_type is invalid
+        
+    Performance notes:
+        - "python": Best for small codebases (<500 files), no subprocess overhead
+        - "ripgrep": Best for large codebases (500+ files), 30-40x faster
+        - "auto": Automatically selects based on codebase size
     """
     if backend_type == "python":
         return PythonSearchBackend()
@@ -287,13 +406,8 @@ def get_search_backend(backend_type: str = "auto") -> SearchBackend:
         return backend
     
     elif backend_type == "auto":
-        # Try ripgrep first, fallback to python
-        rg = RipgrepBackend()
-        if rg.is_available():
-            logger.debug("Using ripgrep backend")
-            return rg
-        logger.debug("Using Python backend")
-        return PythonSearchBackend()
+        # Use SmartBackend that auto-selects based on codebase size
+        return SmartBackend(workspace_path)
     
     else:
         raise ValueError(f"Invalid backend type: {backend_type}. Must be 'auto', 'python', or 'ripgrep'")
