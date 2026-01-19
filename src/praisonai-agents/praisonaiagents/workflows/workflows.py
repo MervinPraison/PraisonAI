@@ -180,10 +180,47 @@ def loop(step: Any, over: Optional[str] = None, from_csv: Optional[str] = None,
     """Loop over items executing step for each."""
     return Loop(step=step, over=over, from_csv=from_csv, from_file=from_file, var_name=var_name)
 
+
 def repeat(step: Any, until: Optional[Callable[[WorkflowContext], bool]] = None,
            max_iterations: int = 10) -> Repeat:
     """Repeat step until condition is met."""
     return Repeat(step=step, until=until, max_iterations=max_iterations)
+
+
+@dataclass
+class Include:
+    """
+    Include another recipe as a workflow step.
+    
+    Enables modular recipe composition - recipes can include other recipes.
+    
+    Usage:
+        workflow = Workflow(steps=[
+            content_writer,
+            include("wordpress-publisher"),  # Include another recipe
+        ])
+        
+    YAML syntax:
+        steps:
+          - agent: content_writer
+          - include: wordpress-publisher
+          
+        # Or with configuration:
+          - include:
+              recipe: wordpress-publisher
+              input: "{{previous_output}}"
+    """
+    recipe: str = ""  # Recipe name or path
+    input: Optional[str] = None  # Input override (default: previous_output)
+    
+    def __init__(self, recipe: str, input: Optional[str] = None):
+        self.recipe = recipe
+        self.input = input
+
+
+def include(recipe: str, input: Optional[str] = None) -> Include:
+    """Include another recipe as a workflow step."""
+    return Include(recipe=recipe, input=input)
 
 
 @dataclass
@@ -915,6 +952,17 @@ class Workflow:
                 all_variables.update(repeat_result.get("variables", {}))
                 i += 1
                 continue
+                
+            elif isinstance(step, Include):
+                # Include another recipe
+                include_result = self._execute_include(
+                    step, previous_output, input, all_variables, model, verbose, stream
+                )
+                results.extend(include_result["steps"])
+                previous_output = include_result["output"]
+                all_variables.update(include_result.get("variables", {}))
+                i += 1
+                continue
             
             # Normalize single step
             step = self._normalize_single_step(step, i)
@@ -1608,6 +1656,169 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         
         all_variables["repeat_iterations"] = iteration + 1
         return {"steps": results, "output": output, "variables": all_variables}
+    
+    def _execute_include(
+        self,
+        include_step: Include,
+        previous_output: Optional[str],
+        input: str,
+        all_variables: Dict[str, Any],
+        model: str,
+        verbose: bool,
+        stream: bool = True,
+        visited_recipes: Optional[set] = None
+    ) -> Dict[str, Any]:
+        """Execute an included recipe as a workflow step.
+        
+        Args:
+            include_step: The Include step with recipe name
+            previous_output: Output from previous step
+            input: Original workflow input
+            all_variables: Current workflow variables
+            model: LLM model to use
+            verbose: Verbose output
+            stream: Enable streaming
+            visited_recipes: Set of already-visited recipe names (for cycle detection)
+            
+        Returns:
+            Dict with 'steps', 'output', and 'variables'
+        """
+        recipe_name = include_step.recipe
+        
+        # Cycle detection
+        if visited_recipes is None:
+            visited_recipes = set()
+        
+        if recipe_name in visited_recipes:
+            error_msg = f"Circular include detected: {recipe_name} was already included in this execution chain"
+            logger.error(error_msg)
+            return {
+                "steps": [{"step": f"include:{recipe_name}", "output": f"Error: {error_msg}"}],
+                "output": error_msg,
+                "variables": all_variables
+            }
+        
+        visited_recipes.add(recipe_name)
+        
+        if verbose:
+            print(f"📦 Including recipe: {recipe_name}")
+        
+        try:
+            # Try to resolve recipe path using agent_recipes if available
+            recipe_path = None
+            
+            try:
+                from agent_recipes import get_template_path
+                recipe_path = get_template_path(recipe_name)
+            except ImportError:
+                # agent_recipes not installed, try local path
+                from pathlib import Path
+                if Path(recipe_name).exists():
+                    recipe_path = Path(recipe_name)
+                else:
+                    # Try as relative path to current working directory
+                    import os
+                    cwd = Path(os.getcwd())
+                    potential_path = cwd / recipe_name
+                    if potential_path.exists():
+                        recipe_path = potential_path
+            
+            if not recipe_path:
+                error_msg = f"Recipe not found: {recipe_name}"
+                logger.error(error_msg)
+                return {
+                    "steps": [{"step": f"include:{recipe_name}", "output": f"Error: {error_msg}"}],
+                    "output": error_msg,
+                    "variables": all_variables
+                }
+            
+            # Find the YAML file (agents.yaml or workflow.yaml)
+            recipe_yaml = None
+            from pathlib import Path
+            recipe_path = Path(recipe_path)
+            
+            for yaml_name in ["agents.yaml", "workflow.yaml", "TEMPLATE.yaml"]:
+                yaml_path = recipe_path / yaml_name
+                if yaml_path.exists():
+                    recipe_yaml = yaml_path
+                    break
+            
+            if not recipe_yaml:
+                error_msg = f"No workflow YAML found in {recipe_path}"
+                logger.error(error_msg)
+                return {
+                    "steps": [{"step": f"include:{recipe_name}", "output": f"Error: {error_msg}"}],
+                    "output": error_msg,
+                    "variables": all_variables
+                }
+            
+            # Load tools from the recipe's tools.py if present
+            tool_registry = {}
+            tools_py = recipe_path / "tools.py"
+            if tools_py.exists():
+                try:
+                    import importlib.util
+                    spec = importlib.util.spec_from_file_location("recipe_tools", tools_py)
+                    recipe_module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(recipe_module)
+                    
+                    # Extract callable tools
+                    for name in dir(recipe_module):
+                        if not name.startswith("_"):
+                            obj = getattr(recipe_module, name)
+                            if callable(obj):
+                                tool_registry[name] = obj
+                except Exception as e:
+                    logger.warning(f"Failed to load tools from {tools_py}: {e}")
+            
+            # Determine input for the included recipe
+            recipe_input = include_step.input or previous_output or input
+            
+            # Substitute variables in the input
+            if recipe_input:
+                for key, value in all_variables.items():
+                    recipe_input = recipe_input.replace(f"{{{{{key}}}}}", str(value))
+                if previous_output:
+                    recipe_input = recipe_input.replace("{{previous_output}}", str(previous_output))
+                recipe_input = recipe_input.replace("{{input}}", input)
+            
+            # Parse and execute the included workflow
+            from .yaml_parser import YAMLWorkflowParser
+            parser = YAMLWorkflowParser(tool_registry=tool_registry)
+            included_workflow = parser.parse_file(str(recipe_yaml))
+            
+            # Merge parent variables into included workflow
+            included_workflow.variables.update(all_variables)
+            included_workflow.variables["previous_output"] = previous_output
+            
+            # Execute the included workflow
+            result = included_workflow.run(
+                input=recipe_input or "",
+                llm=model,
+                verbose=verbose,
+                stream=stream
+            )
+            
+            if verbose:
+                print(f"✅ Included recipe {recipe_name} completed")
+            
+            # Return result in expected format
+            return {
+                "steps": result.get("steps", []),
+                "output": result.get("output", ""),
+                "variables": {**all_variables, **result.get("variables", {})}
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to execute included recipe {recipe_name}: {e}")
+            return {
+                "steps": [{"step": f"include:{recipe_name}", "output": f"Error: {e}"}],
+                "output": f"Error executing {recipe_name}: {e}",
+                "variables": all_variables
+            }
+        finally:
+            # Remove from visited after execution completes (allow re-use in different branches)
+            visited_recipes.discard(recipe_name)
     
     def start(self, input: str = "", **kwargs) -> Dict[str, Any]:
         """Alias for run() for consistency with Agents."""
