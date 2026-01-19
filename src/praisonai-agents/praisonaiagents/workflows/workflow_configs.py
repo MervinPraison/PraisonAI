@@ -48,25 +48,10 @@ class WorkflowOutputPreset(str, Enum):
     DEBUG = "debug"
 
 
-@dataclass
-class WorkflowOutputConfig:
-    """
-    Configuration for workflow output behavior.
-    
-    Consolidates: verbose, stream
-    
-    Usage:
-        # Preset (string)
-        Workflow(steps=[...], output="verbose")
-        
-        # Config
-        Workflow(steps=[...], output=WorkflowOutputConfig(verbose=True, stream=True))
-    """
-    verbose: bool = False
-    stream: bool = True
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {"verbose": self.verbose, "stream": self.stream}
+# WorkflowOutputConfig is now an alias to OutputConfig for DRY approach
+# Workflows use the same output configuration as Agent
+# Import OutputConfig and alias it for backward compatibility
+from ..config.feature_configs import OutputConfig as WorkflowOutputConfig
 
 
 @dataclass
@@ -319,23 +304,26 @@ def resolve_param(
     )
 
 
-def resolve_output_config(value: Any) -> WorkflowOutputConfig:
-    """Resolve output parameter to WorkflowOutputConfig using canonical resolver.
+def resolve_output_config(value: Any):
+    """Resolve output parameter using canonical OUTPUT_PRESETS (DRY approach).
     
-    Supports: None, str preset, list [preset, overrides], Config, dict
+    Supports: None, str preset, list [preset, overrides], OutputConfig, dict
+    
+    Uses the same OUTPUT_PRESETS as Agent for consistency.
     """
     from ..config.param_resolver import resolve, ArrayMode
-    from ..config.presets import WORKFLOW_OUTPUT_PRESETS
+    from ..config.presets import OUTPUT_PRESETS
+    from ..config.feature_configs import OutputConfig
     
     result = resolve(
         value=value,
         param_name="output",
-        config_class=WorkflowOutputConfig,
-        presets=WORKFLOW_OUTPUT_PRESETS,
+        config_class=OutputConfig,
+        presets=OUTPUT_PRESETS,
         array_mode=ArrayMode.PRESET_OVERRIDE,
-        default=WorkflowOutputConfig(),
+        default=OutputConfig(),  # Default is silent mode
     )
-    return result if result else WorkflowOutputConfig(verbose=False, stream=False)
+    return result if result else OutputConfig()
 
 
 def resolve_planning_config(value: Any) -> Optional[WorkflowPlanningConfig]:

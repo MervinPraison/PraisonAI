@@ -27,9 +27,8 @@ from typing import Any, Dict, List, Optional, Callable, Tuple, Union
 from dataclasses import dataclass, field
 
 from .workflow_configs import (
-    WorkflowOutputConfig, WorkflowPlanningConfig, WorkflowMemoryConfig, WorkflowHooksConfig,
+    WorkflowPlanningConfig, WorkflowMemoryConfig,
     WorkflowStepContextConfig, WorkflowStepOutputConfig, WorkflowStepExecutionConfig, WorkflowStepRoutingConfig,
-    WorkflowOutputPreset, WorkflowStepExecutionPreset
 )
 
 logger = logging.getLogger(__name__)
@@ -618,6 +617,7 @@ class Workflow:
     # Private resolved fields (set in __post_init__)
     _verbose: bool = field(default=False, repr=False)
     _stream: bool = field(default=True, repr=False)
+    _output_config: Optional[Any] = field(default=None, repr=False)  # Full OutputConfig for propagation
     _planning_enabled: bool = field(default=False, repr=False)
     _planning_llm: Optional[str] = field(default=None, repr=False)
     _reasoning: bool = field(default=False, repr=False)
@@ -639,10 +639,41 @@ class Workflow:
             resolve_memory_config, resolve_hooks_config,
         )
         
-        # Resolve output param
+        # Resolve output param - now uses OUTPUT_PRESETS (same as Agent)
         output_cfg = resolve_output_config(self.output)
-        self._verbose = output_cfg.verbose if output_cfg else False
-        self._stream = output_cfg.stream if output_cfg else True
+        self._output_config = output_cfg  # Store full config for propagation
+        self._verbose = getattr(output_cfg, 'verbose', False) if output_cfg else False
+        self._stream = getattr(output_cfg, 'stream', True) if output_cfg else True
+        
+        # Enable status/trace output if configured (same as Agent)
+        if output_cfg:
+            status_trace = getattr(output_cfg, 'status_trace', False)
+            actions_trace = getattr(output_cfg, 'actions_trace', False)
+            json_output = getattr(output_cfg, 'json_output', False)
+            simple_output = getattr(output_cfg, 'simple_output', False)
+            metrics = getattr(output_cfg, 'metrics', False)
+            
+            if status_trace:
+                try:
+                    from ..output.trace import enable_trace_output, is_trace_output_enabled
+                    if not is_trace_output_enabled():
+                        enable_trace_output(use_color=True, show_timestamps=True)
+                except ImportError:
+                    pass
+            elif actions_trace:
+                try:
+                    from ..output.status import enable_status_output, is_status_output_enabled
+                    if not is_status_output_enabled():
+                        output_format = "jsonl" if json_output else "text"
+                        enable_status_output(
+                            redact=True,
+                            use_color=True,
+                            format=output_format,
+                            show_timestamps=not simple_output,
+                            show_metrics=metrics
+                        )
+                except ImportError:
+                    pass
         
         # Resolve planning param
         planning_cfg = resolve_planning_config(self.planning)
@@ -1082,7 +1113,7 @@ class Workflow:
                             goal=config.get("goal", "Complete the task"),
                             llm=config.get("llm", model),
                             tools=step_tools if step_tools else None,
-                            # verbose parameter removed - Agent no longer accepts it
+                            output=self.output,  # Propagate output config to child agents
                             reasoning=self.reasoning,
                             stream=stream
                         )

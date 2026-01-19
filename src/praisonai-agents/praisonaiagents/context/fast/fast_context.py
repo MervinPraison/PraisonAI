@@ -151,7 +151,7 @@ class FastContext:
         """Get or create SearchBackend instance (lazy)."""
         if self._backend is None:
             from praisonaiagents.context.fast.search_backends import get_search_backend
-            self._backend = get_search_backend(self.search_backend)
+            self._backend = get_search_backend(self.search_backend, workspace_path=self.workspace_path)
         return self._backend
     
     def _get_index(self):

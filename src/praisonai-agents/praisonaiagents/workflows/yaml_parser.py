@@ -249,6 +249,7 @@ class YAMLWorkflowParser:
         reasoning = workflow_config.get('reasoning', False)
         verbose = workflow_config.get('verbose', False)
         memory_config = workflow_config.get('memory_config')
+        output_mode = workflow_config.get('output')  # NEW: parse output mode from YAML
         
         # Parse variables
         variables = data.get('variables', {})
@@ -275,12 +276,18 @@ class YAMLWorkflowParser:
             from .workflow_configs import WorkflowPlanningConfig
             planning_value = WorkflowPlanningConfig(enabled=bool(planning), llm=planning_llm, reasoning=reasoning)
         
+        # Determine output mode: explicit output > verbose flag > default
+        workflow_output = output_mode
+        if workflow_output is None and verbose:
+            workflow_output = "verbose"
+        
         workflow = Workflow(
             name=name,
             steps=steps,
             variables=variables,
             planning=planning_value,
             default_llm=default_llm,
+            output=workflow_output,  # Pass output mode to Workflow
         )
         
         # Store additional attributes for feature parity with agents.yaml

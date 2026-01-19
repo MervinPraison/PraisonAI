@@ -107,25 +107,25 @@ class TestWorkflowOutputPrecedence:
     """Test output= param precedence: Instance > Config > String > Bool > Default."""
     
     def test_output_default(self):
-        """Default output should be verbose=False, stream=True."""
+        """Default output should be verbose=False, stream=False (silent mode, same as Agent)."""
         from praisonaiagents.workflows import Workflow
         w = Workflow(name="test")
         assert w.verbose == False
-        assert w.stream == True
+        assert w.stream == False  # Now uses OutputConfig default (silent mode)
     
     def test_output_bool_true(self):
-        """output=True should enable verbose with defaults."""
+        """output=True enables config with defaults (silent mode, same as Agent)."""
         from praisonaiagents.workflows import Workflow
         w = Workflow(name="test", output=True)
-        # True enables the config with defaults
-        assert w.stream == True
+        # True enables the config with defaults (OutputConfig defaults to silent)
+        assert w.stream == False  # OutputConfig default is stream=False
     
     def test_output_string_verbose(self):
         """output='verbose' should set verbose=True."""
         from praisonaiagents.workflows import Workflow
         w = Workflow(name="test", output="verbose")
         assert w.verbose == True
-        assert w.stream == True
+        assert w.stream == False  # verbose preset has stream=False
     
     def test_output_string_silent(self):
         """output='silent' should set verbose=False, stream=False."""
@@ -135,9 +135,10 @@ class TestWorkflowOutputPrecedence:
         assert w.stream == False
     
     def test_output_config(self):
-        """output=WorkflowOutputConfig should use config values."""
-        from praisonaiagents.workflows import Workflow, WorkflowOutputConfig
-        cfg = WorkflowOutputConfig(verbose=True, stream=False)
+        """output=OutputConfig should use config values (DRY - same as Agent)."""
+        from praisonaiagents.workflows import Workflow
+        from praisonaiagents.config.feature_configs import OutputConfig
+        cfg = OutputConfig(verbose=True, stream=False)
         w = Workflow(name="test", output=cfg)
         assert w.verbose == True
         assert w.stream == False
