@@ -487,22 +487,85 @@ You are a professional research analyst. When conducting research:
             raw_response=response
         )
     
-    def _parse_gemini_response(self, interaction: Any) -> DeepResearchResponse:
-        """Parse Gemini Deep Research API response."""
+    def _parse_gemini_response(
+        self, 
+        interaction: Any, 
+        fallback_text: str = "",
+        fallback_reasoning: Optional[List[ReasoningStep]] = None
+    ) -> DeepResearchResponse:
+        """Parse Gemini Deep Research API response.
+        
+        Args:
+            interaction: The Gemini interaction object
+            fallback_text: Accumulated text from streaming (used if outputs parsing fails)
+            fallback_reasoning: Reasoning steps collected during streaming
+        """
         report = ""
         citations = []
-        reasoning_steps = []
+        reasoning_steps = fallback_reasoning or []
         
-        # Get the final output
+        # Try multiple attribute paths for Gemini output structure
+        # Path 1: Direct outputs with text attribute
         if hasattr(interaction, 'outputs') and interaction.outputs:
             last_output = interaction.outputs[-1]
-            if hasattr(last_output, 'text'):
+            if hasattr(last_output, 'text') and last_output.text:
                 report = last_output.text
             elif hasattr(last_output, 'content'):
-                report = str(last_output.content)
+                # Gemini nested structure: content.parts[0].text
+                content = last_output.content
+                if hasattr(content, 'parts') and content.parts:
+                    first_part = content.parts[0]
+                    if hasattr(first_part, 'text'):
+                        report = first_part.text
+                    else:
+                        report = str(first_part)
+                elif hasattr(content, 'text'):
+                    report = content.text
+                else:
+                    report = str(content)
         
-        # Gemini doesn't provide structured citations in the same way
-        # but we can try to extract them from annotations if available
+        # Path 2: Direct result attribute
+        if not report and hasattr(interaction, 'result'):
+            result = interaction.result
+            if hasattr(result, 'text'):
+                report = result.text
+            else:
+                report = str(result)
+        
+        # Path 3: Response attribute  
+        if not report and hasattr(interaction, 'response'):
+            resp = interaction.response
+            if hasattr(resp, 'text'):
+                report = resp.text
+            elif hasattr(resp, 'content'):
+                report = str(resp.content)
+        
+        # Path 4: Fallback to streamed content (critical fix)
+        if not report and fallback_text:
+            report = fallback_text
+            if self.verbose:
+                self.logger.debug("Using fallback streamed text for report")
+        
+        # Try to extract citations from grounding metadata
+        if hasattr(interaction, 'outputs') and interaction.outputs:
+            for output in interaction.outputs:
+                if hasattr(output, 'grounding_metadata'):
+                    metadata = output.grounding_metadata
+                    if hasattr(metadata, 'grounding_chunks'):
+                        for chunk in metadata.grounding_chunks:
+                            if hasattr(chunk, 'web') and chunk.web:
+                                citations.append(Citation(
+                                    title=getattr(chunk.web, 'title', ''),
+                                    url=getattr(chunk.web, 'uri', ''),
+                                ))
+        
+        # Log warning if report is empty
+        if not report:
+            self.logger.warning(
+                "Gemini response parsing returned empty report. "
+                f"Interaction ID: {getattr(interaction, 'id', 'unknown')}, "
+                f"Status: {getattr(interaction, 'status', 'unknown')}"
+            )
         
         return DeepResearchResponse(
             report=report,
@@ -878,10 +941,32 @@ You are a professional research analyst. When conducting research:
                         print("\n\n" + "=" * 60)
                         print("✅ Research Complete")
                         print("=" * 60 + "\n")
-                    # Get final interaction for full response
+                    
+                    # Poll until interaction status is actually 'completed'
+                    # (workaround for timing issue where GET returns stale status)
                     if interaction_id:
-                        final_interaction = self.gemini_client.interactions.get(interaction_id)
-                        return self._parse_gemini_response(final_interaction)
+                        max_poll_attempts = 30  # 30 seconds max
+                        for attempt in range(max_poll_attempts):
+                            final_interaction = self.gemini_client.interactions.get(interaction_id)
+                            if final_interaction.status == "completed":
+                                return self._parse_gemini_response(
+                                    final_interaction, 
+                                    fallback_text=final_text,
+                                    fallback_reasoning=reasoning_steps
+                                )
+                            elif final_interaction.status in ["failed", "cancelled"]:
+                                raise RuntimeError(f"Research {final_interaction.status}")
+                            time.sleep(1)
+                        
+                        # If still not completed, use fallback
+                        if self.verbose:
+                            self.logger.warning("Interaction not completed after polling, using streamed content")
+                        return DeepResearchResponse(
+                            report=final_text,
+                            reasoning_steps=reasoning_steps,
+                            provider="gemini",
+                            interaction_id=interaction_id
+                        )
                 
                 elif chunk.event_type == "error":
                     error_msg = getattr(chunk, 'error', 'Unknown streaming error')
@@ -949,7 +1034,11 @@ You are a professional research analyst. When conducting research:
                         if self.verbose:
                             print("\n\n✅ Research Complete (resumed)")
                         final_interaction = self.gemini_client.interactions.get(interaction_id)
-                        return self._parse_gemini_response(final_interaction)
+                        return self._parse_gemini_response(
+                            final_interaction,
+                            fallback_text=accumulated_text,
+                            fallback_reasoning=reasoning_steps
+                        )
                 
             except Exception as e:
                 retry_count += 1
@@ -963,7 +1052,11 @@ You are a professional research analyst. When conducting research:
         while True:
             interaction = self.gemini_client.interactions.get(interaction_id)
             if interaction.status == "completed":
-                return self._parse_gemini_response(interaction)
+                return self._parse_gemini_response(
+                    interaction,
+                    fallback_text=accumulated_text,
+                    fallback_reasoning=reasoning_steps
+                )
             elif interaction.status in ["failed", "cancelled"]:
                 raise RuntimeError(f"Research {interaction.status}")
             time.sleep(self.poll_interval)
