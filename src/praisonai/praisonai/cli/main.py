@@ -2366,8 +2366,32 @@ class PraisonAI:
             if parsed_vars:
                 print(f"[cyan]Variables: {parsed_vars}[/cyan]")
             
-            # Load and execute the YAML workflow
-            workflow = manager.load_yaml(yaml_file)
+            # Auto-load tools.py from recipe directory if present
+            import importlib.util
+            from pathlib import Path
+            
+            yaml_path = Path(yaml_file).resolve()
+            tools_file = yaml_path.parent / "tools.py"
+            tool_registry = {}
+            
+            if tools_file.exists():
+                try:
+                    spec = importlib.util.spec_from_file_location("recipe_tools", str(tools_file))
+                    tools_module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(tools_module)
+                    
+                    # Build registry from public callable functions
+                    for name, obj in vars(tools_module).items():
+                        if callable(obj) and not name.startswith('_'):
+                            tool_registry[name] = obj
+                    
+                    if tool_registry:
+                        print(f"[cyan]Loaded {len(tool_registry)} tools from tools.py: {', '.join(tool_registry.keys())}[/cyan]")
+                except Exception as e:
+                    print(f"[yellow]Warning: Failed to load tools.py: {e}[/yellow]")
+            
+            # Load and execute the YAML workflow with tool registry
+            workflow = manager.load_yaml(yaml_file, tool_registry=tool_registry)
             
             # Show workflow info
             table = Table(title=f"Workflow: {workflow.name}")

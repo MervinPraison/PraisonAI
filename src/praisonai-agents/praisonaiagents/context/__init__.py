@@ -269,4 +269,14 @@ def __getattr__(name: str):
         from . import artifacts
         return getattr(artifacts, name)
     
+    # Session Context Tracking (Agno pattern)
+    if name in ("SessionContextTracker", "SessionState"):
+        from . import session_tracker
+        return getattr(session_tracker, name)
+    
+    # Context Aggregation (CrewAI pattern)
+    if name in ("ContextAggregator", "AggregatedContext", "create_aggregator_from_config"):
+        from . import aggregator
+        return getattr(aggregator, name)
+    
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

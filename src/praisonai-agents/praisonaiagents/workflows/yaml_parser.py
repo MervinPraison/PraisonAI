@@ -278,7 +278,14 @@ class YAMLWorkflowParser:
         
         # Store workflow input (from 'input' or 'topic' field)
         # This is the default input passed to workflow.start() if no input is provided
-        workflow.default_input = data.get('input', data.get('topic', ''))
+        default_input = data.get('input', data.get('topic', ''))
+        
+        # Substitute dynamic variables ({{today}}, {{now}}, etc.) in default_input
+        if default_input and "{{" in default_input:
+            from praisonaiagents.utils.variables import substitute_variables
+            default_input = substitute_variables(default_input, {})
+        
+        workflow.default_input = default_input
         
         return workflow
     

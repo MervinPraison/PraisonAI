@@ -1152,12 +1152,18 @@ class WorkflowManager:
         text: str,
         variables: Dict[str, Any]
     ) -> str:
-        """Substitute {{variable}} placeholders in text."""
-        def replace(match):
-            var_name = match.group(1).strip()
-            return str(variables.get(var_name, match.group(0)))
+        """
+        Substitute {{variable}} placeholders in text.
         
-        return re.sub(r'\{\{(\w+)\}\}', replace, text)
+        Delegates to shared substitute_variables() utility for DRY compliance.
+        
+        Resolution order:
+        1. Dynamic variable providers ({{now}}, {{today}}, {{uuid}}, etc.)
+        2. Static variables from workflow variables dict
+        3. Keep original placeholder if not found
+        """
+        from praisonaiagents.utils.variables import substitute_variables
+        return substitute_variables(text, variables)
     
     def _build_step_context(
         self,

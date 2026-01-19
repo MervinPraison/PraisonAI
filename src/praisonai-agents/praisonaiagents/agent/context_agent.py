@@ -13,16 +13,87 @@ This class implements proper Context Engineering principles following the PRD te
 
 import os
 import json
-import asyncio
-import glob
-import subprocess
-import ast
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Any, Dict, Union, List
+from typing import Optional, Any, Dict, Union, List, TYPE_CHECKING
+
+# Lazy imports for performance - these are only loaded when needed
+_subprocess = None
+_glob = None
+_ast = None
+_asyncio = None
+
+def _get_subprocess():
+    """Lazy import subprocess to avoid import-time overhead."""
+    global _subprocess
+    if _subprocess is None:
+        import subprocess
+        _subprocess = subprocess
+    return _subprocess
+
+def _get_glob():
+    """Lazy import glob to avoid import-time overhead."""
+    global _glob
+    if _glob is None:
+        import glob
+        _glob = glob
+    return _glob
+
+def _get_ast():
+    """Lazy import ast to avoid import-time overhead."""
+    global _ast
+    if _ast is None:
+        import ast
+        _ast = ast
+    return _ast
+
+def _get_asyncio():
+    """Lazy import asyncio to avoid import-time overhead."""
+    global _asyncio
+    if _asyncio is None:
+        import asyncio
+        _asyncio = asyncio
+    return _asyncio
+
+async def _async_subprocess_run(cmd: list, timeout: int = 60) -> tuple:
+    """
+    Run subprocess asynchronously (non-blocking).
+    
+    Args:
+        cmd: Command list to execute
+        timeout: Timeout in seconds
+        
+    Returns:
+        Tuple of (stdout, stderr, returncode)
+    """
+    asyncio = _get_asyncio()
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(),
+            timeout=timeout
+        )
+        return (
+            stdout.decode() if stdout else "",
+            stderr.decode() if stderr else "",
+            process.returncode
+        )
+    except asyncio.TimeoutError:
+        if process:
+            process.kill()
+            await process.wait()
+        raise
+    except FileNotFoundError:
+        raise
+
 from ..agent.agent import Agent
 from ..task import Task
+
 
 class ContextAgent(Agent):
     """
@@ -69,6 +140,7 @@ class ContextAgent(Agent):
         deeply and generate actionable implementation guidance."""
         
         # Initialize parent Agent
+        # Note: self.verbose is set by parent Agent based on output= parameter
         super().__init__(
             name=default_name,
             role=default_role,
@@ -101,6 +173,34 @@ class ContextAgent(Agent):
         # Auto-analyze if requested and project_path provided
         if self.auto_analyze and self.project_path:
             self._perform_context_engineering_analysis()
+
+    def _log(self, message: str, level: str = "info"):
+        """
+        Configurable logging that respects verbose flag.
+        
+        Args:
+            message: Message to log
+            level: Log level (info, debug, warning, error)
+        """
+        if level == "debug":
+            if hasattr(self, 'logger'):
+                self.logger.debug(message)
+            if self.debug_mode:
+                print(f"🐛 {message}")
+        elif level == "warning":
+            if hasattr(self, 'logger'):
+                self.logger.warning(message)
+            if self.verbose:
+                print(f"⚠️ {message}")
+        elif level == "error":
+            if hasattr(self, 'logger'):
+                self.logger.error(message)
+            print(f"❌ {message}")  # Always show errors
+        else:  # info
+            if hasattr(self, 'logger'):
+                self.logger.info(message)
+            if self.verbose:
+                print(message)
 
     def setup_logging(self):
         """Setup comprehensive logging based on debug mode."""
@@ -474,7 +574,7 @@ codebase style and architecture following PRD template principles."""
         """Run gitingest analysis on the codebase."""
         try:
             # Try to run gitingest command
-            result = subprocess.run(
+            result = _get_subprocess().run(
                 ["gitingest", project_path, "--output", "-"],
                 capture_output=True,
                 text=True,
@@ -487,7 +587,7 @@ codebase style and architecture following PRD template principles."""
                 print(f"  ⚠️ Gitingest command failed: {result.stderr}")
                 return None
                 
-        except subprocess.TimeoutExpired:
+        except _get_subprocess().TimeoutExpired:
             print("  ⚠️ Gitingest analysis timed out")
             return None
         except FileNotFoundError:
@@ -1030,7 +1130,7 @@ detailed, actionable implementation steps."""
     def _get_filtered_files(self, project_path: str, pattern: str, max_files: int) -> List[str]:
         """Get filtered files excluding unwanted directories following PRD principles."""
         try:
-            files = glob.glob(os.path.join(project_path, "**", pattern), recursive=True)
+            files = _get_glob().glob(os.path.join(project_path, "**", pattern), recursive=True)
             
             # Filter out unwanted files following PRD methodology
             filtered = []
@@ -1403,7 +1503,7 @@ Return in the exact format specified in your instructions."""
         """Get basic repository file structure."""
         try:
             # Try using gitingest with structure-only flag first
-            result = subprocess.run(
+            result = _get_subprocess().run(
                 ["gitingest", github_url, "--tree-only", "--output", "-"],
                 capture_output=True,
                 text=True,
@@ -1421,7 +1521,7 @@ Return in the exact format specified in your instructions."""
                 print(f"    ⚠️ Gitingest tree failed, using GitHub API...")
                 return self._get_structure_fallback(github_url)
                 
-        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        except (_get_subprocess().TimeoutExpired, FileNotFoundError) as e:
             print(f"    ⚠️ Gitingest not available: {e}, using GitHub API...")
             return self._get_structure_fallback(github_url)
 
@@ -1626,7 +1726,7 @@ Focus on creating clear, structured metadata that will help with intelligent fil
                 print("    ⚠️ gitingest Python package not available, using command line...")
                 
                 # Fallback to command line gitingest for actual content
-                result = subprocess.run(
+                result = _get_subprocess().run(
                     ["gitingest", github_url, "--output", "-"],
                     capture_output=True,
                     text=True,
@@ -1946,7 +2046,7 @@ Since these files were pre-selected for relevance, explain how each contributes 
             except ImportError:
                 print(f"    ⚠️ gitingest Python package not available, trying command line...")
                 # Fallback to command line gitingest
-                result = subprocess.run(
+                result = _get_subprocess().run(
                     ["gitingest", github_url, "--output", "-"],
                     capture_output=True,
                     text=True,
@@ -1959,7 +2059,7 @@ Since these files were pre-selected for relevance, explain how each contributes 
                     print(f"    ⚠️ Gitingest command failed: {result.stderr}")
                     return None
                     
-        except subprocess.TimeoutExpired:
+        except _get_subprocess().TimeoutExpired:
             print("    ⚠️ Gitingest analysis timed out")
             return None
         except FileNotFoundError:
@@ -2281,6 +2381,105 @@ This PRP provides:
                 "file_count": 0,
                 "success": False
             }
+
+    # ============================================================================
+    # P1: Protocol-Compatible Aliases (ContextEngineerProtocol compliance)
+    # ============================================================================
+    
+    def analyze_codebase(self, project_path: str) -> Dict[str, Any]:
+        """
+        Protocol-compatible alias for analyze_codebase_with_gitingest.
+        
+        Args:
+            project_path: Path to the project directory
+            
+        Returns:
+            Analysis results including patterns, architecture, conventions
+        """
+        return self.analyze_codebase_with_gitingest(project_path)
+    
+    def generate_prp(
+        self, 
+        feature_request: str, 
+        context_analysis: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """
+        Protocol-compatible alias for generate_comprehensive_prp.
+        
+        Args:
+            feature_request: Description of the feature to implement
+            context_analysis: Optional codebase analysis to include
+            
+        Returns:
+            Comprehensive PRP document as string
+        """
+        return self.generate_comprehensive_prp(feature_request, context_analysis)
+    
+    def create_implementation_blueprint(
+        self,
+        feature_request: str,
+        context_analysis: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Protocol-compatible alias for build_implementation_blueprint.
+        
+        Args:
+            feature_request: Description of the feature
+            context_analysis: Optional codebase analysis
+            
+        Returns:
+            Blueprint with implementation steps, files to modify, etc.
+        """
+        return self.build_implementation_blueprint(feature_request, context_analysis)
+
+    # ============================================================================
+    # P3: Async Methods (ContextEngineerProtocol compliance)
+    # ============================================================================
+    
+    async def aanalyze_codebase(self, project_path: str) -> Dict[str, Any]:
+        """
+        Async version of analyze_codebase.
+        
+        Uses async subprocess for non-blocking execution.
+        """
+        asyncio = _get_asyncio()
+        # Run sync method in executor for now (subprocess calls are blocking)
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            self.analyze_codebase_with_gitingest,
+            project_path
+        )
+    
+    async def agenerate_prp(
+        self,
+        feature_request: str,
+        context_analysis: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """
+        Async version of generate_prp.
+        """
+        asyncio = _get_asyncio()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.generate_comprehensive_prp(feature_request, context_analysis)
+        )
+    
+    async def acreate_implementation_blueprint(
+        self,
+        feature_request: str,
+        context_analysis: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Async version of create_implementation_blueprint.
+        """
+        asyncio = _get_asyncio()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.build_implementation_blueprint(feature_request, context_analysis)
+        )
 
 
 def create_context_agent(llm: Optional[Union[str, Any]] = None, **kwargs) -> ContextAgent:
