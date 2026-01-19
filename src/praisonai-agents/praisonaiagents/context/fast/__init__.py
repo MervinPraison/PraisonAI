@@ -9,6 +9,12 @@ Key features:
 - Limited serial turns (max 4) for fast response
 - Restricted tool set (grep, glob, read) for safety
 - Returns files + line ranges (no summarization)
+
+Optional optimizations (no performance impact when disabled):
+- Ripgrep backend: Use `search_backend='ripgrep'` for faster grep
+- Async file I/O: Uses aiofiles if installed
+- Incremental indexing: Use `enable_indexing=True`
+- Context compression: Use `compression='truncate'` or `compression='smart'`
 """
 
 # Lazy imports to avoid impacting package load time
@@ -29,6 +35,28 @@ def __getattr__(name):
     elif name == "FastContextAgent":
         from praisonaiagents.context.fast.fast_context_agent import FastContextAgent
         return FastContextAgent
+    # New optimization exports
+    elif name == "get_search_backend":
+        from praisonaiagents.context.fast.search_backends import get_search_backend
+        return get_search_backend
+    elif name == "PythonSearchBackend":
+        from praisonaiagents.context.fast.search_backends import PythonSearchBackend
+        return PythonSearchBackend
+    elif name == "RipgrepBackend":
+        from praisonaiagents.context.fast.search_backends import RipgrepBackend
+        return RipgrepBackend
+    elif name == "FileIndex":
+        from praisonaiagents.context.fast.index_manager import FileIndex
+        return FileIndex
+    elif name == "get_compressor":
+        from praisonaiagents.context.fast.compressor import get_compressor
+        return get_compressor
+    elif name == "TruncateCompressor":
+        from praisonaiagents.context.fast.compressor import TruncateCompressor
+        return TruncateCompressor
+    elif name == "SmartCompressor":
+        from praisonaiagents.context.fast.compressor import SmartCompressor
+        return SmartCompressor
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
@@ -37,4 +65,13 @@ __all__ = [
     "FileMatch",
     "LineRange",
     "FastContextAgent",
+    # Optimization exports
+    "get_search_backend",
+    "PythonSearchBackend", 
+    "RipgrepBackend",
+    "FileIndex",
+    "get_compressor",
+    "TruncateCompressor",
+    "SmartCompressor",
 ]
+
