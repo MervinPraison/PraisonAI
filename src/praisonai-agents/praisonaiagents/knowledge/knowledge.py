@@ -110,22 +110,8 @@ class MongoDBMemory:
     
     def _get_embedding_dimensions(self, model_name: str) -> int:
         """Get embedding dimensions based on model name."""
-        # Common embedding model dimensions
-        model_dimensions = {
-            "text-embedding-3-small": 1536,
-            "text-embedding-3-large": 3072,
-            "text-embedding-ada-002": 1536,
-            "text-embedding-002": 1536,
-            # Add more models as needed
-        }
-        
-        # Check if model name contains known model identifiers
-        for model_key, dimensions in model_dimensions.items():
-            if model_key in model_name.lower():
-                return dimensions
-        
-        # Default to 1536 for unknown models (OpenAI standard)
-        return 1536
+        from praisonaiagents.embedding import get_dimensions
+        return get_dimensions(model_name)
     
     def _create_indexes(self):
         """Create necessary indexes for MongoDB."""
@@ -173,16 +159,11 @@ class MongoDBMemory:
             logging.warning(f"Could not create vector search index: {e}")
     
     def _get_embedding(self, text):
-        """Get embedding for text using litellm for unified provider support."""
+        """Get embedding for text using the unified embedding module."""
         try:
-            import litellm
-            
-            # Use litellm.embedding() for unified multi-provider support
-            response = litellm.embedding(
-                model=self.embedding_model_name,
-                input=text
-            )
-            return response.data[0]["embedding"]
+            from praisonaiagents.embedding import embedding
+            result = embedding(text, model=self.embedding_model_name)
+            return result.embeddings[0] if result.embeddings else None
         except Exception as e:
             logging.error(f"Error getting embedding: {e}")
             return None

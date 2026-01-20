@@ -56,6 +56,15 @@ from . import memory
 from . import workflows
 # Note: knowledge and mcp are lazy-loaded via __getattr__ due to heavy deps
 
+# Embedding API - explicit import shadows subpackage, enabling:
+#   from praisonaiagents import embedding, embeddings, EmbeddingResult, get_dimensions
+# Note: litellm is still lazy-loaded INSIDE the functions (no performance impact)
+from .embedding.embed import embedding, aembedding
+from .embedding.result import EmbeddingResult
+from .embedding.dimensions import get_dimensions
+embeddings = embedding  # Plural alias (OpenAI style: client.embeddings.create)
+aembeddings = aembedding  # Plural alias for async
+
 # Workflows - lightweight module
 from .workflows import (
     Workflow, WorkflowStep, WorkflowContext, StepResult,
@@ -392,6 +401,33 @@ def __getattr__(name):
         _lazy_cache[name] = Memory
         return Memory
     
+    # Embedding module (unified embedding API)
+    # Note: Must import from .embed submodule to get functions, not the module
+    elif name == "embedding":
+        from praisonaiagents.embedding.embed import embedding
+        _lazy_cache[name] = embedding
+        return embedding
+    elif name == "aembedding":
+        from praisonaiagents.embedding.embed import aembedding
+        _lazy_cache[name] = aembedding
+        return aembedding
+    elif name == "embed":
+        from praisonaiagents.embedding.embed import embed
+        _lazy_cache[name] = embed
+        return embed
+    elif name == "aembed":
+        from praisonaiagents.embedding.embed import aembed
+        _lazy_cache[name] = aembed
+        return aembed
+    elif name == "EmbeddingResult":
+        from praisonaiagents.embedding.result import EmbeddingResult
+        _lazy_cache[name] = EmbeddingResult
+        return EmbeddingResult
+    elif name == "get_dimensions":
+        from praisonaiagents.embedding.dimensions import get_dimensions
+        _lazy_cache[name] = get_dimensions
+        return get_dimensions
+    
     # Planning mode support (lazy)
     elif name in ("Plan", "PlanStep", "TodoList", "TodoItem", "PlanStorage", 
                   "PlanningAgent", "ApprovalCallback", "READ_ONLY_TOOLS", 
@@ -660,6 +696,15 @@ __all__ = [
     # Tool essentials
     'tool',
     'Tools',
+    
+    # Embedding API - simplified imports
+    # Usage: from praisonaiagents import embedding, EmbeddingResult
+    'embedding',
+    'embeddings',  # Plural alias (OpenAI style)
+    'aembedding',
+    'aembeddings',  # Plural alias for async
+    'EmbeddingResult',
+    'get_dimensions',
     
     # Sub-packages for organized imports
     # Usage: import praisonaiagents as pa; pa.config.MemoryConfig

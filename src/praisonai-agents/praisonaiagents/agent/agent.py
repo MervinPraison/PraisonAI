@@ -2722,9 +2722,17 @@ Your Goal: {self.goal}"""
             
             # Add JSON format instruction if needed
             if output_json or output_pydantic:
-                model = output_pydantic or output_json
-                json_instruction = f"\nPlease respond with valid JSON matching this schema: {model.model_json_schema()}"
-                messages[-1]["content"] += json_instruction
+                schema_model = output_pydantic or output_json
+                # Handle Pydantic model
+                if hasattr(schema_model, 'model_json_schema'):
+                    import json
+                    json_instruction = f"\nPlease respond with valid JSON matching this schema: {json.dumps(schema_model.model_json_schema())}"
+                    messages[-1]["content"] += json_instruction
+                # Handle inline dict schema (Option A from YAML)
+                elif isinstance(schema_model, dict):
+                    import json
+                    json_instruction = f"\nPlease respond with valid JSON matching this schema: {json.dumps(schema_model)}"
+                    messages[-1]["content"] += json_instruction
         
         return messages, original_prompt
 

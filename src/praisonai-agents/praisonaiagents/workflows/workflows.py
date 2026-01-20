@@ -857,6 +857,53 @@ class Workflow:
         """Get on_step_error callback from hooks config."""
         return self._hooks_config.on_step_error if self._hooks_config else None
     
+    def _resolve_pydantic_class(self, class_name: str) -> Optional[Any]:
+        """
+        Resolve a Pydantic class from string reference (Option B for structured output).
+        
+        Looks for the class in:
+        1. tools.py in the workflow's directory
+        2. The global namespace
+        
+        Args:
+            class_name: Name of the Pydantic class to resolve
+            
+        Returns:
+            The Pydantic class if found, None otherwise
+        """
+        import sys
+        
+        # Try to find the class in tools.py from the workflow's directory
+        if self.file_path:
+            from pathlib import Path
+            workflow_dir = Path(self.file_path).parent
+            tools_path = workflow_dir / "tools.py"
+            
+            if tools_path.exists():
+                try:
+                    import importlib.util
+                    spec = importlib.util.spec_from_file_location("tools", tools_path)
+                    if spec and spec.loader:
+                        tools_module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(tools_module)
+                        
+                        if hasattr(tools_module, class_name):
+                            cls = getattr(tools_module, class_name)
+                            # Verify it's a Pydantic model
+                            if hasattr(cls, 'model_json_schema'):
+                                return cls
+                except Exception as e:
+                    logger.debug(f"Failed to load Pydantic class from tools.py: {e}")
+        
+        # Try to find in already-imported modules
+        for module_name, module in sys.modules.items():
+            if module and hasattr(module, class_name):
+                cls = getattr(module, class_name)
+                if hasattr(cls, 'model_json_schema'):
+                    return cls
+        
+        return None
+    
     @classmethod
     def from_template(
         cls,
@@ -1124,10 +1171,30 @@ class Workflow:
                         
                         # Handle images if present
                         step_images = getattr(step, 'images', None)
+                        # Get structured output options from step
+                        step_output_json = getattr(step, '_output_json', None)
+                        step_output_pydantic = getattr(step, '_output_pydantic', None)
+                        
+                        # Resolve Pydantic class from string reference (Option B)
+                        # If output_pydantic is a string, try to resolve it from tools.py
+                        if step_output_pydantic and isinstance(step_output_pydantic, str):
+                            resolved_class = self._resolve_pydantic_class(step_output_pydantic)
+                            if resolved_class:
+                                step_output_pydantic = resolved_class
+                            else:
+                                logger.warning(f"Could not resolve Pydantic class '{step_output_pydantic}' from tools.py")
+                                step_output_pydantic = None
+                        
+                        # Build chat kwargs
+                        chat_kwargs = {"stream": stream}
                         if step_images:
-                            output = step.agent.chat(action, images=step_images, stream=stream)
-                        else:
-                            output = step.agent.chat(action, stream=stream)
+                            chat_kwargs["images"] = step_images
+                        if step_output_json:
+                            chat_kwargs["output_json"] = step_output_json
+                        if step_output_pydantic:
+                            chat_kwargs["output_pydantic"] = step_output_pydantic
+                        
+                        output = step.agent.chat(action, **chat_kwargs)
                         
                         # Handle output_pydantic if present
                         output_pydantic = getattr(step, 'output_pydantic', None)
@@ -1425,13 +1492,25 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             yaml_action = getattr(step, '_yaml_action', None)
             # Check for _yaml_output_variable from YAML parser
             yaml_output_variable = getattr(step, '_yaml_output_variable', None)
+            # Check for _yaml_output_json from YAML parser (structured output - Option A)
+            yaml_output_json = getattr(step, '_yaml_output_json', None)
+            # Check for _yaml_output_pydantic from YAML parser (structured output - Option B)
+            yaml_output_pydantic = getattr(step, '_yaml_output_pydantic', None)
             # Check for _yaml_step_name from YAML parser
             yaml_step_name = getattr(step, '_yaml_step_name', None)
             # Use yaml_action if set, otherwise fall back to previous_output/input
             default_action = "{{previous_output}}" if index > 0 else "{{input}}"
             action = yaml_action if yaml_action else default_action
-            # Build output config if output_variable is specified
-            output_config = {"variable": yaml_output_variable} if yaml_output_variable else None
+            # Build output config with all structured output options
+            output_config = {}
+            if yaml_output_variable:
+                output_config["variable"] = yaml_output_variable
+            if yaml_output_json:
+                output_config["json_model"] = yaml_output_json
+            if yaml_output_pydantic:
+                output_config["pydantic_model"] = yaml_output_pydantic
+            # Only pass output_config if it has values
+            output_config = output_config if output_config else None
             return WorkflowStep(
                 name=yaml_step_name or getattr(step, 'name', f'agent_{index+1}'),
                 agent=step,
@@ -1462,6 +1541,20 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         stream: bool = True
     ) -> Dict[str, Any]:
         """Execute a single step and return result."""
+        # Handle Include steps (for include inside loop)
+        if isinstance(step, Include):
+            include_result = self._execute_include(
+                step, previous_output, input, all_variables, model, verbose, stream
+            )
+            # Return in the expected format for single step
+            combined_output = include_result.get("output", "")
+            return {
+                "step": f"include:{step.recipe}",
+                "output": combined_output,
+                "stop": False,
+                "variables": include_result.get("variables", all_variables)
+            }
+        
         normalized = self._normalize_single_step(step, index)
         
         context = WorkflowContext(

@@ -776,8 +776,19 @@ class YAMLWorkflowParser:
             if isinstance(step_def, str) and step_def in self._agents:
                 agent_or_step = self._agents[step_def]
         
+        # Check for include at step level (include inside loop)
+        if agent_or_step is None and 'include' in step_data:
+            include_value = step_data['include']
+            if isinstance(include_value, str):
+                agent_or_step = Include(recipe=include_value)
+            elif isinstance(include_value, dict):
+                agent_or_step = Include(
+                    recipe=include_value.get('recipe', ''),
+                    input=include_value.get('input')
+                )
+        
         if agent_or_step is None:
-            raise ValueError("Loop step requires an agent")
+            raise ValueError("Loop step requires an agent or include")
         
         return loop(
             agent_or_step, 

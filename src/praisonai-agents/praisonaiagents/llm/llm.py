@@ -1210,8 +1210,13 @@ Now provide your final answer using this result."""
             # Only append JSON schema for non-Gemini models or Gemini models without structured output support
             if (output_json or output_pydantic) and not is_gemini_with_structured_output:
                 schema_model = output_json or output_pydantic
-                if schema_model and hasattr(schema_model, 'model_json_schema'):
-                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(schema_model.model_json_schema())}"
+                if schema_model:
+                    # Handle Pydantic model
+                    if hasattr(schema_model, 'model_json_schema'):
+                        system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(schema_model.model_json_schema())}"
+                    # Handle inline dict schema (Option A from YAML)
+                    elif isinstance(schema_model, dict):
+                        system_prompt += f"\nReturn ONLY a JSON object that matches this schema: {json.dumps(schema_model)}"
             
             # Skip system messages for legacy o1 models as they don't support them
             if not self._needs_system_message_skip():
@@ -3771,20 +3776,46 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             params.pop(param, None)
         
         if output_json or output_pydantic:
+            from .model_capabilities import supports_structured_outputs
+            schema_model = output_json or output_pydantic
             
-            # Check if this is a Gemini model that supports native structured outputs
-            if self._is_gemini_model():
-                from .model_capabilities import supports_structured_outputs
-                schema_model = output_json or output_pydantic
-                
-                if schema_model and hasattr(schema_model, 'model_json_schema') and supports_structured_outputs(self.model):
-                    schema = schema_model.model_json_schema()
-                    
-                    # Gemini uses response_mime_type and response_schema
-                    params['response_mime_type'] = 'application/json'
-                    params['response_schema'] = schema
-                    
-                    logging.debug(f"Using Gemini native structured output with schema: {json.dumps(schema, indent=2)}")
+            # Check if model supports structured outputs
+            if supports_structured_outputs(self.model):
+                # Check if this is a Gemini model (uses different params)
+                if self._is_gemini_model():
+                    if schema_model and hasattr(schema_model, 'model_json_schema'):
+                        schema = schema_model.model_json_schema()
+                        # Gemini uses response_mime_type and response_schema
+                        params['response_mime_type'] = 'application/json'
+                        params['response_schema'] = schema
+                        logging.debug(f"Using Gemini native structured output with schema: {json.dumps(schema, indent=2)}")
+                else:
+                    # OpenAI and other models use response_format
+                    # Handle Pydantic model
+                    if schema_model and hasattr(schema_model, 'model_json_schema'):
+                        schema = schema_model.model_json_schema()
+                        # Use json_schema format for strict validation
+                        params['response_format'] = {
+                            "type": "json_schema",
+                            "json_schema": {
+                                "name": getattr(schema_model, '__name__', 'response'),
+                                "schema": schema,
+                                "strict": True
+                            }
+                        }
+                        logging.debug(f"Using OpenAI structured output with schema: {json.dumps(schema, indent=2)}")
+                    # Handle dict schema (inline JSON schema from YAML)
+                    elif isinstance(schema_model, dict):
+                        # Inline JSON schema - wrap in response_format
+                        params['response_format'] = {
+                            "type": "json_schema",
+                            "json_schema": {
+                                "name": "structured_output",
+                                "schema": schema_model,
+                                "strict": True
+                            }
+                        }
+                        logging.debug(f"Using inline JSON schema: {json.dumps(schema_model, indent=2)}")
         
         # Add tool_choice="auto" when tools are provided (unless already specified)
         # This encourages the model to use tools when appropriate

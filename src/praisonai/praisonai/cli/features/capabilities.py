@@ -356,11 +356,11 @@ class CapabilitiesHandler:
         except SystemExit:
             return 1
         
-        from praisonai.capabilities.embeddings import embed
+        from praisonaiagents.embedding import embedding
         
         try:
             text_input = " ".join(parsed.text)
-            result = embed(
+            result = embedding(
                 input=text_input,
                 model=parsed.model,
                 dimensions=parsed.dimensions,
