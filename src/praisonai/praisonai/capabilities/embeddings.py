@@ -96,6 +96,11 @@ def embed(
     )
 
 
+# Aliases for consistency with LiteLLM naming
+embedding = embed
+"""Alias for embed(). Use embed() or embedding() interchangeably."""
+
+
 async def aembed(
     input: Union[str, List[str]],
     model: str = "text-embedding-3-small",
@@ -156,3 +161,8 @@ async def aembed(
         usage=usage,
         metadata=metadata or {},
     )
+
+
+# Async alias for consistency with LiteLLM naming
+aembedding = aembed
+"""Alias for aembed(). Use aembed() or aembedding() interchangeably."""

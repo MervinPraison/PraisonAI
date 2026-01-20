@@ -66,6 +66,8 @@ __all__ = [
     # Embeddings
     'embed',
     'aembed',
+    'embedding',  # Alias for embed
+    'aembedding',  # Alias for aembed
     # Rerank
     'rerank',
     'arerank',
@@ -194,6 +196,7 @@ _ATTR_TO_MODULE = {
     'VectorStoreResult': 'vector_stores',
     # Embeddings
     'embed': 'embeddings', 'aembed': 'embeddings', 'EmbeddingResult': 'embeddings',
+    'embedding': 'embeddings', 'aembedding': 'embeddings',  # Aliases
     # Rerank
     'rerank': 'rerank_module', 'arerank': 'rerank_module', 'RerankResult': 'rerank_module',
     # Moderations

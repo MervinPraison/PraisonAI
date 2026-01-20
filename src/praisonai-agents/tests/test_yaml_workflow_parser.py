@@ -364,7 +364,8 @@ steps:
         workflow = parser.parse_string(yaml_content)
         
         assert workflow is not None
-        assert workflow.planning == True
+        # planning field holds WorkflowPlanningConfig, check _planning_enabled for bool
+        assert workflow._planning_enabled == True
         assert workflow.reasoning == True
         assert workflow.verbose == True
     
@@ -376,9 +377,11 @@ steps:
 name: Memory Test
 workflow:
   memory_config:
-    provider: chroma
-    persist: true
-    collection: test_collection
+    backend: chroma
+    user_id: test_user
+    config:
+      persist: true
+      collection: test_collection
 
 agents:
   agent1:
@@ -396,7 +399,7 @@ steps:
         
         assert workflow is not None
         assert workflow.memory_config is not None
-        assert workflow.memory_config.get("provider") == "chroma"
+        assert workflow.memory_config.get("backend") == "chroma"
 
 
 class TestYAMLWorkflowParserCallbacks:
@@ -579,11 +582,9 @@ framework: praisonai
 
 workflow:
   planning: true
+  planning_llm: gpt-4o
   reasoning: true
   verbose: true
-  memory_config:
-    provider: chroma
-    persist: true
 
 variables:
   topic: AI trends
@@ -646,7 +647,7 @@ callbacks:
         
         assert workflow is not None
         assert workflow.name == "Complete Workflow"
-        assert workflow.planning == True
+        assert workflow._planning_enabled == True
         assert workflow.reasoning == True
         assert workflow.variables.get("topic") == "AI trends"
         assert len(workflow.steps) == 4
@@ -794,6 +795,7 @@ topic: "Research AI trends"
 
 workflow:
   planning: true
+  planning_llm: gpt-4o
   reasoning: true
   verbose: true
 
@@ -827,7 +829,7 @@ steps:
         
         assert workflow is not None
         assert workflow.name == "Extended Agents YAML"
-        assert workflow.planning == True
+        assert workflow._planning_enabled == True
         assert workflow.reasoning == True
         assert workflow.variables.get("topic") == "AI trends"
         assert len(workflow.steps) == 2

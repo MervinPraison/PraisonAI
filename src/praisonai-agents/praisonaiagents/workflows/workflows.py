@@ -104,7 +104,7 @@ class Loop:
     Iterate over a list or CSV file, executing step for each item.
     
     Usage:
-        # Loop over list variable
+        # Loop over list variable (sequential)
         workflow = Workflow(
             steps=[loop(processor, over="items")],
             variables={"items": ["a", "b", "c"]}
@@ -114,12 +114,26 @@ class Loop:
         workflow = Workflow(steps=[
             loop(processor, from_csv="data.csv")
         ])
+        
+        # Parallel loop over items (concurrent execution)
+        workflow = Workflow(
+            steps=[loop(processor, over="items", parallel=True)],
+            variables={"items": ["a", "b", "c"]}
+        )
+        
+        # Parallel with limited workers
+        workflow = Workflow(
+            steps=[loop(processor, over="items", parallel=True, max_workers=4)],
+            variables={"items": ["a", "b", "c"]}
+        )
     """
     step: Any = None
     over: Optional[str] = None  # Variable name containing list
     from_csv: Optional[str] = None  # CSV file path
     from_file: Optional[str] = None  # Text file path (one item per line)
     var_name: str = "item"  # Variable name for current item
+    parallel: bool = False  # Execute iterations in parallel
+    max_workers: Optional[int] = None  # Max parallel workers (None = unlimited)
     
     def __init__(
         self, 
@@ -127,13 +141,17 @@ class Loop:
         over: Optional[str] = None,
         from_csv: Optional[str] = None,
         from_file: Optional[str] = None,
-        var_name: str = "item"
+        var_name: str = "item",
+        parallel: bool = False,
+        max_workers: Optional[int] = None
     ):
         self.step = step
         self.over = over
         self.from_csv = from_csv
         self.from_file = from_file
         self.var_name = var_name
+        self.parallel = parallel
+        self.max_workers = max_workers
 
 
 @dataclass
@@ -175,9 +193,24 @@ def parallel(steps: List) -> Parallel:
     return Parallel(steps=steps)
 
 def loop(step: Any, over: Optional[str] = None, from_csv: Optional[str] = None, 
-         from_file: Optional[str] = None, var_name: str = "item") -> Loop:
-    """Loop over items executing step for each."""
-    return Loop(step=step, over=over, from_csv=from_csv, from_file=from_file, var_name=var_name)
+         from_file: Optional[str] = None, var_name: str = "item",
+         parallel: bool = False, max_workers: Optional[int] = None) -> Loop:
+    """Loop over items executing step for each.
+    
+    Args:
+        step: The step (agent/function) to execute for each item
+        over: Variable name containing the list to iterate over
+        from_csv: Path to CSV file to read items from
+        from_file: Path to text file with one item per line
+        var_name: Variable name for current item (default: "item")
+        parallel: If True, execute iterations in parallel (default: False)
+        max_workers: Max parallel workers when parallel=True (default: None = unlimited)
+    
+    Returns:
+        Loop object configured for iteration
+    """
+    return Loop(step=step, over=over, from_csv=from_csv, from_file=from_file, 
+                var_name=var_name, parallel=parallel, max_workers=max_workers)
 
 
 def repeat(step: Any, until: Optional[Callable[[WorkflowContext], bool]] = None,
@@ -769,6 +802,11 @@ class Workflow:
         """Get verbose setting from resolved output config."""
         return self._verbose
     
+    @verbose.setter
+    def verbose(self, value: bool):
+        """Set verbose setting."""
+        self._verbose = value
+    
     @property
     def stream(self) -> bool:
         """Get stream setting from resolved output config."""
@@ -787,8 +825,11 @@ class Workflow:
     @property
     def memory_config(self) -> Optional[Dict[str, Any]]:
         """Get memory config dict for backward compatibility."""
-        if self._memory_config and hasattr(self._memory_config, 'to_dict'):
-            return self._memory_config.to_dict()
+        if self._memory_config:
+            if hasattr(self._memory_config, 'to_dict'):
+                return self._memory_config.to_dict()
+            elif isinstance(self._memory_config, dict):
+                return self._memory_config
         return None
     
     @property
@@ -1382,14 +1423,21 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             agent_tools = getattr(step, 'tools', None)
             # Check for _yaml_action from YAML parser (canonical: action, alias: description)
             yaml_action = getattr(step, '_yaml_action', None)
+            # Check for _yaml_output_variable from YAML parser
+            yaml_output_variable = getattr(step, '_yaml_output_variable', None)
+            # Check for _yaml_step_name from YAML parser
+            yaml_step_name = getattr(step, '_yaml_step_name', None)
             # Use yaml_action if set, otherwise fall back to previous_output/input
             default_action = "{{previous_output}}" if index > 0 else "{{input}}"
             action = yaml_action if yaml_action else default_action
+            # Build output config if output_variable is specified
+            output_config = {"variable": yaml_output_variable} if yaml_output_variable else None
             return WorkflowStep(
-                name=getattr(step, 'name', f'agent_{index+1}'),
+                name=yaml_step_name or getattr(step, 'name', f'agent_{index+1}'),
                 agent=step,
                 tools=agent_tools,
-                action=action
+                action=action,
+                output=output_config
             )
         elif callable(step):
             return WorkflowStep(
@@ -1592,8 +1640,13 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         verbose: bool,
         stream: bool = True
     ) -> Dict[str, Any]:
-        """Execute step for each item in loop."""
+        """Execute step for each item in loop.
+        
+        When loop_step.parallel is True, executes iterations concurrently
+        using ThreadPoolExecutor for faster processing.
+        """
         import csv
+        import concurrent.futures
         
         results = []
         outputs = []
@@ -1603,7 +1656,8 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         if loop_step.over:
             items = all_variables.get(loop_step.over, [])
             if isinstance(items, str):
-                items = [items]
+                # Try to parse as JSON list first (handles agent output like '["a", "b", "c"]')
+                items = self._parse_list_from_string(items)
         elif loop_step.from_csv:
             try:
                 with open(loop_step.from_csv, 'r', encoding='utf-8') as f:
@@ -1620,26 +1674,128 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 logger.error(f"Failed to read file {loop_step.from_file}: {e}")
                 items = []
         
-        if verbose:
-            print(f"🔁 Looping over {len(items)} items...")
+        num_items = len(items)
         
-        for idx, item in enumerate(items):
-            # Add current item to variables
-            loop_vars = all_variables.copy()
-            loop_vars[loop_step.var_name] = item
-            loop_vars["loop_index"] = idx
+        if loop_step.parallel and num_items > 1:
+            # Parallel execution
+            max_workers = loop_step.max_workers or num_items
+            if verbose:
+                print(f"⚡🔁 Parallel looping over {num_items} items (max_workers={max_workers})...")
             
-            step_result = self._execute_single_step_internal(
-                loop_step.step, previous_output, input, loop_vars, model, verbose, idx, stream=stream
-            )
-            results.append({"step": f"{step_result['step']}_{idx}", "output": step_result["output"]})
-            outputs.append(step_result["output"])
-            previous_output = step_result["output"]
+            def execute_item(idx_item_tuple):
+                """Execute step for a single item in thread."""
+                idx, item = idx_item_tuple
+                loop_vars = all_variables.copy()
+                loop_vars[loop_step.var_name] = item
+                loop_vars["loop_index"] = idx
+                
+                # Execute step (verbose=False in parallel to avoid interleaved output)
+                step_result = self._execute_single_step_internal(
+                    loop_step.step, previous_output, input, loop_vars, model, False, idx, stream=False
+                )
+                return idx, step_result
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [executor.submit(execute_item, (idx, item)) for idx, item in enumerate(items)]
+                
+                # Collect results in order
+                indexed_results = []
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        idx, step_result = future.result()
+                        indexed_results.append((idx, step_result))
+                        if verbose:
+                            print(f"  ✓ Item {idx + 1}/{num_items} complete")
+                    except Exception as e:
+                        logger.error(f"Parallel loop iteration failed: {e}")
+                        indexed_results.append((idx, {"step": f"loop_{idx}", "output": f"Error: {e}"}))
+                
+                # Sort by index to maintain order
+                indexed_results.sort(key=lambda x: x[0])
+                
+                for idx, step_result in indexed_results:
+                    results.append({"step": f"{step_result['step']}_{idx}", "output": step_result["output"]})
+                    outputs.append(step_result["output"])
+            
+            if verbose:
+                print(f"✅ Parallel loop complete: {len(outputs)} results")
+        else:
+            # Sequential execution (original behavior)
+            if verbose:
+                print(f"🔁 Looping over {num_items} items...")
+            
+            for idx, item in enumerate(items):
+                # Add current item to variables
+                loop_vars = all_variables.copy()
+                loop_vars[loop_step.var_name] = item
+                loop_vars["loop_index"] = idx
+                
+                step_result = self._execute_single_step_internal(
+                    loop_step.step, previous_output, input, loop_vars, model, verbose, idx, stream=stream
+                )
+                results.append({"step": f"{step_result['step']}_{idx}", "output": step_result["output"]})
+                outputs.append(step_result["output"])
+                previous_output = step_result["output"]
         
         all_variables["loop_outputs"] = outputs
         combined_output = "\n".join(str(o) for o in outputs) if outputs else ""
         
         return {"steps": results, "output": combined_output, "variables": all_variables}
+    
+    def _parse_list_from_string(self, text: str) -> List[Any]:
+        """
+        Parse a list from a string, handling multiple formats.
+        
+        Supports:
+        1. Pure JSON array: '["a", "b", "c"]'
+        2. JSON array embedded in text: 'Here are topics: ["a", "b", "c"]'
+        3. Newline-separated items (fallback)
+        
+        Args:
+            text: String that may contain a list
+            
+        Returns:
+            List of items, or [text] if no list found
+        """
+        import json
+        import re
+        
+        if not text or not text.strip():
+            return []
+        
+        text = text.strip()
+        
+        # 1. Try direct JSON parse (pure JSON array)
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+        
+        # 2. Try to extract JSON array from text using regex
+        # Match JSON arrays like ["item1", "item2"] or ['item1', 'item2']
+        json_array_pattern = r'\[(?:[^\[\]]*(?:"[^"]*"|\'[^\']*\')?[^\[\]]*)*\]'
+        matches = re.findall(json_array_pattern, text)
+        
+        for match in matches:
+            try:
+                # Try parsing as JSON
+                parsed = json.loads(match)
+                if isinstance(parsed, list) and len(parsed) > 0:
+                    return parsed
+            except json.JSONDecodeError:
+                # Try replacing single quotes with double quotes
+                try:
+                    fixed = match.replace("'", '"')
+                    parsed = json.loads(fixed)
+                    if isinstance(parsed, list) and len(parsed) > 0:
+                        return parsed
+                except json.JSONDecodeError:
+                    continue
+        
+        # 3. Fallback: wrap as single item
+        return [text]
     
     def _execute_repeat(
         self,
