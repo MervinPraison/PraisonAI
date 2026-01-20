@@ -742,7 +742,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'recipe', 'endpoints', 'audio', 'embed', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor', 'registry', 'package', 'install', 'uninstall', 'acp', 'debug', 'lsp', 'diag', 'browser']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'recipe', 'endpoints', 'audio', 'embed', 'embedding', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor', 'registry', 'package', 'install', 'uninstall', 'acp', 'debug', 'lsp', 'diag', 'browser']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -1465,7 +1465,7 @@ class PraisonAI:
                 sys.exit(0)
             
             # Capabilities CLI commands
-            elif args.command in ['audio', 'embed', 'images', 'moderate', 'files', 'batches', 
+            elif args.command in ['audio', 'embed', 'embedding', 'images', 'moderate', 'files', 'batches', 
                                   'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning',
                                   'completions', 'messages', 'guardrails', 'rag', 'videos',
                                   'a2a', 'containers', 'passthrough', 'responses', 'search',
@@ -1475,6 +1475,7 @@ class PraisonAI:
                 cmd_map = {
                     'audio': CapabilitiesHandler.handle_audio,
                     'embed': CapabilitiesHandler.handle_embed,
+                    'embedding': CapabilitiesHandler.handle_embed,  # Alias for embed
                     'images': CapabilitiesHandler.handle_images,
                     'moderate': CapabilitiesHandler.handle_moderate,
                     'files': CapabilitiesHandler.handle_files,

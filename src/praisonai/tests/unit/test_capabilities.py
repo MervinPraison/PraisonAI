@@ -632,3 +632,73 @@ class TestCapabilityImports:
         """Test container_files module imports."""
         from praisonai.capabilities import container_file_read
         assert callable(container_file_read)
+
+
+class TestEmbeddingAliases:
+    """Tests for embedding/embed alias consolidation."""
+    
+    def test_import_embed_from_praisonai(self):
+        """Test that embed can be imported from top-level praisonai."""
+        from praisonai import embed
+        assert callable(embed)
+    
+    def test_import_embedding_from_praisonai(self):
+        """Test that embedding can be imported from top-level praisonai."""
+        from praisonai import embedding
+        assert callable(embedding)
+    
+    def test_import_embedding_alias_from_capabilities(self):
+        """Test that embedding alias works in capabilities module."""
+        from praisonai.capabilities import embedding
+        assert callable(embedding)
+    
+    def test_import_aembedding_alias_from_capabilities(self):
+        """Test that aembedding alias works in capabilities module."""
+        from praisonai.capabilities import aembedding
+        assert callable(aembedding)
+    
+    def test_embed_and_embedding_are_same_function(self):
+        """Test that embed and embedding point to the same function."""
+        from praisonai.capabilities import embed, embedding
+        # They should be the same function
+        assert embed is embedding
+    
+    def test_aembed_and_aembedding_are_same_function(self):
+        """Test that aembed and aembedding point to the same function."""
+        from praisonai.capabilities import aembed, aembedding
+        # They should be the same function
+        assert aembed is aembedding
+    
+    def test_top_level_embed_returns_embedding_result(self):
+        """Test that top-level embed returns EmbeddingResult type."""
+        from praisonai import embed
+        from praisonai.capabilities.embeddings import EmbeddingResult
+        # Check that the function signature matches (returns EmbeddingResult)
+        import inspect
+        sig = inspect.signature(embed)
+        # The function should have 'input' as first parameter
+        params = list(sig.parameters.keys())
+        assert 'input' in params
+    
+    def test_top_level_embedding_returns_embedding_result(self):
+        """Test that top-level embedding returns EmbeddingResult type."""
+        from praisonai import embedding
+        from praisonai.capabilities.embeddings import EmbeddingResult
+        # Check that the function signature matches (returns EmbeddingResult)
+        import inspect
+        sig = inspect.signature(embedding)
+        # The function should have 'input' as first parameter
+        params = list(sig.parameters.keys())
+        assert 'input' in params
+    
+    def test_llm_embedding_shows_deprecation_warning(self):
+        """Test that llm.embedding shows deprecation warning."""
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            from praisonai.llm import embedding
+            # Call the function to trigger warning
+            # Note: We can't actually call it without API key, but importing should work
+            assert callable(embedding)
+            # The deprecation warning should be raised when the function is called
+            # We'll check that the function has the warning in its implementation

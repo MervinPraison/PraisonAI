@@ -19,6 +19,7 @@ __all__ = [
     'DeployType',
     'CloudProvider',
     'recipe',
+    'embed',
     'embedding',
 ]
 
@@ -44,9 +45,12 @@ def __getattr__(name):
     elif name == 'recipe':
         from .recipe import core as recipe_module
         return recipe_module
+    elif name == 'embed':
+        from .capabilities.embeddings import embed
+        return embed
     elif name == 'embedding':
-        from .llm import embedding
-        return embedding
+        from .capabilities.embeddings import embed
+        return embed
     
     # Try praisonaiagents exports
     try:

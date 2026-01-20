@@ -281,6 +281,9 @@ class YAMLWorkflowParser:
         if workflow_output is None and verbose:
             workflow_output = "verbose"
         
+        # Build memory config if specified - pass raw dict for flexibility
+        memory_value = memory_config if memory_config else None
+        
         workflow = Workflow(
             name=name,
             steps=steps,
@@ -288,6 +291,7 @@ class YAMLWorkflowParser:
             planning=planning_value,
             default_llm=default_llm,
             output=workflow_output,  # Pass output mode to Workflow
+            memory=memory_value,  # Pass memory config to Workflow
         )
         
         # Store additional attributes for feature parity with agents.yaml
@@ -611,6 +615,11 @@ class YAMLWorkflowParser:
             if async_execution is not None:
                 agent._yaml_async_execution = async_execution
             
+            # Handle output_variable (store output in named variable for loop iteration)
+            output_variable = step_data.get('output_variable')
+            if output_variable:
+                agent._yaml_output_variable = output_variable
+            
             return agent
         else:
             raise ValueError(f"Agent '{agent_id}' not defined in agents section")
@@ -696,7 +705,7 @@ class YAMLWorkflowParser:
         
         return parallel(parallel_steps)
     
-    def _parse_loop_step(self, step_data: Dict) -> Dict:
+    def _parse_loop_step(self, step_data: Dict):
         """
         Parse a loop pattern step.
         
@@ -705,24 +714,80 @@ class YAMLWorkflowParser:
             
         Returns:
             Loop pattern object
+            
+        Supports three syntax forms:
+            # Simple form with agent at step level
+            - loop:
+                over: items
+              agent: processor
+              
+            # Nested step form
+            - loop:
+                over: items
+                parallel: true
+              step:
+                agent: processor
+                
+            # Full nested form
+            - loop:
+                over: items
+                parallel: true
+                max_workers: 4
+                step: processor
         """
         loop_config = step_data['loop']
-        agent_id = step_data.get('agent')
         
+        # Get loop parameters
+        over = loop_config.get('over')
+        from_csv = loop_config.get('from_csv')
+        from_file = loop_config.get('from_file')
+        var_name = loop_config.get('var_name', 'item')
+        parallel_flag = loop_config.get('parallel', False)
+        max_workers = loop_config.get('max_workers')
+        
+        # Resolve the step/agent to execute
+        agent_or_step = None
+        
+        # First check for agent at step level (original syntax)
+        agent_id = step_data.get('agent')
         if agent_id and agent_id in self._agents:
-            agent = self._agents[agent_id]
-            
+            agent_or_step = self._agents[agent_id]
             # Store action if present
             if 'action' in step_data:
-                agent._yaml_action = step_data['action']
-            
-            # Get loop parameters
-            over = loop_config.get('over')
-            from_csv = loop_config.get('from_csv')
-            
-            return loop(agent, over=over, from_csv=from_csv)
+                agent_or_step._yaml_action = step_data['action']
         
-        raise ValueError("Loop step requires an agent")
+        # Check for step: syntax (nested form)
+        if 'step' in step_data:
+            step_def = step_data['step']
+            if isinstance(step_def, dict) and 'agent' in step_def:
+                agent_id = step_def['agent']
+                if agent_id in self._agents:
+                    agent_or_step = self._agents[agent_id]
+                    if 'action' in step_def:
+                        agent_or_step._yaml_action = step_def['action']
+            elif isinstance(step_def, str):
+                # step: agent_name shorthand
+                if step_def in self._agents:
+                    agent_or_step = self._agents[step_def]
+        
+        # Check for step inside loop config
+        if 'step' in loop_config:
+            step_def = loop_config['step']
+            if isinstance(step_def, str) and step_def in self._agents:
+                agent_or_step = self._agents[step_def]
+        
+        if agent_or_step is None:
+            raise ValueError("Loop step requires an agent")
+        
+        return loop(
+            agent_or_step, 
+            over=over, 
+            from_csv=from_csv, 
+            from_file=from_file,
+            var_name=var_name,
+            parallel=parallel_flag, 
+            max_workers=max_workers
+        )
     
     def _parse_repeat_step(self, step_data: Dict) -> Dict:
         """

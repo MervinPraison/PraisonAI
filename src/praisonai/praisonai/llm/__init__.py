@@ -71,6 +71,10 @@ def embedding(text, model="text-embedding-3-small", **kwargs):
     """
     Get embedding vector for text.
     
+    .. deprecated::
+        Use `from praisonai import embed` or `from praisonai.capabilities import embed` instead.
+        This function returns raw vectors; the new embed() returns EmbeddingResult with metadata.
+    
     Args:
         text: Text string or list of strings to embed
         model: Embedding model name (default: text-embedding-3-small)
@@ -94,6 +98,15 @@ def embedding(text, model="text-embedding-3-small", **kwargs):
     Note:
         Requires litellm. Install with: pip install praisonai[llm]
     """
+    import warnings
+    warnings.warn(
+        "praisonai.llm.embedding() is deprecated. "
+        "Use 'from praisonai import embed' or 'from praisonai.capabilities import embed' instead. "
+        "The new embed() returns EmbeddingResult with metadata.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
     try:
         import litellm
     except ImportError:

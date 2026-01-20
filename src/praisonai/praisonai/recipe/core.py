@@ -816,6 +816,11 @@ def _execute_praisonai_workflow(
             registry=tool_registry,
         )
         
+        # Use output= instead of verbose= (DRY: same as Workflow)
+        output_mode = options.get("output")
+        if not output_mode and options.get("verbose"):
+            output_mode = "verbose"
+        
         agent = Agent(
             name=agent_cfg.get("name", "Agent"),
             role=agent_cfg.get("role", ""),
@@ -823,7 +828,7 @@ def _execute_praisonai_workflow(
             backstory=agent_cfg.get("backstory", ""),
             tools=agent_tools if agent_tools else None,
             llm=agent_cfg.get("llm"),
-            verbose=options.get("verbose", False),
+            output=output_mode,  # Use output= instead of deprecated verbose=
         )
         agents.append(agent)
         agent_map[agent_cfg.get("name")] = agent
@@ -848,11 +853,16 @@ def _execute_praisonai_workflow(
         )
         tasks.append(task)
     
+    # Use output mode for Agents as well (DRY approach)
+    output_mode = options.get("output")
+    if not output_mode and options.get("verbose"):
+        output_mode = "verbose"
+    
     praison = Agents(
         agents=agents,
         tasks=tasks,
         process=workflow_config.get("process", "sequential"),
-        verbose=options.get("verbose", 1) if options.get("verbose") else 0,
+        verbose=1 if output_mode == "verbose" else 0,  # Agents still uses verbose int
     )
     
     return praison.start()
@@ -878,12 +888,17 @@ def _execute_simple_agent(
     """Execute a simple single-agent workflow."""
     from praisonaiagents import Agent
     
+    # Use output= instead of verbose= (DRY: same as Workflow)
+    output_mode = options.get("output")
+    if not output_mode and options.get("verbose"):
+        output_mode = "verbose"
+    
     agent = Agent(
         name=workflow_config.get("name", "RecipeAgent"),
         role=workflow_config.get("role", "AI Assistant"),
         goal=workflow_config.get("goal", "Complete the task"),
         backstory=workflow_config.get("backstory", ""),
-        verbose=options.get("verbose", False),
+        output=output_mode,  # Use output= instead of deprecated verbose=
     )
     
     prompt = config.get("input", config.get("prompt", ""))

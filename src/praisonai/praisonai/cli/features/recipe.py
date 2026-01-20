@@ -142,11 +142,12 @@ class RecipeHandler:
   --input, -i       Input JSON or file path
   --config, -c      Config JSON overrides
   --session, -s     Session ID for state grouping
+  --output, -o      Output mode: silent, status, trace, verbose, debug, json
   --json            Output JSON (for parsing)
   --stream          Stream output events (SSE-like)
   --dry-run         Validate without executing
   --explain         Show execution plan
-  --verbose, -v     Verbose output
+  --verbose, -v     Alias for --output verbose
   --timeout <sec>   Timeout in seconds (default: 300)
   --non-interactive Disable prompts (for CI)
   --export <path>   Export run bundle after execution
@@ -555,6 +556,7 @@ class RecipeHandler:
             "dry_run": {"flag": True, "default": False},
             "explain": {"flag": True, "default": False},
             "verbose": {"short": "-v", "flag": True, "default": False},
+            "output": {"short": "-o", "default": None},  # Output mode: silent, status, trace, verbose, debug
             "timeout": {"default": "300"},
             "non_interactive": {"flag": True, "default": False},
             "export": {"default": None},
@@ -599,9 +601,15 @@ class RecipeHandler:
                 return self.EXIT_VALIDATION_ERROR
         
         # Build options
+        # Map --verbose to --output verbose for backward compatibility
+        output_mode = parsed.get("output")
+        if not output_mode and parsed.get("verbose"):
+            output_mode = "verbose"
+        
         options = {
             "dry_run": parsed["dry_run"] or parsed["explain"],
             "verbose": parsed["verbose"],
+            "output": output_mode,  # New: output mode (status, trace, verbose, etc.)
             "timeout_sec": int(parsed["timeout"]),
             "mode": parsed["mode"],
             "offline": parsed["offline"],
