@@ -1155,6 +1155,10 @@ class Workflow:
                             
                     elif step.agent:
                         # Direct agent with tools
+                        # Propagate context management to existing agent if workflow has it enabled
+                        if self.context and not step.agent._context_manager_initialized:
+                            step.agent._context_param = self.context
+                        
                         # Substitute variables in action
                         action = step.action or input
                         for key, value in all_variables.items():
@@ -1229,7 +1233,8 @@ class Workflow:
                             tools=step_tools if step_tools else None,
                             output=self.output,  # Propagate output config to child agents
                             reasoning=self.reasoning,
-                            stream=stream
+                            stream=stream,
+                            context=self.context,  # Propagate context management to child agents
                         )
                         # Substitute variables in action
                         action = step.action
@@ -1587,6 +1592,10 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 output = f"Error: {e}"
         elif normalized.agent:
             try:
+                # Propagate context management to existing agent if workflow has it enabled
+                if self.context and not normalized.agent._context_manager_initialized:
+                    normalized.agent._context_param = self.context
+                
                 action = normalized.action or input
                 # Substitute variables
                 for key, value in all_variables.items():
@@ -1610,8 +1619,8 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                     role=config.get("role", "Assistant"),
                     goal=config.get("goal", "Complete the task"),
                     llm=config.get("llm", model),
-                    # verbose parameter removed - Agent no longer accepts it
-                    stream=stream
+                    stream=stream,
+                    context=self.context,  # Propagate context management to child agents
                 )
                 action = normalized.action
                 for key, value in all_variables.items():

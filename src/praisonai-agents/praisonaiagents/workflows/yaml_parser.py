@@ -254,6 +254,16 @@ class YAMLWorkflowParser:
         # Parse variables
         variables = data.get('variables', {})
         
+        # Auto-add 'topic' to variables for include recipe propagation
+        # This ensures included recipes receive the parent's topic via {{topic}}
+        topic_value = data.get('topic')
+        if topic_value and 'topic' not in variables:
+            # Substitute template variables (e.g., {{today}}) in topic if present
+            if "{{" in str(topic_value):
+                from praisonaiagents.utils.variables import substitute_variables
+                topic_value = substitute_variables(str(topic_value), variables)
+            variables['topic'] = topic_value
+        
         # Parse agents - support both 'agents' and 'roles' keys for backward compatibility
         agents_data = data.get('agents', {})
         if not agents_data and 'roles' in data:

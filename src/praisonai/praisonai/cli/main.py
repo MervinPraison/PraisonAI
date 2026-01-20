@@ -2411,6 +2411,33 @@ class PraisonAI:
             if verbose:
                 workflow.verbose = True
             
+            # Set context management from CLI args
+            context_auto_compact = getattr(args, 'context_auto_compact', None) if args else None
+            context_strategy = getattr(args, 'context_strategy', None) if args else None
+            context_threshold = getattr(args, 'context_threshold', None) if args else None
+            
+            if context_auto_compact is True or context_strategy or context_threshold:
+                # Enable context management with CLI-specified options
+                try:
+                    from praisonaiagents.context import ManagerConfig
+                    config_kwargs = {"auto_compact": True}
+                    if context_strategy:
+                        from praisonaiagents.context import OptimizerStrategy
+                        strategy_map = {
+                            "truncate": OptimizerStrategy.TRUNCATE,
+                            "sliding_window": OptimizerStrategy.SLIDING_WINDOW,
+                            "prune_tools": OptimizerStrategy.PRUNE_TOOLS,
+                            "summarize": OptimizerStrategy.SUMMARIZE,
+                            "smart": OptimizerStrategy.SMART,
+                        }
+                        config_kwargs["strategy"] = strategy_map.get(context_strategy, OptimizerStrategy.SMART)
+                    if context_threshold:
+                        config_kwargs["compact_threshold"] = context_threshold
+                    workflow.context = ManagerConfig(**config_kwargs)
+                    print(f"[cyan]Context management enabled (strategy={context_strategy or 'smart'}, threshold={context_threshold or 0.8})[/cyan]")
+                except ImportError:
+                    print("[yellow]Warning: Context management not available[/yellow]")
+            
             # Execute
             print("\n[bold]Executing workflow...[/bold]\n")
             result = workflow.start("")
