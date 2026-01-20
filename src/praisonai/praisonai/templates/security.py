@@ -250,8 +250,15 @@ class TemplateSecurity:
         errors = []
         total_size = 0
         
+        # Directories to skip during validation
+        SKIP_DIRS = {"__pycache__", ".git", ".svn", ".hg", "node_modules", ".venv", "venv"}
+        
         for file_path in directory.rglob("*"):
             if file_path.is_file():
+                # Skip files in excluded directories
+                if any(skip_dir in file_path.parts for skip_dir in SKIP_DIRS):
+                    continue
+                
                 # Check path safety
                 if not self.validate_path(str(file_path.relative_to(directory))):
                     errors.append(f"Unsafe path: {file_path.relative_to(directory)}")

@@ -660,6 +660,43 @@ def _load_recipe(name: str, offline: bool = False) -> Optional[RecipeConfig]:
         return None
 
 
+def _check_package_installed(package_name: str) -> bool:
+    """
+    Check if a Python package is installed using importlib.metadata.
+    
+    This is more reliable than trying to import the package because:
+    1. Package names often differ from import names (e.g., tavily-python -> tavily)
+    2. importlib.metadata checks the actual installed packages
+    3. No side effects from importing modules
+    
+    Args:
+        package_name: The pip package name (e.g., 'tavily-python', 'pillow')
+        
+    Returns:
+        True if package is installed, False otherwise
+    """
+    try:
+        from importlib.metadata import distributions
+        
+        # Normalize package name for comparison (pip normalizes - and _ and case)
+        normalized = package_name.lower().replace("-", "_").replace(".", "_")
+        
+        for dist in distributions():
+            dist_name = dist.metadata.get("Name", "").lower().replace("-", "_").replace(".", "_")
+            if dist_name == normalized:
+                return True
+        
+        return False
+    except Exception:
+        # Fallback: try to import with common name transformations
+        try:
+            import_name = package_name.replace("-", "_")
+            __import__(import_name)
+            return True
+        except ImportError:
+            return False
+
+
 def _check_dependencies(recipe_config: RecipeConfig) -> Dict[str, Any]:
     """Check if recipe dependencies are satisfied."""
     result = {
@@ -670,28 +707,11 @@ def _check_dependencies(recipe_config: RecipeConfig) -> Dict[str, Any]:
         "external": [],
     }
     
-    # Common package name to import name mappings
-    PACKAGE_IMPORT_MAP = {
-        "tavily-python": "tavily",
-        "google-generativeai": "google.generativeai",
-        "openai-whisper": "whisper",
-        "python-dotenv": "dotenv",
-        "pillow": "PIL",
-        "opencv-python": "cv2",
-        "scikit-learn": "sklearn",
-        "beautifulsoup4": "bs4",
-        "pyyaml": "yaml",
-    }
-    
     # Check Python packages
     for pkg in recipe_config.get_required_packages():
-        # Get the correct import name
-        import_name = PACKAGE_IMPORT_MAP.get(pkg, pkg.replace("-", "_"))
-        try:
-            __import__(import_name)
-            result["packages"].append({"name": pkg, "available": True})
-        except ImportError:
-            result["packages"].append({"name": pkg, "available": False})
+        available = _check_package_installed(pkg)
+        result["packages"].append({"name": pkg, "available": available})
+        if not available:
             result["all_satisfied"] = False
     
     # Check environment variables
@@ -808,6 +828,9 @@ def _execute_recipe(
                 workflow_config, merged_config, tool_registry, options
             )
         elif "steps" in workflow_config:
+            # Pass the workflow file path for proper execution
+            workflow_file_path = template_path / workflow_file if template_path else None
+            merged_config["_workflow_file"] = str(workflow_file_path) if workflow_file_path else None
             return _execute_steps_workflow(
                 workflow_config, merged_config, tool_registry, options
             )
@@ -900,9 +923,35 @@ def _execute_steps_workflow(
     tool_registry: Any,
     options: Dict[str, Any],
 ) -> Any:
-    """Execute a steps-based workflow."""
-    # For now, convert to simple execution
-    return {"message": "Steps workflow executed", "config": config}
+    """
+    Execute a steps-based workflow using praisonaiagents Workflow.
+    
+    This properly executes the workflow with all features:
+    - include steps (modular recipes)
+    - loop steps (parallel/sequential)
+    - output_variable
+    - agent execution
+    """
+    from praisonaiagents.workflows import YAMLWorkflowParser
+    
+    # Get the workflow file path from config if available
+    workflow_file = config.get("_workflow_file")
+    
+    if workflow_file:
+        # Use YAMLWorkflowParser to properly parse and execute the workflow
+        # This handles include steps, loops, variables, tools, etc.
+        parser = YAMLWorkflowParser(tool_registry=tool_registry)
+        workflow = parser.parse_file(workflow_file)
+        return workflow.start()
+    
+    # Fallback: Create workflow from config dict using parser
+    from praisonaiagents import Workflow
+    workflow = Workflow(
+        name=workflow_config.get("name", "RecipeWorkflow"),
+        steps=workflow_config.get("steps", []),
+        variables=workflow_config.get("variables", {}),
+    )
+    return workflow.start()
 
 
 def _execute_simple_agent(
