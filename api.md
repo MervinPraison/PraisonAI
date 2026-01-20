@@ -141,7 +141,7 @@ Methods:
 
 Types:
 ```python
-from praisonai import CloudProvider, Deploy, DeployConfig, DeployType, PraisonAI, __version__, embedding
+from praisonai import CloudProvider, Deploy, DeployConfig, DeployType, PraisonAI, __version__, embed, embedding
 ```
 
 # CLI
