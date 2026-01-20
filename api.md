@@ -249,8 +249,10 @@ Methods:
 * <code title="cli">praisonai lsp status <a href="./src/praisonai/praisonai/cli/commands/lsp.py">--help</a></code>
 * <code title="cli">praisonai lsp stop <a href="./src/praisonai/praisonai/cli/commands/lsp.py">--help</a></code>
 * <code title="cli">praisonai mcp add <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
+* <code title="cli">praisonai mcp auth <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
 * <code title="cli">praisonai mcp describe <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
 * <code title="cli">praisonai mcp list <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
+* <code title="cli">praisonai mcp logout <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
 * <code title="cli">praisonai mcp mcp-callback <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
 * <code title="cli">praisonai mcp remove <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
 * <code title="cli">praisonai mcp run <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
