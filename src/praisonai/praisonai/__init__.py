@@ -46,11 +46,22 @@ def __getattr__(name):
         from .recipe import core as recipe_module
         return recipe_module
     elif name == 'embed':
-        from .capabilities.embeddings import embed
+        # Re-export from core SDK for unified API
+        from praisonaiagents.embedding.embed import embed
         return embed
     elif name == 'embedding':
-        from .capabilities.embeddings import embed
-        return embed
+        # Re-export from core SDK for unified API
+        from praisonaiagents.embedding.embed import embedding
+        return embedding
+    elif name == 'aembed':
+        from praisonaiagents.embedding.embed import aembed
+        return aembed
+    elif name == 'aembedding':
+        from praisonaiagents.embedding.embed import aembedding
+        return aembedding
+    elif name == 'EmbeddingResult':
+        from praisonaiagents.embedding import EmbeddingResult
+        return EmbeddingResult
     
     # Try praisonaiagents exports
     try:

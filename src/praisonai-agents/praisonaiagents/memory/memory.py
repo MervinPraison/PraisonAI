@@ -463,52 +463,19 @@ class Memory:
             self._log_verbose(f"Error creating vector search indexes: {e}", logging.WARNING)
 
     def _get_embedding(self, text: str) -> List[float]:
-        """Get embedding for text using available embedding services."""
+        """Get embedding for text using the unified embedding module."""
         try:
-            if _check_litellm():
-                # Use LiteLLM for consistency with the rest of the codebase
-                import litellm
-                
-                response = litellm.embedding(
-                    model=self.embedding_model,
-                    input=text
-                )
-                return response.data[0]["embedding"]
-            elif _check_openai():
-                # Fallback to OpenAI client
-                from openai import OpenAI
-                client = OpenAI()
-                
-                response = client.embeddings.create(
-                    input=text,
-                    model=self.embedding_model
-                )
-                return response.data[0].embedding
-            else:
-                self._log_verbose("Neither litellm nor openai available for embeddings", logging.WARNING)
-                return None
+            from praisonaiagents.embedding import embedding
+            result = embedding(text, model=self.embedding_model)
+            return result.embeddings[0] if result.embeddings else None
         except Exception as e:
             self._log_verbose(f"Error getting embedding: {e}", logging.ERROR)
             return None
 
     def _get_embedding_dimensions(self, model_name: str) -> int:
         """Get embedding dimensions based on model name."""
-        # Common embedding model dimensions
-        model_dimensions = {
-            "text-embedding-3-small": 1536,
-            "text-embedding-3-large": 3072,
-            "text-embedding-ada-002": 1536,
-            "text-embedding-002": 1536,
-            # Add more models as needed
-        }
-        
-        # Check if model name contains known model identifiers
-        for model_key, dimensions in model_dimensions.items():
-            if model_key in model_name.lower():
-                return dimensions
-        
-        # Default to 1536 for unknown models (OpenAI standard)
-        return 1536
+        from praisonaiagents.embedding import get_dimensions
+        return get_dimensions(model_name)
 
     # -------------------------------------------------------------------------
     #                      Basic Quality Score Computation
@@ -690,27 +657,12 @@ class Memory:
             
         elif self.use_rag and hasattr(self, "chroma_col"):
             try:
-                if _check_litellm():
-                    # Use LiteLLM for consistency with the rest of the codebase
-                    import litellm
-                    
-                    response = litellm.embedding(
-                        model=self.embedding_model,
-                        input=query
-                    )
-                    query_embedding = response.data[0]["embedding"]
-                elif _check_openai():
-                    # Fallback to OpenAI client
-                    from openai import OpenAI
-                    client = OpenAI()
-                    
-                    response = client.embeddings.create(
-                        input=query,
-                        model=self.embedding_model
-                    )
-                    query_embedding = response.data[0].embedding
-                else:
-                    self._log_verbose("Neither litellm nor openai available for embeddings", logging.WARNING)
+                from praisonaiagents.embedding import embedding
+                result = embedding(query, model=self.embedding_model)
+                query_embedding = result.embeddings[0] if result.embeddings else None
+                
+                if query_embedding is None:
+                    self._log_verbose("Failed to get embedding for query", logging.WARNING)
                     return []
                 
                 resp = self.chroma_col.query(
@@ -853,39 +805,20 @@ class Memory:
         # Store in vector database if enabled
         if self.use_rag and hasattr(self, "chroma_col"):
             try:
-                if _check_litellm():
-                    # Use LiteLLM for consistency with the rest of the codebase
-                    import litellm
-                    
-                    logger.info("Getting embeddings from LiteLLM...")
-                    logger.trace(f"Embedding input text: {text}")
-                    
-                    response = litellm.embedding(
-                        model=self.embedding_model,
-                        input=text
-                    )
-                    embedding = response.data[0]["embedding"]
-                    logger.info("Successfully got embeddings from LiteLLM")
-                    logger.trace(f"Received embedding of length: {len(embedding)}")
-                    
-                elif _check_openai():
-                    # Fallback to OpenAI client
-                    from openai import OpenAI
-                    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-                    
-                    logger.info("Getting embeddings from OpenAI...")
-                    logger.trace(f"Embedding input text: {text}")
-                    
-                    response = client.embeddings.create(
-                        input=text,
-                        model=self.embedding_model
-                    )
-                    embedding = response.data[0].embedding
-                    logger.info("Successfully got embeddings from OpenAI")
-                    logger.trace(f"Received embedding of length: {len(embedding)}")
-                else:
-                    logger.warning("Neither litellm nor openai available for embeddings")
+                from praisonaiagents.embedding import embedding as get_embedding
+                
+                logger.info("Getting embeddings...")
+                logger.trace(f"Embedding input text: {text}")
+                
+                result = get_embedding(text, model=self.embedding_model)
+                embedding = result.embeddings[0] if result.embeddings else None
+                
+                if embedding is None:
+                    logger.warning("Failed to get embedding")
                     return
+                    
+                logger.info("Successfully got embeddings")
+                logger.trace(f"Received embedding of length: {len(embedding)}")
                 
                 # Sanitize metadata for ChromaDB
                 sanitized_metadata = self._sanitize_metadata(metadata)
@@ -1006,27 +939,12 @@ class Memory:
 
         elif self.use_rag and hasattr(self, "chroma_col"):
             try:
-                if _check_litellm():
-                    # Use LiteLLM for consistency with the rest of the codebase
-                    import litellm
-                    
-                    response = litellm.embedding(
-                        model=self.embedding_model,
-                        input=query
-                    )
-                    query_embedding = response.data[0]["embedding"]
-                elif _check_openai():
-                    # Fallback to OpenAI client
-                    from openai import OpenAI
-                    client = OpenAI()
-                    
-                    response = client.embeddings.create(
-                        input=query,
-                        model=self.embedding_model
-                    )
-                    query_embedding = response.data[0].embedding
-                else:
-                    self._log_verbose("Neither litellm nor openai available for embeddings", logging.WARNING)
+                from praisonaiagents.embedding import embedding as get_embedding
+                result = get_embedding(query, model=self.embedding_model)
+                query_embedding = result.embeddings[0] if result.embeddings else None
+                
+                if query_embedding is None:
+                    self._log_verbose("Failed to get embedding for query", logging.WARNING)
                     return []
                 
                 # Search ChromaDB with embedding

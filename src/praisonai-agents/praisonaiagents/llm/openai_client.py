@@ -342,9 +342,19 @@ class OpenAIClient:
         if system_prompt:
             # Append JSON schema if needed
             if output_json:
-                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
+                # Handle Pydantic model
+                if hasattr(output_json, 'model_json_schema'):
+                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
+                # Handle inline dict schema (Option A from YAML)
+                elif isinstance(output_json, dict):
+                    system_prompt += f"\nReturn ONLY a JSON object that matches this schema: {json.dumps(output_json)}"
             elif output_pydantic:
-                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
+                # Handle Pydantic model
+                if hasattr(output_pydantic, 'model_json_schema'):
+                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
+                # Handle inline dict schema
+                elif isinstance(output_pydantic, dict):
+                    system_prompt += f"\nReturn ONLY a JSON object that matches this schema: {json.dumps(output_pydantic)}"
             
             messages.append({"role": "system", "content": system_prompt})
         
