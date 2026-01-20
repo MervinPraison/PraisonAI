@@ -670,10 +670,25 @@ def _check_dependencies(recipe_config: RecipeConfig) -> Dict[str, Any]:
         "external": [],
     }
     
+    # Common package name to import name mappings
+    PACKAGE_IMPORT_MAP = {
+        "tavily-python": "tavily",
+        "google-generativeai": "google.generativeai",
+        "openai-whisper": "whisper",
+        "python-dotenv": "dotenv",
+        "pillow": "PIL",
+        "opencv-python": "cv2",
+        "scikit-learn": "sklearn",
+        "beautifulsoup4": "bs4",
+        "pyyaml": "yaml",
+    }
+    
     # Check Python packages
     for pkg in recipe_config.get_required_packages():
+        # Get the correct import name
+        import_name = PACKAGE_IMPORT_MAP.get(pkg, pkg.replace("-", "_"))
         try:
-            __import__(pkg.replace("-", "_"))
+            __import__(import_name)
             result["packages"].append({"name": pkg, "available": True})
         except ImportError:
             result["packages"].append({"name": pkg, "available": False})
@@ -750,6 +765,17 @@ def _execute_recipe(
         # Create a TemplateConfig compatible with loader
         template_path = Path(recipe_config.path) if recipe_config.path else None
         
+        # Determine workflow file - check for agents.yaml if workflow.yaml not specified
+        workflow_file = recipe_config.raw.get("workflow", "workflow.yaml")
+        agents_file = recipe_config.raw.get("agents", "agents.yaml")
+        
+        # If workflow.yaml doesn't exist but agents.yaml does, use agents.yaml as workflow
+        if template_path:
+            workflow_path = template_path / workflow_file
+            agents_path = template_path / agents_file
+            if not workflow_path.exists() and agents_path.exists():
+                workflow_file = agents_file
+        
         loader_config = LoaderTemplateConfig(
             name=recipe_config.name,
             description=recipe_config.description,
@@ -758,8 +784,8 @@ def _execute_recipe(
             license=recipe_config.license,
             tags=recipe_config.tags,
             requires=recipe_config.requires,
-            workflow_file=recipe_config.raw.get("workflow", "workflow.yaml"),
-            agents_file=recipe_config.raw.get("agents", "agents.yaml"),
+            workflow_file=workflow_file,
+            agents_file=agents_file,
             config_schema=recipe_config.config_schema,
             defaults=merged_config,
             skills=recipe_config.raw.get("skills", []),

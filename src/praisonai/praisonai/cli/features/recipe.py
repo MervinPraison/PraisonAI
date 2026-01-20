@@ -338,10 +338,11 @@ class RecipeHandler:
                 table.add_column("Tags", style="yellow")
                 
                 for r in recipes:
+                    desc = r.description or ""
                     table.add_row(
                         r.name,
-                        r.version,
-                        r.description[:50] + "..." if len(r.description) > 50 else r.description,
+                        r.version or "",
+                        desc[:50] + "..." if len(desc) > 50 else desc,
                         ", ".join(r.tags[:3]) if r.tags else "",
                     )
                 
