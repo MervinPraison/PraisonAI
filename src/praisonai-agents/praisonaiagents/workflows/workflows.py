@@ -134,6 +134,7 @@ class Loop:
     var_name: str = "item"  # Variable name for current item
     parallel: bool = False  # Execute iterations in parallel
     max_workers: Optional[int] = None  # Max parallel workers (None = unlimited)
+    output_variable: Optional[str] = None  # Store loop results in this variable name
     
     def __init__(
         self, 
@@ -143,7 +144,8 @@ class Loop:
         from_file: Optional[str] = None,
         var_name: str = "item",
         parallel: bool = False,
-        max_workers: Optional[int] = None
+        max_workers: Optional[int] = None,
+        output_variable: Optional[str] = None
     ):
         self.step = step
         self.over = over
@@ -152,6 +154,7 @@ class Loop:
         self.var_name = var_name
         self.parallel = parallel
         self.max_workers = max_workers
+        self.output_variable = output_variable
 
 
 @dataclass
@@ -194,7 +197,8 @@ def parallel(steps: List) -> Parallel:
 
 def loop(step: Any, over: Optional[str] = None, from_csv: Optional[str] = None, 
          from_file: Optional[str] = None, var_name: str = "item",
-         parallel: bool = False, max_workers: Optional[int] = None) -> Loop:
+         parallel: bool = False, max_workers: Optional[int] = None,
+         output_variable: Optional[str] = None) -> Loop:
     """Loop over items executing step for each.
     
     Args:
@@ -205,12 +209,14 @@ def loop(step: Any, over: Optional[str] = None, from_csv: Optional[str] = None,
         var_name: Variable name for current item (default: "item")
         parallel: If True, execute iterations in parallel (default: False)
         max_workers: Max parallel workers when parallel=True (default: None = unlimited)
+        output_variable: Variable name to store all loop outputs (default: None = "loop_outputs")
     
     Returns:
         Loop object configured for iteration
     """
     return Loop(step=step, over=over, from_csv=from_csv, from_file=from_file, 
-                var_name=var_name, parallel=parallel, max_workers=max_workers)
+                var_name=var_name, parallel=parallel, max_workers=max_workers,
+                output_variable=output_variable)
 
 
 def repeat(step: Any, until: Optional[Callable[[WorkflowContext], bool]] = None,
@@ -1829,9 +1835,15 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 results.append({"step": f"{step_result['step']}_{idx}", "output": step_result["output"]})
                 outputs.append(step_result["output"])
                 previous_output = step_result["output"]
-        
-        all_variables["loop_outputs"] = outputs
+        # Store outputs in user-specified variable or default to loop_outputs
+        output_var_name = loop_step.output_variable or "loop_outputs"
+        all_variables[output_var_name] = outputs
+        all_variables["loop_outputs"] = outputs  # Also keep for backward compatibility
         combined_output = "\n".join(str(o) for o in outputs) if outputs else ""
+        
+        # Debug logging for output_variable
+        if verbose:
+            print(f"📦 Loop stored {len(outputs)} results in variable: '{output_var_name}'")
         
         return {"steps": results, "output": combined_output, "variables": all_variables}
     

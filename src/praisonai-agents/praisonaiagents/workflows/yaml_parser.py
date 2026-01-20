@@ -790,6 +790,9 @@ class YAMLWorkflowParser:
         if agent_or_step is None:
             raise ValueError("Loop step requires an agent or include")
         
+        # Extract output_variable from step level (where user specifies it in YAML)
+        output_variable = step_data.get('output_variable')
+        
         return loop(
             agent_or_step, 
             over=over, 
@@ -797,7 +800,8 @@ class YAMLWorkflowParser:
             from_file=from_file,
             var_name=var_name,
             parallel=parallel_flag, 
-            max_workers=max_workers
+            max_workers=max_workers,
+            output_variable=output_variable
         )
     
     def _parse_repeat_step(self, step_data: Dict) -> Dict:
