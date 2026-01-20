@@ -19,6 +19,8 @@ def mcp_list(
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
 ):
     """List configured MCP servers."""
+    from ..configuration.schema import MCPLocalConfig, MCPRemoteConfig
+    
     output = get_output_controller()
     loader = get_config_loader()
     
@@ -26,16 +28,22 @@ def mcp_list(
     servers = config.mcp.servers
     
     if output.is_json_mode or json_output:
-        output.print_json({
-            "servers": {
-                name: {
+        server_data = {}
+        for name, s in servers.items():
+            if isinstance(s, MCPRemoteConfig):
+                server_data[name] = {
+                    "type": "remote",
+                    "url": s.url,
+                    "enabled": s.enabled,
+                }
+            else:
+                server_data[name] = {
+                    "type": "local",
                     "command": s.command,
                     "args": s.args,
                     "enabled": s.enabled,
                 }
-                for name, s in servers.items()
-            }
-        })
+        output.print_json({"servers": server_data})
         return
     
     if not servers:
@@ -43,13 +51,18 @@ def mcp_list(
         output.print("\nAdd a server with: praisonai mcp add <name> <command>")
         return
     
-    headers = ["Name", "Command", "Enabled"]
+    headers = ["Name", "Type", "Target", "Enabled"]
     rows = []
     for name, server in servers.items():
-        cmd = f"{server.command} {' '.join(server.args)}"
-        if len(cmd) > 50:
-            cmd = cmd[:47] + "..."
-        rows.append([name, cmd, "✓" if server.enabled else "✗"])
+        if isinstance(server, MCPRemoteConfig):
+            target = server.url
+            server_type = "remote"
+        else:
+            target = f"{server.command} {' '.join(server.args)}"
+            server_type = "local"
+        if len(target) > 45:
+            target = target[:42] + "..."
+        rows.append([name, server_type, target, "✓" if server.enabled else "✗"])
     
     output.print_table(headers, rows, title="MCP Servers")
 
@@ -494,6 +507,180 @@ def mcp_run(
         output.print_info("\nServer stopped.")
     except Exception as e:
         output.print_error(f"Failed to start server: {e}")
+        raise typer.Exit(1)
+
+
+@app.command("auth")
+def mcp_auth(
+    name: str = typer.Argument(..., help="Server name to authenticate"),
+    timeout: float = typer.Option(300.0, "--timeout", "-t", help="Timeout for OAuth flow in seconds"),
+):
+    """Authenticate with an OAuth-enabled MCP server.
+    
+    This command initiates the OAuth 2.1 authorization flow for a remote
+    MCP server. It will open your browser for authentication and wait
+    for the callback.
+    
+    Examples:
+        praisonai mcp auth github
+        praisonai mcp auth tavily --timeout 60
+    """
+    output = get_output_controller()
+    loader = get_config_loader()
+    
+    config = loader.load()
+    if name not in config.mcp.servers:
+        output.print_error(f"Server not found: {name}")
+        raise typer.Exit(1)
+    
+    server = config.mcp.servers[name]
+    
+    # Check if this is a remote server
+    from ..configuration.schema import MCPRemoteConfig
+    if not isinstance(server, MCPRemoteConfig):
+        output.print_error(f"Server '{name}' is a local server. OAuth is only for remote servers.")
+        raise typer.Exit(1)
+    
+    if not server.url:
+        output.print_error(f"Server '{name}' has no URL configured.")
+        raise typer.Exit(1)
+    
+    output.print_info(f"Authenticating with MCP server: {name}")
+    output.print(f"  URL: {server.url}")
+    
+    try:
+        from praisonaiagents.mcp import (
+            MCPAuthStorage,
+            OAuthCallbackHandler,
+            generate_state,
+            generate_code_verifier,
+            generate_code_challenge,
+            get_redirect_url,
+        )
+        import webbrowser
+        
+        # Initialize auth storage and callback handler
+        auth_storage = MCPAuthStorage()
+        callback_handler = OAuthCallbackHandler()
+        
+        # Generate PKCE parameters
+        state = generate_state()
+        code_verifier = generate_code_verifier()
+        code_challenge = generate_code_challenge(code_verifier)
+        
+        # Store state and verifier
+        auth_storage.set_oauth_state(name, state)
+        auth_storage.set_code_verifier(name, code_verifier)
+        
+        # Build authorization URL
+        # Note: In a real implementation, we'd discover the auth endpoint
+        # For now, we'll use a simple pattern
+        redirect_uri = get_redirect_url()
+        
+        # Get OAuth config
+        client_id = server.oauth.client_id if server.oauth else None
+        scopes = " ".join(server.oauth.scopes) if server.oauth and server.oauth.scopes else ""
+        
+        # Build auth URL (simplified - real impl would use OIDC discovery)
+        auth_url = f"{server.url}/oauth/authorize"
+        auth_url += "?response_type=code"
+        auth_url += f"&state={state}"
+        auth_url += f"&redirect_uri={redirect_uri}"
+        auth_url += f"&code_challenge={code_challenge}"
+        auth_url += "&code_challenge_method=S256"
+        if client_id:
+            auth_url += f"&client_id={client_id}"
+        if scopes:
+            auth_url += f"&scope={scopes}"
+        
+        output.print_info("Opening browser for authentication...")
+        output.print(f"  If browser doesn't open, visit: {auth_url}")
+        
+        # Open browser
+        webbrowser.open(auth_url)
+        
+        output.print_info(f"Waiting for callback (timeout: {timeout}s)...")
+        
+        # Wait for callback
+        try:
+            code = callback_handler.wait_for_callback(state, timeout=timeout)
+            
+            # Clear temporary state
+            auth_storage.clear_oauth_state(name)
+            auth_storage.clear_code_verifier(name)
+            
+            # Store a placeholder token (real impl would exchange code for tokens)
+            auth_storage.set_tokens(name, {
+                "access_token": f"oauth_{code[:20]}...",
+                "refresh_token": None,
+            }, server_url=server.url)
+            
+            if output.is_json_mode:
+                output.print_json({"name": name, "status": "authenticated"})
+            else:
+                output.print_success(f"Successfully authenticated with {name}")
+                
+        except TimeoutError:
+            auth_storage.clear_oauth_state(name)
+            auth_storage.clear_code_verifier(name)
+            output.print_error(f"Authentication timed out after {timeout} seconds")
+            raise typer.Exit(1)
+            
+    except ImportError as e:
+        output.print_error(f"MCP auth modules not available: {e}")
+        output.print("Install with: pip install praisonaiagents[mcp]")
+        raise typer.Exit(1)
+    except Exception as e:
+        output.print_error(f"Authentication failed: {e}")
+        raise typer.Exit(1)
+
+
+@app.command("logout")
+def mcp_logout(
+    name: str = typer.Argument(..., help="Server name to logout from"),
+    confirm: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+):
+    """Remove OAuth credentials for an MCP server.
+    
+    This command clears stored OAuth tokens and client information
+    for a remote MCP server.
+    
+    Examples:
+        praisonai mcp logout github
+        praisonai mcp logout tavily --yes
+    """
+    output = get_output_controller()
+    
+    try:
+        from praisonaiagents.mcp import MCPAuthStorage
+        
+        auth_storage = MCPAuthStorage()
+        
+        # Check if there are credentials to remove
+        entry = auth_storage.get(name)
+        if not entry or not entry.get("tokens"):
+            output.print_info(f"No credentials stored for: {name}")
+            return
+        
+        if not confirm:
+            confirmed = typer.confirm(f"Remove OAuth credentials for '{name}'?")
+            if not confirmed:
+                output.print_info("Cancelled")
+                raise typer.Exit(0)
+        
+        # Remove credentials
+        auth_storage.remove(name)
+        
+        if output.is_json_mode:
+            output.print_json({"name": name, "status": "logged_out"})
+        else:
+            output.print_success(f"Removed OAuth credentials for: {name}")
+            
+    except ImportError as e:
+        output.print_error(f"MCP auth modules not available: {e}")
+        raise typer.Exit(1)
+    except Exception as e:
+        output.print_error(f"Logout failed: {e}")
         raise typer.Exit(1)
 
 

@@ -5,7 +5,7 @@ Defines the structure and defaults for configuration.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union, Literal
 
 
 @dataclass
@@ -27,12 +27,37 @@ class TracesConfig:
 
 
 @dataclass
-class MCPServerConfig:
-    """MCP server configuration."""
+class MCPOAuthConfig:
+    """OAuth configuration for remote MCP servers."""
+    client_id: Optional[str] = None
+    client_secret: Optional[str] = None
+    scopes: List[str] = field(default_factory=list)
+
+
+@dataclass
+class MCPLocalConfig:
+    """Local MCP server configuration (stdio transport)."""
+    type: Literal["local"] = "local"
     command: str = ""
     args: List[str] = field(default_factory=list)
     env: Dict[str, str] = field(default_factory=dict)
     enabled: bool = True
+    timeout: int = 60000  # milliseconds
+
+
+@dataclass
+class MCPRemoteConfig:
+    """Remote MCP server configuration (HTTP/WebSocket transport)."""
+    type: Literal["remote"] = "remote"
+    url: str = ""
+    headers: Dict[str, str] = field(default_factory=dict)
+    oauth: Optional[MCPOAuthConfig] = None
+    enabled: bool = True
+    timeout: int = 30000  # milliseconds
+
+
+# Union type for MCP server configs
+MCPServerConfig = Union[MCPLocalConfig, MCPRemoteConfig]
 
 
 @dataclass
@@ -89,12 +114,7 @@ class ConfigSchema:
             },
             "mcp": {
                 "servers": {
-                    name: {
-                        "command": server.command,
-                        "args": server.args,
-                        "env": server.env,
-                        "enabled": server.enabled,
-                    }
+                    name: self._server_to_dict(server)
                     for name, server in self.mcp.servers.items()
                 }
             },
@@ -109,6 +129,34 @@ class ConfigSchema:
             },
             **self.extra,
         }
+    
+    def _server_to_dict(self, server: MCPServerConfig) -> Dict[str, Any]:
+        """Convert MCP server config to dictionary."""
+        if isinstance(server, MCPRemoteConfig):
+            result = {
+                "type": "remote",
+                "url": server.url,
+                "headers": server.headers,
+                "enabled": server.enabled,
+                "timeout": server.timeout,
+            }
+            if server.oauth:
+                result["oauth"] = {
+                    "client_id": server.oauth.client_id,
+                    "client_secret": server.oauth.client_secret,
+                    "scopes": server.oauth.scopes,
+                }
+            return result
+        else:
+            # MCPLocalConfig
+            return {
+                "type": "local",
+                "command": server.command,
+                "args": server.args,
+                "env": server.env,
+                "enabled": server.enabled,
+                "timeout": server.timeout,
+            }
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ConfigSchema":
@@ -126,12 +174,33 @@ class ConfigSchema:
         # Parse MCP servers
         mcp_servers = {}
         for name, server_data in mcp_data.get("servers", {}).items():
-            mcp_servers[name] = MCPServerConfig(
-                command=server_data.get("command", ""),
-                args=server_data.get("args", []),
-                env=server_data.get("env", {}),
-                enabled=server_data.get("enabled", True),
-            )
+            server_type = server_data.get("type", "local")
+            if server_type == "remote":
+                oauth_data = server_data.get("oauth")
+                oauth_config = None
+                if oauth_data and isinstance(oauth_data, dict):
+                    oauth_config = MCPOAuthConfig(
+                        client_id=oauth_data.get("client_id"),
+                        client_secret=oauth_data.get("client_secret"),
+                        scopes=oauth_data.get("scopes", []),
+                    )
+                mcp_servers[name] = MCPRemoteConfig(
+                    type="remote",
+                    url=server_data.get("url", ""),
+                    headers=server_data.get("headers", {}),
+                    oauth=oauth_config,
+                    enabled=server_data.get("enabled", True),
+                    timeout=server_data.get("timeout", 30000),
+                )
+            else:
+                mcp_servers[name] = MCPLocalConfig(
+                    type="local",
+                    command=server_data.get("command", ""),
+                    args=server_data.get("args", []),
+                    env=server_data.get("env", {}),
+                    enabled=server_data.get("enabled", True),
+                    timeout=server_data.get("timeout", 60000),
+                )
         
         return cls(
             output=OutputConfig(
