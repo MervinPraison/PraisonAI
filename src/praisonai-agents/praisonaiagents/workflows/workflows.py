@@ -21,6 +21,7 @@ Storage Structure:
 
 import os
 import re
+import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable, Tuple, Union
@@ -32,6 +33,49 @@ from .workflow_configs import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_json_output(output: Any, step_name: str = "step") -> Any:
+    """
+    Parse JSON from LLM output if it's a string.
+    
+    Handles:
+    - Direct JSON strings: '{"key": "value"}'
+    - Markdown code blocks: ```json\n{"key": "value"}\n```
+    
+    Returns:
+        Parsed dict/list if successful, original output otherwise
+    """
+    if not isinstance(output, str) or not output:
+        return output
+    
+    # Try direct JSON parse first
+    try:
+        return json.loads(output)
+    except json.JSONDecodeError:
+        pass
+    
+    # Try extracting from markdown code block
+    json_match = re.search(r'```(?:json)?\s*\n?([\s\S]*?)\n?```', output)
+    if json_match:
+        try:
+            return json.loads(json_match.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+    
+    # Try finding JSON object/array in text
+    # Look for {...} or [...]
+    for pattern in [r'(\{[^}]+\})', r'(\[[^\]]+\])']:
+        match = re.search(pattern, output)
+        if match:
+            try:
+                return json.loads(match.group(1))
+            except json.JSONDecodeError:
+                continue
+    
+    # Return original if can't parse
+    logger.debug(f"Could not parse JSON from step '{step_name}' output")
+    return output
 
 
 @dataclass
@@ -1206,6 +1250,10 @@ class Workflow:
                         
                         output = step.agent.chat(action, **chat_kwargs)
                         
+                        # Parse JSON output if output_json was requested and output is a string
+                        if step_output_json and output and isinstance(output, str):
+                            output = _parse_json_output(output, step.name)
+                        
                         # Handle output_pydantic if present
                         output_pydantic = getattr(step, 'output_pydantic', None)
                         if output_pydantic and output:
@@ -1256,6 +1304,11 @@ class Workflow:
                             action = f"{action}\n\nPrevious attempt feedback: {validation_feedback}"
                         
                         output = temp_agent.chat(action, stream=stream)
+                        
+                        # Parse JSON output if output_json was requested
+                        step_output_json = getattr(step, '_output_json', None)
+                        if step_output_json and output and isinstance(output, str):
+                            output = _parse_json_output(output, step.name)
                         
                 except Exception as e:
                     step_error = e
@@ -1342,6 +1395,26 @@ class Workflow:
             var_name = step.output_variable or f"{step.name}_output"
             all_variables[var_name] = output
             
+            # Validate output and warn about issues
+            if output is None:
+                logger.warning(f"⚠️  Step '{step.name}': Output is None. Agent may not have returned expected format.")
+                if verbose:
+                    print(f"⚠️  WARNING: Step '{step.name}' output is None!")
+            else:
+                # Check type against output_json schema if defined
+                expected_schema = getattr(step, '_output_json', None)
+                if expected_schema and isinstance(expected_schema, dict):
+                    expected_type = expected_schema.get('type')
+                    actual_type = type(output).__name__
+                    if expected_type == 'object' and not isinstance(output, dict):
+                        logger.warning(f"⚠️  Step '{step.name}': Expected object/dict, got {actual_type}")
+                        if verbose:
+                            print(f"⚠️  Step '{step.name}': Expected 'object', received '{actual_type}'")
+                    elif expected_type == 'array' and not isinstance(output, list):
+                        logger.warning(f"⚠️  Step '{step.name}': Expected array/list, got {actual_type}")
+                        if verbose:
+                            print(f"⚠️  Step '{step.name}': Expected 'array', received '{actual_type}'")
+            
             i += 1
         
         # Update workflow status
@@ -1399,33 +1472,12 @@ class Workflow:
         return await self.astart(input, llm, verbose)
     
     def _normalize_steps(self) -> List['WorkflowStep']:
-        """Convert mixed steps (Agent, function, WorkflowStep) to WorkflowStep list."""
-        normalized = []
+        """Convert mixed steps (Agent, function, WorkflowStep) to WorkflowStep list.
         
-        for i, step in enumerate(self.steps):
-            if isinstance(step, WorkflowStep):
-                normalized.append(step)
-            elif callable(step):
-                # It's a function - wrap as handler
-                normalized.append(WorkflowStep(
-                    name=getattr(step, '__name__', f'step_{i+1}'),
-                    handler=step
-                ))
-            elif hasattr(step, 'chat'):
-                # It's an Agent - wrap with agent reference
-                normalized.append(WorkflowStep(
-                    name=getattr(step, 'name', f'agent_{i+1}'),
-                    agent=step,
-                    action="{{input}}"
-                ))
-            else:
-                # Unknown type - try to use as string action
-                normalized.append(WorkflowStep(
-                    name=f'step_{i+1}',
-                    action=str(step)
-                ))
-        
-        return normalized
+        This method uses _normalize_single_step to ensure consistent normalization
+        and avoid duplicated code paths (DRY principle).
+        """
+        return [self._normalize_single_step(step, i) for i, step in enumerate(self.steps)]
     
     def _create_plan(self, input: str, model: str, verbose: bool) -> Optional[str]:
         """Create an execution plan for the workflow using LLM.
@@ -1608,6 +1660,11 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                         action = f"{action}\n\nContext from previous step:\n{previous_output}"
                 action = action.replace("{{input}}", input)
                 output = normalized.agent.chat(action, stream=stream)
+                
+                # Parse JSON output if output_json was requested
+                step_output_json = getattr(normalized, '_output_json', None)
+                if step_output_json and output and isinstance(output, str):
+                    output = _parse_json_output(output, normalized.name)
             except Exception as e:
                 output = f"Error: {e}"
         elif normalized.action:
@@ -1633,6 +1690,11 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                         action = f"{action}\n\nContext from previous step:\n{previous_output}"
                 
                 output = temp_agent.chat(action, stream=stream)
+                
+                # Parse JSON output if output_json was requested
+                step_output_json = getattr(normalized, '_output_json', None)
+                if step_output_json and output and isinstance(output, str):
+                    output = _parse_json_output(output, normalized.name)
             except Exception as e:
                 output = f"Error: {e}"
         
@@ -1849,6 +1911,32 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         all_variables[output_var_name] = outputs
         all_variables["loop_outputs"] = outputs  # Also keep for backward compatibility
         combined_output = "\n".join(str(o) for o in outputs) if outputs else ""
+        
+        # Validate outputs and warn about issues
+        none_count = sum(1 for o in outputs if o is None)
+        if none_count > 0:
+            logger.warning(f"⚠️  Loop '{output_var_name}': {none_count}/{len(outputs)} outputs are None. "
+                          f"Check if agent returned expected format.")
+            if verbose:
+                print(f"⚠️  WARNING: {none_count}/{len(outputs)} loop outputs are None!")
+        
+        # Check for type consistency
+        if outputs and len(outputs) > 0:
+            expected_type = loop_step.step._output_json if hasattr(loop_step.step, '_output_json') else None
+            if expected_type:
+                expected_schema_type = expected_type.get('type') if isinstance(expected_type, dict) else None
+                for i, o in enumerate(outputs):
+                    if o is None:
+                        continue
+                    actual_type = type(o).__name__
+                    if expected_schema_type == 'object' and not isinstance(o, dict):
+                        logger.warning(f"⚠️  Loop output[{i}]: Expected object/dict, got {actual_type}")
+                        if verbose:
+                            print(f"⚠️  Loop output[{i}]: Expected 'object', received '{actual_type}'")
+                    elif expected_schema_type == 'array' and not isinstance(o, list):
+                        logger.warning(f"⚠️  Loop output[{i}]: Expected array/list, got {actual_type}")
+                        if verbose:
+                            print(f"⚠️  Loop output[{i}]: Expected 'array', received '{actual_type}'")
         
         # Debug logging for output_variable
         if verbose:
