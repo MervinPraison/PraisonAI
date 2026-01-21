@@ -294,6 +294,23 @@ class YAMLWorkflowParser:
         # Build memory config if specified - pass raw dict for flexibility
         memory_value = memory_config if memory_config else None
         
+        # Parse context management config (CRITICAL for token overflow prevention)
+        # Supports: context: true OR context: {auto_compact: true, strategy: smart, ...}
+        context_config = data.get('context')
+        if context_config is True:
+            # Simple enable: context: true
+            context_value = True
+        elif isinstance(context_config, dict):
+            # Detailed config: context: {auto_compact: true, ...}
+            try:
+                from ..context.models import ContextConfig
+                context_value = ContextConfig(**context_config)
+            except Exception:
+                # Fallback: just enable with True if ContextConfig fails
+                context_value = True
+        else:
+            context_value = None
+        
         workflow = Workflow(
             name=name,
             steps=steps,
@@ -302,6 +319,7 @@ class YAMLWorkflowParser:
             default_llm=default_llm,
             output=workflow_output,  # Pass output mode to Workflow
             memory=memory_value,  # Pass memory config to Workflow
+            context=context_value,  # Pass context management config to Workflow
         )
         
         # Store additional attributes for feature parity with agents.yaml

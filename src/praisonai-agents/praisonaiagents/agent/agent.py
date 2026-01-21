@@ -1220,12 +1220,38 @@ Your Goal: {self.goal}
                 agent_name=self.name or "Agent",
             )
         elif isinstance(self._context_param, ManagerConfig):
-            # Use provided config
+            # Use provided ManagerConfig
             self._context_manager = ContextManager(
                 model=self.llm if isinstance(self.llm, str) else "gpt-4o-mini",
                 config=self._context_param,
                 agent_name=self.name or "Agent",
             )
+        elif hasattr(self._context_param, 'auto_compact') and hasattr(self._context_param, 'tool_output_max'):
+            # ContextConfig from YAML - convert to ManagerConfig
+            try:
+                from ..context.models import ContextConfig as _ContextConfig
+                if isinstance(self._context_param, _ContextConfig):
+                    # Build ManagerConfig from ContextConfig fields
+                    manager_config = ManagerConfig(
+                        auto_compact=self._context_param.auto_compact,
+                        compact_threshold=self._context_param.compact_threshold,
+                        strategy=self._context_param.strategy,
+                        output_reserve=self._context_param.output_reserve,
+                        default_tool_output_max=self._context_param.tool_output_max,  # Map field name
+                        protected_tools=list(self._context_param.protected_tools),
+                        keep_recent_turns=self._context_param.keep_recent_turns,
+                        monitor_enabled=self._context_param.monitor.enabled if self._context_param.monitor else False,
+                    )
+                    self._context_manager = ContextManager(
+                        model=self.llm if isinstance(self.llm, str) else "gpt-4o-mini",
+                        config=manager_config,
+                        agent_name=self.name or "Agent",
+                    )
+                else:
+                    self._context_manager = None
+            except Exception as e:
+                logging.debug(f"ContextConfig conversion failed: {e}")
+                self._context_manager = None
         elif hasattr(self._context_param, 'process'):
             # Already a ContextManager instance
             self._context_manager = self._context_param
@@ -2920,11 +2946,28 @@ Your Goal: {self.goal}"""
         return self._execute_tool_with_context(function_name, arguments, state)
     
     def _execute_tool_with_context(self, function_name, arguments, state):
-        """Execute tool within injection context."""
+        """Execute tool within injection context, with optional output truncation."""
         from ..tools.injected import with_injection_context
         
         with with_injection_context(state):
-            return self._execute_tool_impl(function_name, arguments)
+            result = self._execute_tool_impl(function_name, arguments)
+        
+        # Apply context-aware truncation if context management is enabled
+        # This prevents tool outputs (e.g., search results) from exploding the context
+        if self.context_manager and result:
+            try:
+                truncated = self._truncate_tool_output(function_name, str(result))
+                if len(truncated) < len(str(result)):
+                    logging.debug(f"Truncated {function_name} output from {len(str(result))} to {len(truncated)} chars")
+                    # Return truncated string if significantly shorter
+                    if isinstance(result, dict):
+                        # Keep dict structure but may have truncated string representation
+                        return result  # Let the string version be truncated at display time
+                    return truncated
+            except Exception as e:
+                logging.debug(f"Tool truncation skipped: {e}")
+        
+        return result
     
     def _execute_tool_impl(self, function_name, arguments):
         """Internal tool execution implementation."""

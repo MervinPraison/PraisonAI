@@ -534,7 +534,15 @@ def __getattr__(name):
         _lazy_cache[name] = result
         return result
     
-    # Context management config (already exists)
+    # Context management config
+    elif name == "ContextConfig":
+        from .context.models import ContextConfig
+        _lazy_cache[name] = ContextConfig
+        return ContextConfig
+    elif name == "OptimizerStrategy":
+        from .context.models import OptimizerStrategy
+        _lazy_cache[name] = OptimizerStrategy
+        return OptimizerStrategy
     elif name == "ManagerConfig":
         from .context.manager import ManagerConfig
         _lazy_cache[name] = ManagerConfig
