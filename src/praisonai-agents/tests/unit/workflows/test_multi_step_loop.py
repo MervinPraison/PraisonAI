@@ -350,6 +350,88 @@ context:
             assert workflow.context.tool_output_max == 5000
 
 
+class TestParallelLoopItemIsolation:
+    """Test that parallel loop iterations get correct isolated items."""
+    
+    def test_parallel_loop_each_iteration_gets_correct_item(self):
+        """Each parallel iteration should process its own item, not duplicates."""
+        from praisonaiagents.workflows.workflows import Workflow, WorkflowStep, Loop
+        import threading
+        
+        # Track which item each iteration received
+        received_items = {}
+        lock = threading.Lock()
+        
+        def capture_item_handler(ctx):
+            idx = ctx.variables.get('loop_index')
+            item = ctx.variables.get('item')
+            with lock:
+                received_items[idx] = item
+            return f"processed_{item}"
+        
+        step = WorkflowStep(name="capture", handler=capture_item_handler)
+        
+        loop_step = Loop(
+            steps=[step],
+            over="items",
+            parallel=True,
+            max_workers=3
+        )
+        
+        workflow = Workflow(
+            name="test",
+            steps=[loop_step],
+            variables={"items": ["apple", "banana", "cherry"]}
+        )
+        
+        workflow.start("")
+        
+        # Each iteration should have received a DIFFERENT item
+        assert len(received_items) == 3
+        assert set(received_items.values()) == {"apple", "banana", "cherry"}
+    
+    def test_parallel_loop_dict_items_expanded_correctly(self):
+        """Dict items should have properties expanded for template access."""
+        from praisonaiagents.workflows.workflows import Workflow, WorkflowStep, Loop
+        import threading
+        
+        received_titles = {}
+        lock = threading.Lock()
+        
+        def capture_title_handler(ctx):
+            idx = ctx.variables.get('loop_index')
+            # Access expanded property
+            title = ctx.variables.get('item.title')
+            with lock:
+                received_titles[idx] = title
+            return f"processed_{title}"
+        
+        step = WorkflowStep(name="capture", handler=capture_title_handler)
+        
+        loop_step = Loop(
+            steps=[step],
+            over="topics",
+            parallel=True,
+            max_workers=3
+        )
+        
+        workflow = Workflow(
+            name="test",
+            steps=[loop_step],
+            variables={"topics": [
+                {"title": "Topic A", "url": "http://a.com"},
+                {"title": "Topic B", "url": "http://b.com"},
+                {"title": "Topic C", "url": "http://c.com"}
+            ]}
+        )
+        
+        workflow.start("")
+        
+        # Each iteration should have received a DIFFERENT title
+        assert len(received_titles) == 3
+        assert set(received_titles.values()) == {"Topic A", "Topic B", "Topic C"}
+
+
 class TestLoopOutputVariable:
     """Test output_variable stores last step output per iteration."""
     

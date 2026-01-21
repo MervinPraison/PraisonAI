@@ -803,7 +803,15 @@ class YAMLWorkflowParser:
         from_file = loop_config.get('from_file')
         var_name = loop_config.get('var_name', 'item')
         parallel_flag = loop_config.get('parallel', False)
-        max_workers = loop_config.get('max_workers')
+        max_workers_raw = loop_config.get('max_workers')
+        # Ensure max_workers is int (YAML may parse as string or contain template)
+        max_workers = None
+        if max_workers_raw is not None:
+            try:
+                max_workers = int(max_workers_raw)
+            except (ValueError, TypeError):
+                # If it's a template variable like {{max_workers}}, leave as None
+                max_workers = None
         
         # Check for multi-step form (NEW) - steps: at step_data level or inside loop config
         nested_steps = step_data.get('steps') or loop_config.get('steps')

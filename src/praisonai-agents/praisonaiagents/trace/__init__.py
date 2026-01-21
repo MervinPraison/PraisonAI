@@ -44,6 +44,13 @@ __all__ = [
     # Redaction
     "redact_dict",
     "REDACT_KEYS",
+    # Context events (for replay)
+    "ContextEvent",
+    "ContextEventType",
+    "ContextTraceSink",
+    "ContextNoOpSink",
+    "ContextListSink",
+    "ContextTraceEmitter",
 ]
 
 
@@ -64,5 +71,18 @@ def __getattr__(name: str):
     if name in ("redact_dict", "REDACT_KEYS"):
         from .redact import redact_dict, REDACT_KEYS
         return locals()[name]
+    
+    # Context events (for replay)
+    if name in ("ContextEvent", "ContextEventType"):
+        from .context_events import ContextEvent, ContextEventType
+        return locals()[name]
+    
+    if name in ("ContextTraceSink", "ContextNoOpSink", "ContextListSink"):
+        from .context_events import ContextTraceSink, ContextNoOpSink, ContextListSink
+        return locals()[name]
+    
+    if name == "ContextTraceEmitter":
+        from .context_events import ContextTraceEmitter
+        return ContextTraceEmitter
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
