@@ -99,6 +99,7 @@ def _extract_from_schema_echo(data: dict) -> Any:
     Common patterns:
     - {'type': 'array', 'items': [...]} -> return [...]
     - {'type': 'object', 'properties': {...}, 'data': {...}} -> return data
+    - {'items': [...]} -> return [...] (native structured output wrapper)
     - {'keywords': [...]} -> return as-is (normal output)
     
     Args:
@@ -125,6 +126,12 @@ def _extract_from_schema_echo(data: dict) -> Any:
             if 'data' in data and isinstance(data['data'], dict):
                 logger.debug("Extracted data from schema-echoed object output")
                 return data['data']
+    
+    # Handle native structured output wrapper: {'items': [...]}
+    # This is created by _build_response_format when wrapping arrays
+    if 'items' in data and len(data) == 1 and isinstance(data['items'], list):
+        logger.debug("Extracted items from native structured output array wrapper")
+        return data['items']
     
     # Not a schema echo, return as-is
     return data
@@ -197,10 +204,10 @@ class Parallel:
 @dataclass
 class Loop:
     """
-    Iterate over a list or CSV file, executing step for each item.
+    Iterate over a list or CSV file, executing step(s) for each item.
     
     Usage:
-        # Loop over list variable (sequential)
+        # Loop over list variable (sequential) - single step
         workflow = Workflow(
             steps=[loop(processor, over="items")],
             variables={"items": ["a", "b", "c"]}
@@ -222,8 +229,20 @@ class Loop:
             steps=[loop(processor, over="items", parallel=True, max_workers=4)],
             variables={"items": ["a", "b", "c"]}
         )
+        
+        # Multi-step loop (NEW) - execute multiple steps per iteration
+        workflow = Workflow(
+            steps=[loop(
+                steps=[researcher, writer, publisher],  # Multiple steps
+                over="topics",
+                parallel=True,
+                max_workers=4
+            )],
+            variables={"topics": [...]}
+        )
     """
-    step: Any = None
+    step: Any = None  # Single step (backward compat)
+    steps: Optional[List[Any]] = None  # Multiple steps (NEW)
     over: Optional[str] = None  # Variable name containing list
     from_csv: Optional[str] = None  # CSV file path
     from_file: Optional[str] = None  # Text file path (one item per line)
@@ -234,7 +253,8 @@ class Loop:
     
     def __init__(
         self, 
-        step: Any, 
+        step: Any = None,
+        steps: Optional[List[Any]] = None,
         over: Optional[str] = None,
         from_csv: Optional[str] = None,
         from_file: Optional[str] = None,
@@ -243,7 +263,18 @@ class Loop:
         max_workers: Optional[int] = None,
         output_variable: Optional[str] = None
     ):
+        # Validation: cannot have both step and steps
+        if step is not None and steps is not None:
+            raise ValueError("Cannot specify both 'step' and 'steps'")
+        # Validation: must have at least one
+        if step is None and steps is None:
+            raise ValueError("Loop requires 'step' or 'steps'")
+        # Validation: steps cannot be empty
+        if steps is not None and len(steps) == 0:
+            raise ValueError("Loop 'steps' cannot be empty")
+        
         self.step = step
+        self.steps = steps
         self.over = over
         self.from_csv = from_csv
         self.from_file = from_file
@@ -291,14 +322,16 @@ def parallel(steps: List) -> Parallel:
     """Execute steps in parallel."""
     return Parallel(steps=steps)
 
-def loop(step: Any, over: Optional[str] = None, from_csv: Optional[str] = None, 
+def loop(step: Any = None, steps: Optional[List[Any]] = None,
+         over: Optional[str] = None, from_csv: Optional[str] = None, 
          from_file: Optional[str] = None, var_name: str = "item",
          parallel: bool = False, max_workers: Optional[int] = None,
          output_variable: Optional[str] = None) -> Loop:
-    """Loop over items executing step for each.
+    """Loop over items executing step(s) for each.
     
     Args:
-        step: The step (agent/function) to execute for each item
+        step: Single step (agent/function) to execute for each item (backward compat)
+        steps: Multiple steps to execute sequentially for each item (NEW)
         over: Variable name containing the list to iterate over
         from_csv: Path to CSV file to read items from
         from_file: Path to text file with one item per line
@@ -310,7 +343,7 @@ def loop(step: Any, over: Optional[str] = None, from_csv: Optional[str] = None,
     Returns:
         Loop object configured for iteration
     """
-    return Loop(step=step, over=over, from_csv=from_csv, from_file=from_file, 
+    return Loop(step=step, steps=steps, over=over, from_csv=from_csv, from_file=from_file, 
                 var_name=var_name, parallel=parallel, max_workers=max_workers,
                 output_variable=output_variable)
 
@@ -1898,24 +1931,44 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         
         num_items = len(items)
         
+        # Determine steps to run (multi-step or single step)
+        steps_to_run = loop_step.steps if loop_step.steps else [loop_step.step]
+        is_multi_step = loop_step.steps is not None and len(loop_step.steps) > 1
+        
         if loop_step.parallel and num_items > 1:
             # Parallel execution
             max_workers = loop_step.max_workers or num_items
             if verbose:
-                print(f"⚡🔁 Parallel looping over {num_items} items (max_workers={max_workers})...")
+                step_info = f" ({len(steps_to_run)} steps each)" if is_multi_step else ""
+                print(f"⚡🔁 Parallel looping over {num_items} items{step_info} (max_workers={max_workers})...")
             
             def execute_item(idx_item_tuple):
-                """Execute step for a single item in thread."""
+                """Execute step(s) for a single item in thread."""
                 idx, item = idx_item_tuple
                 loop_vars = all_variables.copy()
                 loop_vars[loop_step.var_name] = item
                 loop_vars["loop_index"] = idx
                 
-                # Execute step (verbose=False in parallel to avoid interleaved output)
-                step_result = self._execute_single_step_internal(
-                    loop_step.step, previous_output, input, loop_vars, model, False, idx, stream=False
-                )
-                return idx, step_result
+                # Execute all steps sequentially within this iteration
+                iteration_output = previous_output
+                iteration_results = []
+                for step_idx, step in enumerate(steps_to_run):
+                    step_result = self._execute_single_step_internal(
+                        step, iteration_output, input, loop_vars, model, False, step_idx, stream=False
+                    )
+                    iteration_output = step_result.get("output")
+                    iteration_results.append(step_result)
+                    # Update variables if step set any
+                    if step_result.get("variables"):
+                        loop_vars.update(step_result["variables"])
+                
+                # Return final output (last step's output)
+                final_result = {
+                    "step": f"loop_{idx}",
+                    "output": iteration_output,
+                    "steps": iteration_results
+                }
+                return idx, final_result
             
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = [executor.submit(execute_item, (idx, item)) for idx, item in enumerate(items)]
@@ -1944,7 +1997,8 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         else:
             # Sequential execution (original behavior)
             if verbose:
-                print(f"🔁 Looping over {num_items} items...")
+                step_info = f" ({len(steps_to_run)} steps each)" if is_multi_step else ""
+                print(f"🔁 Looping over {num_items} items{step_info}...")
             
             for idx, item in enumerate(items):
                 # Add current item to variables
@@ -1952,12 +2006,20 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 loop_vars[loop_step.var_name] = item
                 loop_vars["loop_index"] = idx
                 
-                step_result = self._execute_single_step_internal(
-                    loop_step.step, previous_output, input, loop_vars, model, verbose, idx, stream=stream
-                )
-                results.append({"step": f"{step_result['step']}_{idx}", "output": step_result["output"]})
-                outputs.append(step_result["output"])
-                previous_output = step_result["output"]
+                # Execute all steps sequentially within this iteration
+                iteration_output = previous_output
+                for step_idx, step in enumerate(steps_to_run):
+                    step_result = self._execute_single_step_internal(
+                        step, iteration_output, input, loop_vars, model, verbose, step_idx, stream=stream
+                    )
+                    iteration_output = step_result.get("output")
+                    # Update variables if step set any
+                    if step_result.get("variables"):
+                        loop_vars.update(step_result["variables"])
+                
+                results.append({"step": f"loop_{idx}", "output": iteration_output})
+                outputs.append(iteration_output)
+                previous_output = iteration_output
         # Store outputs in user-specified variable or default to loop_outputs
         output_var_name = loop_step.output_variable or "loop_outputs"
         all_variables[output_var_name] = outputs

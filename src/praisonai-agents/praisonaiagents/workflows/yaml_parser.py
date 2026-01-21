@@ -296,15 +296,31 @@ class YAMLWorkflowParser:
         
         # Parse context management config (CRITICAL for token overflow prevention)
         # Supports: context: true OR context: {auto_compact: true, strategy: smart, ...}
+        # Also supports YAML-friendly aliases: enabled -> auto_compact, max_tool_output_tokens -> tool_output_max
         context_config = data.get('context')
         if context_config is True:
             # Simple enable: context: true
             context_value = True
         elif isinstance(context_config, dict):
             # Detailed config: context: {auto_compact: true, ...}
+            # Apply field aliasing for YAML-friendly names
+            normalized_config = context_config.copy()
+            
+            # Alias: enabled -> auto_compact
+            if 'enabled' in normalized_config:
+                normalized_config['auto_compact'] = normalized_config.pop('enabled')
+            
+            # Alias: max_tool_output_tokens -> tool_output_max
+            if 'max_tool_output_tokens' in normalized_config:
+                normalized_config['tool_output_max'] = normalized_config.pop('max_tool_output_tokens')
+            
+            # Alias: threshold -> compact_threshold
+            if 'threshold' in normalized_config:
+                normalized_config['compact_threshold'] = normalized_config.pop('threshold')
+            
             try:
                 from ..context.models import ContextConfig
-                context_value = ContextConfig(**context_config)
+                context_value = ContextConfig(**normalized_config)
             except Exception:
                 # Fallback: just enable with True if ContextConfig fails
                 context_value = True
@@ -743,7 +759,7 @@ class YAMLWorkflowParser:
         Returns:
             Loop pattern object
             
-        Supports three syntax forms:
+        Supports multiple syntax forms:
             # Simple form with agent at step level
             - loop:
                 over: items
@@ -762,6 +778,22 @@ class YAMLWorkflowParser:
                 parallel: true
                 max_workers: 4
                 step: processor
+            
+            # Multi-step form (NEW) - steps at step_data level
+            - loop:
+                over: items
+                parallel: true
+              steps:
+                - agent: researcher
+                - agent: writer
+            
+            # Multi-step form (NEW) - steps inside loop config
+            - loop:
+                over: items
+                parallel: true
+                steps:
+                  - agent: researcher
+                  - agent: writer
         """
         loop_config = step_data['loop']
         
@@ -773,7 +805,32 @@ class YAMLWorkflowParser:
         parallel_flag = loop_config.get('parallel', False)
         max_workers = loop_config.get('max_workers')
         
-        # Resolve the step/agent to execute
+        # Check for multi-step form (NEW) - steps: at step_data level or inside loop config
+        nested_steps = step_data.get('steps') or loop_config.get('steps')
+        if nested_steps and isinstance(nested_steps, list) and len(nested_steps) > 0:
+            # Parse each nested step
+            parsed_steps = []
+            for nested_step_data in nested_steps:
+                parsed_step = self._parse_single_step(nested_step_data)
+                if parsed_step is not None:
+                    parsed_steps.append(parsed_step)
+            
+            if parsed_steps:
+                # Extract output_variable from step level
+                output_variable = step_data.get('output_variable')
+                
+                return loop(
+                    steps=parsed_steps,
+                    over=over, 
+                    from_csv=from_csv, 
+                    from_file=from_file,
+                    var_name=var_name,
+                    parallel=parallel_flag, 
+                    max_workers=max_workers,
+                    output_variable=output_variable
+                )
+        
+        # Resolve the step/agent to execute (single step - backward compat)
         agent_or_step = None
         
         # First check for agent at step level (original syntax)
@@ -816,13 +873,13 @@ class YAMLWorkflowParser:
                 )
         
         if agent_or_step is None:
-            raise ValueError("Loop step requires an agent or include")
+            raise ValueError("Loop step requires an agent, include, or steps")
         
         # Extract output_variable from step level (where user specifies it in YAML)
         output_variable = step_data.get('output_variable')
         
         return loop(
-            agent_or_step, 
+            step=agent_or_step, 
             over=over, 
             from_csv=from_csv, 
             from_file=from_file,
