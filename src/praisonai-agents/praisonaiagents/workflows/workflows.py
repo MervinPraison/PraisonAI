@@ -1945,9 +1945,16 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             def execute_item(idx_item_tuple):
                 """Execute step(s) for a single item in thread."""
                 idx, item = idx_item_tuple
-                loop_vars = all_variables.copy()
+                # CRITICAL: Deep copy variables to ensure thread isolation
+                import copy
+                loop_vars = copy.deepcopy(all_variables)
                 loop_vars[loop_step.var_name] = item
                 loop_vars["loop_index"] = idx
+                
+                # Also expand nested item properties for template access (e.g., {{item.title}})
+                if isinstance(item, dict):
+                    for key, value in item.items():
+                        loop_vars[f"{loop_step.var_name}.{key}"] = value
                 
                 # Execute all steps sequentially within this iteration
                 iteration_output = previous_output
@@ -2002,9 +2009,15 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             
             for idx, item in enumerate(items):
                 # Add current item to variables
-                loop_vars = all_variables.copy()
+                import copy
+                loop_vars = copy.deepcopy(all_variables)
                 loop_vars[loop_step.var_name] = item
                 loop_vars["loop_index"] = idx
+                
+                # Also expand nested item properties for template access (e.g., {{item.title}})
+                if isinstance(item, dict):
+                    for key, value in item.items():
+                        loop_vars[f"{loop_step.var_name}.{key}"] = value
                 
                 # Execute all steps sequentially within this iteration
                 iteration_output = previous_output

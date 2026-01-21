@@ -25,6 +25,7 @@ __all__ = [
     'rag_app',
     'test_app',
     'examples_app',
+    'replay_app',
 ]
 
 
@@ -84,4 +85,7 @@ def __getattr__(name: str):
     elif name == 'examples_app':
         from .examples import app as examples_app
         return examples_app
+    elif name == 'replay_app':
+        from .replay import app as replay_app
+        return replay_app
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

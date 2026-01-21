@@ -216,6 +216,7 @@ def register_commands():
     from .commands.test import app as test_app
     from .commands.examples import app as examples_app
     from .commands.batch import app as batch_app
+    from .commands.replay import app as replay_app
     
     # Import TUI and queue commands
     from .features.tui.debug import create_debug_app as create_tui_debug_app
@@ -274,6 +275,7 @@ def register_commands():
     app.add_typer(test_app, name="test", help="Run test suite with tier and provider options")
     app.add_typer(examples_app, name="examples", help="Run and manage example files")
     app.add_typer(batch_app, name="batch", help="Run all PraisonAI scripts in current folder")
+    app.add_typer(replay_app, name="replay", help="Context replay for debugging agent execution")
     
     # Register standardise command
     try:
