@@ -2702,7 +2702,98 @@ Your Goal: {self.goal}"""
             self._system_prompt_cache[cache_key] = system_prompt
         return system_prompt
 
-    def _build_messages(self, prompt, temperature=1.0, output_json=None, output_pydantic=None, tools=None):
+    def _build_response_format(self, schema_model):
+        """Build response_format dict for native structured output.
+        
+        Args:
+            schema_model: Pydantic model or dict schema
+            
+        Returns:
+            Dict suitable for response_format parameter, or None if not applicable
+        """
+        if not schema_model:
+            return None
+        
+        def _add_additional_properties_false(schema):
+            """Recursively add additionalProperties: false and required array to all object schemas."""
+            if isinstance(schema, dict):
+                if schema.get('type') == 'object':
+                    schema['additionalProperties'] = False
+                    # Add required array with all property keys (OpenAI strict mode requirement)
+                    if 'properties' in schema:
+                        schema['required'] = list(schema['properties'].keys())
+                # Recurse into properties
+                if 'properties' in schema:
+                    for prop in schema['properties'].values():
+                        _add_additional_properties_false(prop)
+                # Recurse into items (for arrays)
+                if 'items' in schema:
+                    _add_additional_properties_false(schema['items'])
+                # Recurse into $defs
+                if '$defs' in schema:
+                    for def_schema in schema['$defs'].values():
+                        _add_additional_properties_false(def_schema)
+            return schema
+        
+        def _wrap_array_in_object(schema):
+            """Wrap array schema in object since OpenAI requires root type to be object."""
+            if schema.get('type') == 'array':
+                return {
+                    'type': 'object',
+                    'properties': {
+                        'items': schema
+                    },
+                    'required': ['items'],
+                    'additionalProperties': False
+                }
+            return schema
+        
+        # Handle Pydantic model
+        if hasattr(schema_model, 'model_json_schema'):
+            schema = schema_model.model_json_schema()
+            schema = _add_additional_properties_false(schema)
+            schema = _wrap_array_in_object(schema)
+            name = getattr(schema_model, '__name__', 'response')
+            return {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": name,
+                    "schema": schema,
+                    "strict": True
+                }
+            }
+        
+        # Handle dict schema (inline JSON schema from YAML)
+        if isinstance(schema_model, dict):
+            schema = schema_model.copy()
+            schema = _add_additional_properties_false(schema)
+            schema = _wrap_array_in_object(schema)
+            return {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "structured_output",
+                    "schema": schema,
+                    "strict": True
+                }
+            }
+        
+        return None
+
+    def _supports_native_structured_output(self):
+        """Check if current model supports native structured output via response_format.
+        
+        Auto-detects based on model capabilities using LiteLLM.
+        
+        Returns:
+            bool: True if model supports response_format with json_schema
+        """
+        try:
+            from ..llm.model_capabilities import supports_structured_outputs
+            return supports_structured_outputs(self.llm)
+        except Exception:
+            return False
+
+    def _build_messages(self, prompt, temperature=1.0, output_json=None, output_pydantic=None, tools=None, use_native_format=False):
         """Build messages list for chat completion.
         
         Args:
@@ -2711,32 +2802,36 @@ Your Goal: {self.goal}"""
             output_json: Optional Pydantic model for JSON output
             output_pydantic: Optional Pydantic model for JSON output (alias)
             tools: Optional list of tools to use (defaults to self.tools)
+            use_native_format: If True, skip text injection (native response_format will be used)
             
         Returns:
-            tuple: (messages list, original prompt)
+            Tuple of (messages list, original prompt)
         """
-        # Build system prompt using the helper method
-        system_prompt = self._build_system_prompt(tools)
+        messages = []
+        original_prompt = None
         
         # Use openai_client's build_messages method if available
         if self._openai_client is not None:
             messages, original_prompt = self._openai_client.build_messages(
                 prompt=prompt,
-                system_prompt=system_prompt,
+                system_prompt=self._build_system_prompt(
+                    tools=tools,
+                ),
                 chat_history=self.chat_history,
-                output_json=output_json,
-                output_pydantic=output_pydantic
+                output_json=None if use_native_format else output_json,
+                output_pydantic=None if use_native_format else output_pydantic
             )
         else:
-            # Fallback implementation for when OpenAI client is not available
-            messages = []
-            
-            # Add system message if provided
+            # Build messages manually
+            system_prompt = self._build_system_prompt(
+                tools=tools,
+            )
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
             
             # Add chat history
-            messages.extend(self.chat_history)
+            if self.chat_history:
+                messages.extend(self.chat_history)
             
             # Add user prompt
             if isinstance(prompt, list):
@@ -2746,8 +2841,8 @@ Your Goal: {self.goal}"""
                 messages.append({"role": "user", "content": str(prompt)})
                 original_prompt = str(prompt)
             
-            # Add JSON format instruction if needed
-            if output_json or output_pydantic:
+            # Add JSON format instruction if needed (only when not using native format)
+            if not use_native_format and (output_json or output_pydantic):
                 schema_model = output_pydantic or output_json
                 # Handle Pydantic model
                 if hasattr(schema_model, 'model_json_schema'):
@@ -3305,7 +3400,7 @@ Your Goal: {self.goal}"""
             reasoning_steps=reasoning_steps
         )
 
-    def _chat_completion(self, messages, temperature=1.0, tools=None, stream=True, reasoning_steps=False, task_name=None, task_description=None, task_id=None):
+    def _chat_completion(self, messages, temperature=1.0, tools=None, stream=True, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None):
         start_time = time.time()
         logging.debug(f"{self.name} sending messages to LLM: {messages}")
 
@@ -3392,19 +3487,24 @@ Your Goal: {self.goal}"""
                 if self._openai_client is None:
                     raise ValueError("OpenAI client is not initialized. Please provide OPENAI_API_KEY or use a custom LLM provider.")
                 
-                final_response = self._openai_client.chat_completion_with_tools(
-                    messages=messages,
-                    model=self.llm,
-                    temperature=temperature,
-                    tools=formatted_tools,  # Already formatted for OpenAI
-                    execute_tool_fn=self.execute_tool,
-                    stream=stream,
-                    console=self.console if (self.verbose or stream) else None,
-                    display_fn=self.display_generating if self.verbose else None,
-                    reasoning_steps=reasoning_steps,
-                    verbose=self.verbose,
-                    max_iterations=10
-                )
+                # Build kwargs including response_format if provided
+                chat_kwargs = {
+                    "messages": messages,
+                    "model": self.llm,
+                    "temperature": temperature,
+                    "tools": formatted_tools,  # Already formatted for OpenAI
+                    "execute_tool_fn": self.execute_tool,
+                    "stream": stream,
+                    "console": self.console if (self.verbose or stream) else None,
+                    "display_fn": self.display_generating if self.verbose else None,
+                    "reasoning_steps": reasoning_steps,
+                    "verbose": self.verbose,
+                    "max_iterations": 10
+                }
+                if response_format:
+                    chat_kwargs["response_format"] = response_format
+                
+                final_response = self._openai_client.chat_completion_with_tools(**chat_kwargs)
 
             return final_response
 
@@ -3903,8 +4003,23 @@ Your Goal: {self.goal}"""
                 display_error(f"Error in LLM chat: {e}")
                 return None
         else:
+            # Determine if we should use native structured output
+            schema_model = output_pydantic or output_json
+            use_native_format = False
+            response_format = None
+            
+            if schema_model and self._supports_native_structured_output():
+                # Model supports native structured output - build response_format
+                response_format = self._build_response_format(schema_model)
+                if response_format:
+                    use_native_format = True
+                    logging.debug(f"Agent {self.name} using native structured output with response_format")
+            
             # Use the new _build_messages helper method
-            messages, original_prompt = self._build_messages(prompt, temperature, output_json, output_pydantic)
+            messages, original_prompt = self._build_messages(
+                prompt, temperature, output_json, output_pydantic,
+                use_native_format=use_native_format
+            )
             
             # Store chat history length for potential rollback
             chat_history_length = len(self.chat_history)
@@ -3960,7 +4075,7 @@ Your Goal: {self.goal}"""
                                     agent_tools=agent_tools
                                 )
 
-                        response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=stream, task_name=task_name, task_description=task_description, task_id=task_id)
+                        response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=stream, task_name=task_name, task_description=task_description, task_id=task_id, response_format=response_format)
                         if not response:
                             # Rollback chat history on response failure
                             self.chat_history = self.chat_history[:chat_history_length]

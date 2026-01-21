@@ -42,16 +42,24 @@ def _parse_json_output(output: Any, step_name: str = "step") -> Any:
     Handles:
     - Direct JSON strings: '{"key": "value"}'
     - Markdown code blocks: ```json\n{"key": "value"}\n```
+    - LLM echoing schema: {'type': 'array', 'items': [...]} -> extract items
     
     Returns:
         Parsed dict/list if successful, original output otherwise
     """
     if not isinstance(output, str) or not output:
+        # Handle LLM echoing schema structure even for non-string outputs
+        if isinstance(output, dict):
+            return _extract_from_schema_echo(output)
         return output
     
     # Try direct JSON parse first
     try:
-        return json.loads(output)
+        parsed = json.loads(output)
+        # Check if LLM echoed the schema structure
+        if isinstance(parsed, dict):
+            parsed = _extract_from_schema_echo(parsed)
+        return parsed
     except json.JSONDecodeError:
         pass
     
@@ -59,7 +67,10 @@ def _parse_json_output(output: Any, step_name: str = "step") -> Any:
     json_match = re.search(r'```(?:json)?\s*\n?([\s\S]*?)\n?```', output)
     if json_match:
         try:
-            return json.loads(json_match.group(1).strip())
+            parsed = json.loads(json_match.group(1).strip())
+            if isinstance(parsed, dict):
+                parsed = _extract_from_schema_echo(parsed)
+            return parsed
         except json.JSONDecodeError:
             pass
     
@@ -69,13 +80,54 @@ def _parse_json_output(output: Any, step_name: str = "step") -> Any:
         match = re.search(pattern, output)
         if match:
             try:
-                return json.loads(match.group(1))
+                parsed = json.loads(match.group(1))
+                if isinstance(parsed, dict):
+                    parsed = _extract_from_schema_echo(parsed)
+                return parsed
             except json.JSONDecodeError:
                 continue
     
     # Return original if can't parse
     logger.debug(f"Could not parse JSON from step '{step_name}' output")
     return output
+
+
+def _extract_from_schema_echo(data: dict) -> Any:
+    """
+    Extract actual data when LLM echoes the JSON schema structure.
+    
+    Common patterns:
+    - {'type': 'array', 'items': [...]} -> return [...]
+    - {'type': 'object', 'properties': {...}, 'data': {...}} -> return data
+    - {'keywords': [...]} -> return as-is (normal output)
+    
+    Args:
+        data: Dict that might contain echoed schema
+        
+    Returns:
+        Extracted data or original dict
+    """
+    # Check if this looks like a schema echo with 'type' and actual data
+    if 'type' in data:
+        data_type = data.get('type')
+        
+        # Array schema echo: {'type': 'array', 'items': [...]}
+        if data_type == 'array' and 'items' in data:
+            items = data['items']
+            # If items is a list, that's our actual data
+            if isinstance(items, list):
+                logger.debug("Extracted items from schema-echoed array output")
+                return items
+        
+        # Object schema echo: {'type': 'object', 'properties': {...}, 'data': {...}}
+        if data_type == 'object':
+            # Check for actual data field
+            if 'data' in data and isinstance(data['data'], dict):
+                logger.debug("Extracted data from schema-echoed object output")
+                return data['data']
+    
+    # Not a schema echo, return as-is
+    return data
 
 
 @dataclass
@@ -2163,12 +2215,17 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             # Determine input for the included recipe
             recipe_input = include_step.input or previous_output or input
             
-            # Substitute variables in the input
-            if recipe_input:
+            # Convert non-string inputs to JSON string for variable substitution
+            if recipe_input and not isinstance(recipe_input, str):
+                recipe_input = json.dumps(recipe_input)
+            
+            # Substitute variables in the input (only if it's a string)
+            if recipe_input and isinstance(recipe_input, str):
                 for key, value in all_variables.items():
                     recipe_input = recipe_input.replace(f"{{{{{key}}}}}", str(value))
                 if previous_output:
-                    recipe_input = recipe_input.replace("{{previous_output}}", str(previous_output))
+                    prev_str = previous_output if isinstance(previous_output, str) else json.dumps(previous_output)
+                    recipe_input = recipe_input.replace("{{previous_output}}", prev_str)
                 recipe_input = recipe_input.replace("{{input}}", input)
             
             # Parse and execute the included workflow
