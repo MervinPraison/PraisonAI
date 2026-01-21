@@ -286,6 +286,12 @@ Methods:
 * <code title="cli">praisonai recipe run <a href="./src/praisonai/praisonai/cli/commands/recipe.py">--help</a></code>
 * <code title="cli">praisonai registry list <a href="./src/praisonai/praisonai/cli/commands/registry.py">--help</a></code>
 * <code title="cli">praisonai registry serve <a href="./src/praisonai/praisonai/cli/commands/registry.py">--help</a></code>
+* <code title="cli">praisonai replay cleanup <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
+* <code title="cli">praisonai replay context <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
+* <code title="cli">praisonai replay delete <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
+* <code title="cli">praisonai replay flow <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
+* <code title="cli">praisonai replay list <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
+* <code title="cli">praisonai replay show <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
 * <code title="cli">praisonai research research-main <a href="./src/praisonai/praisonai/cli/commands/research.py">--help</a></code>
 * <code title="cli">praisonai retrieval index <a href="./src/praisonai/praisonai/cli/commands/retrieval.py">--help</a></code>
 * <code title="cli">praisonai retrieval query <a href="./src/praisonai/praisonai/cli/commands/retrieval.py">--help</a></code>
