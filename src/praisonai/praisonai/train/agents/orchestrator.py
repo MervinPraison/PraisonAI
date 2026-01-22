@@ -72,6 +72,7 @@ class AgentTrainer:
         human_mode: bool = False,
         grader: Optional[TrainingGrader] = None,
         storage_dir: Optional[Path] = None,
+        storage_backend: Optional[Any] = None,
         verbose: bool = True,
     ):
         """
@@ -83,6 +84,7 @@ class AgentTrainer:
             human_mode: Use human feedback instead of LLM grading (default: False)
             grader: Custom grader instance (default: TrainingGrader())
             storage_dir: Directory for storing training data
+            storage_backend: Storage backend (FileBackend, SQLiteBackend, RedisBackend)
             verbose: Print progress during training (default: True)
         """
         self.agent = agent
@@ -90,6 +92,7 @@ class AgentTrainer:
         self.human_mode = human_mode
         self.grader = grader
         self.storage_dir = storage_dir
+        self.storage_backend = storage_backend
         self.verbose = verbose
         
         self.session_id = f"train-{uuid.uuid4().hex[:8]}"
@@ -257,6 +260,7 @@ class AgentTrainer:
         self._storage = TrainingStorage(
             session_id=self.session_id,
             storage_dir=self.storage_dir,
+            backend=self.storage_backend,
         )
         
         # Initialize grader for LLM mode

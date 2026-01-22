@@ -6,10 +6,11 @@ Evaluates agent output accuracy by comparing against expected output using LLM-a
 
 import os
 import logging
-from typing import Any, Callable, List, Optional, Union, TYPE_CHECKING
+from typing import Callable, Optional, Union, TYPE_CHECKING
 
 from .base import BaseEvaluator
 from .results import AccuracyResult, EvaluationScore
+from .grader import parse_score_reasoning
 
 if TYPE_CHECKING:
     from ..agent.agent import Agent
@@ -123,19 +124,8 @@ REASONING: [brief explanation]"""
         
         response_text = response.choices[0].message.content or ""
         
-        score = 5.0
-        reasoning = "Unable to parse response"
-        
-        lines = response_text.strip().split('\n')
-        for line in lines:
-            if line.startswith('SCORE:'):
-                try:
-                    score = float(line.replace('SCORE:', '').strip())
-                    score = max(1.0, min(10.0, score))
-                except ValueError:
-                    pass
-            elif line.startswith('REASONING:'):
-                reasoning = line.replace('REASONING:', '').strip()
+        # DRY: Use common parsing function from grader module
+        score, reasoning = parse_score_reasoning(response_text)
         
         return EvaluationScore(
             score=score,

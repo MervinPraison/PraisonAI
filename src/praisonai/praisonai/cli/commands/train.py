@@ -115,6 +115,16 @@ def train_agents(
         "--dry-run",
         help="Show what would happen without running"
     ),
+    storage_backend: Optional[str] = typer.Option(
+        None,
+        "--storage-backend",
+        help="Storage backend: 'file', 'sqlite', or 'redis://url'. Default: file"
+    ),
+    storage_path: Optional[str] = typer.Option(
+        None,
+        "--storage-path",
+        help="Path for storage backend (file dir or sqlite db path)"
+    ),
 ):
     """
     Train agents through iterative feedback loops.
@@ -204,12 +214,20 @@ def train_agents(
     from praisonai.train.agents.grader import TrainingGrader
     grader = TrainingGrader(model=model) if model else None
     
+    # Create storage backend if specified
+    backend = None
+    if storage_backend:
+        backend = _create_storage_backend(storage_backend, storage_path, output)
+        if backend is None and storage_backend not in ("file", None):
+            raise typer.Exit(1)
+    
     trainer = AgentTrainer(
         agent=agent,
         iterations=iterations,
         human_mode=human,
         grader=grader,
         storage_dir=storage_dir,
+        storage_backend=backend,
         verbose=verbose,
     )
     
@@ -365,6 +383,33 @@ def _load_agent_from_file(file_path: str, output) -> Optional[object]:
     
     else:
         output.print_error(f"Unsupported file type: {path.suffix}")
+        return None
+
+
+def _create_storage_backend(backend_type: str, storage_path: Optional[str], output):
+    """Create storage backend from CLI options."""
+    try:
+        if backend_type == "file":
+            from praisonaiagents.storage import FileBackend
+            return FileBackend(storage_dir=storage_path or "~/.praison/train")
+        elif backend_type == "sqlite":
+            from praisonaiagents.storage import SQLiteBackend
+            db_path = storage_path or "~/.praison/train.db"
+            return SQLiteBackend(db_path=db_path)
+        elif backend_type.startswith("redis://"):
+            from praisonaiagents.storage import RedisBackend
+            return RedisBackend(url=backend_type, prefix="train:")
+        else:
+            output.print_error(
+                f"Unknown storage backend: {backend_type}",
+                remediation="Use 'file', 'sqlite', or 'redis://url'"
+            )
+            return None
+    except ImportError as e:
+        output.print_error(f"Failed to import storage backend: {e}")
+        return None
+    except Exception as e:
+        output.print_error(f"Failed to create storage backend: {e}")
         return None
 
 

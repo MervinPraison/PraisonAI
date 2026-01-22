@@ -72,12 +72,13 @@ class YAMLWorkflowParser:
         self._agents: Dict[str, Agent] = {}
         self._callbacks: Dict[str, Callable] = {}
     
-    def parse_file(self, file_path: Union[str, Path]) -> Workflow:
+    def parse_file(self, file_path: Union[str, Path], extra_vars: Optional[Dict[str, Any]] = None) -> Workflow:
         """
         Parse a YAML workflow file.
         
         Args:
             file_path: Path to the YAML file
+            extra_vars: Optional dict of variables to override YAML defaults (e.g., from CLI --var)
             
         Returns:
             Workflow object ready for execution
@@ -89,14 +90,15 @@ class YAMLWorkflowParser:
         with open(file_path, 'r') as f:
             yaml_content = f.read()
         
-        return self.parse_string(yaml_content)
+        return self.parse_string(yaml_content, extra_vars=extra_vars)
     
-    def parse_string(self, yaml_content: str) -> Workflow:
+    def parse_string(self, yaml_content: str, extra_vars: Optional[Dict[str, Any]] = None) -> Workflow:
         """
         Parse a YAML workflow string.
         
         Args:
             yaml_content: YAML content as string
+            extra_vars: Optional dict of variables to override YAML defaults (e.g., from CLI --var)
             
         Returns:
             Workflow object ready for execution
@@ -104,7 +106,7 @@ class YAMLWorkflowParser:
         data = yaml.safe_load(yaml_content)
         # Normalize to canonical format (accept both old and new field names)
         normalized_data = self._normalize_yaml_config(data)
-        return self._parse_workflow_data(normalized_data)
+        return self._parse_workflow_data(normalized_data, extra_vars=extra_vars)
     
     def _normalize_yaml_config(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -222,12 +224,13 @@ class YAMLWorkflowParser:
                     steps.append(step)
         return steps
     
-    def _parse_workflow_data(self, data: Dict[str, Any]) -> Workflow:
+    def _parse_workflow_data(self, data: Dict[str, Any], extra_vars: Optional[Dict[str, Any]] = None) -> Workflow:
         """
         Parse workflow data dictionary into a Workflow object.
         
         Args:
             data: Parsed YAML data dictionary
+            extra_vars: Optional dict of variables to override YAML defaults (e.g., from CLI --var)
             
         Returns:
             Workflow object
@@ -251,8 +254,11 @@ class YAMLWorkflowParser:
         memory_config = workflow_config.get('memory_config')
         output_mode = workflow_config.get('output')  # NEW: parse output mode from YAML
         
-        # Parse variables
+        # Parse variables (YAML defaults), then merge CLI overrides (extra_vars take precedence)
         variables = data.get('variables', {})
+        if extra_vars:
+            variables = {**variables, **extra_vars}  # CLI --var overrides YAML defaults
+
         
         # Auto-add 'topic' to variables for include recipe propagation
         # This ensures included recipes receive the parent's topic via {{topic}}

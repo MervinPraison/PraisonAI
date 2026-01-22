@@ -23,8 +23,11 @@ import json
 import time
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from dataclasses import dataclass
+
+if TYPE_CHECKING:
+    from praisonaiagents.storage.protocols import StorageBackendProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -88,16 +91,32 @@ class MCPToolIndex:
     - Offline-first with sync
     """
     
-    def __init__(self, base_dir: str = "~/.praison/mcp"):
+    def __init__(
+        self,
+        base_dir: str = "~/.praison/mcp",
+        backend: Optional["StorageBackendProtocol"] = None,
+    ):
         """
         Initialize the tool index.
         
         Args:
-            base_dir: Base directory for MCP tool index
+            base_dir: Base directory for MCP tool index (file-based storage)
+            backend: Optional storage backend (file, sqlite, redis).
+                     If provided, base_dir is ignored and backend is used.
+        
+        Example with SQLite backend:
+            ```python
+            from praisonaiagents.storage import SQLiteBackend
+            backend = SQLiteBackend("~/.praison/mcp.db")
+            index = MCPToolIndex(backend=backend)
+            ```
         """
         self.base_dir = Path(base_dir).expanduser().resolve()
         self.servers_dir = self.base_dir / "servers"
-        self._ensure_dirs()
+        self._backend = backend
+        
+        if backend is None:
+            self._ensure_dirs()
     
     def _ensure_dirs(self) -> None:
         """Create necessary directories."""
@@ -151,8 +170,11 @@ class MCPToolIndex:
             schema_path.write_text(json.dumps(tool, indent=2))
         
         # Save index
-        index_path = server_dir / "_index.json"
-        index_path.write_text(json.dumps(index_data, indent=2))
+        if self._backend is not None:
+            self._backend.save(f"mcp:{server}:index", index_data)
+        else:
+            index_path = server_dir / "_index.json"
+            index_path.write_text(json.dumps(index_data, indent=2))
         
         # Update status
         self._update_status(
@@ -191,9 +213,6 @@ class MCPToolIndex:
         error: Optional[str] = None,
     ) -> None:
         """Update server status file."""
-        server_dir = self._get_server_dir(server)
-        status_path = server_dir / "_status.json"
-        
         status = ServerStatus(
             server=server,
             available=available,
@@ -203,7 +222,12 @@ class MCPToolIndex:
             error=error,
         )
         
-        status_path.write_text(json.dumps(status.to_dict(), indent=2))
+        if self._backend is not None:
+            self._backend.save(f"mcp:{server}:status", status.to_dict())
+        else:
+            server_dir = self._get_server_dir(server)
+            status_path = server_dir / "_status.json"
+            status_path.write_text(json.dumps(status.to_dict(), indent=2))
     
     def get_status(self, server: str) -> Optional[ServerStatus]:
         """
@@ -215,6 +239,15 @@ class MCPToolIndex:
         Returns:
             ServerStatus or None if not found
         """
+        if self._backend is not None:
+            data = self._backend.load(f"mcp:{server}:status")
+            if data:
+                try:
+                    return ServerStatus(**data)
+                except TypeError:
+                    return None
+            return None
+        
         server_dir = self._get_server_dir(server)
         status_path = server_dir / "_status.json"
         
@@ -229,6 +262,16 @@ class MCPToolIndex:
     
     def list_servers(self) -> List[str]:
         """List all indexed servers."""
+        if self._backend is not None:
+            keys = self._backend.list_keys(prefix="mcp:")
+            servers = set()
+            for key in keys:
+                # Extract server from "mcp:<server>:index" or "mcp:<server>:status"
+                parts = key.split(":")
+                if len(parts) >= 2:
+                    servers.add(parts[1])
+            return sorted(servers)
+        
         servers = []
         for path in self.servers_dir.iterdir():
             if path.is_dir():

@@ -11,13 +11,17 @@ Each store handles a specific type of learning data:
 - ImprovementStore: Self-improvement proposals
 """
 
-import json
-import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+# DRY: Import base storage for thread safety
+from ...storage.base import BaseJSONStore
+
+if TYPE_CHECKING:
+    from ...storage.protocols import StorageBackendProtocol
 
 
 @dataclass
@@ -50,18 +54,31 @@ class LearnEntry:
 
 
 class BaseStore(ABC):
-    """Abstract base class for learning stores."""
+    """
+    Abstract base class for learning stores.
+    
+    DRY: Uses BaseJSONStore internally for thread-safe, file-locked storage.
+    Supports pluggable backends (file, sqlite, etc.) via the backend parameter.
+    """
     
     def __init__(
         self,
         store_path: Optional[str] = None,
         user_id: Optional[str] = None,
         scope: str = "private",
+        backend: Optional["StorageBackendProtocol"] = None,
     ):
         self.user_id = user_id or "default"
         self.scope = scope
+        self._backend = backend
         self.store_path = store_path or self._default_path()
         self._entries: Dict[str, LearnEntry] = {}
+        
+        # DRY: Use BaseJSONStore for thread-safe storage
+        self._store = BaseJSONStore(
+            storage_path=self.store_path,
+            backend=backend,
+        )
         self._load()
     
     @property
@@ -77,26 +94,15 @@ class BaseStore(ABC):
         return str(base / f"{self.store_name}.json")
     
     def _load(self) -> None:
-        """Load entries from storage."""
-        if os.path.exists(self.store_path):
-            try:
-                with open(self.store_path, "r") as f:
-                    data = json.load(f)
-                    self._entries = {
-                        k: LearnEntry.from_dict(v) for k, v in data.items()
-                    }
-            except (json.JSONDecodeError, IOError):
-                self._entries = {}
+        """Load entries from storage using BaseJSONStore."""
+        data = self._store.load()
+        self._entries = {
+            k: LearnEntry.from_dict(v) for k, v in data.items()
+        }
     
     def _save(self) -> None:
-        """Save entries to storage."""
-        os.makedirs(os.path.dirname(self.store_path), exist_ok=True)
-        with open(self.store_path, "w") as f:
-            json.dump(
-                {k: v.to_dict() for k, v in self._entries.items()},
-                f,
-                indent=2,
-            )
+        """Save entries to storage using BaseJSONStore."""
+        self._store.save({k: v.to_dict() for k, v in self._entries.items()})
     
     def add(self, content: str, metadata: Optional[Dict[str, Any]] = None) -> LearnEntry:
         """Add a new entry."""

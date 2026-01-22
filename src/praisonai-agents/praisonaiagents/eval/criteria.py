@@ -6,10 +6,11 @@ Evaluates agent outputs against custom criteria using LLM-as-judge.
 
 import os
 import logging
-from typing import Callable, List, Literal, Optional, Union, TYPE_CHECKING
+from typing import Callable, Literal, Optional, Union, TYPE_CHECKING
 
 from .base import BaseEvaluator
 from .results import CriteriaResult, CriteriaScore
+from .grader import parse_score_reasoning
 
 if TYPE_CHECKING:
     from ..agent.agent import Agent
@@ -146,28 +147,24 @@ REASONING: [brief explanation]"""
         
         response_text = response.choices[0].message.content or ""
         
-        score = 5.0
-        passed = False
-        reasoning = "Unable to parse response"
-        
-        lines = response_text.strip().split('\n')
-        for line in lines:
-            if self.scoring_type == "binary":
+        # DRY: Use common parsing for numeric mode, custom for binary
+        if self.scoring_type == "binary":
+            score = 5.0
+            passed = False
+            reasoning = "Unable to parse response"
+            
+            lines = response_text.strip().split('\n')
+            for line in lines:
                 if line.startswith('RESULT:'):
                     result_str = line.replace('RESULT:', '').strip().upper()
                     passed = result_str == 'PASS'
                     score = 10.0 if passed else 0.0
-            else:
-                if line.startswith('SCORE:'):
-                    try:
-                        score = float(line.replace('SCORE:', '').strip())
-                        score = max(1.0, min(10.0, score))
-                        passed = score >= self.threshold
-                    except ValueError:
-                        pass
-            
-            if line.startswith('REASONING:'):
-                reasoning = line.replace('REASONING:', '').strip()
+                elif line.startswith('REASONING:'):
+                    reasoning = line.replace('REASONING:', '').strip()
+        else:
+            # DRY: Use common parsing function from grader module
+            score, reasoning = parse_score_reasoning(response_text)
+            passed = score >= self.threshold
         
         return CriteriaScore(
             score=score,

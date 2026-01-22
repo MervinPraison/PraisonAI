@@ -981,27 +981,37 @@ def _execute_steps_workflow(
     - loop steps (parallel/sequential)
     - output_variable
     - agent execution
+    - CLI variable overrides via --var
     """
     from praisonaiagents.workflows import YAMLWorkflowParser
     
     # Get the workflow file path from config if available
     workflow_file = config.get("_workflow_file")
     
+    # Extract CLI variable overrides (everything except internal keys)
+    extra_vars = {k: v for k, v in config.items() if not k.startswith("_")}
+    
     if workflow_file:
         # Use YAMLWorkflowParser to properly parse and execute the workflow
         # This handles include steps, loops, variables, tools, etc.
         parser = YAMLWorkflowParser(tool_registry=tool_registry)
-        workflow = parser.parse_file(workflow_file)
+        workflow = parser.parse_file(workflow_file, extra_vars=extra_vars)
         return workflow.start()
     
     # Fallback: Create workflow from config dict using parser
     from praisonaiagents import Workflow
+    
+    # Merge YAML variables with CLI overrides (CLI takes precedence)
+    yaml_vars = workflow_config.get("variables", {})
+    merged_vars = {**yaml_vars, **extra_vars}
+    
     workflow = Workflow(
         name=workflow_config.get("name", "RecipeWorkflow"),
         steps=workflow_config.get("steps", []),
-        variables=workflow_config.get("variables", {}),
+        variables=merged_vars,
     )
     return workflow.start()
+
 
 
 def _execute_simple_agent(
