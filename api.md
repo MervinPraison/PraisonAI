@@ -345,7 +345,11 @@ Methods:
 * <code title="cli">praisonai traces enable <a href="./src/praisonai/praisonai/cli/commands/traces.py">--help</a></code>
 * <code title="cli">praisonai traces list <a href="./src/praisonai/praisonai/cli/commands/traces.py">--help</a></code>
 * <code title="cli">praisonai traces status <a href="./src/praisonai/praisonai/cli/commands/traces.py">--help</a></code>
-* <code title="cli">praisonai train train-main <a href="./src/praisonai/praisonai/cli/commands/train.py">--help</a></code>
+* <code title="cli">praisonai train agents <a href="./src/praisonai/praisonai/cli/commands/train.py">--help</a></code>
+* <code title="cli">praisonai train list <a href="./src/praisonai/praisonai/cli/commands/train.py">--help</a></code>
+* <code title="cli">praisonai train llm <a href="./src/praisonai/praisonai/cli/commands/train.py">--help</a></code>
+* <code title="cli">praisonai train show <a href="./src/praisonai/praisonai/cli/commands/train.py">--help</a></code>
+* <code title="cli">praisonai train train-callback <a href="./src/praisonai/praisonai/cli/commands/train.py">--help</a></code>
 * <code title="cli">praisonai ui chat <a href="./src/praisonai/praisonai/cli/commands/ui.py">--help</a></code>
 * <code title="cli">praisonai ui code <a href="./src/praisonai/praisonai/cli/commands/ui.py">--help</a></code>
 * <code title="cli">praisonai ui gradio <a href="./src/praisonai/praisonai/cli/commands/ui.py">--help</a></code>
