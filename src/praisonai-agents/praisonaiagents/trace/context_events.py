@@ -12,6 +12,7 @@ Zero Performance Impact:
 Schema Version: 1.0
 """
 
+import contextvars
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -20,6 +21,66 @@ import json
 
 
 CONTEXT_SCHEMA_VERSION = "1.0"
+
+
+# =============================================================================
+# GLOBAL EMITTER REGISTRY
+# =============================================================================
+# Uses contextvars for async-safe, thread-safe global state.
+# Zero overhead when not set (returns disabled NoOp emitter).
+
+_context_emitter: contextvars.ContextVar["ContextTraceEmitter"] = contextvars.ContextVar(
+    'praisonai_context_emitter'
+)
+
+# Singleton disabled emitter for default case (zero allocation per call)
+_default_disabled_emitter: Optional["ContextTraceEmitter"] = None
+
+
+def get_context_emitter() -> "ContextTraceEmitter":
+    """
+    Get the current context trace emitter.
+    
+    Returns a disabled NoOp emitter if not set (zero overhead).
+    This function is safe to call from any async context or thread.
+    
+    Returns:
+        ContextTraceEmitter: The current emitter or a disabled default.
+    """
+    try:
+        return _context_emitter.get()
+    except LookupError:
+        global _default_disabled_emitter
+        if _default_disabled_emitter is None:
+            _default_disabled_emitter = ContextTraceEmitter(
+                sink=ContextNoOpSink(),
+                session_id="",
+                enabled=False
+            )
+        return _default_disabled_emitter
+
+
+def set_context_emitter(emitter: "ContextTraceEmitter") -> contextvars.Token:
+    """
+    Set the context trace emitter for the current async context.
+    
+    Args:
+        emitter: The emitter to set as current.
+        
+    Returns:
+        Token that can be used with reset_context_emitter() to restore previous state.
+    """
+    return _context_emitter.set(emitter)
+
+
+def reset_context_emitter(token: contextvars.Token) -> None:
+    """
+    Reset the context emitter to its previous state.
+    
+    Args:
+        token: Token returned by set_context_emitter().
+    """
+    _context_emitter.reset(token)
 
 
 class ContextEventType(str, Enum):
