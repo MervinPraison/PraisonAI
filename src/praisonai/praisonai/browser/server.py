@@ -175,9 +175,11 @@ class BrowserServer:
     ) -> Optional[Dict]:
         """Process incoming WebSocket message."""
         msg_type = message.get("type", "")
-        logger.debug(f"[SERVER][MSG] _process_message:server.py type={msg_type}")
+        logger.info(f"[SERVER][MSG] _process_message:server.py type={msg_type}, connections={len(self._connections)}")
         
         if msg_type == "start_session":
+            print(f"[SERVER] start_session received, connections={len(self._connections)}", flush=True)
+            logger.info(f"[SERVER][ROUTE] Routing start_session to _handle_start_session, connections={len(self._connections)}")
             return await self._handle_start_session(message, conn)
         
         elif msg_type == "observation":
@@ -274,17 +276,24 @@ class BrowserServer:
 
         # Try to find an available extension
         logger.info(f"[DEBUG] Scanning {len(self._connections)} connections for available extension")
+        logger.info(f"[DEBUG] Current conn id: {id(conn)}")
         for client_id, client_conn in self._connections.items():
             is_self = client_conn == conn
+            is_same_id = id(client_conn) == id(conn)
             has_websocket = client_conn.websocket is not None
             has_session = client_conn.session_id is not None
-            logger.info(f"[DEBUG] Client {client_id[:8]}: is_self={is_self}, websocket={has_websocket}, session={has_session}")
+            logger.info(f"[DEBUG] Client {client_id[:8]}: is_self={is_self}, same_id={is_same_id}, websocket={has_websocket}, session={has_session}, conn_id={id(client_conn)}")
 
             # Only send to extensions (not CLI) that don't have an active session
+            print(f"[SERVER] Checking client {client_id[:8]}: conn!=self={client_conn != conn}, ws={client_conn.websocket is not None}, no_session={not client_conn.session_id}", flush=True)
             if client_conn != conn and client_conn.websocket and not client_conn.session_id:
                 try:
+                    print(f"[SERVER] SENDING start_automation to {client_id[:8]}", flush=True)
                     logger.info(f"[SERVER][START] _handle_start_session:server.py → Sending start_automation to extension {client_id[:8]}")
-                    await client_conn.websocket.send_json(start_msg)
+                    # Use send_text with JSON to ensure compatibility
+                    import json as json_mod
+                    await client_conn.websocket.send_text(json_mod.dumps(start_msg))
+                    print(f"[SERVER] SENT start_automation successfully", flush=True)
                     # Set the extension's session_id so we can broadcast actions to CLI
                     client_conn.session_id = session_id
                     logger.info(f"[SERVER][START] start_automation sent successfully to {client_id[:8]}, session={session_id[:8]}")
@@ -292,6 +301,8 @@ class BrowserServer:
                     break  # Only send to ONE extension
                 except Exception as e:
                     logger.error(f"[SERVER][START] Failed to send start_automation to {client_id[:8]}: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
         
         # *** FIX: If no extension found, it might have stale session_id - clear and retry ***
         if not sent_to_extension:
