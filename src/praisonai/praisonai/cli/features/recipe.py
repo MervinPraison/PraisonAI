@@ -579,6 +579,9 @@ class RecipeHandler:
             "force": {"flag": True, "default": False},
             "allow_dangerous_tools": {"flag": True, "default": False},
             "save": {"flag": True, "default": False},  # Save replay trace
+            "debug": {"flag": True, "default": False},  # Debug mode
+            "profile": {"flag": True, "default": False},  # Profiling mode
+            "deep_profile": {"flag": True, "default": False},  # Deep profiling mode
         }
         parsed = self._parse_args(args, spec)
         
@@ -637,6 +640,9 @@ class RecipeHandler:
             "force": parsed["force"],
             "allow_dangerous_tools": parsed["allow_dangerous_tools"],
             "save_replay": parsed["save"],  # Save replay trace for debugging
+            "debug": parsed.get("debug", False),  # Debug mode
+            "profile": parsed.get("profile", False),  # Profiling mode
+            "deep_profile": parsed.get("deep_profile", False),  # Deep profiling mode
         }
         
         try:

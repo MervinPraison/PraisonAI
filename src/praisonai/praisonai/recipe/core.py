@@ -202,6 +202,7 @@ def run(
             # Set as global emitter so agents can access it
             trace_emitter_token = set_context_emitter(trace_emitter)
             trace_emitter.session_start({"recipe": name, "run_id": run_id})
+            print(f"📝 Replay trace enabled: {run_id}")
         except ImportError as e:
             import logging
             logging.debug(f"Replay module not available: {e}")
@@ -296,6 +297,7 @@ def run(
             trace_emitter.session_end()
         if trace_writer:
             trace_writer.close()
+            print(f"📝 Replay trace saved: {run_id}")
         # Reset global emitter
         if trace_emitter_token:
             from praisonaiagents.trace.context_events import reset_context_emitter
