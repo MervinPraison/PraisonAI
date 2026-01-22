@@ -117,10 +117,15 @@ def test_check_docker_available_not_found(mock_run):
     assert "Install Docker" in result.fix_suggestion
 
 
-@patch('subprocess.run')
-def test_check_port_available_success(mock_run):
+@patch('socket.socket')
+def test_check_port_available_success(mock_socket):
     """Test port availability check success."""
     from praisonai.deploy.doctor import check_port_available
+    
+    # connect_ex returns non-zero when port is NOT in use (available)
+    mock_sock = MagicMock()
+    mock_sock.connect_ex.return_value = 1  # Non-zero = connection refused = port available
+    mock_socket.return_value.__enter__.return_value = mock_sock
     
     result = check_port_available(8005)
     assert result.passed is True
