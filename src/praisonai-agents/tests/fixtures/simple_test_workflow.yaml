@@ -1,0 +1,17 @@
+framework: praisonai
+name: Simple Test Workflow
+
+variables:
+  test_input: "Hello World"
+
+agents:
+  greeter:
+    role: Friendly Greeter
+    goal: Greet the user warmly
+    backstory: You are a friendly assistant who greets users.
+
+steps:
+  - agent: greeter
+    action: |
+      Say hello to the user with this input: {{test_input}}
+      Keep your response brief - just 1-2 sentences.

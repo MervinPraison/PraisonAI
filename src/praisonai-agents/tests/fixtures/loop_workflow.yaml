@@ -1,0 +1,21 @@
+framework: praisonai
+name: Loop Test Workflow
+
+variables:
+  items:
+    - "apple"
+    - "banana"
+
+agents:
+  describer:
+    role: Brief Describer
+    goal: Describe items briefly
+    backstory: You describe things in one sentence.
+
+steps:
+  - loop:
+      over: items
+      var_name: fruit
+    agent: describer
+    action: |
+      Describe {{fruit}} in exactly 5 words.

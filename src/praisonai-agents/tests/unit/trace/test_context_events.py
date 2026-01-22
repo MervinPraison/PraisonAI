@@ -148,6 +148,71 @@ class TestGlobalEmitterRegistry:
         # No way to verify NoOp discarded events, but no exception = success
 
 
+class TestCopyContextToCallable:
+    """Tests for copy_context_to_callable helper."""
+    
+    def test_copy_context_propagates_to_thread(self):
+        """Test that copy_context_to_callable propagates contextvars to threads."""
+        import asyncio
+        from praisonaiagents.trace.context_events import (
+            get_context_emitter, set_context_emitter, reset_context_emitter,
+            ContextTraceEmitter, ContextListSink, copy_context_to_callable
+        )
+        
+        sink = ContextListSink()
+        emitter = ContextTraceEmitter(sink=sink, session_id="test", enabled=True)
+        token = set_context_emitter(emitter)
+        
+        def check_in_thread():
+            thread_emitter = get_context_emitter()
+            thread_emitter.agent_start("thread_agent", {})
+            return thread_emitter.enabled
+        
+        async def run_test():
+            loop = asyncio.get_event_loop()
+            # Use copy_context_to_callable to propagate context
+            result = await loop.run_in_executor(None, copy_context_to_callable(check_in_thread))
+            return result
+        
+        try:
+            result = asyncio.run(run_test())
+            assert result is True, "Emitter should be enabled in thread"
+            
+            events = sink.get_events()
+            assert len(events) == 1
+            assert events[0].agent_name == "thread_agent"
+        finally:
+            reset_context_emitter(token)
+    
+    def test_without_copy_context_thread_gets_default(self):
+        """Test that without copy_context_to_callable, thread gets default disabled emitter."""
+        import asyncio
+        from praisonaiagents.trace.context_events import (
+            get_context_emitter, set_context_emitter, reset_context_emitter,
+            ContextTraceEmitter, ContextListSink
+        )
+        
+        sink = ContextListSink()
+        emitter = ContextTraceEmitter(sink=sink, session_id="test", enabled=True)
+        token = set_context_emitter(emitter)
+        
+        def check_in_thread():
+            thread_emitter = get_context_emitter()
+            return thread_emitter.enabled
+        
+        async def run_test():
+            loop = asyncio.get_event_loop()
+            # WITHOUT copy_context_to_callable - thread should get default disabled emitter
+            result = await loop.run_in_executor(None, check_in_thread)
+            return result
+        
+        try:
+            result = asyncio.run(run_test())
+            assert result is False, "Without copy_context, thread should get disabled default emitter"
+        finally:
+            reset_context_emitter(token)
+
+
 class TestContextEvent:
     """Tests for ContextEvent dataclass."""
     
@@ -621,3 +686,201 @@ print(f"{elapsed:.1f}")
             import_time_ms = float(result.stdout.strip())
             # Additional import should be under 50ms (after base is loaded)
             assert import_time_ms < 50, f"Context events import too slow: {import_time_ms:.1f}ms"
+
+
+class TestFullContextCapture:
+    """Tests for full context capture in trace events (TDD for new feature)."""
+    
+    def test_llm_request_includes_messages_array(self):
+        """Test that llm_request can include full messages array."""
+        from praisonaiagents.trace.context_events import (
+            ContextTraceEmitter, ContextListSink, ContextEventType
+        )
+        
+        sink = ContextListSink()
+        emitter = ContextTraceEmitter(sink=sink, session_id="test")
+        
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "What is 2+2?"},
+        ]
+        
+        emitter.llm_request(
+            agent_name="test_agent",
+            messages_count=2,
+            tokens_used=50,
+            model="gpt-4o-mini",
+            messages=messages,  # New parameter for full messages
+        )
+        
+        events = sink.get_events()
+        assert len(events) == 1
+        assert events[0].event_type == ContextEventType.LLM_REQUEST
+        assert events[0].data.get("messages") == messages
+    
+    def test_llm_response_includes_response_content(self):
+        """Test that llm_response can include response content."""
+        from praisonaiagents.trace.context_events import (
+            ContextTraceEmitter, ContextListSink, ContextEventType
+        )
+        
+        sink = ContextListSink()
+        emitter = ContextTraceEmitter(sink=sink, session_id="test")
+        
+        emitter.llm_response(
+            agent_name="test_agent",
+            response_tokens=10,
+            duration_ms=500.0,
+            finish_reason="stop",
+            response_content="The answer is 4.",  # New parameter
+        )
+        
+        events = sink.get_events()
+        assert len(events) == 1
+        assert events[0].event_type == ContextEventType.LLM_RESPONSE
+        assert events[0].data.get("response_content") == "The answer is 4."
+    
+    def test_context_event_has_branch_id_field(self):
+        """Test that ContextEvent has optional branch_id for parallel execution."""
+        from praisonaiagents.trace.context_events import ContextEvent, ContextEventType
+        
+        # Without branch_id
+        event1 = ContextEvent(
+            event_type=ContextEventType.AGENT_START,
+            timestamp=1736665496.123,
+            session_id="sess-123",
+        )
+        assert event1.branch_id is None
+        
+        # With branch_id
+        event2 = ContextEvent(
+            event_type=ContextEventType.AGENT_START,
+            timestamp=1736665496.123,
+            session_id="sess-123",
+            branch_id="parallel_0",
+        )
+        assert event2.branch_id == "parallel_0"
+    
+    def test_branch_id_in_to_dict(self):
+        """Test that branch_id is included in to_dict output."""
+        from praisonaiagents.trace.context_events import ContextEvent, ContextEventType
+        
+        event = ContextEvent(
+            event_type=ContextEventType.AGENT_START,
+            timestamp=1736665496.123,
+            session_id="sess-123",
+            branch_id="loop_5",
+        )
+        
+        d = event.to_dict()
+        assert d.get("branch_id") == "loop_5"
+    
+    def test_emitter_set_branch(self):
+        """Test that emitter can set branch context for parallel execution."""
+        from praisonaiagents.trace.context_events import (
+            ContextTraceEmitter, ContextListSink, ContextEventType
+        )
+        
+        sink = ContextListSink()
+        emitter = ContextTraceEmitter(sink=sink, session_id="test")
+        
+        # Set branch context
+        emitter.set_branch("parallel_branch_0")
+        
+        # Events should include branch_id
+        emitter.agent_start("test_agent", {"role": "tester"})
+        
+        events = sink.get_events()
+        assert len(events) == 1
+        assert events[0].branch_id == "parallel_branch_0"
+    
+    def test_emitter_clear_branch(self):
+        """Test that emitter can clear branch context."""
+        from praisonaiagents.trace.context_events import (
+            ContextTraceEmitter, ContextListSink
+        )
+        
+        sink = ContextListSink()
+        emitter = ContextTraceEmitter(sink=sink, session_id="test")
+        
+        # Set and then clear branch
+        emitter.set_branch("branch_1")
+        emitter.clear_branch()
+        
+        emitter.agent_start("test_agent", {})
+        
+        events = sink.get_events()
+        assert events[0].branch_id is None
+    
+    def test_context_snapshot_includes_full_messages(self):
+        """Test that context_snapshot captures full messages array."""
+        from praisonaiagents.trace.context_events import (
+            ContextTraceEmitter, ContextListSink, ContextEventType
+        )
+        
+        sink = ContextListSink()
+        emitter = ContextTraceEmitter(sink=sink, session_id="test")
+        
+        messages = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"},
+        ]
+        
+        emitter.context_snapshot(
+            agent_name="test_agent",
+            messages_count=3,
+            tokens_used=100,
+            tokens_budget=128000,
+            messages=messages,
+        )
+        
+        events = sink.get_events()
+        assert len(events) == 1
+        assert events[0].event_type == ContextEventType.CONTEXT_SNAPSHOT
+        assert events[0].data["messages"] == messages
+        assert events[0].messages_count == 3
+
+
+class TestParallelContextPropagation:
+    """Tests for context propagation in parallel execution."""
+    
+    def test_parallel_workflow_preserves_trace_context(self):
+        """Test that parallel workflow execution preserves trace context in threads."""
+        import asyncio
+        import concurrent.futures
+        from praisonaiagents.trace.context_events import (
+            get_context_emitter, set_context_emitter, reset_context_emitter,
+            ContextTraceEmitter, ContextListSink, copy_context_to_callable
+        )
+        
+        sink = ContextListSink()
+        emitter = ContextTraceEmitter(sink=sink, session_id="parallel-test", enabled=True)
+        token = set_context_emitter(emitter)
+        
+        def parallel_task(branch_id):
+            """Simulates a parallel task that emits trace events."""
+            trace = get_context_emitter()
+            trace.set_branch(f"branch_{branch_id}")
+            trace.agent_start(f"agent_{branch_id}", {"branch": branch_id})
+            trace.agent_end(f"agent_{branch_id}")
+            return branch_id
+        
+        try:
+            # Execute parallel tasks with context propagation
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                futures = [
+                    executor.submit(copy_context_to_callable(lambda i=i: parallel_task(i)))
+                    for i in range(3)
+                ]
+                results = [f.result() for f in concurrent.futures.as_completed(futures)]
+            
+            events = sink.get_events()
+            # Should have 6 events (2 per branch: agent_start + agent_end)
+            assert len(events) == 6, f"Expected 6 events, got {len(events)}"
+            
+            # Verify all branches are represented
+            branch_ids = set(e.branch_id for e in events if e.branch_id)
+            assert len(branch_ids) == 3, f"Expected 3 unique branches, got {branch_ids}"
+        finally:
+            reset_context_emitter(token)

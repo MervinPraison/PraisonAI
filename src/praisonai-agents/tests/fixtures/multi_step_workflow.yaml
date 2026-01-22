@@ -1,0 +1,23 @@
+framework: praisonai
+name: Multi-Step Test Workflow
+
+agents:
+  researcher:
+    role: Quick Researcher
+    goal: Find one fact
+    backstory: You find facts quickly.
+  
+  writer:
+    role: Brief Writer
+    goal: Write a short summary
+    backstory: You write concise summaries.
+
+steps:
+  - agent: researcher
+    action: |
+      What is the capital of France? Answer in one sentence.
+  
+  - agent: writer
+    action: |
+      Based on this fact: {{previous_output}}
+      Write a one-sentence fun fact about it.

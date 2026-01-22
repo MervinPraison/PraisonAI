@@ -3454,7 +3454,8 @@ Your Goal: {self.goal}"""
             self.name,
             messages_count=len(messages),
             tokens_used=0,  # Estimated before call
-            model=self.llm if isinstance(self.llm, str) else None
+            model=self.llm if isinstance(self.llm, str) else None,
+            messages=messages,  # Include full messages for context replay
         )
 
         # Use the new _format_tools_for_completion helper method
@@ -3561,14 +3562,23 @@ Your Goal: {self.goal}"""
 
             # Emit LLM response trace event
             _duration_ms = (time.time() - start_time) * 1000
-            _trace_emitter.llm_response(self.name, duration_ms=_duration_ms)
+            _trace_emitter.llm_response(
+                self.name,
+                duration_ms=_duration_ms,
+                response_content=str(final_response) if final_response else None,  # Include response for context replay
+            )
             
             return final_response
 
         except Exception as e:
             # Emit LLM response trace event on error
             _duration_ms = (time.time() - start_time) * 1000
-            _trace_emitter.llm_response(self.name, duration_ms=_duration_ms, finish_reason="error")
+            _trace_emitter.llm_response(
+                self.name,
+                duration_ms=_duration_ms,
+                finish_reason="error",
+                response_content=str(e),  # Include error for context replay
+            )
             display_error(f"Error in chat completion: {e}")
             return None
     
@@ -5872,8 +5882,10 @@ Write the complete compiled report:"""
                     if hasattr(self, 'achat') and asyncio.iscoroutinefunction(self.achat):
                         response = await self.achat(prompt, tools=self.tools, task_name=None, task_description=None, task_id=None)
                     elif hasattr(self, 'chat'): # Fallback for synchronous chat
+                        # Use copy_context_to_callable to propagate contextvars (needed for trace emission)
+                        from ..trace.context_events import copy_context_to_callable
                         loop = asyncio.get_event_loop()
-                        response = await loop.run_in_executor(None, lambda p=prompt: self.chat(p, tools=self.tools))
+                        response = await loop.run_in_executor(None, copy_context_to_callable(lambda p=prompt: self.chat(p, tools=self.tools)))
                     else:
                         logging.error(f"Agent {self.name} has no suitable chat or achat method for MCP tool.")
                         return f"Error: Agent {self.name} misconfigured for MCP."

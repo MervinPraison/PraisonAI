@@ -99,11 +99,18 @@ def replay_context(
         "-j",
         help="Output as JSON (implies --dump)",
     ),
+    full: bool = typer.Option(
+        False,
+        "--full",
+        "-f",
+        help="Show full context content (messages, responses) without truncation",
+    ),
 ):
     """Interactive replay of a context trace.
     
     Use --dump for non-interactive output (useful for scripting/verification).
     Use --json for machine-readable output.
+    Use --full to show complete context content at each stage.
     """
     from ..output.console import get_output_controller
     
@@ -134,7 +141,7 @@ def replay_context(
     
     # Non-interactive dump mode
     if dump:
-        _dump_events(output, events, session_id, json_output)
+        _dump_events(output, events, session_id, json_output, full)
         return
     
     output.print_success(f"Loaded {len(events)} events from: {session_id}")
@@ -152,8 +159,16 @@ def replay_context(
     player.run()
 
 
-def _dump_events(output, events, session_id: str, json_output: bool):
-    """Dump all events non-interactively."""
+def _dump_events(output, events, session_id: str, json_output: bool, full: bool = False):
+    """Dump all events non-interactively.
+    
+    Args:
+        output: Output controller
+        events: List of trace events
+        session_id: Session identifier
+        json_output: Whether to output as JSON
+        full: Whether to show full content without truncation
+    """
     if json_output or output.is_json_mode:
         output.print_json({
             "session_id": session_id,
@@ -179,11 +194,14 @@ def _dump_events(output, events, session_id: str, json_output: bool):
         
         agent_name = getattr(event, 'agent_name', None) or (event.get('agent_name') if isinstance(event, dict) else None)
         seq = getattr(event, 'sequence_num', i) or (event.get('sequence_num', i) if isinstance(event, dict) else i)
+        branch_id = getattr(event, 'branch_id', None) or (event.get('branch_id') if isinstance(event, dict) else None)
         
         # Format event header
         header = f"[{seq + 1:3d}] {et.upper()}"
         if agent_name:
             header += f" ({agent_name})"
+        if branch_id:
+            header += f" [branch: {branch_id}]"
         
         output.print(f"\n{'-'*50}")
         output.print(header)
@@ -193,11 +211,25 @@ def _dump_events(output, events, session_id: str, json_output: bool):
         if data:
             for key, value in data.items():
                 if value is not None:
-                    # Truncate long values
                     value_str = str(value)
-                    if len(value_str) > 100:
+                    # Full mode: show complete content; otherwise truncate
+                    if not full and len(value_str) > 100:
                         value_str = value_str[:100] + "..."
-                    output.print(f"  {key}: {value_str}")
+                    
+                    # For messages array in full mode, format nicely
+                    if full and key == "messages" and isinstance(value, list):
+                        output.print(f"  {key}:")
+                        for msg_idx, msg in enumerate(value):
+                            role = msg.get("role", "unknown") if isinstance(msg, dict) else "unknown"
+                            content = msg.get("content", "") if isinstance(msg, dict) else str(msg)
+                            output.print(f"    [{msg_idx + 1}] {role}:")
+                            # Indent content lines
+                            for line in str(content).split('\n')[:20]:  # Limit lines in full mode
+                                output.print(f"        {line}")
+                            if len(str(content).split('\n')) > 20:
+                                output.print(f"        ... ({len(str(content).split(chr(10)))} lines total)")
+                    else:
+                        output.print(f"  {key}: {value_str}")
         
         # Show token info if available
         tokens_used = getattr(event, 'tokens_used', 0) or (event.get('tokens_used', 0) if isinstance(event, dict) else 0)

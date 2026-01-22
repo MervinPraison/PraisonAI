@@ -1,0 +1,12 @@
+framework: praisonai
+topic: Simple Test
+
+roles:
+  greeter:
+    role: Friendly Greeter
+    goal: Greet the user warmly
+    backstory: You are a friendly assistant who greets users.
+    tasks:
+      greet_task:
+        description: Say hello to the user. Keep your response brief - just 1-2 sentences.
+        expected_output: A friendly greeting

@@ -1,0 +1,15 @@
+framework: praisonai
+name: Parallel Test Workflow
+
+agents:
+  analyst:
+    role: Quick Analyst
+    goal: Analyze briefly
+    backstory: You analyze topics in one sentence.
+
+steps:
+  - parallel:
+      - agent: analyst
+        action: What is 2+2? Answer in one word.
+      - agent: analyst
+        action: What is 3+3? Answer in one word.
