@@ -189,6 +189,23 @@ def run(
         "session_id": session_id,
     }
     
+    # Initialize replay trace writer if --save flag is set
+    trace_writer = None
+    trace_emitter = None
+    if options.get("save_replay", False):
+        try:
+            from praisonai.replay import ContextTraceWriter
+            from praisonaiagents.trace.context_events import ContextTraceEmitter
+            trace_writer = ContextTraceWriter(session_id=run_id)
+            trace_emitter = ContextTraceEmitter(sink=trace_writer, session_id=run_id)
+            trace_emitter.session_start({"recipe": name, "run_id": run_id})
+        except ImportError as e:
+            import logging
+            logging.debug(f"Replay module not available: {e}")
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to initialize trace writer: {e}")
+    
     try:
         # Load template
         recipe_config = _load_recipe(name, offline=options.get("offline", False))
@@ -235,6 +252,11 @@ def run(
         
         # Dry run mode
         if options.get("dry_run", False):
+            # Close trace writer for dry-run
+            if trace_emitter:
+                trace_emitter.session_end()
+            if trace_writer:
+                trace_writer.close()
             return RecipeResult(
                 run_id=run_id,
                 recipe=recipe_config.name,
@@ -255,15 +277,22 @@ def run(
         else:
             merged_config = {**recipe_config.defaults, **input, **config}
         
-        # Execute recipe
+        # Execute recipe (pass trace_emitter for event tracking)
         output = _execute_recipe(
             recipe_config,
             merged_config,
             session_id,
             options,
+            trace_emitter=trace_emitter,
         )
         
         duration = time.time() - start_time
+        
+        # Close trace writer on success
+        if trace_emitter:
+            trace_emitter.session_end()
+        if trace_writer:
+            trace_writer.close()
         
         return RecipeResult(
             run_id=run_id,
@@ -276,6 +305,10 @@ def run(
         )
         
     except RecipeNotFoundError as e:
+        if trace_emitter:
+            trace_emitter.session_end()
+        if trace_writer:
+            trace_writer.close()
         return RecipeResult(
             run_id=run_id,
             recipe=name,
@@ -286,6 +319,10 @@ def run(
             trace=trace,
         )
     except RecipeDependencyError as e:
+        if trace_emitter:
+            trace_emitter.session_end()
+        if trace_writer:
+            trace_writer.close()
         return RecipeResult(
             run_id=run_id,
             recipe=e.recipe or name,
@@ -296,6 +333,10 @@ def run(
             trace=trace,
         )
     except RecipePolicyError as e:
+        if trace_emitter:
+            trace_emitter.session_end()
+        if trace_writer:
+            trace_writer.close()
         return RecipeResult(
             run_id=run_id,
             recipe=e.recipe or name,
@@ -306,6 +347,10 @@ def run(
             trace=trace,
         )
     except RecipeTimeoutError as e:
+        if trace_emitter:
+            trace_emitter.session_end()
+        if trace_writer:
+            trace_writer.close()
         return RecipeResult(
             run_id=run_id,
             recipe=name,
@@ -316,6 +361,10 @@ def run(
             trace=trace,
         )
     except Exception as e:
+        if trace_emitter:
+            trace_emitter.session_end()
+        if trace_writer:
+            trace_writer.close()
         return RecipeResult(
             run_id=run_id,
             recipe=name,
@@ -771,6 +820,7 @@ def _execute_recipe(
     merged_config: Dict[str, Any],
     session_id: str,
     options: Dict[str, Any],
+    trace_emitter: Any = None,
 ) -> Any:
     """Execute the recipe workflow."""
     try:

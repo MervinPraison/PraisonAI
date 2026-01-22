@@ -566,6 +566,7 @@ class RecipeHandler:
             "offline": {"flag": True, "default": False},
             "force": {"flag": True, "default": False},
             "allow_dangerous_tools": {"flag": True, "default": False},
+            "save": {"flag": True, "default": False},  # Save replay trace
         }
         parsed = self._parse_args(args, spec)
         
@@ -616,6 +617,7 @@ class RecipeHandler:
             "offline": parsed["offline"],
             "force": parsed["force"],
             "allow_dangerous_tools": parsed["allow_dangerous_tools"],
+            "save_replay": parsed["save"],  # Save replay trace for debugging
         }
         
         try:

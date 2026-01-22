@@ -34,6 +34,8 @@ TYPER_COMMANDS = {
     'memory', 'workflow', 'tools', 'knowledge', 'deploy', 'agents', 'skills',
     'eval', 'templates', 'recipe', 'todo', 'docs', 'commit', 'hooks', 'rules',
     'registry', 'package', 'endpoints', 'test', 'examples', 'batch',
+    # Replay commands
+    'replay',
     # Standardisation commands
     'standardise', 'standardize',
 }

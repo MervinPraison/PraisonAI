@@ -3051,17 +3051,43 @@ Your Goal: {self.goal}"""
         # This prevents tool outputs (e.g., search results) from exploding the context
         if self.context_manager and result:
             try:
-                truncated = self._truncate_tool_output(function_name, str(result))
-                if len(truncated) < len(str(result)):
-                    logging.debug(f"Truncated {function_name} output from {len(str(result))} to {len(truncated)} chars")
-                    # Return truncated string if significantly shorter
+                result_str = str(result)
+                truncated = self._truncate_tool_output(function_name, result_str)
+                if len(truncated) < len(result_str):
+                    logging.debug(f"Truncated {function_name} output from {len(result_str)} to {len(truncated)} chars")
+                    # For dicts, truncate large string fields (e.g., raw_content from search)
                     if isinstance(result, dict):
-                        # Keep dict structure but may have truncated string representation
-                        return result  # Let the string version be truncated at display time
-                    return truncated
+                        result = self._truncate_dict_fields(result, function_name)
+                    else:
+                        return truncated
             except Exception as e:
                 logging.debug(f"Tool truncation skipped: {e}")
         
+        return result
+    
+    def _truncate_dict_fields(self, data: dict, tool_name: str, max_field_chars: int = None) -> dict:
+        """Truncate large string fields in a dict to prevent context overflow."""
+        if max_field_chars is None:
+            # Use tool budget from context manager (default 5000 tokens * 4 chars/token = 20000 chars)
+            max_tokens = self.context_manager.get_tool_budget(tool_name) if self.context_manager else 5000
+            max_field_chars = max_tokens * 4
+        
+        result = {}
+        for key, value in data.items():
+            if isinstance(value, str) and len(value) > max_field_chars:
+                # Truncate large string fields
+                result[key] = value[:max_field_chars] + "...[truncated]"
+                logging.debug(f"Truncated field '{key}' from {len(value)} to {max_field_chars} chars")
+            elif isinstance(value, dict):
+                result[key] = self._truncate_dict_fields(value, tool_name, max_field_chars)
+            elif isinstance(value, list):
+                result[key] = [
+                    self._truncate_dict_fields(item, tool_name, max_field_chars) if isinstance(item, dict)
+                    else (item[:max_field_chars] + "...[truncated]" if isinstance(item, str) and len(item) > max_field_chars else item)
+                    for item in value
+                ]
+            else:
+                result[key] = value
         return result
     
     def _execute_tool_impl(self, function_name, arguments):
