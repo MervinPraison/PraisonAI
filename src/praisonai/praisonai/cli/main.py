@@ -1377,8 +1377,18 @@ class PraisonAI:
             
             elif args.command == 'recipe':
                 # Recipe command - new unified recipe system
+                # Re-inject flags consumed by main parser into unknown_args for recipe handler
+                recipe_args = list(unknown_args)
+                if getattr(args, 'save', False) and '--save' not in recipe_args:
+                    recipe_args.append('--save')
+                if getattr(args, 'verbose', False) and '--verbose' not in recipe_args:
+                    recipe_args.append('--verbose')
+                if getattr(args, 'profile', False) and '--profile' not in recipe_args:
+                    recipe_args.append('--profile')
+                if getattr(args, 'profile_deep', False) and '--deep-profile' not in recipe_args:
+                    recipe_args.append('--deep-profile')
                 from .features.recipe import handle_recipe_command
-                exit_code = handle_recipe_command(unknown_args)
+                exit_code = handle_recipe_command(recipe_args)
                 sys.exit(exit_code)
             
             elif args.command == 'endpoints':
