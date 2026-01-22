@@ -3043,27 +3043,44 @@ Your Goal: {self.goal}"""
     def _execute_tool_with_context(self, function_name, arguments, state):
         """Execute tool within injection context, with optional output truncation."""
         from ..tools.injected import with_injection_context
+        from ..trace.context_events import get_context_emitter
+        import time as _time
         
-        with with_injection_context(state):
-            result = self._execute_tool_impl(function_name, arguments)
+        # Emit tool call start event (zero overhead when not set)
+        _trace_emitter = get_context_emitter()
+        _trace_emitter.tool_call_start(self.name, function_name, arguments)
+        _tool_start_time = _time.time()
         
-        # Apply context-aware truncation if context management is enabled
-        # This prevents tool outputs (e.g., search results) from exploding the context
-        if self.context_manager and result:
-            try:
-                result_str = str(result)
-                truncated = self._truncate_tool_output(function_name, result_str)
-                if len(truncated) < len(result_str):
-                    logging.debug(f"Truncated {function_name} output from {len(result_str)} to {len(truncated)} chars")
-                    # For dicts, truncate large string fields (e.g., raw_content from search)
-                    if isinstance(result, dict):
-                        result = self._truncate_dict_fields(result, function_name)
-                    else:
-                        return truncated
-            except Exception as e:
-                logging.debug(f"Tool truncation skipped: {e}")
-        
-        return result
+        try:
+            with with_injection_context(state):
+                result = self._execute_tool_impl(function_name, arguments)
+            
+            # Apply context-aware truncation if context management is enabled
+            # This prevents tool outputs (e.g., search results) from exploding the context
+            if self.context_manager and result:
+                try:
+                    result_str = str(result)
+                    truncated = self._truncate_tool_output(function_name, result_str)
+                    if len(truncated) < len(result_str):
+                        logging.debug(f"Truncated {function_name} output from {len(result_str)} to {len(truncated)} chars")
+                        # For dicts, truncate large string fields (e.g., raw_content from search)
+                        if isinstance(result, dict):
+                            result = self._truncate_dict_fields(result, function_name)
+                        else:
+                            result = truncated
+                except Exception as e:
+                    logging.debug(f"Tool truncation skipped: {e}")
+            
+            # Emit tool call end event
+            _duration_ms = (_time.time() - _tool_start_time) * 1000
+            _trace_emitter.tool_call_end(self.name, function_name, str(result)[:500] if result else None, _duration_ms)
+            
+            return result
+        except Exception as e:
+            # Emit tool call end with error
+            _duration_ms = (_time.time() - _tool_start_time) * 1000
+            _trace_emitter.tool_call_end(self.name, function_name, None, _duration_ms, str(e))
+            raise
     
     def _truncate_dict_fields(self, data: dict, tool_name: str, max_field_chars: int = None) -> dict:
         """Truncate large string fields in a dict to prevent context overflow."""
@@ -3429,6 +3446,16 @@ Your Goal: {self.goal}"""
     def _chat_completion(self, messages, temperature=1.0, tools=None, stream=True, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None):
         start_time = time.time()
         logging.debug(f"{self.name} sending messages to LLM: {messages}")
+        
+        # Emit LLM request trace event (zero overhead when not set)
+        from ..trace.context_events import get_context_emitter
+        _trace_emitter = get_context_emitter()
+        _trace_emitter.llm_request(
+            self.name,
+            messages_count=len(messages),
+            tokens_used=0,  # Estimated before call
+            model=self.llm if isinstance(self.llm, str) else None
+        )
 
         # Use the new _format_tools_for_completion helper method
         formatted_tools = self._format_tools_for_completion(tools)
@@ -3532,9 +3559,16 @@ Your Goal: {self.goal}"""
                 
                 final_response = self._openai_client.chat_completion_with_tools(**chat_kwargs)
 
+            # Emit LLM response trace event
+            _duration_ms = (time.time() - start_time) * 1000
+            _trace_emitter.llm_response(self.name, duration_ms=_duration_ms)
+            
             return final_response
 
         except Exception as e:
+            # Emit LLM response trace event on error
+            _duration_ms = (time.time() - start_time) * 1000
+            _trace_emitter.llm_response(self.name, duration_ms=_duration_ms, finish_reason="error")
             display_error(f"Error in chat completion: {e}")
             return None
     
@@ -3823,6 +3857,18 @@ Your Goal: {self.goal}"""
                         Supports: file paths, URLs, or data URIs.
             ...other args...
         """
+        # Emit context trace event (zero overhead when not set)
+        from ..trace.context_events import get_context_emitter
+        _trace_emitter = get_context_emitter()
+        _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
+        
+        try:
+            return self._chat_impl(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter)
+        finally:
+            _trace_emitter.agent_end(self.name)
+    
+    def _chat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter):
+        """Internal chat implementation (extracted for trace wrapping)."""
         # Apply rate limiter if configured (before any LLM call)
         if self._rate_limiter is not None:
             self._rate_limiter.acquire()
@@ -4293,7 +4339,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             prompt: Text query that WILL be stored in chat_history
             attachments: Optional list of image/file paths that are ephemeral
                         (used for THIS turn only, NEVER stored in history).
-        """ 
+        """
+        # Emit context trace event (zero overhead when not set)
+        from ..trace.context_events import get_context_emitter
+        _trace_emitter = get_context_emitter()
+        _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
+        
+        try:
+            return await self._achat_impl(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, task_name, task_description, task_id, attachments, _trace_emitter)
+        finally:
+            _trace_emitter.agent_end(self.name)
+    
+    async def _achat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, task_name, task_description, task_id, attachments, _trace_emitter):
+        """Internal async chat implementation (extracted for trace wrapping)."""
         # Process ephemeral attachments (DRY - builds multimodal prompt)
         # IMPORTANT: Original text 'prompt' is stored in history, attachments are NOT
         llm_prompt = self._build_multimodal_prompt(prompt, attachments) if attachments else prompt

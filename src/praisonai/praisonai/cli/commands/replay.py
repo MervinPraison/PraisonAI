@@ -87,8 +87,24 @@ def replay_context(
         "--no-rich",
         help="Disable Rich formatting",
     ),
+    dump: bool = typer.Option(
+        False,
+        "--dump",
+        "-d",
+        help="Dump all events non-interactively (for scripting)",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        "-j",
+        help="Output as JSON (implies --dump)",
+    ),
 ):
-    """Interactive replay of a context trace."""
+    """Interactive replay of a context trace.
+    
+    Use --dump for non-interactive output (useful for scripting/verification).
+    Use --json for machine-readable output.
+    """
     from ..output.console import get_output_controller
     
     output = get_output_controller()
@@ -112,6 +128,15 @@ def replay_context(
         output.print_error(f"No events in trace: {session_id}")
         raise typer.Exit(1)
     
+    # JSON output implies dump mode
+    if json_output:
+        dump = True
+    
+    # Non-interactive dump mode
+    if dump:
+        _dump_events(output, events, session_id, json_output)
+        return
+    
     output.print_success(f"Loaded {len(events)} events from: {session_id}")
     
     # Create and run player
@@ -125,6 +150,63 @@ def replay_context(
             output.print_warning(f"Invalid start position. Valid range: 1-{len(events)}")
     
     player.run()
+
+
+def _dump_events(output, events, session_id: str, json_output: bool):
+    """Dump all events non-interactively."""
+    if json_output or output.is_json_mode:
+        output.print_json({
+            "session_id": session_id,
+            "total_events": len(events),
+            "events": [e.to_dict() if hasattr(e, 'to_dict') else e for e in events],
+        })
+        return
+    
+    # Text output - formatted for readability
+    output.print(f"\n{'='*60}")
+    output.print(f"  CONTEXT REPLAY: {session_id}")
+    output.print(f"  Total Events: {len(events)}")
+    output.print(f"{'='*60}\n")
+    
+    for i, event in enumerate(events):
+        # Get event details
+        if hasattr(event, 'event_type'):
+            et = event.event_type
+            if hasattr(et, 'value'):
+                et = et.value
+        else:
+            et = event.get('event_type', 'unknown')
+        
+        agent_name = getattr(event, 'agent_name', None) or (event.get('agent_name') if isinstance(event, dict) else None)
+        seq = getattr(event, 'sequence_num', i) or (event.get('sequence_num', i) if isinstance(event, dict) else i)
+        
+        # Format event header
+        header = f"[{seq + 1:3d}] {et.upper()}"
+        if agent_name:
+            header += f" ({agent_name})"
+        
+        output.print(f"\n{'-'*50}")
+        output.print(header)
+        
+        # Show event-specific data
+        data = getattr(event, 'data', None) or (event.get('data') if isinstance(event, dict) else None)
+        if data:
+            for key, value in data.items():
+                if value is not None:
+                    # Truncate long values
+                    value_str = str(value)
+                    if len(value_str) > 100:
+                        value_str = value_str[:100] + "..."
+                    output.print(f"  {key}: {value_str}")
+        
+        # Show token info if available
+        tokens_used = getattr(event, 'tokens_used', 0) or (event.get('tokens_used', 0) if isinstance(event, dict) else 0)
+        if tokens_used:
+            output.print(f"  tokens_used: {tokens_used}")
+    
+    output.print(f"\n{'='*60}")
+    output.print(f"  END OF REPLAY ({len(events)} events)")
+    output.print(f"{'='*60}\n")
 
 
 @app.command("show")

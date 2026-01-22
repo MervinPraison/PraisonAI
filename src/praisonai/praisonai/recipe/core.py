@@ -192,12 +192,15 @@ def run(
     # Initialize replay trace writer if --save flag is set
     trace_writer = None
     trace_emitter = None
+    trace_emitter_token = None  # Token for resetting global emitter
     if options.get("save_replay", False):
         try:
             from praisonai.replay import ContextTraceWriter
-            from praisonaiagents.trace.context_events import ContextTraceEmitter
+            from praisonaiagents.trace.context_events import ContextTraceEmitter, set_context_emitter
             trace_writer = ContextTraceWriter(session_id=run_id)
             trace_emitter = ContextTraceEmitter(sink=trace_writer, session_id=run_id)
+            # Set as global emitter so agents can access it
+            trace_emitter_token = set_context_emitter(trace_emitter)
             trace_emitter.session_start({"recipe": name, "run_id": run_id})
         except ImportError as e:
             import logging
@@ -293,6 +296,10 @@ def run(
             trace_emitter.session_end()
         if trace_writer:
             trace_writer.close()
+        # Reset global emitter
+        if trace_emitter_token:
+            from praisonaiagents.trace.context_events import reset_context_emitter
+            reset_context_emitter(trace_emitter_token)
         
         return RecipeResult(
             run_id=run_id,
@@ -309,6 +316,9 @@ def run(
             trace_emitter.session_end()
         if trace_writer:
             trace_writer.close()
+        if trace_emitter_token:
+            from praisonaiagents.trace.context_events import reset_context_emitter
+            reset_context_emitter(trace_emitter_token)
         return RecipeResult(
             run_id=run_id,
             recipe=name,
@@ -323,6 +333,9 @@ def run(
             trace_emitter.session_end()
         if trace_writer:
             trace_writer.close()
+        if trace_emitter_token:
+            from praisonaiagents.trace.context_events import reset_context_emitter
+            reset_context_emitter(trace_emitter_token)
         return RecipeResult(
             run_id=run_id,
             recipe=e.recipe or name,
@@ -337,6 +350,9 @@ def run(
             trace_emitter.session_end()
         if trace_writer:
             trace_writer.close()
+        if trace_emitter_token:
+            from praisonaiagents.trace.context_events import reset_context_emitter
+            reset_context_emitter(trace_emitter_token)
         return RecipeResult(
             run_id=run_id,
             recipe=e.recipe or name,
@@ -351,6 +367,9 @@ def run(
             trace_emitter.session_end()
         if trace_writer:
             trace_writer.close()
+        if trace_emitter_token:
+            from praisonaiagents.trace.context_events import reset_context_emitter
+            reset_context_emitter(trace_emitter_token)
         return RecipeResult(
             run_id=run_id,
             recipe=name,
@@ -365,6 +384,9 @@ def run(
             trace_emitter.session_end()
         if trace_writer:
             trace_writer.close()
+        if trace_emitter_token:
+            from praisonaiagents.trace.context_events import reset_context_emitter
+            reset_context_emitter(trace_emitter_token)
         return RecipeResult(
             run_id=run_id,
             recipe=name,

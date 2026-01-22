@@ -43,6 +43,111 @@ class TestContextEventType:
         assert ContextEventType.TOOL_CALL_START.value == "tool_call_start"
 
 
+class TestGlobalEmitterRegistry:
+    """Tests for global emitter registry using contextvars."""
+    
+    def test_get_context_emitter_returns_noop_by_default(self):
+        """Test that get_context_emitter returns a disabled NoOp emitter when not set."""
+        from praisonaiagents.trace.context_events import (
+            get_context_emitter, ContextListSink
+        )
+        
+        emitter = get_context_emitter()
+        
+        # Should return an emitter (not None)
+        assert emitter is not None
+        # Should be disabled by default
+        assert emitter.enabled == False
+    
+    def test_set_context_emitter_and_get(self):
+        """Test that set_context_emitter sets the emitter for current context."""
+        from praisonaiagents.trace.context_events import (
+            get_context_emitter, set_context_emitter, reset_context_emitter,
+            ContextTraceEmitter, ContextListSink
+        )
+        
+        sink = ContextListSink()
+        emitter = ContextTraceEmitter(sink=sink, session_id="test-session", enabled=True)
+        
+        # Set the emitter
+        token = set_context_emitter(emitter)
+        
+        try:
+            # Get should return the same emitter
+            retrieved = get_context_emitter()
+            assert retrieved is emitter
+            assert retrieved.enabled == True
+            assert retrieved.session_id == "test-session"
+        finally:
+            # Reset to avoid affecting other tests
+            reset_context_emitter(token)
+    
+    def test_reset_context_emitter(self):
+        """Test that reset_context_emitter restores previous state."""
+        from praisonaiagents.trace.context_events import (
+            get_context_emitter, set_context_emitter, reset_context_emitter,
+            ContextTraceEmitter, ContextListSink
+        )
+        
+        # Get default (disabled)
+        default_emitter = get_context_emitter()
+        assert default_emitter.enabled == False
+        
+        # Set a new emitter
+        sink = ContextListSink()
+        new_emitter = ContextTraceEmitter(sink=sink, session_id="new", enabled=True)
+        token = set_context_emitter(new_emitter)
+        
+        # Verify it's set
+        assert get_context_emitter() is new_emitter
+        
+        # Reset
+        reset_context_emitter(token)
+        
+        # Should be back to disabled default
+        restored = get_context_emitter()
+        assert restored.enabled == False
+    
+    def test_context_emitter_emits_to_sink_when_set(self):
+        """Test that events are emitted to the sink when emitter is set."""
+        from praisonaiagents.trace.context_events import (
+            get_context_emitter, set_context_emitter, reset_context_emitter,
+            ContextTraceEmitter, ContextListSink, ContextEventType
+        )
+        
+        sink = ContextListSink()
+        emitter = ContextTraceEmitter(sink=sink, session_id="test", enabled=True)
+        token = set_context_emitter(emitter)
+        
+        try:
+            # Get emitter and emit events
+            e = get_context_emitter()
+            e.agent_start("test-agent")
+            e.agent_end("test-agent")
+            
+            # Verify events were captured
+            events = sink.get_events()
+            assert len(events) == 2
+            assert events[0].event_type == ContextEventType.AGENT_START
+            assert events[1].event_type == ContextEventType.AGENT_END
+        finally:
+            reset_context_emitter(token)
+    
+    def test_context_emitter_noop_when_not_set(self):
+        """Test that events are discarded when emitter is not set (NoOp)."""
+        from praisonaiagents.trace.context_events import get_context_emitter
+        
+        # Get default emitter (should be NoOp/disabled)
+        emitter = get_context_emitter()
+        
+        # These should not raise, just be no-ops
+        emitter.agent_start("test")
+        emitter.tool_call_start("test", "some_tool")
+        emitter.agent_end("test")
+        
+        # No way to verify NoOp discarded events, but no exception = success
+
+
 class TestContextEvent:
     """Tests for ContextEvent dataclass."""
     
