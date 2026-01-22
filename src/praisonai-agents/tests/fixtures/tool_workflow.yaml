@@ -1,0 +1,13 @@
+framework: praisonai
+name: Tool Test Workflow
+
+agents:
+  calculator:
+    role: Simple Calculator
+    goal: Do basic math
+    backstory: You calculate things.
+
+steps:
+  - agent: calculator
+    action: |
+      Calculate 10 * 5 and tell me the result in one sentence.

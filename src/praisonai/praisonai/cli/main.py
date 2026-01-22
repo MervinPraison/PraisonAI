@@ -686,17 +686,69 @@ class PraisonAI:
             except Exception:
                 pass  # Continue even if flow display fails
             
-            AgentsGenerator = _get_agents_generator()
-            agents_generator = AgentsGenerator(
-                self.agent_file,
-                self.framework,
-                self.config_list,
-                agent_yaml=self.agent_yaml,
-                tools=self.tools
-            )
-            result = agents_generator.generate_crew_and_kickoff()
-            print(result)
-            return result
+            # Initialize trace variables for cleanup
+            trace_writer = None
+            trace_emitter = None
+            trace_emitter_token = None
+            
+            # Get save flag for replay trace
+            save_replay = getattr(args, 'save', False)
+            
+            # Initialize replay trace writer if --save flag is set
+            import uuid
+            run_id = f"run-{uuid.uuid4().hex[:12]}"
+            if save_replay:
+                try:
+                    from praisonai.replay import ContextTraceWriter
+                    from praisonaiagents.trace.context_events import ContextTraceEmitter, set_context_emitter
+                    
+                    trace_writer = ContextTraceWriter(session_id=run_id)
+                    trace_emitter = ContextTraceEmitter(sink=trace_writer, session_id=run_id)
+                    # Set as global emitter so agents can access it
+                    trace_emitter_token = set_context_emitter(trace_emitter)
+                    trace_emitter.session_start({"agents_file": self.agent_file, "run_id": run_id})
+                    print(f"[cyan]📝 Replay trace enabled: {run_id}[/cyan]")
+                except ImportError as e:
+                    import logging
+                    logging.debug(f"Replay module not available: {e}")
+                except Exception as e:
+                    import logging
+                    logging.warning(f"Failed to initialize trace writer: {e}")
+            
+            try:
+                AgentsGenerator = _get_agents_generator()
+                agents_generator = AgentsGenerator(
+                    self.agent_file,
+                    self.framework,
+                    self.config_list,
+                    agent_yaml=self.agent_yaml,
+                    tools=self.tools
+                )
+                result = agents_generator.generate_crew_and_kickoff()
+                print(result)
+                
+                # Close trace writer on success
+                if trace_emitter:
+                    trace_emitter.session_end()
+                    print(f"[cyan]📝 Replay trace saved: {run_id}[/cyan]")
+                if trace_writer:
+                    trace_writer.close()
+                # Reset global emitter
+                if trace_emitter_token:
+                    from praisonaiagents.trace.context_events import reset_context_emitter
+                    reset_context_emitter(trace_emitter_token)
+                
+                return result
+            except Exception as e:
+                # Cleanup trace on error
+                if trace_emitter:
+                    trace_emitter.session_end()
+                if trace_writer:
+                    trace_writer.close()
+                if trace_emitter_token:
+                    from praisonaiagents.trace.context_events import reset_context_emitter
+                    reset_context_emitter(trace_emitter_token)
+                raise
 
     def parse_args(self):
         """
@@ -2363,11 +2415,17 @@ class PraisonAI:
             variables: Workflow variables
             args: Parsed command line arguments
         """
+        # Initialize trace variables for cleanup
+        trace_writer = None
+        trace_emitter = None
+        trace_emitter_token = None
+        
         try:
             from praisonaiagents.workflows import WorkflowManager
             from rich import print
             from rich.table import Table
             from rich.console import Console
+            import uuid
             
             console = Console()
             manager = WorkflowManager()
@@ -2387,6 +2445,30 @@ class PraisonAI:
             
             # Get verbose flag
             verbose = '--verbose' in action_args or '-v' in action_args or (getattr(args, 'verbose', False) if args else False)
+            
+            # Get save flag for replay trace
+            save_replay = '--save' in action_args or '-s' in action_args or (getattr(args, 'save', False) if args else False)
+            
+            # Initialize replay trace writer if --save flag is set
+            run_id = f"run-{uuid.uuid4().hex[:12]}"
+            if save_replay:
+                try:
+                    from praisonai.replay import ContextTraceWriter
+                    from praisonaiagents.trace.context_events import ContextTraceEmitter, set_context_emitter
+                    from pathlib import Path
+                    
+                    trace_writer = ContextTraceWriter(session_id=run_id)
+                    trace_emitter = ContextTraceEmitter(sink=trace_writer, session_id=run_id)
+                    # Set as global emitter so agents can access it
+                    trace_emitter_token = set_context_emitter(trace_emitter)
+                    trace_emitter.session_start({"workflow": yaml_file, "run_id": run_id})
+                    print(f"[cyan]📝 Replay trace enabled: {run_id}[/cyan]")
+                except ImportError as e:
+                    import logging
+                    logging.debug(f"Replay module not available: {e}")
+                except Exception as e:
+                    import logging
+                    logging.warning(f"Failed to initialize trace writer: {e}")
             
             print(f"[bold cyan]Running YAML workflow: {yaml_file}[/bold cyan]")
             if parsed_vars:
@@ -2480,10 +2562,37 @@ class PraisonAI:
                         print(output)
             else:
                 print(f"\n[red]❌ Workflow failed: {result.get('error', 'Unknown error')}[/red]")
+            
+            # Close trace writer on completion
+            if trace_emitter:
+                trace_emitter.session_end()
+                print(f"[cyan]📝 Replay trace saved: {run_id}[/cyan]")
+            if trace_writer:
+                trace_writer.close()
+            # Reset global emitter
+            if trace_emitter_token:
+                from praisonaiagents.trace.context_events import reset_context_emitter
+                reset_context_emitter(trace_emitter_token)
                 
         except FileNotFoundError:
+            # Cleanup trace on error
+            if trace_emitter:
+                trace_emitter.session_end()
+            if trace_writer:
+                trace_writer.close()
+            if trace_emitter_token:
+                from praisonaiagents.trace.context_events import reset_context_emitter
+                reset_context_emitter(trace_emitter_token)
             print(f"[red]ERROR: YAML file not found: {yaml_file}[/red]")
         except Exception as e:
+            # Cleanup trace on error
+            if trace_emitter:
+                trace_emitter.session_end()
+            if trace_writer:
+                trace_writer.close()
+            if trace_emitter_token:
+                from praisonaiagents.trace.context_events import reset_context_emitter
+                reset_context_emitter(trace_emitter_token)
             print(f"[red]ERROR: YAML workflow failed: {e}[/red]")
             import traceback
             traceback.print_exc()

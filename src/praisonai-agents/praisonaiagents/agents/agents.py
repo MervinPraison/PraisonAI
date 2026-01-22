@@ -798,8 +798,10 @@ Context:
                         tasks_to_run = []
                     
                     # Run sync task in an executor to avoid blocking the event loop
+                    # Use copy_context_to_callable to propagate contextvars (needed for trace emission)
+                    from ..trace.context_events import copy_context_to_callable
                     loop = asyncio.get_running_loop()
-                    await loop.run_in_executor(None, self.run_task, task_id)
+                    await loop.run_in_executor(None, copy_context_to_callable(lambda tid=task_id: self.run_task(tid)))
 
             if tasks_to_run:
                 await asyncio.gather(*tasks_to_run)
@@ -822,8 +824,10 @@ Context:
                     # Before running a sync task, execute all pending async tasks
                     await flush_async_tasks()
                     # Run sync task in an executor to avoid blocking the event loop
+                    # Use copy_context_to_callable to propagate contextvars (needed for trace emission)
+                    from ..trace.context_events import copy_context_to_callable
                     loop = asyncio.get_running_loop()
-                    await loop.run_in_executor(None, self.run_task, task_id)
+                    await loop.run_in_executor(None, copy_context_to_callable(lambda tid=task_id: self.run_task(tid)))
             
             # Execute any remaining async tasks at the end
             await flush_async_tasks()
@@ -835,8 +839,10 @@ Context:
                     await self.arun_task(task_id)
                 else:
                     # Run sync task in an executor to avoid blocking the event loop
+                    # Use copy_context_to_callable to propagate contextvars (needed for trace emission)
+                    from ..trace.context_events import copy_context_to_callable
                     loop = asyncio.get_running_loop()
-                    await loop.run_in_executor(None, self.run_task, task_id)
+                    await loop.run_in_executor(None, copy_context_to_callable(lambda tid=task_id: self.run_task(tid)))
 
     async def astart(self, content=None, return_dict=False, **kwargs):
         """Async version of start method.
@@ -1678,9 +1684,11 @@ Context:
                                 response = await agent_instance.achat(current_input, task_name=None, task_description=None, task_id=None)
                             else:
                                 # Run sync function in a thread to avoid blocking
+                                # Use copy_context_to_callable to propagate contextvars (needed for trace emission)
+                                from ..trace.context_events import copy_context_to_callable
                                 loop = asyncio.get_running_loop()
                                 # Correctly pass current_input to the lambda for closure
-                                response = await loop.run_in_executor(None, lambda ci=current_input: agent_instance.chat(ci))
+                                response = await loop.run_in_executor(None, copy_context_to_callable(lambda ci=current_input: agent_instance.chat(ci)))
                             
                             # Store this agent's result
                             results.append({
@@ -1752,8 +1760,10 @@ Context:
                             if asyncio.iscoroutinefunction(agent.chat):
                                 response = await agent.achat(query)
                             else:
+                                # Use copy_context_to_callable to propagate contextvars (needed for trace emission)
+                                from ..trace.context_events import copy_context_to_callable
                                 loop = asyncio.get_running_loop()
-                                response = await loop.run_in_executor(None, lambda q=query: agent.chat(q))
+                                response = await loop.run_in_executor(None, copy_context_to_callable(lambda q=query: agent.chat(q)))
                             
                             return {
                                 "agent": agent.display_name,
@@ -1888,8 +1898,10 @@ Context:
                         if hasattr(agent_instance, 'achat') and asyncio.iscoroutinefunction(agent_instance.achat):
                             response = await agent_instance.achat(current_input, tools=agent_instance.tools, task_name=None, task_description=None, task_id=None)
                         elif hasattr(agent_instance, 'chat'): # Fallback to sync chat if achat not suitable
+                            # Use copy_context_to_callable to propagate contextvars (needed for trace emission)
+                            from ..trace.context_events import copy_context_to_callable
                             loop = asyncio.get_running_loop()
-                            response = await loop.run_in_executor(None, lambda ci=current_input: agent_instance.chat(ci, tools=agent_instance.tools))
+                            response = await loop.run_in_executor(None, copy_context_to_callable(lambda ci=current_input: agent_instance.chat(ci, tools=agent_instance.tools)))
                         else:
                             logging.warning(f"Agent {agent_instance.display_name} has no suitable chat or achat method.")
                             response = f"Error: Agent {agent_instance.display_name} has no callable chat method."
