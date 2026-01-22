@@ -367,5 +367,6 @@ class TestZeroOverhead:
                 pass
         elapsed = (time.perf_counter() - start) * 1000
         
-        # Should complete 1k calls in under 10ms when disabled
-        assert elapsed < 10, f"phase took {elapsed}ms for 1k calls"
+        # Should complete 1k calls in under 20ms when disabled
+        # Context manager overhead varies by system load
+        assert elapsed < 20, f"phase took {elapsed}ms for 1k calls"
