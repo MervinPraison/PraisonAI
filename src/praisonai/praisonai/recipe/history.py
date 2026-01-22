@@ -11,9 +11,12 @@ import json
 import shutil
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from .models import RecipeResult
+
+if TYPE_CHECKING:
+    from praisonaiagents.storage.protocols import StorageBackendProtocol
 
 
 # Default storage path
@@ -39,7 +42,7 @@ class RunHistory:
     """
     Local run history storage.
     
-    Storage structure:
+    Storage structure (file-based):
     ~/.praison/runs/
     ├── index.json           # Run index for fast lookup
     └── <run_id>/
@@ -47,13 +50,36 @@ class RunHistory:
         ├── input.json       # Input data
         ├── output.json      # Output data
         └── events.jsonl     # Event stream (if streaming)
+    
+    Supports pluggable backends (file, sqlite, redis) via the backend parameter.
+    
+    Example with SQLite backend:
+        ```python
+        from praisonaiagents.storage import SQLiteBackend
+        backend = SQLiteBackend("~/.praison/runs.db")
+        history = RunHistory(backend=backend)
+        ```
     """
     
-    def __init__(self, path: Optional[Path] = None):
-        """Initialize run history storage."""
+    def __init__(
+        self,
+        path: Optional[Path] = None,
+        backend: Optional["StorageBackendProtocol"] = None,
+    ):
+        """
+        Initialize run history storage.
+        
+        Args:
+            path: Path for file-based storage (default: ~/.praison/runs)
+            backend: Optional storage backend (file, sqlite, redis).
+                     If provided, path is ignored and backend is used.
+        """
         self.path = Path(path) if path else DEFAULT_RUNS_PATH
         self.index_path = self.path / "index.json"
-        self._ensure_structure()
+        self._backend = backend
+        
+        if backend is None:
+            self._ensure_structure()
     
     def _ensure_structure(self):
         """Ensure storage directory structure exists."""
@@ -63,6 +89,10 @@ class RunHistory:
     
     def _load_index(self) -> Dict[str, Any]:
         """Load run index."""
+        if self._backend is not None:
+            loaded = self._backend.load("_index")
+            return loaded if loaded else {"runs": {}, "updated": _get_timestamp()}
+        
         if self.index_path.exists():
             with open(self.index_path) as f:
                 return json.load(f)
@@ -71,6 +101,11 @@ class RunHistory:
     def _save_index(self, index: Dict[str, Any]):
         """Save run index."""
         index["updated"] = _get_timestamp()
+        
+        if self._backend is not None:
+            self._backend.save("_index", index)
+            return
+        
         with open(self.index_path, "w") as f:
             json.dump(index, f, indent=2)
     
@@ -119,24 +154,35 @@ class RunHistory:
             "retention_days": retention_days,
         }
         
-        with open(run_dir / "run.json", "w") as f:
-            json.dump(run_data, f, indent=2)
-        
-        # Store input (if allowed)
-        if input_data and export_allowed:
-            with open(run_dir / "input.json", "w") as f:
-                json.dump(input_data, f, indent=2)
-        
-        # Store output (if allowed)
-        if result.output and export_allowed:
-            with open(run_dir / "output.json", "w") as f:
-                json.dump(result.output, f, indent=2)
-        
-        # Store events (if any)
-        if events:
-            with open(run_dir / "events.jsonl", "w") as f:
-                for event in events:
-                    f.write(json.dumps(event) + "\n")
+        if self._backend is not None:
+            # Backend-based storage
+            full_data = {
+                "run": run_data,
+                "input": input_data if input_data and export_allowed else None,
+                "output": result.output if result.output and export_allowed else None,
+                "events": events,
+            }
+            self._backend.save(f"run:{run_id}", full_data)
+        else:
+            # File-based storage
+            with open(run_dir / "run.json", "w") as f:
+                json.dump(run_data, f, indent=2)
+            
+            # Store input (if allowed)
+            if input_data and export_allowed:
+                with open(run_dir / "input.json", "w") as f:
+                    json.dump(input_data, f, indent=2)
+            
+            # Store output (if allowed)
+            if result.output and export_allowed:
+                with open(run_dir / "output.json", "w") as f:
+                    json.dump(result.output, f, indent=2)
+            
+            # Store events (if any)
+            if events:
+                with open(run_dir / "events.jsonl", "w") as f:
+                    for event in events:
+                        f.write(json.dumps(event) + "\n")
         
         # Update index
         index = self._load_index()
@@ -164,6 +210,22 @@ class RunHistory:
         Raises:
             RunNotFoundError: If run not found
         """
+        if self._backend is not None:
+            # Backend-based retrieval
+            full_data = self._backend.load(f"run:{run_id}")
+            if not full_data:
+                raise RunNotFoundError(f"Run not found: {run_id}")
+            
+            run_data = full_data.get("run", {})
+            if full_data.get("input"):
+                run_data["input"] = full_data["input"]
+            if full_data.get("output"):
+                run_data["output"] = full_data["output"]
+            if full_data.get("events"):
+                run_data["events"] = full_data["events"]
+            return run_data
+        
+        # File-based retrieval
         run_dir = self.path / run_id
         if not run_dir.exists():
             raise RunNotFoundError(f"Run not found: {run_id}")
@@ -294,9 +356,12 @@ class RunHistory:
         Returns:
             True if deleted
         """
-        run_dir = self.path / run_id
-        if run_dir.exists():
-            shutil.rmtree(run_dir)
+        if self._backend is not None:
+            self._backend.delete(f"run:{run_id}")
+        else:
+            run_dir = self.path / run_id
+            if run_dir.exists():
+                shutil.rmtree(run_dir)
         
         index = self._load_index()
         if run_id in index["runs"]:

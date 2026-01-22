@@ -7,8 +7,10 @@ Provides functions for managing trace storage locations and listing traces.
 import os
 from pathlib import Path
 from typing import List, Optional
-from dataclasses import dataclass
-from datetime import datetime
+
+# DRY: Import base classes from praisonaiagents.storage
+from praisonaiagents.storage.models import BaseSessionInfo
+from praisonaiagents.storage.base import list_json_sessions, cleanup_old_sessions as _cleanup_old_sessions
 
 
 DEFAULT_TRACES_DIR = "~/.praison/traces"
@@ -26,25 +28,25 @@ def get_traces_dir() -> Path:
     return traces_dir
 
 
-@dataclass
-class TraceInfo:
-    """Information about a trace file."""
-    session_id: str
-    path: Path
-    size_bytes: int
-    created_at: datetime
-    modified_at: datetime
-    event_count: int = 0
+class TraceInfo(BaseSessionInfo):
+    """
+    Information about a trace file.
+    
+    DRY: Inherits from BaseSessionInfo which provides:
+    - session_id, path, size_bytes, created_at, modified_at, item_count
+    - to_dict(), from_dict(), from_path() methods
+    """
+    
+    @property
+    def event_count(self) -> int:
+        """Alias for item_count for backward compatibility."""
+        return self.item_count
     
     def to_dict(self):
-        return {
-            "session_id": self.session_id,
-            "path": str(self.path),
-            "size_bytes": self.size_bytes,
-            "created_at": self.created_at.isoformat(),
-            "modified_at": self.modified_at.isoformat(),
-            "event_count": self.event_count,
-        }
+        """Override to include event_count for backward compatibility."""
+        d = super().to_dict()
+        d["event_count"] = self.event_count
+        return d
 
 
 def list_traces(
@@ -53,6 +55,8 @@ def list_traces(
 ) -> List[TraceInfo]:
     """
     List available trace files.
+    
+    DRY: Uses list_json_sessions from praisonaiagents.storage.base.
     
     Args:
         traces_dir: Directory to search (default: ~/.praison/traces)
@@ -64,35 +68,21 @@ def list_traces(
     if traces_dir is None:
         traces_dir = get_traces_dir()
     
-    if not traces_dir.exists():
-        return []
+    # DRY: Use common list_json_sessions function with .jsonl suffix
+    base_sessions = list_json_sessions(Path(traces_dir), suffix=".jsonl", limit=limit)
     
-    traces = []
-    for trace_file in traces_dir.iterdir():
-        if trace_file.is_file() and trace_file.suffix == ".jsonl":
-            stat = trace_file.stat()
-            
-            # Count events (lines) in file
-            event_count = 0
-            try:
-                with open(trace_file, "r") as f:
-                    event_count = sum(1 for _ in f)
-            except Exception:
-                pass
-            
-            traces.append(TraceInfo(
-                session_id=trace_file.stem,
-                path=trace_file,
-                size_bytes=stat.st_size,
-                created_at=datetime.fromtimestamp(stat.st_ctime),
-                modified_at=datetime.fromtimestamp(stat.st_mtime),
-                event_count=event_count,
-            ))
-    
-    # Sort by modification time (newest first)
-    traces.sort(key=lambda t: t.modified_at, reverse=True)
-    
-    return traces[:limit]
+    # Convert BaseSessionInfo to TraceInfo for backward compatibility
+    return [
+        TraceInfo(
+            session_id=s.session_id,
+            path=s.path,
+            size_bytes=s.size_bytes,
+            created_at=s.created_at,
+            modified_at=s.modified_at,
+            item_count=s.item_count,
+        )
+        for s in base_sessions
+    ]
 
 
 def get_trace_path(session_id: str, traces_dir: Optional[Path] = None) -> Path:
@@ -120,6 +110,8 @@ def cleanup_old_traces(
     """
     Clean up old trace files.
     
+    DRY: Uses cleanup_old_sessions from praisonaiagents.storage.base.
+    
     Args:
         traces_dir: Directory to clean (default: ~/.praison/traces)
         max_age_days: Delete traces older than this
@@ -131,42 +123,10 @@ def cleanup_old_traces(
     if traces_dir is None:
         traces_dir = get_traces_dir()
     
-    if not traces_dir.exists():
-        return 0
-    
-    deleted = 0
-    now = datetime.now()
-    
-    # Get all traces sorted by age (oldest first)
-    traces = list_traces(traces_dir, limit=10000)
-    traces.sort(key=lambda t: t.modified_at)
-    
-    # Delete old traces
-    for trace in traces:
-        age_days = (now - trace.modified_at).days
-        if age_days > max_age_days:
-            try:
-                trace.path.unlink()
-                deleted += 1
-            except Exception:
-                pass
-    
-    # Check total size and delete oldest if needed
-    total_size_mb = sum(t.size_bytes for t in traces if t.path.exists()) / (1024 * 1024)
-    
-    if total_size_mb > max_size_mb:
-        # Re-fetch remaining traces
-        remaining = list_traces(traces_dir, limit=10000)
-        remaining.sort(key=lambda t: t.modified_at)
-        
-        for trace in remaining:
-            if total_size_mb <= max_size_mb:
-                break
-            try:
-                trace.path.unlink()
-                total_size_mb -= trace.size_bytes / (1024 * 1024)
-                deleted += 1
-            except Exception:
-                pass
-    
-    return deleted
+    # DRY: Use common cleanup function with .jsonl suffix
+    return _cleanup_old_sessions(
+        storage_dir=Path(traces_dir),
+        suffix=".jsonl",
+        max_age_days=max_age_days,
+        max_size_mb=max_size_mb,
+    )

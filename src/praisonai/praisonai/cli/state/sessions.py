@@ -5,15 +5,17 @@ Provides persistence and resume functionality for sessions.
 """
 
 import json
-import os
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from ..configuration.paths import get_sessions_dir, ensure_config_dirs
 from .identifiers import RunContext
+
+if TYPE_CHECKING:
+    from praisonaiagents.storage.protocols import StorageBackendProtocol
 
 
 @dataclass
@@ -70,11 +72,35 @@ class SessionManager:
     Each session contains:
     - metadata.json: Session metadata
     - events.jsonl: Stream of events (NDJSON)
+    
+    Supports pluggable backends (file, sqlite, redis) via the backend parameter.
+    
+    Example with SQLite backend:
+        ```python
+        from praisonaiagents.storage import SQLiteBackend
+        backend = SQLiteBackend("~/.praison/sessions.db")
+        manager = SessionManager(backend=backend)
+        ```
     """
     
-    def __init__(self, sessions_dir: Optional[Path] = None):
+    def __init__(
+        self,
+        sessions_dir: Optional[Path] = None,
+        backend: Optional["StorageBackendProtocol"] = None,
+    ):
+        """
+        Initialize session manager.
+        
+        Args:
+            sessions_dir: Directory for file-based storage
+            backend: Optional storage backend (file, sqlite, redis).
+                     If provided, sessions_dir is ignored.
+        """
         self.sessions_dir = sessions_dir or get_sessions_dir()
-        ensure_config_dirs()
+        self._backend = backend
+        
+        if backend is None:
+            ensure_config_dirs()
     
     def _get_session_dir(self, session_id: str) -> Path:
         """Get the directory for a session."""
@@ -125,6 +151,10 @@ class SessionManager:
     
     def _save_metadata(self, metadata: SessionMetadata) -> None:
         """Save session metadata."""
+        if self._backend is not None:
+            self._backend.save(f"session:{metadata.session_id}:meta", metadata.to_dict())
+            return
+        
         path = self._get_metadata_path(metadata.session_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
@@ -132,6 +162,15 @@ class SessionManager:
     
     def _load_metadata(self, session_id: str) -> Optional[SessionMetadata]:
         """Load session metadata."""
+        if self._backend is not None:
+            data = self._backend.load(f"session:{session_id}:meta")
+            if data:
+                try:
+                    return SessionMetadata.from_dict(data)
+                except (KeyError, TypeError):
+                    return None
+            return None
+        
         path = self._get_metadata_path(session_id)
         if not path.exists():
             return None
@@ -150,12 +189,18 @@ class SessionManager:
             session_id: Session ID
             event: Event data to append
         """
-        events_path = self._get_events_path(session_id)
-        if not events_path.parent.exists():
-            return
-        
-        with open(events_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(event, default=str) + "\n")
+        if self._backend is not None:
+            # Load existing events, append, save
+            events = self._backend.load(f"session:{session_id}:events") or []
+            events.append(event)
+            self._backend.save(f"session:{session_id}:events", events)
+        else:
+            events_path = self._get_events_path(session_id)
+            if not events_path.parent.exists():
+                return
+            
+            with open(events_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(event, default=str) + "\n")
         
         # Update metadata
         metadata = self._load_metadata(session_id)
@@ -180,14 +225,29 @@ class SessionManager:
         """
         sessions = []
         
-        if not self.sessions_dir.exists():
-            return sessions
-        
-        for session_dir in self.sessions_dir.iterdir():
-            if session_dir.is_dir():
-                metadata = self._load_metadata(session_dir.name)
+        if self._backend is not None:
+            # List all session metadata keys
+            keys = self._backend.list_keys(prefix="session:")
+            session_ids = set()
+            for key in keys:
+                # Extract session_id from "session:<id>:meta" or "session:<id>:events"
+                parts = key.split(":")
+                if len(parts) >= 2:
+                    session_ids.add(parts[1])
+            
+            for session_id in session_ids:
+                metadata = self._load_metadata(session_id)
                 if metadata:
                     sessions.append(metadata)
+        else:
+            if not self.sessions_dir.exists():
+                return sessions
+            
+            for session_dir in self.sessions_dir.iterdir():
+                if session_dir.is_dir():
+                    metadata = self._load_metadata(session_dir.name)
+                    if metadata:
+                        sessions.append(metadata)
         
         # Sort by updated_at descending
         sessions.sort(key=lambda s: s.updated_at, reverse=True)
@@ -204,6 +264,11 @@ class SessionManager:
         Returns:
             True if deleted, False if not found
         """
+        if self._backend is not None:
+            deleted_meta = self._backend.delete(f"session:{session_id}:meta")
+            deleted_events = self._backend.delete(f"session:{session_id}:events")
+            return deleted_meta or deleted_events
+        
         session_dir = self._get_session_dir(session_id)
         if not session_dir.exists():
             return False
@@ -221,6 +286,9 @@ class SessionManager:
         Returns:
             List of events
         """
+        if self._backend is not None:
+            return self._backend.load(f"session:{session_id}:events") or []
+        
         events_path = self._get_events_path(session_id)
         if not events_path.exists():
             return []
@@ -303,11 +371,20 @@ class SessionManager:
 
 # Global session manager
 _session_manager: Optional[SessionManager] = None
+_session_backend: Optional["StorageBackendProtocol"] = None
+
+
+def set_session_backend(backend: "StorageBackendProtocol") -> None:
+    """Set the storage backend for session manager."""
+    global _session_backend, _session_manager
+    _session_backend = backend
+    # Reset manager to use new backend
+    _session_manager = None
 
 
 def get_session_manager() -> SessionManager:
     """Get the global session manager."""
     global _session_manager
     if _session_manager is None:
-        _session_manager = SessionManager()
+        _session_manager = SessionManager(backend=_session_backend)
     return _session_manager

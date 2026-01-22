@@ -215,6 +215,10 @@ class RecipeHandler:
     def _parse_args(self, args: List[str], spec: Dict[str, Any]) -> Dict[str, Any]:
         """Parse command arguments based on spec."""
         result = {k: v.get("default") for k, v in spec.items()}
+        # Initialize multi-value options as empty lists
+        for k, v in spec.items():
+            if v.get("multi"):
+                result[k] = []
         positional_keys = [k for k, v in spec.items() if v.get("positional")]
         positional_idx = 0
         
@@ -228,7 +232,11 @@ class RecipeHandler:
                     if spec[key].get("flag"):
                         result[key] = True
                     elif i + 1 < len(args):
-                        result[key] = args[i + 1]
+                        # Support multi-value options (--var can be used multiple times)
+                        if spec[key].get("multi"):
+                            result[key].append(args[i + 1])
+                        else:
+                            result[key] = args[i + 1]
                         i += 1
                 i += 1
             elif arg.startswith("-") and len(arg) == 2:
@@ -238,7 +246,10 @@ class RecipeHandler:
                         if val.get("flag"):
                             result[key] = True
                         elif i + 1 < len(args):
-                            result[key] = args[i + 1]
+                            if val.get("multi"):
+                                result[key].append(args[i + 1])
+                            else:
+                                result[key] = args[i + 1]
                             i += 1
                         break
                 i += 1
@@ -551,6 +562,7 @@ class RecipeHandler:
             "input": {"short": "-i", "default": None},
             "config": {"short": "-c", "default": None},
             "session": {"short": "-s", "default": None},
+            "var": {"multi": True},  # --var key=value, can be used multiple times
             "json": {"flag": True, "default": False},
             "stream": {"flag": True, "default": False},
             "background": {"flag": True, "default": False},
@@ -592,6 +604,13 @@ class RecipeHandler:
         remaining_positional = [a for a in args[1:] if not a.startswith("-")]
         if remaining_positional and not parsed["input"]:
             input_data = {"input": remaining_positional[0]}
+        
+        # Merge --var key=value pairs into input_data (variables)
+        if parsed.get("var"):
+            for v in parsed["var"]:
+                if "=" in v:
+                    key, value = v.split("=", 1)
+                    input_data[key] = value
         
         # Parse config
         config = {}

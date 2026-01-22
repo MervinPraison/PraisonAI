@@ -34,6 +34,14 @@ __all__ = [
     "PerformanceMetrics",
     "ToolCallResult",
     "CriteriaScore",
+    # DRY: Common grading base classes and protocols
+    "BaseLLMGrader",
+    "GradeResult",
+    "GraderProtocol",
+    "GradeResultProtocol",
+    "ScoredResultProtocol",
+    "AsyncGraderProtocol",
+    "parse_score_reasoning",
 ]
 
 _LAZY_IMPORTS = {
@@ -50,6 +58,14 @@ _LAZY_IMPORTS = {
     "PerformanceMetrics": ("results", "PerformanceMetrics"),
     "ToolCallResult": ("results", "ToolCallResult"),
     "CriteriaScore": ("results", "CriteriaScore"),
+    # DRY: Common grading base classes and protocols
+    "BaseLLMGrader": ("grader", "BaseLLMGrader"),
+    "GradeResult": ("grader", "GradeResult"),
+    "GraderProtocol": ("protocols", "GraderProtocol"),
+    "GradeResultProtocol": ("protocols", "GradeResultProtocol"),
+    "ScoredResultProtocol": ("protocols", "ScoredResultProtocol"),
+    "AsyncGraderProtocol": ("protocols", "AsyncGraderProtocol"),
+    "parse_score_reasoning": ("grader", "parse_score_reasoning"),
 }
 
 

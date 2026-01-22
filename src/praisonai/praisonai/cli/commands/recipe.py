@@ -33,14 +33,26 @@ def recipe_list():
 def recipe_run(
     name: str = typer.Argument(..., help="Recipe name"),
     model: str = typer.Option(None, "--model", "-m", help="LLM model to use"),
+    var: list[str] = typer.Option(None, "--var", help="Variable override (key=value), can be used multiple times"),
 ):
-    """Run a recipe."""
+    """Run a recipe with optional variable overrides.
+    
+    Examples:
+        praisonai recipe run ai-url-blog-generator --var url="https://example.com/article"
+        praisonai recipe run ai-dynamic-blog-generator --var topic="LangGraph 0.3" --var style="coding"
+    """
     from praisonai.cli.main import PraisonAI
     import sys
     
     argv = ['recipe', 'run', name]
     if model:
         argv.extend(['--model', model])
+    
+    # Pass --var directly to the recipe handler (features/recipe.py)
+    # Don't convert to --workflow-var as that gets consumed by main.py's parser
+    if var:
+        for v in var:
+            argv.extend(['--var', v])
     
     original_argv = sys.argv
     sys.argv = ['praisonai'] + argv
@@ -52,6 +64,8 @@ def recipe_run(
         pass
     finally:
         sys.argv = original_argv
+
+
 
 
 @app.command("install")

@@ -13,9 +13,28 @@ from typing import Optional
 import typer
 
 from ..output.console import get_output_controller
-from ..state.sessions import get_session_manager
+from ..state.sessions import get_session_manager, set_session_backend
 
 app = typer.Typer(help="Session management")
+
+
+def _create_backend(backend_type: str, storage_path: Optional[str]):
+    """Create storage backend from CLI options."""
+    try:
+        if backend_type == "file":
+            from praisonaiagents.storage import FileBackend
+            return FileBackend(storage_dir=storage_path or "~/.praison/sessions")
+        elif backend_type == "sqlite":
+            from praisonaiagents.storage import SQLiteBackend
+            db_path = storage_path or "~/.praison/sessions.db"
+            return SQLiteBackend(db_path=db_path)
+        elif backend_type.startswith("redis://"):
+            from praisonaiagents.storage import RedisBackend
+            return RedisBackend(url=backend_type, prefix="session:")
+        else:
+            return None
+    except Exception:
+        return None
 
 
 @app.command("list")
@@ -26,9 +45,26 @@ def session_list(
         "-n",
         help="Maximum number of sessions to show",
     ),
+    storage_backend: Optional[str] = typer.Option(
+        None,
+        "--storage-backend",
+        help="Storage backend: 'file', 'sqlite', or 'redis://url'",
+    ),
+    storage_path: Optional[str] = typer.Option(
+        None,
+        "--storage-path",
+        help="Path for storage backend",
+    ),
 ):
     """List all sessions."""
     output = get_output_controller()
+    
+    # Configure backend if specified
+    if storage_backend:
+        backend = _create_backend(storage_backend, storage_path)
+        if backend:
+            set_session_backend(backend)
+    
     manager = get_session_manager()
     
     sessions = manager.list(limit=limit)
