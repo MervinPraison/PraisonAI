@@ -11,7 +11,8 @@ Shows how to monitor agent performance when using external tools.
 """
 
 from praisonaiagents import Agent
-from praisonaiagents.tools import duckduckgo, wikipedia_tools
+from praisonaiagents import duckduckgo
+from praisonai_tools import wikipedia_tools
 from praisonaiagents.telemetry import (
     monitor_function, track_api_call, get_api_stats,
     get_slowest_functions, performance_monitor

@@ -48,8 +48,8 @@ def is_injected_type(annotation):
 def get_injected_params(func):
     return _get_injected_module().get_injected_params(func)
 
-def inject_state_into_kwargs(func, kwargs, agent_state):
-    return _get_injected_module().inject_state_into_kwargs(func, kwargs, agent_state)
+def inject_state_into_kwargs(kwargs, injected_params):
+    return _get_injected_module().inject_state_into_kwargs(kwargs, injected_params)
 
 def filter_injected_from_schema(schema, func):
     return _get_injected_module().filter_injected_from_schema(schema, func)
