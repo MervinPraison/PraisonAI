@@ -28,7 +28,7 @@ praisonai-call = "praisonai.api.call:main"
 
 [project.optional-dependencies]
 ui = [
-    "chainlit>=2.8.5,<2.9.4",
+    "chainlit>=2.8.5,<=2.9.4",
     "sqlalchemy>=2.0.36",
     "aiosqlite>=0.20.0",
     "greenlet>=3.0.3"
@@ -42,7 +42,7 @@ api = [
 ]
 agentops = ["agentops>=0.3.12"]
 chat = [
-    "chainlit>=2.8.5,<2.9.4",
+    "chainlit>=2.8.5,<=2.9.4",
     "aiosqlite>=0.20.0",
     "greenlet>=3.0.3",
     "tavily-python==0.5.0",
@@ -52,7 +52,7 @@ chat = [
     "rich"
 ]
 code = [
-    "chainlit>=2.8.5,<2.9.4",
+    "chainlit>=2.8.5,<=2.9.4",
     "aiosqlite>=0.20.0",
     "greenlet>=3.0.3",
     "tavily-python==0.5.0",
@@ -61,7 +61,7 @@ code = [
     "playwright>=1.47.0"
 ]
 realtime = [
-    "chainlit>=2.8.5,<2.9.4",
+    "chainlit>=2.8.5,<=2.9.4",
     "aiosqlite>=0.20.0",
     "greenlet>=3.0.3",
     "tavily-python==0.5.0",
