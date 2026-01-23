@@ -288,6 +288,7 @@ Methods:
 * <code title="cli">praisonai registry serve <a href="./src/praisonai/praisonai/cli/commands/registry.py">--help</a></code>
 * <code title="cli">praisonai replay cleanup <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
 * <code title="cli">praisonai replay context <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
+* <code title="cli">praisonai replay dashboard <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
 * <code title="cli">praisonai replay delete <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
 * <code title="cli">praisonai replay flow <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
 * <code title="cli">praisonai replay list <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
