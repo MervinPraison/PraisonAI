@@ -52,7 +52,7 @@ chat = [
     "rich"
 ]
 code = [
-    "chainlit>=2.8.5,<2.9.0",
+    "chainlit>=2.8.5,<2.9.4",
     "aiosqlite>=0.20.0",
     "greenlet>=3.0.3",
     "tavily-python==0.5.0",
