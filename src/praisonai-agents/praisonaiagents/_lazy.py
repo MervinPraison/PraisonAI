@@ -161,6 +161,77 @@ def create_lazy_getattr(
     return __getattr__
 
 
+def create_lazy_getattr_with_fallback(
+    mapping: Dict[str, Tuple[str, str]],
+    module_name: str = 'unknown',
+    cache: Optional[Dict[str, Any]] = None,
+    fallback_modules: Optional[list] = None,
+    custom_handler: Optional[Callable[[str, Dict[str, Any]], Any]] = None
+) -> Callable[[str], Any]:
+    """
+    Create a __getattr__ function with fallback to sub-packages.
+    
+    This is useful for main __init__.py files that need to:
+    1. Check a mapping of known lazy imports
+    2. Fall back to sub-packages for additional symbols
+    3. Handle custom logic for optional modules
+    
+    Args:
+        mapping: Dict mapping attribute names to (module_path, attr_name) tuples
+        module_name: Name of the module (for error messages)
+        cache: Optional cache dict (creates new one if None)
+        fallback_modules: List of sub-package names to try if not in mapping
+        custom_handler: Optional function(name, cache) for custom logic before fallback
+    
+    Returns:
+        A __getattr__ function suitable for use in a module
+    """
+    _cache = cache if cache is not None else {}
+    _fallback_modules = fallback_modules or []
+    
+    def __getattr__(name: str) -> Any:
+        # Check cache first
+        if name in _cache:
+            return _cache[name]
+        
+        # Check if it's in our mapping
+        if name in mapping:
+            module_path, attr_name = mapping[name]
+            try:
+                value = lazy_import(module_path, attr_name, _cache)
+                _cache[name] = value
+                return value
+            except (ImportError, AttributeError):
+                # Optional module not available
+                _cache[name] = None
+                return None
+        
+        # Try custom handler if provided
+        if custom_handler is not None:
+            try:
+                result = custom_handler(name, _cache)
+                if result is not None:
+                    _cache[name] = result
+                    return result
+            except AttributeError:
+                pass  # Continue to fallback
+        
+        # Try fallback modules
+        for subpkg in _fallback_modules:
+            try:
+                submodule = importlib.import_module(f'.{subpkg}', module_name)
+                if hasattr(submodule, name):
+                    result = getattr(submodule, name)
+                    _cache[name] = result
+                    return result
+            except (ImportError, AttributeError):
+                continue
+        
+        raise AttributeError(f"module {module_name!r} has no attribute {name!r}")
+    
+    return __getattr__
+
+
 def create_lazy_getattr_with_groups(
     groups: Dict[str, Dict[str, Tuple[str, str]]],
     module_name: str = 'unknown',

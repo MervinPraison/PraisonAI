@@ -72,627 +72,330 @@ from . import tools
 # These are only needed when output=verbose, not for silent mode
 # Moved to __getattr__ for lazy loading
 
-# Module-level caches for lazy-loaded classes
-# Using threading.local() ensures thread-safe access to cached values
+# ============================================================================
+# LAZY LOADING CONFIGURATION
+# ============================================================================
+# Using centralized _lazy.py utility for DRY, thread-safe lazy loading.
+# All heavy dependencies are loaded on-demand to minimize import time.
+# ============================================================================
+
+from ._lazy import lazy_import, create_lazy_getattr_with_fallback
+
+# Thread-safe cache for lazy-loaded values
+_lazy_cache = {}
+
+# Backward compatibility: _get_lazy_cache function for tests
 import threading
 _lazy_cache_local = threading.local()
 
 def _get_lazy_cache():
-    """Get thread-local lazy cache dict. Thread-safe for concurrent access."""
+    """Get thread-local lazy cache dict. Thread-safe for concurrent access.
+    
+    Note: This is kept for backward compatibility with tests.
+    The main lazy loading now uses the centralized _lazy.py utility.
+    """
     if not hasattr(_lazy_cache_local, 'cache'):
         _lazy_cache_local.cache = {}
     return _lazy_cache_local.cache
 
-# Backward-compatible alias (module-level access still works, now thread-safe)
-_lazy_cache = {}  # Kept for compatibility, but prefer _get_lazy_cache()
+# ============================================================================
+# LAZY IMPORT MAPPING
+# ============================================================================
+# Maps attribute names to (module_path, attr_name) tuples.
+# This is the single source of truth for all lazy imports.
+# ============================================================================
 
-# Flags for optional modules
-_mcp_available = None
-_planning_available = None
-_telemetry_available = None
-_agui_available = None
-_a2a_available = None
+_LAZY_IMPORTS = {
+    # Main display utilities (imports rich)
+    'TaskOutput': ('praisonaiagents.main', 'TaskOutput'),
+    'ReflectionOutput': ('praisonaiagents.main', 'ReflectionOutput'),
+    'display_interaction': ('praisonaiagents.main', 'display_interaction'),
+    'display_self_reflection': ('praisonaiagents.main', 'display_self_reflection'),
+    'display_instruction': ('praisonaiagents.main', 'display_instruction'),
+    'display_tool_call': ('praisonaiagents.main', 'display_tool_call'),
+    'display_error': ('praisonaiagents.main', 'display_error'),
+    'display_generating': ('praisonaiagents.main', 'display_generating'),
+    'clean_triple_backticks': ('praisonaiagents.main', 'clean_triple_backticks'),
+    'error_logs': ('praisonaiagents.main', 'error_logs'),
+    'register_display_callback': ('praisonaiagents.main', 'register_display_callback'),
+    'sync_display_callbacks': ('praisonaiagents.main', 'sync_display_callbacks'),
+    'async_display_callbacks': ('praisonaiagents.main', 'async_display_callbacks'),
+    
+    # Workflows
+    'Workflow': ('praisonaiagents.workflows', 'Workflow'),
+    'WorkflowStep': ('praisonaiagents.workflows', 'WorkflowStep'),
+    'WorkflowContext': ('praisonaiagents.workflows', 'WorkflowContext'),
+    'StepResult': ('praisonaiagents.workflows', 'StepResult'),
+    'Route': ('praisonaiagents.workflows', 'Route'),
+    'Parallel': ('praisonaiagents.workflows', 'Parallel'),
+    'Loop': ('praisonaiagents.workflows', 'Loop'),
+    'Repeat': ('praisonaiagents.workflows', 'Repeat'),
+    'route': ('praisonaiagents.workflows', 'route'),
+    'parallel': ('praisonaiagents.workflows', 'parallel'),
+    'loop': ('praisonaiagents.workflows', 'loop'),
+    'repeat': ('praisonaiagents.workflows', 'repeat'),
+    'Pipeline': ('praisonaiagents.workflows', 'Pipeline'),
+    
+    # Handoff
+    'Handoff': ('praisonaiagents.agent.handoff', 'Handoff'),
+    'handoff': ('praisonaiagents.agent.handoff', 'handoff'),
+    'handoff_filters': ('praisonaiagents.agent.handoff', 'handoff_filters'),
+    'RECOMMENDED_PROMPT_PREFIX': ('praisonaiagents.agent.handoff', 'RECOMMENDED_PROMPT_PREFIX'),
+    'prompt_with_handoff_instructions': ('praisonaiagents.agent.handoff', 'prompt_with_handoff_instructions'),
+    'HandoffConfig': ('praisonaiagents.agent.handoff', 'HandoffConfig'),
+    'HandoffResult': ('praisonaiagents.agent.handoff', 'HandoffResult'),
+    'HandoffInputData': ('praisonaiagents.agent.handoff', 'HandoffInputData'),
+    'ContextPolicy': ('praisonaiagents.agent.handoff', 'ContextPolicy'),
+    'HandoffError': ('praisonaiagents.agent.handoff', 'HandoffError'),
+    'HandoffCycleError': ('praisonaiagents.agent.handoff', 'HandoffCycleError'),
+    'HandoffDepthError': ('praisonaiagents.agent.handoff', 'HandoffDepthError'),
+    'HandoffTimeoutError': ('praisonaiagents.agent.handoff', 'HandoffTimeoutError'),
+    
+    # Embedding API
+    'embedding': ('praisonaiagents.embedding.embed', 'embedding'),
+    'embeddings': ('praisonaiagents.embedding.embed', 'embedding'),
+    'aembedding': ('praisonaiagents.embedding.embed', 'aembedding'),
+    'aembeddings': ('praisonaiagents.embedding.embed', 'aembedding'),
+    'embed': ('praisonaiagents.embedding.embed', 'embed'),
+    'aembed': ('praisonaiagents.embedding.embed', 'aembed'),
+    'EmbeddingResult': ('praisonaiagents.embedding.result', 'EmbeddingResult'),
+    'get_dimensions': ('praisonaiagents.embedding.dimensions', 'get_dimensions'),
+    
+    # Guardrails
+    'GuardrailResult': ('praisonaiagents.guardrails', 'GuardrailResult'),
+    'LLMGuardrail': ('praisonaiagents.guardrails', 'LLMGuardrail'),
+    
+    # Flow display
+    'FlowDisplay': ('praisonaiagents.flow_display', 'FlowDisplay'),
+    'track_workflow': ('praisonaiagents.flow_display', 'track_workflow'),
+    
+    # Agent classes
+    'Agent': ('praisonaiagents.agent.agent', 'Agent'),
+    'ImageAgent': ('praisonaiagents.agent.image_agent', 'ImageAgent'),
+    'VideoAgent': ('praisonaiagents.agent.video_agent', 'VideoAgent'),
+    'VideoConfig': ('praisonaiagents.agent.video_agent', 'VideoConfig'),
+    'AudioAgent': ('praisonaiagents.agent.audio_agent', 'AudioAgent'),
+    'AudioConfig': ('praisonaiagents.agent.audio_agent', 'AudioConfig'),
+    'OCRAgent': ('praisonaiagents.agent.ocr_agent', 'OCRAgent'),
+    'OCRConfig': ('praisonaiagents.agent.ocr_agent', 'OCRConfig'),
+    'ContextAgent': ('praisonaiagents.agent.context_agent', 'ContextAgent'),
+    'create_context_agent': ('praisonaiagents.agent.context_agent', 'create_context_agent'),
+    'DeepResearchAgent': ('praisonaiagents.agent.deep_research_agent', 'DeepResearchAgent'),
+    'DeepResearchResponse': ('praisonaiagents.agent.deep_research_agent', 'DeepResearchResponse'),
+    'ReasoningStep': ('praisonaiagents.agent.deep_research_agent', 'ReasoningStep'),
+    'WebSearchCall': ('praisonaiagents.agent.deep_research_agent', 'WebSearchCall'),
+    'CodeExecutionStep': ('praisonaiagents.agent.deep_research_agent', 'CodeExecutionStep'),
+    'MCPCall': ('praisonaiagents.agent.deep_research_agent', 'MCPCall'),
+    'FileSearchCall': ('praisonaiagents.agent.deep_research_agent', 'FileSearchCall'),
+    'Provider': ('praisonaiagents.agent.deep_research_agent', 'Provider'),
+    'QueryRewriterAgent': ('praisonaiagents.agent.query_rewriter_agent', 'QueryRewriterAgent'),
+    'RewriteStrategy': ('praisonaiagents.agent.query_rewriter_agent', 'RewriteStrategy'),
+    'RewriteResult': ('praisonaiagents.agent.query_rewriter_agent', 'RewriteResult'),
+    'PromptExpanderAgent': ('praisonaiagents.agent.prompt_expander_agent', 'PromptExpanderAgent'),
+    'ExpandStrategy': ('praisonaiagents.agent.prompt_expander_agent', 'ExpandStrategy'),
+    'ExpandResult': ('praisonaiagents.agent.prompt_expander_agent', 'ExpandResult'),
+    
+    # Agents
+    'Agents': ('praisonaiagents.agents.agents', 'Agents'),
+    'Task': ('praisonaiagents.task.task', 'Task'),
+    'AutoAgents': ('praisonaiagents.agents.autoagents', 'AutoAgents'),
+    'AutoRagAgent': ('praisonaiagents.agents.auto_rag_agent', 'AutoRagAgent'),
+    'AutoRagConfig': ('praisonaiagents.agents.auto_rag_agent', 'AutoRagConfig'),
+    'RagRetrievalPolicy': ('praisonaiagents.agents.auto_rag_agent', 'RetrievalPolicy'),
+    
+    # Session
+    'Session': ('praisonaiagents.session', 'Session'),
+    
+    # MCP (optional)
+    'MCP': ('praisonaiagents.mcp.mcp', 'MCP'),
+    
+    # Knowledge
+    'Knowledge': ('praisonaiagents.knowledge.knowledge', 'Knowledge'),
+    'Chunking': ('praisonaiagents.knowledge.chunking', 'Chunking'),
+    
+    # FastContext
+    'FastContext': ('praisonaiagents.context.fast', 'FastContext'),
+    'FastContextResult': ('praisonaiagents.context.fast', 'FastContextResult'),
+    'FileMatch': ('praisonaiagents.context.fast', 'FileMatch'),
+    'LineRange': ('praisonaiagents.context.fast', 'LineRange'),
+    
+    # RAG
+    'RetrievalConfig': ('praisonaiagents.rag.retrieval_config', 'RetrievalConfig'),
+    'RetrievalPolicy': ('praisonaiagents.rag.retrieval_config', 'RetrievalPolicy'),
+    'CitationsMode': ('praisonaiagents.rag.retrieval_config', 'CitationsMode'),
+    'ContextPack': ('praisonaiagents.rag.models', 'ContextPack'),
+    'RAGResult': ('praisonaiagents.rag', 'RAGResult'),
+    'Citation': ('praisonaiagents.rag', 'Citation'),
+    'RAG': ('praisonaiagents.rag', 'RAG'),
+    'RAGConfig': ('praisonaiagents.rag', 'RAGConfig'),
+    'RAGCitation': ('praisonaiagents.rag', 'Citation'),
+    
+    # Skills
+    'SkillManager': ('praisonaiagents.skills', 'SkillManager'),
+    'SkillProperties': ('praisonaiagents.skills', 'SkillProperties'),
+    'SkillMetadata': ('praisonaiagents.skills', 'SkillMetadata'),
+    'SkillLoader': ('praisonaiagents.skills', 'SkillLoader'),
+    
+    # Memory
+    'Memory': ('praisonaiagents.memory.memory', 'Memory'),
+    
+    # Planning
+    'Plan': ('praisonaiagents.planning', 'Plan'),
+    'PlanStep': ('praisonaiagents.planning', 'PlanStep'),
+    'TodoList': ('praisonaiagents.planning', 'TodoList'),
+    'TodoItem': ('praisonaiagents.planning', 'TodoItem'),
+    'PlanStorage': ('praisonaiagents.planning', 'PlanStorage'),
+    'PlanningAgent': ('praisonaiagents.planning', 'PlanningAgent'),
+    'ApprovalCallback': ('praisonaiagents.planning', 'ApprovalCallback'),
+    'READ_ONLY_TOOLS': ('praisonaiagents.planning', 'READ_ONLY_TOOLS'),
+    'RESTRICTED_TOOLS': ('praisonaiagents.planning', 'RESTRICTED_TOOLS'),
+    
+    # Telemetry
+    'get_telemetry': ('praisonaiagents.telemetry', 'get_telemetry'),
+    'enable_telemetry': ('praisonaiagents.telemetry', 'enable_telemetry'),
+    'disable_telemetry': ('praisonaiagents.telemetry', 'disable_telemetry'),
+    'enable_performance_mode': ('praisonaiagents.telemetry', 'enable_performance_mode'),
+    'disable_performance_mode': ('praisonaiagents.telemetry', 'disable_performance_mode'),
+    'cleanup_telemetry_resources': ('praisonaiagents.telemetry', 'cleanup_telemetry_resources'),
+    'MinimalTelemetry': ('praisonaiagents.telemetry', 'MinimalTelemetry'),
+    'TelemetryCollector': ('praisonaiagents.telemetry', 'TelemetryCollector'),
+    
+    # UI (optional)
+    'AGUI': ('praisonaiagents.ui.agui', 'AGUI'),
+    'A2A': ('praisonaiagents.ui.a2a', 'A2A'),
+    
+    # Feature configs
+    'MemoryConfig': ('praisonaiagents.config.feature_configs', 'MemoryConfig'),
+    'KnowledgeConfig': ('praisonaiagents.config.feature_configs', 'KnowledgeConfig'),
+    'PlanningConfig': ('praisonaiagents.config.feature_configs', 'PlanningConfig'),
+    'ReflectionConfig': ('praisonaiagents.config.feature_configs', 'ReflectionConfig'),
+    'GuardrailConfig': ('praisonaiagents.config.feature_configs', 'GuardrailConfig'),
+    'WebConfig': ('praisonaiagents.config.feature_configs', 'WebConfig'),
+    'OutputConfig': ('praisonaiagents.config.feature_configs', 'OutputConfig'),
+    'ExecutionConfig': ('praisonaiagents.config.feature_configs', 'ExecutionConfig'),
+    'TemplateConfig': ('praisonaiagents.config.feature_configs', 'TemplateConfig'),
+    'CachingConfig': ('praisonaiagents.config.feature_configs', 'CachingConfig'),
+    'HooksConfig': ('praisonaiagents.config.feature_configs', 'HooksConfig'),
+    'SkillsConfig': ('praisonaiagents.config.feature_configs', 'SkillsConfig'),
+    'AutonomyConfig': ('praisonaiagents.config.feature_configs', 'AutonomyConfig'),
+    'MemoryBackend': ('praisonaiagents.config.feature_configs', 'MemoryBackend'),
+    'ChunkingStrategy': ('praisonaiagents.config.feature_configs', 'ChunkingStrategy'),
+    'GuardrailAction': ('praisonaiagents.config.feature_configs', 'GuardrailAction'),
+    'WebSearchProvider': ('praisonaiagents.config.feature_configs', 'WebSearchProvider'),
+    'OutputPreset': ('praisonaiagents.config.feature_configs', 'OutputPreset'),
+    'ExecutionPreset': ('praisonaiagents.config.feature_configs', 'ExecutionPreset'),
+    'AutonomyLevel': ('praisonaiagents.config.feature_configs', 'AutonomyLevel'),
+    'MultiAgentHooksConfig': ('praisonaiagents.config.feature_configs', 'MultiAgentHooksConfig'),
+    'MultiAgentOutputConfig': ('praisonaiagents.config.feature_configs', 'MultiAgentOutputConfig'),
+    'MultiAgentExecutionConfig': ('praisonaiagents.config.feature_configs', 'MultiAgentExecutionConfig'),
+    'MultiAgentPlanningConfig': ('praisonaiagents.config.feature_configs', 'MultiAgentPlanningConfig'),
+    'MultiAgentMemoryConfig': ('praisonaiagents.config.feature_configs', 'MultiAgentMemoryConfig'),
+    
+    # Parameter resolver
+    'resolve': ('praisonaiagents.config.param_resolver', 'resolve'),
+    'ArrayMode': ('praisonaiagents.config.param_resolver', 'ArrayMode'),
+    'resolve_memory': ('praisonaiagents.config.param_resolver', 'resolve_memory'),
+    'resolve_knowledge': ('praisonaiagents.config.param_resolver', 'resolve_knowledge'),
+    'resolve_output': ('praisonaiagents.config.param_resolver', 'resolve_output'),
+    'resolve_execution': ('praisonaiagents.config.param_resolver', 'resolve_execution'),
+    'resolve_web': ('praisonaiagents.config.param_resolver', 'resolve_web'),
+    'resolve_planning': ('praisonaiagents.config.param_resolver', 'resolve_planning'),
+    'resolve_reflection': ('praisonaiagents.config.param_resolver', 'resolve_reflection'),
+    'resolve_context': ('praisonaiagents.config.param_resolver', 'resolve_context'),
+    'resolve_autonomy': ('praisonaiagents.config.param_resolver', 'resolve_autonomy'),
+    'resolve_caching': ('praisonaiagents.config.param_resolver', 'resolve_caching'),
+    'resolve_hooks': ('praisonaiagents.config.param_resolver', 'resolve_hooks'),
+    'resolve_skills': ('praisonaiagents.config.param_resolver', 'resolve_skills'),
+    'resolve_routing': ('praisonaiagents.config.param_resolver', 'resolve_routing'),
+    'resolve_guardrails': ('praisonaiagents.config.param_resolver', 'resolve_guardrails'),
+    'resolve_guardrail_policies': ('praisonaiagents.config.param_resolver', 'resolve_guardrail_policies'),
+    
+    # Presets
+    'MEMORY_PRESETS': ('praisonaiagents.config.presets', 'MEMORY_PRESETS'),
+    'MEMORY_URL_SCHEMES': ('praisonaiagents.config.presets', 'MEMORY_URL_SCHEMES'),
+    'OUTPUT_PRESETS': ('praisonaiagents.config.presets', 'OUTPUT_PRESETS'),
+    'EXECUTION_PRESETS': ('praisonaiagents.config.presets', 'EXECUTION_PRESETS'),
+    'WEB_PRESETS': ('praisonaiagents.config.presets', 'WEB_PRESETS'),
+    'PLANNING_PRESETS': ('praisonaiagents.config.presets', 'PLANNING_PRESETS'),
+    'REFLECTION_PRESETS': ('praisonaiagents.config.presets', 'REFLECTION_PRESETS'),
+    'CONTEXT_PRESETS': ('praisonaiagents.config.presets', 'CONTEXT_PRESETS'),
+    'AUTONOMY_PRESETS': ('praisonaiagents.config.presets', 'AUTONOMY_PRESETS'),
+    'CACHING_PRESETS': ('praisonaiagents.config.presets', 'CACHING_PRESETS'),
+    'MULTI_AGENT_OUTPUT_PRESETS': ('praisonaiagents.config.presets', 'MULTI_AGENT_OUTPUT_PRESETS'),
+    'MULTI_AGENT_EXECUTION_PRESETS': ('praisonaiagents.config.presets', 'MULTI_AGENT_EXECUTION_PRESETS'),
+    'GUARDRAIL_PRESETS': ('praisonaiagents.config.presets', 'GUARDRAIL_PRESETS'),
+    'KNOWLEDGE_PRESETS': ('praisonaiagents.config.presets', 'KNOWLEDGE_PRESETS'),
+    
+    # Parse utilities
+    'detect_url_scheme': ('praisonaiagents.config.parse_utils', 'detect_url_scheme'),
+    'is_path_like': ('praisonaiagents.config.parse_utils', 'is_path_like'),
+    'suggest_similar': ('praisonaiagents.config.parse_utils', 'suggest_similar'),
+    'is_policy_string': ('praisonaiagents.config.parse_utils', 'is_policy_string'),
+    'parse_policy_string': ('praisonaiagents.config.parse_utils', 'parse_policy_string'),
+    
+    # Context management
+    'ContextConfig': ('praisonaiagents.context.models', 'ContextConfig'),
+    'OptimizerStrategy': ('praisonaiagents.context.models', 'OptimizerStrategy'),
+    'ManagerConfig': ('praisonaiagents.context.manager', 'ManagerConfig'),
+    'ContextManager': ('praisonaiagents.context.manager', 'ContextManager'),
+    
+    # db and obs modules
+    'db': ('praisonaiagents.db', 'db'),
+    'obs': ('praisonaiagents.obs', 'obs'),
+}
 
 
-def __getattr__(name):
-    """
-    Lazy load heavy modules to avoid impacting package load time.
+def _custom_handler(name, cache):
+    """Handle special cases that need custom logic."""
+    import warnings
     
-    This function is called when an attribute is not found in the module.
-    It enables deferred loading of heavy dependencies like litellm.
-    """
-    global _mcp_available, _planning_available, _telemetry_available
-    global _agui_available, _a2a_available
-    
-    # Return cached values if available
-    if name in _lazy_cache:
-        return _lazy_cache[name]
-    
-    # Main display utilities - lazy loaded to avoid importing rich at startup
-    # These are only needed when output=verbose, not for silent mode
-    _main_exports = {
-        'TaskOutput', 'ReflectionOutput', 'display_interaction', 'display_self_reflection',
-        'display_instruction', 'display_tool_call', 'display_error', 'display_generating',
-        'clean_triple_backticks', 'error_logs', 'register_display_callback',
-        'sync_display_callbacks', 'async_display_callbacks'
-    }
-    if name in _main_exports:
-        from . import main as _main_module
-        value = getattr(_main_module, name)
-        _lazy_cache[name] = value
-        return value
-    
-    # Workflows - lazy loaded for performance
-    _workflow_names = {
-        'Workflow', 'WorkflowStep', 'WorkflowContext', 'StepResult',
-        'Route', 'Parallel', 'Loop', 'Repeat',
-        'route', 'parallel', 'loop', 'repeat', 'Pipeline'
-    }
-    if name in _workflow_names:
-        from . import workflows as _workflows_module
-        value = getattr(_workflows_module, name)
-        _lazy_cache[name] = value
-        return value
-    
-    # Handoff - lazy loaded for performance
-    _handoff_names = {
-        'Handoff', 'handoff', 'handoff_filters',
-        'RECOMMENDED_PROMPT_PREFIX', 'prompt_with_handoff_instructions',
-        'HandoffConfig', 'HandoffResult', 'HandoffInputData',
-        'ContextPolicy', 'HandoffError', 'HandoffCycleError', 
-        'HandoffDepthError', 'HandoffTimeoutError'
-    }
-    if name in _handoff_names:
-        # Import directly from handoff module to avoid recursion
-        from .agent.handoff import (
-            Handoff, handoff, handoff_filters,
-            RECOMMENDED_PROMPT_PREFIX, prompt_with_handoff_instructions,
-            HandoffConfig, HandoffResult, HandoffInputData,
-            ContextPolicy, HandoffError, HandoffCycleError, 
-            HandoffDepthError, HandoffTimeoutError
-        )
-        _handoff_exports = {
-            'Handoff': Handoff, 'handoff': handoff, 'handoff_filters': handoff_filters,
-            'RECOMMENDED_PROMPT_PREFIX': RECOMMENDED_PROMPT_PREFIX,
-            'prompt_with_handoff_instructions': prompt_with_handoff_instructions,
-            'HandoffConfig': HandoffConfig, 'HandoffResult': HandoffResult,
-            'HandoffInputData': HandoffInputData, 'ContextPolicy': ContextPolicy,
-            'HandoffError': HandoffError, 'HandoffCycleError': HandoffCycleError,
-            'HandoffDepthError': HandoffDepthError, 'HandoffTimeoutError': HandoffTimeoutError
-        }
-        for k, v in _handoff_exports.items():
-            _lazy_cache[k] = v
-        return _handoff_exports[name]
-    
-    # db and obs - lazy loaded for performance
-    if name == 'db':
-        from .db import db
-        _lazy_cache[name] = db
-        return db
-    elif name == 'obs':
-        from .obs import obs
-        _lazy_cache[name] = obs
-        return obs
-    
-    # memory module - lazy loaded for performance
-    if name == 'memory':
-        import importlib
-        _memory_module = importlib.import_module('.memory', __name__)
-        _lazy_cache[name] = _memory_module
-        return _memory_module
-    
-    # workflows module - lazy loaded for performance
-    if name == 'workflows':
-        import importlib
-        _workflows_module = importlib.import_module('.workflows', __name__)
-        _lazy_cache[name] = _workflows_module
-        return _workflows_module
-    
-    # Embedding API - lazy loaded for performance
-    _embedding_names = {'embedding', 'embeddings', 'aembedding', 'aembeddings', 'EmbeddingResult', 'get_dimensions'}
-    if name in _embedding_names:
-        if name in ('embedding', 'embeddings'):
-            from .embedding.embed import embedding
-            _lazy_cache['embedding'] = embedding
-            _lazy_cache['embeddings'] = embedding
-            return embedding
-        elif name in ('aembedding', 'aembeddings'):
-            from .embedding.embed import aembedding
-            _lazy_cache['aembedding'] = aembedding
-            _lazy_cache['aembeddings'] = aembedding
-            return aembedding
-        elif name == 'EmbeddingResult':
-            from .embedding.result import EmbeddingResult
-            _lazy_cache[name] = EmbeddingResult
-            return EmbeddingResult
-        elif name == 'get_dimensions':
-            from .embedding.dimensions import get_dimensions
-            _lazy_cache[name] = get_dimensions
-            return get_dimensions
-    
-    # Guardrails - lazy loaded to avoid importing main.py which imports rich
-    if name == 'GuardrailResult':
-        from .guardrails import GuardrailResult
-        _lazy_cache[name] = GuardrailResult
-        return GuardrailResult
-    elif name == 'LLMGuardrail':
-        from .guardrails import LLMGuardrail
-        _lazy_cache[name] = LLMGuardrail
-        return LLMGuardrail
-    
-    # Flow display - lazy loaded to avoid importing rich at startup
-    if name == 'FlowDisplay':
-        try:
-            from .flow_display import FlowDisplay
-            _lazy_cache[name] = FlowDisplay
-            return FlowDisplay
-        except ImportError:
-            _lazy_cache[name] = None
-            return None
-    elif name == 'track_workflow':
-        try:
-            from .flow_display import track_workflow
-            _lazy_cache[name] = track_workflow
-            return track_workflow
-        except ImportError:
-            _lazy_cache[name] = None
-            return None
-    
-    # Agent and related classes (triggers litellm import chain)
-    if name == "Agent":
-        from .agent.agent import Agent
-        _lazy_cache[name] = Agent
-        return Agent
-    elif name == "ImageAgent":
-        from .agent.image_agent import ImageAgent
-        _lazy_cache[name] = ImageAgent
-        return ImageAgent
-    elif name == "VideoAgent":
-        from .agent.video_agent import VideoAgent
-        _lazy_cache[name] = VideoAgent
-        return VideoAgent
-    elif name == "VideoConfig":
-        from .agent.video_agent import VideoConfig
-        _lazy_cache[name] = VideoConfig
-        return VideoConfig
-    elif name == "AudioAgent":
-        from .agent.audio_agent import AudioAgent
-        _lazy_cache[name] = AudioAgent
-        return AudioAgent
-    elif name == "AudioConfig":
-        from .agent.audio_agent import AudioConfig
-        _lazy_cache[name] = AudioConfig
-        return AudioConfig
-    elif name == "OCRAgent":
-        from .agent.ocr_agent import OCRAgent
-        _lazy_cache[name] = OCRAgent
-        return OCRAgent
-    elif name == "OCRConfig":
-        from .agent.ocr_agent import OCRConfig
-        _lazy_cache[name] = OCRConfig
-        return OCRConfig
-    elif name == "ContextAgent":
-        from .agent.context_agent import ContextAgent
-        _lazy_cache[name] = ContextAgent
-        return ContextAgent
-    elif name == "create_context_agent":
-        from .agent.context_agent import create_context_agent
-        _lazy_cache[name] = create_context_agent
-        return create_context_agent
-    elif name == "DeepResearchAgent":
-        from .agent.deep_research_agent import DeepResearchAgent
-        _lazy_cache[name] = DeepResearchAgent
-        return DeepResearchAgent
-    elif name == "DeepResearchResponse":
-        from .agent.deep_research_agent import DeepResearchResponse
-        _lazy_cache[name] = DeepResearchResponse
-        return DeepResearchResponse
-    elif name == "Citation":
-        from .agent.deep_research_agent import Citation
-        _lazy_cache[name] = Citation
-        return Citation
-    elif name == "ReasoningStep":
-        from .agent.deep_research_agent import ReasoningStep
-        _lazy_cache[name] = ReasoningStep
-        return ReasoningStep
-    elif name == "WebSearchCall":
-        from .agent.deep_research_agent import WebSearchCall
-        _lazy_cache[name] = WebSearchCall
-        return WebSearchCall
-    elif name == "CodeExecutionStep":
-        from .agent.deep_research_agent import CodeExecutionStep
-        _lazy_cache[name] = CodeExecutionStep
-        return CodeExecutionStep
-    elif name == "MCPCall":
-        from .agent.deep_research_agent import MCPCall
-        _lazy_cache[name] = MCPCall
-        return MCPCall
-    elif name == "FileSearchCall":
-        from .agent.deep_research_agent import FileSearchCall
-        _lazy_cache[name] = FileSearchCall
-        return FileSearchCall
-    elif name == "Provider":
-        from .agent.deep_research_agent import Provider
-        _lazy_cache[name] = Provider
-        return Provider
-    elif name == "QueryRewriterAgent":
-        from .agent.query_rewriter_agent import QueryRewriterAgent
-        _lazy_cache[name] = QueryRewriterAgent
-        return QueryRewriterAgent
-    elif name == "RewriteStrategy":
-        from .agent.query_rewriter_agent import RewriteStrategy
-        _lazy_cache[name] = RewriteStrategy
-        return RewriteStrategy
-    elif name == "RewriteResult":
-        from .agent.query_rewriter_agent import RewriteResult
-        _lazy_cache[name] = RewriteResult
-        return RewriteResult
-    elif name == "PromptExpanderAgent":
-        from .agent.prompt_expander_agent import PromptExpanderAgent
-        _lazy_cache[name] = PromptExpanderAgent
-        return PromptExpanderAgent
-    elif name == "ExpandStrategy":
-        from .agent.prompt_expander_agent import ExpandStrategy
-        _lazy_cache[name] = ExpandStrategy
-        return ExpandStrategy
-    elif name == "ExpandResult":
-        from .agent.prompt_expander_agent import ExpandResult
-        _lazy_cache[name] = ExpandResult
-        return ExpandResult
-    
-    # Agents (canonical) and PraisonAIAgents (backward-compatible alias)
-    elif name == "Agents":
-        from .agents.agents import Agents
-        _lazy_cache[name] = Agents
-        _lazy_cache["PraisonAIAgents"] = Agents  # Also cache alias
-        return Agents
-    elif name == "PraisonAIAgents":
-        import warnings
+    # PraisonAIAgents deprecation warning
+    if name == "PraisonAIAgents":
         warnings.warn(
             "PraisonAIAgents is deprecated, use Agents instead. "
             "Example: from praisonaiagents import Agents",
             DeprecationWarning,
-            stacklevel=2
+            stacklevel=4
         )
-        from .agents.agents import Agents
-        _lazy_cache["Agents"] = Agents
-        _lazy_cache[name] = Agents
-        return Agents
+        value = lazy_import('praisonaiagents.agents.agents', 'Agents', cache)
+        cache['Agents'] = value
+        cache['PraisonAIAgents'] = value
+        return value
     
-    # Task
-    elif name == "Task":
-        from .task.task import Task
-        _lazy_cache[name] = Task
-        return Task
+    # Module imports (return the module itself)
+    if name == 'memory':
+        import importlib
+        return importlib.import_module('.memory', 'praisonaiagents')
+    if name == 'workflows':
+        import importlib
+        return importlib.import_module('.workflows', 'praisonaiagents')
     
-    # AutoAgents
-    elif name == "AutoAgents":
-        from .agents.autoagents import AutoAgents
-        _lazy_cache[name] = AutoAgents
-        return AutoAgents
-    
-    # AutoRagAgent (auto RAG retrieval decision)
-    elif name == "AutoRagAgent":
-        from .agents.auto_rag_agent import AutoRagAgent
-        _lazy_cache[name] = AutoRagAgent
-        return AutoRagAgent
-    elif name == "AutoRagConfig":
-        from .agents.auto_rag_agent import AutoRagConfig
-        _lazy_cache[name] = AutoRagConfig
-        return AutoRagConfig
-    elif name == "RagRetrievalPolicy":
-        from .agents.auto_rag_agent import RetrievalPolicy
-        _lazy_cache[name] = RetrievalPolicy
-        return RetrievalPolicy
-    
-    # Session (imports requests lazily via session/api.py)
-    elif name == "Session":
-        from .session import Session
-        _lazy_cache[name] = Session
-        return Session
-    
-    # MCP support (optional)
-    elif name == "MCP":
-        if _mcp_available is None:
-            try:
-                from .mcp.mcp import MCP as _MCP
-                _lazy_cache[name] = _MCP
-                return _MCP
-            except ImportError:
-                return None
-        return _lazy_cache.get(name)
-    
-    # Knowledge module (imports chromadb, mem0)
-    elif name == "Knowledge":
-        from praisonaiagents.knowledge.knowledge import Knowledge
-        _lazy_cache[name] = Knowledge
-        return Knowledge
-    elif name == "Chunking":
-        from praisonaiagents.knowledge.chunking import Chunking
-        _lazy_cache[name] = Chunking
-        return Chunking
-    
-    # FastContext support
-    elif name == "FastContext":
-        from praisonaiagents.context.fast import FastContext
-        _lazy_cache[name] = FastContext
-        return FastContext
-    elif name == "FastContextResult":
-        from praisonaiagents.context.fast import FastContextResult
-        _lazy_cache[name] = FastContextResult
-        return FastContextResult
-    elif name == "FileMatch":
-        from praisonaiagents.context.fast import FileMatch
-        _lazy_cache[name] = FileMatch
-        return FileMatch
-    elif name == "LineRange":
-        from praisonaiagents.context.fast import LineRange
-        _lazy_cache[name] = LineRange
-        return LineRange
-    
-    # Retrieval configuration (Agent-first unified config)
-    elif name == "RetrievalConfig":
-        from praisonaiagents.rag.retrieval_config import RetrievalConfig
-        _lazy_cache[name] = RetrievalConfig
-        return RetrievalConfig
-    elif name == "RetrievalPolicy":
-        from praisonaiagents.rag.retrieval_config import RetrievalPolicy
-        _lazy_cache[name] = RetrievalPolicy
-        return RetrievalPolicy
-    elif name == "CitationsMode":
-        from praisonaiagents.rag.retrieval_config import CitationsMode
-        _lazy_cache[name] = CitationsMode
-        return CitationsMode
-    
-    # RAG models (used by Agent.query() and Agent.retrieve())
-    elif name == "ContextPack":
-        from praisonaiagents.rag.models import ContextPack
-        _lazy_cache[name] = ContextPack
-        return ContextPack
-    elif name == "RAGResult":
-        from praisonaiagents.rag import RAGResult
-        _lazy_cache[name] = RAGResult
-        return RAGResult
-    elif name == "Citation":
-        from praisonaiagents.rag import Citation
-        _lazy_cache[name] = Citation
-        return Citation
-    
-    # RAG internals (advanced use - prefer Agent.query() for normal usage)
-    elif name == "RAG":
-        from praisonaiagents.rag import RAG
-        _lazy_cache[name] = RAG
-        return RAG
-    elif name == "RAGConfig":
-        from praisonaiagents.rag import RAGConfig
-        _lazy_cache[name] = RAGConfig
-        return RAGConfig
-    elif name == "RAGCitation":
-        from praisonaiagents.rag import Citation
-        _lazy_cache[name] = Citation
-        return Citation
-    
-    # Agent Skills support (lazy loaded for zero performance impact)
-    elif name == "SkillManager":
-        from praisonaiagents.skills import SkillManager
-        _lazy_cache[name] = SkillManager
-        return SkillManager
-    elif name == "SkillProperties":
-        from praisonaiagents.skills import SkillProperties
-        _lazy_cache[name] = SkillProperties
-        return SkillProperties
-    elif name == "SkillMetadata":
-        from praisonaiagents.skills import SkillMetadata
-        _lazy_cache[name] = SkillMetadata
-        return SkillMetadata
-    elif name == "SkillLoader":
-        from praisonaiagents.skills import SkillLoader
-        _lazy_cache[name] = SkillLoader
-        return SkillLoader
-    
-    # Memory module (imports chromadb)
-    elif name == "Memory":
-        from praisonaiagents.memory.memory import Memory
-        _lazy_cache[name] = Memory
-        return Memory
-    
-    # Embedding module (unified embedding API)
-    # Note: Must import from .embed submodule to get functions, not the module
-    elif name == "embedding":
-        from praisonaiagents.embedding.embed import embedding
-        _lazy_cache[name] = embedding
-        return embedding
-    elif name == "aembedding":
-        from praisonaiagents.embedding.embed import aembedding
-        _lazy_cache[name] = aembedding
-        return aembedding
-    elif name == "embed":
-        from praisonaiagents.embedding.embed import embed
-        _lazy_cache[name] = embed
-        return embed
-    elif name == "aembed":
-        from praisonaiagents.embedding.embed import aembed
-        _lazy_cache[name] = aembed
-        return aembed
-    elif name == "EmbeddingResult":
-        from praisonaiagents.embedding.result import EmbeddingResult
-        _lazy_cache[name] = EmbeddingResult
-        return EmbeddingResult
-    elif name == "get_dimensions":
-        from praisonaiagents.embedding.dimensions import get_dimensions
-        _lazy_cache[name] = get_dimensions
-        return get_dimensions
-    
-    # Planning mode support (lazy)
-    elif name in ("Plan", "PlanStep", "TodoList", "TodoItem", "PlanStorage", 
-                  "PlanningAgent", "ApprovalCallback", "READ_ONLY_TOOLS", 
-                  "RESTRICTED_TOOLS"):
-        try:
-            from . import planning as _planning
-            result = getattr(_planning, name)
-            _lazy_cache[name] = result
-            return result
-        except ImportError:
-            if name in ("READ_ONLY_TOOLS", "RESTRICTED_TOOLS"):
-                return []
-            return None
-    
-    # Telemetry support (lazy loaded)
-    elif name in ("get_telemetry", "enable_telemetry", "disable_telemetry",
-                  "enable_performance_mode", "disable_performance_mode",
-                  "cleanup_telemetry_resources", "MinimalTelemetry", "TelemetryCollector"):
-        try:
-            from . import telemetry as _telemetry
-            result = getattr(_telemetry, name)
-            _lazy_cache[name] = result
-            return result
-        except ImportError:
-            # Provide stub functions
-            if name == "get_telemetry":
-                return lambda: None
-            elif name == "enable_telemetry":
-                import logging
-                def _stub(*args, **kwargs):
-                    logging.warning(
-                        "Telemetry not available. Install with: pip install praisonaiagents[telemetry]"
-                    )
-                    return None
-                return _stub
-            elif name in ("disable_telemetry", "enable_performance_mode", 
-                         "disable_performance_mode", "cleanup_telemetry_resources"):
-                return lambda: None
-            return None
-    
-    # AG-UI support (optional, lazy loaded)
-    elif name == "AGUI":
-        try:
-            from praisonaiagents.ui.agui import AGUI
-            _lazy_cache[name] = AGUI
-            return AGUI
-        except ImportError:
-            return None
-    
-    # A2A support (optional, lazy loaded)
-    elif name == "A2A":
-        try:
-            from praisonaiagents.ui.a2a import A2A
-            _lazy_cache[name] = A2A
-            return A2A
-        except ImportError:
-            return None
-    
-    # Feature Config classes (agent-centric API)
-    elif name in ("MemoryConfig", "KnowledgeConfig", "PlanningConfig", 
-                  "ReflectionConfig", "GuardrailConfig", "WebConfig",
-                  "OutputConfig", "ExecutionConfig", "TemplateConfig",
-                  "CachingConfig", "HooksConfig", "SkillsConfig", "AutonomyConfig",
-                  "MemoryBackend", "ChunkingStrategy", "GuardrailAction", 
-                  "WebSearchProvider", "OutputPreset", "ExecutionPreset", "AutonomyLevel",
-                  # Multi-Agent config classes
-                  "MultiAgentHooksConfig", "MultiAgentOutputConfig", 
-                  "MultiAgentExecutionConfig", "MultiAgentPlanningConfig",
-                  "MultiAgentMemoryConfig"):
-        from .config import feature_configs
-        result = getattr(feature_configs, name)
-        _lazy_cache[name] = result
-        return result
-    
-    # Unified parameter resolver (agent-centric API)
-    elif name in ("resolve", "ArrayMode", "resolve_memory", "resolve_knowledge",
-                  "resolve_output", "resolve_execution", "resolve_web",
-                  "resolve_planning", "resolve_reflection", "resolve_context",
-                  "resolve_autonomy", "resolve_caching", "resolve_hooks",
-                  "resolve_skills", "resolve_routing", "resolve_guardrails",
-                  "resolve_guardrail_policies"):
-        from .config import param_resolver
-        result = getattr(param_resolver, name)
-        _lazy_cache[name] = result
-        return result
-    
-    # Preset registries (agent-centric API)
-    elif name in ("MEMORY_PRESETS", "MEMORY_URL_SCHEMES", "OUTPUT_PRESETS",
-                  "EXECUTION_PRESETS", "WEB_PRESETS", "PLANNING_PRESETS",
-                  "REFLECTION_PRESETS", "CONTEXT_PRESETS", "AUTONOMY_PRESETS",
-                  "CACHING_PRESETS", "MULTI_AGENT_OUTPUT_PRESETS",
-                  "MULTI_AGENT_EXECUTION_PRESETS", "GUARDRAIL_PRESETS",
-                  "KNOWLEDGE_PRESETS"):
-        from .config import presets
-        result = getattr(presets, name)
-        _lazy_cache[name] = result
-        return result
-    
-    # Parse utilities (agent-centric API)
-    elif name in ("detect_url_scheme", "is_path_like", "suggest_similar",
-                  "is_policy_string", "parse_policy_string"):
-        from .config import parse_utils
-        result = getattr(parse_utils, name)
-        _lazy_cache[name] = result
-        return result
-    
-    # Context management config
-    elif name == "ContextConfig":
-        from .context.models import ContextConfig
-        _lazy_cache[name] = ContextConfig
-        return ContextConfig
-    elif name == "OptimizerStrategy":
-        from .context.models import OptimizerStrategy
-        _lazy_cache[name] = OptimizerStrategy
-        return OptimizerStrategy
-    elif name == "ManagerConfig":
-        from .context.manager import ManagerConfig
-        _lazy_cache[name] = ManagerConfig
-        return ManagerConfig
-    elif name == "ContextManager":
-        from .context.manager import ContextManager
-        _lazy_cache[name] = ContextManager
-        return ContextManager
-    
-    # =========================================================================
-    # Sub-package fallback: delegate to sub-packages for additional symbols
-    # This enables: from praisonaiagents import duckduckgo, FileMemory, etc.
-    # =========================================================================
-    
-    # Try tools sub-package (110+ tool functions)
-    try:
-        from . import tools as _tools_module
-        if hasattr(_tools_module, name):
-            result = getattr(_tools_module, name)
-            _lazy_cache[name] = result
-            return result
-    except (ImportError, AttributeError):
-        pass
-    
-    # Try memory sub-package (FileMemory, RulesManager, etc.)
-    try:
-        from . import memory as _memory_module
-        if hasattr(_memory_module, name):
-            result = getattr(_memory_module, name)
-            _lazy_cache[name] = result
-            return result
-    except (ImportError, AttributeError):
-        pass
-    
-    # Try config sub-package (already handled above, but catch any stragglers)
-    try:
-        from . import config as _config_module
-        if hasattr(_config_module, name):
-            result = getattr(_config_module, name)
-            _lazy_cache[name] = result
-            return result
-    except (ImportError, AttributeError):
-        pass
-    
-    # Try workflows sub-package (Pipeline, Route, etc. - already imported, catch aliases)
-    try:
-        from . import workflows as _workflows_module
-        if hasattr(_workflows_module, name):
-            result = getattr(_workflows_module, name)
-            _lazy_cache[name] = result
-            return result
-    except (ImportError, AttributeError):
-        pass
-    
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    raise AttributeError(f"Not handled by custom_handler: {name}")
+
+
+# ============================================================================
+# SUBPACKAGE FUNCTION OVERRIDES
+# ============================================================================
+# Some subpackage names conflict with function names we want to export.
+# Override them here to return the function instead of the module.
+# ============================================================================
+
+# Override 'embedding' to return the function, not the subpackage
+from .embedding.embed import embedding as _embedding_func
+embedding = _embedding_func
+
+# Also provide embeddings alias
+embeddings = _embedding_func
+
+
+# Create the __getattr__ function using centralized utility
+__getattr__ = create_lazy_getattr_with_fallback(
+    mapping=_LAZY_IMPORTS,
+    module_name=__name__,
+    cache=_lazy_cache,
+    fallback_modules=['tools', 'memory', 'config', 'workflows'],
+    custom_handler=_custom_handler
+)
 
 
 # Initialize telemetry only if explicitly enabled via config

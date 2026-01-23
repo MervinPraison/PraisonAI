@@ -11,18 +11,8 @@ from .decorator import tool, FunctionTool
 from .registry import get_registry, register_tool, get_tool, ToolRegistry
 from .tools import Tools
 
-def __getattr__(name):
-    """Lazy load heavy tool dependencies."""
-    if name in _tools_lazy_cache:
-        return _tools_lazy_cache[name]
-    
-    # Injected is lazy loaded due to heavy deps
-    if name == 'Injected':
-        from .injected import Injected
-        _tools_lazy_cache[name] = Injected
-        return Injected
-    
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+# Export Injected type directly for easy access
+from .injected import Injected, AgentState
 
 # Map of function names to their module and class (if any)
 TOOL_MAPPINGS = {

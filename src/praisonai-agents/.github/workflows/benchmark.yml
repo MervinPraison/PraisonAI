@@ -138,3 +138,143 @@ jobs:
           else
             echo "Quick benchmark not found, skipping"
           fi
+
+  # Real API benchmark - only runs when API keys are available
+  # Triggered manually or on main branch with secrets
+  real-api-benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name == 'workflow_dispatch' || (github.ref == 'refs/heads/main' && github.event_name == 'push')
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install package
+        run: |
+          pip install -e .
+          pip install pytest
+      
+      - name: Check API Key Availability
+        id: check_keys
+        run: |
+          if [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
+            echo "has_openai=true" >> $GITHUB_OUTPUT
+            echo "✅ OpenAI API key available"
+          else
+            echo "has_openai=false" >> $GITHUB_OUTPUT
+            echo "⚠️ OpenAI API key not available, skipping real API tests"
+          fi
+      
+      - name: Run Real API Benchmark
+        if: steps.check_keys.outputs.has_openai == 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python -c "
+          import time
+          import os
+          
+          # Verify API key is set
+          if not os.environ.get('OPENAI_API_KEY'):
+              print('❌ OPENAI_API_KEY not set')
+              exit(1)
+          
+          from praisonaiagents import Agent
+          
+          # Create a simple agent
+          agent = Agent(
+              name='BenchmarkAgent',
+              instructions='You are a helpful assistant. Be concise.',
+              llm='gpt-4o-mini',
+              output='silent'
+          )
+          
+          # Warmup run
+          print('Running warmup...')
+          agent.chat('Say hello in one word')
+          
+          # Benchmark runs
+          print('Running benchmark (3 iterations)...')
+          times = []
+          for i in range(3):
+              start = time.perf_counter()
+              response = agent.chat('What is 2+2? Answer with just the number.')
+              elapsed = time.perf_counter() - start
+              times.append(elapsed)
+              print(f'  Run {i+1}: {elapsed:.2f}s')
+          
+          avg = sum(times) / len(times)
+          print(f'')
+          print(f'Real API Benchmark Results:')
+          print(f'  Average response time: {avg:.2f}s')
+          print(f'  Min: {min(times):.2f}s')
+          print(f'  Max: {max(times):.2f}s')
+          
+          # Verify response quality
+          if '4' in response:
+              print('✅ Response quality check passed')
+          else:
+              print(f'⚠️ Unexpected response: {response}')
+          "
+      
+      - name: Run Multi-Agent Benchmark
+        if: steps.check_keys.outputs.has_openai == 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python -c "
+          import time
+          import os
+          
+          from praisonaiagents import Agent, Agents, Task
+          
+          # Create agents
+          researcher = Agent(
+              name='Researcher',
+              instructions='You research topics. Be brief.',
+              llm='gpt-4o-mini',
+              output='silent'
+          )
+          
+          writer = Agent(
+              name='Writer', 
+              instructions='You write summaries. Be brief.',
+              llm='gpt-4o-mini',
+              output='silent'
+          )
+          
+          # Create tasks
+          task1 = Task(
+              description='List 2 facts about Python programming',
+              agent=researcher,
+              expected_output='2 brief facts'
+          )
+          
+          task2 = Task(
+              description='Summarize the facts in one sentence',
+              agent=writer,
+              expected_output='One sentence summary'
+          )
+          
+          # Run workflow
+          print('Running multi-agent workflow...')
+          start = time.perf_counter()
+          
+          agents = Agents(agents=[researcher, writer], tasks=[task1, task2])
+          result = agents.start()
+          
+          elapsed = time.perf_counter() - start
+          
+          print(f'')
+          print(f'Multi-Agent Benchmark Results:')
+          print(f'  Total workflow time: {elapsed:.2f}s')
+          print(f'  Agents: 2')
+          print(f'  Tasks: 2')
+          print('✅ Multi-agent workflow completed successfully')
+          "

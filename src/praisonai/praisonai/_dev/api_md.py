@@ -215,6 +215,10 @@ class ApiMdGenerator:
         lazy_sources = self._parse_getattr_lazy_imports(tree)
         import_sources.update(lazy_sources)
         
+        # Parse _LAZY_IMPORTS dictionary pattern
+        dict_sources = self._parse_lazy_imports_dict(tree)
+        import_sources.update(dict_sources)
+        
         # For each export, find its definition
         for export_name in sorted(all_exports):
             if export_name in import_sources:
@@ -249,25 +253,55 @@ class ApiMdGenerator:
                 # Walk through ALL nodes in the function to find if statements
                 for stmt in ast.walk(node):
                     if isinstance(stmt, ast.If):
-                        # Check if this is `if name == "SomeName":`
-                        symbol_name = self._extract_name_comparison(stmt.test)
-                        if symbol_name:
+                        # Check if this is `if name == "SomeName":` or `if name in ("A", "B"):`
+                        symbol_names = self._extract_name_comparisons(stmt.test)
+                        if symbol_names:
                             # Look for import statement in the body
                             for inner_stmt in stmt.body:
                                 if isinstance(inner_stmt, ast.ImportFrom) and inner_stmt.module:
                                     for alias in inner_stmt.names:
                                         imported_name = alias.name
-                                        lazy_sources[symbol_name] = (inner_stmt.module, imported_name)
-                                        break
+                                        for symbol_name in symbol_names:
+                                            lazy_sources[symbol_name] = (inner_stmt.module, imported_name)
                                     break
+                                elif isinstance(inner_stmt, ast.Assign):
+                                    # Handle: value = lazy_import('path', 'attr', cache)
+                                    if isinstance(inner_stmt.value, ast.Call) and getattr(inner_stmt.value.func, 'id', '') == 'lazy_import':
+                                        if len(inner_stmt.value.args) >= 2:
+                                            mod_arg = inner_stmt.value.args[0]
+                                            attr_arg = inner_stmt.value.args[1]
+                                            if (isinstance(mod_arg, ast.Constant) and isinstance(mod_arg.value, str) and
+                                                isinstance(attr_arg, ast.Constant) and isinstance(attr_arg.value, str)):
+                                                for symbol_name in symbol_names:
+                                                    lazy_sources[symbol_name] = (mod_arg.value, attr_arg.value)
+                                        break
         
         return lazy_sources
+
+    def _parse_lazy_imports_dict(self, tree: ast.Module) -> Dict[str, Tuple[str, str]]:
+        """Parse _LAZY_IMPORTS dictionary definition."""
+        lazy_sources: Dict[str, Tuple[str, str]] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id == '_LAZY_IMPORTS':
+                        if isinstance(node.value, ast.Dict):
+                            for k, v in zip(node.value.keys, node.value.values):
+                                if k and isinstance(k, ast.Constant) and isinstance(k.value, str):
+                                    if isinstance(v, ast.Tuple) and len(v.elts) >= 2:
+                                        module_elt = v.elts[0]
+                                        attr_elt = v.elts[1]
+                                        if (isinstance(module_elt, ast.Constant) and isinstance(module_elt.value, str) and
+                                            isinstance(attr_elt, ast.Constant) and isinstance(attr_elt.value, str)):
+                                            lazy_sources[k.value] = (module_elt.value, attr_elt.value)
+        return lazy_sources
     
-    def _extract_name_comparison(self, test: ast.expr) -> Optional[str]:
+    def _extract_name_comparisons(self, test: ast.expr) -> List[str]:
         """
-        Extract the string value from comparisons like `name == "Agent"`.
-        Also handles `name in ("A", "B", "C")` patterns.
+        Extract the string values from comparisons like `name == "Agent"`
+        or `name in ("A", "B", "C")`.
         """
+        names = []
         if isinstance(test, ast.Compare):
             # Handle: name == "Agent"
             if (len(test.ops) == 1 and 
@@ -276,19 +310,18 @@ class ApiMdGenerator:
                 if len(test.comparators) == 1:
                     comp = test.comparators[0]
                     if isinstance(comp, ast.Constant) and isinstance(comp.value, str):
-                        return comp.value
+                        names.append(comp.value)
             # Handle: name in ("A", "B", "C")
             if (len(test.ops) == 1 and
                 isinstance(test.ops[0], ast.In) and
                 isinstance(test.left, ast.Name) and test.left.id == 'name'):
-                # Return first item for now (we'll get others via elif)
                 if len(test.comparators) == 1:
                     comp = test.comparators[0]
                     if isinstance(comp, ast.Tuple):
                         for elt in comp.elts:
                             if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
-                                return elt.value
-        return None
+                                names.append(elt.value)
+        return names
     
     def _resolve_symbol(
         self,
