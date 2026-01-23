@@ -59,7 +59,7 @@ chat = [
     "pydantic<=2.10.1"
 ]
 code = [
-    "chainlit>=2.8.5,<2.9.0",
+    "chainlit>=2.8.5,<2.9.4",
     "litellm>=1.72.6",
     "aiosqlite>=0.20.0",
     "greenlet>=3.0.3",
