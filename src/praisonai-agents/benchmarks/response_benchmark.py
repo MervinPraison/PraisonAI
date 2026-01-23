@@ -61,7 +61,7 @@ def benchmark_praisonai_response(iterations: int = 5) -> ResponseResult:
             name="Test Agent",
             instructions="Be concise, reply with one sentence.",
             llm="gpt-4o-mini",
-            verbose=False
+            output="silent"
         )
         
         start = time.perf_counter()
@@ -114,7 +114,7 @@ def benchmark_praisonai_with_tool(iterations: int = 5) -> ResponseResult:
             instructions="You are a weather assistant. Use the get_weather tool to answer questions.",
             llm="gpt-4o-mini",
             tools=[get_weather],
-            verbose=False
+            output="silent"
         )
         
         start = time.perf_counter()

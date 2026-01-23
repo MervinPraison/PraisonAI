@@ -275,7 +275,7 @@ class Agent:
         reflection: Optional[Union[bool, Any]] = None,  # Union[bool, ReflectionConfig]
         guardrails: Optional[Union[bool, Callable, Any]] = None,  # Union[bool, Callable, GuardrailConfig]
         web: Optional[Union[bool, Any]] = None,  # Union[bool, WebConfig]
-        context: Optional[Union[bool, Any]] = False,  # Union[bool, ManagerConfig, ContextManager]
+        context: Optional[Union[bool, Any]] = None,  # Union[bool, ManagerConfig, ContextManager] - None=smart default
         autonomy: Optional[Union[bool, Dict[str, Any], Any]] = None,  # Union[bool, dict, AutonomyConfig]
         verification_hooks: Optional[List[Any]] = None,  # List of VerificationHook instances
         output: Optional[Union[str, Any]] = None,  # Union[str preset, OutputConfig]
@@ -1117,7 +1117,12 @@ Your Goal: {self.goal}
         self._thinking_budget = thinking_budget
         
         # Context management (lazy loaded for zero overhead when disabled)
-        self._context_param = context  # Store raw param for lazy init
+        # Smart default: auto-enable context when tools are present
+        if context is None and self.tools:
+            # Tools present but no explicit context setting - auto-enable
+            self._context_param = True
+        else:
+            self._context_param = context  # Store raw param for lazy init
         self._context_manager = None  # Lazy initialized on first use
         self._context_manager_initialized = False
         self._session_dedup_cache = None  # Shared session cache from workflow
@@ -1225,6 +1230,7 @@ Your Goal: {self.goal}
                 model=self.llm if isinstance(self.llm, str) else "gpt-4o-mini",
                 agent_name=self.name or "Agent",
                 session_cache=self._session_dedup_cache,  # Share session cache from workflow
+                llm_summarize_fn=self._create_llm_summarize_fn(),  # Auto-wire LLM summarization
             )
         elif isinstance(self._context_param, ManagerConfig):
             # Use provided ManagerConfig
@@ -1233,6 +1239,7 @@ Your Goal: {self.goal}
                 config=self._context_param,
                 agent_name=self.name or "Agent",
                 session_cache=self._session_dedup_cache,  # Share session cache from workflow
+                llm_summarize_fn=self._create_llm_summarize_fn() if self._context_param.llm_summarize else None,
             )
         elif hasattr(self._context_param, 'auto_compact') and hasattr(self._context_param, 'tool_output_max'):
             # ContextConfig from YAML - convert to ManagerConfig
@@ -1250,11 +1257,16 @@ Your Goal: {self.goal}
                         keep_recent_turns=self._context_param.keep_recent_turns,
                         monitor_enabled=self._context_param.monitor.enabled if self._context_param.monitor else False,
                     )
+                    # Check if llm_summarize is enabled in ContextConfig
+                    llm_summarize_enabled = getattr(self._context_param, 'llm_summarize', False)
+                    if llm_summarize_enabled:
+                        manager_config.llm_summarize = True
                     self._context_manager = ContextManager(
                         model=self.llm if isinstance(self.llm, str) else "gpt-4o-mini",
                         config=manager_config,
                         agent_name=self.name or "Agent",
                         session_cache=self._session_dedup_cache,  # Share session cache from workflow
+                        llm_summarize_fn=self._create_llm_summarize_fn() if llm_summarize_enabled else None,
                     )
                 else:
                     self._context_manager = None
@@ -1276,6 +1288,51 @@ Your Goal: {self.goal}
         """Set context manager directly."""
         self._context_manager = value
         self._context_manager_initialized = True
+
+    def _create_llm_summarize_fn(self) -> Optional[Callable]:
+        """
+        Create an LLM summarization function using the agent's LLM.
+        
+        Returns a function that can be used by the context optimizer to
+        intelligently summarize conversation history.
+        
+        Returns:
+            Callable that takes (messages, max_tokens) and returns summary string,
+            or None if LLM is not available.
+        """
+        def llm_summarize(messages: List[Dict[str, Any]], max_tokens: int = 500) -> str:
+            """Summarize messages using the agent's LLM."""
+            try:
+                # Build summarization prompt
+                conversation_text = "\n".join([
+                    f"{m.get('role', 'unknown')}: {m.get('content', '')[:500]}"
+                    for m in messages if m.get('content')
+                ])
+                
+                prompt = f"""Summarize the following conversation in a concise way that preserves key information, decisions, and context. Keep the summary under {max_tokens} tokens.
+
+Conversation:
+{conversation_text}
+
+Summary:"""
+                
+                # Use agent's LLM to generate summary
+                client = get_openai_client(self.llm, self.base_url, self.api_key)
+                model_name = self.llm if isinstance(self.llm, str) else "gpt-4o-mini"
+                
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=max_tokens,
+                    temperature=0.3,
+                )
+                
+                return response.choices[0].message.content or "[Summary unavailable]"
+            except Exception as e:
+                logging.debug(f"LLM summarization failed: {e}")
+                return f"[Previous conversation summary - {len(messages)} messages]"
+        
+        return llm_summarize
 
     @property
     def console(self):

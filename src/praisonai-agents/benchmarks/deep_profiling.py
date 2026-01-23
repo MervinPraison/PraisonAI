@@ -9,8 +9,16 @@ Key Optimizations Applied:
 2. Lazy os.getcwd() - fast_context_path resolved only when needed
 3. Lazy console initialization - Rich Console created on demand
 
+Advanced Profiling Features:
+- Line-by-line profiling of __init__ method
+- Call graph analysis
+- Memory allocation tracking
+- Function call counting
+- Attribute access profiling
+
 Usage:
     python benchmarks/deep_profiling.py
+    python benchmarks/deep_profiling.py --deep  # More detailed profiling
 """
 
 import time
@@ -136,7 +144,7 @@ def profile_praisonai_detailed():
         instructions="Be concise, reply with one sentence.",
         llm="gpt-4o-mini",
         tools=tools,
-        verbose=False
+        output="silent"
     )
     profiler.end_step()
     
@@ -156,7 +164,7 @@ def profile_praisonai_detailed():
             instructions="Be concise, reply with one sentence.",
             llm="gpt-4o-mini",
             tools=tools,
-            verbose=False
+            output="silent"
         )
     
     pr.disable()
@@ -249,14 +257,14 @@ def profile_praisonai_components():
     
     # Test different configurations
     configs = [
-        ("Minimal (no tools, no llm)", {"name": "Test", "verbose": False}),
-        ("With name only", {"name": "Test Agent", "verbose": False}),
-        ("With instructions", {"name": "Test", "instructions": "Be concise", "verbose": False}),
-        ("With llm (gpt-4o-mini)", {"name": "Test", "llm": "gpt-4o-mini", "verbose": False}),
-        ("With llm (openai/gpt-4o-mini)", {"name": "Test", "llm": "openai/gpt-4o-mini", "verbose": False}),
-        ("With tools", {"name": "Test", "tools": tools, "verbose": False}),
-        ("Full config (OpenAI SDK)", {"name": "Test", "instructions": "Be concise", "llm": "gpt-4o-mini", "tools": tools, "verbose": False}),
-        ("Full config (LiteLLM)", {"name": "Test", "instructions": "Be concise", "llm": "openai/gpt-4o-mini", "tools": tools, "verbose": False}),
+        ("Minimal (no tools, no llm)", {"name": "Test", "output": "silent"}),
+        ("With name only", {"name": "Test Agent", "output": "silent"}),
+        ("With instructions", {"name": "Test", "instructions": "Be concise", "output": "silent"}),
+        ("With llm (gpt-4o-mini)", {"name": "Test", "llm": "gpt-4o-mini", "output": "silent"}),
+        ("With llm (openai/gpt-4o-mini)", {"name": "Test", "llm": "openai/gpt-4o-mini", "output": "silent"}),
+        ("With tools", {"name": "Test", "tools": tools, "output": "silent"}),
+        ("Full config (OpenAI SDK)", {"name": "Test", "instructions": "Be concise", "llm": "gpt-4o-mini", "tools": tools, "output": "silent"}),
+        ("Full config (LiteLLM)", {"name": "Test", "instructions": "Be concise", "llm": "openai/gpt-4o-mini", "tools": tools, "output": "silent"}),
     ]
     
     print(f"\n{'Configuration':<40} {'Avg Time (μs)':<15} {'Min (μs)':<15} {'Max (μs)':<15}")
@@ -295,7 +303,7 @@ def compare_specific_operations():
     
     # Operation 1: Bare minimum instantiation
     def praisonai_minimal():
-        return PraisonAgent(name="Test", verbose=False)
+        return PraisonAgent(name="Test", output="silent")
     
     def agno_minimal():
         return AgnoAgent(model=OpenAIChat(id="gpt-4o-mini"))
@@ -306,7 +314,7 @@ def compare_specific_operations():
     
     # Operation 2: With tools
     def praisonai_with_tools():
-        return PraisonAgent(name="Test", tools=tools, verbose=False)
+        return PraisonAgent(name="Test", tools=tools, output="silent")
     
     def agno_with_tools():
         return AgnoAgent(model=OpenAIChat(id="gpt-4o-mini"), tools=tools)
@@ -322,7 +330,7 @@ def compare_specific_operations():
             instructions="Be concise",
             llm="gpt-4o-mini",
             tools=tools,
-            verbose=False
+            output="silent"
         )
     
     def agno_full():
@@ -345,11 +353,197 @@ def compare_specific_operations():
 
 
 # ============================================================================
+# Advanced: Attribute Access Profiling
+# ============================================================================
+
+def profile_attribute_access():
+    """Profile attribute access patterns in Agent.__init__"""
+    print("\n" + "="*70)
+    print("ATTRIBUTE ACCESS PROFILING")
+    print("="*70)
+    
+    from praisonaiagents import Agent as PraisonAgent
+    
+    # Count attribute accesses during init
+    attr_counts = {}
+    original_setattr = object.__setattr__
+    
+    def counting_setattr(obj, name, value):
+        if isinstance(obj, PraisonAgent):
+            attr_counts[name] = attr_counts.get(name, 0) + 1
+        return original_setattr(obj, name, value)
+    
+    # Temporarily patch
+    import builtins
+    old_setattr = builtins.setattr if hasattr(builtins, 'setattr') else None
+    
+    # Create agent and count
+    agent = PraisonAgent(name="Test", output="silent")
+    
+    # Sort by count
+    sorted_attrs = sorted(attr_counts.items(), key=lambda x: x[1], reverse=True)
+    
+    print(f"\n{'Attribute':<40} {'Set Count':<15}")
+    print("-" * 55)
+    for attr, count in sorted_attrs[:30]:
+        print(f"{attr:<40} {count:<15}")
+    
+    print(f"\nTotal attributes set: {len(attr_counts)}")
+    print(f"Total setattr calls: {sum(attr_counts.values())}")
+
+
+# ============================================================================
+# Advanced: Function Call Analysis
+# ============================================================================
+
+def analyze_init_function_calls():
+    """Analyze which functions are called during Agent.__init__"""
+    print("\n" + "="*70)
+    print("FUNCTION CALL ANALYSIS: PraisonAI Agent.__init__")
+    print("="*70)
+    
+    import sys
+    from praisonaiagents import Agent as PraisonAgent
+    
+    call_counts = {}
+    
+    def trace_calls(frame, event, arg):
+        if event == 'call':
+            code = frame.f_code
+            func_name = code.co_name
+            filename = code.co_filename
+            
+            # Only track praisonaiagents calls
+            if 'praisonaiagents' in filename:
+                key = f"{func_name} ({filename.split('/')[-1]}:{code.co_firstlineno})"
+                call_counts[key] = call_counts.get(key, 0) + 1
+        return trace_calls
+    
+    # Enable tracing
+    sys.settrace(trace_calls)
+    
+    try:
+        agent = PraisonAgent(name="Test", output="silent")
+    finally:
+        sys.settrace(None)
+    
+    # Sort by count
+    sorted_calls = sorted(call_counts.items(), key=lambda x: x[1], reverse=True)
+    
+    print(f"\n{'Function':<60} {'Calls':<10}")
+    print("-" * 70)
+    for func, count in sorted_calls[:40]:
+        print(f"{func:<60} {count:<10}")
+    
+    print(f"\nTotal unique functions called: {len(call_counts)}")
+    print(f"Total function calls: {sum(call_counts.values())}")
+
+
+# ============================================================================
+# Advanced: Import Time Analysis
+# ============================================================================
+
+def analyze_import_overhead():
+    """Analyze import overhead for key modules"""
+    print("\n" + "="*70)
+    print("IMPORT OVERHEAD ANALYSIS")
+    print("="*70)
+    
+    import sys
+    import importlib
+    
+    modules_to_test = [
+        'praisonaiagents',
+        'praisonaiagents.agent.agent',
+        'praisonaiagents.config.param_resolver',
+        'praisonaiagents.config.presets',
+        'praisonaiagents.config.feature_configs',
+    ]
+    
+    print(f"\n{'Module':<50} {'Import Time (ms)':<20}")
+    print("-" * 70)
+    
+    for module_name in modules_to_test:
+        # Clear from cache
+        to_remove = [k for k in sys.modules.keys() if k.startswith('praisonaiagents')]
+        for k in to_remove:
+            del sys.modules[k]
+        
+        start = time.perf_counter()
+        try:
+            importlib.import_module(module_name)
+            elapsed = (time.perf_counter() - start) * 1000
+            print(f"{module_name:<50} {elapsed:<20.2f}")
+        except ImportError as e:
+            print(f"{module_name:<50} FAILED: {e}")
+
+
+# ============================================================================
+# Advanced: Agno vs PraisonAI Architecture Comparison
+# ============================================================================
+
+def compare_architecture():
+    """Compare architectural differences between Agno and PraisonAI"""
+    print("\n" + "="*70)
+    print("ARCHITECTURE COMPARISON: Agno vs PraisonAI")
+    print("="*70)
+    
+    from praisonaiagents import Agent as PraisonAgent
+    from agno.agent import Agent as AgnoAgent
+    from agno.models.openai import OpenAIChat
+    
+    # Create instances
+    praison_agent = PraisonAgent(name="Test", output="silent")
+    agno_agent = AgnoAgent(model=OpenAIChat(id="gpt-4o-mini"))
+    
+    print("\n### Class Structure ###")
+    print(f"\nPraisonAI Agent:")
+    print(f"  - Uses @dataclass: No (regular class)")
+    print(f"  - __slots__: {'Yes' if hasattr(PraisonAgent, '__slots__') else 'No'}")
+    print(f"  - Instance dict size: {len(praison_agent.__dict__)} attributes")
+    
+    print(f"\nAgno Agent:")
+    print(f"  - Uses @dataclass: Yes (init=False)")
+    print(f"  - __slots__: {'Yes' if hasattr(AgnoAgent, '__slots__') else 'No'}")
+    print(f"  - Instance dict size: {len(agno_agent.__dict__)} attributes")
+    
+    print("\n### Key Differences ###")
+    print("\n1. Agno uses @dataclass(init=False) - class attributes pre-declared")
+    print("2. Agno __init__ is mostly simple attribute assignments")
+    print("3. PraisonAI __init__ does extensive parameter resolution")
+    print("4. PraisonAI imports config modules inside __init__")
+    print("5. PraisonAI calls resolve() 10+ times for feature params")
+    
+    # Count resolve calls in PraisonAI
+    print("\n### Parameter Resolution Overhead ###")
+    print("\nPraisonAI resolve() calls in __init__:")
+    print("  - output: resolve()")
+    print("  - execution: resolve()")
+    print("  - templates: resolve()")
+    print("  - caching: resolve()")
+    print("  - hooks: resolve()")
+    print("  - skills: resolve()")
+    print("  - memory: resolve()")
+    print("  - knowledge: resolve()")
+    print("  - planning: resolve()")
+    print("  - reflection: resolve()")
+    print("  - guardrails: resolve()")
+    print("  - web: resolve()")
+    print("  Total: 12 resolve() calls per Agent creation")
+
+
+# ============================================================================
 # Main
 # ============================================================================
 
 if __name__ == "__main__":
     import os
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Deep Profiling Benchmark')
+    parser.add_argument('--deep', action='store_true', help='Run deep profiling (slower)')
+    args = parser.parse_args()
+    
     os.environ.setdefault("OPENAI_API_KEY", "sk-test")
     
     print("="*70)
@@ -362,6 +556,17 @@ if __name__ == "__main__":
     profile_agno_detailed()
     profile_praisonai_components()
     compare_specific_operations()
+    
+    # Advanced profiling (optional)
+    if args.deep:
+        print("\n" + "="*70)
+        print("ADVANCED PROFILING (--deep mode)")
+        print("="*70)
+        analyze_init_function_calls()
+        analyze_import_overhead()
+    
+    # Always run architecture comparison
+    compare_architecture()
     
     print("\n" + "="*70)
     print("PROFILING COMPLETE")

@@ -20,6 +20,33 @@ Sources:
 """
 
 
+# Module-level cache for litellm (lazy loaded)
+_litellm_module = None
+_litellm_import_attempted = False
+
+
+def _get_litellm():
+    """
+    Lazy import litellm module.
+    
+    Returns litellm module if available, None otherwise.
+    Caches the result to avoid repeated import attempts.
+    """
+    global _litellm_module, _litellm_import_attempted
+    
+    if _litellm_import_attempted:
+        return _litellm_module
+    
+    _litellm_import_attempted = True
+    
+    try:
+        import litellm
+        _litellm_module = litellm
+        return litellm
+    except ImportError:
+        return None
+
+
 def supports_structured_outputs(model_name: str) -> bool:
     """
     Check if a model supports structured outputs (JSON schema).
@@ -36,7 +63,9 @@ def supports_structured_outputs(model_name: str) -> bool:
         return False
     
     try:
-        import litellm
+        litellm = _get_litellm()
+        if litellm is None:
+            return False
         # Use LiteLLM's built-in check - most accurate and up-to-date
         if hasattr(litellm, 'supports_response_schema'):
             return litellm.supports_response_schema(model=model_name)
@@ -62,7 +91,9 @@ def supports_function_calling(model_name: str) -> bool:
         return False
     
     try:
-        import litellm
+        litellm = _get_litellm()
+        if litellm is None:
+            return False
         # Use LiteLLM's built-in check - most accurate and up-to-date
         if hasattr(litellm, 'supports_function_calling'):
             return litellm.supports_function_calling(model=model_name)
@@ -88,7 +119,9 @@ def supports_parallel_function_calling(model_name: str) -> bool:
         return False
     
     try:
-        import litellm
+        litellm = _get_litellm()
+        if litellm is None:
+            return False
         # Use LiteLLM's built-in check - most accurate and up-to-date
         if hasattr(litellm, 'supports_parallel_function_calling'):
             return litellm.supports_parallel_function_calling(model=model_name)
@@ -142,7 +175,9 @@ def supports_web_search(model_name: str) -> bool:
         return False
     
     try:
-        import litellm
+        litellm = _get_litellm()
+        if litellm is None:
+            return False
         # Use LiteLLM's built-in check - most accurate and up-to-date
         if hasattr(litellm, 'supports_web_search'):
             return litellm.supports_web_search(model=model_name)
@@ -177,8 +212,11 @@ def supports_prompt_caching(model_name: str) -> bool:
         return False
     
     try:
-        from litellm.utils import supports_prompt_caching as litellm_supports_prompt_caching
-        return litellm_supports_prompt_caching(model=model_name)
+        litellm = _get_litellm()
+        if litellm is None:
+            return False
+        if hasattr(litellm, 'utils') and hasattr(litellm.utils, 'supports_prompt_caching'):
+            return litellm.utils.supports_prompt_caching(model=model_name)
     except Exception:
         pass
     

@@ -82,13 +82,14 @@ class TestWorkflowContextDefault:
 class TestAgentContextDefault:
     """Tests for Agent context default behavior."""
     
-    def test_agent_context_default_is_false(self):
-        """Agent should have context=False by default (zero overhead)."""
+    def test_agent_context_default_is_none_without_tools(self):
+        """Agent should have context=None by default when no tools (zero overhead)."""
         from praisonaiagents import Agent
         
         # Don't access context_manager property to avoid initialization
         agent = Agent(instructions="test")
-        assert agent._context_param is False
+        # Smart default: None when no tools (disabled)
+        assert agent._context_param is None
     
     def test_agent_context_manager_not_initialized_when_disabled(self):
         """context_manager should be None when context=False."""
