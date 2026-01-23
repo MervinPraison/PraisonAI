@@ -14,7 +14,7 @@ Features:
 - Decision outcomes (allow, deny, block, ask)
 
 Zero Performance Impact:
-- All imports are lazy loaded via __getattr__
+- All imports are lazy loaded via centralized _lazy.py utility
 - Hooks only execute when registered
 - No overhead when hooks are disabled
 
@@ -44,6 +44,8 @@ Usage:
     )
 """
 
+from .._lazy import create_lazy_getattr_with_groups
+
 __all__ = [
     # Core types
     "HookEvent",
@@ -63,8 +65,12 @@ __all__ = [
     "AfterToolInput",
     "BeforeAgentInput",
     "AfterAgentInput",
+    "BeforeLLMInput",
+    "AfterLLMInput",
     "SessionStartInput",
     "SessionEndInput",
+    "OnErrorInput",
+    "OnRetryInput",
     # Middleware types
     "InvocationContext",
     "ModelRequest",
@@ -87,59 +93,64 @@ __all__ = [
     "VerificationResult",
 ]
 
+# Grouped lazy imports for DRY and efficient loading
+# When one attribute from a group is accessed, all are loaded together
+_LAZY_GROUPS = {
+    'types_core': {
+        'HookEvent': ('praisonaiagents.hooks.types', 'HookEvent'),
+        'HookDecision': ('praisonaiagents.hooks.types', 'HookDecision'),
+        'HookResult': ('praisonaiagents.hooks.types', 'HookResult'),
+        'HookInput': ('praisonaiagents.hooks.types', 'HookInput'),
+        'HookOutput': ('praisonaiagents.hooks.types', 'HookOutput'),
+    },
+    'types_definitions': {
+        'HookDefinition': ('praisonaiagents.hooks.types', 'HookDefinition'),
+        'CommandHook': ('praisonaiagents.hooks.types', 'CommandHook'),
+        'FunctionHook': ('praisonaiagents.hooks.types', 'FunctionHook'),
+    },
+    'registry': {
+        'HookRegistry': ('praisonaiagents.hooks.registry', 'HookRegistry'),
+    },
+    'runner': {
+        'HookRunner': ('praisonaiagents.hooks.runner', 'HookRunner'),
+    },
+    'events': {
+        'BeforeToolInput': ('praisonaiagents.hooks.events', 'BeforeToolInput'),
+        'AfterToolInput': ('praisonaiagents.hooks.events', 'AfterToolInput'),
+        'BeforeAgentInput': ('praisonaiagents.hooks.events', 'BeforeAgentInput'),
+        'AfterAgentInput': ('praisonaiagents.hooks.events', 'AfterAgentInput'),
+        'BeforeLLMInput': ('praisonaiagents.hooks.events', 'BeforeLLMInput'),
+        'AfterLLMInput': ('praisonaiagents.hooks.events', 'AfterLLMInput'),
+        'SessionStartInput': ('praisonaiagents.hooks.events', 'SessionStartInput'),
+        'SessionEndInput': ('praisonaiagents.hooks.events', 'SessionEndInput'),
+        'OnErrorInput': ('praisonaiagents.hooks.events', 'OnErrorInput'),
+        'OnRetryInput': ('praisonaiagents.hooks.events', 'OnRetryInput'),
+    },
+    'middleware_types': {
+        'InvocationContext': ('praisonaiagents.hooks.middleware', 'InvocationContext'),
+        'ModelRequest': ('praisonaiagents.hooks.middleware', 'ModelRequest'),
+        'ModelResponse': ('praisonaiagents.hooks.middleware', 'ModelResponse'),
+        'ToolRequest': ('praisonaiagents.hooks.middleware', 'ToolRequest'),
+        'ToolResponse': ('praisonaiagents.hooks.middleware', 'ToolResponse'),
+    },
+    'middleware_decorators': {
+        'before_model': ('praisonaiagents.hooks.middleware', 'before_model'),
+        'after_model': ('praisonaiagents.hooks.middleware', 'after_model'),
+        'wrap_model_call': ('praisonaiagents.hooks.middleware', 'wrap_model_call'),
+        'before_tool': ('praisonaiagents.hooks.middleware', 'before_tool'),
+        'after_tool': ('praisonaiagents.hooks.middleware', 'after_tool'),
+        'wrap_tool_call': ('praisonaiagents.hooks.middleware', 'wrap_tool_call'),
+    },
+    'middleware_utilities': {
+        'MiddlewareChain': ('praisonaiagents.hooks.middleware', 'MiddlewareChain'),
+        'AsyncMiddlewareChain': ('praisonaiagents.hooks.middleware', 'AsyncMiddlewareChain'),
+        'MiddlewareManager': ('praisonaiagents.hooks.middleware', 'MiddlewareManager'),
+    },
+    'verification': {
+        'VerificationHook': ('praisonaiagents.hooks.verification', 'VerificationHook'),
+        'VerificationResult': ('praisonaiagents.hooks.verification', 'VerificationResult'),
+    },
+}
 
-def __getattr__(name: str):
-    """Lazy load module components to avoid import overhead."""
-    if name in ("HookEvent", "HookDecision", "HookResult", "HookInput", "HookOutput"):
-        from .types import HookEvent, HookDecision, HookResult, HookInput, HookOutput
-        return locals()[name]
-    
-    if name in ("HookDefinition", "CommandHook", "FunctionHook"):
-        from .types import HookDefinition, CommandHook, FunctionHook
-        return locals()[name]
-    
-    if name == "HookRegistry":
-        from .registry import HookRegistry
-        return HookRegistry
-    
-    if name == "HookRunner":
-        from .runner import HookRunner
-        return HookRunner
-    
-    if name in ("BeforeToolInput", "AfterToolInput", "BeforeAgentInput", 
-                "AfterAgentInput", "SessionStartInput", "SessionEndInput"):
-        from .events import (
-            BeforeToolInput, AfterToolInput, BeforeAgentInput,
-            AfterAgentInput, SessionStartInput, SessionEndInput
-        )
-        return locals()[name]
-    
-    # Middleware types
-    if name in ("InvocationContext", "ModelRequest", "ModelResponse", 
-                "ToolRequest", "ToolResponse"):
-        from .middleware import (
-            InvocationContext, ModelRequest, ModelResponse,
-            ToolRequest, ToolResponse
-        )
-        return locals()[name]
-    
-    # Middleware decorators
-    if name in ("before_model", "after_model", "wrap_model_call",
-                "before_tool", "after_tool", "wrap_tool_call"):
-        from .middleware import (
-            before_model, after_model, wrap_model_call,
-            before_tool, after_tool, wrap_tool_call
-        )
-        return locals()[name]
-    
-    # Middleware utilities
-    if name in ("MiddlewareChain", "AsyncMiddlewareChain", "MiddlewareManager"):
-        from .middleware import MiddlewareChain, AsyncMiddlewareChain, MiddlewareManager
-        return locals()[name]
-    
-    # Verification hooks (protocols for autonomy)
-    if name in ("VerificationHook", "VerificationResult"):
-        from .verification import VerificationHook, VerificationResult
-        return locals()[name]
-    
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+# Create the __getattr__ function using centralized utility
+__getattr__ = create_lazy_getattr_with_groups(_LAZY_GROUPS, __name__)

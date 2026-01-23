@@ -17,9 +17,19 @@ Usage:
 import logging
 import threading
 from typing import Callable, Dict, List, Optional, Union
-from importlib.metadata import entry_points
 
 from .base import BaseTool
+
+# Lazy load entry_points to reduce import time
+_entry_points = None
+
+def _get_entry_points():
+    """Lazy load entry_points from importlib.metadata."""
+    global _entry_points
+    if _entry_points is None:
+        from importlib.metadata import entry_points as _ep
+        _entry_points = _ep
+    return _entry_points
 
 
 # Entry point group name for external plugins
@@ -165,11 +175,11 @@ class ToolRegistry:
         count = 0
         try:
             # Python 3.10+ style
-            eps = entry_points(group=ENTRY_POINT_GROUP)
+            eps = _get_entry_points()(group=ENTRY_POINT_GROUP)
         except TypeError:
             # Python 3.9 fallback
             try:
-                all_eps = entry_points()
+                all_eps = _get_entry_points()()
                 eps = all_eps.get(ENTRY_POINT_GROUP, [])
             except Exception:
                 eps = []

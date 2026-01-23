@@ -16,6 +16,20 @@ from unittest.mock import patch, MagicMock
 runner = CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def reset_global_state():
+    """Reset the global state before each test."""
+    from praisonai.cli.app import state, GlobalState
+    # Reset all fields of state to their defaults
+    default_state = GlobalState()
+    state.output_format = default_state.output_format
+    state.no_color = default_state.no_color
+    state.quiet = default_state.quiet
+    state.verbose = default_state.verbose
+    state.screen_reader = default_state.screen_reader
+    state.output_controller = default_state.output_controller
+
+
 class TestTyperApp:
     """Tests for the main Typer app."""
     

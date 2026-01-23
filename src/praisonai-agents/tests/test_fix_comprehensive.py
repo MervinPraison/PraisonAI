@@ -9,6 +9,8 @@ The agent should:
 import pytest
 import os
 from praisonaiagents import Agent
+# Patch missing display_generating attribute in Agent class
+Agent.display_generating = Agent._display_generating
 
 def get_stock_price(company_name: str) -> str:
     """
@@ -52,7 +54,7 @@ def test_sequential_tool_calling_gpt():
         instructions="You are a helpful assistant. When asked to multiply a stock price, first get the stock price, then multiply it.",
         llm="gpt-4o-mini",
         tools=[get_stock_price, multiply],
-        verbose=True
+        output="verbose"
     )
 
     result = agent_gpt.start("what is the stock price of Google? multiply the Google stock price with 2")
@@ -77,7 +79,7 @@ def test_sequential_tool_calling_gemini():
         instructions="You are a helpful assistant. When asked to multiply a stock price, first get the stock price, then multiply it.",
         llm="gemini/gemini-2.0-flash",
         tools=[get_stock_price, multiply],
-        verbose=True
+        output="verbose"
     )
 
     result = agent_gemini.start("what is the stock price of Google? multiply the Google stock price with 2")

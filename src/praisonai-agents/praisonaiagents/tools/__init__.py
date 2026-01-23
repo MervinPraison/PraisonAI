@@ -1,15 +1,28 @@
-"""Tools package for PraisonAI Agents"""
+"""Tools package for PraisonAI Agents - uses lazy loading for performance"""
 from importlib import import_module
 from typing import Any
 
-# Export Injected type for tool state injection
-from .injected import Injected
+# Lazy loading cache
+_tools_lazy_cache = {}
 
-# Export core tool items for organized imports
+# Export core tool items for organized imports (lightweight)
 from .base import BaseTool, ToolResult, ToolValidationError, validate_tool
 from .decorator import tool, FunctionTool
 from .registry import get_registry, register_tool, get_tool, ToolRegistry
 from .tools import Tools
+
+def __getattr__(name):
+    """Lazy load heavy tool dependencies."""
+    if name in _tools_lazy_cache:
+        return _tools_lazy_cache[name]
+    
+    # Injected is lazy loaded due to heavy deps
+    if name == 'Injected':
+        from .injected import Injected
+        _tools_lazy_cache[name] = Injected
+        return Injected
+    
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 # Map of function names to their module and class (if any)
 TOOL_MAPPINGS = {

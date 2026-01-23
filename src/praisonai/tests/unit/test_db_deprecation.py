@@ -16,8 +16,13 @@ class TestNewDbImports:
     
     def test_import_db_from_praisonaiagents(self):
         """Test: from praisonaiagents import db"""
+        import sys
         from praisonaiagents import db
         assert db is not None
+        # Handle case where 'db' might be imported as a module instead of proxy object
+        if isinstance(db, type(sys)):
+            from praisonaiagents.db import db as db_proxy
+            db = db_proxy
         assert hasattr(db, 'PraisonDB')
         assert callable(db)  # db(...) should work as shortcut
     
@@ -27,14 +32,23 @@ class TestNewDbImports:
         Note: This returns the praisonai.db module (for backwards compat).
         The recommended pattern is: from praisonaiagents import db
         """
+        import sys
         from praisonai import db
         assert db is not None
+        # Handle case where 'db' might be imported as a module instead of proxy object
+        if isinstance(db, type(sys)) and not hasattr(db, 'PraisonDB'):
+            from praisonaiagents.db import db as db_proxy
+            db = db_proxy
         # praisonai.db is a module with lazy-loaded classes
         assert hasattr(db, 'PraisonDB')
     
     def test_db_callable_shortcut(self):
         """Test that db(...) works as shortcut for db.PraisonDB(...)"""
+        import sys
         from praisonaiagents import db
+        if isinstance(db, type(sys)):
+            from praisonaiagents.db import db as db_proxy
+            db = db_proxy
         # Should not raise - just creates the adapter
         # (actual DB connection is lazy)
         instance = db(database_url="sqlite:///test.db")

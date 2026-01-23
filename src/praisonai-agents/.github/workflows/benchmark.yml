@@ -1,0 +1,140 @@
+# Performance Benchmark CI
+# Runs import time and instantiation benchmarks on push/PR
+# Fails if import time exceeds 200ms threshold
+
+name: Performance Benchmark
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'praisonaiagents/**'
+      - 'benchmarks/**'
+      - '.github/workflows/benchmark.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'praisonaiagents/**'
+      - 'benchmarks/**'
+      - '.github/workflows/benchmark.yml'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install package
+        run: |
+          pip install -e .
+          pip install pytest
+      
+      - name: Measure Import Time
+        id: import_time
+        run: |
+          # Measure import time (full Agent import)
+          IMPORT_TIME=$(python -c "
+          import time
+          import sys
+          
+          # Clear any cached modules
+          for key in list(sys.modules.keys()):
+              if 'praisonai' in key:
+                  del sys.modules[key]
+          
+          start = time.perf_counter()
+          from praisonaiagents import Agent
+          elapsed = (time.perf_counter() - start) * 1000
+          print(f'{elapsed:.1f}')
+          ")
+          
+          echo "import_time=$IMPORT_TIME" >> $GITHUB_OUTPUT
+          echo "Import time: ${IMPORT_TIME}ms"
+      
+      - name: Check Import Time Threshold
+        run: |
+          IMPORT_TIME=${{ steps.import_time.outputs.import_time }}
+          THRESHOLD=200
+          
+          echo "Import time: ${IMPORT_TIME}ms"
+          echo "Threshold: ${THRESHOLD}ms"
+          
+          # Compare using bc for floating point
+          if (( $(echo "$IMPORT_TIME > $THRESHOLD" | bc -l) )); then
+            echo "❌ FAIL: Import time ${IMPORT_TIME}ms exceeds threshold ${THRESHOLD}ms"
+            exit 1
+          else
+            echo "✅ PASS: Import time ${IMPORT_TIME}ms is within threshold ${THRESHOLD}ms"
+          fi
+      
+      - name: Measure Instantiation Time
+        run: |
+          python -c "
+          import time
+          from praisonaiagents import Agent
+          
+          # Warmup
+          for _ in range(5):
+              Agent(name='Test', output='silent')
+          
+          # Measure
+          times = []
+          for _ in range(50):
+              start = time.perf_counter()
+              Agent(name='Test', output='silent')
+              times.append((time.perf_counter() - start) * 1e6)
+          
+          avg = sum(times) / len(times)
+          min_t = min(times)
+          max_t = max(times)
+          
+          print(f'Instantiation time:')
+          print(f'  Average: {avg:.2f}μs')
+          print(f'  Min: {min_t:.2f}μs')
+          print(f'  Max: {max_t:.2f}μs')
+          "
+      
+      - name: Verify Lazy Imports
+        run: |
+          python -c "
+          import sys
+          
+          # Clear any cached modules
+          for key in list(sys.modules.keys()):
+              if 'praisonai' in key or 'litellm' in key:
+                  del sys.modules[key]
+          
+          # Import package
+          import praisonaiagents
+          
+          # Check heavy deps are NOT loaded
+          heavy_deps = ['litellm', 'chromadb', 'mem0', 'rich']
+          loaded = []
+          for dep in heavy_deps:
+              if dep in sys.modules:
+                  loaded.append(dep)
+          
+          if loaded:
+              print(f'⚠️ WARNING: Heavy deps loaded eagerly: {loaded}')
+              # Don't fail, just warn - some deps may be needed
+          else:
+              print('✅ All heavy deps are lazy loaded')
+          "
+      
+      - name: Run Quick Benchmark (if available)
+        continue-on-error: true
+        run: |
+          if [ -f "benchmarks/quick_benchmark.py" ]; then
+            python benchmarks/quick_benchmark.py --fast || true
+          else
+            echo "Quick benchmark not found, skipping"
+          fi

@@ -30,12 +30,29 @@ import logging
 from typing import Any, Callable, Dict, Optional, Union, get_type_hints
 
 from .base import BaseTool
-from .injected import (
-    is_injected_type, 
-    get_injected_params, 
-    inject_state_into_kwargs,
-    filter_injected_from_schema
-)
+
+# Lazy load injected module functions to reduce import time
+_injected_module = None
+
+def _get_injected_module():
+    """Lazy load the injected module."""
+    global _injected_module
+    if _injected_module is None:
+        from . import injected as _inj
+        _injected_module = _inj
+    return _injected_module
+
+def is_injected_type(annotation):
+    return _get_injected_module().is_injected_type(annotation)
+
+def get_injected_params(func):
+    return _get_injected_module().get_injected_params(func)
+
+def inject_state_into_kwargs(func, kwargs, agent_state):
+    return _get_injected_module().inject_state_into_kwargs(func, kwargs, agent_state)
+
+def filter_injected_from_schema(schema, func):
+    return _get_injected_module().filter_injected_from_schema(schema, func)
 
 
 class FunctionTool(BaseTool):
