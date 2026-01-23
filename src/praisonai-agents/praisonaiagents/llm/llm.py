@@ -1596,10 +1596,11 @@ Now provide your final answer using this result."""
                                 tokens_in = getattr(usage, 'prompt_tokens', 0) or 0
                                 tokens_out = getattr(usage, 'completion_tokens', 0) or 0
                         
-                        # Calculate cost if available
+                        # Calculate cost using centralized module (lazy litellm import)
                         llm_cost = None
                         try:
-                            llm_cost = litellm.completion_cost(completion_response=final_response)
+                            from ._cost import calculate_cost
+                            llm_cost = calculate_cost(final_response, model=self.model)
                         except Exception:
                             pass
                         

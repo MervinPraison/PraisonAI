@@ -283,6 +283,9 @@ class ContextConfig:
     # Sliding window
     keep_recent_turns: int = 5
     
+    # LLM-powered summarization
+    llm_summarize: bool = False  # Enable LLM-powered summarization (uses agent's LLM)
+    
     # Session tracking (Agno pattern)
     session_tracking: bool = False     # Enable goal/plan/progress tracking
     track_summary: bool = True         # Auto-extract conversation summary

@@ -253,6 +253,9 @@ class ManagerConfig:
     tool_budgets: Dict[str, PerToolBudget] = field(default_factory=dict)
     protected_tools: List[str] = field(default_factory=list)
     
+    # LLM-powered summarization
+    llm_summarize: bool = False  # Enable LLM-powered summarization
+    
     # Estimation
     estimation_mode: EstimationMode = EstimationMode.HEURISTIC
     log_estimation_mismatch: bool = False
@@ -302,6 +305,7 @@ class ManagerConfig:
             "allow_absolute_paths": self.allow_absolute_paths,
             "prune_after_tokens": self.prune_after_tokens,
             "keep_recent_turns": self.keep_recent_turns,
+            "llm_summarize": self.llm_summarize,
             "source": self.source,
         }
         return result
@@ -424,6 +428,7 @@ class ContextManager:
         session_id: str = "",
         agent_name: str = "",
         session_cache: Optional[SessionDeduplicationCache] = None,
+        llm_summarize_fn: Optional[Callable] = None,
     ):
         """
         Initialize context manager.
@@ -433,11 +438,16 @@ class ContextManager:
             config: Manager configuration
             session_id: Session identifier
             agent_name: Agent name for monitoring
+            session_cache: Shared session cache for cross-agent deduplication
+            llm_summarize_fn: Optional LLM function for intelligent summarization
         """
         self.model = model
         self.config = config or ManagerConfig.from_env()
         self.session_id = session_id
         self.agent_name = agent_name
+        
+        # LLM summarization function (auto-wired from agent when llm_summarize=True)
+        self._llm_summarize_fn = llm_summarize_fn
         
         # Session-level deduplication cache (shared across agents in workflow)
         self._session_cache = session_cache
@@ -601,11 +611,12 @@ class ContextManager:
         if original_tokens <= target_tokens:
             return messages, None
         
-        # Get optimizer
+        # Get optimizer with LLM summarization if configured
         optimizer = get_optimizer(
             self.config.strategy,
             preserve_recent=self.config.keep_recent_turns,
             protected_tools=self.config.protected_tools,
+            llm_summarize_fn=self._llm_summarize_fn if self.config.llm_summarize else None,
         )
         
         # Try optimization
@@ -695,6 +706,8 @@ class ContextManager:
                 
                 # Check local seen hashes first
                 if content_hash in seen_hashes:
+                    import logging
+                    logging.debug(f"[Context] Dedup: skipping local duplicate (hash={content_hash[:8]}, agent={self.agent_name})")
                     continue
                 
                 # Check session-level cache for cross-agent deduplication
@@ -702,6 +715,8 @@ class ContextManager:
                     tokens = estimate_message_tokens(msg)
                     if self._session_cache.check_and_add(content_hash, self.agent_name, tokens):
                         # Duplicate found in session cache - skip
+                        import logging
+                        logging.debug(f"[Context] Dedup: skipping session duplicate (hash={content_hash[:8]}, agent={self.agent_name}, tokens={tokens})")
                         continue
                 
                 seen_hashes.add(content_hash)

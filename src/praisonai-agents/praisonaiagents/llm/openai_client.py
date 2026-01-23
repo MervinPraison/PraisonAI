@@ -1266,14 +1266,11 @@ class OpenAIClient:
             tokens_in = getattr(usage, 'prompt_tokens', 0) if usage else 0
             tokens_out = getattr(usage, 'completion_tokens', 0) if usage else 0
             
-            # Calculate cost if litellm available
+            # Calculate cost using centralized module (lazy litellm import)
             cost = None
             try:
-                import litellm
-                if hasattr(final_response, 'model_dump'):
-                    cost = litellm.completion_cost(completion_response=final_response.model_dump())
-                elif isinstance(final_response, dict):
-                    cost = litellm.completion_cost(completion_response=final_response)
+                from ._cost import calculate_cost
+                cost = calculate_cost(final_response, model=model)
             except Exception:
                 pass  # Cost calculation is optional
             

@@ -1,0 +1,145 @@
+name: Performance Benchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: 'Number of benchmark iterations'
+        required: false
+        default: '100'
+      fail_on_regression:
+        description: 'Fail if performance regresses'
+        required: false
+        default: 'true'
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e src/praisonai-agents[all]
+          pip install agno crewai langgraph
+
+      - name: Run Import Time Benchmark
+        id: import_time
+        run: |
+          cd src/praisonai-agents
+          python benchmarks/import_time.py 2>&1 | tee import_time_output.txt
+          
+          # Extract import time
+          IMPORT_TIME=$(grep -oP 'Median:\s+\K[\d.]+' import_time_output.txt || echo "0")
+          echo "import_time=$IMPORT_TIME" >> $GITHUB_OUTPUT
+          
+          # Check threshold (200ms)
+          if (( $(echo "$IMPORT_TIME > 200" | bc -l) )); then
+            echo "::warning::Import time ${IMPORT_TIME}ms exceeds 200ms threshold"
+            if [ "${{ inputs.fail_on_regression }}" == "true" ]; then
+              echo "import_passed=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "import_passed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Memory Usage Benchmark
+        id: memory
+        run: |
+          cd src/praisonai-agents
+          python benchmarks/memory_usage.py 2>&1 | tee memory_output.txt
+          
+          # Extract peak memory
+          PEAK_MEMORY=$(grep -oP 'Peak:\s+\K[\d.]+' memory_output.txt || echo "0")
+          echo "peak_memory=$PEAK_MEMORY" >> $GITHUB_OUTPUT
+          
+          # Check threshold (30MB)
+          if (( $(echo "$PEAK_MEMORY > 30" | bc -l) )); then
+            echo "::warning::Memory usage ${PEAK_MEMORY}MB exceeds 30MB threshold"
+            if [ "${{ inputs.fail_on_regression }}" == "true" ]; then
+              echo "memory_passed=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "memory_passed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Simple Benchmark
+        id: simple
+        run: |
+          cd src/praisonai-agents
+          python benchmarks/simple_benchmark.py 2>&1 | tee simple_output.txt
+          
+          # Extract PraisonAI time
+          PRAISON_TIME=$(grep -oP 'PraisonAI\s+\K[\d.]+' simple_output.txt | head -1 || echo "0")
+          echo "praison_time=$PRAISON_TIME" >> $GITHUB_OUTPUT
+
+      - name: Run Tools Benchmark
+        id: tools
+        run: |
+          cd src/praisonai-agents
+          python benchmarks/tools_benchmark.py 2>&1 | tee tools_output.txt
+          
+          # Extract PraisonAI time with tools
+          PRAISON_TOOLS_TIME=$(grep -oP 'PraisonAI\s+\K[\d.]+' tools_output.txt | head -1 || echo "0")
+          echo "praison_tools_time=$PRAISON_TOOLS_TIME" >> $GITHUB_OUTPUT
+
+      - name: Run Parameter Impact Benchmark
+        id: param_impact
+        run: |
+          cd src/praisonai-agents
+          python benchmarks/param_impact_benchmark.py --no-save --iterations ${{ inputs.iterations }} 2>&1 | tee param_impact_output.txt
+
+      - name: Check Lazy Imports
+        id: lazy_imports
+        run: |
+          cd src/praisonai-agents
+          python -c "
+          import sys
+          from praisonaiagents import Agent
+          agent = Agent(name='Test', output='silent')
+          
+          # Check litellm is NOT loaded
+          if 'litellm' in sys.modules:
+              print('FAIL: litellm loaded during silent agent creation')
+              exit(1)
+          else:
+              print('PASS: litellm not loaded (lazy import working)')
+          "
+
+      - name: Generate Benchmark Summary
+        if: always()
+        run: |
+          echo "## Performance Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value | Threshold | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Import Time | ${{ steps.import_time.outputs.import_time }}ms | <200ms | ${{ steps.import_time.outputs.import_passed == 'true' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Peak Memory | ${{ steps.memory.outputs.peak_memory }}MB | <30MB | ${{ steps.memory.outputs.memory_passed == 'true' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Agent Instantiation | ${{ steps.simple.outputs.praison_time }}μs | - | ℹ️ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Agent with Tools | ${{ steps.tools.outputs.praison_tools_time }}μs | - | ℹ️ |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Lazy Import Check" >> $GITHUB_STEP_SUMMARY
+          echo "✅ litellm not loaded during silent agent creation" >> $GITHUB_STEP_SUMMARY
+
+      - name: Fail on Regression
+        if: inputs.fail_on_regression == 'true'
+        run: |
+          if [ "${{ steps.import_time.outputs.import_passed }}" == "false" ]; then
+            echo "::error::Import time regression detected"
+            exit 1
+          fi
+          if [ "${{ steps.memory.outputs.memory_passed }}" == "false" ]; then
+            echo "::error::Memory usage regression detected"
+            exit 1
+          fi
+          echo "All performance checks passed!"

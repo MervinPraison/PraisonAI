@@ -186,7 +186,7 @@ def instantiate_praisonai_agent():
         instructions="Be concise, reply with one sentence.",
         llm="gpt-4o-mini",
         tools=tools,
-        verbose=False
+        output="silent"
     )
 
 
@@ -197,7 +197,7 @@ def instantiate_praisonai_litellm_agent():
         instructions="Be concise, reply with one sentence.",
         llm="openai/gpt-4o-mini",
         tools=tools,
-        verbose=False
+        output="silent"
     )
 
 

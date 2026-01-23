@@ -57,11 +57,11 @@ def run_benchmark():
     from praisonaiagents import Agent as PraisonAgent
     
     results['PraisonAI'] = measure_instantiation(
-        lambda: PraisonAgent(name='Test', llm='gpt-4o-mini', tools=tools, verbose=False)
+        lambda: PraisonAgent(name='Test', llm='gpt-4o-mini', tools=tools, output="silent")
     )
     
     results['PraisonAI (LiteLLM)'] = measure_instantiation(
-        lambda: PraisonAgent(name='Test', llm='openai/gpt-4o-mini', tools=tools, verbose=False)
+        lambda: PraisonAgent(name='Test', llm='openai/gpt-4o-mini', tools=tools, output="silent")
     )
     
     # Other frameworks with tools

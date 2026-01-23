@@ -197,3 +197,99 @@ class TestSmartOptimizerWithLLMSummarize:
         
         # Should not raise
         assert optimizer._summarize.llm_summarize_fn is not None
+
+
+class TestContextConfigLLMSummarize:
+    """Tests for llm_summarize option in ContextConfig."""
+    
+    def test_context_config_has_llm_summarize_field(self):
+        """ContextConfig should have llm_summarize field."""
+        from praisonaiagents.context.models import ContextConfig
+        
+        config = ContextConfig(llm_summarize=True)
+        assert config.llm_summarize is True
+    
+    def test_context_config_llm_summarize_default_false(self):
+        """llm_summarize should default to False."""
+        from praisonaiagents.context.models import ContextConfig
+        
+        config = ContextConfig()
+        assert config.llm_summarize is False
+    
+    def test_manager_config_has_llm_summarize_field(self):
+        """ManagerConfig should have llm_summarize field."""
+        from praisonaiagents.context.manager import ManagerConfig
+        
+        config = ManagerConfig(llm_summarize=True)
+        assert config.llm_summarize is True
+    
+    def test_manager_config_llm_summarize_default_false(self):
+        """llm_summarize should default to False."""
+        from praisonaiagents.context.manager import ManagerConfig
+        
+        config = ManagerConfig()
+        assert config.llm_summarize is False
+    
+    def test_manager_config_to_dict_includes_llm_summarize(self):
+        """to_dict should include llm_summarize."""
+        from praisonaiagents.context.manager import ManagerConfig
+        
+        config = ManagerConfig(llm_summarize=True)
+        d = config.to_dict()
+        assert "llm_summarize" in d
+        assert d["llm_summarize"] is True
+
+
+class TestDeduplicationLogging:
+    """Tests for deduplication debug logging."""
+    
+    def test_deduplication_removes_duplicates(self):
+        """Deduplication should remove duplicate content."""
+        from praisonaiagents.context.manager import ContextManager
+        
+        manager = ContextManager(model="gpt-4o-mini", agent_name="test")
+        
+        # Create messages with duplicate content
+        long_content = "x" * 200  # > 100 chars to trigger dedup
+        messages = [
+            {"role": "user", "content": long_content},
+            {"role": "assistant", "content": "Response"},
+            {"role": "user", "content": long_content},  # Duplicate
+        ]
+        
+        result = manager._deduplicate_messages(messages)
+        
+        # Should have removed the duplicate
+        assert len(result) == 2
+    
+    def test_deduplication_preserves_system_messages(self):
+        """Deduplication should always preserve system messages."""
+        from praisonaiagents.context.manager import ContextManager
+        
+        manager = ContextManager(model="gpt-4o-mini", agent_name="test")
+        
+        messages = [
+            {"role": "system", "content": "You are helpful"},
+            {"role": "system", "content": "You are helpful"},  # Same content
+        ]
+        
+        result = manager._deduplicate_messages(messages)
+        
+        # Both system messages should be preserved
+        assert len(result) == 2
+    
+    def test_deduplication_preserves_tool_calls(self):
+        """Deduplication should preserve assistant messages with tool_calls."""
+        from praisonaiagents.context.manager import ContextManager
+        
+        manager = ContextManager(model="gpt-4o-mini", agent_name="test")
+        
+        messages = [
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "1"}]},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "2"}]},
+        ]
+        
+        result = manager._deduplicate_messages(messages)
+        
+        # Both should be preserved
+        assert len(result) == 2
