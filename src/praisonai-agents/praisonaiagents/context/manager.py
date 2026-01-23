@@ -26,11 +26,70 @@ from enum import Enum
 from .models import (
     ContextLedger, BudgetAllocation, OptimizerStrategy, OptimizationResult
 )
-from .tokens import estimate_tokens_heuristic, estimate_messages_tokens
+from .tokens import estimate_tokens_heuristic, estimate_messages_tokens, estimate_message_tokens
 from .budgeter import ContextBudgeter
 from .ledger import ContextLedgerManager, MultiAgentLedger
 from .optimizer import get_optimizer
 from .monitor import ContextMonitor, MultiAgentMonitor
+
+
+class SessionDeduplicationCache:
+    """
+    Thread-safe session-level content deduplication cache.
+    
+    Tracks content hashes across all agents in a workflow session
+    to prevent duplicate content from being sent to LLM.
+    """
+    
+    def __init__(self, max_size: int = 1000):
+        """
+        Initialize session deduplication cache.
+        
+        Args:
+            max_size: Maximum number of hashes to cache (LRU eviction)
+        """
+        self._cache: Dict[str, str] = {}  # hash -> agent_name
+        self._lock = threading.Lock()
+        self._max_size = max_size
+        self._stats = {"duplicates_prevented": 0, "tokens_saved": 0}
+    
+    def check_and_add(self, content_hash: str, agent_name: str, tokens: int = 0) -> bool:
+        """
+        Check if content hash exists and add if new.
+        
+        Args:
+            content_hash: Hash of the content
+            agent_name: Name of the agent adding this content
+            tokens: Estimated tokens in this content
+            
+        Returns:
+            True if duplicate (already exists), False if new
+        """
+        with self._lock:
+            if content_hash in self._cache:
+                self._stats["duplicates_prevented"] += 1
+                self._stats["tokens_saved"] += tokens
+                return True  # Duplicate
+            
+            # LRU eviction if at capacity
+            if len(self._cache) >= self._max_size:
+                # Remove oldest entry
+                oldest_key = next(iter(self._cache))
+                del self._cache[oldest_key]
+            
+            self._cache[content_hash] = agent_name
+            return False  # New content
+    
+    def get_stats(self) -> Dict[str, int]:
+        """Get deduplication statistics."""
+        with self._lock:
+            return self._stats.copy()
+    
+    def clear(self) -> None:
+        """Clear the cache."""
+        with self._lock:
+            self._cache.clear()
+            self._stats = {"duplicates_prevented": 0, "tokens_saved": 0}
 
 
 class EstimationMode(str, Enum):
@@ -364,6 +423,7 @@ class ContextManager:
         config: Optional[ManagerConfig] = None,
         session_id: str = "",
         agent_name: str = "",
+        session_cache: Optional[SessionDeduplicationCache] = None,
     ):
         """
         Initialize context manager.
@@ -378,6 +438,9 @@ class ContextManager:
         self.config = config or ManagerConfig.from_env()
         self.session_id = session_id
         self.agent_name = agent_name
+        
+        # Session-level deduplication cache (shared across agents in workflow)
+        self._session_cache = session_cache
         
         # Core components
         self._budgeter = ContextBudgeter(
@@ -475,7 +538,21 @@ class ContextManager:
                 details={"utilization": utilization, "threshold": self.config.compact_threshold},
             )
         
-        # Auto-compact if needed
+        # Step 1: Deduplicate messages before optimization
+        deduped_messages = self._deduplicate_messages(messages)
+        dedup_saved = estimate_messages_tokens(messages) - estimate_messages_tokens(deduped_messages)
+        if dedup_saved > 0:
+            self._add_history_event(
+                OptimizationEventType.CAP_OUTPUTS,
+                tokens_before=estimate_messages_tokens(messages),
+                tokens_after=estimate_messages_tokens(deduped_messages),
+                tokens_saved=dedup_saved,
+                details={"reason": "deduplication", "messages_removed": len(messages) - len(deduped_messages)},
+            )
+            messages = deduped_messages
+            result["tokens_before"] = estimate_messages_tokens(messages)
+        
+        # Step 2: Auto-compact if needed
         if self.config.auto_compact and needs_optimization:
             optimized_messages, opt_result = self._optimize_with_benefit_check(
                 messages,
@@ -572,6 +649,66 @@ class ContextManager:
         )
         
         return optimized, result
+    
+    def _deduplicate_messages(
+        self,
+        messages: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """
+        Remove duplicate content from messages.
+        
+        Detects and removes messages with identical content hashes,
+        keeping only the first occurrence. Preserves message order.
+        Uses session-level cache for cross-agent deduplication if available.
+        
+        Args:
+            messages: List of messages to deduplicate
+            
+        Returns:
+            Deduplicated list of messages
+        """
+        if not messages:
+            return messages
+        
+        seen_hashes: set = set()
+        result: List[Dict[str, Any]] = []
+        
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            
+            # Always keep system messages (usually unique)
+            if role == "system":
+                result.append(msg)
+                continue
+            
+            # Always keep assistant messages with tool_calls (they're actions)
+            if role == "assistant" and msg.get("tool_calls"):
+                result.append(msg)
+                continue
+            
+            # For tool results and user/assistant content, check for duplicates
+            if isinstance(content, str) and len(content) > 100:
+                # Hash the content (first 2000 chars to avoid hashing huge content)
+                content_key = content[:2000]
+                content_hash = hashlib.md5(content_key.encode()).hexdigest()[:16]
+                
+                # Check local seen hashes first
+                if content_hash in seen_hashes:
+                    continue
+                
+                # Check session-level cache for cross-agent deduplication
+                if self._session_cache:
+                    tokens = estimate_message_tokens(msg)
+                    if self._session_cache.check_and_add(content_hash, self.agent_name, tokens):
+                        # Duplicate found in session cache - skip
+                        continue
+                
+                seen_hashes.add(content_hash)
+            
+            result.append(msg)
+        
+        return result
     
     def _take_snapshot(
         self,
@@ -809,6 +946,83 @@ class ContextManager:
             "monitor_stats": self._monitor.get_stats(),
         }
     
+    def emergency_truncate(
+        self,
+        messages: List[Dict[str, Any]],
+        target_tokens: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Emergency truncation when optimization isn't enough.
+        
+        Aggressively removes messages to fit within target tokens.
+        Preserves system messages and most recent turns.
+        
+        Args:
+            messages: Messages to truncate
+            target_tokens: Target token count
+            
+        Returns:
+            Truncated messages list
+        """
+        if not messages:
+            return messages
+        
+        # Estimate current tokens
+        current_tokens = estimate_messages_tokens(messages)
+        if current_tokens <= target_tokens:
+            return messages
+        
+        # Separate system and non-system messages
+        system_msgs = [m for m in messages if m.get("role") == "system"]
+        other_msgs = [m for m in messages if m.get("role") != "system"]
+        
+        # Keep system messages (they're usually small)
+        result = list(system_msgs)
+        system_tokens = estimate_messages_tokens(system_msgs)
+        remaining_budget = target_tokens - system_tokens
+        
+        if remaining_budget <= 0:
+            # Even system messages exceed budget - truncate system content
+            for msg in result:
+                if isinstance(msg.get("content"), str) and len(msg["content"]) > 500:
+                    msg["content"] = msg["content"][:500] + "...[truncated]"
+            return result
+        
+        # Keep most recent messages that fit
+        kept_msgs = []
+        tokens_used = 0
+        
+        for msg in reversed(other_msgs):
+            msg_tokens = estimate_message_tokens(msg)
+            if tokens_used + msg_tokens <= remaining_budget:
+                kept_msgs.insert(0, msg)
+                tokens_used += msg_tokens
+            else:
+                # Try to fit a truncated version
+                if msg.get("role") == "user" and isinstance(msg.get("content"), str):
+                    # Keep user messages but truncate content
+                    available = remaining_budget - tokens_used
+                    if available > 50:
+                        truncated_msg = msg.copy()
+                        max_chars = available * 4  # ~4 chars per token
+                        truncated_msg["content"] = msg["content"][:max_chars] + "...[truncated]"
+                        kept_msgs.insert(0, truncated_msg)
+                break
+        
+        result.extend(kept_msgs)
+        
+        # Log the emergency truncation
+        self._add_history_event(
+            OptimizationEventType.CAP_OUTPUTS,
+            tokens_before=current_tokens,
+            tokens_after=estimate_messages_tokens(result),
+            tokens_saved=current_tokens - estimate_messages_tokens(result),
+            messages_affected=len(messages) - len(result),
+            details={"reason": "emergency_truncation", "target_tokens": target_tokens},
+        )
+        
+        return result
+    
     def get_resolved_config(self) -> Dict[str, Any]:
         """Get the fully resolved configuration with source info."""
         return {
@@ -847,6 +1061,7 @@ class MultiAgentContextManager:
         self,
         config: Optional[ManagerConfig] = None,
         default_policy: Optional[ContextPolicy] = None,
+        session_cache: Optional[SessionDeduplicationCache] = None,
     ):
         """
         Initialize multi-agent context manager.
@@ -854,9 +1069,13 @@ class MultiAgentContextManager:
         Args:
             config: Base configuration
             default_policy: Default context sharing policy
+            session_cache: Shared session deduplication cache
         """
         self.config = config or ManagerConfig.from_env()
         self.default_policy = default_policy or ContextPolicy()
+        
+        # Session-level deduplication cache (shared across all agents)
+        self._session_cache = session_cache or SessionDeduplicationCache()
         
         self._agents: Dict[str, ContextManager] = {}
         self._multi_ledger = MultiAgentLedger()
@@ -884,8 +1103,13 @@ class MultiAgentContextManager:
                 model=model,
                 config=self.config,
                 agent_name=agent_id,
+                session_cache=self._session_cache,  # Share session cache
             )
         return self._agents[agent_id]
+    
+    def get_session_cache(self) -> SessionDeduplicationCache:
+        """Get the session deduplication cache."""
+        return self._session_cache
     
     def set_agent_policy(self, agent_id: str, policy: ContextPolicy) -> None:
         """Set context policy for an agent."""
@@ -978,6 +1202,7 @@ class MultiAgentContextManager:
                 agent_id: policy.to_dict()
                 for agent_id, policy in self._policies.items()
             },
+            "session_dedup": self._session_cache.get_stats() if self._session_cache else {},
         }
 
 

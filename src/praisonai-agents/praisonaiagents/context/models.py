@@ -274,6 +274,9 @@ class ContextConfig:
     prune_after_tokens: int = 40000
     protected_tools: List[str] = field(default_factory=list)
     
+    # Per-tool output limits (tool_name -> max_chars)
+    tool_limits: Dict[str, int] = field(default_factory=dict)
+    
     # Monitoring
     monitor: MonitorConfig = field(default_factory=MonitorConfig)
     
@@ -301,6 +304,31 @@ class ContextConfig:
         result = asdict(self)
         result['strategy'] = self.strategy.value
         return result
+    
+    @classmethod
+    def for_recipe(cls) -> "ContextConfig":
+        """
+        Preset for recipe/workflow use cases with many tool calls.
+        
+        Optimized for:
+        - Preventing context overflow in multi-step workflows
+        - Preserving important tool outputs
+        - Triggering compaction earlier (70% vs 80%)
+        - Limiting tool outputs to prevent explosion
+        
+        Returns:
+            ContextConfig with recipe-optimized settings
+        """
+        return cls(
+            auto_compact=True,
+            compact_threshold=0.7,  # Trigger at 70% (earlier than default 80%)
+            strategy=OptimizerStrategy.SMART,
+            tool_output_max=2000,  # Limit each tool output to ~2000 tokens
+            keep_recent_turns=3,   # Keep last 3 turns intact
+            prune_after_tokens=50000,  # Start pruning after 50K tokens
+            output_reserve=8000,
+            history_ratio=0.6,
+        )
 
 
 @runtime_checkable

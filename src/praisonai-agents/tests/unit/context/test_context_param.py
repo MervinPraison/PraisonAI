@@ -132,12 +132,14 @@ class TestWorkflowContextParam:
     """Tests for Workflow context= parameter."""
     
     def test_workflow_context_false_default(self):
-        """Workflow context=False should be the default."""
+        """Workflow context=True should be the default (enabled for overflow prevention)."""
         from praisonaiagents import Workflow
         
         workflow = Workflow(name="Test", steps=[])
         
-        assert workflow.context is False
+        # Changed from False to True to enable context management by default for workflows
+        # This prevents context overflow errors in recipes with many tool calls
+        assert workflow.context is True
     
     def test_workflow_context_true(self):
         """Workflow context=True should be stored."""

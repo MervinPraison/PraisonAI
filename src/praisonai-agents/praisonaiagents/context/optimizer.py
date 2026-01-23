@@ -151,12 +151,14 @@ class PruneToolsOptimizer(BaseOptimizer):
     def __init__(
         self,
         preserve_recent: int = 5,
-        max_output_chars: int = 500,
+        max_output_chars: int = 4000,  # Increased from 500 to allow full page content
         protected_tools: Optional[List[str]] = None,
+        tool_limits: Optional[Dict[str, int]] = None,  # Per-tool limits
     ):
         self.preserve_recent = preserve_recent
         self.max_output_chars = max_output_chars
         self.protected_tools = protected_tools or []
+        self.tool_limits = tool_limits or {}  # {tool_name: max_chars}
     
     def optimize(
         self,
@@ -192,11 +194,15 @@ class PruneToolsOptimizer(BaseOptimizer):
                     result.append(msg)
                     continue
                 
+                # Get per-tool limit or use default
+                limit = self.tool_limits.get(tool_name, self.max_output_chars)
+                
                 # Truncate if too long
-                if isinstance(content, str) and len(content) > self.max_output_chars:
+                if isinstance(content, str) and len(content) > limit:
                     pruned_msg = msg.copy()
-                    pruned_msg["content"] = content[:self.max_output_chars] + "\n...[output truncated]..."
+                    pruned_msg["content"] = content[:limit] + "\n...[output truncated]..."
                     pruned_msg["_pruned"] = True
+                    pruned_msg["_original_length"] = len(content)
                     result.append(pruned_msg)
                     pruned_count += 1
                 else:
@@ -287,15 +293,32 @@ class NonDestructiveOptimizer(BaseOptimizer):
 
 class SummarizeOptimizer(BaseOptimizer):
     """
-    Summarize older messages using LLM.
+    Summarize older messages using LLM or fallback to truncation.
     
-    Note: This is a placeholder that creates a structured summary.
-    Actual LLM summarization should be done at the agent level.
+    When an LLM summarize function is provided, uses it to create
+    intelligent summaries. Otherwise falls back to truncation.
     """
     
-    def __init__(self, preserve_recent: int = 5, max_summary_items: int = 10):
+    def __init__(
+        self,
+        preserve_recent: int = 5,
+        max_summary_items: int = 10,
+        llm_summarize_fn: Optional[callable] = None,
+        max_summary_tokens: int = 500,
+    ):
+        """
+        Initialize summarize optimizer.
+        
+        Args:
+            preserve_recent: Number of recent messages to keep intact
+            max_summary_items: Max items to include in fallback summary
+            llm_summarize_fn: Optional function(messages) -> str for LLM summarization
+            max_summary_tokens: Target token count for LLM summary
+        """
         self.preserve_recent = preserve_recent
         self.max_summary_items = max_summary_items
+        self.llm_summarize_fn = llm_summarize_fn
+        self.max_summary_tokens = max_summary_tokens
     
     def optimize(
         self,
@@ -324,24 +347,16 @@ class SummarizeOptimizer(BaseOptimizer):
         older = other_msgs[:-self.preserve_recent] if len(other_msgs) > self.preserve_recent else []
         
         if older:
-            # Create summary
-            summary_parts = []
-            for msg in older[:self.max_summary_items]:
-                role = msg.get("role", "unknown")
-                content = msg.get("content", "")
-                if isinstance(content, str) and content:
-                    summary_parts.append(f"[{role}]: {content[:150]}...")
+            # Try LLM summarization first
+            summary = self._create_summary(older)
             
-            if summary_parts:
-                summary = (
-                    "[Previous conversation summary]\n"
-                    + "\n".join(summary_parts)
-                )
+            if summary:
                 result.append({
                     "role": "system",
                     "content": summary,
                     "_summary": True,
                     "_original_count": len(older),
+                    "_llm_summarized": self.llm_summarize_fn is not None,
                 })
         
         result.extend(recent)
@@ -356,6 +371,103 @@ class SummarizeOptimizer(BaseOptimizer):
             messages_removed=len(older),
             summary_added=bool(older),
         )
+    
+    def _create_summary(self, messages: List[Dict[str, Any]]) -> str:
+        """Create summary using LLM or fallback to truncation."""
+        if self.llm_summarize_fn:
+            try:
+                # Use LLM to create intelligent summary
+                return self.llm_summarize_fn(messages, self.max_summary_tokens)
+            except Exception:
+                # Fallback to truncation on error
+                pass
+        
+        # Fallback: Create truncated summary
+        summary_parts = []
+        for msg in messages[:self.max_summary_items]:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            if isinstance(content, str) and content:
+                summary_parts.append(f"[{role}]: {content[:150]}...")
+        
+        if summary_parts:
+            return "[Previous conversation summary]\n" + "\n".join(summary_parts)
+        return ""
+
+
+class LLMSummarizeOptimizer(SummarizeOptimizer):
+    """
+    LLM-powered summarization optimizer.
+    
+    Uses the agent's LLM to create intelligent summaries of older messages,
+    preserving key information while reducing token count.
+    """
+    
+    def __init__(
+        self,
+        preserve_recent: int = 5,
+        llm_client: Optional[Any] = None,
+        model: str = "gpt-4o-mini",
+        max_summary_tokens: int = 500,
+    ):
+        """
+        Initialize LLM summarize optimizer.
+        
+        Args:
+            preserve_recent: Number of recent messages to keep intact
+            llm_client: OpenAI-compatible client for summarization
+            model: Model to use for summarization
+            max_summary_tokens: Target token count for summary
+        """
+        self.llm_client = llm_client
+        self.model = model
+        
+        # Create LLM summarize function if client provided
+        llm_fn = self._llm_summarize if llm_client else None
+        
+        super().__init__(
+            preserve_recent=preserve_recent,
+            llm_summarize_fn=llm_fn,
+            max_summary_tokens=max_summary_tokens,
+        )
+    
+    def _llm_summarize(self, messages: List[Dict[str, Any]], max_tokens: int) -> str:
+        """Use LLM to create intelligent summary."""
+        if not self.llm_client:
+            return ""
+        
+        # Build content to summarize
+        content_parts = []
+        for msg in messages:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            if isinstance(content, str) and content:
+                # Truncate very long content for summarization input
+                truncated = content[:2000] if len(content) > 2000 else content
+                content_parts.append(f"[{role}]: {truncated}")
+        
+        if not content_parts:
+            return ""
+        
+        # Create summarization prompt
+        summarize_prompt = f"""Summarize the following conversation history concisely, preserving key facts, decisions, and context. Keep the summary under {max_tokens} tokens.
+
+Conversation:
+{chr(10).join(content_parts)}
+
+Summary:"""
+        
+        try:
+            response = self.llm_client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": summarize_prompt}],
+                max_tokens=max_tokens,
+                temperature=0.3,
+            )
+            summary = response.choices[0].message.content
+            return f"[AI Summary of {len(messages)} previous messages]\n{summary}"
+        except Exception:
+            return ""
 
 
 class SmartOptimizer(BaseOptimizer):
@@ -372,16 +484,23 @@ class SmartOptimizer(BaseOptimizer):
         self,
         preserve_recent: int = 5,
         protected_tools: Optional[List[str]] = None,
+        tool_limits: Optional[Dict[str, int]] = None,
+        llm_summarize_fn: Optional[callable] = None,
     ):
         self.preserve_recent = preserve_recent
         self.protected_tools = protected_tools or []
+        self.tool_limits = tool_limits or {}
         
         self._prune = PruneToolsOptimizer(
             preserve_recent=preserve_recent,
             protected_tools=protected_tools,
+            tool_limits=tool_limits,
         )
         self._window = SlidingWindowOptimizer()
-        self._summarize = SummarizeOptimizer(preserve_recent=preserve_recent)
+        self._summarize = SummarizeOptimizer(
+            preserve_recent=preserve_recent,
+            llm_summarize_fn=llm_summarize_fn,
+        )
     
     def optimize(
         self,
@@ -449,6 +568,9 @@ OPTIMIZER_REGISTRY: Dict[OptimizerStrategy, type] = {
     OptimizerStrategy.SUMMARIZE: SummarizeOptimizer,
     OptimizerStrategy.SMART: SmartOptimizer,
 }
+
+# LLM summarizer available separately (not in registry as it needs client)
+LLM_SUMMARIZE_OPTIMIZER = LLMSummarizeOptimizer
 
 
 def get_optimizer(

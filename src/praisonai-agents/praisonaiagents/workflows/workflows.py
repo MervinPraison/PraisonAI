@@ -768,7 +768,7 @@ class Workflow:
     planning: Optional[Any] = False  # Union[bool, str, WorkflowPlanningConfig] - planning mode
     memory: Optional[Any] = None  # Union[bool, WorkflowMemoryConfig, instance] - memory
     hooks: Optional[Any] = None  # WorkflowHooksConfig - lifecycle callbacks
-    context: Optional[Any] = False  # Union[bool, ManagerConfig, ContextManager] - context management
+    context: Optional[Any] = True  # Union[bool, ManagerConfig, ContextManager] - context management (enabled by default for workflows)
     # NEW: Agent-like consolidated params for feature parity
     autonomy: Optional[Any] = None  # Union[bool, AutonomyConfig] - agent autonomy
     knowledge: Optional[Any] = None  # Union[bool, List[str], KnowledgeConfig] - RAG
@@ -793,6 +793,7 @@ class Workflow:
     _hooks_config: Optional[Any] = field(default=None, repr=False)
     _context_manager: Optional[Any] = field(default=None, repr=False)
     _context_manager_initialized: bool = field(default=False, repr=False)
+    _session_dedup_cache: Optional[Any] = field(default=None, repr=False)  # Shared session deduplication cache
     # NEW: Resolved configs for agent-like params (for propagation to steps/agents)
     _autonomy_config: Optional[Any] = field(default=None, repr=False)
     _knowledge_config: Optional[Any] = field(default=None, repr=False)
@@ -915,6 +916,14 @@ class Workflow:
                 config_class=ReflectionConfig, presets=REFLECTION_PRESETS,
                 default=None,
             )
+        
+        # Initialize session deduplication cache for cross-agent deduplication
+        if self.context:
+            try:
+                from ..context.manager import SessionDeduplicationCache
+                self._session_dedup_cache = SessionDeduplicationCache()
+            except ImportError:
+                pass
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -1285,8 +1294,15 @@ class Workflow:
                     elif step.agent:
                         # Direct agent with tools
                         # Propagate context management to existing agent if workflow has it enabled
-                        if self.context and not step.agent._context_manager_initialized:
-                            step.agent._context_param = self.context
+                        if self.context:
+                            if not step.agent._context_manager_initialized:
+                                step.agent._context_param = self.context
+                            # Share session deduplication cache for cross-agent deduplication
+                            if self._session_dedup_cache:
+                                step.agent._session_dedup_cache = self._session_dedup_cache
+                                # Also set on existing context manager if already initialized
+                                if step.agent._context_manager and hasattr(step.agent._context_manager, '_session_cache'):
+                                    step.agent._context_manager._session_cache = self._session_dedup_cache
                         
                         # Substitute variables in action
                         action = step.action or input
@@ -1732,8 +1748,15 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         elif normalized.agent:
             try:
                 # Propagate context management to existing agent if workflow has it enabled
-                if self.context and not normalized.agent._context_manager_initialized:
-                    normalized.agent._context_param = self.context
+                if self.context:
+                    if not normalized.agent._context_manager_initialized:
+                        normalized.agent._context_param = self.context
+                    # Share session deduplication cache for cross-agent deduplication
+                    if self._session_dedup_cache:
+                        normalized.agent._session_dedup_cache = self._session_dedup_cache
+                        # Also set on existing context manager if already initialized
+                        if normalized.agent._context_manager and hasattr(normalized.agent._context_manager, '_session_cache'):
+                            normalized.agent._context_manager._session_cache = self._session_dedup_cache
                 
                 action = normalized.action or input
                 # Substitute variables

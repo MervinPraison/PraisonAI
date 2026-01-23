@@ -99,6 +99,7 @@ __all__ = [
     "PruneToolsOptimizer",
     "NonDestructiveOptimizer",
     "SummarizeOptimizer",
+    "LLMSummarizeOptimizer",
     "SmartOptimizer",
     "get_optimizer",
     "get_effective_history",
@@ -125,6 +126,7 @@ __all__ = [
     "EstimationMetrics",
     "PerToolBudget",
     "SnapshotHookData",
+    "SessionDeduplicationCache",
     # Protocols (NEW)
     "ContextView",
     "ContextMutator",
@@ -203,7 +205,7 @@ def __getattr__(name: str):
     # Optimization
     if name in ("BaseOptimizer", "TruncateOptimizer", "SlidingWindowOptimizer",
                 "PruneToolsOptimizer", "NonDestructiveOptimizer", "SummarizeOptimizer",
-                "SmartOptimizer", "get_optimizer"):
+                "LLMSummarizeOptimizer", "SmartOptimizer", "get_optimizer"):
         from . import optimizer
         return getattr(optimizer, name)
     
@@ -218,7 +220,8 @@ def __getattr__(name: str):
     if name in ("ContextManager", "MultiAgentContextManager", "create_context_manager",
                 "ManagerConfig", "ContextPolicy", "EstimationMode", "ContextShareMode",
                 "ToolShareMode", "OptimizationEvent", "OptimizationEventType",
-                "EstimationMetrics", "PerToolBudget", "SnapshotHookData"):
+                "EstimationMetrics", "PerToolBudget", "SnapshotHookData",
+                "SessionDeduplicationCache"):
         from . import manager
         return getattr(manager, name)
     
