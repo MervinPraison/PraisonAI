@@ -4,23 +4,62 @@ import warnings
 import re
 import inspect
 import asyncio
-from typing import Any, Dict, List, Optional, Union, Literal, Callable
+from typing import Any, Dict, List, Optional, Union, Literal, Callable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from rich.console import Console
+    from rich.live import Live
 from pydantic import BaseModel
 import time
 import json
 import xml.etree.ElementTree as ET
-from ..main import (
-    display_error,
-    display_tool_call,
-    display_instruction,
-    display_interaction,
-    display_generating,
-    display_self_reflection,
-    ReflectionOutput,
-    execute_sync_callback,
-)
-from rich.console import Console
-from rich.live import Live
+# Display functions - lazy loaded to avoid importing rich at startup
+# These are only needed when output=verbose
+_display_module = None
+_rich_console = None
+_rich_live = None
+
+def _get_display_functions():
+    """Lazy load display functions from main module."""
+    global _display_module
+    if _display_module is None:
+        from ..main import (
+            display_error,
+            display_tool_call,
+            display_instruction,
+            display_interaction,
+            display_generating,
+            display_self_reflection,
+            ReflectionOutput,
+            execute_sync_callback,
+        )
+        _display_module = {
+            'display_error': display_error,
+            'display_tool_call': display_tool_call,
+            'display_instruction': display_instruction,
+            'display_interaction': display_interaction,
+            'display_generating': display_generating,
+            'display_self_reflection': display_self_reflection,
+            'ReflectionOutput': ReflectionOutput,
+            'execute_sync_callback': execute_sync_callback,
+        }
+    return _display_module
+
+def _get_console():
+    """Lazy load rich.console.Console."""
+    global _rich_console
+    if _rich_console is None:
+        from rich.console import Console
+        _rich_console = Console
+    return _rich_console
+
+def _get_live():
+    """Lazy load rich.live.Live."""
+    global _rich_live
+    if _rich_live is None:
+        from rich.live import Live
+        _rich_live = Live
+    return _rich_live
 
 # Import token tracking
 try:
@@ -391,7 +430,7 @@ Respond with ONLY a valid JSON tool call in this format:
         """Lazily initialize Rich Console only when needed."""
         if self._console is None:
             from rich.console import Console
-            self._console = Console()
+            self._console = _get_console()()
         return self._console
 
     def _apply_ollama_defaults(self):
@@ -1426,7 +1465,7 @@ Now provide your final answer using this result."""
         self_reflect: bool = False,
         max_reflect: int = 3,
         min_reflect: int = 1,
-        console: Optional[Console] = None,
+        console: Optional['Console'] = None,
         agent_name: Optional[str] = None,
         agent_role: Optional[str] = None,
         agent_tools: Optional[List[str]] = None,
@@ -1533,7 +1572,7 @@ Now provide your final answer using this result."""
                     display_text = next((item["text"] for item in prompt if item["type"] == "text"), "")
                 
                 if display_text and str(display_text).strip():
-                    display_instruction(
+                    _get_display_functions()['display_instruction'](
                         f"Agent {agent_name} is processing prompt: {display_text}",
                         console=self.console,
                         agent_name=agent_name,
@@ -1556,7 +1595,7 @@ Now provide your final answer using this result."""
                     
                     # Trigger LLM callback for subsequent iterations (after tool calls)
                     # Initial callback is in agent._chat_completion, so this triggers for all loop iterations
-                    execute_sync_callback('llm_start', model=self.model, agent_name=agent_name)
+                    _get_display_functions()['execute_sync_callback']('llm_start', model=self.model, agent_name=agent_name)
 
                     # If reasoning_steps is True, do a single non-streaming call
                     if reasoning_steps:
@@ -1604,7 +1643,7 @@ Now provide your final answer using this result."""
                         except Exception:
                             pass
                         
-                        execute_sync_callback(
+                        _get_display_functions()['execute_sync_callback'](
                             'llm_end',
                             model=self.model,
                             tokens_in=tokens_in,
@@ -1619,7 +1658,7 @@ Now provide your final answer using this result."""
                         
                         # Optionally display reasoning if present
                         if verbose and reasoning_content and not interaction_displayed:
-                            display_interaction(
+                            _get_display_functions()['display_interaction'](
                                 original_prompt,
                                 f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
                                 markdown=markdown,
@@ -1635,7 +1674,7 @@ Now provide your final answer using this result."""
                             interaction_displayed = True
                             callback_executed = True
                         elif verbose and not interaction_displayed:
-                            display_interaction(
+                            _get_display_functions()['display_interaction'](
                                 original_prompt,
                                 response_text,
                                 markdown=markdown,
@@ -1652,7 +1691,7 @@ Now provide your final answer using this result."""
                             callback_executed = True
                         elif not callback_executed:
                             # Only execute callback if display_interaction hasn't been called (which would trigger callbacks internally)
-                            execute_sync_callback(
+                            _get_display_functions()['execute_sync_callback'](
                                 'interaction',
                                 message=original_prompt,
                                 response=response_content,
@@ -1693,7 +1732,7 @@ Now provide your final answer using this result."""
                             try:
                                 if verbose:
                                     # Verbose streaming: show display_generating during streaming
-                                    with Live(display_generating("", current_time), console=self.console, refresh_per_second=4) as live:
+                                    with _get_live()(_get_display_functions()['display_generating']("", current_time), console=self.console, refresh_per_second=4) as live:
                                         for chunk in litellm.completion(
                                             **self._build_completion_params(
                                                 messages=messages,
@@ -1710,7 +1749,7 @@ Now provide your final answer using this result."""
                                                 response_text, tool_calls = self._process_stream_delta(
                                                     delta, response_text, tool_calls, formatted_tools
                                                 )
-                                                live.update(display_generating(response_text, current_time))
+                                                live.update(_get_display_functions()['display_generating'](response_text, current_time))
                                 else:
                                     # Non-verbose streaming: no display_generating during streaming
                                     for chunk in litellm.completion(
@@ -1740,7 +1779,7 @@ Now provide your final answer using this result."""
                                     try:
                                         if verbose:
                                             # When verbose=True, always use streaming for better UX
-                                            with Live(display_generating("", current_time), console=self.console, refresh_per_second=4, transient=True) as live:
+                                            with _get_live()(_get_display_functions()['display_generating']("", current_time), console=self.console, refresh_per_second=4, transient=True) as live:
                                                 response_text = ""
                                                 tool_calls = []
                                                 # Use streaming when verbose for progressive display
@@ -1760,7 +1799,7 @@ Now provide your final answer using this result."""
                                                         response_text, tool_calls = self._process_stream_delta(
                                                             delta, response_text, tool_calls, formatted_tools
                                                         )
-                                                        live.update(display_generating(response_text, current_time))
+                                                        live.update(_get_display_functions()['display_generating'](response_text, current_time))
                                             
                                             # Clear the live display after completion
                                             self.console.print()
@@ -1798,7 +1837,7 @@ Now provide your final answer using this result."""
                                         # Execute callbacks and display based on verbose setting
                                         if verbose and not interaction_displayed:
                                             # Display the complete response at once (this will trigger callbacks internally)
-                                            display_interaction(
+                                            _get_display_functions()['display_interaction'](
                                                 original_prompt,
                                                 response_text,
                                                 markdown=markdown,
@@ -1815,7 +1854,7 @@ Now provide your final answer using this result."""
                                             callback_executed = True
                                         elif not callback_executed:
                                             # Only execute callback if display_interaction hasn't been called
-                                            execute_sync_callback(
+                                            _get_display_functions()['execute_sync_callback'](
                                                 'interaction',
                                                 message=original_prompt,
                                                 response=response_text,
@@ -1860,7 +1899,7 @@ Now provide your final answer using this result."""
                                 
                                 # Execute callbacks after streaming completes (only if not verbose, since verbose will call display_interaction later)
                                 if not verbose and not callback_executed:
-                                    execute_sync_callback(
+                                    _get_display_functions()['execute_sync_callback'](
                                         'interaction',
                                         message=original_prompt,
                                         response=response_text,
@@ -1890,7 +1929,7 @@ Now provide your final answer using this result."""
                             # Non-streaming approach (when tools require it, streaming is disabled, or streaming fallback)
                             if verbose:
                                 # When verbose=True, always use streaming for better UX
-                                with Live(display_generating("", current_time), console=self.console, refresh_per_second=4, transient=True) as live:
+                                with _get_live()(_get_display_functions()['display_generating']("", current_time), console=self.console, refresh_per_second=4, transient=True) as live:
                                     response_text = ""
                                     tool_calls = []
                                     # Use streaming when verbose for progressive display
@@ -1910,7 +1949,7 @@ Now provide your final answer using this result."""
                                             response_text, tool_calls = self._process_stream_delta(
                                                 delta, response_text, tool_calls, formatted_tools
                                             )
-                                            live.update(display_generating(response_text, current_time))
+                                            live.update(_get_display_functions()['display_generating'](response_text, current_time))
                                 
                                 # Clear the live display after completion
                                 self.console.print()
@@ -1948,7 +1987,7 @@ Now provide your final answer using this result."""
                             # Execute callbacks and display based on verbose setting
                             if verbose and not interaction_displayed:
                                 # Display the complete response at once (this will trigger callbacks internally)
-                                display_interaction(
+                                _get_display_functions()['display_interaction'](
                                     original_prompt,
                                     response_text,
                                     markdown=markdown,
@@ -1965,7 +2004,7 @@ Now provide your final answer using this result."""
                                 callback_executed = True
                             elif not callback_executed:
                                 # Only execute callback if display_interaction hasn't been called
-                                execute_sync_callback(
+                                _get_display_functions()['execute_sync_callback'](
                                     'interaction',
                                     message=original_prompt,
                                     response=response_text,
@@ -2197,11 +2236,11 @@ Now provide your final answer using this result."""
                                     logging.debug("[TOOL_EXEC_DEBUG] Tool returned no output")
                                 
                                 logging.debug(f"[TOOL_EXEC_DEBUG] About to display tool call with message: {display_message}")
-                                display_tool_call(display_message, console=self.console)
+                                _get_display_functions()['display_tool_call'](display_message, console=self.console)
                             
                             # Always trigger callback for status output (even when verbose=False)
                             result_str = json.dumps(tool_result) if tool_result else "empty"
-                            execute_sync_callback(
+                            _get_display_functions()['execute_sync_callback'](
                                 'tool_call',
                                 message=f"Calling function: {function_name}",
                                 tool_name=function_name,
@@ -2300,7 +2339,7 @@ Now provide your final answer using this result."""
                 # Display the final response if verbose mode is enabled
                 if verbose and not interaction_displayed:
                     generation_time_val = time.time() - start_time
-                    display_interaction(
+                    _get_display_functions()['display_interaction'](
                         original_prompt,
                         final_response_text,
                         markdown=markdown,
@@ -2317,7 +2356,7 @@ Now provide your final answer using this result."""
                     callback_executed = True
                 elif not callback_executed:
                     # Execute callback if not already done
-                    execute_sync_callback(
+                    _get_display_functions()['execute_sync_callback'](
                         'interaction',
                         message=original_prompt,
                         response=final_response_text,
@@ -2340,7 +2379,7 @@ Now provide your final answer using this result."""
             if verbose and not interaction_displayed:
                 # If we have stored reasoning content from tool execution, display it
                 if stored_reasoning_content:
-                    display_interaction(
+                    _get_display_functions()['display_interaction'](
                         original_prompt,
                         f"Reasoning:\n{stored_reasoning_content}\n\nAnswer:\n{response_text}",
                         markdown=markdown,
@@ -2354,7 +2393,7 @@ Now provide your final answer using this result."""
                         task_id=task_id
                     )
                 else:
-                    display_interaction(
+                    _get_display_functions()['display_interaction'](
                         original_prompt,
                         response_text,
                         markdown=markdown,
@@ -2371,7 +2410,7 @@ Now provide your final answer using this result."""
                 callback_executed = True
             elif not callback_executed:
                 # Only execute callback if display_interaction hasn't been called
-                execute_sync_callback(
+                _get_display_functions()['execute_sync_callback'](
                     'interaction',
                     message=original_prompt,
                     response=response_content,
@@ -2398,7 +2437,7 @@ Now provide your final answer using this result."""
                 self.chat_history.append({"role": "assistant", "content": response_text})
                 
                 if verbose and not interaction_displayed:
-                    display_interaction(original_prompt, response_text, markdown=markdown,
+                    _get_display_functions()['display_interaction'](original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=self.console,
                                      agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                      task_name=task_name, task_description=task_description, task_id=task_id)
@@ -2406,7 +2445,7 @@ Now provide your final answer using this result."""
                     callback_executed = True
                 elif not callback_executed:
                     # Only execute callback if display_interaction hasn't been called
-                    execute_sync_callback(
+                    _get_display_functions()['execute_sync_callback'](
                         'interaction',
                         message=original_prompt,
                         response=response_text,
@@ -2424,7 +2463,7 @@ Now provide your final answer using this result."""
 
             if not self_reflect:
                 if verbose and not interaction_displayed:
-                    display_interaction(original_prompt, response_text, markdown=markdown,
+                    _get_display_functions()['display_interaction'](original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=self.console,
                                      agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                      task_name=task_name, task_description=task_description, task_id=task_id)
@@ -2432,7 +2471,7 @@ Now provide your final answer using this result."""
                     callback_executed = True
                 elif not callback_executed:
                     # Only execute callback if display_interaction hasn't been called
-                    execute_sync_callback(
+                    _get_display_functions()['execute_sync_callback'](
                         'interaction',
                         message=original_prompt,
                         response=response_text,
@@ -2486,7 +2525,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                     # Optionally display reasoning if present
                     if verbose and reasoning_content:
-                        display_interaction(
+                        _get_display_functions()['display_interaction'](
                             "Reflection reasoning:",
                             f"{reasoning_content}\n\nReflection result:\n{reflection_text}",
                             markdown=markdown,
@@ -2500,7 +2539,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             task_id=task_id
                         )
                     elif verbose:
-                        display_interaction(
+                        _get_display_functions()['display_interaction'](
                             "Self-reflection (non-streaming):",
                             reflection_text,
                             markdown=markdown,
@@ -2516,7 +2555,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 else:
                     # Existing streaming approach
                     if verbose:
-                        with Live(display_generating("", start_time), console=self.console, refresh_per_second=4) as live:
+                        with _get_live()(_get_display_functions()['display_generating']("", start_time), console=self.console, refresh_per_second=4) as live:
                             reflection_text = ""
                             for chunk in litellm.completion(
                                 **self._build_completion_params(
@@ -2532,7 +2571,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 if chunk and chunk.choices and chunk.choices[0].delta.content:
                                     content = chunk.choices[0].delta.content
                                     reflection_text += content
-                                    live.update(display_generating(reflection_text, start_time))
+                                    live.update(_get_display_functions()['display_generating'](reflection_text, start_time))
                     else:
                         reflection_text = ""
                         for chunk in litellm.completion(
@@ -2554,14 +2593,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     satisfactory = reflection_data.get("satisfactory", "no").lower() == "yes"
 
                     if verbose:
-                        display_self_reflection(
+                        _get_display_functions()['display_self_reflection'](
                             f"Agent {agent_name} self reflection: reflection='{reflection_data['reflection']}' satisfactory='{reflection_data['satisfactory']}'",
                             console=self.console
                         )
 
                     if satisfactory and reflection_count >= min_reflect - 1:
                         if verbose and not interaction_displayed:
-                            display_interaction(prompt, response_text, markdown=markdown,
+                            _get_display_functions()['display_interaction'](prompt, response_text, markdown=markdown,
                                              generation_time=time.time() - start_time, console=self.console,
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
@@ -2570,7 +2609,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                     if reflection_count >= max_reflect - 1:
                         if verbose and not interaction_displayed:
-                            display_interaction(prompt, response_text, markdown=markdown,
+                            _get_display_functions()['display_interaction'](prompt, response_text, markdown=markdown,
                                              generation_time=time.time() - start_time, console=self.console,
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
@@ -2587,7 +2626,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Get new response after reflection
                     if verbose:
-                        with Live(display_generating("", time.time()), console=self.console, refresh_per_second=4) as live:
+                        with _get_live()(_get_display_functions()['display_generating']("", time.time()), console=self.console, refresh_per_second=4) as live:
                             response_text = ""
                             for chunk in litellm.completion(
                                 **self._build_completion_params(
@@ -2603,7 +2642,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 if chunk and chunk.choices and chunk.choices[0].delta.content:
                                     content = chunk.choices[0].delta.content
                                     response_text += content
-                                    live.update(display_generating(response_text, time.time()))
+                                    live.update(_get_display_functions()['display_generating'](response_text, time.time()))
                     else:
                         response_text = ""
                         for chunk in litellm.completion(
@@ -2627,7 +2666,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     reflection_count += 1
                     if reflection_count >= max_reflect:
                         if verbose and not interaction_displayed:
-                            display_interaction(prompt, response_text, markdown=markdown,
+                            _get_display_functions()['display_interaction'](prompt, response_text, markdown=markdown,
                                              generation_time=time.time() - start_time, console=self.console,
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
@@ -2635,18 +2674,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         return response_text
                     continue
                 except Exception as e:
-                    display_error(f"Error in LLM response: {str(e)}")
+                    _get_display_functions()['display_error'](f"Error in LLM response: {str(e)}")
                     return None
             
             # If we've exhausted reflection attempts
             if verbose and not interaction_displayed:
-                display_interaction(prompt, response_text, markdown=markdown,
+                _get_display_functions()['display_interaction'](prompt, response_text, markdown=markdown,
                                  generation_time=time.time() - start_time, console=self.console)
                 interaction_displayed = True
             return response_text
 
         except Exception as error:
-            display_error(f"Error in get_response: {str(error)}")
+            _get_display_functions()['display_error'](f"Error in get_response: {str(error)}")
             raise
         
         # Log completion time if in debug mode
@@ -2949,7 +2988,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         self_reflect: bool = False,
         max_reflect: int = 3,
         min_reflect: int = 1,
-        console: Optional[Console] = None,
+        console: Optional['Console'] = None,
         agent_name: Optional[str] = None,
         agent_role: Optional[str] = None,
         agent_tools: Optional[List[str]] = None,
@@ -3060,7 +3099,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     response_text = resp["choices"][0]["message"]["content"]
                     
                     if verbose and reasoning_content and not interaction_displayed:
-                        display_interaction(
+                        _get_display_functions()['display_interaction'](
                             "Initial reasoning:",
                             f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
                             markdown=markdown,
@@ -3075,7 +3114,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         )
                         interaction_displayed = True
                     elif verbose and not interaction_displayed:
-                        display_interaction(
+                        _get_display_functions()['display_interaction'](
                             "Initial response:",
                             response_text,
                             markdown=markdown,
@@ -3172,7 +3211,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         
                         if verbose and not interaction_displayed:
                             # Display the complete response at once
-                            display_interaction(
+                            _get_display_functions()['display_interaction'](
                                 original_prompt,
                                 response_text,
                                 markdown=markdown,
@@ -3235,7 +3274,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 display_message += f"Function returned: {tool_result}"
                             else:
                                 display_message += "Function returned no output"
-                            display_tool_call(display_message, console=self.console)
+                            _get_display_functions()['display_tool_call'](display_message, console=self.console)
                         # Check if it's Ollama provider
                         if self._is_ollama_provider():
                             # For Ollama, use user role and format as natural language
@@ -3277,7 +3316,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         response_text = resp["choices"][0]["message"]["content"]
                         
                         if verbose and reasoning_content and not interaction_displayed:
-                            display_interaction(
+                            _get_display_functions()['display_interaction'](
                                 "Tool response reasoning:",
                                 f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
                                 markdown=markdown,
@@ -3292,7 +3331,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             )
                             interaction_displayed = True
                         elif verbose and not interaction_displayed:
-                            display_interaction(
+                            _get_display_functions()['display_interaction'](
                                 "Tool response:",
                                 response_text,
                                 markdown=markdown,
@@ -3411,7 +3450,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 self.chat_history.append({"role": "user", "content": original_prompt})
                 self.chat_history.append({"role": "assistant", "content": response_text})
                 if verbose and not interaction_displayed:
-                    display_interaction(original_prompt, response_text, markdown=markdown,
+                    _get_display_functions()['display_interaction'](original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=self.console,
                                      agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                      task_name=task_name, task_description=task_description, task_id=task_id)
@@ -3425,7 +3464,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # Display with stored reasoning content if available
                 if verbose and not interaction_displayed:
                     if stored_reasoning_content:
-                        display_interaction(
+                        _get_display_functions()['display_interaction'](
                             original_prompt,
                             f"Reasoning:\n{stored_reasoning_content}\n\nAnswer:\n{display_text}",
                             markdown=markdown,
@@ -3439,7 +3478,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             task_id=task_id
                         )
                     else:
-                        display_interaction(original_prompt, display_text, markdown=markdown,
+                        _get_display_functions()['display_interaction'](original_prompt, display_text, markdown=markdown,
                                          generation_time=time.time() - start_time, console=self.console,
                                          agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                          task_name=task_name, task_description=task_description, task_id=task_id)
@@ -3482,7 +3521,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                 # Optionally display reasoning if present
                 if verbose and reasoning_content:
-                    display_interaction(
+                    _get_display_functions()['display_interaction'](
                         "Reflection reasoning:",
                         f"{reasoning_content}\n\nReflection result:\n{reflection_text}",
                         markdown=markdown,
@@ -3496,7 +3535,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         task_id=task_id
                     )
                 elif verbose:
-                    display_interaction(
+                    _get_display_functions()['display_interaction'](
                         "Self-reflection (non-streaming):",
                         reflection_text,
                         markdown=markdown,
@@ -3512,7 +3551,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             else:
                 # Existing streaming approach
                 if verbose:
-                    with Live(display_generating("", start_time), console=self.console, refresh_per_second=4) as live:
+                    with _get_live()(_get_display_functions()['display_generating']("", start_time), console=self.console, refresh_per_second=4) as live:
                         reflection_text = ""
                         async for chunk in await litellm.acompletion(
                             **self._build_completion_params(
@@ -3528,7 +3567,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if chunk and chunk.choices and chunk.choices[0].delta.content:
                                 content = chunk.choices[0].delta.content
                                 reflection_text += content
-                                live.update(display_generating(reflection_text, start_time))
+                                live.update(_get_display_functions()['display_generating'](reflection_text, start_time))
                 else:
                     reflection_text = ""
                     async for chunk in await litellm.acompletion(
@@ -3551,14 +3590,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     satisfactory = reflection_data.get("satisfactory", "no").lower() == "yes"
 
                     if verbose:
-                        display_self_reflection(
+                        _get_display_functions()['display_self_reflection'](
                             f"Agent {agent_name} self reflection: reflection='{reflection_data['reflection']}' satisfactory='{reflection_data['satisfactory']}'",
                             console=self.console
                         )
 
                     if satisfactory and reflection_count >= min_reflect - 1:
                         if verbose and not interaction_displayed:
-                            display_interaction(prompt, response_text, markdown=markdown,
+                            _get_display_functions()['display_interaction'](prompt, response_text, markdown=markdown,
                                              generation_time=time.time() - start_time, console=self.console,
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
@@ -3567,7 +3606,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                     if reflection_count >= max_reflect - 1:
                         if verbose and not interaction_displayed:
-                            display_interaction(prompt, response_text, markdown=markdown,
+                            _get_display_functions()['display_interaction'](prompt, response_text, markdown=markdown,
                                              generation_time=time.time() - start_time, console=self.console,
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
@@ -3592,7 +3631,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except Exception as error:
             if LLMContextLengthExceededException(str(error))._is_context_limit_error(str(error)):
                 raise LLMContextLengthExceededException(str(error))
-            display_error(f"Error in get_response_async: {str(error)}")
+            _get_display_functions()['display_error'](f"Error in get_response_async: {str(error)}")
             raise
             
         # Log completion time if in debug mode
@@ -4000,7 +4039,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         stream: bool = True,
         verbose: bool = True,
         markdown: bool = True,
-        console: Optional[Console] = None,
+        console: Optional['Console'] = None,
         agent_name: Optional[str] = None,
         agent_role: Optional[str] = None,
         agent_tools: Optional[List[str]] = None,
@@ -4053,12 +4092,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             )
             
             if stream:
-                with Live(display_generating("", start_time), console=console or self.console, refresh_per_second=4) as live:
+                with _get_live()(_get_display_functions()['display_generating']("", start_time), console=console or self.console, refresh_per_second=4) as live:
                     for chunk in litellm.completion(**completion_params):
                         content = self._process_streaming_chunk(chunk)
                         if content:
                             response_text += content
-                            live.update(display_generating(response_text, start_time))
+                            live.update(_get_display_functions()['display_generating'](response_text, start_time))
                         if content:
                             response_text += content
             else:
@@ -4067,7 +4106,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 response_text = response.choices[0].message.content.strip() if response.choices[0].message.content else ""
 
             if verbose:
-                display_interaction(
+                _get_display_functions()['display_interaction'](
                     prompt if isinstance(prompt, str) else prompt[0].get("text", ""),
                     response_text,
                     markdown=markdown,
@@ -4084,7 +4123,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             return response_text.strip() if response_text else ""
 
         except Exception as error:
-            display_error(f"Error in response: {str(error)}")
+            _get_display_functions()['display_error'](f"Error in response: {str(error)}")
             raise
 
     # Async version of response function. Response without tool calls
@@ -4096,7 +4135,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         stream: bool = True,
         verbose: bool = True,
         markdown: bool = True,
-        console: Optional[Console] = None,
+        console: Optional['Console'] = None,
         agent_name: Optional[str] = None,
         agent_role: Optional[str] = None,
         agent_tools: Optional[List[str]] = None,
@@ -4150,12 +4189,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             )
             
             if stream:
-                with Live(display_generating("", start_time), console=console or self.console, refresh_per_second=4) as live:
+                with _get_live()(_get_display_functions()['display_generating']("", start_time), console=console or self.console, refresh_per_second=4) as live:
                     async for chunk in await litellm.acompletion(**completion_params):
                         content = self._process_streaming_chunk(chunk)
                         if content:
                             response_text += content
-                            live.update(display_generating(response_text, start_time))
+                            live.update(_get_display_functions()['display_generating'](response_text, start_time))
                         if content:
                             response_text += content
             else:
@@ -4164,7 +4203,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 response_text = response.choices[0].message.content.strip() if response.choices[0].message.content else ""
 
             if verbose:
-                display_interaction(
+                _get_display_functions()['display_interaction'](
                     prompt if isinstance(prompt, str) else prompt[0].get("text", ""),
                     response_text,
                     markdown=markdown,
@@ -4181,7 +4220,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             return response_text.strip() if response_text else ""
 
         except Exception as error:
-            display_error(f"Error in response_async: {str(error)}")
+            _get_display_functions()['display_error'](f"Error in response_async: {str(error)}")
             raise
 
     def _generate_tool_definition(self, function_or_name) -> Optional[Dict]:

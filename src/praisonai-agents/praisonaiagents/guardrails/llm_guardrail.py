@@ -8,7 +8,7 @@ using natural language descriptions, similar to CrewAI's implementation.
 import logging
 from typing import Any, Tuple, Union, Optional
 from pydantic import BaseModel
-from ..main import TaskOutput
+from ..output.models import TaskOutput
 
 
 class LLMGuardrail:

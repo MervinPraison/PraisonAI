@@ -72,7 +72,8 @@ from .workflows import (
     route, parallel, loop, repeat,
     Pipeline  # Alias for Workflow
 )
-from .guardrails import GuardrailResult, LLMGuardrail
+# Guardrails - LAZY LOADED (imports main.py which imports rich)
+# GuardrailResult and LLMGuardrail moved to __getattr__
 
 # Handoff - lightweight (unified agent-to-agent transfer)
 from .agent.handoff import (
@@ -82,30 +83,12 @@ from .agent.handoff import (
     ContextPolicy, HandoffError, HandoffCycleError, HandoffDepthError, HandoffTimeoutError,
 )
 
-# Flow display (optional)
-try:
-    from .flow_display import FlowDisplay, track_workflow
-except ImportError:
-    FlowDisplay = None
-    track_workflow = None
+# Flow display - LAZY LOADED (moved to __getattr__)
+# FlowDisplay and track_workflow are now lazy loaded
 
-# Main display utilities - these are used frequently so import directly
-# but they don't pull in litellm
-from .main import (
-    TaskOutput,
-    ReflectionOutput,
-    display_interaction,
-    display_self_reflection,
-    display_instruction,
-    display_tool_call,
-    display_error,
-    display_generating,
-    clean_triple_backticks,
-    error_logs,
-    register_display_callback,
-    sync_display_callbacks,
-    async_display_callbacks,
-)
+# Main display utilities - LAZY LOADED to avoid importing rich at startup
+# These are only needed when output=verbose, not for silent mode
+# Moved to __getattr__ for lazy loading
 
 # Module-level caches for lazy-loaded classes
 # Using threading.local() ensures thread-safe access to cached values
@@ -142,6 +125,48 @@ def __getattr__(name):
     # Return cached values if available
     if name in _lazy_cache:
         return _lazy_cache[name]
+    
+    # Main display utilities - lazy loaded to avoid importing rich at startup
+    # These are only needed when output=verbose, not for silent mode
+    _main_exports = {
+        'TaskOutput', 'ReflectionOutput', 'display_interaction', 'display_self_reflection',
+        'display_instruction', 'display_tool_call', 'display_error', 'display_generating',
+        'clean_triple_backticks', 'error_logs', 'register_display_callback',
+        'sync_display_callbacks', 'async_display_callbacks'
+    }
+    if name in _main_exports:
+        from . import main as _main_module
+        value = getattr(_main_module, name)
+        _lazy_cache[name] = value
+        return value
+    
+    # Guardrails - lazy loaded to avoid importing main.py which imports rich
+    if name == 'GuardrailResult':
+        from .guardrails import GuardrailResult
+        _lazy_cache[name] = GuardrailResult
+        return GuardrailResult
+    elif name == 'LLMGuardrail':
+        from .guardrails import LLMGuardrail
+        _lazy_cache[name] = LLMGuardrail
+        return LLMGuardrail
+    
+    # Flow display - lazy loaded to avoid importing rich at startup
+    if name == 'FlowDisplay':
+        try:
+            from .flow_display import FlowDisplay
+            _lazy_cache[name] = FlowDisplay
+            return FlowDisplay
+        except ImportError:
+            _lazy_cache[name] = None
+            return None
+    elif name == 'track_workflow':
+        try:
+            from .flow_display import track_workflow
+            _lazy_cache[name] = track_workflow
+            return track_workflow
+        except ImportError:
+            _lazy_cache[name] = None
+            return None
     
     # Agent and related classes (triggers litellm import chain)
     if name == "Agent":

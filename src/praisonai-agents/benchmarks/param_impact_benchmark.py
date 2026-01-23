@@ -314,14 +314,16 @@ def save_results(results: List[ParamResult], filename: str = 'PARAM_IMPACT_RESUL
 def main():
     parser = argparse.ArgumentParser(description='PraisonAI Parameter Impact Benchmark')
     parser.add_argument('--iterations', type=int, default=100, help='Number of iterations per test')
-    parser.add_argument('--no-save', action='store_true', help='Do not save results to file')
+    parser.add_argument('--save', action='store_true', help='Save results to file')
     args = parser.parse_args()
     
     results = run_benchmark(iterations=args.iterations)
     print_results(results)
     
-    if not args.no_save:
+    if args.save:
         save_results(results)
+    else:
+        print('\nResults not saved (use --save flag to save results to file)')
 
 
 if __name__ == '__main__':

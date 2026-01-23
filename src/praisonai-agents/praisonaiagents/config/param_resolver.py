@@ -671,6 +671,119 @@ def resolve_guardrails(value: Any, config_class: Type) -> Any:
     )
 
 
+# =============================================================================
+# Batch Resolution for Performance
+# =============================================================================
+
+def resolve_batch(
+    params: dict,
+    presets_map: dict,
+    config_classes: dict,
+    defaults: dict = None,
+) -> dict:
+    """
+    Resolve multiple parameters in a single batch call for performance.
+    
+    This reduces function call overhead by processing all parameters together
+    instead of making 11+ separate resolve() calls.
+    
+    Args:
+        params: Dict of {param_name: value} to resolve
+        presets_map: Dict of {param_name: presets_dict}
+        config_classes: Dict of {param_name: config_class}
+        defaults: Dict of {param_name: default_value}
+        
+    Returns:
+        Dict of {param_name: resolved_value}
+        
+    Example:
+        results = resolve_batch(
+            params={
+                'output': 'silent',
+                'execution': None,
+                'memory': True,
+            },
+            presets_map={
+                'output': OUTPUT_PRESETS,
+                'execution': EXECUTION_PRESETS,
+                'memory': MEMORY_PRESETS,
+            },
+            config_classes={
+                'output': OutputConfig,
+                'execution': ExecutionConfig,
+                'memory': MemoryConfig,
+            },
+            defaults={
+                'output': OutputConfig(),
+                'execution': ExecutionConfig(),
+                'memory': None,
+            }
+        )
+    """
+    defaults = defaults or {}
+    results = {}
+    
+    for param_name, value in params.items():
+        config_class = config_classes.get(param_name)
+        presets = presets_map.get(param_name)
+        default = defaults.get(param_name)
+        
+        # Fast path: None -> default
+        if value is None:
+            results[param_name] = default
+            continue
+        
+        # Fast path: already a config instance
+        if config_class and isinstance(value, config_class):
+            results[param_name] = value
+            continue
+        
+        # Fast path: bool handling
+        if isinstance(value, bool):
+            if value:
+                results[param_name] = config_class() if config_class else True
+            else:
+                results[param_name] = None
+            continue
+        
+        # Fast path: string preset lookup
+        if isinstance(value, str) and presets:
+            value_lower = value.lower()
+            for preset_key in presets:
+                if preset_key.lower() == value_lower:
+                    preset_value = presets[preset_key]
+                    if preset_value is None:
+                        results[param_name] = None
+                    elif config_class and isinstance(preset_value, config_class):
+                        results[param_name] = preset_value
+                    elif isinstance(preset_value, dict) and config_class:
+                        results[param_name] = config_class(**preset_value)
+                    else:
+                        results[param_name] = preset_value
+                    break
+            else:
+                # Not a preset - use full resolve for error handling
+                results[param_name] = resolve(
+                    value=value,
+                    param_name=param_name,
+                    config_class=config_class,
+                    presets=presets,
+                    default=default,
+                )
+            continue
+        
+        # Fallback to full resolve for complex cases
+        results[param_name] = resolve(
+            value=value,
+            param_name=param_name,
+            config_class=config_class,
+            presets=presets,
+            default=default,
+        )
+    
+    return results
+
+
 def resolve_guardrail_policies(
     policies: list,
     config_class: Type,
