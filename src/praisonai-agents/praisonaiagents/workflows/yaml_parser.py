@@ -324,6 +324,10 @@ class YAMLWorkflowParser:
             if 'threshold' in normalized_config:
                 normalized_config['compact_threshold'] = normalized_config.pop('threshold')
             
+            # Alias: tool_output_limits -> tool_limits (per-tool configurable limits)
+            if 'tool_output_limits' in normalized_config:
+                normalized_config['tool_limits'] = normalized_config.pop('tool_output_limits')
+            
             try:
                 from ..context.models import ContextConfig
                 context_value = ContextConfig(**normalized_config)

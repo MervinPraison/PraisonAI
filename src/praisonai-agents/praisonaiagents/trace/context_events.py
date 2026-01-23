@@ -143,6 +143,10 @@ class ContextEvent:
         tokens_budget: Total token budget available
         data: Event-specific data (tool args, message content, etc.)
         branch_id: Optional branch identifier for parallel execution tracking
+        prompt_tokens: Number of tokens in the prompt/request
+        completion_tokens: Number of tokens in the completion/response
+        cost_usd: Estimated cost in USD for this event
+        content_hash: SHA256 hash of content for duplicate detection
     """
     event_type: ContextEventType
     timestamp: float
@@ -154,6 +158,10 @@ class ContextEvent:
     tokens_budget: int = 0
     data: Dict[str, Any] = field(default_factory=dict)
     branch_id: Optional[str] = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cost_usd: float = 0.0
+    content_hash: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -168,9 +176,14 @@ class ContextEvent:
             "tokens_used": self.tokens_used,
             "tokens_budget": self.tokens_budget,
             "data": self.data,
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+            "cost_usd": self.cost_usd,
         }
         if self.branch_id is not None:
             result["branch_id"] = self.branch_id
+        if self.content_hash is not None:
+            result["content_hash"] = self.content_hash
         return result
     
     def to_json(self) -> str:
@@ -200,6 +213,10 @@ class ContextEvent:
             tokens_budget=data.get("tokens_budget", 0),
             data=data.get("data", {}),
             branch_id=data.get("branch_id"),
+            prompt_tokens=data.get("prompt_tokens", 0),
+            completion_tokens=data.get("completion_tokens", 0),
+            cost_usd=data.get("cost_usd", 0.0),
+            content_hash=data.get("content_hash"),
         )
 
 
@@ -461,18 +478,33 @@ class ContextTraceEmitter:
         result: Optional[str] = None,
         duration_ms: float = 0.0,
         error: Optional[str] = None,
+        cost_usd: float = 0.0,
     ) -> None:
-        """Emit tool call end event."""
-        # Truncate long results
+        """Emit tool call end event.
+        
+        Args:
+            agent_name: Name of the agent
+            tool_name: Name of the tool called
+            result: Tool result (will be truncated)
+            duration_ms: Duration in milliseconds
+            error: Error message if any
+            cost_usd: Cost in USD (e.g., 0.001 for internet search = 1 credit)
+        """
+        # Truncate long results (2000 chars allows full search results while keeping trace size reasonable)
         truncated_result = None
         if result:
-            truncated_result = result[:500] + "..." if len(result) > 500 else result
+            truncated_result = result[:2000] + "..." if len(result) > 2000 else result
+        
+        # Calculate tool cost if not provided (1 credit = $0.001 for search tools)
+        if cost_usd == 0.0:
+            cost_usd = self._get_tool_cost(tool_name)
         
         self._emit(ContextEvent(
             event_type=ContextEventType.TOOL_CALL_END,
             timestamp=time.time(),
             session_id=self._session_id,
             agent_name=agent_name,
+            cost_usd=cost_usd,
             data={
                 "tool_name": tool_name,
                 "result": truncated_result,
@@ -480,6 +512,29 @@ class ContextTraceEmitter:
                 "error": error,
             },
         ))
+    
+    def _get_tool_cost(self, tool_name: str) -> float:
+        """Get cost for a tool call (1 credit = $0.001 for search tools).
+        
+        Args:
+            tool_name: Name of the tool
+            
+        Returns:
+            Cost in USD
+        """
+        # Tools that cost 1 credit ($0.001) per call
+        SEARCH_TOOLS = {
+            "tavily_search", "internet_search", "web_search", "search",
+            "tavily_extract", "web_extract", "scrape", "crawl",
+            "duckduckgo_search", "google_search", "bing_search",
+        }
+        
+        tool_lower = tool_name.lower()
+        for search_tool in SEARCH_TOOLS:
+            if search_tool in tool_lower:
+                return 0.001  # 1 credit = $0.001
+        
+        return 0.0  # Free for other tools
     
     def llm_request(
         self,
@@ -522,18 +577,27 @@ class ContextTraceEmitter:
         duration_ms: float = 0.0,
         finish_reason: Optional[str] = None,
         response_content: Optional[str] = None,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        cost_usd: float = 0.0,
     ) -> None:
         """Emit LLM response event.
         
         Args:
             agent_name: Name of the agent receiving the response
-            response_tokens: Number of tokens in response
+            response_tokens: Number of tokens in response (deprecated, use completion_tokens)
             duration_ms: Response time in milliseconds
             finish_reason: Reason for completion (stop, length, etc.)
             response_content: Optional response content for context replay
+            prompt_tokens: Number of tokens in the prompt/request
+            completion_tokens: Number of tokens in the completion/response
+            cost_usd: Estimated cost in USD for this LLM call
         """
+        # Use completion_tokens if provided, fallback to response_tokens for backward compat
+        actual_completion_tokens = completion_tokens if completion_tokens > 0 else response_tokens
+        
         data = {
-            "response_tokens": response_tokens,
+            "response_tokens": actual_completion_tokens,
             "duration_ms": duration_ms,
             "finish_reason": finish_reason,
         }
@@ -549,6 +613,9 @@ class ContextTraceEmitter:
             timestamp=time.time(),
             session_id=self._session_id,
             agent_name=agent_name,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=actual_completion_tokens,
+            cost_usd=cost_usd,
             data=data,
         ))
     

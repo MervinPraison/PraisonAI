@@ -31,6 +31,7 @@ class ReplayPlayer:
         self,
         reader: ContextTraceReader,
         use_rich: bool = True,
+        full_mode: bool = False,
     ):
         """
         Initialize the player.
@@ -38,9 +39,11 @@ class ReplayPlayer:
         Args:
             reader: ContextTraceReader with loaded events
             use_rich: Whether to use Rich for formatting (if available)
+            full_mode: Whether to show full content without truncation
         """
         self._reader = reader
         self._use_rich = use_rich
+        self._full_mode = full_mode
         self._current_index = 0
         self._events = reader.get_all()
         
@@ -111,6 +114,21 @@ class ReplayPlayer:
                 budget_str = f" / {tokens_budget:,}" if tokens_budget else ""
                 content_lines.append(f"  Tokens: {tokens_used:,}{budget_str}")
         
+        # Add token/cost info if available
+        prompt_tokens = getattr(event, 'prompt_tokens', 0) or (event.get('prompt_tokens', 0) if isinstance(event, dict) else 0)
+        completion_tokens = getattr(event, 'completion_tokens', 0) or (event.get('completion_tokens', 0) if isinstance(event, dict) else 0)
+        cost_usd = getattr(event, 'cost_usd', 0) or (event.get('cost_usd', 0) if isinstance(event, dict) else 0)
+        
+        if prompt_tokens or completion_tokens or cost_usd:
+            content_lines.append("")
+            content_lines.append("[bold]Token/Cost Info:[/bold]")
+            if prompt_tokens:
+                content_lines.append(f"  Prompt Tokens: {prompt_tokens:,}")
+            if completion_tokens:
+                content_lines.append(f"  Completion Tokens: {completion_tokens:,}")
+            if cost_usd:
+                content_lines.append(f"  Cost: ${cost_usd:.6f}")
+        
         # Add event data if available
         data = getattr(event, 'data', {}) or (event.get('data', {}) if isinstance(event, dict) else {})
         if data:
@@ -118,10 +136,11 @@ class ReplayPlayer:
             content_lines.append("[bold]Event Data:[/bold]")
             for key, value in data.items():
                 if value is not None:
-                    # Truncate long values
                     value_str = str(value)
-                    if len(value_str) > 100:
-                        value_str = value_str[:100] + "..."
+                    # Use full_mode to control truncation
+                    max_len = 10000 if self._full_mode else 100
+                    if len(value_str) > max_len:
+                        value_str = value_str[:max_len] + "..."
                     content_lines.append(f"  {key}: {value_str}")
         
         content = "\n".join(content_lines)
@@ -166,6 +185,20 @@ class ReplayPlayer:
                 budget_str = f" / {tokens_budget:,}" if tokens_budget else ""
                 print(f"  Tokens: {tokens_used:,}{budget_str}")
         
+        # Token/cost info
+        prompt_tokens = getattr(event, 'prompt_tokens', 0) or (event.get('prompt_tokens', 0) if isinstance(event, dict) else 0)
+        completion_tokens = getattr(event, 'completion_tokens', 0) or (event.get('completion_tokens', 0) if isinstance(event, dict) else 0)
+        cost_usd = getattr(event, 'cost_usd', 0) or (event.get('cost_usd', 0) if isinstance(event, dict) else 0)
+        
+        if prompt_tokens or completion_tokens or cost_usd:
+            print("\nToken/Cost Info:")
+            if prompt_tokens:
+                print(f"  Prompt Tokens: {prompt_tokens:,}")
+            if completion_tokens:
+                print(f"  Completion Tokens: {completion_tokens:,}")
+            if cost_usd:
+                print(f"  Cost: ${cost_usd:.6f}")
+        
         # Event data
         data = getattr(event, 'data', {}) or (event.get('data', {}) if isinstance(event, dict) else {})
         if data:
@@ -173,8 +206,10 @@ class ReplayPlayer:
             for key, value in data.items():
                 if value is not None:
                     value_str = str(value)
-                    if len(value_str) > 100:
-                        value_str = value_str[:100] + "..."
+                    # Use full_mode to control truncation
+                    max_len = 10000 if self._full_mode else 100
+                    if len(value_str) > max_len:
+                        value_str = value_str[:max_len] + "..."
                     print(f"  {key}: {value_str}")
         
         print("\n[Enter/Down] Next  [Up] Previous  [g N] Go to N  [q] Quit")
