@@ -62,20 +62,28 @@ def calculate_llm_cost(
     completion_tokens: int,
     model: Optional[str] = None,
     response: Optional[Any] = None,
+    use_litellm: bool = False,
 ) -> float:
     """
-    Calculate LLM cost using litellm if available, otherwise fallback pricing.
+    Calculate LLM cost using fallback pricing (fast) or litellm (accurate).
     
     Args:
         prompt_tokens: Number of input tokens
         completion_tokens: Number of output tokens
         model: Model name (e.g., 'gpt-4o-mini', 'claude-3-5-sonnet')
         response: Optional LLM response object for litellm.completion_cost
+        use_litellm: If True, use litellm for accurate pricing (slower, imports litellm).
+                     Default False for performance - uses fast fallback pricing.
         
     Returns:
         Estimated cost in USD (float)
     """
-    # Try litellm first (supports 1000+ models with accurate pricing)
+    # Use fallback pricing by default (fast, no imports)
+    # Only use litellm if explicitly requested (e.g., for --save CLI flag)
+    if not use_litellm:
+        return _calculate_fallback_cost(prompt_tokens, completion_tokens, model)
+    
+    # Try litellm only when explicitly requested (supports 1000+ models with accurate pricing)
     if _check_litellm_available():
         try:
             from litellm.cost_calculator import completion_cost
