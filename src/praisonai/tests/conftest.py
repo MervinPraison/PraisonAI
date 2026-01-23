@@ -206,3 +206,25 @@ def fast_sleep(request, monkeypatch):
     async def fast_async_sleep(seconds):
         await original_async_sleep(min(seconds, 0.001))
     monkeypatch.setattr(asyncio, 'sleep', fast_async_sleep) 
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    report = outcome.get_result()
+    if report.when == "call":
+        report.duration = call.stop - call.start
+
+def pytest_report_teststatus(report, config):
+    """Add duration to the test status output if it's a call report."""
+    if report.when == 'call':
+        duration = getattr(report, 'duration', 0)
+        category, short, verbose = '', '', ''
+        if report.passed:
+            category = 'passed'
+        elif report.failed:
+            category = 'failed'
+        elif report.skipped:
+            category = 'skipped'
+        
+        if category:
+            return category, short, f"{report.outcome.upper()} ({duration:.4f}s)"
+    return None

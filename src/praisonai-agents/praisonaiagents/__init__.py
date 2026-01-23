@@ -45,43 +45,25 @@ from .tools.tools import Tools
 from .tools.base import BaseTool, ToolResult, ToolValidationError, validate_tool
 from .tools.decorator import tool, FunctionTool
 from .tools.registry import get_registry, register_tool, get_tool, ToolRegistry
-from .db import db
-from .obs import obs
+# db and obs are lazy-loaded via __getattr__ for performance
 
 # Sub-packages for organized imports (pa.config, pa.tools, etc.)
 # These enable: import praisonaiagents as pa; pa.config.MemoryConfig
 from . import config
 from . import tools
-from . import memory
-from . import workflows
-# Note: knowledge and mcp are lazy-loaded via __getattr__ due to heavy deps
+# Note: db, obs, knowledge and mcp are lazy-loaded via __getattr__ due to heavy deps
 
-# Embedding API - explicit import shadows subpackage, enabling:
-#   from praisonaiagents import embedding, embeddings, EmbeddingResult, get_dimensions
-# Note: litellm is still lazy-loaded INSIDE the functions (no performance impact)
-from .embedding.embed import embedding, aembedding
-from .embedding.result import EmbeddingResult
-from .embedding.dimensions import get_dimensions
-embeddings = embedding  # Plural alias (OpenAI style: client.embeddings.create)
-aembeddings = aembedding  # Plural alias for async
+# Embedding API - LAZY LOADED via __getattr__ for performance
+# Supports: embedding, embeddings, aembedding, aembeddings, EmbeddingResult, get_dimensions
 
-# Workflows - lightweight module
-from .workflows import (
-    Workflow, WorkflowStep, WorkflowContext, StepResult,
-    Route, Parallel, Loop, Repeat,
-    route, parallel, loop, repeat,
-    Pipeline  # Alias for Workflow
-)
+# Workflows - LAZY LOADED (moved to __getattr__)
+# Workflow, WorkflowStep, WorkflowContext, StepResult, Route, Parallel, Loop, Repeat, etc.
+
 # Guardrails - LAZY LOADED (imports main.py which imports rich)
 # GuardrailResult and LLMGuardrail moved to __getattr__
 
-# Handoff - lightweight (unified agent-to-agent transfer)
-from .agent.handoff import (
-    Handoff, handoff, handoff_filters, 
-    RECOMMENDED_PROMPT_PREFIX, prompt_with_handoff_instructions,
-    HandoffConfig, HandoffResult, HandoffInputData,
-    ContextPolicy, HandoffError, HandoffCycleError, HandoffDepthError, HandoffTimeoutError,
-)
+# Handoff - LAZY LOADED (moved to __getattr__)
+# Handoff, handoff, handoff_filters, etc.
 
 # Flow display - LAZY LOADED (moved to __getattr__)
 # FlowDisplay and track_workflow are now lazy loaded
@@ -139,6 +121,94 @@ def __getattr__(name):
         value = getattr(_main_module, name)
         _lazy_cache[name] = value
         return value
+    
+    # Workflows - lazy loaded for performance
+    _workflow_names = {
+        'Workflow', 'WorkflowStep', 'WorkflowContext', 'StepResult',
+        'Route', 'Parallel', 'Loop', 'Repeat',
+        'route', 'parallel', 'loop', 'repeat', 'Pipeline'
+    }
+    if name in _workflow_names:
+        from . import workflows as _workflows_module
+        value = getattr(_workflows_module, name)
+        _lazy_cache[name] = value
+        return value
+    
+    # Handoff - lazy loaded for performance
+    _handoff_names = {
+        'Handoff', 'handoff', 'handoff_filters',
+        'RECOMMENDED_PROMPT_PREFIX', 'prompt_with_handoff_instructions',
+        'HandoffConfig', 'HandoffResult', 'HandoffInputData',
+        'ContextPolicy', 'HandoffError', 'HandoffCycleError', 
+        'HandoffDepthError', 'HandoffTimeoutError'
+    }
+    if name in _handoff_names:
+        # Import directly from handoff module to avoid recursion
+        from .agent.handoff import (
+            Handoff, handoff, handoff_filters,
+            RECOMMENDED_PROMPT_PREFIX, prompt_with_handoff_instructions,
+            HandoffConfig, HandoffResult, HandoffInputData,
+            ContextPolicy, HandoffError, HandoffCycleError, 
+            HandoffDepthError, HandoffTimeoutError
+        )
+        _handoff_exports = {
+            'Handoff': Handoff, 'handoff': handoff, 'handoff_filters': handoff_filters,
+            'RECOMMENDED_PROMPT_PREFIX': RECOMMENDED_PROMPT_PREFIX,
+            'prompt_with_handoff_instructions': prompt_with_handoff_instructions,
+            'HandoffConfig': HandoffConfig, 'HandoffResult': HandoffResult,
+            'HandoffInputData': HandoffInputData, 'ContextPolicy': ContextPolicy,
+            'HandoffError': HandoffError, 'HandoffCycleError': HandoffCycleError,
+            'HandoffDepthError': HandoffDepthError, 'HandoffTimeoutError': HandoffTimeoutError
+        }
+        for k, v in _handoff_exports.items():
+            _lazy_cache[k] = v
+        return _handoff_exports[name]
+    
+    # db and obs - lazy loaded for performance
+    if name == 'db':
+        from .db import db
+        _lazy_cache[name] = db
+        return db
+    elif name == 'obs':
+        from .obs import obs
+        _lazy_cache[name] = obs
+        return obs
+    
+    # memory module - lazy loaded for performance
+    if name == 'memory':
+        import importlib
+        _memory_module = importlib.import_module('.memory', __name__)
+        _lazy_cache[name] = _memory_module
+        return _memory_module
+    
+    # workflows module - lazy loaded for performance
+    if name == 'workflows':
+        import importlib
+        _workflows_module = importlib.import_module('.workflows', __name__)
+        _lazy_cache[name] = _workflows_module
+        return _workflows_module
+    
+    # Embedding API - lazy loaded for performance
+    _embedding_names = {'embedding', 'embeddings', 'aembedding', 'aembeddings', 'EmbeddingResult', 'get_dimensions'}
+    if name in _embedding_names:
+        if name in ('embedding', 'embeddings'):
+            from .embedding.embed import embedding
+            _lazy_cache['embedding'] = embedding
+            _lazy_cache['embeddings'] = embedding
+            return embedding
+        elif name in ('aembedding', 'aembeddings'):
+            from .embedding.embed import aembedding
+            _lazy_cache['aembedding'] = aembedding
+            _lazy_cache['aembeddings'] = aembedding
+            return aembedding
+        elif name == 'EmbeddingResult':
+            from .embedding.result import EmbeddingResult
+            _lazy_cache[name] = EmbeddingResult
+            return EmbeddingResult
+        elif name == 'get_dimensions':
+            from .embedding.dimensions import get_dimensions
+            _lazy_cache[name] = get_dimensions
+            return get_dimensions
     
     # Guardrails - lazy loaded to avoid importing main.py which imports rich
     if name == 'GuardrailResult':

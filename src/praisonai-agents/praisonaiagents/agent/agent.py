@@ -18,6 +18,8 @@ _rich_console = None
 _rich_live = None
 _llm_module = None
 _main_module = None
+_hooks_module = None
+_stream_emitter_class = None
 
 def _get_console():
     """Lazy load rich.console.Console."""
@@ -72,6 +74,25 @@ def _get_display_functions():
         }
     return _main_module
 
+def _get_hooks_module():
+    """Lazy load hooks module for HookRunner and HookRegistry."""
+    global _hooks_module
+    if _hooks_module is None:
+        from ..hooks import HookRunner, HookRegistry
+        _hooks_module = {
+            'HookRunner': HookRunner,
+            'HookRegistry': HookRegistry,
+        }
+    return _hooks_module
+
+def _get_stream_emitter():
+    """Lazy load StreamEventEmitter class."""
+    global _stream_emitter_class
+    if _stream_emitter_class is None:
+        from ..streaming.events import StreamEventEmitter
+        _stream_emitter_class = StreamEventEmitter
+    return _stream_emitter_class
+
 # ============================================================================
 # Performance: Module-level imports for param resolution (moved from __init__)
 # These imports are lightweight and avoid per-Agent import overhead
@@ -113,6 +134,29 @@ class Agent:
     _env_output_checked = False
     _default_model = None
     _default_model_checked = False
+    
+    @property
+    def _hook_runner(self):
+        """Lazy-loaded HookRunner for event-based hooks (zero overhead when not used)."""
+        if self.__hook_runner is None:
+            hooks_mod = _get_hooks_module()
+            self.__hook_runner = hooks_mod['HookRunner'](
+                registry=self._hooks_registry_param if isinstance(self._hooks_registry_param, hooks_mod['HookRegistry']) else None,
+                cwd=os.getcwd()
+            )
+        return self.__hook_runner
+    
+    @property
+    def stream_emitter(self):
+        """Lazy-loaded StreamEventEmitter for real-time events (zero overhead when not used)."""
+        if self.__stream_emitter is None:
+            self.__stream_emitter = _get_stream_emitter()()
+        return self.__stream_emitter
+    
+    @stream_emitter.setter
+    def stream_emitter(self, value):
+        """Allow setting stream_emitter directly."""
+        self.__stream_emitter = value
     
     @classmethod
     def _get_env_output_mode(cls):
@@ -1009,6 +1053,11 @@ class Agent:
         # Store hooks for middleware system (zero overhead when empty)
         self._hooks = _hooks_list if _hooks_list else []
         self._middleware_manager = None  # Lazy init
+        
+        # Lazy init for HookRunner and StreamEventEmitter (zero overhead when not used)
+        self.__hook_runner = None  # Will be initialized on first access
+        self.__stream_emitter = None  # Will be initialized on first access
+        self._hooks_registry_param = hooks  # Store for lazy init
         
         # Store llm_config for configurable model switching
         self._llm_config = llm_config or {}
@@ -3319,6 +3368,27 @@ Your Goal: {self.goal}"""
         _tool_start_time = _time.time()
         
         try:
+            # Trigger BEFORE_TOOL hook
+            from ..hooks import HookEvent, BeforeToolInput
+            before_tool_input = BeforeToolInput(
+                session_id=getattr(self, '_session_id', 'default'),
+                cwd=os.getcwd(),
+                event_name=HookEvent.BEFORE_TOOL,
+                timestamp=str(_time.time()),
+                agent_name=self.name,
+                tool_name=function_name,
+                tool_input=arguments
+            )
+            tool_hook_results = self._hook_runner.execute_sync(HookEvent.BEFORE_TOOL, before_tool_input, target=function_name)
+            if self._hook_runner.is_blocked(tool_hook_results):
+                logging.warning(f"Tool {function_name} execution blocked by BEFORE_TOOL hook")
+                return f"Execution of {function_name} was blocked by security policy."
+            
+            # Update arguments if modified by hooks
+            for res in tool_hook_results:
+                if res.output and res.output.modified_data:
+                    arguments.update(res.output.modified_data)
+
             with with_injection_context(state):
                 result = self._execute_tool_impl(function_name, arguments)
             
@@ -3354,12 +3424,48 @@ Your Goal: {self.goal}"""
             _duration_ms = (_time.time() - _tool_start_time) * 1000
             _trace_emitter.tool_call_end(self.name, function_name, str(result) if result else None, _duration_ms)
             
+            # Trigger AFTER_TOOL hook
+            from ..hooks import HookEvent, AfterToolInput
+            after_tool_input = AfterToolInput(
+                session_id=getattr(self, '_session_id', 'default'),
+                cwd=os.getcwd(),
+                event_name=HookEvent.AFTER_TOOL,
+                timestamp=str(_time.time()),
+                agent_name=self.name,
+                tool_name=function_name,
+                tool_input=arguments,
+                tool_output=result,
+                execution_time_ms=(_time.time() - _tool_start_time) * 1000
+            )
+            self._hook_runner.execute_sync(HookEvent.AFTER_TOOL, after_tool_input, target=function_name)
+            
             return result
         except Exception as e:
             # Emit tool call end with error
             _duration_ms = (_time.time() - _tool_start_time) * 1000
             _trace_emitter.tool_call_end(self.name, function_name, None, _duration_ms, str(e))
+            
+            # Trigger OnError hook if needed (optional future step)
             raise
+            
+    def _trigger_after_agent_hook(self, prompt, response, start_time, tools_used=None):
+        """Trigger AFTER_AGENT hook and return response."""
+        from ..hooks import HookEvent, AfterAgentInput
+        after_agent_input = AfterAgentInput(
+            session_id=getattr(self, '_session_id', 'default'),
+            cwd=os.getcwd(),
+            event_name=HookEvent.AFTER_AGENT,
+            timestamp=str(time.time()),
+            agent_name=self.name,
+            prompt=prompt if isinstance(prompt, str) else str(prompt),
+            response=response or "",
+            tools_used=tools_used or [],
+            total_tokens=0,
+            execution_time_ms=(time.time() - start_time) * 1000
+        )
+        self._hook_runner.execute_sync(HookEvent.AFTER_AGENT, after_agent_input)
+        return response
+
     
     def _calculate_llm_cost(self, prompt_tokens: int, completion_tokens: int, response: any = None) -> float:
         """Calculate estimated cost for LLM call.
@@ -3729,10 +3835,10 @@ Your Goal: {self.goal}"""
         return f"Agent(name='{self.name}', role='{self.role}', goal='{self.goal}')"
 
     def _process_stream_response(self, messages, temperature, start_time, formatted_tools=None, reasoning_steps=False):
-        """Process streaming response and return final response"""
+        """Internal helper for streaming response processing with real-time events."""
         if self._openai_client is None:
-            raise ValueError("OpenAI client is not initialized. Please provide OPENAI_API_KEY or use a custom LLM provider.")
-        
+            return None
+            
         return self._openai_client.process_stream_response(
             messages=messages,
             model=self.llm,
@@ -3740,12 +3846,29 @@ Your Goal: {self.goal}"""
             tools=formatted_tools,
             start_time=start_time,
             console=self.console,
-            display_fn=self.display_generating if self.verbose else None,
-            reasoning_steps=reasoning_steps
+            display_fn=_get_display_functions()['display_generating'] if self.verbose else None,
+            reasoning_steps=reasoning_steps,
+            stream_callback=self.stream_emitter.emit,
+            emit_events=True
         )
 
     def _chat_completion(self, messages, temperature=1.0, tools=None, stream=True, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None):
         start_time = time.time()
+        
+        # Trigger BEFORE_LLM hook
+        from ..hooks import HookEvent, BeforeLLMInput
+        before_llm_input = BeforeLLMInput(
+            session_id=getattr(self, '_session_id', 'default'),
+            cwd=os.getcwd(),
+            event_name=HookEvent.BEFORE_LLM,
+            timestamp=str(time.time()),
+            agent_name=self.name,
+            messages=messages,
+            model=self.llm if isinstance(self.llm, str) else str(self.llm),
+            temperature=temperature
+        )
+        self._hook_runner.execute_sync(HookEvent.BEFORE_LLM, before_llm_input)
+        
         logging.debug(f"{self.name} sending messages to LLM: {messages}")
         
         # Emit LLM request trace event (zero overhead when not set)
@@ -3884,6 +4007,21 @@ Your Goal: {self.goal}"""
                 completion_tokens=_completion_tokens,
                 cost_usd=_cost_usd,
             )
+            
+            # Trigger AFTER_LLM hook
+            from ..hooks import HookEvent, AfterLLMInput
+            after_llm_input = AfterLLMInput(
+                session_id=getattr(self, '_session_id', 'default'),
+                cwd=os.getcwd(),
+                event_name=HookEvent.AFTER_LLM,
+                timestamp=str(time.time()),
+                agent_name=self.name,
+                messages=messages,
+                response=str(final_response),
+                model=self.llm if isinstance(self.llm, str) else str(self.llm),
+                latency_ms=(time.time() - start_time) * 1000
+            )
+            self._hook_runner.execute_sync(HookEvent.AFTER_LLM, after_llm_input)
             
             return final_response
 
@@ -4278,7 +4416,30 @@ Your Goal: {self.goal}"""
         # Start a new run for this chat turn
         prompt_str = prompt if isinstance(prompt, str) else str(prompt)
         self._start_run(prompt_str)
+
+        # Trigger BEFORE_AGENT hook
+        from ..hooks import HookEvent, BeforeAgentInput
+        before_agent_input = BeforeAgentInput(
+            session_id=getattr(self, '_session_id', 'default'),
+            cwd=os.getcwd(),
+            event_name=HookEvent.BEFORE_AGENT,
+            timestamp=str(time.time()),
+            agent_name=self.name,
+            prompt=prompt_str,
+            conversation_history=self.chat_history,
+            tools_available=[t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
+        )
+        hook_results = self._hook_runner.execute_sync(HookEvent.BEFORE_AGENT, before_agent_input)
+        if self._hook_runner.is_blocked(hook_results):
+            logging.warning(f"Agent {self.name} execution blocked by BEFORE_AGENT hook")
+            return None
         
+        # Update prompt if modified by hooks
+        for res in hook_results:
+            if res.output and res.output.modified_data and "prompt" in res.output.modified_data:
+                prompt = res.output.modified_data["prompt"]
+                llm_prompt = self._build_multimodal_prompt(prompt, attachments) if attachments else prompt
+
         # Reset the final display flag for each new conversation
         self._final_display_shown = False
         
@@ -4451,7 +4612,7 @@ Your Goal: {self.goal}"""
                         validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id)
                         # Execute callback and display after validation
                         self._execute_callback_and_display(prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
-                        return validated_response
+                        return self._trigger_after_agent_hook(prompt, validated_response, start_time)
                     except Exception as e:
                         logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
                         # Rollback chat history on guardrail failure
@@ -4581,7 +4742,7 @@ Your Goal: {self.goal}"""
                                     validated_reasoning = self._apply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools, task_name, task_description, task_id)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_reasoning, time.time() - start_time, task_name, task_description, task_id)
-                                    return validated_reasoning
+                                    return self._trigger_after_agent_hook(original_prompt, validated_reasoning, start_time)
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
                                     # Rollback chat history on guardrail failure
@@ -4750,6 +4911,29 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Process ephemeral attachments (DRY - builds multimodal prompt)
         # IMPORTANT: Original text 'prompt' is stored in history, attachments are NOT
         llm_prompt = self._build_multimodal_prompt(prompt, attachments) if attachments else prompt
+        
+        # Trigger BEFORE_AGENT hook
+        from ..hooks import HookEvent, BeforeAgentInput
+        before_agent_input = BeforeAgentInput(
+            session_id=getattr(self, '_session_id', 'default'),
+            cwd=os.getcwd(),
+            event_name=HookEvent.BEFORE_AGENT,
+            timestamp=str(time.time()),
+            agent_name=self.name,
+            prompt=prompt if isinstance(prompt, str) else str(prompt),
+            conversation_history=self.chat_history,
+            tools_available=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools or self.tools)]
+        )
+        hook_results = await self._hook_runner.execute(HookEvent.BEFORE_AGENT, before_agent_input)
+        if self._hook_runner.is_blocked(hook_results):
+            logging.warning(f"Agent {self.name} execution blocked by BEFORE_AGENT hook")
+            return None
+            
+        # Update prompt if modified by hooks
+        for res in hook_results:
+            if res.output and res.output.modified_data and "prompt" in res.output.modified_data:
+                prompt = res.output.modified_data["prompt"]
+                llm_prompt = self._build_multimodal_prompt(prompt, attachments) if attachments else prompt
         
         # Track execution via telemetry
         if hasattr(self, '_telemetry') and self._telemetry:

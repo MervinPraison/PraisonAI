@@ -501,8 +501,7 @@ class TestAgentIntegration:
         
         agent = Agent(
             name="Test Agent",
-            memory=True,
-            user_id=unique_user_id
+            memory={"user_id": unique_user_id}
         )
         
         agent.store_memory("User prefers dark mode", memory_type="short_term")

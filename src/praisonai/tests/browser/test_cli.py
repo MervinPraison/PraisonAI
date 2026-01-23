@@ -80,8 +80,22 @@ class TestCLIClearCommand:
 class TestCLIDoctorCommand:
     """Test doctor diagnostics command."""
     
-    def test_doctor_runs(self):
+    @patch('praisonai.browser.diagnostics.run_all_diagnostics')
+    def test_doctor_runs(self, mock_diagnostics):
         """Test doctor command runs without error."""
+        # Mock diagnostics results to pass
+        mock_diagnostics.return_value = {
+            "results": [],
+            "summary": {
+                "total": 0,
+                "passed": 0,
+                "failed": 0,
+                "warned": 0,
+                "skipped": 0,
+                "all_pass": True
+            }
+        }
+        
         # Mock the database path check
         with patch('pathlib.Path.exists', return_value=True):
             with patch('sqlite3.connect') as mock_conn:

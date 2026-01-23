@@ -29,8 +29,20 @@ import gc
 # BENCHMARK FUNCTIONS
 # ============================================================================
 
-def measure_import_time(module_name, clear_cache=True):
-    """Measure import time for a module."""
+def measure_import_time(module_name, clear_cache=True, full_agent_import=True):
+    """Measure import time for a module.
+    
+    Args:
+        module_name: Name of the module to import
+        clear_cache: Whether to clear module cache before import
+        full_agent_import: If True, measure full Agent class import (recommended).
+                          If False, measure package import only (misleading for Agno).
+    
+    Note: Agno's main __init__.py only exports __version__, so measuring 
+    'import agno' gives misleading results (5ms). The actual Agent import
+    'from agno.agent import Agent' takes ~500ms. This function measures
+    the full Agent import by default for accurate comparison.
+    """
     if clear_cache:
         # Clear module cache
         mods_to_remove = [k for k in sys.modules.keys() if module_name.split('.')[0] in k]
@@ -41,9 +53,15 @@ def measure_import_time(module_name, clear_cache=True):
     start = time.perf_counter()
     
     if module_name == 'praisonaiagents':
-        import praisonaiagents
+        if full_agent_import:
+            from praisonaiagents import Agent  # noqa: F401
+        else:
+            import praisonaiagents  # noqa: F401
     elif module_name == 'agno':
-        import agno
+        if full_agent_import:
+            from agno.agent import Agent  # noqa: F401
+        else:
+            import agno  # noqa: F401
     
     end = time.perf_counter()
     return (end - start) * 1000  # Return in milliseconds

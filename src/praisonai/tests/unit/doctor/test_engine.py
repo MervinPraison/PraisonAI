@@ -1,4 +1,5 @@
 """Unit tests for doctor engine."""
+import pytest
 
 from praisonai.cli.features.doctor.models import (
     CheckCategory,
@@ -13,12 +14,11 @@ from praisonai.cli.features.doctor.engine import DoctorEngine, run_doctor
 class TestDoctorEngine:
     """Tests for DoctorEngine class."""
     
-    def setup_method(self):
-        """Reset registry before each test."""
+    @pytest.fixture(autouse=True)
+    def reset_registry(self):
+        """Reset the registry before and after each test."""
         CheckRegistry.reset()
-    
-    def teardown_method(self):
-        """Reset registry after each test."""
+        yield
         CheckRegistry.reset()
     
     def test_get_environment_summary(self):

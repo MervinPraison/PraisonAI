@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Test LLM class directly to verify self-reflection fix"""
 
+import pytest
 from praisonaiagents.llm import LLM
 
 # Define calculator tool locally to avoid import issues
@@ -20,7 +21,8 @@ def calculator(expression: str) -> str:
     except Exception as e:
         return f"Error: {str(e)}"
 
-def test_llm_direct():
+@pytest.mark.asyncio
+async def test_llm_direct():
     """Test LLM class directly with self-reflection and tools"""
     print("=== Testing LLM Direct with Self-Reflection and Tools ===")
     
@@ -29,7 +31,7 @@ def test_llm_direct():
     
     # Test with self-reflection and tools
     try:
-        response = llm.get_response(
+        response = await llm.get_response_async(
             prompt="Calculate 15 * 23 and verify your answer",
             system_prompt="You are a helpful math assistant. Use tools when needed.",
             tools=[calculator],
