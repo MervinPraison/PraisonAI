@@ -7,7 +7,7 @@ following the same pattern as CrewAI for consistency.
 
 from typing import Any, Tuple, Union
 from pydantic import BaseModel, Field
-from ..main import TaskOutput
+from ..output.models import TaskOutput
 
 
 class GuardrailResult(BaseModel):

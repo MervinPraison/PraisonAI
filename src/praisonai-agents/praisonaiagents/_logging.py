@@ -122,16 +122,26 @@ _configure_litellm = configure_litellm
 # ROOT LOGGER CONFIGURATION
 # ========================================================================
 def configure_root_logger():
-    """Configure the root logger with RichHandler."""
-    from rich.logging import RichHandler
+    """Configure the root logger with optional RichHandler.
     
+    Uses standard StreamHandler by default for performance.
+    RichHandler is only used when LOGLEVEL=DEBUG for better debugging experience.
+    """
     loglevel = os.environ.get('LOGLEVEL', 'WARNING').upper()
+    
+    # Only use RichHandler for DEBUG level to avoid importing rich at startup
+    # This significantly improves import time for silent/normal operation
+    if loglevel == 'DEBUG':
+        from rich.logging import RichHandler
+        handlers = [RichHandler(rich_tracebacks=True)]
+    else:
+        handlers = [logging.StreamHandler()]
     
     logging.basicConfig(
         level=getattr(logging, loglevel, logging.WARNING),
         format="%(asctime)s %(filename)s:%(lineno)d %(levelname)s %(message)s",
         datefmt="[%X]",
-        handlers=[RichHandler(rich_tracebacks=True)],
+        handlers=handlers,
         force=True
     )
 

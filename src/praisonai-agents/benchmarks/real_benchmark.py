@@ -15,6 +15,7 @@ import os
 from typing import Literal, List
 from dataclasses import dataclass, field
 from importlib.metadata import version as get_version
+import argparse
 
 # Ensure API key is set
 if not os.environ.get('OPENAI_API_KEY'):
@@ -392,6 +393,10 @@ def save_results(results: dict, versions: dict):
 # ============================================================================
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='PraisonAI Agents - Real-World Execution Benchmark')
+    parser.add_argument('--save', action='store_true', help='Save results to file')
+    args = parser.parse_args()
+    
     print("="*70)
     print("PraisonAI Agents - Real-World Execution Benchmark")
     print("="*70)
@@ -470,4 +475,7 @@ if __name__ == "__main__":
     print("\n" + "="*70)
     
     # Save results
-    save_results(results, versions)
+    if args.save:
+        save_results(results, versions)
+    else:
+        print('\nResults not saved (use --save flag to save results to file)')

@@ -3,7 +3,7 @@ import asyncio
 import inspect
 from typing import List, Optional, Dict, Any, Type, Callable, Union, Coroutine, Literal, Tuple, get_args, get_origin
 from pydantic import BaseModel
-from ..main import TaskOutput
+from ..output.models import TaskOutput
 from ..agent.agent import Agent
 import uuid
 import os

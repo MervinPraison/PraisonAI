@@ -3,26 +3,90 @@ import time
 import json
 import logging
 import asyncio
-import threading
 import contextlib
 from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Generator
-from rich.console import Console
-from rich.live import Live
-from ..llm import (
-    get_openai_client,
-    process_stream_chunks
-)
-from ..main import (
-    display_error,
-    display_instruction,
-    display_interaction,
-    display_generating,
-    display_self_reflection,
-    ReflectionOutput,
-    adisplay_instruction,
-    execute_sync_callback
-)
 import inspect
+
+# ============================================================================
+# Performance: Lazy imports for heavy dependencies
+# Rich, LLM, and display utilities are only imported when needed (output=verbose)
+# This reduces import time from ~420ms to ~20ms for silent mode
+# ============================================================================
+
+# Lazy-loaded modules (populated on first use)
+_rich_console = None
+_rich_live = None
+_llm_module = None
+_main_module = None
+
+def _get_console():
+    """Lazy load rich.console.Console."""
+    global _rich_console
+    if _rich_console is None:
+        from rich.console import Console
+        _rich_console = Console
+    return _rich_console
+
+def _get_live():
+    """Lazy load rich.live.Live."""
+    global _rich_live
+    if _rich_live is None:
+        from rich.live import Live
+        _rich_live = Live
+    return _rich_live
+
+def _get_llm_functions():
+    """Lazy load LLM functions."""
+    global _llm_module
+    if _llm_module is None:
+        from ..llm import get_openai_client, process_stream_chunks
+        _llm_module = {
+            'get_openai_client': get_openai_client,
+            'process_stream_chunks': process_stream_chunks,
+        }
+    return _llm_module
+
+def _get_display_functions():
+    """Lazy load display functions from main module."""
+    global _main_module
+    if _main_module is None:
+        from ..main import (
+            display_error,
+            display_instruction,
+            display_interaction,
+            display_generating,
+            display_self_reflection,
+            ReflectionOutput,
+            adisplay_instruction,
+            execute_sync_callback
+        )
+        _main_module = {
+            'display_error': display_error,
+            'display_instruction': display_instruction,
+            'display_interaction': display_interaction,
+            'display_generating': display_generating,
+            'display_self_reflection': display_self_reflection,
+            'ReflectionOutput': ReflectionOutput,
+            'adisplay_instruction': adisplay_instruction,
+            'execute_sync_callback': execute_sync_callback,
+        }
+    return _main_module
+
+# ============================================================================
+# Performance: Module-level imports for param resolution (moved from __init__)
+# These imports are lightweight and avoid per-Agent import overhead
+# ============================================================================
+from ..config.param_resolver import resolve, ArrayMode
+from ..config.presets import (
+    OUTPUT_PRESETS, EXECUTION_PRESETS, MEMORY_PRESETS, MEMORY_URL_SCHEMES,
+    WEB_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS, CACHING_PRESETS,
+    DEFAULT_OUTPUT_MODE,
+)
+from ..config.feature_configs import (
+    OutputConfig, ExecutionConfig, MemoryConfig, KnowledgeConfig,
+    PlanningConfig, ReflectionConfig, GuardrailConfig, WebConfig,
+    TemplateConfig, CachingConfig, HooksConfig, SkillsConfig,
+)
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
 # Increased to allow full page content from search tools while still preventing overflow
@@ -44,6 +108,27 @@ if TYPE_CHECKING:
 class Agent:
     # Class-level counter for generating unique display names for nameless agents
     _agent_counter = 0
+    # Class-level cache for environment variables (avoid repeated os.environ.get)
+    _env_output_mode = None
+    _env_output_checked = False
+    _default_model = None
+    _default_model_checked = False
+    
+    @classmethod
+    def _get_env_output_mode(cls):
+        """Get cached PRAISONAI_OUTPUT env var value."""
+        if not cls._env_output_checked:
+            cls._env_output_mode = os.environ.get('PRAISONAI_OUTPUT', '').lower()
+            cls._env_output_checked = True
+        return cls._env_output_mode
+    
+    @classmethod
+    def _get_default_model(cls):
+        """Get cached default model name from OPENAI_MODEL_NAME env var."""
+        if not cls._default_model_checked:
+            cls._default_model = os.getenv('OPENAI_MODEL_NAME', 'gpt-4o-mini')
+            cls._default_model_checked = True
+        return cls._default_model
     
     @classmethod
     def _configure_logging(cls):
@@ -393,19 +478,8 @@ class Agent:
         # ============================================================
         # CONSOLIDATED PARAMS EXTRACTION (agent-centric API)
         # Uses unified resolver: Instance > Config > Array > String > Bool > Default
+        # Note: Imports moved to module level for performance
         # ============================================================
-        
-        # Import resolver and config classes
-        from ..config.param_resolver import resolve, ArrayMode
-        from ..config.presets import (
-            OUTPUT_PRESETS, EXECUTION_PRESETS, MEMORY_PRESETS, MEMORY_URL_SCHEMES,
-            WEB_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS, CACHING_PRESETS,
-        )
-        from ..config.feature_configs import (
-            OutputConfig, ExecutionConfig, MemoryConfig, KnowledgeConfig,
-            PlanningConfig, ReflectionConfig, GuardrailConfig, WebConfig,
-            TemplateConfig, CachingConfig, HooksConfig, SkillsConfig,
-        )
         
         # Initialize extracted values with defaults
         user_id = None
@@ -433,34 +507,40 @@ class Agent:
         skills_dirs = None
         
         # ─────────────────────────────────────────────────────────────────────
-        # Resolve OUTPUT param using unified resolver
-        # Supports: None, str preset, list [preset, overrides], OutputConfig
+        # Resolve OUTPUT param - FAST PATH for common cases
         # DEFAULT: "silent" mode (zero overhead, fastest performance)
-        # Can be overridden by PRAISONAI_OUTPUT env var
         # ─────────────────────────────────────────────────────────────────────
-        from ..config.presets import DEFAULT_OUTPUT_MODE
-        
-        # Check for env var override
-        env_output = os.environ.get('PRAISONAI_OUTPUT', '').lower()
-        if env_output and env_output in OUTPUT_PRESETS and output is None:
-            output = env_output
-        
-        # Use default output mode if not specified
-        # Track if user explicitly configured output (for respecting in start())
+        # Fast path: None -> silent defaults (use cached env var)
         if output is None:
-            output = DEFAULT_OUTPUT_MODE
+            env_output = Agent._get_env_output_mode()
+            if env_output and env_output in OUTPUT_PRESETS:
+                output = env_output
+            else:
+                output = DEFAULT_OUTPUT_MODE
             _has_explicit_output = False
         else:
             _has_explicit_output = True
         
-        _output_config = resolve(
-            value=output,
-            param_name="output",
-            config_class=OutputConfig,
-            presets=OUTPUT_PRESETS,
-            array_mode=ArrayMode.PRESET_OVERRIDE,
-            default=OutputConfig(),  # OutputConfig defaults to silent mode (zero overhead)
-        )
+        # Fast path: string preset lookup (most common case)
+        if isinstance(output, str):
+            output_lower = output.lower()
+            preset_value = OUTPUT_PRESETS.get(output_lower)
+            if preset_value is not None:
+                _output_config = OutputConfig(**preset_value) if isinstance(preset_value, dict) else preset_value
+            else:
+                _output_config = OutputConfig()  # Default silent
+        elif isinstance(output, OutputConfig):
+            _output_config = output
+        else:
+            # Complex case: use full resolver
+            _output_config = resolve(
+                value=output,
+                param_name="output",
+                config_class=OutputConfig,
+                presets=OUTPUT_PRESETS,
+                array_mode=ArrayMode.PRESET_OVERRIDE,
+                default=OutputConfig(),
+            )
         if _output_config:
             verbose = _output_config.verbose
             markdown = _output_config.markdown
@@ -509,17 +589,28 @@ class Agent:
                 pass  # Status module not available
         
         # ─────────────────────────────────────────────────────────────────────
-        # Resolve EXECUTION param using unified resolver
-        # Supports: None, str preset, list [preset, overrides], ExecutionConfig
+        # Resolve EXECUTION param - FAST PATH for common cases
         # ─────────────────────────────────────────────────────────────────────
-        _exec_config = resolve(
-            value=execution,
-            param_name="execution",
-            config_class=ExecutionConfig,
-            presets=EXECUTION_PRESETS,
-            array_mode=ArrayMode.PRESET_OVERRIDE,
-            default=ExecutionConfig(),
-        )
+        # Fast path: None -> default config (skip resolve() call)
+        if execution is None:
+            _exec_config = ExecutionConfig()
+        elif isinstance(execution, ExecutionConfig):
+            _exec_config = execution
+        elif isinstance(execution, str):
+            preset_value = EXECUTION_PRESETS.get(execution.lower())
+            if preset_value is not None:
+                _exec_config = ExecutionConfig(**preset_value) if isinstance(preset_value, dict) else preset_value
+            else:
+                _exec_config = ExecutionConfig()
+        else:
+            _exec_config = resolve(
+                value=execution,
+                param_name="execution",
+                config_class=ExecutionConfig,
+                presets=EXECUTION_PRESETS,
+                array_mode=ArrayMode.PRESET_OVERRIDE,
+                default=ExecutionConfig(),
+            )
         if _exec_config:
             max_iter = _exec_config.max_iter
             max_rpm = _exec_config.max_rpm
@@ -529,14 +620,22 @@ class Agent:
             max_iter, max_rpm, max_execution_time, max_retry_limit = 20, None, None, 2
         
         # ─────────────────────────────────────────────────────────────────────
-        # Resolve TEMPLATES param
+        # Resolve TEMPLATES param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        _template_config = resolve(
-            value=templates,
-            param_name="templates",
-            config_class=TemplateConfig,
-            default=None,
-        )
+        # Fast path: None -> no templates (skip resolve() call)
+        if templates is None:
+            _template_config = None
+        elif isinstance(templates, TemplateConfig):
+            _template_config = templates
+        elif isinstance(templates, dict):
+            _template_config = TemplateConfig(**templates)
+        else:
+            _template_config = resolve(
+                value=templates,
+                param_name="templates",
+                config_class=TemplateConfig,
+                default=None,
+            )
         if _template_config:
             system_template = _template_config.system
             prompt_template = _template_config.prompt
@@ -546,16 +645,25 @@ class Agent:
             system_template, prompt_template, response_template, use_system_prompt = None, None, None, True
         
         # ─────────────────────────────────────────────────────────────────────
-        # Resolve CACHING param
-        # Supports: None, bool, str preset, CachingConfig
+        # Resolve CACHING param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        _caching_config = resolve(
-            value=caching,
-            param_name="caching",
-            config_class=CachingConfig,
-            presets=CACHING_PRESETS,
-            default=CachingConfig() if caching is None else None,
-        )
+        # Fast path: None -> default caching, False -> disabled
+        if caching is None:
+            _caching_config = CachingConfig()
+        elif caching is False:
+            _caching_config = None
+        elif caching is True:
+            _caching_config = CachingConfig()
+        elif isinstance(caching, CachingConfig):
+            _caching_config = caching
+        else:
+            _caching_config = resolve(
+                value=caching,
+                param_name="caching",
+                config_class=CachingConfig,
+                presets=CACHING_PRESETS,
+                default=CachingConfig(),
+            )
         if _caching_config:
             cache = _caching_config.enabled
             prompt_caching = _caching_config.prompt_caching
@@ -565,18 +673,25 @@ class Agent:
             cache, prompt_caching = True, None
         
         # ─────────────────────────────────────────────────────────────────────
-        # Resolve HOOKS param using unified resolver
-        # Supports: None, list of callables, HooksConfig, dict
+        # Resolve HOOKS param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
         _hooks_list = []
         step_callback = None
-        _hooks_config = resolve(
-            value=hooks,
-            param_name="hooks",
-            config_class=HooksConfig,
-            array_mode=ArrayMode.PASSTHROUGH,
-            default=None,
-        )
+        # Fast path: None -> no hooks (skip resolve() call)
+        if hooks is None:
+            _hooks_config = None
+        elif isinstance(hooks, list):
+            _hooks_config = hooks  # Passthrough list directly
+        elif isinstance(hooks, HooksConfig):
+            _hooks_config = hooks
+        else:
+            _hooks_config = resolve(
+                value=hooks,
+                param_name="hooks",
+                config_class=HooksConfig,
+                array_mode=ArrayMode.PASSTHROUGH,
+                default=None,
+            )
         if _hooks_config is not None:
             if isinstance(_hooks_config, list):
                 _hooks_list = _hooks_config
@@ -585,19 +700,26 @@ class Agent:
                 _hooks_list = _hooks_config.middleware or []
         
         # ─────────────────────────────────────────────────────────────────────
-        # Resolve SKILLS param using unified resolver
-        # Supports: None, list of paths, SkillsConfig, str
+        # Resolve SKILLS param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
         _skills = None
         skills_dirs = None
-        _skills_config = resolve(
-            value=skills,
-            param_name="skills",
-            config_class=SkillsConfig,
-            array_mode=ArrayMode.SOURCES,
-            string_mode="path_as_source",
-            default=None,
-        )
+        # Fast path: None -> no skills (skip resolve() call)
+        if skills is None:
+            _skills_config = None
+        elif isinstance(skills, list):
+            _skills_config = SkillsConfig(sources=skills)
+        elif isinstance(skills, SkillsConfig):
+            _skills_config = skills
+        else:
+            _skills_config = resolve(
+                value=skills,
+                param_name="skills",
+                config_class=SkillsConfig,
+                array_mode=ArrayMode.SOURCES,
+                string_mode="path_as_source",
+                default=None,
+            )
         if _skills_config is not None:
             if isinstance(_skills_config, SkillsConfig):
                 _skills = _skills_config.paths
@@ -606,19 +728,30 @@ class Agent:
                 _skills = _skills_config
         
         # ─────────────────────────────────────────────────────────────────────
-        # Resolve MEMORY param using unified resolver
-        # Supports: None, bool, str preset, str URL, list, MemoryConfig, Instance
+        # Resolve MEMORY param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        _memory_config = resolve(
-            value=memory,
-            param_name="memory",
-            config_class=MemoryConfig,
-            presets=MEMORY_PRESETS,
-            url_schemes=MEMORY_URL_SCHEMES,
-            instance_check=lambda v: (hasattr(v, 'search') and hasattr(v, 'add')) or hasattr(v, 'database_url'),
-            array_mode=ArrayMode.SINGLE_OR_LIST,
-            default=None,
-        )
+        # Fast path: None/False -> no memory (skip resolve() call)
+        if memory is None or memory is False:
+            _memory_config = None
+        elif memory is True:
+            _memory_config = MemoryConfig()
+        elif isinstance(memory, MemoryConfig):
+            _memory_config = memory
+        elif hasattr(memory, 'search') and hasattr(memory, 'add'):
+            _memory_config = memory  # Memory instance passthrough
+        elif hasattr(memory, 'database_url'):
+            _memory_config = memory  # db() instance passthrough
+        else:
+            _memory_config = resolve(
+                value=memory,
+                param_name="memory",
+                config_class=MemoryConfig,
+                presets=MEMORY_PRESETS,
+                url_schemes=MEMORY_URL_SCHEMES,
+                instance_check=lambda v: (hasattr(v, 'search') and hasattr(v, 'add')) or hasattr(v, 'database_url'),
+                array_mode=ArrayMode.SINGLE_OR_LIST,
+                default=None,
+            )
         
         # Extract values from resolved memory config
         if _memory_config is not None:
@@ -649,21 +782,32 @@ class Agent:
             memory = None
         
         # ─────────────────────────────────────────────────────────────────────
-        # Resolve KNOWLEDGE param using unified resolver
-        # Supports: None, bool, str path, list of sources, KnowledgeConfig, Instance
+        # Resolve KNOWLEDGE param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
         retrieval_config = None
         embedder_config = None
         
-        _knowledge_config = resolve(
-            value=knowledge,
-            param_name="knowledge",
-            config_class=KnowledgeConfig,
-            instance_check=lambda v: hasattr(v, 'search') and hasattr(v, 'add'),
-            array_mode=ArrayMode.SOURCES_WITH_CONFIG,
-            string_mode="path_as_source",
-            default=None,
-        )
+        # Fast path: None/False -> no knowledge (skip resolve() call)
+        if knowledge is None or knowledge is False:
+            _knowledge_config = None
+        elif knowledge is True:
+            _knowledge_config = KnowledgeConfig()
+        elif isinstance(knowledge, KnowledgeConfig):
+            _knowledge_config = knowledge
+        elif isinstance(knowledge, list):
+            _knowledge_config = KnowledgeConfig(sources=knowledge)
+        elif hasattr(knowledge, 'search') and hasattr(knowledge, 'add'):
+            _knowledge_config = knowledge  # Knowledge instance passthrough
+        else:
+            _knowledge_config = resolve(
+                value=knowledge,
+                param_name="knowledge",
+                config_class=KnowledgeConfig,
+                instance_check=lambda v: hasattr(v, 'search') and hasattr(v, 'add'),
+                array_mode=ArrayMode.SOURCES_WITH_CONFIG,
+                string_mode="path_as_source",
+                default=None,
+            )
         
         if _knowledge_config is not None:
             if hasattr(_knowledge_config, 'search') and hasattr(_knowledge_config, 'add'):
@@ -687,18 +831,25 @@ class Agent:
             knowledge = None
         
         # ─────────────────────────────────────────────────────────────────────
-        # Resolve PLANNING param
-        # Supports: None, bool, str LLM/preset, list, PlanningConfig
+        # Resolve PLANNING param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        _planning_config = resolve(
-            value=planning,
-            param_name="planning",
-            config_class=PlanningConfig,
-            presets=PLANNING_PRESETS,
-            string_mode="llm_model",
-            array_mode=ArrayMode.PRESET_OVERRIDE,
-            default=None,
-        )
+        # Fast path: None/False -> no planning (skip resolve() call)
+        if planning is None or planning is False:
+            _planning_config = None
+        elif planning is True:
+            _planning_config = PlanningConfig()
+        elif isinstance(planning, PlanningConfig):
+            _planning_config = planning
+        else:
+            _planning_config = resolve(
+                value=planning,
+                param_name="planning",
+                config_class=PlanningConfig,
+                presets=PLANNING_PRESETS,
+                string_mode="llm_model",
+                array_mode=ArrayMode.PRESET_OVERRIDE,
+                default=None,
+            )
         
         if _planning_config is not None:
             if isinstance(_planning_config, PlanningConfig):
@@ -714,17 +865,24 @@ class Agent:
             planning = False
         
         # ─────────────────────────────────────────────────────────────────────
-        # Resolve REFLECTION param
-        # Supports: None, bool, str preset, list, ReflectionConfig
+        # Resolve REFLECTION param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        _reflection_config = resolve(
-            value=reflection,
-            param_name="reflection",
-            config_class=ReflectionConfig,
-            presets=REFLECTION_PRESETS,
-            array_mode=ArrayMode.PRESET_OVERRIDE,
-            default=None,
-        )
+        # Fast path: None/False -> no reflection (skip resolve() call)
+        if reflection is None or reflection is False:
+            _reflection_config = None
+        elif reflection is True:
+            _reflection_config = ReflectionConfig()
+        elif isinstance(reflection, ReflectionConfig):
+            _reflection_config = reflection
+        else:
+            _reflection_config = resolve(
+                value=reflection,
+                param_name="reflection",
+                config_class=ReflectionConfig,
+                presets=REFLECTION_PRESETS,
+                array_mode=ArrayMode.PRESET_OVERRIDE,
+                default=None,
+            )
         
         if _reflection_config is not None:
             if isinstance(_reflection_config, ReflectionConfig):
@@ -741,14 +899,24 @@ class Agent:
             self_reflect = False
         
         # ─────────────────────────────────────────────────────────────────────
-        # Resolve GUARDRAILS param using unified resolver
-        # Supports: None, bool, callable, str prompt, GuardrailConfig
+        # Resolve GUARDRAILS param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        from .._resolver_helpers import resolve_guardrails as _resolve_guardrails
-        _guardrails_config = _resolve_guardrails(
-            value=guardrails,
-            config_class=GuardrailConfig,
-        )
+        # Fast path: None/False -> no guardrails (skip resolve() call)
+        if guardrails is None or guardrails is False:
+            _guardrails_config = None
+        elif callable(guardrails) and not isinstance(guardrails, type):
+            _guardrails_config = guardrails  # Callable passthrough
+        elif isinstance(guardrails, GuardrailConfig):
+            _guardrails_config = guardrails
+        elif isinstance(guardrails, str):
+            # String could be LLM prompt - passthrough for later processing
+            _guardrails_config = guardrails
+        else:
+            from .._resolver_helpers import resolve_guardrails as _resolve_guardrails
+            _guardrails_config = _resolve_guardrails(
+                value=guardrails,
+                config_class=GuardrailConfig,
+            )
         
         if _guardrails_config is not None:
             if callable(_guardrails_config) and not isinstance(_guardrails_config, type):
@@ -762,17 +930,24 @@ class Agent:
                 guardrail = _guardrails_config
         
         # ─────────────────────────────────────────────────────────────────────
-        # Resolve WEB param using unified resolver
-        # Supports: None, bool, str provider/mode, list, WebConfig
+        # Resolve WEB param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        _web_config = resolve(
-            value=web,
-            param_name="web",
-            config_class=WebConfig,
-            presets=WEB_PRESETS,
-            array_mode=ArrayMode.PRESET_OVERRIDE,
-            default=None,
-        )
+        # Fast path: None/False -> no web (skip resolve() call)
+        if web is None or web is False:
+            _web_config = None
+        elif web is True:
+            _web_config = WebConfig()
+        elif isinstance(web, WebConfig):
+            _web_config = web
+        else:
+            _web_config = resolve(
+                value=web,
+                param_name="web",
+                config_class=WebConfig,
+                presets=WEB_PRESETS,
+                array_mode=ArrayMode.PRESET_OVERRIDE,
+                default=None,
+            )
         
         if _web_config is not None:
             if isinstance(_web_config, WebConfig):
@@ -877,8 +1052,8 @@ class Agent:
                     llm_config['metrics'] = metrics
                     self.llm_instance = LLM(**llm_config)
                 else:
-                    # Create LLM with model string and base_url
-                    model_name = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o-mini')
+                    # Create LLM with model string and base_url (cached for performance)
+                    model_name = llm or Agent._get_default_model()
                     self.llm_instance = LLM(
                         model=model_name,
                         base_url=base_url,
@@ -928,6 +1103,7 @@ class Agent:
                 llm_params['claude_memory'] = claude_memory
                 self.llm_instance = LLM(**llm_params)
                 self._using_custom_llm = True
+                self.llm = llm
                 
                 # Ensure tools are properly accessible when using custom LLM
                 if tools:
@@ -939,9 +1115,9 @@ class Agent:
                     "LLM features requested but dependencies not installed. "
                     "Please install with: pip install \"praisonaiagents[llm]\""
                 ) from e
-        # Otherwise, fall back to OpenAI environment/name
+        # Otherwise, fall back to OpenAI environment/name (cached for performance)
         else:
-            self.llm = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o-mini')
+            self.llm = llm or Agent._get_default_model()
         # Handle tools parameter - ensure it's always a list
         if callable(tools):
             # If a single function/callable is passed, wrap it in a list
@@ -978,17 +1154,17 @@ class Agent:
         self.embedder_config = embedder_config
         self.knowledge = knowledge
         self.use_system_prompt = use_system_prompt
-        # Thread-safe chat_history with lock for concurrent access
+        # Thread-safe chat_history with lazy lock for concurrent access
         self.chat_history = []
-        self._history_lock = threading.Lock()
+        self.__history_lock = None  # Lazy initialized
         self.markdown = markdown
         self.stream = stream
         self.metrics = metrics
         self.max_reflect = max_reflect
         self.min_reflect = min_reflect
         self.reflect_prompt = reflect_prompt
-        # Use the same model selection logic for reflect_llm
-        self.reflect_llm = reflect_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o-mini')
+        # Use the same model selection logic for reflect_llm (cached for performance)
+        self.reflect_llm = reflect_llm or Agent._get_default_model()
         self._console = None  # Lazy load console when needed
         
         # Initialize system prompt
@@ -1045,11 +1221,10 @@ Your Goal: {self.goal}
         self._guardrail_fn = None
         self._setup_guardrail()
         
-        # Cache for system prompts and formatted tools with thread-safe lock
-        # RLock allows re-entrant access from the same thread
+        # Cache for system prompts and formatted tools with lazy thread-safe lock
         self._system_prompt_cache = {}
         self._formatted_tools_cache = {}
-        self._cache_lock = threading.RLock()
+        self.__cache_lock = None  # Lazy initialized RLock
         # Limit cache size to prevent unbounded growth
         self._max_cache_size = 100
 
@@ -1130,12 +1305,37 @@ Your Goal: {self.goal}
         # Action trace mode - handled via display callbacks, not separate emitter
         self._actions_trace = actions_trace
 
-        # Telemetry
-        try:
-            from ..telemetry import get_telemetry
-            self._telemetry = get_telemetry()
-        except (ImportError, AttributeError):
-            self._telemetry = None
+        # Telemetry - lazy initialized via property for performance
+        self.__telemetry = None
+        self.__telemetry_initialized = False
+
+    @property
+    def _telemetry(self):
+        """Lazy-loaded telemetry instance for performance."""
+        if not self.__telemetry_initialized:
+            try:
+                from ..telemetry import get_telemetry
+                self.__telemetry = get_telemetry()
+            except (ImportError, AttributeError):
+                self.__telemetry = None
+            self.__telemetry_initialized = True
+        return self.__telemetry
+
+    @property
+    def _history_lock(self):
+        """Lazy-loaded history lock for thread-safe chat history access."""
+        if self.__history_lock is None:
+            import threading
+            self.__history_lock = threading.Lock()
+        return self.__history_lock
+
+    @property
+    def _cache_lock(self):
+        """Lazy-loaded cache lock for thread-safe cache access."""
+        if self.__cache_lock is None:
+            import threading
+            self.__cache_lock = threading.RLock()
+        return self.__cache_lock
 
     @property
     def auto_memory(self):
@@ -1317,7 +1517,7 @@ Conversation:
 Summary:"""
                 
                 # Use agent's LLM to generate summary
-                client = get_openai_client(self.llm, self.base_url, self.api_key)
+                client = _get_llm_functions()['get_openai_client'](self.llm, self.base_url, self.api_key)
                 model_name = self.llm if isinstance(self.llm, str) else "gpt-4o-mini"
                 
                 response = client.chat.completions.create(
@@ -1343,7 +1543,7 @@ Summary:"""
             return None
         if self._console is None:
             from rich.console import Console
-            self._console = Console()
+            self._console = _get_console()()
         return self._console
     
     @property
@@ -1417,7 +1617,7 @@ Summary:"""
         """Lazily initialize OpenAI client only when needed."""
         if self.__openai_client is None:
             try:
-                self.__openai_client = get_openai_client(
+                self.__openai_client = _get_llm_functions()['get_openai_client'](
                     api_key=self._openai_api_key, 
                     base_url=self._openai_base_url
                 )
@@ -3593,8 +3793,8 @@ Your Goal: {self.goal}"""
                     # Non-streaming with custom LLM - don't show streaming-like behavior
                     if False:  # Don't use display_generating when stream=False to avoid streaming-like behavior
                         # This block is disabled to maintain consistency with the OpenAI path fix
-                        with Live(
-                            display_generating("", start_time),
+                        with _get_live()(
+                            _get_display_functions()['display_generating']("", start_time),
                             console=self.console,
                             refresh_per_second=4,
                         ) as live:
@@ -3736,7 +3936,7 @@ Your Goal: {self.goal}"""
                 finish_reason="error",
                 response_content=str(e),  # Include error for context replay
             )
-            display_error(f"Error in chat completion: {e}")
+            _get_display_functions()['display_error'](f"Error in chat completion: {e}")
             return None
     
     def _execute_callback_and_display(self, prompt: str, response: str, generation_time: float, task_name=None, task_description=None, task_id=None):
@@ -3745,7 +3945,7 @@ Your Goal: {self.goal}"""
         This centralizes the logic for callback execution and display to avoid duplication.
         """
         # Always execute callbacks for status/trace output (regardless of LLM backend)
-        execute_sync_callback(
+        _get_display_functions()['execute_sync_callback'](
             'interaction',
             message=prompt,
             response=response,
@@ -3761,7 +3961,7 @@ Your Goal: {self.goal}"""
         # Always display final interaction when verbose is True to ensure consistent formatting
         # This ensures both OpenAI and custom LLM providers (like Gemini) show formatted output
         if self.verbose and not self._final_display_shown:
-            display_interaction(prompt, response, markdown=self.markdown, 
+            _get_display_functions()['display_interaction'](prompt, response, markdown=self.markdown, 
                               generation_time=generation_time, console=self.console,
                               agent_name=self.name,
                               agent_role=self.role,
@@ -3771,7 +3971,7 @@ Your Goal: {self.goal}"""
                               task_id=None)  # Not available in this context
             self._final_display_shown = True
     
-    def display_generating(self, content: str, start_time: float):
+    def _display_generating(self, content: str, start_time: float):
         """Display function for generating animation with agent info."""
         from rich.panel import Panel
         from rich.markdown import Markdown
@@ -4260,10 +4460,10 @@ Your Goal: {self.goal}"""
                 except Exception as e:
                     # Rollback chat history if LLM call fails
                     self.chat_history = self.chat_history[:chat_history_length]
-                    display_error(f"Error in LLM chat: {e}")
+                    _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
                     return None
             except Exception as e:
-                display_error(f"Error in LLM chat: {e}")
+                _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
                 return None
         else:
             # Determine if we should use native structured output
@@ -4330,7 +4530,7 @@ Your Goal: {self.goal}"""
                             if display_text and str(display_text).strip():
                                 # Pass agent information to display_instruction
                                 agent_tools = [t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
-                                display_instruction(
+                                _get_display_functions()['display_instruction'](
                                     f"Agent {self.name} is processing prompt: {display_text}", 
                                     console=self.console,
                                     agent_name=self.name,
@@ -4433,27 +4633,27 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         self.reflection = data.get('reflection', '')
                                         self.satisfactory = data.get('satisfactory', 'no').lower()
                                 
-                                reflection_output = CustomReflectionOutput(reflection_data)
+                                reflection_output = _get_display_functions()['ReflectionOutput'](reflection_data)
                             else:
                                 # Use OpenAI's structured output for OpenAI models
                                 reflection_response = self._openai_client.sync_client.beta.chat.completions.parse(
                                     model=self.reflect_llm if self.reflect_llm else self.llm,
                                     messages=messages,
                                     temperature=temperature,
-                                    response_format=ReflectionOutput
+                                    response_format=_get_display_functions()['ReflectionOutput']
                                 )
 
                                 reflection_output = reflection_response.choices[0].message.parsed
 
                             if self.verbose:
-                                display_self_reflection(f"Agent {self.name} self reflection (using {self.reflect_llm if self.reflect_llm else self.llm}): reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'", console=self.console)
+                                _get_display_functions()['display_self_reflection'](f"Agent {self.name} self reflection (using {self.reflect_llm if self.reflect_llm else self.llm}): reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'", console=self.console)
 
                             messages.append({"role": "assistant", "content": f"Self Reflection: {reflection_output.reflection} Satisfactory?: {reflection_output.satisfactory}"})
 
                             # Only consider satisfactory after minimum reflections
                             if reflection_output.satisfactory == "yes" and reflection_count >= self.min_reflect - 1:
                                 if self.verbose:
-                                    display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
+                                    _get_display_functions()['display_self_reflection']("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
                                 # User message already added before LLM call via _build_messages
                                 self.chat_history.append({"role": "assistant", "content": response_text})
                                 # Apply guardrail validation after satisfactory reflection
@@ -4473,7 +4673,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # Check if we've hit max reflections
                             if reflection_count >= self.max_reflect - 1:
                                 if self.verbose:
-                                    display_self_reflection("Maximum reflection count reached, returning current response", console=self.console)
+                                    _get_display_functions()['display_self_reflection']("Maximum reflection count reached, returning current response", console=self.console)
                                 # User message already added before LLM call via _build_messages
                                 self.chat_history.append({"role": "assistant", "content": response_text})
                                 # Apply guardrail validation after max reflections
@@ -4500,7 +4700,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             continue  # Continue the loop for more reflections
 
                         except Exception as e:
-                                display_error(f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
+                                _get_display_functions()['display_error'](f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
                                 logging.error("Reflection parsing failed.", exc_info=True)
                                 messages.append({"role": "assistant", "content": "Self Reflection failed."})
                                 reflection_count += 1
@@ -4510,7 +4710,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         raise
             except Exception as e:
                 # Catch any exceptions that escape the while loop
-                display_error(f"Unexpected error in chat: {e}", console=self.console)
+                _get_display_functions()['display_error'](f"Unexpected error in chat: {e}", console=self.console)
                 # Rollback chat history
                 self.chat_history = self.chat_history[:chat_history_length]
                 return None
@@ -4655,7 +4855,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 except Exception as e:
                     # Rollback chat history if LLM call fails
                     self.chat_history = self.chat_history[:chat_history_length]
-                    display_error(f"Error in LLM chat: {e}")
+                    _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
                     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
                         logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
@@ -4693,7 +4893,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         
                         if display_text and str(display_text).strip():
                             agent_tools = [t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
-                            await adisplay_instruction(
+                            await _get_display_functions()['adisplay_instruction'](
                                 f"Agent {self.name} is processing prompt: {display_text}",
                                 console=self.console,
                                 agent_name=self.name,
@@ -4707,7 +4907,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # Check if OpenAI client is available
                     if self._openai_client is None:
                         error_msg = "OpenAI client is not initialized. Please provide OPENAI_API_KEY or use a custom LLM provider."
-                        display_error(error_msg)
+                        _get_display_functions()['display_error'](error_msg)
                         return None
 
                     # Make the API call based on the type of request
@@ -4771,7 +4971,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     if self._openai_client is None:
                                         # For custom LLMs, self-reflection with structured output is not supported
                                         if self.verbose:
-                                            display_self_reflection(f"Agent {self.name}: Self-reflection with structured output is not supported for custom LLM providers. Skipping reflection.", console=self.console)
+                                            _get_display_functions()['display_self_reflection'](f"Agent {self.name}: Self-reflection with structured output is not supported for custom LLM providers. Skipping reflection.", console=self.console)
                                         # Return the original response without reflection
                                         self.chat_history.append({"role": "user", "content": original_prompt})
                                         self.chat_history.append({"role": "assistant", "content": response_text})
@@ -4784,24 +4984,24 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         model=self.reflect_llm if self.reflect_llm else self.llm,
                                         messages=reflection_messages,
                                         temperature=temperature,
-                                        response_format=ReflectionOutput
+                                        response_format=_get_display_functions()['ReflectionOutput']
                                     )
                                     
                                     reflection_output = reflection_response.choices[0].message.parsed
                                     
                                     if self.verbose:
-                                        display_self_reflection(f"Agent {self.name} self reflection (using {self.reflect_llm if self.reflect_llm else self.llm}): reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'", console=self.console)
+                                        _get_display_functions()['display_self_reflection'](f"Agent {self.name} self reflection (using {self.reflect_llm if self.reflect_llm else self.llm}): reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'", console=self.console)
                                     
                                     # Only consider satisfactory after minimum reflections
                                     if reflection_output.satisfactory == "yes" and reflection_count >= self.min_reflect - 1:
                                         if self.verbose:
-                                            display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
+                                            _get_display_functions()['display_self_reflection']("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
                                         break
                                     
                                     # Check if we've hit max reflections
                                     if reflection_count >= self.max_reflect - 1:
                                         if self.verbose:
-                                            display_self_reflection("Maximum reflection count reached, returning current response", console=self.console)
+                                            _get_display_functions()['display_self_reflection']("Maximum reflection count reached, returning current response", console=self.console)
                                         break
                                     
                                     # Regenerate response based on reflection
@@ -4820,7 +5020,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     
                                 except Exception as e:
                                     if self.verbose:
-                                        display_error(f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
+                                        _get_display_functions()['display_error'](f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
                                     logging.error("Reflection parsing failed.", exc_info=True)
                                     reflection_count += 1
                                     if reflection_count >= self.max_reflect:
@@ -4843,13 +5043,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             self.chat_history = self.chat_history[:chat_history_length]
                             return None
                 except Exception as e:
-                    display_error(f"Error in chat completion: {e}")
+                    _get_display_functions()['display_error'](f"Error in chat completion: {e}")
                     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
                         logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
                     return None
         except Exception as e:
-            display_error(f"Error in achat: {e}")
+            _get_display_functions()['display_error'](f"Error in achat: {e}")
             if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                 total_time = time.time() - start_time
                 logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
@@ -4876,7 +5076,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # Find the matching tool
                     tool = next((t for t in tools if t.__name__ == function_name), None)
                     if not tool:
-                        display_error(f"Tool {function_name} not found")
+                        _get_display_functions()['display_error'](f"Tool {function_name} not found")
                         continue
                     
                     # Check if the tool is async
@@ -4889,7 +5089,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     results.append(result)
                 except Exception as e:
-                    display_error(f"Error executing tool {function_name}: {e}")
+                    _get_display_functions()['display_error'](f"Error executing tool {function_name}: {e}")
                     results.append(None)
 
             # If we have results, format them into a response
@@ -4926,19 +5126,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         
                         self.console.print()
                         
-                        final_response = process_stream_chunks(chunks)
+                        final_response = _get_llm_functions()['process_stream_chunks'](chunks)
                         # Return only reasoning content if reasoning_steps is True
                         if reasoning_steps and hasattr(final_response.choices[0].message, 'reasoning_content') and final_response.choices[0].message.reasoning_content:
                             return final_response.choices[0].message.reasoning_content
                         return final_response.choices[0].message.content if final_response else full_response_text
 
                     except Exception as e:
-                        display_error(f"Error in final chat completion: {e}")
+                        _get_display_functions()['display_error'](f"Error in final chat completion: {e}")
                         return formatted_results
                 return formatted_results
             return None
         except Exception as e:
-            display_error(f"Error in _achat_completion: {e}")
+            _get_display_functions()['display_error'](f"Error in _achat_completion: {e}")
             return None
 
     async def arun(self, prompt: str, **kwargs):
@@ -5054,7 +5254,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         from rich.panel import Panel
         from rich.markdown import Markdown
         
-        console = Console()
+        console = _get_console()()
         
         # Step 1: Create the plan
         console.print("\n[bold blue]📋 PLANNING PHASE[/bold blue]")
@@ -5274,7 +5474,7 @@ Write the complete compiled report:"""
                     import threading
                     import time as time_module
                     
-                    console = Console()
+                    console = _get_console()()
                     start_time = time_module.time()
                     
                     # ─────────────────────────────────────────────────────────────
@@ -5869,7 +6069,7 @@ Write the complete compiled report:"""
             except ImportError as e:
                 # Check which specific module is missing
                 missing_module = str(e).split("No module named '")[-1].rstrip("'")
-                display_error(f"Missing dependency: {missing_module}. Required for launch() method with HTTP mode.")
+                _get_display_functions()['display_error'](f"Missing dependency: {missing_module}. Required for launch() method with HTTP mode.")
                 logging.error(f"Missing dependency: {missing_module}. Required for launch() method with HTTP mode.")
                 print(f"\nTo add API capabilities, install the required dependencies:")
                 print(f"pip install {missing_module}")
@@ -6044,7 +6244,7 @@ Write the complete compiled report:"""
                 
             except ImportError as e:
                 missing_module = str(e).split("No module named '")[-1].rstrip("'")
-                display_error(f"Missing dependency: {missing_module}. Required for launch() method with MCP mode.")
+                _get_display_functions()['display_error'](f"Missing dependency: {missing_module}. Required for launch() method with MCP mode.")
                 logging.error(f"Missing dependency: {missing_module}. Required for launch() method with MCP mode.")
                 print(f"\nTo add MCP capabilities, install the required dependencies:")
                 print(f"pip install {missing_module} mcp praison-mcp starlette uvicorn") # Added mcp, praison-mcp, starlette, uvicorn
@@ -6162,5 +6362,5 @@ Write the complete compiled report:"""
                         print("\nMCP Server stopped")
             return None
         else:
-            display_error(f"Invalid protocol: {protocol}. Choose 'http' or 'mcp'.")
+            _get_display_functions()['display_error'](f"Invalid protocol: {protocol}. Choose 'http' or 'mcp'.")
             return None 

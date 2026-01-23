@@ -15,6 +15,7 @@ CI Gate:
 """
 import sys
 import tracemalloc
+import argparse
 
 
 def clear_modules():
@@ -86,4 +87,11 @@ def main():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='PraisonAI Agents Memory Usage Benchmark')
+    parser.add_argument('--save', action='store_true', help='Save results to file')
+    args = parser.parse_args()
+    
+    if not args.save:
+        print("\nNote: Results are not saved to file by default. Use --save to save them.")
+        
     sys.exit(main())

@@ -542,6 +542,7 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description='Deep Profiling Benchmark')
     parser.add_argument('--deep', action='store_true', help='Run deep profiling (slower)')
+    parser.add_argument('--save', action='store_true', help='Save results to file')
     args = parser.parse_args()
     
     os.environ.setdefault("OPENAI_API_KEY", "sk-test")
