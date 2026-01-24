@@ -28,6 +28,13 @@ __all__ = [
     "ReplayPlayer",
     "get_traces_dir",
     "list_traces",
+    "ContextEffectivenessJudge",
+    "JudgeReport",
+    "format_judge_report",
+    "generate_plan_from_report",
+    "JudgePlan",
+    "ActionableFix",
+    "PlanApplier",
 ]
 
 
@@ -52,5 +59,33 @@ def __getattr__(name: str):
     if name == "list_traces":
         from .storage import list_traces
         return list_traces
+    
+    if name == "ContextEffectivenessJudge":
+        from .judge import ContextEffectivenessJudge
+        return ContextEffectivenessJudge
+    
+    if name == "JudgeReport":
+        from .judge import JudgeReport
+        return JudgeReport
+    
+    if name == "format_judge_report":
+        from .judge import format_judge_report
+        return format_judge_report
+    
+    if name == "generate_plan_from_report":
+        from .judge import generate_plan_from_report
+        return generate_plan_from_report
+    
+    if name == "JudgePlan":
+        from .plan import JudgePlan
+        return JudgePlan
+    
+    if name == "ActionableFix":
+        from .plan import ActionableFix
+        return ActionableFix
+    
+    if name == "PlanApplier":
+        from .applier import PlanApplier
+        return PlanApplier
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

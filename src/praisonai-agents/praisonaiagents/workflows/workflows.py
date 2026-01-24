@@ -1420,8 +1420,8 @@ class Workflow:
                         except Exception:
                             pass
                 
-                # Check guardrail if present
-                guardrail = getattr(step, 'guardrail', None)
+                # Check guardrail if present (guardrails is canonical, guardrail is deprecated)
+                guardrail = getattr(step, 'guardrails', None) or getattr(step, 'guardrail', None)
                 if guardrail and output and not step_error:
                     try:
                         is_valid, feedback = guardrail(StepResult(output=output))
@@ -1863,6 +1863,57 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         
         return {"steps": results, "output": output, "variables": all_variables}
     
+    def _llm_summarize_for_parallel(
+        self,
+        content: str,
+        num_branches: int,
+        model: str,
+        verbose: bool = False
+    ) -> str:
+        """
+        Use LLM to create a concise summary of content for parallel distribution.
+        
+        This reduces token usage when the same context is passed to multiple parallel branches.
+        """
+        from ..context.tokens import estimate_tokens_heuristic
+        
+        # Only summarize if content is large enough
+        tokens = estimate_tokens_heuristic(content)
+        if tokens < 1500:
+            return content
+        
+        # Target summary size: ~500 tokens to leave room for each branch's work
+        target_tokens = min(500, tokens // num_branches)
+        
+        try:
+            import litellm
+            
+            prompt = f"""Summarize the following content concisely, preserving all key information, data, and actionable items. 
+Keep the summary under {target_tokens * 4} characters. Focus on facts, numbers, and specific details.
+
+CONTENT:
+{content[:8000]}
+
+CONCISE SUMMARY:"""
+            
+            response = litellm.completion(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=target_tokens,
+                temperature=0.1,
+            )
+            
+            summary = response.choices[0].message.content.strip()
+            
+            if verbose:
+                print(f"  🤖 LLM summarized context: {tokens:,} → {estimate_tokens_heuristic(summary):,} tokens")
+            
+            return summary
+            
+        except Exception as e:
+            logger.debug(f"LLM summarization failed, using truncation: {e}")
+            raise  # Let caller handle fallback
+    
     def _execute_parallel(
         self,
         parallel_step: Parallel,
@@ -1882,20 +1933,43 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         if verbose:
             print(f"⚡ Running {len(parallel_step.steps)} steps in parallel...")
         
+        # Optimize: Use LLM-based summarization before distributing to parallel branches
+        # This prevents rate limits and reduces token waste
+        optimized_previous = previous_output
+        num_branches = len(parallel_step.steps)
+        if previous_output and len(previous_output) > 3000:
+            from ..context.tokens import estimate_tokens_heuristic
+            tokens = estimate_tokens_heuristic(previous_output)
+            if tokens > 1000:
+                # Try LLM-based summarization first, fall back to truncation
+                try:
+                    optimized_previous = self._llm_summarize_for_parallel(previous_output, num_branches, model, verbose)
+                except Exception:
+                    # Fallback to truncation-based summarization
+                    max_chars = min(2500, len(previous_output) // max(num_branches, 2))
+                    if len(previous_output) > max_chars:
+                        optimized_previous = previous_output[:max_chars * 2 // 3] + "\n\n[... context summarized for parallel efficiency ...]\n\n" + previous_output[-max_chars // 3:]
+                
+                if verbose and optimized_previous != previous_output:
+                    new_tokens = estimate_tokens_heuristic(optimized_previous)
+                    saved = tokens - new_tokens
+                    print(f"  📦 Optimized context for {num_branches} parallel branches: {tokens:,} → {new_tokens:,} tokens (saved {saved:,} per branch)")
+        
         # Use ThreadPoolExecutor for parallel execution
-        # Use copy_context_to_callable to propagate contextvars (needed for trace emission)
+        # IMPORTANT: Limit max_workers to prevent rate limit issues (max 3 concurrent branches)
         from ..trace.context_events import copy_context_to_callable, get_context_emitter
         
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(parallel_step.steps)) as executor:
+        effective_workers = min(3, len(parallel_step.steps))  # Cap at 3 to prevent rate limits
+        with concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers) as executor:
             futures = []
             for idx, step in enumerate(parallel_step.steps):
                 # Wrap execution to propagate context and set branch_id for parallel tracking
-                def execute_with_branch(step=step, idx=idx):
+                def execute_with_branch(step=step, idx=idx, opt_prev=optimized_previous):
                     emitter = get_context_emitter()
                     emitter.set_branch(f"parallel_{idx}")
                     try:
                         return self._execute_single_step_internal(
-                            step, previous_output, input, all_variables.copy(), model, False, idx, stream
+                            step, opt_prev, input, all_variables.copy(), model, False, idx, stream
                         )
                     finally:
                         emitter.clear_branch()
@@ -1972,16 +2046,33 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         is_multi_step = loop_step.steps is not None and len(loop_step.steps) > 1
         
         if loop_step.parallel and num_items > 1:
-            # Parallel execution
-            max_workers = loop_step.max_workers or num_items
+            # Parallel execution - cap workers to prevent rate limits
+            max_workers = min(loop_step.max_workers or num_items, 3)  # Cap at 3 to prevent rate limits
             if verbose:
                 step_info = f" ({len(steps_to_run)} steps each)" if is_multi_step else ""
                 print(f"⚡🔁 Parallel looping over {num_items} items{step_info} (max_workers={max_workers})...")
             
+            # Optimize: Aggressively summarize large previous_output before distributing to parallel branches
+            # This reduces token waste and prevents rate limit issues
+            optimized_previous = previous_output
+            if previous_output and len(previous_output) > 3000:
+                from ..context.tokens import estimate_tokens_heuristic
+                tokens = estimate_tokens_heuristic(previous_output)
+                # Target: max 800 tokens per branch to stay well under rate limits
+                if tokens > 1000:
+                    max_chars = min(2500, len(previous_output) // max(num_items, 2))
+                    if len(previous_output) > max_chars:
+                        # Extract key information: first part (context) + last part (recent output)
+                        optimized_previous = previous_output[:max_chars * 2 // 3] + "\n\n[... context summarized for parallel efficiency ...]\n\n" + previous_output[-max_chars // 3:]
+                        if verbose:
+                            new_tokens = estimate_tokens_heuristic(optimized_previous)
+                            saved = tokens - new_tokens
+                            print(f"  📦 Optimized context for {num_items} parallel branches: {tokens:,} → {new_tokens:,} tokens (saved {saved:,} per branch)")
+            
             # Use copy_context_to_callable to propagate contextvars (needed for trace emission)
             from ..trace.context_events import copy_context_to_callable, get_context_emitter
             
-            def execute_item(idx_item_tuple):
+            def execute_item(idx_item_tuple, opt_prev=optimized_previous):
                 """Execute step(s) for a single item in thread."""
                 idx, item = idx_item_tuple
                 
@@ -1990,7 +2081,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 emitter.set_branch(f"loop_{idx}")
                 
                 try:
-                    # CRITICAL: Deep copy variables to ensure thread isolation
+                    # CRITICAL: Deep copy variables to ensure thread isolation (per-branch context isolation)
                     import copy
                     loop_vars = copy.deepcopy(all_variables)
                     loop_vars[loop_step.var_name] = item
@@ -2002,7 +2093,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                             loop_vars[f"{loop_step.var_name}.{key}"] = value
                     
                     # Execute all steps sequentially within this iteration
-                    iteration_output = previous_output
+                    iteration_output = opt_prev
                     iteration_results = []
                     for step_idx, step in enumerate(steps_to_run):
                         step_result = self._execute_single_step_internal(

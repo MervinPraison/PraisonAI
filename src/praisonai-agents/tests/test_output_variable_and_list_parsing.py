@@ -109,8 +109,11 @@ These topics are trending this week.
         from praisonaiagents.workflows import Loop
         
         # Create a loop that iterates over a variable
+        def dummy_step(ctx):
+            return {"output": "done"}
+        
         loop_step = Loop(
-            step=None,
+            step=dummy_step,
             over="topics",
             parallel=True
         )
@@ -146,8 +149,11 @@ class TestDynamicParallelism:
         from praisonaiagents.workflows import Loop
         
         # Create a parallel loop without max_workers
+        def dummy_step(ctx):
+            return {"output": "done"}
+        
         loop_step = Loop(
-            step=None,
+            step=dummy_step,
             over="items",
             parallel=True,
             max_workers=None  # Should default to num_items
@@ -166,8 +172,11 @@ class TestDynamicParallelism:
         """Test that max_workers caps the number of parallel workers."""
         from praisonaiagents.workflows import Loop
         
+        def dummy_step(ctx):
+            return {"output": "done"}
+        
         loop_step = Loop(
-            step=None,
+            step=dummy_step,
             over="items",
             parallel=True,
             max_workers=2  # Cap at 2

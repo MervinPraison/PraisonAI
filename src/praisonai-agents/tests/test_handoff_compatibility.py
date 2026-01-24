@@ -156,7 +156,11 @@ def test_handoff_filters():
 
 
 def test_all_agent_parameters():
-    """Test that all agent parameters still work"""
+    """Test that all agent parameters still work with consolidated API"""
+    from praisonaiagents.config import (
+        ExecutionConfig, OutputConfig, ReflectionConfig, MemoryConfig, TemplateConfig
+    )
+    
     agent = Agent(
         name="Full Agent",
         role="Test Role",
@@ -166,35 +170,18 @@ def test_all_agent_parameters():
         llm="gpt-4",
         tools=[],
         function_calling_llm=None,
-        max_iter=10,
-        max_rpm=100,
-        max_execution_time=300,
+        # Consolidated params
+        execution=ExecutionConfig(max_iter=10, max_rpm=100, max_execution_time=300, max_retry_limit=5),
+        output=OutputConfig(verbose=False, markdown=False, stream=False, reasoning_steps=True),
+        reflection=ReflectionConfig(min_iterations=2, max_iterations=5, llm="gpt-3.5-turbo", prompt="Reflect on this"),
+        templates=TemplateConfig(system="Test template", prompt="Test prompt", response="Test response"),
         memory=None,
-        verbose=False,
         allow_delegation=True,
-        step_callback=None,
-        cache=False,
-        system_template="Test template",
-        prompt_template="Test prompt",
-        response_template="Test response",
+        caching=False,
         allow_code_execution=True,
-        max_retry_limit=5,
         code_execution_mode="unsafe",
-        embedder_config={"test": "config"},
         knowledge=None,
-        knowledge_config={"test": "knowledge"},
-        use_system_prompt=False,
-        markdown=False,
-        stream=False,
-        reflection=True,
-        max_reflect=5,
-        min_reflect=2,
-        reflect_llm="gpt-3.5-turbo",
-        reflect_prompt="Reflect on this",
-        user_id="test_user",
-        reasoning_steps=True,
         guardrails=None,
-        max_guardrail_retries=5,
         handoffs=[]  # New parameter
     )
     

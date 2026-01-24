@@ -92,6 +92,67 @@ class SessionDeduplicationCache:
             self._stats = {"duplicates_prevented": 0, "tokens_saved": 0}
 
 
+def deduplicate_topics(topics: list, key: str = "title", similarity_threshold: float = 0.8) -> list:
+    """
+    Programmatic deduplication of topics/items before agent processing.
+    
+    This helps prevent duplicate content from being passed to downstream agents,
+    reducing token waste and improving quality.
+    
+    Args:
+        topics: List of topic dicts or strings
+        key: Key to use for comparison if topics are dicts (default: "title")
+        similarity_threshold: Similarity threshold for fuzzy matching (0.0-1.0)
+        
+    Returns:
+        Deduplicated list of topics
+    """
+    if not topics:
+        return topics
+    
+    seen_hashes = set()
+    seen_normalized = set()
+    unique_topics = []
+    
+    for topic in topics:
+        # Get the content to compare
+        if isinstance(topic, dict):
+            content = str(topic.get(key, topic.get("content", str(topic))))
+        else:
+            content = str(topic)
+        
+        # Normalize for comparison
+        normalized = content.lower().strip()
+        # Remove common words for better matching
+        normalized = " ".join(w for w in normalized.split() if len(w) > 3)
+        
+        # Check exact hash match
+        content_hash = hashlib.md5(normalized.encode()).hexdigest()
+        if content_hash in seen_hashes:
+            continue
+        
+        # Check fuzzy match using simple word overlap
+        is_duplicate = False
+        for seen in seen_normalized:
+            # Calculate Jaccard similarity
+            words1 = set(normalized.split())
+            words2 = set(seen.split())
+            if words1 and words2:
+                intersection = len(words1 & words2)
+                union = len(words1 | words2)
+                similarity = intersection / union if union > 0 else 0
+                if similarity >= similarity_threshold:
+                    is_duplicate = True
+                    break
+        
+        if not is_duplicate:
+            seen_hashes.add(content_hash)
+            seen_normalized.add(normalized)
+            unique_topics.append(topic)
+    
+    return unique_topics
+
+
 class EstimationMode(str, Enum):
     """Token estimation modes."""
     HEURISTIC = "heuristic"
@@ -256,6 +317,10 @@ class ManagerConfig:
     # LLM-powered summarization
     llm_summarize: bool = False  # Enable LLM-powered summarization
     
+    # Smart tool output summarization
+    smart_tool_summarize: bool = True  # Summarize large tool outputs using LLM before truncating
+    tool_summarize_limits: Dict[str, int] = field(default_factory=dict)  # Per-tool min_chars_to_summarize
+    
     # Estimation
     estimation_mode: EstimationMode = EstimationMode.HEURISTIC
     log_estimation_mismatch: bool = False
@@ -306,6 +371,8 @@ class ManagerConfig:
             "prune_after_tokens": self.prune_after_tokens,
             "keep_recent_turns": self.keep_recent_turns,
             "llm_summarize": self.llm_summarize,
+            "smart_tool_summarize": self.smart_tool_summarize,
+            "tool_summarize_limits": self.tool_summarize_limits,
             "source": self.source,
         }
         return result
@@ -617,6 +684,8 @@ class ContextManager:
             preserve_recent=self.config.keep_recent_turns,
             protected_tools=self.config.protected_tools,
             llm_summarize_fn=self._llm_summarize_fn if self.config.llm_summarize else None,
+            smart_tool_summarize=self.config.smart_tool_summarize,
+            tool_summarize_limits=self.config.tool_summarize_limits,
         )
         
         # Try optimization

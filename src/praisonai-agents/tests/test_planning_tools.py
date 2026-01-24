@@ -193,11 +193,11 @@ class TestAgentsPlanningTools:
         agent = Agent(name="Test", role="Tester")
         task = Task(description="Test task", agent=agent)
         
+        from praisonaiagents.config import MultiAgentPlanningConfig
         agents = Agents(
             agents=[agent],
             tasks=[task],
-            planning=True,
-            planning_tools=[search_tool]
+            planning=MultiAgentPlanningConfig(tools=[search_tool])
         )
         
         assert agents.planning_tools is not None
@@ -228,11 +228,11 @@ class TestAgentsPlanningTools:
         agent = Agent(name="Test", role="Tester")
         task = Task(description="Test task", agent=agent)
         
+        from praisonaiagents.config import MultiAgentPlanningConfig
         agents = Agents(
             agents=[agent],
             tasks=[task],
-            planning=True,
-            planning_tools=[search_tool]
+            planning=MultiAgentPlanningConfig(tools=[search_tool])
         )
         
         # Get the planning agent
@@ -297,11 +297,11 @@ class TestAgentsPlanningReasoning:
         agent = Agent(name="Test", role="Tester")
         task = Task(description="Test task", agent=agent)
         
+        from praisonaiagents.config import MultiAgentPlanningConfig
         agents = Agents(
             agents=[agent],
             tasks=[task],
-            planning=True,
-            planning_reasoning=True
+            planning=MultiAgentPlanningConfig(reasoning=True)
         )
         
         assert agents.planning_reasoning is True
@@ -328,11 +328,11 @@ class TestAgentsPlanningReasoning:
         agent = Agent(name="Test", role="Tester")
         task = Task(description="Test task", agent=agent)
         
+        from praisonaiagents.config import MultiAgentPlanningConfig
         agents = Agents(
             agents=[agent],
             tasks=[task],
-            planning=True,
-            planning_reasoning=True
+            planning=MultiAgentPlanningConfig(reasoning=True)
         )
         
         planning_agent = agents._get_planning_agent()
@@ -357,16 +357,18 @@ class TestPlanningToolsIntegration:
         agent = Agent(name="Researcher", role="Research Analyst")
         task = Task(description="Research AI trends", agent=agent)
         
+        from praisonaiagents.config import MultiAgentPlanningConfig
         agents = Agents(
             agents=[agent],
             tasks=[task],
-            planning=True,
-            planning_tools=[search_tool],
-            planning_reasoning=True,
-            auto_approve_plan=True
+            planning=MultiAgentPlanningConfig(
+                tools=[search_tool],
+                reasoning=True,
+                auto_approve=True
+            )
         )
         
-        assert agents.planning is True
+        assert agents.planning is not None  # Planning config is set
         assert agents.planning_tools is not None
         assert agents.planning_reasoning is True
         

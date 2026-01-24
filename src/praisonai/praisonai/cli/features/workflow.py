@@ -713,7 +713,7 @@ Example:
             return result_path
             
         except ImportError:
-            self.print_status("Auto-generation requires instructor: pip install instructor", "error")
+            self.print_status("Auto-generation requires litellm: pip install litellm", "error")
             return None
         except Exception as e:
             self.print_status(f"Generation failed: {e}", "error")

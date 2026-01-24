@@ -21,28 +21,40 @@ class TestParallelLoopClass:
         """Test that Loop class accepts parallel parameter."""
         from praisonaiagents.workflows import Loop
         
-        loop = Loop(step=None, over="items", parallel=True)
+        def dummy_step(ctx):
+            return {"output": "done"}
+        
+        loop = Loop(step=dummy_step, over="items", parallel=True)
         assert loop.parallel is True
     
     def test_loop_class_has_max_workers_param(self):
         """Test that Loop class accepts max_workers parameter."""
         from praisonaiagents.workflows import Loop
         
-        loop = Loop(step=None, over="items", parallel=True, max_workers=4)
+        def dummy_step(ctx):
+            return {"output": "done"}
+        
+        loop = Loop(step=dummy_step, over="items", parallel=True, max_workers=4)
         assert loop.max_workers == 4
     
     def test_loop_parallel_defaults_to_false(self):
         """Test that parallel defaults to False (sequential)."""
         from praisonaiagents.workflows import Loop
         
-        loop = Loop(step=None, over="items")
+        def dummy_step(ctx):
+            return {"output": "done"}
+        
+        loop = Loop(step=dummy_step, over="items")
         assert loop.parallel is False
     
     def test_loop_max_workers_defaults_to_none(self):
         """Test that max_workers defaults to None (unlimited)."""
         from praisonaiagents.workflows import Loop
         
-        loop = Loop(step=None, over="items")
+        def dummy_step(ctx):
+            return {"output": "done"}
+        
+        loop = Loop(step=dummy_step, over="items")
         assert loop.max_workers is None
 
 

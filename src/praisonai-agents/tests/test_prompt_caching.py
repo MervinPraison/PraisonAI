@@ -151,32 +151,34 @@ class TestLLMBuildMessagesWithPromptCaching:
 
 
 class TestAgentPromptCachingParameter:
-    """Tests for prompt_caching parameter in Agent class."""
+    """Tests for caching= parameter in Agent class (consolidated API)."""
     
-    def test_agent_init_with_prompt_caching_true(self):
-        """Test Agent initialization with prompt_caching=True."""
+    def test_agent_init_with_caching_config_prompt_caching_true(self):
+        """Test Agent initialization with caching=CachingConfig(prompt_caching=True)."""
         from praisonaiagents import Agent
+        from praisonaiagents.config import CachingConfig
         
         agent = Agent(
             name="Test Agent",
             llm="anthropic/claude-3-5-sonnet-latest",
-            prompt_caching=True
+            caching=CachingConfig(prompt_caching=True)
         )
         assert agent.prompt_caching == True
     
-    def test_agent_init_with_prompt_caching_false(self):
-        """Test Agent initialization with prompt_caching=False."""
+    def test_agent_init_with_caching_config_prompt_caching_false(self):
+        """Test Agent initialization with caching=CachingConfig(prompt_caching=False)."""
         from praisonaiagents import Agent
+        from praisonaiagents.config import CachingConfig
         
         agent = Agent(
             name="Test Agent",
             llm="anthropic/claude-3-5-sonnet-latest",
-            prompt_caching=False
+            caching=CachingConfig(prompt_caching=False)
         )
         assert agent.prompt_caching == False
     
-    def test_agent_init_without_prompt_caching(self):
-        """Test Agent initialization without prompt_caching parameter."""
+    def test_agent_init_without_caching(self):
+        """Test Agent initialization without caching parameter."""
         from praisonaiagents import Agent
         
         agent = Agent(name="Test Agent")
@@ -197,11 +199,12 @@ class TestAgentPromptCachingParameter:
     def test_agent_passes_prompt_caching_to_llm(self):
         """Test that Agent passes prompt_caching to LLM instance."""
         from praisonaiagents import Agent
+        from praisonaiagents.config import CachingConfig
         
         agent = Agent(
             name="Test Agent",
             llm="anthropic/claude-3-5-sonnet-latest",
-            prompt_caching=True
+            caching=CachingConfig(prompt_caching=True)
         )
         
         # Check that LLM instance has prompt_caching set
@@ -222,12 +225,13 @@ class TestPromptCachingIntegration:
         if not os.getenv("ANTHROPIC_API_KEY"):
             pytest.skip("ANTHROPIC_API_KEY not set")
         
+        from praisonaiagents.config import CachingConfig
         agent = Agent(
             name="Caching Test Agent",
             instructions="You are a helpful assistant." * 100,  # Long system prompt
             llm="anthropic/claude-3-5-sonnet-latest",
-            prompt_caching=True,
-            verbose=False
+            caching=CachingConfig(prompt_caching=True),
+            output="silent"
         )
         
         # First call - should create cache

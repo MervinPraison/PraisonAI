@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Test LLM class directly to verify self-reflection fix"""
 
+import os
 import pytest
 from praisonaiagents.llm import LLM
 
@@ -21,6 +22,11 @@ def calculator(expression: str) -> str:
     except Exception as e:
         return f"Error: {str(e)}"
 
+@pytest.mark.integration
+@pytest.mark.skipif(
+    not os.environ.get("OPENAI_API_KEY"),
+    reason="OPENAI_API_KEY not set - skipping integration test"
+)
 @pytest.mark.asyncio
 async def test_llm_direct():
     """Test LLM class directly with self-reflection and tools"""

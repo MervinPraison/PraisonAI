@@ -40,7 +40,7 @@ def _test_model_helper(model_name: str):
         backstory="You are an expert at finding and summarizing information.",
         llm=model_name,
         tools=[search_tool],
-        verbose=True
+        output="verbose"
     )
     
     # Create a task that requires tool usage
@@ -55,7 +55,7 @@ def _test_model_helper(model_name: str):
     workflow = Agents(
         agents=[agent],
         tasks=[task],
-        verbose=True
+        output="verbose"
     )
     
     try:

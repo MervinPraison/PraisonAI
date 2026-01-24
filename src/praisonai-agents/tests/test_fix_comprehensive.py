@@ -65,6 +65,7 @@ def test_sequential_tool_calling_gpt():
     print(f"GPT result contains '200': {'200' in str(result)}")
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     not os.environ.get("GOOGLE_API_KEY"),
     reason="GOOGLE_API_KEY not set - skipping integration test"

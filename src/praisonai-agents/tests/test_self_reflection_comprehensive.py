@@ -37,7 +37,7 @@ def test_self_reflection_with_tools():
         backstory="You are an expert analyst with strong critical thinking skills",
         reflection=True,
         llm="gemini/gemini-2.5-flash-lite-preview-06-17",
-        verbose=True,
+        output="verbose",
         tools=[duckduckgo_search]
     )
 
@@ -79,7 +79,7 @@ def test_self_reflection_without_tools():
         backstory="You are an expert analyst with strong critical thinking skills",
         reflection=True,
         llm="gemini/gemini-2.5-flash-lite-preview-06-17",
-        verbose=True
+        output="verbose"
     )
 
     # Create a task

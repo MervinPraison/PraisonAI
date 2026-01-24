@@ -395,6 +395,109 @@ class SummarizeOptimizer(BaseOptimizer):
         return ""
 
 
+class SummarizeToolOutputsOptimizer(BaseOptimizer):
+    """
+    Summarize large tool outputs using LLM before truncation.
+    
+    This optimizer specifically targets tool role messages with large content,
+    using an LLM to create intelligent summaries that preserve key information.
+    Falls back to keeping original content if LLM is unavailable or fails.
+    """
+    
+    def __init__(
+        self,
+        llm_summarize_fn: Optional[callable] = None,
+        max_output_tokens: int = 1000,
+        min_chars_to_summarize: int = 2000,
+        preserve_recent: int = 2,
+        tool_summarize_limits: Optional[Dict[str, int]] = None,
+    ):
+        """
+        Initialize tool output summarizer.
+        
+        Args:
+            llm_summarize_fn: Function(content, max_tokens) -> summary string
+            max_output_tokens: Target token count for summarized output
+            min_chars_to_summarize: Default minimum chars before summarization triggers
+            preserve_recent: Number of recent tool outputs to preserve intact
+            tool_summarize_limits: Per-tool min_chars_to_summarize limits {tool_name: min_chars}
+        """
+        self.llm_summarize_fn = llm_summarize_fn
+        self.max_output_tokens = max_output_tokens
+        self.min_chars_to_summarize = min_chars_to_summarize
+        self.preserve_recent = preserve_recent
+        self.tool_summarize_limits = tool_summarize_limits or {}
+    
+    def optimize(
+        self,
+        messages: List[Dict[str, Any]],
+        target_tokens: int,
+        ledger: Optional[ContextLedger] = None,
+    ) -> tuple:
+        original_tokens = estimate_messages_tokens(messages)
+        
+        # If already under budget or no LLM function, return as-is
+        if original_tokens <= target_tokens or not self.llm_summarize_fn:
+            return messages, OptimizationResult(
+                original_tokens=original_tokens,
+                optimized_tokens=original_tokens,
+                tokens_saved=0,
+                strategy_used=OptimizerStrategy.SMART,
+            )
+        
+        result = []
+        summarized_count = 0
+        
+        # Find tool messages and their indices
+        tool_indices = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
+        
+        # Preserve recent tool outputs (only if there are more than preserve_recent tools)
+        if tool_indices and self.preserve_recent > 0 and len(tool_indices) > self.preserve_recent:
+            recent_tool_indices = set(tool_indices[-self.preserve_recent:])
+        else:
+            recent_tool_indices = set()  # Summarize all if few tools or preserve_recent=0
+        
+        for i, msg in enumerate(messages):
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            
+            # Only process tool messages with large content
+            if role == "tool" and i not in recent_tool_indices:
+                # Get per-tool limit or use default
+                tool_name = msg.get("name", "")
+                min_chars = self.tool_summarize_limits.get(tool_name, self.min_chars_to_summarize)
+                if isinstance(content, str) and len(content) >= min_chars:
+                    # Try to summarize
+                    try:
+                        summary = self.llm_summarize_fn(content, self.max_output_tokens)
+                        if summary and len(summary) < len(content):
+                            summarized_msg = msg.copy()
+                            summarized_msg["content"] = summary
+                            summarized_msg["_summarized"] = True
+                            summarized_msg["_original_length"] = len(content)
+                            result.append(summarized_msg)
+                            summarized_count += 1
+                            continue
+                    except Exception:
+                        # Fallback to original on error
+                        pass
+            
+            result.append(msg)
+        
+        optimized_tokens = estimate_messages_tokens(result)
+        
+        tokens_saved = original_tokens - optimized_tokens
+        
+        return result, OptimizationResult(
+            original_tokens=original_tokens,
+            optimized_tokens=optimized_tokens,
+            tokens_saved=tokens_saved,
+            strategy_used=OptimizerStrategy.SMART,
+            tool_outputs_summarized=summarized_count,
+            tokens_saved_by_summarization=tokens_saved,  # All savings from summarization
+        )
+
+
 class LLMSummarizeOptimizer(SummarizeOptimizer):
     """
     LLM-powered summarization optimizer.
@@ -475,9 +578,10 @@ class SmartOptimizer(BaseOptimizer):
     Smart optimization combining multiple strategies.
     
     Applies strategies in order:
-    1. Prune tool outputs
-    2. Sliding window
-    3. Summarize if still over
+    1. Summarize tool outputs (if LLM available and smart_tool_summarize=True)
+    2. Prune tool outputs (fallback truncation)
+    3. Sliding window
+    4. Summarize conversation if still over
     """
     
     def __init__(
@@ -486,11 +590,21 @@ class SmartOptimizer(BaseOptimizer):
         protected_tools: Optional[List[str]] = None,
         tool_limits: Optional[Dict[str, int]] = None,
         llm_summarize_fn: Optional[callable] = None,
+        smart_tool_summarize: bool = True,
+        tool_summarize_limits: Optional[Dict[str, int]] = None,
     ):
         self.preserve_recent = preserve_recent
         self.protected_tools = protected_tools or []
         self.tool_limits = tool_limits or {}
+        self.smart_tool_summarize = smart_tool_summarize
+        self.tool_summarize_limits = tool_summarize_limits or {}
         
+        # Tool output summarization (LLM-powered, applied first when available)
+        self._summarize_tools = SummarizeToolOutputsOptimizer(
+            llm_summarize_fn=llm_summarize_fn if smart_tool_summarize else None,
+            preserve_recent=preserve_recent,
+            tool_summarize_limits=tool_summarize_limits,
+        )
         self._prune = PruneToolsOptimizer(
             preserve_recent=preserve_recent,
             protected_tools=protected_tools,
@@ -518,8 +632,29 @@ class SmartOptimizer(BaseOptimizer):
                 strategy_used=OptimizerStrategy.SMART,
             )
         
-        # Step 1: Prune tool outputs
-        result, prune_result = self._prune.optimize(messages, target_tokens, ledger)
+        # Step 1: Summarize tool outputs (LLM-powered, if available)
+        tool_summarized_count = 0
+        tokens_saved_by_summarization = 0
+        if self._summarize_tools.llm_summarize_fn:
+            result, tool_summary_result = self._summarize_tools.optimize(messages, target_tokens, ledger)
+            tool_summarized_count = tool_summary_result.tool_outputs_summarized
+            tokens_saved_by_summarization = tool_summary_result.tokens_saved_by_summarization
+            
+            if estimate_messages_tokens(result) <= target_tokens:
+                return result, OptimizationResult(
+                    original_tokens=original_tokens,
+                    optimized_tokens=tool_summary_result.optimized_tokens,
+                    tokens_saved=original_tokens - tool_summary_result.optimized_tokens,
+                    strategy_used=OptimizerStrategy.SMART,
+                    tool_outputs_summarized=tool_summarized_count,
+                    tokens_saved_by_summarization=tokens_saved_by_summarization,
+                )
+        else:
+            result = messages
+        
+        # Step 2: Prune tool outputs (fallback truncation)
+        result, prune_result = self._prune.optimize(result, target_tokens, ledger)
+        tokens_saved_by_truncation = prune_result.tokens_saved
         
         if estimate_messages_tokens(result) <= target_tokens:
             return result, OptimizationResult(
@@ -527,10 +662,13 @@ class SmartOptimizer(BaseOptimizer):
                 optimized_tokens=prune_result.optimized_tokens,
                 tokens_saved=original_tokens - prune_result.optimized_tokens,
                 strategy_used=OptimizerStrategy.SMART,
+                tool_outputs_summarized=tool_summarized_count,
                 tool_outputs_pruned=prune_result.tool_outputs_pruned,
+                tokens_saved_by_summarization=tokens_saved_by_summarization,
+                tokens_saved_by_truncation=tokens_saved_by_truncation,
             )
         
-        # Step 2: Sliding window
+        # Step 3: Sliding window
         result, window_result = self._window.optimize(result, target_tokens, ledger)
         
         if estimate_messages_tokens(result) <= target_tokens:
@@ -543,7 +681,7 @@ class SmartOptimizer(BaseOptimizer):
                 messages_removed=window_result.messages_removed,
             )
         
-        # Step 3: Summarize
+        # Step 4: Summarize conversation
         result, summary_result = self._summarize.optimize(result, target_tokens, ledger)
         
         optimized_tokens = estimate_messages_tokens(result)
@@ -553,7 +691,10 @@ class SmartOptimizer(BaseOptimizer):
             optimized_tokens=optimized_tokens,
             tokens_saved=original_tokens - optimized_tokens,
             strategy_used=OptimizerStrategy.SMART,
+            tool_outputs_summarized=tool_summarized_count,
             tool_outputs_pruned=prune_result.tool_outputs_pruned,
+            tokens_saved_by_summarization=tokens_saved_by_summarization,
+            tokens_saved_by_truncation=tokens_saved_by_truncation,
             messages_removed=window_result.messages_removed + summary_result.messages_removed,
             summary_added=summary_result.summary_added,
         )

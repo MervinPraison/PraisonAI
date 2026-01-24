@@ -1054,6 +1054,9 @@ class TestAgentWorkflows:
         class MockAgent:
             def __init__(self, name):
                 self.name = name
+                self._context_manager_initialized = True
+                self._context_param = None
+                self._context_manager = None
             
             def chat(self, message, **kwargs):
                 return f"Processed: {message}"
@@ -1072,6 +1075,9 @@ class TestAgentWorkflows:
             def __init__(self, name, prefix):
                 self.name = name
                 self.prefix = prefix
+                self._context_manager_initialized = True
+                self._context_param = None
+                self._context_manager = None
             
             def chat(self, message, **kwargs):
                 return f"{self.prefix}: {message}"
@@ -1119,6 +1125,9 @@ class TestAgentWorkflows:
             def __init__(self, name, output):
                 self.name = name
                 self.output = output
+                self._context_manager_initialized = True
+                self._context_param = None
+                self._context_manager = None
             
             def chat(self, message, **kwargs):
                 return self.output
@@ -1462,6 +1471,9 @@ class TestToolsPerStep:
             def __init__(self, name, tools=None):
                 self.name = name
                 self.tools = tools or []
+                self._context_manager_initialized = True
+                self._context_param = None
+                self._context_manager = None
             
             def chat(self, message, **kwargs):
                 return f"Response with {len(self.tools)} tools"

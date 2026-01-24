@@ -176,8 +176,8 @@ def run(
     config = config or {}
     input = input or {}
     
-    # Generate identifiers
-    run_id = _generate_run_id()
+    # Generate identifiers - use custom trace_name if provided
+    run_id = options.get("trace_name") or _generate_run_id()
     trace_id = _generate_trace_id()
     session_id = session_id or f"session-{uuid.uuid4().hex[:8]}"
     
@@ -198,7 +198,7 @@ def run(
             from praisonai.replay import ContextTraceWriter
             from praisonaiagents.trace.context_events import ContextTraceEmitter, set_context_emitter
             trace_writer = ContextTraceWriter(session_id=run_id)
-            trace_emitter = ContextTraceEmitter(sink=trace_writer, session_id=run_id)
+            trace_emitter = ContextTraceEmitter(sink=trace_writer, session_id=run_id, full_content=True)
             # Set as global emitter so agents can access it
             trace_emitter_token = set_context_emitter(trace_emitter)
             trace_emitter.session_start({"recipe": name, "run_id": run_id})

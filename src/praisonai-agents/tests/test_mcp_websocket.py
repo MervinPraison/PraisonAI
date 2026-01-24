@@ -180,15 +180,15 @@ class TestWebSocketTransport:
         assert transport.max_retries == 5
         assert transport.timeout == 30.0
     
-    def test_transport_send_requires_connection(self):
+    @pytest.mark.asyncio
+    async def test_transport_send_requires_connection(self):
         """Test that send raises error when not connected."""
         from praisonaiagents.mcp.mcp_websocket import WebSocketTransport
-        import asyncio
         
         transport = WebSocketTransport("ws://localhost:8080/mcp")
         
         with pytest.raises(RuntimeError, match="WebSocket not connected"):
-            asyncio.get_event_loop().run_until_complete(transport.send({"test": 1}))
+            await transport.send({"test": 1})
 
 
 class TestWebSocketReconnection:
