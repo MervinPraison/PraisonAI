@@ -1294,7 +1294,7 @@ class Workflow:
                     elif step.agent:
                         # Direct agent with tools
                         # Propagate context management to existing agent if workflow has it enabled
-                        if self.context:
+                        if self.context and hasattr(step.agent, '_context_manager_initialized'):
                             if not step.agent._context_manager_initialized:
                                 step.agent._context_param = self.context
                             # Share session deduplication cache for cross-agent deduplication
@@ -1324,47 +1324,56 @@ class Workflow:
                         if validation_feedback:
                             action = f"{action}\n\nPrevious attempt feedback: {validation_feedback}"
                         
-                        # Handle images if present
-                        step_images = getattr(step, 'images', None)
-                        # Get structured output options from step
-                        step_output_json = getattr(step, '_output_json', None)
-                        step_output_pydantic = getattr(step, '_output_pydantic', None)
-                        
-                        # Resolve Pydantic class from string reference (Option B)
-                        # If output_pydantic is a string, try to resolve it from tools.py
-                        if step_output_pydantic and isinstance(step_output_pydantic, str):
-                            resolved_class = self._resolve_pydantic_class(step_output_pydantic)
-                            if resolved_class:
-                                step_output_pydantic = resolved_class
-                            else:
-                                logger.warning(f"Could not resolve Pydantic class '{step_output_pydantic}' from tools.py")
-                                step_output_pydantic = None
-                        
-                        # Build chat kwargs
-                        chat_kwargs = {"stream": stream}
-                        if step_images:
-                            chat_kwargs["images"] = step_images
-                        if step_output_json:
-                            chat_kwargs["output_json"] = step_output_json
-                        if step_output_pydantic:
-                            chat_kwargs["output_pydantic"] = step_output_pydantic
-                        
-                        output = step.agent.chat(action, **chat_kwargs)
-                        
-                        # Parse JSON output if output_json was requested and output is a string
-                        if step_output_json and output and isinstance(output, str):
-                            output = _parse_json_output(output, step.name)
-                        
-                        # Handle output_pydantic if present
-                        output_pydantic = getattr(step, 'output_pydantic', None)
-                        if output_pydantic and output:
-                            try:
-                                # Try to parse output as Pydantic model
-                                if hasattr(output_pydantic, 'model_validate_json'):
-                                    parsed = output_pydantic.model_validate_json(output)
-                                    output = parsed.model_dump_json()
-                            except Exception as e:
-                                logger.debug(f"Pydantic parsing failed: {e}")
+                        # Check if this is a specialized agent (AudioAgent, VideoAgent, ImageAgent, OCRAgent)
+                        agent_class_name = step.agent.__class__.__name__
+                        if agent_class_name in ('AudioAgent', 'VideoAgent', 'ImageAgent', 'OCRAgent', 'DeepResearchAgent'):
+                            # Use specialized agent dispatch
+                            output = self._execute_specialized_agent(
+                                step.agent, agent_class_name, action, step, all_variables, stream
+                            )
+                        else:
+                            # Standard Agent with chat() method
+                            # Handle images if present
+                            step_images = getattr(step, 'images', None)
+                            # Get structured output options from step
+                            step_output_json = getattr(step, '_output_json', None)
+                            step_output_pydantic = getattr(step, '_output_pydantic', None)
+                            
+                            # Resolve Pydantic class from string reference (Option B)
+                            # If output_pydantic is a string, try to resolve it from tools.py
+                            if step_output_pydantic and isinstance(step_output_pydantic, str):
+                                resolved_class = self._resolve_pydantic_class(step_output_pydantic)
+                                if resolved_class:
+                                    step_output_pydantic = resolved_class
+                                else:
+                                    logger.warning(f"Could not resolve Pydantic class '{step_output_pydantic}' from tools.py")
+                                    step_output_pydantic = None
+                            
+                            # Build chat kwargs
+                            chat_kwargs = {"stream": stream}
+                            if step_images:
+                                chat_kwargs["images"] = step_images
+                            if step_output_json:
+                                chat_kwargs["output_json"] = step_output_json
+                            if step_output_pydantic:
+                                chat_kwargs["output_pydantic"] = step_output_pydantic
+                            
+                            output = step.agent.chat(action, **chat_kwargs)
+                            
+                            # Parse JSON output if output_json was requested and output is a string
+                            if step_output_json and output and isinstance(output, str):
+                                output = _parse_json_output(output, step.name)
+                            
+                            # Handle output_pydantic if present
+                            output_pydantic = getattr(step, 'output_pydantic', None)
+                            if output_pydantic and output:
+                                try:
+                                    # Try to parse output as Pydantic model
+                                    if hasattr(output_pydantic, 'model_validate_json'):
+                                        parsed = output_pydantic.model_validate_json(output)
+                                        output = parsed.model_dump_json()
+                                except Exception as e:
+                                    logger.debug(f"Pydantic parsing failed: {e}")
                             
                     elif step.action:
                         # Action with agent_config - create temporary agent
@@ -1640,18 +1649,106 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             logger.error(f"Planning failed: {e}")
             return None
     
+    def _execute_specialized_agent(
+        self,
+        agent: Any,
+        agent_class_name: str,
+        action: str,
+        step: 'WorkflowStep',
+        variables: Dict[str, Any],
+        stream: bool
+    ) -> Any:
+        """
+        Execute a specialized agent (AudioAgent, VideoAgent, ImageAgent, OCRAgent).
+        
+        Dispatches to the appropriate method based on agent type and action.
+        Falls back to chat() for standard Agent class.
+        
+        Args:
+            agent: The agent instance
+            agent_class_name: Name of the agent class
+            action: The action/prompt to execute
+            step: The workflow step containing additional config
+            variables: Current workflow variables
+            stream: Whether to stream output
+            
+        Returns:
+            Output from the agent execution
+        """
+        # Get yaml_action which specifies the method to call
+        yaml_action = getattr(agent, '_yaml_action', None) or action
+        
+        # AudioAgent - TTS (speech) or STT (transcribe)
+        if agent_class_name == 'AudioAgent':
+            if yaml_action == 'speech' or 'speech' in yaml_action.lower():
+                # Text-to-Speech
+                text = variables.get('text', action)
+                output_file = variables.get('output') or variables.get('audio_output') or 'output.mp3'
+                voice = variables.get('voice', 'alloy')
+                result = agent.speech(text, output=output_file, voice=voice)
+                # Store the output file path in variables for next step
+                variables['_last_audio_file'] = output_file
+                return result
+            elif yaml_action == 'transcribe' or 'transcribe' in yaml_action.lower():
+                # Speech-to-Text - check multiple variable names for input file
+                input_file = (
+                    variables.get('audio_file') or 
+                    variables.get('audio') or 
+                    variables.get('_last_audio_file') or  # From previous TTS step
+                    variables.get('input')
+                )
+                # If input is empty string or template, use default
+                if not input_file or input_file == '{{input}}' or 'Context from previous' in str(input_file):
+                    input_file = 'output.mp3'  # Default TTS output
+                language = variables.get('language', 'en')
+                return agent.transcribe(input_file, language=language)
+            else:
+                # Default to speech if action contains text
+                return agent.speech(action, output=variables.get('output', 'output.mp3'))
+        
+        # VideoAgent - generate
+        elif agent_class_name == 'VideoAgent':
+            prompt = variables.get('prompt', action)
+            output_file = variables.get('output', 'output.mp4')
+            return agent.generate(prompt, output=output_file)
+        
+        # ImageAgent - generate
+        elif agent_class_name == 'ImageAgent':
+            prompt = variables.get('prompt', action)
+            return agent.generate(prompt)
+        
+        # OCRAgent - extract
+        elif agent_class_name == 'OCRAgent':
+            source = variables.get('source', action)
+            return agent.extract(source)
+        
+        # DeepResearchAgent - research
+        elif agent_class_name == 'DeepResearchAgent':
+            query = variables.get('query', action)
+            return agent.research(query)
+        
+        # Default: standard Agent with chat() method
+        else:
+            return agent.chat(action, stream=stream)
+    
     def _normalize_single_step(self, step: Any, index: int) -> 'WorkflowStep':
         """Normalize a single step to WorkflowStep.
         
         Supports:
         - WorkflowStep objects (passed through)
         - Agent objects (wrapped with agent reference and tools)
+        - Specialized agents (AudioAgent, VideoAgent, ImageAgent, OCRAgent)
         - Callable functions (wrapped as handler)
         - Strings (used as action)
         """
         if isinstance(step, WorkflowStep):
             return step
-        elif hasattr(step, 'chat'):
+        
+        # Check for standard Agent (has chat method) or specialized agents
+        agent_class_name = step.__class__.__name__
+        is_specialized_agent = agent_class_name in ('AudioAgent', 'VideoAgent', 'ImageAgent', 'OCRAgent', 'DeepResearchAgent')
+        
+        if hasattr(step, 'chat') or is_specialized_agent:
             # It's an Agent - wrap with agent reference and preserve tools
             agent_tools = getattr(step, 'tools', None)
             # Check for _yaml_action from YAML parser (canonical: action, alias: description)
@@ -1748,7 +1845,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         elif normalized.agent:
             try:
                 # Propagate context management to existing agent if workflow has it enabled
-                if self.context:
+                if self.context and hasattr(normalized.agent, '_context_manager_initialized'):
                     if not normalized.agent._context_manager_initialized:
                         normalized.agent._context_param = self.context
                     # Share session deduplication cache for cross-agent deduplication
@@ -1769,7 +1866,12 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                         # Auto-append context if not explicitly referenced
                         action = f"{action}\n\nContext from previous step:\n{previous_output}"
                 action = action.replace("{{input}}", input)
-                output = normalized.agent.chat(action, stream=stream)
+                
+                # Check if this is a specialized agent (AudioAgent, VideoAgent, ImageAgent, OCRAgent)
+                agent_class_name = normalized.agent.__class__.__name__
+                output = self._execute_specialized_agent(
+                    normalized.agent, agent_class_name, action, normalized, all_variables, stream
+                )
                 
                 # Parse JSON output if output_json was requested
                 step_output_json = getattr(normalized, '_output_json', None)

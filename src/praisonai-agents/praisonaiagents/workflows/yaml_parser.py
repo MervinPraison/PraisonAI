@@ -442,16 +442,24 @@ class YAMLWorkflowParser:
         
         return agents
     
-    def _create_agent(self, agent_id: str, config: Dict[str, Any]) -> Agent:
+    def _create_agent(self, agent_id: str, config: Dict[str, Any]) -> Any:
         """
         Create an Agent from configuration.
+        
+        Supports specialized agent types via the `agent:` field:
+        - agent: AudioAgent  -> Creates AudioAgent for TTS/STT
+        - agent: VideoAgent  -> Creates VideoAgent for video generation
+        - agent: ImageAgent  -> Creates ImageAgent for image generation
+        - agent: OCRAgent    -> Creates OCRAgent for text extraction
+        - agent: DeepResearchAgent -> Creates DeepResearchAgent for research
+        - (no agent field)   -> Creates default Agent
         
         Args:
             agent_id: Identifier for the agent
             config: Agent configuration dictionary
             
         Returns:
-            Agent object
+            Agent object (or specialized agent type)
         """
         # Extract agent parameters
         name = config.get('name', agent_id)
@@ -486,16 +494,31 @@ class YAMLWorkflowParser:
         prompt_template = config.get('prompt_template')
         response_template = config.get('response_template')
         
-        # Create agent (verbose parameter removed - Agent no longer accepts it)
-        agent = Agent(
-            name=name,
-            role=role,
-            goal=goal,
-            instructions=instructions,
-            backstory=backstory,
-            llm=llm,
-            tools=tools if tools else None,
-        )
+        # Check for specialized agent type via `agent:` field
+        agent_type = config.get('agent', '').lower() if config.get('agent') else ''
+        
+        # Create appropriate agent based on type
+        if agent_type == 'audioagent':
+            agent = self._create_audio_agent(name, llm, config)
+        elif agent_type == 'videoagent':
+            agent = self._create_video_agent(name, llm, config)
+        elif agent_type == 'imageagent':
+            agent = self._create_image_agent(name, llm, config)
+        elif agent_type == 'ocragent':
+            agent = self._create_ocr_agent(name, llm, config)
+        elif agent_type == 'deepresearchagent':
+            agent = self._create_deep_research_agent(name, llm, config)
+        else:
+            # Default: create standard Agent
+            agent = Agent(
+                name=name,
+                role=role,
+                goal=goal,
+                instructions=instructions,
+                backstory=backstory,
+                llm=llm,
+                tools=tools if tools else None,
+            )
         
         # Store additional attributes for later use
         agent._yaml_planning = planning
@@ -515,6 +538,127 @@ class YAMLWorkflowParser:
         agent._yaml_prompt_template = prompt_template
         agent._yaml_response_template = response_template
         
+        return agent
+    
+    def _create_audio_agent(self, name: str, llm: Optional[str], config: Dict[str, Any]) -> Any:
+        """
+        Create an AudioAgent for TTS/STT operations.
+        
+        Args:
+            name: Agent name
+            llm: LLM model (e.g., openai/tts-1, openai/whisper-1)
+            config: Full agent configuration
+            
+        Returns:
+            AudioAgent instance
+        """
+        from ..agent import AudioAgent
+        
+        # AudioAgent accepts: llm, audio config
+        audio_config = config.get('audio', {})
+        
+        agent = AudioAgent(
+            llm=llm,
+            audio=audio_config if audio_config else None,
+        )
+        # Store name for identification
+        agent.name = name
+        return agent
+    
+    def _create_video_agent(self, name: str, llm: Optional[str], config: Dict[str, Any]) -> Any:
+        """
+        Create a VideoAgent for video generation.
+        
+        Args:
+            name: Agent name
+            llm: LLM model (e.g., openai/sora-2)
+            config: Full agent configuration
+            
+        Returns:
+            VideoAgent instance
+        """
+        from ..agent import VideoAgent
+        
+        # VideoAgent accepts: llm, video config
+        video_config = config.get('video', {})
+        
+        agent = VideoAgent(
+            llm=llm,
+            video=video_config if video_config else None,
+        )
+        agent.name = name
+        return agent
+    
+    def _create_image_agent(self, name: str, llm: Optional[str], config: Dict[str, Any]) -> Any:
+        """
+        Create an ImageAgent for image generation.
+        
+        Args:
+            name: Agent name
+            llm: LLM model (e.g., openai/dall-e-3)
+            config: Full agent configuration
+            
+        Returns:
+            ImageAgent instance
+        """
+        from ..agent import ImageAgent
+        
+        # ImageAgent accepts: llm, style, and other image config
+        style = config.get('style', 'natural')
+        
+        agent = ImageAgent(
+            llm=llm,
+            style=style,
+        )
+        agent.name = name
+        return agent
+    
+    def _create_ocr_agent(self, name: str, llm: Optional[str], config: Dict[str, Any]) -> Any:
+        """
+        Create an OCRAgent for text extraction from documents/images.
+        
+        Args:
+            name: Agent name
+            llm: LLM model (e.g., mistral/mistral-ocr-latest)
+            config: Full agent configuration
+            
+        Returns:
+            OCRAgent instance
+        """
+        from ..agent import OCRAgent
+        
+        # OCRAgent accepts: llm, ocr config
+        ocr_config = config.get('ocr', {})
+        
+        agent = OCRAgent(
+            llm=llm,
+            ocr=ocr_config if ocr_config else None,
+        )
+        agent.name = name
+        return agent
+    
+    def _create_deep_research_agent(self, name: str, llm: Optional[str], config: Dict[str, Any]) -> Any:
+        """
+        Create a DeepResearchAgent for automated research.
+        
+        Args:
+            name: Agent name
+            llm: LLM model (e.g., o3-deep-research)
+            config: Full agent configuration
+            
+        Returns:
+            DeepResearchAgent instance
+        """
+        from ..agent import DeepResearchAgent
+        
+        # DeepResearchAgent accepts: model, instructions, etc.
+        instructions = config.get('instructions', config.get('backstory', ''))
+        
+        agent = DeepResearchAgent(
+            name=name,
+            model=llm or 'o3-deep-research',
+            instructions=instructions,
+        )
         return agent
     
     def _resolve_tools(self, tools_config: List[str]) -> List[Callable]:
