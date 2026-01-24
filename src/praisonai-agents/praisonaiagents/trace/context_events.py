@@ -324,7 +324,11 @@ class ContextTraceEmitter:
         emitter.session_end()
     """
     
-    __slots__ = ("_sink", "_session_id", "_enabled", "_redact", "_sequence", "_branch_id")
+    __slots__ = ("_sink", "_session_id", "_enabled", "_redact", "_sequence", "_branch_id", "_full_content")
+    
+    # Default limits for truncation (can be overridden with full_content=True)
+    DEFAULT_TOOL_RESULT_LIMIT = 10000  # Increased from 2000 to capture full search results
+    DEFAULT_LLM_RESPONSE_LIMIT = 10000  # Increased from 5000
     
     def __init__(
         self,
@@ -332,6 +336,7 @@ class ContextTraceEmitter:
         session_id: str = "",
         enabled: bool = True,
         redact: bool = True,
+        full_content: bool = False,
     ):
         """
         Initialize context trace emitter.
@@ -341,6 +346,7 @@ class ContextTraceEmitter:
             session_id: Session identifier for all events
             enabled: Whether tracing is enabled
             redact: Whether to redact sensitive data
+            full_content: If True, store full content without truncation (for --full flag)
         """
         self._sink = sink if sink is not None else ContextNoOpSink()
         self._session_id = session_id
@@ -348,6 +354,7 @@ class ContextTraceEmitter:
         self._redact = redact
         self._sequence = 0
         self._branch_id: Optional[str] = None
+        self._full_content = full_content
     
     def _emit(self, event: ContextEvent) -> None:
         """Internal emit with enabled check and sequence assignment."""
@@ -490,10 +497,14 @@ class ContextTraceEmitter:
             error: Error message if any
             cost_usd: Cost in USD (e.g., 0.001 for internet search = 1 credit)
         """
-        # Truncate long results (2000 chars allows full search results while keeping trace size reasonable)
+        # Truncate long results unless full_content is enabled
         truncated_result = None
         if result:
-            truncated_result = result[:2000] + "..." if len(result) > 2000 else result
+            if self._full_content:
+                truncated_result = result  # No truncation when full_content=True
+            else:
+                limit = self.DEFAULT_TOOL_RESULT_LIMIT
+                truncated_result = result[:limit] + "...[truncated]" if len(result) > limit else result
         
         # Calculate tool cost if not provided (1 credit = $0.001 for search tools)
         if cost_usd == 0.0:
@@ -602,9 +613,11 @@ class ContextTraceEmitter:
             "finish_reason": finish_reason,
         }
         if response_content is not None:
-            # Truncate very long responses to prevent huge trace files
-            if len(response_content) > 5000:
-                data["response_content"] = response_content[:5000] + "... [truncated]"
+            # Truncate very long responses unless full_content is enabled
+            if self._full_content:
+                data["response_content"] = response_content
+            elif len(response_content) > self.DEFAULT_LLM_RESPONSE_LIMIT:
+                data["response_content"] = response_content[:self.DEFAULT_LLM_RESPONSE_LIMIT] + "...[truncated]"
             else:
                 data["response_content"] = response_content
         

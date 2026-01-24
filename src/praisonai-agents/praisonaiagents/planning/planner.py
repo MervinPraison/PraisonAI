@@ -190,7 +190,7 @@ Provide a concise analysis that will help in creating an implementation plan.'''
                 goal="Research information and create detailed implementation plans",
                 llm=self.llm_model,
                 tools=self.tools,
-                verbose=self.verbose > 0
+                output="verbose" if self.verbose > 0 else "silent"
             )
         return self._agent
     

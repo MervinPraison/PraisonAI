@@ -631,9 +631,13 @@ class TestPluginDiscovery:
         mock_ep.name = "mock_plugin"
         mock_ep.load.return_value = MockPluginTool
         
-        # Mock entry_points to return our mock
+        # Reset the lazy-loaded entry_points cache
+        import praisonaiagents.tools.registry as registry_module
+        registry_module._entry_points = None
+        
+        # Mock entry_points at the source (importlib.metadata)
         mocker.patch(
-            'praisonaiagents.tools.registry.entry_points',
+            'importlib.metadata.entry_points',
             return_value=[mock_ep]
         )
         
@@ -656,8 +660,13 @@ class TestPluginDiscovery:
         mock_ep.name = "broken_plugin"
         mock_ep.load.side_effect = ImportError("Module not found")
         
+        # Reset the lazy-loaded entry_points cache
+        import praisonaiagents.tools.registry as registry_module
+        registry_module._entry_points = None
+        
+        # Mock entry_points at the source (importlib.metadata)
         mocker.patch(
-            'praisonaiagents.tools.registry.entry_points',
+            'importlib.metadata.entry_points',
             return_value=[mock_ep]
         )
         
@@ -680,8 +689,13 @@ class TestPluginDiscovery:
         mock_ep.name = "func_plugin"
         mock_ep.load.return_value = plugin_function
         
+        # Reset the lazy-loaded entry_points cache
+        import praisonaiagents.tools.registry as registry_module
+        registry_module._entry_points = None
+        
+        # Mock entry_points at the source (importlib.metadata)
         mocker.patch(
-            'praisonaiagents.tools.registry.entry_points',
+            'importlib.metadata.entry_points',
             return_value=[mock_ep]
         )
         
@@ -707,8 +721,13 @@ class TestPluginDiscovery:
         mock_ep.name = "lazy_tool"
         mock_ep.load.return_value = LazyTool
         
+        # Reset the lazy-loaded entry_points cache
+        import praisonaiagents.tools.registry as registry_module
+        registry_module._entry_points = None
+        
+        # Mock entry_points at the source (importlib.metadata)
         mocker.patch(
-            'praisonaiagents.tools.registry.entry_points',
+            'importlib.metadata.entry_points',
             return_value=[mock_ep]
         )
         

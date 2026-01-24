@@ -42,7 +42,7 @@ def test_file_memory_with_agent():
             name="Assistant",
             instructions="You are a helpful assistant. Use the memory context to personalize responses.",
             memory=memory,
-            verbose=True
+            output="verbose"
         )
         
         # Test that memory context is included
@@ -114,7 +114,7 @@ def test_context_compression_with_llm():
             summarizer = Agent(
                 name="Summarizer",
                 instructions="You summarize text concisely.",
-                verbose=False
+                output="silent"
             )
             return summarizer.chat(prompt)
         
@@ -255,7 +255,7 @@ def test_multi_agent_with_shared_memory():
             goal="Research and gather information",
             backstory="Expert at finding and analyzing information",
             memory=shared_memory,
-            verbose=True
+            output="verbose"
         )
         
         writer = Agent(
@@ -264,7 +264,7 @@ def test_multi_agent_with_shared_memory():
             goal="Write clear documentation",
             backstory="Expert at technical writing",
             memory=shared_memory,
-            verbose=True
+            output="verbose"
         )
         
         # Test researcher
@@ -366,7 +366,7 @@ def test_agent_with_rules():
             agent = Agent(
                 name="RulesAgent",
                 instructions="You are a helpful assistant.",
-                verbose=True
+                output="verbose"
             )
             
             # Check if rules were loaded

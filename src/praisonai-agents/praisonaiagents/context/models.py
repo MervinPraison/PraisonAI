@@ -214,6 +214,9 @@ class OptimizationResult:
     messages_removed: int = 0
     messages_tagged: int = 0
     tool_outputs_pruned: int = 0
+    tool_outputs_summarized: int = 0  # Count of tool outputs summarized via LLM
+    tokens_saved_by_summarization: int = 0  # Tokens saved specifically by LLM summarization
+    tokens_saved_by_truncation: int = 0  # Tokens saved specifically by truncation
     summary_added: bool = False
     
     @property
@@ -285,6 +288,9 @@ class ContextConfig:
     
     # LLM-powered summarization
     llm_summarize: bool = False  # Enable LLM-powered summarization (uses agent's LLM)
+    
+    # Smart tool output summarization (summarize before truncating)
+    smart_tool_summarize: bool = True  # Summarize large tool outputs using LLM before truncating
     
     # Session tracking (Agno pattern)
     session_tracking: bool = False     # Enable goal/plan/progress tracking

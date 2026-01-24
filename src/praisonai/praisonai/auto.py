@@ -1,63 +1,229 @@
-from openai import OpenAI
+"""Auto-generation module for PraisonAI agents and workflows.
+
+This module uses FULL LAZY LOADING for all heavy dependencies:
+- crewai: Only loaded when framework='crewai' is used
+- autogen: Only loaded when framework='autogen' is used  
+- praisonaiagents: Only loaded when framework='praisonai' is used
+- litellm: Only loaded when structured output is needed
+- openai: Fallback for structured output when litellm unavailable
+- praisonai_tools: Only loaded when tools are needed
+
+This ensures minimal import-time overhead.
+"""
 from pydantic import BaseModel
-from typing import Dict, List, Optional
-import instructor
+from typing import Dict, List, Optional, Type, TypeVar
 import os
 import json
 import yaml
 from rich import print
 import logging
 
-# Framework-specific imports with availability checks
-CREWAI_AVAILABLE = False
-AUTOGEN_AVAILABLE = False
-PRAISONAI_TOOLS_AVAILABLE = False
-PRAISONAI_AVAILABLE = False
+# Type variable for Pydantic models
+T = TypeVar('T', bound=BaseModel)
 
-try:
-    from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, Agents
-    PRAISONAI_AVAILABLE = True
-except ImportError:
-    pass
+# =============================================================================
+# LAZY LOADING INFRASTRUCTURE - All heavy imports are deferred
+# =============================================================================
 
-try:
-    from crewai import Agent, Task, Crew
-    CREWAI_AVAILABLE = True
-except ImportError:
-    pass
+# Cached availability flags (None = not checked yet)
+_crewai_available = None
+_autogen_available = None
+_autogen_v4_available = None
+_praisonai_available = None
+_praisonai_tools_available = None
+_litellm_available = None
+_openai_available = None
 
-try:
-    import autogen
-    AUTOGEN_AVAILABLE = True
-except ImportError:
-    pass
+# Cached module/class references
+_crewai_classes = None  # (Agent, Task, Crew)
+_autogen_module = None
+_autogen_v4_classes = None  # (AssistantAgent, OpenAIChatCompletionClient)
+_praisonai_classes = None  # (PraisonAgent, PraisonTask, Agents)
+_praisonai_tools = None  # dict of tool classes
+_litellm = None
+_openai_client = None
 
-try:
-    from autogen_agentchat.agents import AssistantAgent
-    from autogen_ext.models.openai import OpenAIChatCompletionClient
-    AUTOGEN_V4_AVAILABLE = True
-except ImportError:
-    AUTOGEN_V4_AVAILABLE = False
 
-try:
-    from praisonai_tools import (
-        CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool,
-        DirectoryReadTool, FileReadTool, TXTSearchTool, JSONSearchTool,
-        MDXSearchTool, PDFSearchTool, RagTool, ScrapeElementFromWebsiteTool,
-        ScrapeWebsiteTool, WebsiteSearchTool, XMLSearchTool,
-        YoutubeChannelSearchTool, YoutubeVideoSearchTool
-    )
-    PRAISONAI_TOOLS_AVAILABLE = True
-except ImportError:
-    PRAISONAI_TOOLS_AVAILABLE = False
+# --- CrewAI lazy loading ---
+def _check_crewai_available() -> bool:
+    """Check if crewai is available (cached)."""
+    global _crewai_available
+    if _crewai_available is None:
+        try:
+            import crewai  # noqa: F401
+            _crewai_available = True
+        except ImportError:
+            _crewai_available = False
+    return _crewai_available
 
-# LiteLLM availability check for multi-provider support
-LITELLM_AVAILABLE = False
-try:
-    import litellm  # noqa: F401 - imported for availability check
-    LITELLM_AVAILABLE = True
-except ImportError:
-    pass
+
+def _get_crewai():
+    """Lazy load crewai classes."""
+    global _crewai_classes
+    if _crewai_classes is None:
+        from crewai import Agent, Task, Crew
+        _crewai_classes = (Agent, Task, Crew)
+    return _crewai_classes
+
+
+# --- AutoGen lazy loading ---
+def _check_autogen_available() -> bool:
+    """Check if autogen v0.2 is available (cached)."""
+    global _autogen_available
+    if _autogen_available is None:
+        try:
+            import autogen  # noqa: F401
+            _autogen_available = True
+        except ImportError:
+            _autogen_available = False
+    return _autogen_available
+
+
+def _check_autogen_v4_available() -> bool:
+    """Check if autogen v0.4 is available (cached)."""
+    global _autogen_v4_available
+    if _autogen_v4_available is None:
+        try:
+            from autogen_agentchat.agents import AssistantAgent  # noqa: F401
+            _autogen_v4_available = True
+        except ImportError:
+            _autogen_v4_available = False
+    return _autogen_v4_available
+
+
+def _get_autogen():
+    """Lazy load autogen module."""
+    global _autogen_module
+    if _autogen_module is None:
+        import autogen
+        _autogen_module = autogen
+    return _autogen_module
+
+
+def _get_autogen_v4():
+    """Lazy load autogen v0.4 classes."""
+    global _autogen_v4_classes
+    if _autogen_v4_classes is None:
+        from autogen_agentchat.agents import AssistantAgent
+        from autogen_ext.models.openai import OpenAIChatCompletionClient
+        _autogen_v4_classes = (AssistantAgent, OpenAIChatCompletionClient)
+    return _autogen_v4_classes
+
+
+# --- PraisonAI Agents lazy loading ---
+def _check_praisonai_available() -> bool:
+    """Check if praisonaiagents is available (cached)."""
+    global _praisonai_available
+    if _praisonai_available is None:
+        try:
+            import praisonaiagents  # noqa: F401
+            _praisonai_available = True
+        except ImportError:
+            _praisonai_available = False
+    return _praisonai_available
+
+
+def _get_praisonai():
+    """Lazy load praisonaiagents classes."""
+    global _praisonai_classes
+    if _praisonai_classes is None:
+        from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, Agents
+        _praisonai_classes = (PraisonAgent, PraisonTask, Agents)
+    return _praisonai_classes
+
+
+# --- PraisonAI Tools lazy loading ---
+def _check_praisonai_tools_available() -> bool:
+    """Check if praisonai_tools is available (cached)."""
+    global _praisonai_tools_available
+    if _praisonai_tools_available is None:
+        try:
+            import praisonai_tools  # noqa: F401
+            _praisonai_tools_available = True
+        except ImportError:
+            _praisonai_tools_available = False
+    return _praisonai_tools_available
+
+
+def _get_praisonai_tools():
+    """Lazy load praisonai_tools classes."""
+    global _praisonai_tools
+    if _praisonai_tools is None:
+        from praisonai_tools import (
+            CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool,
+            DirectoryReadTool, FileReadTool, TXTSearchTool, JSONSearchTool,
+            MDXSearchTool, PDFSearchTool, RagTool, ScrapeElementFromWebsiteTool,
+            ScrapeWebsiteTool, WebsiteSearchTool, XMLSearchTool,
+            YoutubeChannelSearchTool, YoutubeVideoSearchTool
+        )
+        _praisonai_tools = {
+            'CodeDocsSearchTool': CodeDocsSearchTool,
+            'CSVSearchTool': CSVSearchTool,
+            'DirectorySearchTool': DirectorySearchTool,
+            'DOCXSearchTool': DOCXSearchTool,
+            'DirectoryReadTool': DirectoryReadTool,
+            'FileReadTool': FileReadTool,
+            'TXTSearchTool': TXTSearchTool,
+            'JSONSearchTool': JSONSearchTool,
+            'MDXSearchTool': MDXSearchTool,
+            'PDFSearchTool': PDFSearchTool,
+            'RagTool': RagTool,
+            'ScrapeElementFromWebsiteTool': ScrapeElementFromWebsiteTool,
+            'ScrapeWebsiteTool': ScrapeWebsiteTool,
+            'WebsiteSearchTool': WebsiteSearchTool,
+            'XMLSearchTool': XMLSearchTool,
+            'YoutubeChannelSearchTool': YoutubeChannelSearchTool,
+            'YoutubeVideoSearchTool': YoutubeVideoSearchTool,
+        }
+    return _praisonai_tools
+
+
+# --- LiteLLM lazy loading ---
+def _check_litellm_available() -> bool:
+    """Check if litellm is available (cached)."""
+    global _litellm_available
+    if _litellm_available is None:
+        try:
+            import litellm  # noqa: F401
+            _litellm_available = True
+        except ImportError:
+            _litellm_available = False
+    return _litellm_available
+
+
+def _get_litellm():
+    """Lazy load litellm module."""
+    global _litellm
+    if _litellm is None:
+        import litellm as _litellm_module
+        _litellm = _litellm_module
+    return _litellm
+
+
+# --- OpenAI lazy loading ---
+def _check_openai_available() -> bool:
+    """Check if openai is available (cached)."""
+    global _openai_available
+    if _openai_available is None:
+        try:
+            import openai  # noqa: F401
+            _openai_available = True
+        except ImportError:
+            _openai_available = False
+    return _openai_available
+
+
+def _get_openai_client(api_key: str = None, base_url: str = None):
+    """Lazy load OpenAI client."""
+    global _openai_client
+    if _openai_client is None:
+        from openai import OpenAI
+        _openai_client = OpenAI(
+            api_key=api_key or os.environ.get("OPENAI_API_KEY"),
+            base_url=base_url
+        )
+    return _openai_client
+
 
 _loglevel = os.environ.get('LOGLEVEL', 'INFO').strip().upper() or 'INFO'
 logging.basicConfig(level=_loglevel, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -281,7 +447,7 @@ class BaseAutoGenerator:
     Base class for auto-generators with shared functionality.
     
     Provides:
-    - Lazy-loaded instructor client (LiteLLM or OpenAI fallback)
+    - LiteLLM-based structured output (replaces instructor for less dependencies)
     - Environment variable handling for model/API configuration
     - Config list management
     """
@@ -308,33 +474,59 @@ class BaseAutoGenerator:
                 'api_key': os.environ.get("OPENAI_API_KEY")
             }
         ]
-        self._client = None  # Lazy loading for performance
     
-    @property
-    def client(self):
-        """Lazy load the instructor client to avoid performance impact.
-        
-        Uses LiteLLM via instructor.from_provider if available for multi-provider support,
-        otherwise falls back to direct OpenAI SDK.
+    def _structured_completion(self, response_model: Type[T], messages: List[Dict], **kwargs) -> T:
         """
-        if self._client is None:
-            if LITELLM_AVAILABLE:
-                # Use LiteLLM for multi-provider support (100+ LLMs)
-                model_name = self.config_list[0]['model']
-                self._client = instructor.from_provider(
-                    f"litellm/{model_name}",
-                    mode=instructor.Mode.JSON
-                )
-            else:
-                # Fallback to direct OpenAI SDK
-                self._client = instructor.patch(
-                    OpenAI(
-                        base_url=self.config_list[0]['base_url'],
-                        api_key=self.config_list[0]['api_key'],
-                    ),
-                    mode=instructor.Mode.JSON,
-                )
-        return self._client
+        Make a structured LLM completion with provider fallback.
+        
+        Priority:
+        1. LiteLLM (if available) - supports 100+ LLM providers
+        2. OpenAI SDK (fallback) - uses beta.chat.completions.parse
+        
+        Args:
+            response_model: Pydantic model class for structured output
+            messages: List of message dicts for the LLM
+            **kwargs: Additional arguments passed to the LLM
+            
+        Returns:
+            Instance of response_model with parsed response
+            
+        Raises:
+            ImportError: If neither litellm nor openai is installed
+        """
+        model_name = self.config_list[0]['model']
+        
+        # Try LiteLLM first (preferred - supports 100+ providers)
+        if _check_litellm_available():
+            litellm = _get_litellm()
+            response = litellm.completion(
+                model=model_name,
+                messages=messages,
+                response_format=response_model,
+                **kwargs
+            )
+            content = response.choices[0].message.content
+            return response_model.model_validate_json(content)
+        
+        # Fallback to OpenAI SDK (uses beta.chat.completions.parse)
+        if _check_openai_available():
+            client = _get_openai_client(
+                api_key=self.config_list[0].get('api_key'),
+                base_url=self.config_list[0].get('base_url')
+            )
+            response = client.beta.chat.completions.parse(
+                model=model_name,
+                messages=messages,
+                response_format=response_model,
+                **kwargs
+            )
+            return response.choices[0].message.parsed
+        
+        # Neither available - raise helpful error
+        raise ImportError(
+            "Structured output requires either litellm or openai. "
+            "Install with: pip install litellm  OR  pip install openai"
+        )
     
     @staticmethod
     def get_available_tools() -> List[str]:
@@ -450,25 +642,25 @@ class AutoGenerator(BaseAutoGenerator):
         super().__init__(config_list=config_list)
         
         # Validate framework availability and show framework-specific messages
-        if framework == "crewai" and not CREWAI_AVAILABLE:
+        if framework == "crewai" and not _check_crewai_available():
             raise ImportError("""
 CrewAI is not installed. Please install with:
     pip install "praisonai[crewai]"
 """)
-        elif framework == "autogen" and not (AUTOGEN_AVAILABLE or AUTOGEN_V4_AVAILABLE):
+        elif framework == "autogen" and not (_check_autogen_available() or _check_autogen_v4_available()):
             raise ImportError("""
 AutoGen is not installed. Please install with:
     pip install "praisonai[autogen]" for v0.2
     pip install "praisonai[autogen-v4]" for v0.4
 """)
-        elif framework == "praisonai" and not PRAISONAI_AVAILABLE:
+        elif framework == "praisonai" and not _check_praisonai_available():
             raise ImportError("""
 Praisonai is not installed. Please install with:
     pip install praisonaiagents
 """)
 
         # Only show tools message if using a framework and tools are needed
-        if (framework in ["crewai", "autogen"]) and not PRAISONAI_TOOLS_AVAILABLE:
+        if (framework in ["crewai", "autogen"]) and not _check_praisonai_tools_available():
             if framework == "autogen":
                 logging.warning("""
 Tools are not available for autogen. To use tools, install:
@@ -536,11 +728,8 @@ Tools are not available for {framework}. To use tools, install:
             path = generator.generate()
             print(path)
         """
-        response = self.client.chat.completions.create(
-            model=self.config_list[0]['model'],
+        response = self._structured_completion(
             response_model=TeamStructure,
-            max_retries=5,
-            timeout=120.0,  # 2 minute timeout for complex generations
             messages=[
                 {"role": "system", "content": "You are a helpful assistant designed to output complex team structures."},
                 {"role": "user", "content": self.get_user_content()}
@@ -927,11 +1116,8 @@ Respond with:
 - confidence: Your confidence score (0.0 to 1.0)
 """
         
-        response = self.client.chat.completions.create(
-            model=self.config_list[0]['model'],
+        response = self._structured_completion(
             response_model=PatternRecommendation,
-            max_retries=3,
-            timeout=60.0,
             messages=[
                 {"role": "system", "content": "You are an expert at designing AI agent workflows."},
                 {"role": "user", "content": prompt}
@@ -952,11 +1138,8 @@ Respond with:
         Returns:
             Path to the generated workflow file
         """
-        response = self.client.chat.completions.create(
-            model=self.config_list[0]['model'],
+        response = self._structured_completion(
             response_model=WorkflowStructure,
-            max_retries=5,
-            timeout=120.0,  # 2 minute timeout for complex generations
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that designs workflow structures."},
                 {"role": "user", "content": self._get_prompt(pattern)}

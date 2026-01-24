@@ -558,15 +558,15 @@ class TestMemoryIntegrationWithOpenAI:
         
         try:
             # Create agent with memory enabled
+            from praisonaiagents.config import MemoryConfig
             agent = Agent(
                 name="Memory Test Agent",
                 role="Assistant",
                 goal="Help users and remember their information",
                 backstory="You are a helpful assistant with memory capabilities.",
                 # Uses default model (gpt-4o-mini via OPENAI_MODEL_NAME or fallback)
-                memory=True,
-                user_id=test_user_id,
-                verbose=False
+                memory=MemoryConfig(user_id=test_user_id),
+                output="silent"
             )
             
             # Store memories BEFORE the chat
@@ -611,13 +611,13 @@ class TestMemoryIntegrationWithOpenAI:
         test_user_id = "persistence_test_user"
         
         try:
+            from praisonaiagents.config import MemoryConfig
             # First agent - store memories
             agent1 = Agent(
                 name="Agent 1",
                 # Uses default model (gpt-4o-mini via OPENAI_MODEL_NAME or fallback)
-                memory=True,
-                user_id=test_user_id,
-                verbose=False
+                memory=MemoryConfig(user_id=test_user_id),
+                output="silent"
             )
             
             agent1.store_memory("User prefers Python over JavaScript", memory_type="long_term", importance=0.9)
@@ -632,9 +632,8 @@ class TestMemoryIntegrationWithOpenAI:
             agent2 = Agent(
                 name="Agent 2",
                 # Uses default model (gpt-4o-mini via OPENAI_MODEL_NAME or fallback)
-                memory=True,
-                user_id=test_user_id,
-                verbose=False
+                memory=MemoryConfig(user_id=test_user_id),
+                output="silent"
             )
             
             # Verify memories loaded
@@ -670,11 +669,12 @@ class TestMultiAgentMemorySharing:
             user_id = f"shared_user_{uuid.uuid4().hex[:8]}"
             base_path = f"{tmpdir}/memory"
             
+            from praisonaiagents.config import MemoryConfig
             # Agent 1 stores memories
             agent1 = Agent(
                 name="Agent1",
-                memory={"provider": "file", "user_id": user_id, "base_path": base_path},
-                verbose=False
+                memory=MemoryConfig(backend="file", user_id=user_id),
+                output="silent"
             )
             
             agent1.store_memory("User prefers Python", memory_type="short_term")
@@ -689,8 +689,8 @@ class TestMultiAgentMemorySharing:
             # Agent 2 with same user_id should load memories
             agent2 = Agent(
                 name="Agent2",
-                memory={"provider": "file", "user_id": user_id, "base_path": base_path},
-                verbose=False
+                memory=MemoryConfig(backend="file", user_id=user_id),
+                output="silent"
             )
             
             # Verify Agent2 loaded the same memories
@@ -710,19 +710,20 @@ class TestMultiAgentMemorySharing:
         with tempfile.TemporaryDirectory() as tmpdir:
             base_path = f"{tmpdir}/memory"
             
+            from praisonaiagents.config import MemoryConfig
             # Agent 1 with user_id "user1"
             agent1 = Agent(
                 name="Agent1",
-                memory={"provider": "file", "user_id": "user1", "base_path": base_path},
-                verbose=False
+                memory=MemoryConfig(backend="file", user_id="user1"),
+                output="silent"
             )
             agent1.store_memory("User1 data", memory_type="long_term", importance=0.9)
             
             # Agent 2 with different user_id "user2"
             agent2 = Agent(
                 name="Agent2",
-                memory={"provider": "file", "user_id": "user2", "base_path": base_path},
-                verbose=False
+                memory=MemoryConfig(backend="file", user_id="user2"),
+                output="silent"
             )
             
             # Agent2 should have no memories (different user_id)
@@ -737,10 +738,11 @@ class TestMultiAgentMemorySharing:
         from praisonaiagents import Agent
         
         with tempfile.TemporaryDirectory() as tmpdir:
+            from praisonaiagents.config import MemoryConfig
             agent = Agent(
                 name="TestAgent",
-                memory={"provider": "file", "user_id": "test", "base_path": f"{tmpdir}/memory"},
-                verbose=False
+                memory=MemoryConfig(backend="file", user_id="test"),
+                output="silent"
             )
             
             # Store memories
@@ -758,12 +760,13 @@ class TestMultiAgentMemorySharing:
     def test_memory_display_info(self):
         """Test that memory display info shows correct counts."""
         from praisonaiagents import Agent
+        from praisonaiagents.config import MemoryConfig
         
         with tempfile.TemporaryDirectory() as tmpdir:
             agent = Agent(
                 name="TestAgent",
-                memory={"provider": "file", "user_id": "test", "base_path": f"{tmpdir}/memory"},
-                verbose=True
+                memory=MemoryConfig(backend="file", user_id="test"),
+                output="verbose"
             )
             
             # Store various memories
@@ -798,12 +801,12 @@ class TestMultiAgentMemoryIntegration:
         test_user_id = "multi_agent_llm_test"
         
         try:
+            from praisonaiagents.config import MemoryConfig
             # Agent 1 stores memories
             agent1 = Agent(
                 name="Agent1",
-                memory=True,
-                user_id=test_user_id,
-                verbose=False
+                memory=MemoryConfig(user_id=test_user_id),
+                output="silent"
             )
             
             agent1.store_memory("User's favorite color is blue", memory_type="long_term", importance=0.9)
@@ -812,9 +815,8 @@ class TestMultiAgentMemoryIntegration:
             # Agent 2 with same user_id should recall memories
             agent2 = Agent(
                 name="Agent2",
-                memory=True,
-                user_id=test_user_id,
-                verbose=False
+                memory=MemoryConfig(user_id=test_user_id),
+                output="silent"
             )
             
             # Verify memories loaded

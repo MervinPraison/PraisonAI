@@ -81,6 +81,47 @@ if CREWAI_AVAILABLE or AUTOGEN_AVAILABLE or PRAISONAI_AVAILABLE:
 
 os.environ["OTEL_SDK_DISABLED"] = "true"
 
+
+def safe_format(template: str, **kwargs) -> str:
+    """
+    Safely format a string template, preserving JSON-like curly braces.
+    
+    This handles cases where templates contain Gutenberg block syntax like
+    {"level":2} which would cause KeyError with standard .format().
+    
+    Uses a two-pass approach:
+    1. Escape all {{ and }} (already escaped braces)
+    2. Only substitute known variable placeholders
+    
+    Args:
+        template: String template with {variable} placeholders
+        **kwargs: Variable substitutions to apply
+        
+    Returns:
+        Formatted string with variables substituted and JSON preserved
+        
+    Example:
+        >>> safe_format('Use <!-- wp:heading {"level":2} --> for {topic}', topic='AI')
+        'Use <!-- wp:heading {"level":2} --> for AI'
+    """
+    import re
+    
+    # Pattern to match {word} but not {"key": or {number} patterns
+    # This matches simple variable names like {topic}, {style}, etc.
+    def replace_var(match):
+        var_name = match.group(1)
+        if var_name in kwargs:
+            return str(kwargs[var_name])
+        # If not in kwargs, leave it as-is (don't raise KeyError)
+        return match.group(0)
+    
+    # Match {variable_name} where variable_name is a valid Python identifier
+    # but NOT {" (JSON start) or {number (like {2})
+    pattern = r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}'
+    
+    return re.sub(pattern, replace_var, template)
+
+
 def noop(*args, **kwargs):
     pass
 
@@ -520,14 +561,14 @@ class AgentsGenerator:
         
         # Create agents and tasks from config
         for role, details in config['roles'].items():
-            agent_name = details['role'].format(topic=topic).replace("{topic}", topic)
-            agent_goal = details['goal'].format(topic=topic)
+            agent_name = safe_format(details['role'], topic=topic).replace("{topic}", topic)
+            agent_goal = safe_format(details['goal'], topic=topic)
             
             # Create AutoGen assistant agent
             agents[role] = autogen.AssistantAgent(
                 name=agent_name,
                 llm_config=llm_config,
-                system_message=details['backstory'].format(topic=topic) + 
+                system_message=safe_format(details['backstory'], topic=topic) + 
                              ". Must Reply \"TERMINATE\" in the end when everything is done.",
             )
             
@@ -544,8 +585,8 @@ class AgentsGenerator:
 
             # Prepare tasks
             for task_name, task_details in details.get('tasks', {}).items():
-                description_filled = task_details['description'].format(topic=topic)
-                expected_output_filled = task_details['expected_output'].format(topic=topic)
+                description_filled = safe_format(task_details['description'], topic=topic)
+                expected_output_filled = safe_format(task_details['expected_output'], topic=topic)
                 
                 chat_task = {
                     "recipient": agents[role],
@@ -592,9 +633,9 @@ class AgentsGenerator:
             # Create agents from config
             for role, details in config['roles'].items():
                 # For AutoGen v0.4, ensure agent name is a valid Python identifier
-                agent_name = details['role'].format(topic=topic).replace("{topic}", topic)
+                agent_name = safe_format(details['role'], topic=topic).replace("{topic}", topic)
                 agent_name = sanitize_agent_name_for_autogen_v4(agent_name)
-                backstory = details['backstory'].format(topic=topic)
+                backstory = safe_format(details['backstory'], topic=topic)
                 
                 # Convert tools for v0.4 - simplified tool passing
                 agent_tools = []
@@ -618,7 +659,7 @@ class AgentsGenerator:
                 
                 # Collect all task descriptions for sequential execution
                 for task_name, task_details in details.get('tasks', {}).items():
-                    description_filled = task_details['description'].format(topic=topic)
+                    description_filled = safe_format(task_details['description'], topic=topic)
                     combined_tasks.append(description_filled)
             
             if not agents:
@@ -688,9 +729,9 @@ class AgentsGenerator:
 
         # Create agents from config
         for role, details in config['roles'].items():
-            role_filled = details['role'].format(topic=topic)
-            goal_filled = details['goal'].format(topic=topic)
-            backstory_filled = details['backstory'].format(topic=topic)
+            role_filled = safe_format(details['role'], topic=topic)
+            goal_filled = safe_format(details['goal'], topic=topic)
+            backstory_filled = safe_format(details['backstory'], topic=topic)
             
             # Get agent tools
             agent_tools = [tools_dict[tool] for tool in details.get('tools', []) 
@@ -751,8 +792,8 @@ class AgentsGenerator:
 
             # Create tasks for the agent
             for task_name, task_details in details.get('tasks', {}).items():
-                description_filled = task_details['description'].format(topic=topic)
-                expected_output_filled = task_details['expected_output'].format(topic=topic)
+                description_filled = safe_format(task_details['description'], topic=topic)
+                expected_output_filled = safe_format(task_details['expected_output'], topic=topic)
 
                 task = Task(
                     description=description_filled,
@@ -818,9 +859,9 @@ class AgentsGenerator:
 
         # Create agents from config
         for role, details in config['roles'].items():
-            role_filled = details['role'].format(topic=topic)
-            goal_filled = details['goal'].format(topic=topic)
-            backstory_filled = details['backstory'].format(topic=topic)
+            role_filled = safe_format(details['role'], topic=topic)
+            goal_filled = safe_format(details['goal'], topic=topic)
+            backstory_filled = safe_format(details['backstory'], topic=topic)
             
             # Pass all loaded tools to the agent
             # Get LLM from config or environment
@@ -863,8 +904,8 @@ class AgentsGenerator:
                 self.logger.debug(f"Auto-generated task for agent {role_filled}")
             else:
                 for task_name, task_details in agent_tasks.items():
-                    description_filled = task_details['description'].format(topic=topic)
-                    expected_output_filled = task_details['expected_output'].format(topic=topic)
+                    description_filled = safe_format(task_details['description'], topic=topic)
+                    expected_output_filled = safe_format(task_details['expected_output'], topic=topic)
 
                     task = PraisonTask(
                         description=description_filled,

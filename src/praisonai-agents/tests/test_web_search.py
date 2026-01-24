@@ -127,31 +127,32 @@ class TestLLMBuildCompletionParams:
 
 
 class TestAgentWebSearchParameter:
-    """Test Agent class web_search parameter."""
+    """Test Agent class web= parameter (consolidated API)."""
     
-    def test_agent_init_with_web_search_true(self):
-        """Test Agent initialization with web_search=True."""
+    def test_agent_init_with_web_search(self):
+        """Test Agent initialization with web=WebConfig(search=True, fetch=False)."""
         from praisonaiagents import Agent
+        from praisonaiagents.config import WebConfig
         agent = Agent(
             name="Test Agent",
             instructions="Test",
-            web_search=True
+            web=WebConfig(search=True, fetch=False)
         )
         assert agent.web_search == True
     
-    def test_agent_init_with_web_search_dict(self):
-        """Test Agent initialization with web_search as dict."""
+    def test_agent_init_with_web_config_search_only(self):
+        """Test Agent initialization with WebConfig search only."""
         from praisonaiagents import Agent
-        web_search_options = {"search_context_size": "high"}
+        from praisonaiagents.config import WebConfig
         agent = Agent(
             name="Test Agent",
             instructions="Test",
-            web_search=web_search_options
+            web=WebConfig(search=True, fetch=False)
         )
-        assert agent.web_search == web_search_options
+        assert agent.web_search == True
     
-    def test_agent_init_without_web_search(self):
-        """Test Agent initialization without web_search (default None)."""
+    def test_agent_init_without_web(self):
+        """Test Agent initialization without web (default None)."""
         from praisonaiagents import Agent
         agent = Agent(
             name="Test Agent",
@@ -162,11 +163,12 @@ class TestAgentWebSearchParameter:
     def test_agent_with_custom_llm_passes_web_search(self):
         """Test that Agent passes web_search to custom LLM instance."""
         from praisonaiagents import Agent
+        from praisonaiagents.config import WebConfig
         agent = Agent(
             name="Test Agent",
             instructions="Test",
             llm="openai/gpt-4o-search-preview",
-            web_search=True
+            web=WebConfig(search=True, fetch=False)
         )
         # When using custom LLM (with /), it creates llm_instance
         assert hasattr(agent, 'llm_instance')
@@ -179,11 +181,12 @@ class TestWebSearchFallback:
     def test_fallback_tool_injection_for_unsupported_model(self):
         """Test that DuckDuckGo tool is injected for unsupported models."""
         from praisonaiagents import Agent
+        from praisonaiagents.config import WebConfig
         agent = Agent(
             name="Test Agent",
             instructions="Test",
             llm="ollama/llama3",
-            web_search=True
+            web=WebConfig(search=True, fetch=False)
         )
         # Check that internet_search tool was added to tools
         tool_names = [getattr(t, '__name__', str(t)) for t in agent.tools]
@@ -192,11 +195,12 @@ class TestWebSearchFallback:
     def test_no_fallback_for_supported_model(self):
         """Test that no fallback tool is added for supported models."""
         from praisonaiagents import Agent
+        from praisonaiagents.config import WebConfig
         agent = Agent(
             name="Test Agent",
             instructions="Test",
             llm="openai/gpt-4o-search-preview",
-            web_search=True,
+            web=WebConfig(search=True, fetch=False),
             tools=[]  # Explicitly empty tools
         )
         # For supported models, tools should remain empty (native web search used)
@@ -238,12 +242,13 @@ class TestWebSearchIntegration:
     def test_web_search_with_openai(self):
         """Test actual web search with OpenAI (integration test)."""
         from praisonaiagents import Agent
+        from praisonaiagents.config import WebConfig
         
         agent = Agent(
             name="Researcher",
             instructions="You are a helpful research assistant.",
             llm="openai/gpt-4o-search-preview",
-            web_search=True
+            web=WebConfig(search=True, fetch=False)
         )
         
         result = agent.start("What is the current weather in San Francisco?")

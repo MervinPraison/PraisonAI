@@ -25,16 +25,15 @@ def test_self_reflection_fix():
     print("=== Testing Self-Reflection Fix ===")
     
     # Create an agent with self-reflection and a simple tool
+    from praisonaiagents.config import ReflectionConfig
     agent = Agent(
         role="Math Assistant",
         goal="Solve math problems accurately",
         backstory="You are a helpful math assistant",
-        reflection=True,
+        reflection=ReflectionConfig(min_iterations=1, max_iterations=2),
         llm="gpt-4o-mini",  # Use a more widely available model
-        verbose=True,
-        tools=[calculator],
-        min_reflect=1,
-        max_reflect=2
+        output="verbose",
+        tools=[calculator]
     )
 
     # Test with a simple calculation that might trigger self-reflection

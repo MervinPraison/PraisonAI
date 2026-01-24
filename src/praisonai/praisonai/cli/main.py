@@ -2838,7 +2838,7 @@ class PraisonAI:
             print(f"[cyan]Run with: praisonai workflow run {output_file}[/cyan]")
             
         except ImportError:
-            print("[red]Auto-generation requires instructor: pip install instructor[/red]")
+            print("[red]Auto-generation requires litellm: pip install litellm[/red]")
         except Exception as e:
             print(f"[red]Generation failed: {e}[/red]")
 

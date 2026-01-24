@@ -137,6 +137,7 @@ class TestA2UIAgent:
 class TestA2UIAgentWithLLM:
     """Test A2UIAgent with actual LLM calls."""
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_chat_with_ui(self):
         """Test chat that returns A2UI response."""

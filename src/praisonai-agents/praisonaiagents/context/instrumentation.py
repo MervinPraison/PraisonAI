@@ -46,7 +46,11 @@ class ContextMetrics:
     # Token tracking
     tokens_processed: int = 0
     tokens_saved: int = 0
+    tokens_saved_by_summarization: int = 0  # Tokens saved by LLM summarization
+    tokens_saved_by_truncation: int = 0  # Tokens saved by truncation
     compactions_triggered: int = 0
+    tool_outputs_summarized: int = 0  # Count of tool outputs summarized
+    tool_outputs_truncated: int = 0  # Count of tool outputs truncated
     
     # Cache stats
     cache_hits: int = 0
@@ -76,7 +80,13 @@ class ContextMetrics:
             "tokens": {
                 "processed": self.tokens_processed,
                 "saved": self.tokens_saved,
+                "saved_by_summarization": self.tokens_saved_by_summarization,
+                "saved_by_truncation": self.tokens_saved_by_truncation,
                 "compactions": self.compactions_triggered,
+            },
+            "tool_outputs": {
+                "summarized": self.tool_outputs_summarized,
+                "truncated": self.tool_outputs_truncated,
             },
             "cache": {
                 "hits": self.cache_hits,
