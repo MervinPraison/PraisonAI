@@ -130,17 +130,18 @@ class JudgeReport:
 
 class ContextEffectivenessJudge:
     """
-    LLM-as-Judge for analyzing context effectiveness in agent traces.
+    LLM-as-Judge for analyzing context/memory/knowledge effectiveness in agent traces.
     
-    Evaluates:
-    - Task achievement: Did each agent accomplish its goal?
-    - Context utilization: Was the context passed effectively used?
-    - Output quality: Is the output high quality and relevant?
+    Modes:
+    - context: Evaluates context flow between agents (default)
+    - memory: Evaluates memory utilization (store/search effectiveness)
+    - knowledge: Evaluates knowledge retrieval effectiveness
     
-    DRY: Uses the same grading pattern as BaseLLMGrader.
+    DRY: Uses the same grading pattern with mode-specific prompts.
     """
     
-    PROMPT_TEMPLATE = """You are an expert evaluator for AI agent workflows. Analyze this agent's performance.
+    # Mode-specific prompt templates
+    PROMPT_TEMPLATE_CONTEXT = """You are an expert evaluator for AI agent workflows. Analyze this agent's performance.
 
 AGENT: {agent_name}
 AGENT GOAL: {agent_goal}
@@ -177,6 +178,71 @@ SUGGESTIONS:
 - [specific, actionable improvement suggestion 1]
 - [specific, actionable improvement suggestion 2]
 """
+
+    PROMPT_TEMPLATE_MEMORY = """You are an expert evaluator for AI agent memory utilization. Analyze how well this agent uses memory.
+
+AGENT: {agent_name}
+AGENT GOAL: {agent_goal}
+
+MEMORY OPERATIONS:
+- Memory Stores: {memory_store_count}
+- Memory Searches: {memory_search_count}
+- Memory Store Details: {memory_store_details}
+- Memory Search Details: {memory_search_details}
+
+TASK/INPUT: {input_text}
+AGENT OUTPUT: {output}
+
+Evaluate on these memory-specific criteria:
+1. RETRIEVAL_RELEVANCE (1-10): Did the agent search for relevant memories? Were queries well-formed?
+2. STORAGE_QUALITY (1-10): Did the agent store useful information? Was content appropriate for memory?
+3. RECALL_EFFECTIVENESS (1-10): Was retrieved memory actually used in the response?
+4. MEMORY_EFFICIENCY (1-10): Was memory used efficiently? No redundant stores/searches?
+
+Respond in this EXACT format:
+RETRIEVAL_SCORE: [1-10]
+STORAGE_SCORE: [1-10]
+RECALL_SCORE: [1-10]
+EFFICIENCY_SCORE: [1-10]
+REASONING: [brief explanation of scores, referencing specific memory operations]
+SUGGESTIONS:
+- [specific, actionable improvement suggestion 1]
+- [specific, actionable improvement suggestion 2]
+"""
+
+    PROMPT_TEMPLATE_KNOWLEDGE = """You are an expert evaluator for AI agent knowledge retrieval. Analyze how well this agent uses knowledge.
+
+AGENT: {agent_name}
+AGENT GOAL: {agent_goal}
+
+KNOWLEDGE OPERATIONS:
+- Knowledge Searches: {knowledge_search_count}
+- Knowledge Adds: {knowledge_add_count}
+- Search Details: {knowledge_search_details}
+- Sources Used: {knowledge_sources}
+
+TASK/INPUT: {input_text}
+AGENT OUTPUT: {output}
+
+Evaluate on these knowledge-specific criteria:
+1. RETRIEVAL_ACCURACY (1-10): Did the agent find relevant documents? Were queries effective?
+2. SOURCE_COVERAGE (1-10): Were all relevant sources used? Any important sources missed?
+3. CITATION_QUALITY (1-10): Were sources properly attributed? Was information accurately represented?
+4. KNOWLEDGE_INTEGRATION (1-10): Was retrieved knowledge well-integrated into the response?
+
+Respond in this EXACT format:
+RETRIEVAL_SCORE: [1-10]
+COVERAGE_SCORE: [1-10]
+CITATION_SCORE: [1-10]
+INTEGRATION_SCORE: [1-10]
+REASONING: [brief explanation of scores, referencing specific knowledge operations]
+SUGGESTIONS:
+- [specific, actionable improvement suggestion 1]
+- [specific, actionable improvement suggestion 2]
+"""
+
+    # Backward compatibility alias
+    PROMPT_TEMPLATE = PROMPT_TEMPLATE_CONTEXT
     
     def __init__(
         self,
@@ -184,6 +250,7 @@ SUGGESTIONS:
         temperature: float = 0.1,
         max_tokens: int = 800,
         reports_dir: Optional[Path] = None,
+        mode: str = "context",
     ):
         """
         Initialize the judge.
@@ -193,12 +260,22 @@ SUGGESTIONS:
             temperature: LLM temperature
             max_tokens: Max tokens for LLM response
             reports_dir: Directory to save judge reports
+            mode: Evaluation mode - 'context', 'memory', or 'knowledge'
         """
         self.model = model or os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini")
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.reports_dir = reports_dir or Path.home() / ".praison" / "judge_reports"
         self.reports_dir.mkdir(parents=True, exist_ok=True)
+        self.mode = mode
+        
+        # Select prompt template based on mode
+        if mode == "memory":
+            self.prompt_template = self.PROMPT_TEMPLATE_MEMORY
+        elif mode == "knowledge":
+            self.prompt_template = self.PROMPT_TEMPLATE_KNOWLEDGE
+        else:
+            self.prompt_template = self.PROMPT_TEMPLATE_CONTEXT
     
     def _get_litellm(self):
         """Lazy import litellm."""
@@ -286,6 +363,84 @@ SUGGESTIONS:
                         break
         
         return agent_data
+    
+    def _extract_memory_events(self, events: List[Any]) -> Dict[str, Dict[str, Any]]:
+        """Extract memory events (store/search) per agent from trace."""
+        memory_data: Dict[str, Dict[str, Any]] = {}
+        
+        for event in events:
+            if hasattr(event, 'event_type'):
+                event_type = event.event_type.value if hasattr(event.event_type, 'value') else str(event.event_type)
+                agent_name = event.agent_name or "unknown"
+                data = event.data or {}
+            else:
+                event_type = event.get('event_type', '')
+                agent_name = event.get('agent_name', 'unknown')
+                data = event.get('data', {})
+            
+            if event_type not in ("memory_store", "memory_search"):
+                continue
+            
+            if agent_name not in memory_data:
+                memory_data[agent_name] = {
+                    "stores": [],
+                    "searches": [],
+                }
+            
+            if event_type == "memory_store":
+                memory_data[agent_name]["stores"].append({
+                    "memory_type": data.get("memory_type", "unknown"),
+                    "content_length": data.get("content_length", 0),
+                    "metadata": data.get("metadata", {}),
+                })
+            elif event_type == "memory_search":
+                memory_data[agent_name]["searches"].append({
+                    "query": data.get("query", ""),
+                    "result_count": data.get("result_count", 0),
+                    "memory_type": data.get("memory_type", "unknown"),
+                    "top_score": data.get("top_score"),
+                })
+        
+        return memory_data
+    
+    def _extract_knowledge_events(self, events: List[Any]) -> Dict[str, Dict[str, Any]]:
+        """Extract knowledge events (search/add) per agent from trace."""
+        knowledge_data: Dict[str, Dict[str, Any]] = {}
+        
+        for event in events:
+            if hasattr(event, 'event_type'):
+                event_type = event.event_type.value if hasattr(event.event_type, 'value') else str(event.event_type)
+                agent_name = event.agent_name or "unknown"
+                data = event.data or {}
+            else:
+                event_type = event.get('event_type', '')
+                agent_name = event.get('agent_name', 'unknown')
+                data = event.get('data', {})
+            
+            if event_type not in ("knowledge_search", "knowledge_add"):
+                continue
+            
+            if agent_name not in knowledge_data:
+                knowledge_data[agent_name] = {
+                    "searches": [],
+                    "adds": [],
+                }
+            
+            if event_type == "knowledge_search":
+                knowledge_data[agent_name]["searches"].append({
+                    "query": data.get("query", ""),
+                    "result_count": data.get("result_count", 0),
+                    "sources": data.get("sources", []),
+                    "top_score": data.get("top_score"),
+                })
+            elif event_type == "knowledge_add":
+                knowledge_data[agent_name]["adds"].append({
+                    "source": data.get("source", ""),
+                    "chunk_count": data.get("chunk_count", 0),
+                    "metadata": data.get("metadata", {}),
+                })
+        
+        return knowledge_data
     
     def _extract_tool_events(self, events: List[Any]) -> List[Dict[str, Any]]:
         """Extract detailed tool call events for evaluation."""
@@ -620,7 +775,8 @@ REASONING: [brief explanation]
                         task_description = first_task.get("description", task_description)[:500]
                         expected_output = first_task.get("expected_output", expected_output)[:300]
         
-        prompt = self.PROMPT_TEMPLATE.format(
+        # Use mode-specific prompt template
+        prompt = self.prompt_template.format(
             agent_name=agent_name,
             agent_goal=agent_goal[:200],
             task_description=task_description[:500],
@@ -632,6 +788,16 @@ REASONING: [brief explanation]
             output=output[:1000],
             tool_calls=tool_calls[:300],
             tool_errors=tool_errors[:500],
+            # Memory-specific fields (used in memory mode)
+            memory_store_count=agent_info.get("memory_store_count", 0),
+            memory_search_count=agent_info.get("memory_search_count", 0),
+            memory_store_details=agent_info.get("memory_store_details", "None"),
+            memory_search_details=agent_info.get("memory_search_details", "None"),
+            # Knowledge-specific fields (used in knowledge mode)
+            knowledge_search_count=agent_info.get("knowledge_search_count", 0),
+            knowledge_add_count=agent_info.get("knowledge_add_count", 0),
+            knowledge_search_details=agent_info.get("knowledge_search_details", "None"),
+            knowledge_sources=agent_info.get("knowledge_sources", "None"),
         )
         
         try:
@@ -773,6 +939,33 @@ REASONING: [brief explanation]
             JudgeReport with all agent scores, tool evaluations, and recommendations
         """
         agent_data = self._extract_agent_data(events)
+        
+        # Enrich agent_data with memory/knowledge events based on mode
+        if self.mode == "memory":
+            memory_data = self._extract_memory_events(events)
+            for agent_name, mem_info in memory_data.items():
+                if agent_name in agent_data:
+                    stores = mem_info.get("stores", [])
+                    searches = mem_info.get("searches", [])
+                    agent_data[agent_name]["memory_store_count"] = len(stores)
+                    agent_data[agent_name]["memory_search_count"] = len(searches)
+                    agent_data[agent_name]["memory_store_details"] = str(stores[:3]) if stores else "None"
+                    agent_data[agent_name]["memory_search_details"] = str(searches[:3]) if searches else "None"
+        
+        elif self.mode == "knowledge":
+            knowledge_data = self._extract_knowledge_events(events)
+            for agent_name, know_info in knowledge_data.items():
+                if agent_name in agent_data:
+                    searches = know_info.get("searches", [])
+                    adds = know_info.get("adds", [])
+                    agent_data[agent_name]["knowledge_search_count"] = len(searches)
+                    agent_data[agent_name]["knowledge_add_count"] = len(adds)
+                    agent_data[agent_name]["knowledge_search_details"] = str(searches[:3]) if searches else "None"
+                    # Collect all sources
+                    all_sources = []
+                    for s in searches:
+                        all_sources.extend(s.get("sources", []))
+                    agent_data[agent_name]["knowledge_sources"] = ", ".join(set(all_sources)[:5]) or "None"
         
         # Load YAML info if provided
         yaml_info = None

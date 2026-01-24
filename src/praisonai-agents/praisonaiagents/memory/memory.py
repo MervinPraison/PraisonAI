@@ -250,6 +250,24 @@ class Memory:
         if self.verbose >= 5:
             logger.log(level, msg)
 
+    def _emit_memory_event(self, event_type: str, memory_type: str, 
+                           content_length: int = 0, query: str = "", 
+                           result_count: int = 0, top_score: float = None,
+                           metadata: Dict[str, Any] = None):
+        """Emit memory trace event if tracing is enabled (zero overhead when disabled)."""
+        try:
+            from ..trace.context_events import get_context_emitter
+            emitter = get_context_emitter()
+            if not emitter.enabled:
+                return
+            agent_name = self.cfg.get("agent_name", "unknown")
+            if event_type == "store":
+                emitter.memory_store(agent_name, memory_type, content_length, metadata)
+            elif event_type == "search":
+                emitter.memory_search(agent_name, query, result_count, memory_type, top_score)
+        except Exception:
+            pass  # Silent fail - tracing should never break memory operations
+
     # -------------------------------------------------------------------------
     #                          Initialization
     # -------------------------------------------------------------------------
@@ -573,6 +591,9 @@ class Memory:
             logger.error(f"Failed to store in SQLite short-term memory: {e}")
             if not self.use_mongodb:  # Only raise if we're not using MongoDB as fallback
                 raise
+        
+        # Emit trace event for memory store
+        self._emit_memory_event("store", "short_term", len(text), metadata=metadata)
 
     def search_short_term(
         self, 
@@ -708,6 +729,10 @@ class Memory:
                         "text": row[1],
                         "metadata": meta
                     })
+            # Emit trace event for memory search
+            top_score = results[0].get("score") if results else None
+            self._emit_memory_event("search", "short_term", query=query, 
+                                   result_count=len(results), top_score=top_score)
             return results
 
     def reset_short_term(self):
@@ -840,7 +865,9 @@ class Memory:
                 logger.info("Successfully stored in Mem0")
             except Exception as e:
                 logger.error(f"Error storing in Mem0: {e}")
-
+        
+        # Emit trace event for memory store
+        self._emit_memory_event("store", "long_term", len(text), metadata=metadata)
 
     def search_long_term(
         self, 
@@ -1013,7 +1040,12 @@ class Memory:
             results = [r for r in results if r.get("score", 1.0) >= relevance_cutoff]
             logger.info(f"After relevance filter: {len(results)} results")
         
-        return results[:limit]
+        final_results = results[:limit]
+        # Emit trace event for memory search
+        top_score = final_results[0].get("score") if final_results else None
+        self._emit_memory_event("search", "long_term", query=query, 
+                               result_count=len(final_results), top_score=top_score)
+        return final_results
 
     def reset_long_term(self):
         """Clear local LTM DB, plus Chroma, MongoDB, or mem0 if in use."""

@@ -130,13 +130,23 @@ def recipe_judge(
     yaml_file: str = typer.Option(None, "--yaml", "-y", help="YAML file path for fix recommendations"),
     output: str = typer.Option(None, "--output", "-o", help="Output plan file (default: judge_plan.yaml)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without saving"),
+    context: bool = typer.Option(False, "--context", help="Evaluate context flow between agents (default mode)"),
+    memory: bool = typer.Option(False, "--memory", help="Evaluate memory utilization (store/search effectiveness)"),
+    knowledge: bool = typer.Option(False, "--knowledge", help="Evaluate knowledge retrieval effectiveness"),
 ):
     """Judge a recipe execution trace and generate fix recommendations.
     
     Similar to 'terraform plan' - analyzes the trace and generates a plan of fixes.
     
+    Evaluation Modes:
+    - --context: Evaluate context flow between agents (default)
+    - --memory: Evaluate memory utilization (store/search effectiveness)
+    - --knowledge: Evaluate knowledge retrieval effectiveness
+    
     Examples:
         praisonai recipe judge run-abc123
+        praisonai recipe judge run-abc123 --memory
+        praisonai recipe judge run-abc123 --knowledge
         praisonai recipe judge run-abc123 --yaml agents.yaml --output plan.yaml
         praisonai recipe judge run-abc123 --dry-run
     """
@@ -147,7 +157,15 @@ def recipe_judge(
         format_judge_report,
     )
     
-    print(f"🔍 Judging trace: {trace_id}")
+    # Determine evaluation mode (default to context)
+    mode = "context"
+    if memory:
+        mode = "memory"
+    elif knowledge:
+        mode = "knowledge"
+    
+    mode_emoji = {"context": "🔄", "memory": "🧠", "knowledge": "📚"}
+    print(f"{mode_emoji.get(mode, '🔍')} Judging trace: {trace_id} (mode: {mode})")
     
     try:
         reader = ContextTraceReader(trace_id)
@@ -159,8 +177,8 @@ def recipe_judge(
         
         print(f"  📊 Found {len(events)} events")
         
-        # Run judge with YAML-aware evaluation if yaml_file provided
-        judge = ContextEffectivenessJudge()
+        # Run judge with mode-specific evaluation
+        judge = ContextEffectivenessJudge(mode=mode)
         report = judge.judge_trace(events, session_id=trace_id, yaml_file=yaml_file)
         
         # Display report
