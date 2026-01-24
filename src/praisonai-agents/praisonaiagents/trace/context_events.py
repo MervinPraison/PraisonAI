@@ -122,6 +122,12 @@ class ContextEventType(str, Enum):
     LLM_REQUEST = "llm_request"
     LLM_RESPONSE = "llm_response"
     CONTEXT_SNAPSHOT = "context_snapshot"
+    # Memory events for memory utilization tracking
+    MEMORY_STORE = "memory_store"
+    MEMORY_SEARCH = "memory_search"
+    # Knowledge events for knowledge utilization tracking
+    KNOWLEDGE_SEARCH = "knowledge_search"
+    KNOWLEDGE_ADD = "knowledge_add"
 
 
 @dataclass
@@ -672,6 +678,120 @@ class ContextTraceEmitter:
                 "to_agent": to_agent,
                 "reason": reason,
                 "context_passed": context_passed or {},
+            },
+        ))
+    
+    def memory_store(
+        self,
+        agent_name: str,
+        memory_type: str,
+        content_length: int,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Emit memory store event for tracking memory writes.
+        
+        Args:
+            agent_name: Name of the agent storing memory
+            memory_type: Type of memory (short_term, long_term, entity, user)
+            content_length: Length of content being stored
+            metadata: Optional metadata about the storage
+        """
+        self._emit(ContextEvent(
+            event_type=ContextEventType.MEMORY_STORE,
+            timestamp=time.time(),
+            session_id=self._session_id,
+            agent_name=agent_name,
+            data={
+                "memory_type": memory_type,
+                "content_length": content_length,
+                "metadata": metadata or {},
+            },
+        ))
+    
+    def memory_search(
+        self,
+        agent_name: str,
+        query: str,
+        result_count: int,
+        memory_type: str,
+        top_score: Optional[float] = None,
+    ) -> None:
+        """Emit memory search event for tracking memory reads.
+        
+        Args:
+            agent_name: Name of the agent searching memory
+            query: Search query
+            result_count: Number of results returned
+            memory_type: Type of memory searched
+            top_score: Score of top result (if available)
+        """
+        self._emit(ContextEvent(
+            event_type=ContextEventType.MEMORY_SEARCH,
+            timestamp=time.time(),
+            session_id=self._session_id,
+            agent_name=agent_name,
+            data={
+                "query": query[:500] if query else "",
+                "result_count": result_count,
+                "memory_type": memory_type,
+                "top_score": top_score,
+            },
+        ))
+    
+    def knowledge_search(
+        self,
+        agent_name: str,
+        query: str,
+        result_count: int,
+        sources: Optional[List[str]] = None,
+        top_score: Optional[float] = None,
+    ) -> None:
+        """Emit knowledge search event for tracking knowledge retrieval.
+        
+        Args:
+            agent_name: Name of the agent searching knowledge
+            query: Search query
+            result_count: Number of results returned
+            sources: List of source documents/files
+            top_score: Score of top result (if available)
+        """
+        self._emit(ContextEvent(
+            event_type=ContextEventType.KNOWLEDGE_SEARCH,
+            timestamp=time.time(),
+            session_id=self._session_id,
+            agent_name=agent_name,
+            data={
+                "query": query[:500] if query else "",
+                "result_count": result_count,
+                "sources": (sources or [])[:10],
+                "top_score": top_score,
+            },
+        ))
+    
+    def knowledge_add(
+        self,
+        agent_name: str,
+        source: str,
+        chunk_count: int,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Emit knowledge add event for tracking knowledge indexing.
+        
+        Args:
+            agent_name: Name of the agent adding knowledge
+            source: Source file/URL being indexed
+            chunk_count: Number of chunks created
+            metadata: Optional metadata about the indexing
+        """
+        self._emit(ContextEvent(
+            event_type=ContextEventType.KNOWLEDGE_ADD,
+            timestamp=time.time(),
+            session_id=self._session_id,
+            agent_name=agent_name,
+            data={
+                "source": source,
+                "chunk_count": chunk_count,
+                "metadata": metadata or {},
             },
         ))
     
