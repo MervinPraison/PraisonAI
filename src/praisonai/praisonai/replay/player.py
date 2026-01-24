@@ -137,10 +137,11 @@ class ReplayPlayer:
             for key, value in data.items():
                 if value is not None:
                     value_str = str(value)
-                    # Use full_mode to control truncation
-                    max_len = 10000 if self._full_mode else 100
-                    if len(value_str) > max_len:
-                        value_str = value_str[:max_len] + "..."
+                    # Use full_mode to control truncation - None means no limit
+                    if not self._full_mode:
+                        max_len = 100
+                        if len(value_str) > max_len:
+                            value_str = value_str[:max_len] + "..."
                     content_lines.append(f"  {key}: {value_str}")
         
         content = "\n".join(content_lines)
@@ -206,10 +207,11 @@ class ReplayPlayer:
             for key, value in data.items():
                 if value is not None:
                     value_str = str(value)
-                    # Use full_mode to control truncation
-                    max_len = 10000 if self._full_mode else 100
-                    if len(value_str) > max_len:
-                        value_str = value_str[:max_len] + "..."
+                    # Use full_mode to control truncation - None means no limit
+                    if not self._full_mode:
+                        max_len = 100
+                        if len(value_str) > max_len:
+                            value_str = value_str[:max_len] + "..."
                     print(f"  {key}: {value_str}")
         
         print("\n[Enter/Down] Next  [Up] Previous  [g N] Go to N  [q] Quit")

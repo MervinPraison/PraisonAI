@@ -509,8 +509,10 @@ REASONING: [brief explanation]
     
     def _detect_content_loss(self, events: List[Any]) -> tuple:
         """Detect if important content was lost during the workflow."""
+        import re
         content_loss_detected = False
         content_loss_details = []
+        unresolved_templates = set()  # Track unique unresolved templates
         
         for event in events:
             if hasattr(event, 'event_type'):
@@ -540,6 +542,28 @@ REASONING: [brief explanation]
                     content_loss_details.append(
                         f"LLM response was truncated for agent '{agent_name}'"
                     )
+            
+            # Check for unresolved template variables in LLM requests
+            if event_type == "llm_request":
+                messages = data.get("messages", [])
+                for msg in messages:
+                    if isinstance(msg, dict):
+                        content = str(msg.get("content", ""))
+                    else:
+                        content = str(msg)
+                    
+                    # Find unresolved {{variable}} patterns
+                    template_matches = re.findall(r'\{\{(\w+)\}\}', content)
+                    for match in template_matches:
+                        unresolved_templates.add(match)
+        
+        # Add unresolved template warnings
+        if unresolved_templates:
+            content_loss_detected = True
+            for template in sorted(unresolved_templates):
+                content_loss_details.append(
+                    f"⚠️ Unresolved template variable: {{{{{template}}}}} - variable not substituted"
+                )
         
         return content_loss_detected, content_loss_details
     

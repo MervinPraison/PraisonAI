@@ -275,11 +275,21 @@ def run(
                 trace=trace,
             )
         
-        # Merge input and config
+        # Merge input and config with built-in variables
+        # Add built-in template variables that should always be resolved
+        builtin_vars = {
+            "today": datetime.now().strftime("%B %d, %Y"),  # e.g., "January 24, 2026"
+            "date": datetime.now().strftime("%Y-%m-%d"),     # e.g., "2026-01-24"
+            "time": datetime.now().strftime("%H:%M:%S"),     # e.g., "14:30:00"
+            "datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "year": datetime.now().strftime("%Y"),
+            "month": datetime.now().strftime("%B"),
+        }
+        
         if isinstance(input, str):
-            merged_config = {**recipe_config.defaults, "input": input, **config}
+            merged_config = {**builtin_vars, **recipe_config.defaults, "input": input, **config}
         else:
-            merged_config = {**recipe_config.defaults, **input, **config}
+            merged_config = {**builtin_vars, **recipe_config.defaults, **input, **config}
         
         # Execute recipe (pass trace_emitter for event tracking)
         output = _execute_recipe(
