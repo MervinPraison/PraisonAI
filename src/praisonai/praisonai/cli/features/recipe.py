@@ -96,6 +96,8 @@ class RecipeHandler:
             "verify": self.cmd_verify,
             "runs": self.cmd_runs,
             "policy": self.cmd_policy,
+            "judge": self.cmd_judge,
+            "apply": self.cmd_apply,
             "help": lambda _: self._print_help() or self.EXIT_SUCCESS,
             "--help": lambda _: self._print_help() or self.EXIT_SUCCESS,
             "-h": lambda _: self._print_help() or self.EXIT_SUCCESS,
@@ -132,6 +134,8 @@ class RecipeHandler:
   publish <bundle>  Publish recipe to registry
   pull <name>       Pull recipe from registry
   runs              List/manage run history
+  judge <trace_id>  Judge a trace with LLM (--memory, --knowledge, --context)
+  apply <plan>      Apply fixes from a judge plan
   sbom <recipe>     Generate SBOM (Software Bill of Materials)
   audit <recipe>    Audit dependencies for vulnerabilities
   sign <bundle>     Sign a recipe bundle
@@ -1753,6 +1757,161 @@ OPENAI_API_KEY=your-api-key
         """Get current timestamp."""
         from datetime import datetime, timezone
         return datetime.now(timezone.utc).isoformat()
+    
+    def cmd_judge(self, args: List[str]) -> int:
+        """Judge a recipe execution trace and generate fix recommendations.
+        
+        Usage:
+            praisonai recipe judge <trace_id> [options]
+        
+        Options:
+            --yaml, -y <file>     YAML file path for fix recommendations
+            --output, -o <file>   Output plan file (default: judge_plan.yaml)
+            --dry-run             Show plan without saving
+            --context             Evaluate context flow between agents (default)
+            --memory              Evaluate memory utilization (store/search effectiveness)
+            --knowledge           Evaluate knowledge retrieval effectiveness
+        """
+        spec = {
+            "trace_id": {"positional": True},
+            "yaml": {"short": "-y"},
+            "output": {"short": "-o"},
+            "dry_run": {"flag": True},
+            "context": {"flag": True},
+            "memory": {"flag": True},
+            "knowledge": {"flag": True},
+        }
+        parsed = self._parse_args(args, spec)
+        
+        if not parsed.get("trace_id"):
+            self._print_error("Trace ID required")
+            print("\nUsage: praisonai recipe judge <trace_id> [--memory|--knowledge|--context]")
+            print("\nExamples:")
+            print("  praisonai recipe judge run-abc123")
+            print("  praisonai recipe judge run-abc123 --memory")
+            print("  praisonai recipe judge run-abc123 --knowledge")
+            print("  praisonai recipe judge run-abc123 --yaml agents.yaml --output plan.yaml")
+            return self.EXIT_VALIDATION_ERROR
+        
+        trace_id = parsed["trace_id"]
+        yaml_file = parsed.get("yaml")
+        output_file = parsed.get("output")
+        dry_run = parsed.get("dry_run", False)
+        
+        # Determine evaluation mode (default to context)
+        mode = "context"
+        if parsed.get("memory"):
+            mode = "memory"
+        elif parsed.get("knowledge"):
+            mode = "knowledge"
+        
+        mode_emoji = {"context": "🔄", "memory": "🧠", "knowledge": "📚"}
+        print(f"{mode_emoji.get(mode, '🔍')} Judging trace: {trace_id} (mode: {mode})")
+        
+        try:
+            from praisonai.replay import (
+                ContextTraceReader,
+                ContextEffectivenessJudge,
+            )
+            from praisonai.replay.judge import (
+                generate_plan_from_report,
+                format_judge_report,
+            )
+            
+            reader = ContextTraceReader(trace_id)
+            events = reader.get_all()
+            
+            if not events:
+                self._print_error(f"No events found for trace: {trace_id}")
+                return self.EXIT_NOT_FOUND
+            
+            print(f"  📊 Found {len(events)} events")
+            
+            # Run judge with mode-specific evaluation
+            judge = ContextEffectivenessJudge(mode=mode)
+            report = judge.judge_trace(events, session_id=trace_id, yaml_file=yaml_file)
+            
+            # Display report
+            print(format_judge_report(report))
+            
+            # Generate plan if yaml_file provided
+            if yaml_file:
+                plan = generate_plan_from_report(report, yaml_file=yaml_file)
+                print(plan.format_summary())
+                
+                if not dry_run:
+                    out_file = output_file or "judge_plan.yaml"
+                    plan.save(out_file)
+                    self._print_success(f"Plan saved to: {out_file}")
+                    print(f"   Run 'praisonai recipe apply {out_file}' to apply fixes")
+            else:
+                print("\n💡 Tip: Add --yaml <file> to generate actionable fix recommendations")
+            
+            return self.EXIT_SUCCESS
+            
+        except Exception as e:
+            self._print_error(str(e))
+            import traceback
+            traceback.print_exc()
+            return self.EXIT_RUNTIME_ERROR
+    
+    def cmd_apply(self, args: List[str]) -> int:
+        """Apply fixes from a judge plan to YAML files.
+        
+        Usage:
+            praisonai recipe apply <plan_file> [options]
+        
+        Options:
+            --confirm             Apply without confirmation prompts
+            --fix-ids <ids>       Apply only specific fixes (comma-separated)
+            --dry-run             Show changes without applying
+        """
+        spec = {
+            "plan_file": {"type": "positional", "required": True},
+            "confirm": {"type": "flag"},
+            "fix_ids": {"type": "option", "name": "fix-ids"},
+            "dry_run": {"type": "flag", "name": "dry-run"},
+        }
+        parsed = self._parse_args(args, spec)
+        
+        if not parsed.get("plan_file"):
+            self._print_error("Plan file required")
+            print("\nUsage: praisonai recipe apply <plan_file> [--confirm] [--dry-run]")
+            return self.EXIT_VALIDATION_ERROR
+        
+        plan_file = parsed["plan_file"]
+        confirm = parsed.get("confirm", False)
+        fix_ids_str = parsed.get("fix_ids")
+        dry_run = parsed.get("dry_run", False)
+        
+        fix_ids = None
+        if fix_ids_str:
+            fix_ids = [f.strip() for f in fix_ids_str.split(",")]
+        
+        try:
+            from praisonai.replay.judge import JudgePlan
+            
+            plan = JudgePlan.load(plan_file)
+            print(f"📋 Loaded plan: {plan_file}")
+            print(f"   Fixes: {len(plan.fixes)}")
+            
+            if dry_run:
+                print("\n[DRY RUN] Would apply the following fixes:")
+                for fix in plan.fixes:
+                    if fix_ids and fix.fix_id not in fix_ids:
+                        continue
+                    print(f"  - {fix.fix_id}: {fix.description}")
+                return self.EXIT_SUCCESS
+            
+            # Apply fixes
+            applied = plan.apply(fix_ids=fix_ids, confirm=confirm)
+            self._print_success(f"Applied {applied} fixes")
+            
+            return self.EXIT_SUCCESS
+            
+        except Exception as e:
+            self._print_error(str(e))
+            return self.EXIT_RUNTIME_ERROR
 
 
 def handle_recipe_command(args: List[str]) -> int:

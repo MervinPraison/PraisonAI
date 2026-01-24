@@ -51,6 +51,12 @@ __all__ = [
     "ContextNoOpSink",
     "ContextListSink",
     "ContextTraceEmitter",
+    # Context manager
+    "trace_context",
+    # Global emitter registry
+    "get_context_emitter",
+    "set_context_emitter",
+    "reset_context_emitter",
 ]
 
 
@@ -84,5 +90,13 @@ def __getattr__(name: str):
     if name == "ContextTraceEmitter":
         from .context_events import ContextTraceEmitter
         return ContextTraceEmitter
+    
+    if name == "trace_context":
+        from .context_events import trace_context
+        return trace_context
+    
+    if name in ("get_context_emitter", "set_context_emitter", "reset_context_emitter"):
+        from .context_events import get_context_emitter, set_context_emitter, reset_context_emitter
+        return locals()[name]
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

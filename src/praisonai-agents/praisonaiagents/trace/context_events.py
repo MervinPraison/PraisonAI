@@ -14,9 +14,10 @@ Schema Version: 1.0
 
 import contextvars
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, Generator, List, Optional, Protocol, runtime_checkable
 import json
 
 
@@ -81,6 +82,36 @@ def reset_context_emitter(token: contextvars.Token) -> None:
         token: Token returned by set_context_emitter().
     """
     _context_emitter.reset(token)
+
+
+@contextmanager
+def trace_context(emitter: "ContextTraceEmitter") -> Generator["ContextTraceEmitter", None, None]:
+    """
+    Context manager for trace emitter lifecycle.
+    
+    Automatically sets the emitter on entry and resets on exit,
+    even if an exception occurs. This is the recommended way to
+    use custom trace emitters.
+    
+    Args:
+        emitter: The emitter to use within the context.
+        
+    Yields:
+        The emitter for use within the context.
+        
+    Example:
+        sink = MyCustomSink()
+        emitter = ContextTraceEmitter(sink=sink, session_id="my-session", enabled=True)
+        
+        with trace_context(emitter) as ctx:
+            agent = Agent(...)
+            agent.chat("Hello")  # Events go to MyCustomSink
+    """
+    token = set_context_emitter(emitter)
+    try:
+        yield emitter
+    finally:
+        reset_context_emitter(token)
 
 
 def copy_context_to_callable(func):
@@ -363,13 +394,21 @@ class ContextTraceEmitter:
         self._full_content = full_content
     
     def _emit(self, event: ContextEvent) -> None:
-        """Internal emit with enabled check and sequence assignment."""
+        """Internal emit with enabled check and sequence assignment.
+        
+        Exception-safe: sink errors are silently caught to prevent
+        tracing from crashing agent execution.
+        """
         if not self._enabled:
             return
         event.sequence_num = self._sequence
         event.branch_id = self._branch_id  # Include branch context
         self._sequence += 1
-        self._sink.emit(event)
+        try:
+            self._sink.emit(event)
+        except Exception:
+            # Tracing should never crash agent execution
+            pass
     
     def set_branch(self, branch_id: str) -> None:
         """Set current branch context for parallel execution tracking.
