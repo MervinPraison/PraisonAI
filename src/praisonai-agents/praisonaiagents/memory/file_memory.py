@@ -175,6 +175,24 @@ class FileMemory:
         if self.verbose >= 1:
             logger.log(level, msg)
     
+    def _emit_memory_event(self, event_type: str, memory_type: str, 
+                           content_length: int = 0, query: str = "", 
+                           result_count: int = 0, top_score: float = None,
+                           metadata: Dict[str, Any] = None):
+        """Emit memory trace event if tracing is enabled (zero overhead when disabled)."""
+        try:
+            from ..trace.context_events import get_context_emitter
+            emitter = get_context_emitter()
+            if not emitter.enabled:
+                return
+            agent_name = self.user_id or "unknown"
+            if event_type == "store":
+                emitter.memory_store(agent_name, memory_type, content_length, metadata)
+            elif event_type == "search":
+                emitter.memory_search(agent_name, query, result_count, memory_type, top_score)
+        except Exception:
+            pass  # Silent fail - tracing should never break memory operations
+    
     def _generate_id(self, content: str) -> str:
         """Generate a unique ID for content."""
         timestamp = str(time.time())
@@ -321,6 +339,9 @@ class FileMemory:
         self._save_short_term()
         self._log(f"Added short-term memory: {content[:50]}...")
         
+        # Emit trace event
+        self._emit_memory_event("store", "short_term", len(content), metadata=metadata)
+        
         return item.id
     
     def get_short_term(self, limit: Optional[int] = None) -> List[MemoryItem]:
@@ -386,6 +407,9 @@ class FileMemory:
         
         self._save_long_term()
         self._log(f"Added long-term memory: {content[:50]}...")
+        
+        # Emit trace event
+        self._emit_memory_event("store", "long_term", len(content), metadata=metadata)
         
         return item.id
     
@@ -654,7 +678,14 @@ class FileMemory:
         
         # Sort by score and limit
         results.sort(key=lambda x: x["score"], reverse=True)
-        return results[:limit]
+        final_results = results[:limit]
+        
+        # Emit trace event for search
+        top_score = final_results[0]["score"] if final_results else None
+        self._emit_memory_event("search", "all", query=query, 
+                               result_count=len(final_results), top_score=top_score)
+        
+        return final_results
     
     def get_context(
         self,

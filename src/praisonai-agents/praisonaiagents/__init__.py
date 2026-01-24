@@ -250,6 +250,15 @@ _LAZY_IMPORTS = {
     'READ_ONLY_TOOLS': ('praisonaiagents.planning', 'READ_ONLY_TOOLS'),
     'RESTRICTED_TOOLS': ('praisonaiagents.planning', 'RESTRICTED_TOOLS'),
     
+    # Trace (protocol-driven, for custom sinks)
+    'ContextTraceSink': ('praisonaiagents.trace', 'ContextTraceSink'),
+    'ContextTraceEmitter': ('praisonaiagents.trace', 'ContextTraceEmitter'),
+    'ContextEvent': ('praisonaiagents.trace', 'ContextEvent'),
+    'ContextEventType': ('praisonaiagents.trace', 'ContextEventType'),
+    'trace_context': ('praisonaiagents.trace', 'trace_context'),
+    'ContextListSink': ('praisonaiagents.trace', 'ContextListSink'),
+    'ContextNoOpSink': ('praisonaiagents.trace', 'ContextNoOpSink'),
+    
     # Telemetry
     'get_telemetry': ('praisonaiagents.telemetry', 'get_telemetry'),
     'enable_telemetry': ('praisonaiagents.telemetry', 'enable_telemetry'),

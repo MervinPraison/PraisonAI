@@ -289,9 +289,27 @@ SUGGESTIONS:
             )
     
     def _extract_agent_data(self, events: List[Any]) -> Dict[str, Dict[str, Any]]:
-        """Extract per-agent data from trace events."""
+        """Extract per-agent data from trace events.
+        
+        Only creates agent entries for actual agents (those with agent_start events),
+        not for memory/knowledge event sources which may have different identifiers.
+        """
         agent_data: Dict[str, Dict[str, Any]] = {}
         
+        # First pass: identify actual agents from agent_start events
+        actual_agents = set()
+        for event in events:
+            if hasattr(event, 'event_type'):
+                event_type = event.event_type.value if hasattr(event.event_type, 'value') else str(event.event_type)
+                agent_name = event.agent_name
+            else:
+                event_type = event.get('event_type', '')
+                agent_name = event.get('agent_name')
+            
+            if event_type == "agent_start" and agent_name:
+                actual_agents.add(agent_name)
+        
+        # Second pass: extract data only for actual agents
         for event in events:
             # Handle both objects and dicts
             if hasattr(event, 'agent_name'):
@@ -308,6 +326,11 @@ SUGGESTIONS:
                 completion_tokens = event.get('completion_tokens', 0) or 0
             
             if not agent_name:
+                continue
+            
+            # Skip events from non-agent sources (e.g., memory user_id, knowledge sources)
+            # Only process events from actual agents identified by agent_start
+            if agent_name not in actual_agents:
                 continue
             
             if agent_name not in agent_data:
@@ -365,21 +388,91 @@ SUGGESTIONS:
         return agent_data
     
     def _extract_memory_events(self, events: List[Any]) -> Dict[str, Dict[str, Any]]:
-        """Extract memory events (store/search) per agent from trace."""
+        """Extract memory events (store/search) per agent from trace.
+        
+        Memory events may be attributed to FileMemory user_id instead of agent name.
+        This method associates memory events with the nearest agent:
+        - If within agent_start/agent_end: use that agent
+        - If before first agent_start: use the next agent
+        - If after agent_end: use the previous or next agent
+        """
         memory_data: Dict[str, Dict[str, Any]] = {}
+        
+        # First pass: build list of agent spans (start_seq, end_seq, agent_name)
+        agent_spans = []
+        current_agent = None
+        current_start = None
+        max_seq = 0
         
         for event in events:
             if hasattr(event, 'event_type'):
                 event_type = event.event_type.value if hasattr(event.event_type, 'value') else str(event.event_type)
-                agent_name = event.agent_name or "unknown"
-                data = event.data or {}
+                agent_name = event.agent_name
+                seq_num = getattr(event, 'sequence_num', 0)
             else:
                 event_type = event.get('event_type', '')
-                agent_name = event.get('agent_name', 'unknown')
+                agent_name = event.get('agent_name')
+                seq_num = event.get('sequence_num', 0)
+            
+            max_seq = max(max_seq, seq_num)
+            
+            if event_type == "agent_start" and agent_name:
+                current_agent = agent_name
+                current_start = seq_num
+            elif event_type == "agent_end" and current_agent:
+                agent_spans.append((current_start, seq_num, current_agent))
+                current_agent = None
+                current_start = None
+        
+        # Helper to find the best agent for a sequence number
+        def find_agent_for_seq(seq: int) -> Optional[str]:
+            # Check if within any span
+            for start, end, name in agent_spans:
+                if start <= seq <= end:
+                    return name
+            
+            # Find nearest span (prefer next agent for pre-agent events)
+            nearest_agent = None
+            nearest_dist = float('inf')
+            
+            for start, end, name in agent_spans:
+                # Distance to span start (for events before agent)
+                if seq < start:
+                    dist = start - seq
+                    if dist < nearest_dist:
+                        nearest_dist = dist
+                        nearest_agent = name
+                # Distance to span end (for events after agent)
+                elif seq > end:
+                    dist = seq - end
+                    if dist < nearest_dist:
+                        nearest_dist = dist
+                        nearest_agent = name
+            
+            return nearest_agent
+        
+        # Second pass: extract memory events and associate with nearest agent
+        for event in events:
+            if hasattr(event, 'event_type'):
+                event_type = event.event_type.value if hasattr(event.event_type, 'value') else str(event.event_type)
+                event_agent_name = event.agent_name or "unknown"
+                data = event.data or {}
+                seq_num = getattr(event, 'sequence_num', 0)
+            else:
+                event_type = event.get('event_type', '')
+                event_agent_name = event.get('agent_name', 'unknown')
                 data = event.get('data', {})
+                seq_num = event.get('sequence_num', 0)
             
             if event_type not in ("memory_store", "memory_search"):
                 continue
+            
+            # Find the best agent for this memory event
+            agent_name = find_agent_for_seq(seq_num)
+            
+            # Fallback to event's agent_name if no agent found
+            if not agent_name:
+                agent_name = event_agent_name
             
             if agent_name not in memory_data:
                 memory_data[agent_name] = {
@@ -404,21 +497,86 @@ SUGGESTIONS:
         return memory_data
     
     def _extract_knowledge_events(self, events: List[Any]) -> Dict[str, Dict[str, Any]]:
-        """Extract knowledge events (search/add) per agent from trace."""
+        """Extract knowledge events (search/add) per agent from trace.
+        
+        Knowledge events may be attributed to a different name than the agent.
+        This method associates knowledge events with the nearest agent:
+        - If within agent_start/agent_end: use that agent
+        - If before first agent_start: use the next agent
+        - If after agent_end: use the previous or next agent
+        """
         knowledge_data: Dict[str, Dict[str, Any]] = {}
+        
+        # First pass: build list of agent spans (start_seq, end_seq, agent_name)
+        agent_spans = []
+        current_agent = None
+        current_start = None
         
         for event in events:
             if hasattr(event, 'event_type'):
                 event_type = event.event_type.value if hasattr(event.event_type, 'value') else str(event.event_type)
-                agent_name = event.agent_name or "unknown"
-                data = event.data or {}
+                agent_name = event.agent_name
+                seq_num = getattr(event, 'sequence_num', 0)
             else:
                 event_type = event.get('event_type', '')
-                agent_name = event.get('agent_name', 'unknown')
+                agent_name = event.get('agent_name')
+                seq_num = event.get('sequence_num', 0)
+            
+            if event_type == "agent_start" and agent_name:
+                current_agent = agent_name
+                current_start = seq_num
+            elif event_type == "agent_end" and current_agent:
+                agent_spans.append((current_start, seq_num, current_agent))
+                current_agent = None
+                current_start = None
+        
+        # Helper to find the best agent for a sequence number
+        def find_agent_for_seq(seq: int) -> Optional[str]:
+            # Check if within any span
+            for start, end, name in agent_spans:
+                if start <= seq <= end:
+                    return name
+            
+            # Find nearest span
+            nearest_agent = None
+            nearest_dist = float('inf')
+            
+            for start, end, name in agent_spans:
+                if seq < start:
+                    dist = start - seq
+                    if dist < nearest_dist:
+                        nearest_dist = dist
+                        nearest_agent = name
+                elif seq > end:
+                    dist = seq - end
+                    if dist < nearest_dist:
+                        nearest_dist = dist
+                        nearest_agent = name
+            
+            return nearest_agent
+        
+        # Second pass: extract knowledge events and associate with nearest agent
+        for event in events:
+            if hasattr(event, 'event_type'):
+                event_type = event.event_type.value if hasattr(event.event_type, 'value') else str(event.event_type)
+                event_agent_name = event.agent_name or "unknown"
+                data = event.data or {}
+                seq_num = getattr(event, 'sequence_num', 0)
+            else:
+                event_type = event.get('event_type', '')
+                event_agent_name = event.get('agent_name', 'unknown')
                 data = event.get('data', {})
+                seq_num = event.get('sequence_num', 0)
             
             if event_type not in ("knowledge_search", "knowledge_add"):
                 continue
+            
+            # Find the best agent for this knowledge event
+            agent_name = find_agent_for_seq(seq_num)
+            
+            # Fallback to event's agent_name if no agent found
+            if not agent_name:
+                agent_name = event_agent_name
             
             if agent_name not in knowledge_data:
                 knowledge_data[agent_name] = {
@@ -830,7 +988,13 @@ REASONING: [brief explanation]
         agent_name: str,
         agent_info: Dict[str, Any],
     ) -> ContextEffectivenessScore:
-        """Parse LLM response into ContextEffectivenessScore."""
+        """Parse LLM response into ContextEffectivenessScore.
+        
+        Handles mode-specific score names:
+        - context mode: TASK_SCORE, CONTEXT_SCORE, QUALITY_SCORE, INSTRUCTION_SCORE
+        - memory mode: RETRIEVAL_SCORE, STORAGE_SCORE, RECALL_SCORE, EFFICIENCY_SCORE
+        - knowledge mode: RETRIEVAL_SCORE, COVERAGE_SCORE, CITATION_SCORE, INTEGRATION_SCORE
+        """
         task_score = 5.0
         context_score = 5.0
         quality_score = 5.0
@@ -846,6 +1010,7 @@ REASONING: [brief explanation]
         for line in lines:
             line = line.strip()
             
+            # Context mode scores
             if line.startswith('TASK_SCORE:'):
                 try:
                     task_score = float(line.replace('TASK_SCORE:', '').strip())
@@ -870,6 +1035,57 @@ REASONING: [brief explanation]
             elif line.startswith('INSTRUCTION_SCORE:'):
                 try:
                     instruction_score = float(line.replace('INSTRUCTION_SCORE:', '').strip())
+                    instruction_score = max(1.0, min(10.0, instruction_score))
+                except ValueError:
+                    pass
+            
+            # Memory mode scores (map to context mode equivalents)
+            elif line.startswith('RETRIEVAL_SCORE:'):
+                try:
+                    task_score = float(line.replace('RETRIEVAL_SCORE:', '').strip())
+                    task_score = max(1.0, min(10.0, task_score))
+                except ValueError:
+                    pass
+            
+            elif line.startswith('STORAGE_SCORE:'):
+                try:
+                    context_score = float(line.replace('STORAGE_SCORE:', '').strip())
+                    context_score = max(1.0, min(10.0, context_score))
+                except ValueError:
+                    pass
+            
+            elif line.startswith('RECALL_SCORE:'):
+                try:
+                    quality_score = float(line.replace('RECALL_SCORE:', '').strip())
+                    quality_score = max(1.0, min(10.0, quality_score))
+                except ValueError:
+                    pass
+            
+            elif line.startswith('EFFICIENCY_SCORE:'):
+                try:
+                    instruction_score = float(line.replace('EFFICIENCY_SCORE:', '').strip())
+                    instruction_score = max(1.0, min(10.0, instruction_score))
+                except ValueError:
+                    pass
+            
+            # Knowledge mode scores (map to context mode equivalents)
+            elif line.startswith('COVERAGE_SCORE:'):
+                try:
+                    context_score = float(line.replace('COVERAGE_SCORE:', '').strip())
+                    context_score = max(1.0, min(10.0, context_score))
+                except ValueError:
+                    pass
+            
+            elif line.startswith('CITATION_SCORE:'):
+                try:
+                    quality_score = float(line.replace('CITATION_SCORE:', '').strip())
+                    quality_score = max(1.0, min(10.0, quality_score))
+                except ValueError:
+                    pass
+            
+            elif line.startswith('INTEGRATION_SCORE:'):
+                try:
+                    instruction_score = float(line.replace('INTEGRATION_SCORE:', '').strip())
                     instruction_score = max(1.0, min(10.0, instruction_score))
                 except ValueError:
                     pass
@@ -965,7 +1181,7 @@ REASONING: [brief explanation]
                     all_sources = []
                     for s in searches:
                         all_sources.extend(s.get("sources", []))
-                    agent_data[agent_name]["knowledge_sources"] = ", ".join(set(all_sources)[:5]) or "None"
+                    agent_data[agent_name]["knowledge_sources"] = ", ".join(list(set(all_sources))[:5]) or "None"
         
         # Load YAML info if provided
         yaml_info = None

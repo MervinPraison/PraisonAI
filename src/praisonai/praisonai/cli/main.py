@@ -1387,6 +1387,9 @@ class PraisonAI:
                     recipe_args.append('--profile')
                 if getattr(args, 'profile_deep', False) and '--deep-profile' not in recipe_args:
                     recipe_args.append('--deep-profile')
+                # Re-inject memory flag for judge command (consumed by main parser)
+                if getattr(args, 'memory', False) and '--memory' not in recipe_args:
+                    recipe_args.append('--memory')
                 from .features.recipe import handle_recipe_command
                 exit_code = handle_recipe_command(recipe_args)
                 sys.exit(exit_code)
