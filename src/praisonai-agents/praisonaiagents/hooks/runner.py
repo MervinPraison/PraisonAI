@@ -337,10 +337,21 @@ class HookRunner:
             
             duration = (time.time() - start_time) * 1000
             
-            # Normalize result
-            if result is None:
+            # Normalize result - allow simple return values for easier hooks
+            # None, True, missing return → allow
+            # False → deny  
+            # str → deny with that reason
+            # dict with 'decision' → convert to HookResult
+            if result is None or result is True:
                 result = HookResult.allow()
+            elif result is False:
+                result = HookResult.deny("Denied by hook")
+            elif isinstance(result, str):
+                result = HookResult.deny(result)
+            elif isinstance(result, dict) and 'decision' in result:
+                result = HookResult(**result)
             elif not isinstance(result, HookResult):
+                # Unknown type, treat as allow
                 result = HookResult.allow()
             
             return HookExecutionResult(

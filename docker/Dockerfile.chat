@@ -16,7 +16,7 @@ RUN mkdir -p /root/.praison
 # Install Python packages (using latest versions)
 RUN pip install --no-cache-dir \
     praisonai_tools \
-    "praisonai>=3.10.19" \
+    "praisonai>=3.10.20" \
     "praisonai[chat]" \
     "embedchain[github,youtube]"
 
