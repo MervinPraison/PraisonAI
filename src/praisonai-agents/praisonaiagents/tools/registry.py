@@ -251,3 +251,58 @@ def register_tool(
 def get_tool(name: str) -> Optional[Union[BaseTool, Callable]]:
     """Convenience function to get a tool from the global registry."""
     return get_registry().get(name)
+
+
+# Simplified alias for register_tool
+def add_tool(
+    tool: Union[BaseTool, Callable],
+    name: Optional[str] = None
+) -> None:
+    """Register a tool. Simplified alias for register_tool().
+    
+    Args:
+        tool: BaseTool instance or callable function
+        name: Optional override name
+    """
+    register_tool(tool, name=name)
+
+
+def has_tool(name: str) -> bool:
+    """Check if a tool is registered in the global registry.
+    
+    Args:
+        name: Name of the tool to check
+        
+    Returns:
+        True if tool exists, False otherwise
+    """
+    return get_registry().get(name) is not None
+
+
+def remove_tool(name: str) -> bool:
+    """Remove a tool from the global registry.
+    
+    Args:
+        name: Name of the tool to remove
+        
+    Returns:
+        True if tool was found and removed, False otherwise
+    """
+    registry = get_registry()
+    if name in registry._tools:
+        del registry._tools[name]
+        return True
+    if name in registry._functions:
+        del registry._functions[name]
+        return True
+    return False
+
+
+def list_tools() -> List[str]:
+    """List all registered tool names.
+    
+    Returns:
+        List of tool names
+    """
+    registry = get_registry()
+    return list(registry._tools.keys()) + list(registry._functions.keys())

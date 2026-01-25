@@ -82,6 +82,8 @@ __all__ = [
     'error_logs',
     'register_display_callback',
     'register_approval_callback',
+    'add_display_callback',  # Simplified alias
+    'add_approval_callback',  # Simplified alias
     'sync_display_callbacks',
     'async_display_callbacks',
     'execute_callback',
@@ -122,6 +124,12 @@ def register_approval_callback(callback_fn):
     """
     global approval_callback
     approval_callback = callback_fn
+
+
+# Simplified aliases (consistent naming convention)
+add_display_callback = register_display_callback
+add_approval_callback = register_approval_callback
+
 
 def execute_sync_callback(display_type: str, **kwargs):
     """Execute synchronous callback for a given display type without displaying anything.

@@ -261,6 +261,23 @@ def register_profile(profile: AgentProfile) -> None:
     BUILTIN_PROFILES[profile.name] = profile
 
 
+# Simplified alias
+add_profile = register_profile
+
+
+def has_profile(name: str) -> bool:
+    """Check if a profile exists."""
+    return name in BUILTIN_PROFILES
+
+
+def remove_profile(name: str) -> bool:
+    """Remove a profile by name. Returns True if found and removed."""
+    if name in BUILTIN_PROFILES:
+        del BUILTIN_PROFILES[name]
+        return True
+    return False
+
+
 def get_profiles_by_mode(mode: AgentMode) -> List[AgentProfile]:
     """Get all profiles that can be used in a specific mode."""
     return [
