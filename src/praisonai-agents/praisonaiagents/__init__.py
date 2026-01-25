@@ -6,6 +6,21 @@ Heavy dependencies like litellm are only loaded when actually needed.
 """
 
 # =============================================================================
+# NAMING CONVENTION GUIDE (Simplified patterns for consistency)
+# =============================================================================
+# | Pattern     | When to Use           | Examples                          |
+# |-------------|----------------------|-----------------------------------|
+# | add_X       | Register something   | add_hook, add_tool                |
+# | get_X       | Retrieve something   | get_tool, get_registry            |
+# | remove_X    | Unregister something | remove_hook, remove_tool          |
+# | has_X       | Check existence      | has_hook, has_tool                |
+# | enable_X    | Turn on feature      | enable_telemetry                  |
+# | disable_X   | Turn off feature     | disable_telemetry                 |
+# | XConfig     | Configuration class  | MemoryConfig, HooksConfig         |
+# | @verb       | Decorator            | @tool, @before_model              |
+# =============================================================================
+
+# =============================================================================
 # NAMESPACE PACKAGE GUARD
 # =============================================================================
 # Detect if we're loaded as a namespace package (which indicates stale artifacts

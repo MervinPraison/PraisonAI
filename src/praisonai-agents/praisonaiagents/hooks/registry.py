@@ -334,3 +334,110 @@ def set_default_registry(registry: HookRegistry):
     """Set the default global hook registry."""
     global _default_registry
     _default_registry = registry
+
+
+# =============================================================================
+# Simplified API (beginner-friendly aliases)
+# =============================================================================
+# These functions provide a simpler, beginner-friendly API for hook management.
+# They accept both string event names ('before_tool') and HookEvent enums.
+# =============================================================================
+
+def add_hook(
+    event: Union[str, HookEvent],
+    callback: Optional[Callable[[HookInput], HookResult]] = None,
+    priority: int = 10,
+    matcher: Optional[str] = None
+) -> Union[str, Callable]:
+    """Register a hook callback. Simplified API.
+    
+    Accepts both string event names and HookEvent enums:
+        add_hook('before_tool', my_callback)  # String
+        add_hook(HookEvent.BEFORE_TOOL, my_callback)  # Enum
+    
+    Can also be used as a decorator:
+        @add_hook('before_tool')
+        def my_hook(data):
+            return HookResult.allow()
+    
+    Args:
+        event: Hook event name ('before_tool', 'after_llm', etc.) or HookEvent enum
+        callback: Function to call when hook fires (optional when using as decorator)
+        priority: Execution order (lower = earlier). Default 10. (Reserved for future use)
+        matcher: Optional regex pattern to match specific targets (e.g., tool names)
+        
+    Returns:
+        Hook ID for later removal, or a decorator function if callback is None
+        
+    Raises:
+        ValueError: If event string is not a valid HookEvent
+    """
+    # Normalize string to HookEvent
+    if isinstance(event, str):
+        try:
+            event = HookEvent(event)
+        except ValueError:
+            valid_events = [e.value for e in HookEvent]
+            raise ValueError(
+                f"Unknown hook event: '{event}'. "
+                f"Valid events: {', '.join(valid_events)}"
+            )
+    
+    # If callback is None, return a decorator
+    if callback is None:
+        def decorator(func: Callable[[HookInput], HookResult]) -> Callable:
+            get_default_registry().register_function(
+                event=event,
+                func=func,
+                matcher=matcher
+            )
+            return func
+        return decorator
+    
+    return get_default_registry().register_function(
+        event=event,
+        func=callback,
+        matcher=matcher
+    )
+
+
+def remove_hook(hook_id: str) -> bool:
+    """Remove a hook by ID. Simplified API.
+    
+    Args:
+        hook_id: The hook ID returned by add_hook()
+        
+    Returns:
+        True if hook was found and removed, False otherwise
+    """
+    return get_default_registry().unregister(hook_id)
+
+
+def has_hook(event: Union[str, HookEvent]) -> bool:
+    """Check if any hooks are registered for an event. Simplified API.
+    
+    Accepts both string event names and HookEvent enums:
+        has_hook('before_tool')  # String
+        has_hook(HookEvent.BEFORE_TOOL)  # Enum
+    
+    Args:
+        event: Hook event name or HookEvent enum
+        
+    Returns:
+        True if hooks are registered for this event
+        
+    Raises:
+        ValueError: If event string is not a valid HookEvent
+    """
+    # Normalize string to HookEvent
+    if isinstance(event, str):
+        try:
+            event = HookEvent(event)
+        except ValueError:
+            valid_events = [e.value for e in HookEvent]
+            raise ValueError(
+                f"Unknown hook event: '{event}'. "
+                f"Valid events: {', '.join(valid_events)}"
+            )
+    
+    return get_default_registry().has_hooks(event)

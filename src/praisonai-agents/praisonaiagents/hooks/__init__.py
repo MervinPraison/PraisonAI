@@ -91,6 +91,11 @@ __all__ = [
     # Verification hooks (protocols)
     "VerificationHook",
     "VerificationResult",
+    # Simplified API (beginner-friendly)
+    "add_hook",
+    "remove_hook",
+    "has_hook",
+    "get_default_registry",
 ]
 
 # Grouped lazy imports for DRY and efficient loading
@@ -149,6 +154,13 @@ _LAZY_GROUPS = {
     'verification': {
         'VerificationHook': ('praisonaiagents.hooks.verification', 'VerificationHook'),
         'VerificationResult': ('praisonaiagents.hooks.verification', 'VerificationResult'),
+    },
+    # Simplified API (beginner-friendly aliases)
+    'simplified_api': {
+        'add_hook': ('praisonaiagents.hooks.registry', 'add_hook'),
+        'remove_hook': ('praisonaiagents.hooks.registry', 'remove_hook'),
+        'has_hook': ('praisonaiagents.hooks.registry', 'has_hook'),
+        'get_default_registry': ('praisonaiagents.hooks.registry', 'get_default_registry'),
     },
 }
 
