@@ -18,6 +18,48 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+def _smart_truncate(text: str, max_chars: int = 1000, preserve_structure: bool = True) -> str:
+    """
+    Smart truncation that preserves key information for LLM evaluation.
+    
+    For large outputs exceeding LLM context limits, this function:
+    1. Preserves the beginning (usually contains key info)
+    2. Preserves the ending (usually contains conclusions)
+    3. Adds a summary of what was truncated
+    
+    Args:
+        text: Text to truncate
+        max_chars: Maximum characters to keep
+        preserve_structure: If True, try to preserve JSON/list structure
+        
+    Returns:
+        Truncated text with truncation indicator
+    """
+    if not text or len(text) <= max_chars:
+        return text
+    
+    # Calculate portions: 60% beginning, 30% ending, 10% for truncation message
+    begin_chars = int(max_chars * 0.6)
+    end_chars = int(max_chars * 0.3)
+    
+    beginning = text[:begin_chars]
+    ending = text[-end_chars:]
+    
+    # Count what was truncated
+    truncated_chars = len(text) - begin_chars - end_chars
+    truncated_lines = text[begin_chars:-end_chars].count('\n') if end_chars > 0 else text[begin_chars:].count('\n')
+    
+    # Build truncation message
+    truncation_msg = f"\n\n[... TRUNCATED {truncated_chars:,} chars, ~{truncated_lines} lines ...]\n\n"
+    
+    return beginning + truncation_msg + ending
+
+
+def _estimate_tokens(text: str) -> int:
+    """Rough token estimation (4 chars per token average)."""
+    return len(text) // 4
+
+
 @dataclass
 class ToolEvaluation:
     """Evaluation of a single tool call."""
@@ -979,9 +1021,15 @@ REASONING: [brief explanation]
         """
         litellm = self._get_litellm()
         
-        input_text = "\n".join(agent_info.get("inputs", [])[:3]) or "No input recorded"
-        output = "\n".join(agent_info.get("outputs", [])[:3]) or "No output recorded"
-        context_summary = "\n".join(agent_info.get("context", [])[:2]) or "No context recorded"
+        # Use smart truncation for large outputs to preserve key information
+        raw_input = "\n".join(agent_info.get("inputs", [])[:3]) or "No input recorded"
+        raw_output = "\n".join(agent_info.get("outputs", [])[:3]) or "No output recorded"
+        raw_context = "\n".join(agent_info.get("context", [])[:2]) or "No context recorded"
+        
+        # Smart truncate to fit within LLM context while preserving key info
+        input_text = _smart_truncate(raw_input, max_chars=800)
+        output = _smart_truncate(raw_output, max_chars=2000)  # More space for output
+        context_summary = _smart_truncate(raw_context, max_chars=1500)
         
         # Format tool calls and extract errors (can be dicts or strings)
         raw_tool_calls = agent_info.get("tool_calls", [])[:5]
@@ -1033,18 +1081,19 @@ REASONING: [brief explanation]
             input_validation_status = "✅ All inputs appear to be properly provided"
         
         # Use mode-specific prompt template
+        # Note: input_text, output, context_summary already smart-truncated above
         prompt = self.prompt_template.format(
             agent_name=agent_name,
-            agent_goal=agent_goal[:200],
-            task_description=task_description[:500],
-            expected_output=expected_output[:300],
-            input_text=input_text[:500],
+            agent_goal=_smart_truncate(agent_goal, max_chars=200),
+            task_description=_smart_truncate(task_description, max_chars=500),
+            expected_output=_smart_truncate(expected_output, max_chars=300),
+            input_text=input_text,  # Already smart-truncated
             input_tokens=agent_info.get("prompt_tokens", 0),
-            context_summary=context_summary[:1000],
+            context_summary=context_summary,  # Already smart-truncated
             output_tokens=agent_info.get("completion_tokens", 0),
-            output=output[:1000],
-            tool_calls=tool_calls[:300],
-            tool_errors=tool_errors[:500],
+            output=output,  # Already smart-truncated
+            tool_calls=_smart_truncate(tool_calls, max_chars=500),
+            tool_errors=_smart_truncate(tool_errors, max_chars=500),
             # Enhanced fields for context mode
             recipe_goal=recipe_goal or "Not specified",
             previous_steps_context=previous_steps_context,
