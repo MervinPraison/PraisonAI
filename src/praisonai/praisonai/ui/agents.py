@@ -444,12 +444,16 @@ async def ui_run_praisonai(config, topic, tools_dict):
             agents_map[role] = agent
 
         # Create tasks
+        # Import tool resolver for YAML tool resolution
+        from praisonai.tool_resolver import ToolResolver
+        tool_resolver = ToolResolver()
+        
         for role, details in config['roles'].items():
             agent = agents_map[role]
             role_name = agent.name
 
             # -------------------------------------------------------------
-            # FIX: Skip empty or invalid tool names to avoid null tool objects
+            # Tool resolution: local tools_dict first, then ToolResolver
             # -------------------------------------------------------------
             role_tools = []
             task_tools = []  # Initialize task_tools outside the loop
@@ -458,6 +462,10 @@ async def ui_run_praisonai(config, topic, tools_dict):
                 if not tool_name or not tool_name.strip():
                     logger.warning("Skipping empty tool name.")
                     continue
+                
+                tool_name = tool_name.strip()
+                
+                # First check local tools_dict (from tools.py)
                 if tool_name in tools_dict:
                     # Create a copy of the tool definition
                     tool_def = tools_dict[tool_name].copy()
@@ -468,7 +476,13 @@ async def ui_run_praisonai(config, topic, tools_dict):
                     # Add API tool definition to task's tools
                     task_tools.append(tool_def)
                 else:
-                    logger.warning(f"Tool '{tool_name}' not found. Skipping.")
+                    # Try to resolve from built-in tools via ToolResolver
+                    resolved_tool = tool_resolver.resolve(tool_name)
+                    if resolved_tool is not None:
+                        role_tools.append(resolved_tool)
+                        logger.info(f"Resolved tool '{tool_name}' from built-in tools")
+                    else:
+                        logger.warning(f"Tool '{tool_name}' not found. Skipping.")
             
             # Set the agent's tools after collecting all tools
             if role_tools:

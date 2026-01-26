@@ -848,14 +848,23 @@ class AgentsGenerator:
     def _run_praisonai(self, config, topic, tools_dict):
         """
         Run agents using the PraisonAI framework.
+        
+        Tool resolution order:
+        1. Local tools.py (backward compat, custom tools)
+        2. YAML tools: field resolved via ToolResolver
+        3. Built-in tools from praisonaiagents.tools
         """
         agents = {}
         tasks = []
         tasks_dict = {}
 
-        # Load tools once at the beginning
+        # Import tool resolver (lazy import to avoid circular deps)
+        from praisonai.tool_resolver import ToolResolver
+        tool_resolver = ToolResolver()
+        
+        # Load tools from local tools.py (backward compat)
         tools_list = self.load_tools_from_tools_py()
-        self.logger.debug(f"Loaded tools: {tools_list}")
+        self.logger.debug(f"Loaded tools from tools.py: {tools_list}")
 
         # Create agents from config
         for role, details in config['roles'].items():
@@ -863,7 +872,32 @@ class AgentsGenerator:
             goal_filled = safe_format(details['goal'], topic=topic)
             backstory_filled = safe_format(details['backstory'], topic=topic)
             
-            # Pass all loaded tools to the agent
+            # Resolve tools for this agent from YAML tools: field
+            yaml_tool_names = details.get('tools', [])
+            agent_tools = list(tools_list)  # Start with local tools.py tools
+            
+            if yaml_tool_names:
+                # Resolve each tool name from YAML
+                for tool_name in yaml_tool_names:
+                    if not tool_name or not isinstance(tool_name, str):
+                        continue
+                    tool_name = tool_name.strip()
+                    
+                    # Check if already in tools_list (from tools.py)
+                    already_loaded = any(
+                        getattr(t, '__name__', None) == tool_name or 
+                        getattr(t, 'name', None) == tool_name
+                        for t in agent_tools
+                    )
+                    
+                    if not already_loaded:
+                        resolved_tool = tool_resolver.resolve(tool_name)
+                        if resolved_tool is not None:
+                            agent_tools.append(resolved_tool)
+                            self.logger.debug(f"Resolved tool '{tool_name}' for agent {role}")
+                        else:
+                            self.logger.warning(f"Tool '{tool_name}' not found for agent {role}")
+            
             # Get LLM from config or environment
             llm_config = details.get('llm', {})
             llm_model = llm_config.get("model") if isinstance(llm_config, dict) else llm_config
@@ -875,7 +909,7 @@ class AgentsGenerator:
                 goal=goal_filled,
                 backstory=backstory_filled,
                 instructions=details.get('instructions'),
-                tools=tools_list,  # Pass the entire tools list to the agent
+                tools=agent_tools,  # Pass resolved tools to the agent
                 allow_delegation=details.get('allow_delegation', False),
                 llm=llm_model,
                 reflection=details.get('reflection', False),
@@ -911,7 +945,7 @@ class AgentsGenerator:
                         description=description_filled,
                         expected_output=expected_output_filled,
                         agent=agent,
-                        tools=tools_list,  # Pass the same tools list to the task
+                        tools=agent_tools,  # Pass resolved tools to the task
                         async_execution=task_details.get('async_execution', False),
                         context=[],
                         config=task_details.get('config', {}),
