@@ -353,6 +353,7 @@ Methods:
 * <code title="cli">praisonai tools info <a href="./src/praisonai/praisonai/cli/commands/tools.py">--help</a></code>
 * <code title="cli">praisonai tools list <a href="./src/praisonai/praisonai/cli/commands/tools.py">--help</a></code>
 * <code title="cli">praisonai tools test <a href="./src/praisonai/praisonai/cli/commands/tools.py">--help</a></code>
+* <code title="cli">praisonai tools validate <a href="./src/praisonai/praisonai/cli/commands/tools.py">--help</a></code>
 * <code title="cli">praisonai traces disable <a href="./src/praisonai/praisonai/cli/commands/traces.py">--help</a></code>
 * <code title="cli">praisonai traces enable <a href="./src/praisonai/praisonai/cli/commands/traces.py">--help</a></code>
 * <code title="cli">praisonai traces list <a href="./src/praisonai/praisonai/cli/commands/traces.py">--help</a></code>
