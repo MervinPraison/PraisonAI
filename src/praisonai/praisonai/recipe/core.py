@@ -870,8 +870,12 @@ def _execute_recipe(
         template_path = Path(recipe_config.path) if recipe_config.path else None
         
         # Determine workflow file - check for agents.yaml if workflow.yaml not specified
-        workflow_file = recipe_config.raw.get("workflow", "workflow.yaml")
-        agents_file = recipe_config.raw.get("agents", "agents.yaml")
+        workflow_raw = recipe_config.raw.get("workflow", "workflow.yaml")
+        agents_raw = recipe_config.raw.get("agents", "agents.yaml")
+        
+        # Handle case where "workflow" or "agents" is a dict (inline definition) vs string (file path)
+        workflow_file = workflow_raw if isinstance(workflow_raw, str) else "workflow.yaml"
+        agents_file = "agents.yaml"  # Always use agents.yaml as the file path
         
         # If workflow.yaml doesn't exist but agents.yaml does, use agents.yaml as workflow
         if template_path:

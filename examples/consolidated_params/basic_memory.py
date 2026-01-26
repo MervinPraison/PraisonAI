@@ -1,21 +1,24 @@
-"""
-Basic Memory Example - Agent-Centric API
-
-Demonstrates the simplest memory usage with consolidated params.
-"""
-
+"""Basic memory example - minimal usage."""
 from praisonaiagents import Agent
 
-# Basic: Enable memory with preset
+# Simple enable (uses default file-based memory)
 agent = Agent(
     instructions="You are a helpful assistant with memory.",
-    memory="sqlite",  # Preset: sqlite, redis, postgres, file
+    memory=True,
 )
 
-# Run a simple task
-response = agent.start("Remember that my favorite color is blue.")
-print(response)
+# With preset
+agent_redis = Agent(
+    instructions="You are a helpful assistant.",
+    memory="redis",  # Uses redis preset
+)
 
-# Follow-up to test memory
-response = agent.start("What is my favorite color?")
-print(response)
+# With URL
+agent_postgres = Agent(
+    instructions="You are a helpful assistant.",
+    memory="postgresql://localhost/mydb",  # URL auto-detected
+)
+
+if __name__ == "__main__":
+    response = agent.chat("Remember that my favorite color is blue.")
+    print(response)

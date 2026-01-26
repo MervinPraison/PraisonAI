@@ -824,25 +824,122 @@ def docs_run_all(
 
 @app.command("generate")
 def docs_generate(
-    source: str = typer.Argument(".", help="Source directory"),
-    output: str = typer.Option("docs", "--output", "-o", help="Output directory"),
+    package: Optional[Path] = typer.Option(
+        None,
+        "--package", "-p",
+        help="Path to praisonaiagents package (default: auto-detect)",
+    ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output", "-o",
+        help="Output directory for MDX files (default: ~/PraisonAIDocs/docs/sdk/reference/praisonaiagents)",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Preview without writing files",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing files",
+    ),
+    module: Optional[str] = typer.Option(
+        None,
+        "--module", "-m",
+        help="Generate docs for specific module only",
+    ),
+    update_nav: bool = typer.Option(
+        False,
+        "--update-nav",
+        help="Update docs.json navigation",
+    ),
 ):
-    """Generate documentation."""
-    from praisonai.cli.main import PraisonAI
-    import sys
+    """
+    Generate SDK reference documentation from Python source code.
     
-    argv = ['docs', 'generate', source, '--output', output]
+    Parses praisonaiagents package using griffe and generates Mintlify-compatible
+    MDX documentation for all public symbols in _LAZY_IMPORTS.
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
+    Examples:
+        praisonai docs generate                    # Generate all reference docs
+        praisonai docs generate --dry-run          # Preview without writing
+        praisonai docs generate --module agent     # Generate only agent module
+        praisonai docs generate --update-nav       # Also update docs.json
+    """
+    import subprocess
+    import time
     
+    start_time = time.time()
+    
+    # Default paths
+    default_package = Path("/Users/praison/praisonai-package/src/praisonai-agents/praisonaiagents")
+    default_output = Path("/Users/praison/PraisonAIDocs/docs/sdk/reference/praisonaiagents")
+    generator_script = Path("/Users/praison/PraisonAI-tools/scripts/generate-sdk-docs.py")
+    
+    pkg_path = package or default_package
+    out_path = output or default_output
+    
+    # Validate paths
+    if not pkg_path.exists():
+        typer.echo(f"❌ Package path not found: {pkg_path}")
+        raise typer.Exit(2)
+    
+    if not generator_script.exists():
+        typer.echo(f"❌ Generator script not found: {generator_script}")
+        raise typer.Exit(2)
+    
+    typer.echo("=" * 60)
+    typer.echo("PraisonAI SDK Documentation Generator")
+    typer.echo("=" * 60)
+    typer.echo(f"Package: {pkg_path}")
+    typer.echo(f"Output: {out_path}")
+    typer.echo(f"Dry run: {dry_run}")
+    if module:
+        typer.echo(f"Module filter: {module}")
+    typer.echo()
+    
+    # Build command (use sys.executable to ensure same Python environment)
+    import sys as _sys
+    cmd = [
+        _sys.executable,
+        str(generator_script),
+        "--package", str(pkg_path),
+        "--output", str(out_path),
+    ]
+    
+    if dry_run:
+        cmd.append("--dry-run")
+    if force:
+        cmd.append("--force")
+    if module:
+        cmd.extend(["--module", module])
+    if update_nav:
+        cmd.append("--update-nav")
+    
+    # Run generator
     try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+        result = subprocess.run(
+            cmd,
+            capture_output=False,
+            text=True,
+            timeout=120,
+        )
+        
+        elapsed = time.time() - start_time
+        typer.echo(f"\nTotal time: {elapsed:.2f}s")
+        
+        if elapsed > 60:
+            typer.echo("⚠️ Warning: Generation took longer than 60s target")
+        
+        raise typer.Exit(result.returncode)
+        
+    except subprocess.TimeoutExpired:
+        typer.echo("❌ Generation timed out after 120s")
+        raise typer.Exit(1)
+    except FileNotFoundError:
+        typer.echo("❌ Python3 not found")
+        raise typer.Exit(1)
 
 
 @app.command("serve")

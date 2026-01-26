@@ -5,6 +5,11 @@ Demonstrates how to create custom trace sinks for PraisonAI agents.
 The trace system uses a protocol-driven design - implement 3 methods
 and your sink works with any agent.
 
+Protocol: ContextTraceSinkProtocol (AGENTS.md naming: XProtocol for interfaces)
+- emit(event) - Receive a trace event
+- flush() - Flush any buffered events  
+- close() - Release resources
+
 Examples:
 1. HTTP Sink - Send events to a remote server
 2. SQLite Sink - Store events in a database
@@ -14,6 +19,7 @@ Examples:
 from praisonaiagents import (
     Agent,
     ContextTraceEmitter,
+    ContextTraceSinkProtocol,  # Protocol for type hints (optional)
     trace_context,
 )
 
@@ -165,7 +171,13 @@ def example_with_real_agent():
     
     Note: Requires OPENAI_API_KEY environment variable.
     """
+    import os
     print("\n=== Real Agent with Custom Sink ===")
+    
+    # Check for API key
+    if not os.environ.get("OPENAI_API_KEY"):
+        print("Skipping real agent test (no OPENAI_API_KEY)")
+        return
     
     # Create custom sink
     sink = ConsoleSink()
@@ -180,11 +192,10 @@ def example_with_real_agent():
         )
         
         # This chat will emit events to ConsoleSink
-        # Uncomment to run (requires API key):
-        # result = agent.chat("Say hello in 5 words or less")
-        # print(f"Agent response: {result}")
+        result = agent.chat("Say hello in 5 words or less")
+        print(f"\nAgent response: {result}")
     
-    print("Real agent example complete (agent.chat commented out)")
+    print("Real agent example complete")
 
 
 if __name__ == "__main__":

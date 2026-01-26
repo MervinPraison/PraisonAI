@@ -1,26 +1,22 @@
-"""
-Basic Workflow Example - Agent-Centric API
-
-Demonstrates minimal workflow with consolidated params.
-"""
-
+"""Basic workflow example with consolidated params."""
 from praisonaiagents import Agent
 from praisonaiagents.workflows import Workflow, WorkflowStep
 
-# Create a simple workflow
+# Create agents
+writer = Agent(instructions="You are a content writer.")
+editor = Agent(instructions="You are an editor.")
+
+# Create workflow with consolidated params
 workflow = Workflow(
-    name="simple_workflow",
-    output="verbose",  # Workflow-level output preset
+    name="Content Pipeline",
+    steps=[
+        WorkflowStep(name="write", agent=writer, action="Write about {{topic}}"),
+        WorkflowStep(name="edit", agent=editor, action="Edit the content", context=["write"]),
+    ],
+    output="verbose",
+    planning=True,
 )
 
-# Add a step
-step = WorkflowStep(
-    name="writer",
-    action="Write a haiku about programming",
-    agent=Agent(instructions="You are a creative poet."),
-    output="result.txt",  # Save output to file
-)
-
-# Note: This is a structural example - actual execution requires workflow.run()
-print("Workflow created with output preset:", workflow.output)
-print("Step output file:", step.output_file)
+if __name__ == "__main__":
+    result = workflow.run(variables={"topic": "AI agents"})
+    print(result)

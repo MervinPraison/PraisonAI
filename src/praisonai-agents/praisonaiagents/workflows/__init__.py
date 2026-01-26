@@ -19,6 +19,7 @@ from .workflows import (
     Loop,
     Repeat,
     Include,
+    If,
     
     # Convenience functions
     route,
@@ -26,6 +27,10 @@ from .workflows import (
     loop,
     repeat,
     include,
+    if_,
+    
+    # Constants
+    MAX_NESTING_DEPTH,
     
     # Backward compatibility aliases
     StepInput,
@@ -75,11 +80,16 @@ __all__ = [
     "Loop",
     "Repeat",
     "Include",
+    "If",
     "route",
     "parallel",
     "loop",
     "repeat",
     "include",
+    "if_",
+    
+    # Constants
+    "MAX_NESTING_DEPTH",
     
     # Workflow Config Classes
     "WorkflowOutputConfig",

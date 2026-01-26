@@ -35,8 +35,9 @@ __all__ = [
     "ActionEvent",
     "ActionEventType",
     "ActionTraceConfig",
-    # Sinks
-    "TraceSink",
+    # Sink protocols (AGENTS.md naming: XProtocol)
+    "TraceSinkProtocol",
+    "TraceSink",  # Backward compat alias
     "NoOpSink",
     "ListSink",
     # Emitter
@@ -47,7 +48,8 @@ __all__ = [
     # Context events (for replay)
     "ContextEvent",
     "ContextEventType",
-    "ContextTraceSink",
+    "ContextTraceSinkProtocol",
+    "ContextTraceSink",  # Backward compat alias
     "ContextNoOpSink",
     "ContextListSink",
     "ContextTraceEmitter",
@@ -66,8 +68,8 @@ def __getattr__(name: str):
         from .protocol import ActionEvent, ActionEventType, ActionTraceConfig
         return locals()[name]
     
-    if name in ("TraceSink", "NoOpSink", "ListSink"):
-        from .protocol import TraceSink, NoOpSink, ListSink
+    if name in ("TraceSinkProtocol", "TraceSink", "NoOpSink", "ListSink"):
+        from .protocol import TraceSinkProtocol, TraceSink, NoOpSink, ListSink
         return locals()[name]
     
     if name == "TraceEmitter":
@@ -83,8 +85,8 @@ def __getattr__(name: str):
         from .context_events import ContextEvent, ContextEventType
         return locals()[name]
     
-    if name in ("ContextTraceSink", "ContextNoOpSink", "ContextListSink"):
-        from .context_events import ContextTraceSink, ContextNoOpSink, ContextListSink
+    if name in ("ContextTraceSinkProtocol", "ContextTraceSink", "ContextNoOpSink", "ContextListSink"):
+        from .context_events import ContextTraceSinkProtocol, ContextTraceSink, ContextNoOpSink, ContextListSink
         return locals()[name]
     
     if name == "ContextTraceEmitter":

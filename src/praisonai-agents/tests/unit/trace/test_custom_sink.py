@@ -2,20 +2,23 @@
 Tests for custom sink protocol and trace_context helper.
 
 TDD tests to verify:
-1. Custom sinks can implement ContextTraceSink protocol (duck typing)
+1. Custom sinks can implement ContextTraceSinkProtocol protocol (duck typing)
 2. trace_context() context manager properly sets/resets emitter
 3. Exception in sink doesn't crash agent execution
 4. Protocol compliance validation
+
+Note: ContextTraceSink is a backward-compat alias for ContextTraceSinkProtocol
+per AGENTS.md naming convention (XProtocol for interfaces).
 """
 
 
 class TestCustomSinkProtocol:
-    """Tests for custom sink implementing ContextTraceSink protocol."""
+    """Tests for custom sink implementing ContextTraceSinkProtocol protocol."""
     
     def test_custom_sink_duck_typing_works(self):
         """Test that a custom class implementing emit/flush/close works as sink."""
         from praisonaiagents.trace.context_events import (
-            ContextTraceEmitter, ContextTraceSink
+            ContextTraceEmitter, ContextTraceSinkProtocol
         )
         
         # Custom sink - NO inheritance required
@@ -35,7 +38,7 @@ class TestCustomSinkProtocol:
         sink = MyCustomSink()
         
         # Should pass isinstance check (runtime_checkable)
-        assert isinstance(sink, ContextTraceSink)
+        assert isinstance(sink, ContextTraceSinkProtocol)
         
         # Should work with emitter
         emitter = ContextTraceEmitter(sink=sink, session_id="test", enabled=True)

@@ -98,6 +98,8 @@ class RecipeHandler:
             "policy": self.cmd_policy,
             "judge": self.cmd_judge,
             "apply": self.cmd_apply,
+            "create": self.cmd_create,
+            "optimize": self.cmd_optimize,
             "help": lambda _: self._print_help() or self.EXIT_SUCCESS,
             "--help": lambda _: self._print_help() or self.EXIT_SUCCESS,
             "-h": lambda _: self._print_help() or self.EXIT_SUCCESS,
@@ -136,6 +138,8 @@ class RecipeHandler:
   runs              List/manage run history
   judge <trace_id>  Judge a trace with LLM (--memory, --knowledge, --context)
   apply <plan>      Apply fixes from a judge plan
+  create <goal>     Create recipe from natural language goal (auto-optimize)
+  optimize <name>   Optimize existing recipe with judge feedback
   sbom <recipe>     Generate SBOM (Software Bill of Materials)
   audit <recipe>    Audit dependencies for vulnerabilities
   sign <bundle>     Sign a recipe bundle
@@ -265,6 +269,88 @@ class RecipeHandler:
                 i += 1
         
         return result
+    
+    def _parse_agents_spec(self, spec_str: str) -> Dict[str, Dict[str, Any]]:
+        """Parse agents specification string.
+        
+        Format: name:role=X,goal=Y;name2:role=Z,goal=W
+        
+        Returns:
+            Dict of agent_name -> {role, goal, backstory}
+        """
+        if not spec_str or not spec_str.strip():
+            return {}
+        
+        agents = {}
+        for agent_spec in spec_str.split(";"):
+            agent_spec = agent_spec.strip()
+            if not agent_spec or ":" not in agent_spec:
+                continue
+            
+            parts = agent_spec.split(":", 1)
+            agent_name = parts[0].strip()
+            
+            agent_config = {}
+            if len(parts) > 1:
+                for prop in parts[1].split(","):
+                    if "=" in prop:
+                        key, value = prop.split("=", 1)
+                        agent_config[key.strip()] = value.strip()
+            
+            agents[agent_name] = agent_config
+        
+        return agents
+    
+    def _parse_tools_spec(self, spec_str: str) -> Dict[str, List[str]]:
+        """Parse tools specification string.
+        
+        Format: agent:tool1,tool2;agent2:tool3,tool4
+        
+        Returns:
+            Dict of agent_name -> [tool1, tool2, ...]
+        """
+        if not spec_str or not spec_str.strip():
+            return {}
+        
+        tools = {}
+        for tool_spec in spec_str.split(";"):
+            tool_spec = tool_spec.strip()
+            if not tool_spec or ":" not in tool_spec:
+                continue
+            
+            parts = tool_spec.split(":", 1)
+            agent_name = parts[0].strip()
+            
+            if len(parts) > 1:
+                tool_list = [t.strip() for t in parts[1].split(",") if t.strip()]
+                tools[agent_name] = tool_list
+        
+        return tools
+    
+    def _parse_agent_types_spec(self, spec_str: str) -> Dict[str, str]:
+        """Parse agent types specification string.
+        
+        Format: agent:image;agent2:audio
+        
+        Returns:
+            Dict of agent_name -> type
+        """
+        if not spec_str or not spec_str.strip():
+            return {}
+        
+        agent_types = {}
+        for type_spec in spec_str.split(";"):
+            type_spec = type_spec.strip()
+            if not type_spec or ":" not in type_spec:
+                continue
+            
+            parts = type_spec.split(":", 1)
+            agent_name = parts[0].strip()
+            
+            if len(parts) > 1:
+                agent_types[agent_name] = parts[1].strip()
+        
+        return agent_types
     
     def cmd_list(self, args: List[str]) -> int:
         """List available recipes."""
@@ -833,56 +919,53 @@ class RecipeHandler:
             output_dir = Path(parsed["output"]) / parsed["name"]
             output_dir.mkdir(parents=True, exist_ok=True)
             
-            # Create TEMPLATE.yaml
-            template_yaml = f'''schema_version: "1.0"
-name: {parsed["name"]}
-version: "1.0.0"
-description: |
-  Description of your recipe.
-author: your-name
-license: Apache-2.0
-tags: [example]
+            # Create agents.yaml with metadata block (simplified 2-file structure)
+            agents_yaml = f'''# Recipe metadata (optional, for registry/sharing)
+metadata:
+  name: {parsed["name"]}
+  version: "1.0.0"
+  description: |
+    Description of your recipe.
+  author: your-name
+  license: Apache-2.0
+  tags:
+    - example
+  requires:
+    env:
+      - OPENAI_API_KEY
 
-requires:
-  env: [OPENAI_API_KEY]
-  packages: []
-
-tools:
-  allow: []
-  deny: [shell.exec, file.write]
-
-workflow: workflow.yaml
-
-config:
-  input:
-    type: string
-    required: true
-    description: Input for the recipe
-
-defaults:
-  input: ""
-
-outputs:
-  - name: result
-    type: text
-    description: Recipe output
-'''
-            (output_dir / "TEMPLATE.yaml").write_text(template_yaml)
-            
-            # Create workflow.yaml
-            workflow_yaml = '''framework: praisonai
+framework: praisonai
 topic: ""
-roles:
+
+agents:
   assistant:
     role: AI Assistant
     goal: Complete the task
     backstory: You are a helpful AI assistant.
-    tasks:
-      main_task:
-        description: "Process the input: {{{{input}}}}"
-        expected_output: Processed result
+    tools:
+      - read_file
+      - write_file
+
+steps:
+  - agent: assistant
+    action: "Process the input: {{{{input}}}}"
+    expected_output: Processed result
 '''
-            (output_dir / "workflow.yaml").write_text(workflow_yaml)
+            (output_dir / "agents.yaml").write_text(agents_yaml)
+            
+            # Create tools.py
+            tools_py = '''"""Custom tools for this recipe."""
+
+# Define your custom tools here
+# Example:
+# def my_custom_tool(query: str) -> str:
+#     """A custom tool."""
+#     return f"Result: {query}"
+
+# Dynamic variables can also be defined here
+# CUSTOM_VAR = "value"
+'''
+            (output_dir / "tools.py").write_text(tools_py)
             
             # Create README.md
             readme = f'''# {parsed["name"]}
@@ -897,7 +980,7 @@ praisonai recipe run {parsed["name"]} --input "your input"
 
 ## Configuration
 
-See TEMPLATE.yaml for configuration options.
+See agents.yaml for configuration options (metadata block for registry info).
 '''
             (output_dir / "README.md").write_text(readme)
             
@@ -910,7 +993,7 @@ OPENAI_API_KEY=your-api-key
             self._print_success(f"Recipe '{parsed['name']}' initialized at {output_dir}")
             print("\nNext steps:")
             print(f"  1. cd {output_dir}")
-            print("  2. Edit TEMPLATE.yaml and workflow.yaml")
+            print("  2. Edit agents.yaml and tools.py")
             print(f"  3. praisonai recipe validate {parsed['name']}")
             print(f"  4. praisonai recipe run {parsed['name']} --input 'test'")
             
@@ -1911,6 +1994,186 @@ OPENAI_API_KEY=your-api-key
             
         except Exception as e:
             self._print_error(str(e))
+            return self.EXIT_RUNTIME_ERROR
+
+
+    def cmd_create(self, args: List[str]) -> int:
+        """Create a new recipe from a natural language goal.
+        
+        Usage:
+            praisonai recipe create "GOAL" [options]
+        
+        Options:
+            --output, -o <dir>    Output directory (default: current dir)
+            --no-optimize         Skip optimization loop
+            --iterations <n>      Optimization iterations (default: 3)
+            --threshold <n>       Score threshold to stop (default: 8.0)
+            --agents <spec>       Custom agents (format: name:role=X,goal=Y;name2:...)
+            --tools <spec>        Custom tools per agent (format: agent:tool1,tool2;...)
+            --agent-types <spec>  Agent types (format: agent:image;agent2:audio;...)
+        """
+        spec = {
+            "goal": {"positional": True},
+            "output": {"short": "-o", "default": "."},
+            "no_optimize": {"flag": True, "default": False},
+            "iterations": {"default": "3"},
+            "threshold": {"default": "8.0"},
+            "agents": {"default": ""},
+            "tools": {"default": ""},
+            "agent_types": {"default": ""},
+        }
+        parsed = self._parse_args(args, spec)
+        
+        if not parsed.get("goal"):
+            self._print_error("Goal required")
+            print("\nUsage: praisonai recipe create \"GOAL\" [options]")
+            print("\nExamples:")
+            print('  praisonai recipe create "Build a web scraper for news"')
+            print('  praisonai recipe create "Research AI trends" --no-optimize')
+            print('  praisonai recipe create "Research AI" --agents "researcher:role=AI Researcher,goal=Find papers"')
+            print('  praisonai recipe create "Research AI" --tools "researcher:internet_search,arxiv"')
+            return self.EXIT_VALIDATION_ERROR
+        
+        goal = parsed["goal"]
+        output_dir = Path(parsed["output"])
+        no_optimize = parsed.get("no_optimize", False)
+        iterations = int(parsed.get("iterations", 3))
+        threshold = float(parsed.get("threshold", 8.0))
+        
+        # Parse customization options
+        agents = self._parse_agents_spec(parsed.get("agents", ""))
+        tools = self._parse_tools_spec(parsed.get("tools", ""))
+        agent_types = self._parse_agent_types_spec(parsed.get("agent_types", ""))
+        
+        print(f"🚀 Creating recipe for: {goal}")
+        if agents:
+            print(f"   📋 Custom agents: {', '.join(agents.keys())}")
+        if tools:
+            print(f"   🔧 Custom tools: {sum(len(v) for v in tools.values())} tools")
+        if agent_types:
+            print(f"   🏷️  Agent types: {', '.join(f'{k}={v}' for k, v in agent_types.items())}")
+        
+        try:
+            from .recipe_creator import RecipeCreator
+            
+            creator = RecipeCreator()
+            recipe_path = creator.create(
+                goal,
+                output_dir=output_dir,
+                agents=agents if agents else None,
+                tools=tools if tools else None,
+                agent_types=agent_types if agent_types else None,
+            )
+            
+            self._print_success(f"Created recipe: {recipe_path}")
+            print("   📄 agents.yaml  (agent definitions + metadata)")
+            print("   📄 tools.py     (custom functions)")
+            
+            if not no_optimize:
+                print(f"\n🔄 Starting optimization loop ({iterations} iterations, threshold: {threshold})")
+                
+                from .recipe_optimizer import RecipeOptimizer
+                
+                optimizer = RecipeOptimizer(
+                    max_iterations=iterations,
+                    score_threshold=threshold,
+                )
+                
+                final_report = optimizer.optimize(recipe_path)
+                
+                if final_report:
+                    score = getattr(final_report, 'overall_score', 0)
+                    print(f"\n✅ Optimization complete! Final score: {score}/10")
+            
+            print(f"\n📁 Recipe ready at: {recipe_path}")
+            print(f"   Run with: praisonai recipe run {recipe_path.name}")
+            
+            return self.EXIT_SUCCESS
+            
+        except Exception as e:
+            self._print_error(str(e))
+            import traceback
+            traceback.print_exc()
+            return self.EXIT_RUNTIME_ERROR
+    
+    def cmd_optimize(self, args: List[str]) -> int:
+        """Optimize an existing recipe using judge feedback.
+        
+        Usage:
+            praisonai recipe optimize <NAME> [WHAT] [options]
+        
+        Options:
+            --iterations <n>      Optimization iterations (default: 3)
+            --threshold <n>       Score threshold to stop (default: 8.0)
+            --input <text>        Input data for recipe runs
+        """
+        spec = {
+            "name": {"positional": True},
+            "target": {"positional": True, "default": ""},
+            "iterations": {"default": "3"},
+            "threshold": {"default": "8.0"},
+            "input": {"short": "-i", "default": ""},
+        }
+        parsed = self._parse_args(args, spec)
+        
+        if not parsed.get("name"):
+            self._print_error("Recipe name required")
+            print("\nUsage: praisonai recipe optimize <NAME> [WHAT] [options]")
+            print("\nExamples:")
+            print('  praisonai recipe optimize my-recipe')
+            print('  praisonai recipe optimize my-recipe "improve error handling"')
+            return self.EXIT_VALIDATION_ERROR
+        
+        name = parsed["name"]
+        target = parsed.get("target", "")
+        iterations = int(parsed.get("iterations", 3))
+        threshold = float(parsed.get("threshold", 8.0))
+        input_data = parsed.get("input", "")
+        
+        # Find recipe path
+        recipe_path = Path(name)
+        if not recipe_path.exists():
+            # Try as recipe name in current directory
+            recipe_path = Path.cwd() / name
+        if not recipe_path.exists():
+            # Try in recipes directory
+            try:
+                recipe_path = self.recipe.get_recipe_path(name)
+            except Exception:
+                pass
+        
+        if not recipe_path.exists():
+            self._print_error(f"Recipe not found: {name}")
+            return self.EXIT_NOT_FOUND
+        
+        print(f"🔄 Optimizing recipe: {recipe_path.name}")
+        if target:
+            print(f"   Target: {target}")
+        
+        try:
+            from .recipe_optimizer import RecipeOptimizer
+            
+            optimizer = RecipeOptimizer(
+                max_iterations=iterations,
+                score_threshold=threshold,
+            )
+            
+            final_report = optimizer.optimize(
+                recipe_path,
+                input_data=input_data,
+                optimization_target=target if target else None,
+            )
+            
+            if final_report:
+                score = getattr(final_report, 'overall_score', 0)
+                self._print_success(f"Optimization complete! Final score: {score}/10")
+            
+            return self.EXIT_SUCCESS
+            
+        except Exception as e:
+            self._print_error(str(e))
+            import traceback
+            traceback.print_exc()
             return self.EXIT_RUNTIME_ERROR
 
 

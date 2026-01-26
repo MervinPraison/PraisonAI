@@ -258,12 +258,14 @@ class ContextEvent:
 
 
 @runtime_checkable
-class ContextTraceSink(Protocol):
+class ContextTraceSinkProtocol(Protocol):
     """
     Protocol for context trace event sinks.
     
     Implementations receive context events and handle them
     (e.g., write to file, collect in memory, send to server).
+    
+    Naming follows AGENTS.md convention: XProtocol for interfaces.
     """
     
     def emit(self, event: ContextEvent) -> None:
@@ -277,6 +279,10 @@ class ContextTraceSink(Protocol):
     def close(self) -> None:
         """Close the sink and release resources."""
         ...
+
+
+# Backward compatibility alias (deprecated)
+ContextTraceSink = ContextTraceSinkProtocol
 
 
 class ContextNoOpSink:

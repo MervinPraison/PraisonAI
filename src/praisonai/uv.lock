@@ -3899,10 +3899,10 @@ requires-dist = [
     { name = "autogen-agentchat", marker = "extra == 'autogen-v4'", specifier = ">=0.4.0" },
     { name = "autogen-core", marker = "extra == 'autogen-v4'", specifier = ">=0.4.0" },
     { name = "autogen-ext", extras = ["openai"], marker = "extra == 'autogen-v4'", specifier = ">=0.4.0" },
-    { name = "chainlit", marker = "extra == 'chat'", specifier = ">=2.8.5,<2.9.0" },
-    { name = "chainlit", marker = "extra == 'code'", specifier = ">=2.8.5,<2.9.0" },
-    { name = "chainlit", marker = "extra == 'realtime'", specifier = ">=2.8.5,<2.9.0" },
-    { name = "chainlit", marker = "extra == 'ui'", specifier = ">=2.8.5,<2.9.0" },
+    { name = "chainlit", marker = "extra == 'chat'", specifier = ">=2.8.5,<=2.9.4" },
+    { name = "chainlit", marker = "extra == 'code'", specifier = ">=2.8.5,<=2.9.4" },
+    { name = "chainlit", marker = "extra == 'realtime'", specifier = ">=2.8.5,<=2.9.4" },
+    { name = "chainlit", marker = "extra == 'ui'", specifier = ">=2.8.5,<=2.9.4" },
     { name = "crawl4ai", marker = "extra == 'chat'", specifier = ">=0.7.0" },
     { name = "crawl4ai", marker = "extra == 'code'", specifier = ">=0.7.0" },
     { name = "crawl4ai", marker = "extra == 'realtime'", specifier = ">=0.7.0" },
@@ -3928,7 +3928,7 @@ requires-dist = [
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen-v4'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.1.0" },
-    { name = "praisonaiagents", specifier = ">=0.13.18" },
+    { name = "praisonaiagents", specifier = ">=0.13.19" },
     { name = "pyautogen", marker = "extra == 'autogen'", specifier = "==0.2.29" },
     { name = "pyngrok", marker = "extra == 'call'", specifier = ">=1.4.0" },
     { name = "pyparsing", specifier = ">=3.0.0" },
@@ -3973,7 +3973,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "0.13.18"
+version = "0.13.19"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -3982,9 +3982,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/cf/e1/52093a988240b43dd1704c36c67f125b55b2c4299e835a1a17de0f12804f/praisonaiagents-0.13.18.tar.gz", hash = "sha256:ccc8ce6faf6ba21a2311cfbd0e447d289ec81c8d577446c978c413e2752aad26", size = 1094127, upload-time = "2026-01-25T00:33:29.15Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/dd/fb/d0a25938d9232c62d99b80199d51e80b9330c075c8222e541ba425e495a9/praisonaiagents-0.13.19.tar.gz", hash = "sha256:3bf484fc0d4aafa51e0ea30d2860487f0ae2ebd00580ba2c7b86eb4af6c8a35e", size = 1101799, upload-time = "2026-01-26T08:06:18.396Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/65/d1/7794eee8a0760f458ec2fb1cf1509ba716949adaa600d1594b3f6e13282c/praisonaiagents-0.13.18-py3-none-any.whl", hash = "sha256:acc5e06b337d095430be07d794892ac7935420c3902abe29aa77c75bb871aacb", size = 1068404, upload-time = "2026-01-25T00:33:27.04Z" },
+    { url = "https://files.pythonhosted.org/packages/2f/fa/98b85ab9fed45acaf2b184eab25fe0425001371142439b8a0fe7820e182e/praisonaiagents-0.13.19-py3-none-any.whl", hash = "sha256:ead5562726d5349a63fcc571a12132f205f625046294da82e692ea4285e00654", size = 1077267, upload-time = "2026-01-26T08:06:15.391Z" },
 ]
 
 [[package]]

@@ -731,6 +731,8 @@ class YAMLWorkflowParser:
             return self._parse_repeat_step(step_data)
         elif 'include' in step_data:
             return self._parse_include_step(step_data)
+        elif 'if' in step_data:
+            return self._parse_if_step(step_data)
         elif 'agent' in step_data:
             return self._parse_agent_step(step_data)
         else:
@@ -853,6 +855,52 @@ class YAMLWorkflowParser:
             input_template = include_config.get('input')
         
         return Include(recipe=recipe_name, input=input_template)
+    
+    def _parse_if_step(self, step_data: Dict):
+        """
+        Parse a conditional branching (if:) pattern step.
+        
+        Args:
+            step_data: Step definition with 'if' key
+            
+        Returns:
+            If pattern object
+            
+        YAML syntax:
+            - if:
+                condition: "{{score}} > 80"
+                then:
+                  - agent: approver
+                else:
+                  - agent: rejector
+        """
+        from .workflows import If
+        
+        if_config = step_data['if']
+        
+        condition = if_config.get('condition', '')
+        
+        # Parse then steps
+        then_steps = []
+        then_config = if_config.get('then', [])
+        for step in then_config:
+            parsed = self._parse_single_step(step)
+            if parsed:
+                then_steps.append(parsed)
+        
+        # Parse else steps (optional)
+        else_steps = []
+        else_config = if_config.get('else', [])
+        for step in else_config:
+            parsed = self._parse_single_step(step)
+            if parsed:
+                else_steps.append(parsed)
+        
+        return If(
+            condition=condition,
+            then_steps=then_steps,
+            else_steps=else_steps if else_steps else None
+        )
     
     def _parse_route_step(self, step_data: Dict) -> Dict:
         """
