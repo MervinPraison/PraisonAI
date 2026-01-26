@@ -91,15 +91,14 @@ class RecipeOptimizer:
         Returns:
             Tuple of (JudgeReport, trace_id)
         """
-        from praisonai.recipe import RecipeManager
+        from praisonai import recipe
         from praisonai.replay import ContextTraceReader, ContextEffectivenessJudge
         
         # Generate unique trace name for this iteration
         trace_name = f"{recipe_path.name}-opt-{iteration}"
         
         # Run the recipe with trace saving
-        manager = RecipeManager()
-        result = manager.run(
+        result = recipe.run(
             str(recipe_path),
             input={"input": input_data} if input_data else {},
             options={

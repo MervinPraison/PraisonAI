@@ -183,10 +183,17 @@ def recipe_judge(
     context: bool = typer.Option(False, "--context", help="Evaluate context flow between agents (default mode)"),
     memory: bool = typer.Option(False, "--memory", help="Evaluate memory utilization (store/search effectiveness)"),
     knowledge: bool = typer.Option(False, "--knowledge", help="Evaluate knowledge retrieval effectiveness"),
+    goal: str = typer.Option(None, "--goal", "-g", help="Override recipe goal for evaluation (extracted from YAML if not provided)"),
 ):
     """Judge a recipe execution trace and generate fix recommendations.
     
     Similar to 'terraform plan' - analyzes the trace and generates a plan of fixes.
+    
+    The judge now includes:
+    - Dynamic failure detection (LLM determines if task failed)
+    - Previous step quality context (each agent sees how prior agents performed)
+    - Recipe goal evaluation (evaluates against overall workflow objective)
+    - Input validation status (detects unresolved template variables)
     
     Evaluation Modes:
     - --context: Evaluate context flow between agents (default)
@@ -195,6 +202,7 @@ def recipe_judge(
     
     Examples:
         praisonai recipe judge run-abc123
+        praisonai recipe judge run-abc123 --goal "Analyze image and create blog post"
         praisonai recipe judge run-abc123 --memory
         praisonai recipe judge run-abc123 --knowledge
         praisonai recipe judge run-abc123 --yaml agents.yaml --output plan.yaml
@@ -317,6 +325,89 @@ def recipe_optimize(
     except ImportError as e:
         print(f"❌ Missing dependency: {e}")
         print("   Install with: pip install litellm")
+        raise typer.Exit(1)
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        raise typer.Exit(1)
+
+
+@app.command("serve")
+def recipe_serve(
+    recipe: str = typer.Argument(None, help="Recipe name or path to serve (optional, serves all if not specified)"),
+    host: str = typer.Option("127.0.0.1", "--host", "-h", help="Server host"),
+    port: int = typer.Option(8765, "--port", "-p", help="Server port"),
+    reload: bool = typer.Option(False, "--reload", "-r", help="Enable hot reload"),
+    workers: int = typer.Option(1, "--workers", "-w", help="Number of worker processes"),
+    config: str = typer.Option(None, "--config", "-c", help="Path to serve.yaml config file"),
+    api_key: str = typer.Option(None, "--api-key", help="API key for authentication"),
+    cors: str = typer.Option("*", "--cors", help="CORS origins (comma-separated or *)"),
+    metrics: bool = typer.Option(False, "--metrics", help="Enable /metrics endpoint"),
+    admin: bool = typer.Option(False, "--admin", help="Enable /admin endpoints"),
+):
+    """Start HTTP server for recipe execution.
+    
+    Serves recipes as REST API endpoints.
+    
+    Examples:
+        praisonai recipe serve
+        praisonai recipe serve my-recipe --port 8080
+        praisonai recipe serve --host 0.0.0.0 --port 8000
+        praisonai recipe serve --config serve.yaml
+        praisonai recipe serve --api-key my-secret-key
+        praisonai recipe serve --workers 4
+    """
+    print(f"🚀 Starting recipe server...")
+    print(f"   Host: {host}")
+    print(f"   Port: {port}")
+    if recipe:
+        print(f"   Recipe: {recipe}")
+    if config:
+        print(f"   Config: {config}")
+    if api_key:
+        print(f"   Auth: API Key enabled")
+    if workers > 1:
+        print(f"   Workers: {workers}")
+    
+    try:
+        from praisonai.recipe.serve import serve, load_config
+        
+        # Load config from file if provided
+        serve_config = {}
+        if config:
+            serve_config = load_config(config)
+        
+        # Override with CLI options
+        if api_key:
+            serve_config["api_key"] = api_key
+            serve_config["auth"] = "api-key"
+        if cors:
+            serve_config["cors_origins"] = cors
+        if metrics:
+            serve_config["enable_metrics"] = True
+        if admin:
+            serve_config["enable_admin"] = True
+        if recipe:
+            serve_config["recipes"] = [recipe]
+        
+        print(f"\n📡 Server running at http://{host}:{port}")
+        print(f"   Health: http://{host}:{port}/health")
+        print(f"   Recipes: http://{host}:{port}/v1/recipes")
+        print(f"   OpenAPI: http://{host}:{port}/openapi.json")
+        if metrics:
+            print(f"   Metrics: http://{host}:{port}/metrics")
+        print(f"\n   Press Ctrl+C to stop\n")
+        
+        serve(
+            host=host,
+            port=port,
+            reload=reload,
+            config=serve_config,
+            workers=workers,
+        )
+        
+    except ImportError as e:
+        print(f"❌ Missing dependency: {e}")
+        print("   Install with: pip install praisonai[serve]")
         raise typer.Exit(1)
     except Exception as e:
         print(f"❌ Error: {e}")

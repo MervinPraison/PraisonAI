@@ -947,7 +947,17 @@ def _execute_praisonai_workflow(
     agents = []
     agent_map = {}
     
-    for agent_cfg in workflow_config.get("agents", []):
+    agents_cfg = workflow_config.get("agents", [])
+    if isinstance(agents_cfg, dict):
+        # Convert dict of agents to list of dicts, including the key as 'name'
+        agents_list = []
+        for name, cfg in agents_cfg.items():
+            if isinstance(cfg, dict):
+                cfg["name"] = cfg.get("name", name)
+                agents_list.append(cfg)
+        agents_cfg = agents_list
+    
+    for agent_cfg in agents_cfg:
         agent_tools = resolve_tools(
             agent_cfg.get("tools", []),
             registry=tool_registry,
@@ -999,7 +1009,6 @@ def _execute_praisonai_workflow(
         agents=agents,
         tasks=tasks,
         process=workflow_config.get("process", "sequential"),
-        verbose=1 if output_mode == "verbose" else 0,  # Agents still uses verbose int
     )
     
     return praison.start()

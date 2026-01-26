@@ -70,6 +70,9 @@ class ContextEffectivenessScore:
     hallucination_score: float = 0.0  # 1-10: 10=no hallucination, 1=severe hallucination
     error_handling_score: float = 0.0  # 1-10: How well did agent handle errors?
     tool_errors: List[str] = field(default_factory=list)  # List of tool errors encountered
+    # Dynamic failure detection (determined by LLM, not hardcoded)
+    failure_detected: bool = False  # Did LLM detect a task failure?
+    failure_reason: str = ""  # LLM's explanation of why task failed
     
     def to_dict(self) -> Dict[str, Any]:
         result = asdict(self)
@@ -91,6 +94,10 @@ class JudgeReport:
     context_flow_evaluations: List[ContextFlowEvaluation] = field(default_factory=list)
     content_loss_detected: bool = False
     content_loss_details: List[str] = field(default_factory=list)
+    # Enhanced fields for recipe-level evaluation
+    recipe_goal: str = ""  # The overall recipe goal from YAML
+    failures_detected: int = 0  # Count of agents with detected failures
+    input_validation_issues: List[str] = field(default_factory=list)  # Unresolved inputs
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -105,6 +112,9 @@ class JudgeReport:
             "context_flow_evaluations": [c.to_dict() for c in self.context_flow_evaluations],
             "content_loss_detected": self.content_loss_detected,
             "content_loss_details": self.content_loss_details,
+            "recipe_goal": self.recipe_goal,
+            "failures_detected": self.failures_detected,
+            "input_validation_issues": self.input_validation_issues,
         }
     
     @classmethod
@@ -125,6 +135,9 @@ class JudgeReport:
             ],
             content_loss_detected=data.get("content_loss_detected", False),
             content_loss_details=data.get("content_loss_details", []),
+            recipe_goal=data.get("recipe_goal", ""),
+            failures_detected=data.get("failures_detected", 0),
+            input_validation_issues=data.get("input_validation_issues", []),
         )
 
 
@@ -141,12 +154,25 @@ class ContextEffectivenessJudge:
     """
     
     # Mode-specific prompt templates
-    PROMPT_TEMPLATE_CONTEXT = """You are an expert evaluator for AI agent workflows. Analyze this agent's performance.
+    PROMPT_TEMPLATE_CONTEXT = """You are an expert evaluator for AI agent workflows. Analyze this agent's performance critically.
+
+═══════════════════════════════════════════════════════════════════
+RECIPE GOAL (The overall workflow objective - CRITICAL for evaluation):
+{recipe_goal}
+
+INPUT VALIDATION STATUS:
+{input_validation_status}
+═══════════════════════════════════════════════════════════════════
 
 AGENT: {agent_name}
 AGENT GOAL: {agent_goal}
 TASK DESCRIPTION: {task_description}
 EXPECTED OUTPUT FORMAT: {expected_output}
+
+═══════════════════════════════════════════════════════════════════
+PREVIOUS AGENTS' PERFORMANCE (Context for this agent's evaluation):
+{previous_steps_context}
+═══════════════════════════════════════════════════════════════════
 
 TASK/INPUT: {input_text}
 CONTEXT RECEIVED (tokens: {input_tokens}):
@@ -158,8 +184,22 @@ AGENT OUTPUT (tokens: {output_tokens}):
 TOOL CALLS: {tool_calls}
 TOOL ERRORS: {tool_errors}
 
+═══════════════════════════════════════════════════════════════════
+FAILURE DETECTION (CRITICAL - Analyze the output carefully):
+You MUST determine if the agent FAILED its primary task. Look for:
+- Agent explicitly stating it cannot access, read, or process required inputs
+- Agent using fallback/sample/hypothetical data instead of real provided data
+- Agent admitting inability to complete the requested action
+- Output that doesn't match what was actually requested
+
+If the agent failed to use the ACTUAL provided input and instead created
+sample/hypothetical content, this is a TASK FAILURE regardless of output quality.
+═══════════════════════════════════════════════════════════════════
+
 Evaluate on these criteria:
 1. TASK ACHIEVEMENT (1-10): Did the agent accomplish what it was asked to do based on the task description?
+   - If agent failed to access/use required input: MAX 3/10
+   - If agent used fallback/sample data instead of real input: MAX 3/10
 2. CONTEXT UTILIZATION (1-10): Did the agent effectively use the context provided?
 3. OUTPUT QUALITY (1-10): Does the output match the expected format and contain useful information?
 4. INSTRUCTION_FOLLOWING (1-10): Did the agent follow the specific instructions given? (format, steps, constraints)
@@ -173,6 +213,8 @@ QUALITY_SCORE: [1-10]
 INSTRUCTION_SCORE: [1-10]
 HALLUCINATION_SCORE: [1-10]
 ERROR_SCORE: [1-10]
+FAILURE_DETECTED: [true/false] - Set to true if agent failed to complete primary task
+FAILURE_REASON: [If FAILURE_DETECTED is true, explain why the task failed]
 REASONING: [brief explanation of scores, referencing specific issues]
 SUGGESTIONS:
 - [specific, actionable improvement suggestion 1]
@@ -880,13 +922,61 @@ REASONING: [brief explanation]
         
         return content_loss_detected, content_loss_details
     
+    def _build_previous_steps_context(
+        self,
+        previous_scores: List[ContextEffectivenessScore],
+    ) -> str:
+        """Build context string describing previous agents' performance.
+        
+        This helps the LLM judge understand the quality of work done by
+        previous agents when evaluating the current agent.
+        
+        Args:
+            previous_scores: List of scores from agents that ran before this one
+            
+        Returns:
+            Formatted string describing previous agents' performance
+        """
+        if not previous_scores:
+            return "This is the first agent in the workflow. No previous agents."
+        
+        lines = []
+        for i, score in enumerate(previous_scores, 1):
+            status = "✅ PASSED" if score.task_achievement_score >= 6 else "❌ FAILED"
+            if score.failure_detected:
+                status = "❌ FAILED"
+            
+            lines.append(f"Agent {i}: {score.agent_name}")
+            lines.append(f"  Status: {status}")
+            lines.append(f"  Task Score: {score.task_achievement_score}/10")
+            lines.append(f"  Output Quality: {score.output_quality_score}/10")
+            if score.failure_detected and score.failure_reason:
+                lines.append(f"  Failure: {score.failure_reason[:100]}")
+            elif score.reasoning:
+                lines.append(f"  Summary: {score.reasoning[:100]}")
+            lines.append("")
+        
+        return "\n".join(lines)
+    
     def _judge_agent(
         self,
         agent_name: str,
         agent_info: Dict[str, Any],
         yaml_info: Optional[Dict[str, Any]] = None,
+        previous_scores: Optional[List[ContextEffectivenessScore]] = None,
+        recipe_goal: str = "",
+        input_validation_issues: Optional[List[str]] = None,
     ) -> ContextEffectivenessScore:
-        """Judge a single agent's performance with YAML-aware evaluation."""
+        """Judge a single agent's performance with YAML-aware evaluation.
+        
+        Args:
+            agent_name: Name of the agent being judged
+            agent_info: Extracted data about the agent's execution
+            yaml_info: Optional YAML structure info for context
+            previous_scores: Scores from agents that ran before this one
+            recipe_goal: The overall recipe/workflow goal
+            input_validation_issues: List of input validation issues (unresolved templates)
+        """
         litellm = self._get_litellm()
         
         input_text = "\n".join(agent_info.get("inputs", [])[:3]) or "No input recorded"
@@ -933,6 +1023,15 @@ REASONING: [brief explanation]
                         task_description = first_task.get("description", task_description)[:500]
                         expected_output = first_task.get("expected_output", expected_output)[:300]
         
+        # Build previous steps context
+        previous_steps_context = self._build_previous_steps_context(previous_scores or [])
+        
+        # Build input validation status
+        if input_validation_issues:
+            input_validation_status = "⚠️ INPUT ISSUES DETECTED:\n" + "\n".join(f"  - {issue}" for issue in input_validation_issues[:5])
+        else:
+            input_validation_status = "✅ All inputs appear to be properly provided"
+        
         # Use mode-specific prompt template
         prompt = self.prompt_template.format(
             agent_name=agent_name,
@@ -946,6 +1045,10 @@ REASONING: [brief explanation]
             output=output[:1000],
             tool_calls=tool_calls[:300],
             tool_errors=tool_errors[:500],
+            # Enhanced fields for context mode
+            recipe_goal=recipe_goal or "Not specified",
+            previous_steps_context=previous_steps_context,
+            input_validation_status=input_validation_status,
             # Memory-specific fields (used in memory mode)
             memory_store_count=agent_info.get("memory_store_count", 0),
             memory_search_count=agent_info.get("memory_search_count", 0),
@@ -994,6 +1097,10 @@ REASONING: [brief explanation]
         - context mode: TASK_SCORE, CONTEXT_SCORE, QUALITY_SCORE, INSTRUCTION_SCORE
         - memory mode: RETRIEVAL_SCORE, STORAGE_SCORE, RECALL_SCORE, EFFICIENCY_SCORE
         - knowledge mode: RETRIEVAL_SCORE, COVERAGE_SCORE, CITATION_SCORE, INTEGRATION_SCORE
+        
+        Also handles dynamic failure detection:
+        - FAILURE_DETECTED: true/false
+        - FAILURE_REASON: explanation of failure
         """
         task_score = 5.0
         context_score = 5.0
@@ -1003,6 +1110,8 @@ REASONING: [brief explanation]
         error_score = 10.0  # Default to good error handling
         reasoning = "Unable to parse response"
         suggestions: List[str] = []
+        failure_detected = False
+        failure_reason = ""
         
         lines = response_text.strip().split('\n')
         in_suggestions = False
@@ -1107,6 +1216,13 @@ REASONING: [brief explanation]
             elif line.startswith('REASONING:'):
                 reasoning = line.replace('REASONING:', '').strip()
             
+            elif line.startswith('FAILURE_DETECTED:'):
+                value = line.replace('FAILURE_DETECTED:', '').strip().lower()
+                failure_detected = value in ('true', 'yes', '1')
+            
+            elif line.startswith('FAILURE_REASON:'):
+                failure_reason = line.replace('FAILURE_REASON:', '').strip()
+            
             elif line.startswith('SUGGESTIONS:'):
                 in_suggestions = True
             
@@ -1131,6 +1247,8 @@ REASONING: [brief explanation]
             instruction_following_score=instruction_score,
             hallucination_score=hallucination_score,
             error_handling_score=error_score,
+            failure_detected=failure_detected,
+            failure_reason=failure_reason,
         )
     
     def judge_trace(
@@ -1185,11 +1303,16 @@ REASONING: [brief explanation]
         
         # Load YAML info if provided
         yaml_info = None
+        recipe_goal = ""
         if yaml_file:
             yaml_info = _detect_yaml_structure(yaml_file)
+            recipe_goal = yaml_info.get("recipe_goal", "")
         
-        # Detect content loss
+        # Detect content loss (includes unresolved templates)
         content_loss_detected, content_loss_details = self._detect_content_loss(events)
+        
+        # Extract input validation issues from content loss details
+        input_validation_issues = [d for d in content_loss_details if "Unresolved template" in d]
         
         # Evaluate tool calls if enabled
         tool_evaluations_by_agent: Dict[str, List[ToolEvaluation]] = {}
@@ -1205,8 +1328,16 @@ REASONING: [brief explanation]
         agent_scores: List[ContextEffectivenessScore] = []
         agent_order = list(agent_data.keys())
         
+        # Judge each agent, passing previous scores for context
         for agent_name, agent_info in agent_data.items():
-            score = self._judge_agent(agent_name, agent_info, yaml_info)
+            score = self._judge_agent(
+                agent_name,
+                agent_info,
+                yaml_info,
+                previous_scores=agent_scores.copy(),  # Pass scores of agents judged so far
+                recipe_goal=recipe_goal,
+                input_validation_issues=input_validation_issues,
+            )
             # Add tool evaluations to agent score
             score.tool_evaluations = tool_evaluations_by_agent.get(agent_name, [])
             agent_scores.append(score)
@@ -1243,6 +1374,9 @@ REASONING: [brief explanation]
             for e in evals if e.was_truncated
         )
         
+        # Count failures detected by LLM
+        failures_detected = sum(1 for s in agent_scores if s.failure_detected)
+        
         report = JudgeReport(
             session_id=session_id,
             timestamp=datetime.utcnow().isoformat(),
@@ -1257,10 +1391,14 @@ REASONING: [brief explanation]
                 "total_tokens": total_input_tokens + total_output_tokens,
                 "total_tool_calls": total_tool_calls,
                 "truncated_tool_calls": truncated_tool_calls,
+                "failures_detected": failures_detected,
             },
             context_flow_evaluations=context_flow_evaluations,
             content_loss_detected=content_loss_detected,
             content_loss_details=content_loss_details,
+            recipe_goal=recipe_goal,
+            failures_detected=failures_detected,
+            input_validation_issues=input_validation_issues,
         )
         
         # Save report
@@ -1336,18 +1474,37 @@ def format_judge_report(report: JudgeReport) -> str:
     lines.append(f"  Agents Evaluated: {report.total_agents}")
     lines.append(f"  Overall Score: {report.overall_score}/10")
     
+    # Show recipe goal if available
+    if report.recipe_goal:
+        lines.append(f"  Recipe Goal: {report.recipe_goal[:100]}...")
+    
+    # Show failures detected
+    if report.failures_detected > 0:
+        lines.append("")
+        lines.append(f"  ❌ FAILURES DETECTED: {report.failures_detected} agent(s) failed their primary task")
+    
+    # Show input validation issues
+    if report.input_validation_issues:
+        lines.append("")
+        lines.append("  ⚠️  INPUT VALIDATION ISSUES:")
+        for issue in report.input_validation_issues[:3]:
+            lines.append(f"    - {issue}")
+    
     # Show content loss warning if detected
     if report.content_loss_detected:
         lines.append("")
         lines.append("  ⚠️  CONTENT LOSS DETECTED:")
         for detail in report.content_loss_details[:3]:
-            lines.append(f"    - {detail}")
+            if "Unresolved template" not in detail:  # Already shown above
+                lines.append(f"    - {detail}")
     
     lines.append("")
     lines.append("  AGENT SCORES:")
     
     for score in report.agent_scores:
-        lines.append(f"    {score.agent_name}:")
+        # Show failure status prominently
+        status = "❌ FAILED" if score.failure_detected else "✅"
+        lines.append(f"    {score.agent_name}: {status}")
         lines.append(f"      Task Achievement: {score.task_achievement_score}/10")
         lines.append(f"      Context Utilization: {score.context_utilization_score}/10")
         lines.append(f"      Output Quality: {score.output_quality_score}/10")
@@ -1355,6 +1512,11 @@ def format_judge_report(report: JudgeReport) -> str:
         lines.append(f"      Hallucination: {score.hallucination_score}/10")
         lines.append(f"      Error Handling: {score.error_handling_score}/10")
         lines.append(f"      Overall: {score.overall_score}/10")
+        
+        # Show failure reason if detected
+        if score.failure_detected and score.failure_reason:
+            lines.append(f"      ❌ Failure Reason: {score.failure_reason[:150]}")
+        
         lines.append(f"      Reasoning: {score.reasoning[:100]}...")
         
         # Show tool evaluations if any
@@ -1445,11 +1607,13 @@ def _detect_yaml_structure(yaml_file: str) -> dict:
     Returns dict with:
         - structure: 'recipe' (roles/tasks) or 'simple' (agents) or 'workflow' (steps)
         - agent_map: mapping of agent display names to YAML keys
+        - recipe_goal: the overall goal/objective from the YAML (if present)
+        - roles: role data for each agent
     """
     from pathlib import Path
     import yaml
     
-    result = {"structure": "simple", "agent_map": {}, "roles": {}}
+    result = {"structure": "simple", "agent_map": {}, "roles": {}, "recipe_goal": ""}
     
     try:
         yaml_path = Path(yaml_file)
@@ -1461,6 +1625,15 @@ def _detect_yaml_structure(yaml_file: str) -> dict:
         
         if not data:
             return result
+        
+        # Extract recipe-level goal (can be 'goal', 'objective', or 'description')
+        recipe_goal = data.get("goal", "") or data.get("objective", "") or data.get("description", "")
+        if isinstance(recipe_goal, str):
+            result["recipe_goal"] = recipe_goal
+        
+        # Also check for 'topic' which often describes the workflow purpose
+        if not result["recipe_goal"] and data.get("topic"):
+            result["recipe_goal"] = f"Topic: {data.get('topic')}"
         
         # Detect recipe structure (roles with tasks)
         if "roles" in data:
