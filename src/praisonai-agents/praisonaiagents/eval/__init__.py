@@ -50,6 +50,19 @@ __all__ = [
     "EvalReport",
     "EvalPackage",
     "EvalRunnerProtocol",
+    # Unified Judge API (follows add_X/get_X/list_X naming)
+    "Judge",
+    "JudgeConfig",
+    "JudgeResult",
+    "JudgeProtocol",
+    "JudgeResultProtocol",
+    "AccuracyJudge",
+    "CriteriaJudge",
+    "RecipeJudge",
+    "add_judge",
+    "get_judge",
+    "list_judges",
+    "remove_judge",
 ]
 
 _LAZY_IMPORTS = {
@@ -82,6 +95,19 @@ _LAZY_IMPORTS = {
     "EvalReport": ("package", "EvalReport"),
     "EvalPackage": ("package", "EvalPackage"),
     "EvalRunnerProtocol": ("package", "EvalRunnerProtocol"),
+    # Unified Judge API (follows add_X/get_X/list_X naming)
+    "Judge": ("judge", "Judge"),
+    "JudgeConfig": ("judge", "JudgeConfig"),
+    "JudgeResult": ("results", "JudgeResult"),
+    "JudgeProtocol": ("protocols", "JudgeProtocol"),
+    "JudgeResultProtocol": ("protocols", "JudgeResultProtocol"),
+    "AccuracyJudge": ("judge", "AccuracyJudge"),
+    "CriteriaJudge": ("judge", "CriteriaJudge"),
+    "RecipeJudge": ("judge", "RecipeJudge"),
+    "add_judge": ("judge", "add_judge"),
+    "get_judge": ("judge", "get_judge"),
+    "list_judges": ("judge", "list_judges"),
+    "remove_judge": ("judge", "remove_judge"),
 }
 
 

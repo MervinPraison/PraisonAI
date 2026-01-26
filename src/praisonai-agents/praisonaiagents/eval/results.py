@@ -364,6 +364,92 @@ class ReliabilityResult:
 
 
 @dataclass
+class JudgeResult:
+    """
+    Result from a Judge evaluation.
+    
+    This is the unified result type for all LLM-as-judge evaluations.
+    
+    Attributes:
+        score: Quality score (1-10)
+        passed: Whether the evaluation passed (score >= threshold)
+        reasoning: Explanation for the score
+        output: The output that was judged
+        expected: Optional expected output
+        criteria: Optional criteria used for evaluation
+        suggestions: List of improvement suggestions
+        timestamp: When judging occurred
+        metadata: Additional metadata
+    """
+    score: float
+    passed: bool
+    reasoning: str
+    output: str = ""
+    expected: Optional[str] = None
+    criteria: Optional[str] = None
+    suggestions: List[str] = field(default_factory=list)
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert result to dictionary."""
+        return {
+            "score": self.score,
+            "passed": self.passed,
+            "reasoning": self.reasoning,
+            "output": self.output,
+            "expected": self.expected,
+            "criteria": self.criteria,
+            "suggestions": self.suggestions,
+            "timestamp": self.timestamp,
+            "metadata": self.metadata,
+        }
+    
+    def to_json(self) -> str:
+        """Convert result to JSON string."""
+        return json.dumps(self.to_dict(), indent=2)
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "JudgeResult":
+        """Create from dictionary."""
+        return cls(
+            score=data.get("score", 5.0),
+            passed=data.get("passed", False),
+            reasoning=data.get("reasoning", ""),
+            output=data.get("output", ""),
+            expected=data.get("expected"),
+            criteria=data.get("criteria"),
+            suggestions=data.get("suggestions", []),
+            timestamp=data.get("timestamp", datetime.now().isoformat()),
+            metadata=data.get("metadata", {}),
+        )
+    
+    def print_summary(self) -> None:
+        """Print a summary of the judge result."""
+        try:
+            from rich.console import Console
+            from rich.table import Table
+            
+            console = Console()
+            
+            table = Table(title="Judge Result")
+            table.add_column("Metric", style="cyan")
+            table.add_column("Value", style="green" if self.passed else "red")
+            
+            table.add_row("Score", f"{self.score:.1f}/10")
+            table.add_row("Status", "✅ PASSED" if self.passed else "❌ FAILED")
+            table.add_row("Reasoning", self.reasoning[:80] + "..." if len(self.reasoning) > 80 else self.reasoning)
+            
+            if self.criteria:
+                table.add_row("Criteria", self.criteria[:50] + "..." if len(self.criteria) > 50 else self.criteria)
+            
+            console.print(table)
+        except ImportError:
+            print(f"Judge Result: Score={self.score:.1f}/10, {'PASSED' if self.passed else 'FAILED'}")
+            print(f"  Reasoning: {self.reasoning}")
+
+
+@dataclass
 class CriteriaScore:
     """Individual criteria evaluation score."""
     score: float
