@@ -14,6 +14,15 @@ from .tools import Tools
 # Export Injected type directly for easy access
 from .injected import Injected, AgentState
 
+# Export validation and retry protocols
+from .validators import (
+    ValidationResult,
+    ToolValidatorProtocol,
+    AsyncToolValidatorProtocol,
+    PassthroughValidator,
+)
+from .retry import RetryPolicy, FallbackChain, ToolExecutionConfig
+
 # Map of function names to their module and class (if any)
 TOOL_MAPPINGS = {
     # Direct functions
@@ -183,9 +192,12 @@ def __getattr__(name: str) -> Any:
         return method
 
 __all__ = list(TOOL_MAPPINGS.keys()) + [
-    'Injected',
+    'Injected', 'AgentState',
     'BaseTool', 'ToolResult', 'ToolValidationError', 'validate_tool',
     'tool', 'FunctionTool',
     'get_registry', 'register_tool', 'get_tool', 'add_tool', 'has_tool', 'remove_tool', 'list_tools', 'ToolRegistry',
-    'Tools'
+    'Tools',
+    # Validation and retry protocols
+    'ValidationResult', 'ToolValidatorProtocol', 'AsyncToolValidatorProtocol', 'PassthroughValidator',
+    'RetryPolicy', 'FallbackChain', 'ToolExecutionConfig',
 ]

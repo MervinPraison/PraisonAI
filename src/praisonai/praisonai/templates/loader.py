@@ -136,13 +136,18 @@ class TemplateLoader:
         return template_config
     
     def _parse_template_file(self, template_dir: Path) -> TemplateConfig:
-        """Parse TEMPLATE.yaml file."""
+        """Parse TEMPLATE.yaml file, or extract metadata from agents.yaml if absent."""
         import yaml
         
         template_file = template_dir / self.TEMPLATE_FILE
         
         if not template_file.exists():
-            # Try to infer from directory name
+            # Try to extract metadata from agents.yaml (simplified 2-file structure)
+            agents_file = template_dir / "agents.yaml"
+            if agents_file.exists():
+                return self._parse_agents_yaml_metadata(template_dir, agents_file)
+            
+            # Fallback to directory name
             return TemplateConfig(
                 name=template_dir.name,
                 path=template_dir
@@ -187,6 +192,86 @@ class TemplateLoader:
             cli=raw.get("cli", {}),
             runtime=runtime,
             raw=raw,
+            path=template_dir
+        )
+    
+    def _parse_agents_yaml_metadata(
+        self,
+        template_dir: Path,
+        agents_file: Path
+    ) -> TemplateConfig:
+        """
+        Extract metadata from agents.yaml for simplified 2-file recipe structure.
+        
+        Supports optional 'metadata' block in agents.yaml:
+        ```yaml
+        metadata:
+          name: my-recipe
+          version: "1.0.0"
+          description: What this recipe does
+          author: author-name
+          license: MIT
+          tags: [tag1, tag2]
+          requires:
+            env: [API_KEY]
+        
+        framework: praisonai
+        agents:
+          ...
+        ```
+        
+        Args:
+            template_dir: Path to the template directory
+            agents_file: Path to agents.yaml file
+            
+        Returns:
+            TemplateConfig with metadata extracted from agents.yaml
+        """
+        import yaml
+        
+        with open(agents_file) as f:
+            raw = yaml.safe_load(f) or {}
+        
+        # Extract metadata block if present
+        metadata = raw.get("metadata", {})
+        
+        # Extract requires from metadata
+        requires = metadata.get("requires", {})
+        if isinstance(requires, list):
+            requires = {"tools": requires}
+        
+        # Use agents.yaml as the workflow file (it contains agents and steps)
+        workflow_file = "agents.yaml"
+        agents_file_ref = "agents.yaml"
+        
+        # Build raw config for compatibility
+        raw_config = {
+            **raw,
+            "name": metadata.get("name", template_dir.name),
+            "version": metadata.get("version", "1.0.0"),
+            "description": metadata.get("description", ""),
+            "author": metadata.get("author"),
+            "license": metadata.get("license"),
+            "tags": metadata.get("tags", []),
+            "requires": requires,
+        }
+        
+        return TemplateConfig(
+            name=metadata.get("name", template_dir.name),
+            description=metadata.get("description", ""),
+            version=metadata.get("version", "1.0.0"),
+            author=metadata.get("author"),
+            license=metadata.get("license"),
+            tags=metadata.get("tags", []),
+            requires=requires,
+            workflow_file=workflow_file,
+            agents_file=agents_file_ref,
+            config_schema=metadata.get("config", {}),
+            defaults=metadata.get("defaults", {}),
+            skills=raw.get("skills", []),
+            cli=metadata.get("cli", {}),
+            runtime=None,
+            raw=raw_config,
             path=template_dir
         )
     

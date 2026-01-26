@@ -1,0 +1,62 @@
+# Nested Workflow Patterns Example
+# Demonstrates: nested loops, if conditions, and combined patterns
+
+agents:
+  data_processor:
+    role: Data Processor
+    goal: Process individual data items
+    backstory: Expert at transforming and validating data
+    
+  quality_checker:
+    role: Quality Checker  
+    goal: Verify data quality meets standards
+    backstory: Meticulous quality assurance specialist
+    
+  approver:
+    role: Approver
+    goal: Approve high-quality items
+    backstory: Senior reviewer with approval authority
+    
+  rejector:
+    role: Rejector
+    goal: Handle rejected items
+    backstory: Specialist in rejection workflows
+
+workflow:
+  name: Nested Data Processing Pipeline
+  
+  variables:
+    batches:
+      - name: batch_1
+        items: ["item_a", "item_b"]
+      - name: batch_2
+        items: ["item_c", "item_d"]
+    quality_threshold: 80
+  
+  steps:
+    # Step 1: Process each batch with nested item loop
+    - loop:
+        over: batches
+        var_name: batch
+        steps:
+          # Nested loop: process each item in the batch
+          - loop:
+              over: "{{batch.items}}"
+              var_name: item
+              steps:
+                - agent: data_processor
+                  action: "Process item {{item}} from {{batch.name}}"
+    
+    # Step 2: Quality check with conditional branching
+    - agent: quality_checker
+      action: "Check quality of all processed items and return a score"
+    
+    # Step 3: Conditional approval based on quality score
+    - if:
+        condition: "{{quality_score}} >= {{quality_threshold}}"
+        then:
+          - agent: approver
+            action: "Approve the batch - quality score meets threshold"
+        else:
+          - agent: rejector
+            action: "Reject the batch - quality score below threshold"

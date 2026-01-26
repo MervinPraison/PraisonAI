@@ -269,8 +269,11 @@ _LAZY_IMPORTS = {
     'READ_ONLY_TOOLS': ('praisonaiagents.planning', 'READ_ONLY_TOOLS'),
     'RESTRICTED_TOOLS': ('praisonaiagents.planning', 'RESTRICTED_TOOLS'),
     
-    # Trace (protocol-driven, for custom sinks)
-    'ContextTraceSink': ('praisonaiagents.trace', 'ContextTraceSink'),
+    # Trace (protocol-driven, for custom sinks) - AGENTS.md naming: XProtocol
+    'ContextTraceSinkProtocol': ('praisonaiagents.trace', 'ContextTraceSinkProtocol'),
+    'ContextTraceSink': ('praisonaiagents.trace', 'ContextTraceSink'),  # Backward compat alias
+    'TraceSinkProtocol': ('praisonaiagents.trace', 'TraceSinkProtocol'),
+    'TraceSink': ('praisonaiagents.trace', 'TraceSink'),  # Backward compat alias
     'ContextTraceEmitter': ('praisonaiagents.trace', 'ContextTraceEmitter'),
     'ContextEvent': ('praisonaiagents.trace', 'ContextEvent'),
     'ContextEventType': ('praisonaiagents.trace', 'ContextEventType'),

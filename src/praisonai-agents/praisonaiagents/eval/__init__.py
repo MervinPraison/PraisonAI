@@ -44,6 +44,12 @@ __all__ = [
     "ScoredResultProtocol",
     "AsyncGraderProtocol",
     "parse_score_reasoning",
+    # Eval package types
+    "EvalCase",
+    "EvalResult",
+    "EvalReport",
+    "EvalPackage",
+    "EvalRunnerProtocol",
 ]
 
 _LAZY_IMPORTS = {
@@ -70,6 +76,12 @@ _LAZY_IMPORTS = {
     "ScoredResultProtocol": ("protocols", "ScoredResultProtocol"),
     "AsyncGraderProtocol": ("protocols", "AsyncGraderProtocol"),
     "parse_score_reasoning": ("grader", "parse_score_reasoning"),
+    # Eval package types
+    "EvalCase": ("package", "EvalCase"),
+    "EvalResult": ("package", "EvalResult"),
+    "EvalReport": ("package", "EvalReport"),
+    "EvalPackage": ("package", "EvalPackage"),
+    "EvalRunnerProtocol": ("package", "EvalRunnerProtocol"),
 }
 
 

@@ -206,6 +206,52 @@ class PolicyEngine:
         for policy_data in data.get("policies", []):
             policy = Policy.from_dict(policy_data)
             self.add_policy(policy)
+    
+    def load_from_yaml(self, filepath: str) -> None:
+        """Load policies from a YAML file.
+        
+        Args:
+            filepath: Path to YAML policy file
+            
+        Raises:
+            ImportError: If PyYAML is not installed
+            FileNotFoundError: If the file doesn't exist
+            ValueError: If the YAML is malformed or invalid
+            
+        Example YAML format:
+            policies:
+              - name: deny_shell
+                priority: 100
+                rules:
+                  - match: "tool:shell_*"
+                    action: deny
+                    reason: "Shell tools disabled"
+        """
+        try:
+            import yaml
+        except ImportError:
+            raise ImportError(
+                "PyYAML is required for YAML policy loading. "
+                "Install with: pip install pyyaml"
+            )
+        
+        import os
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"Policy file not found: {filepath}")
+        
+        try:
+            with open(filepath, 'r') as f:
+                data = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            raise ValueError(f"Invalid YAML in policy file: {e}")
+        
+        if data is None:
+            raise ValueError("Policy file is empty")
+        
+        if not isinstance(data, dict):
+            raise ValueError("Policy file must contain a YAML dictionary")
+        
+        self.load_from_dict(data)
 
 
 # Convenience functions for common policies

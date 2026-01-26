@@ -390,6 +390,82 @@ def include(recipe: str, input: Optional[str] = None) -> Include:
     return Include(recipe=recipe, input=input)
 
 
+# Maximum nesting depth for patterns (prevents stack overflow)
+MAX_NESTING_DEPTH = 5
+
+
+@dataclass
+class If:
+    """
+    Conditional branching pattern for workflows.
+    
+    Evaluates a condition and executes either then_steps or else_steps.
+    
+    Usage:
+        workflow = Workflow(steps=[
+            if_(
+                condition="{{score}} > 80",
+                then_steps=[approve_step],
+                else_steps=[reject_step]
+            )
+        ])
+        
+    YAML syntax:
+        steps:
+          - if:
+              condition: "{{score}} > 80"
+              then:
+                - agent: approver
+              else:
+                - agent: rejector
+    
+    Supported condition formats:
+        - Numeric comparison: "{{var}} > 80", "{{var}} >= 50", "{{var}} < 10"
+        - String equality: "{{var}} == approved", "{{var}} != rejected"
+        - Contains check: "error in {{message}}", "{{status}} contains success"
+        - Boolean: "{{flag}}" (truthy check)
+    """
+    condition: str = ""  # Condition expression with {{var}} placeholders
+    then_steps: List[Any] = field(default_factory=list)  # Steps if condition is true
+    else_steps: Optional[List[Any]] = None  # Steps if condition is false (optional)
+    
+    def __init__(
+        self,
+        condition: str,
+        then_steps: List[Any],
+        else_steps: Optional[List[Any]] = None
+    ):
+        self.condition = condition
+        self.then_steps = then_steps
+        self.else_steps = else_steps or []
+
+
+def if_(
+    condition: str,
+    then_steps: List[Any],
+    else_steps: Optional[List[Any]] = None
+) -> If:
+    """
+    Create a conditional branching step.
+    
+    Args:
+        condition: Condition expression with {{var}} placeholders
+        then_steps: Steps to execute if condition is true
+        else_steps: Steps to execute if condition is false (optional)
+    
+    Returns:
+        If object for conditional execution
+    
+    Example:
+        if_(
+            condition="{{score}} > 80",
+            then_steps=[approve_agent],
+            else_steps=[reject_agent]
+        )
+    """
+    return If(condition=condition, then_steps=then_steps, else_steps=else_steps)
+
+
 @dataclass
 class WorkflowStep:
     """
@@ -1227,6 +1303,17 @@ class Workflow:
                 i += 1
                 continue
             
+            elif isinstance(step, If):
+                # Conditional branching
+                if_result = self._execute_if(
+                    step, previous_output, input, all_variables, model, verbose, stream
+                )
+                results.extend(if_result["steps"])
+                previous_output = if_result["output"]
+                all_variables.update(if_result.get("variables", {}))
+                i += 1
+                continue
+            
             # Normalize single step
             step = self._normalize_single_step(step, i)
             
@@ -1801,9 +1888,88 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         model: str,
         verbose: bool,
         index: int = 0,
-        stream: bool = True
+        stream: bool = True,
+        depth: int = 0
     ) -> Dict[str, Any]:
-        """Execute a single step and return result."""
+        """Execute a single step and return result.
+        
+        Args:
+            step: The step to execute (Agent, function, or pattern like Loop/Parallel/Route/If)
+            previous_output: Output from previous step
+            input: Original workflow input
+            all_variables: Current workflow variables
+            model: LLM model to use
+            verbose: Whether to print verbose output
+            index: Step index
+            stream: Whether to stream responses
+            depth: Current nesting depth (for pattern recursion safety)
+        
+        Returns:
+            Dict with 'step', 'output', 'stop', 'variables'
+        """
+        # Check nesting depth limit for nested patterns
+        if depth > MAX_NESTING_DEPTH:
+            raise ValueError(
+                f"Maximum nesting depth ({MAX_NESTING_DEPTH}) exceeded. "
+                "Simplify your workflow or reduce pattern nesting."
+            )
+        
+        # Handle nested patterns (Loop, Parallel, Route, Repeat, If)
+        if isinstance(step, Loop):
+            loop_result = self._execute_loop(
+                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1
+            )
+            return {
+                "step": f"loop_{index}",
+                "output": loop_result.get("output", ""),
+                "stop": False,
+                "variables": loop_result.get("variables", all_variables)
+            }
+        
+        if isinstance(step, Parallel):
+            parallel_result = self._execute_parallel(
+                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1
+            )
+            return {
+                "step": f"parallel_{index}",
+                "output": parallel_result.get("output", ""),
+                "stop": False,
+                "variables": parallel_result.get("variables", all_variables)
+            }
+        
+        if isinstance(step, Route):
+            route_result = self._execute_route(
+                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1
+            )
+            return {
+                "step": f"route_{index}",
+                "output": route_result.get("output", ""),
+                "stop": False,
+                "variables": route_result.get("variables", all_variables)
+            }
+        
+        if isinstance(step, Repeat):
+            repeat_result = self._execute_repeat(
+                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1
+            )
+            return {
+                "step": f"repeat_{index}",
+                "output": repeat_result.get("output", ""),
+                "stop": False,
+                "variables": repeat_result.get("variables", all_variables)
+            }
+        
+        if isinstance(step, If):
+            if_result = self._execute_if(
+                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1
+            )
+            return {
+                "step": f"if_{index}",
+                "output": if_result.get("output", ""),
+                "stop": False,
+                "variables": if_result.get("variables", all_variables)
+            }
+        
         # Handle Include steps (for include inside loop)
         if isinstance(step, Include):
             include_result = self._execute_include(
@@ -1928,7 +2094,8 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         all_variables: Dict[str, Any],
         model: str,
         verbose: bool,
-        stream: bool = True
+        stream: bool = True,
+        depth: int = 0
     ) -> Dict[str, Any]:
         """Execute routing based on previous output."""
         results = []
@@ -1954,7 +2121,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         # Execute matched route steps
         for idx, step in enumerate(matched_route):
             step_result = self._execute_single_step_internal(
-                step, output, input, all_variables, model, verbose, idx, stream=stream
+                step, output, input, all_variables, model, verbose, idx, stream=stream, depth=depth+1
             )
             results.append({"step": step_result["step"], "output": step_result["output"]})
             output = step_result["output"]
@@ -2024,7 +2191,8 @@ CONCISE SUMMARY:"""
         all_variables: Dict[str, Any],
         model: str,
         verbose: bool,
-        stream: bool = True
+        stream: bool = True,
+        depth: int = 0
     ) -> Dict[str, Any]:
         """Execute steps in parallel (simulated with sequential for now)."""
         import concurrent.futures
@@ -2071,7 +2239,7 @@ CONCISE SUMMARY:"""
                     emitter.set_branch(f"parallel_{idx}")
                     try:
                         return self._execute_single_step_internal(
-                            step, opt_prev, input, all_variables.copy(), model, False, idx, stream
+                            step, opt_prev, input, all_variables.copy(), model, False, idx, stream, depth=depth+1
                         )
                     finally:
                         emitter.clear_branch()
@@ -2105,7 +2273,8 @@ CONCISE SUMMARY:"""
         all_variables: Dict[str, Any],
         model: str,
         verbose: bool,
-        stream: bool = True
+        stream: bool = True,
+        depth: int = 0
     ) -> Dict[str, Any]:
         """Execute step for each item in loop.
         
@@ -2199,7 +2368,7 @@ CONCISE SUMMARY:"""
                     iteration_results = []
                     for step_idx, step in enumerate(steps_to_run):
                         step_result = self._execute_single_step_internal(
-                            step, iteration_output, input, loop_vars, model, False, step_idx, stream=False
+                            step, iteration_output, input, loop_vars, model, False, step_idx, stream=False, depth=depth+1
                         )
                         iteration_output = step_result.get("output")
                         iteration_results.append(step_result)
@@ -2266,7 +2435,7 @@ CONCISE SUMMARY:"""
                 iteration_output = previous_output
                 for step_idx, step in enumerate(steps_to_run):
                     step_result = self._execute_single_step_internal(
-                        step, iteration_output, input, loop_vars, model, verbose, step_idx, stream=stream
+                        step, iteration_output, input, loop_vars, model, verbose, step_idx, stream=stream, depth=depth+1
                     )
                     iteration_output = step_result.get("output")
                     # Update variables if step set any
@@ -2377,7 +2546,8 @@ CONCISE SUMMARY:"""
         all_variables: Dict[str, Any],
         model: str,
         verbose: bool,
-        stream: bool = True
+        stream: bool = True,
+        depth: int = 0
     ) -> Dict[str, Any]:
         """Repeat step until condition is met."""
         results = []
@@ -2388,7 +2558,7 @@ CONCISE SUMMARY:"""
         
         for iteration in range(repeat_step.max_iterations):
             step_result = self._execute_single_step_internal(
-                repeat_step.step, output, input, all_variables, model, verbose, iteration, stream=stream
+                repeat_step.step, output, input, all_variables, model, verbose, iteration, stream=stream, depth=depth+1
             )
             results.append({"step": f"{step_result['step']}_{iteration}", "output": step_result["output"]})
             output = step_result["output"]
@@ -2415,6 +2585,192 @@ CONCISE SUMMARY:"""
         
         all_variables["repeat_iterations"] = iteration + 1
         return {"steps": results, "output": output, "variables": all_variables}
+    
+    def _execute_if(
+        self,
+        if_step: If,
+        previous_output: Optional[str],
+        input: str,
+        all_variables: Dict[str, Any],
+        model: str,
+        verbose: bool,
+        stream: bool = True,
+        depth: int = 0
+    ) -> Dict[str, Any]:
+        """Execute conditional branching based on condition evaluation.
+        
+        Args:
+            if_step: The If step with condition and branches
+            previous_output: Output from previous step
+            input: Original workflow input
+            all_variables: Current workflow variables
+            model: LLM model to use
+            verbose: Verbose output
+            stream: Enable streaming
+            depth: Current nesting depth
+            
+        Returns:
+            Dict with 'steps', 'output', and 'variables'
+        """
+        results = []
+        output = previous_output
+        
+        # Evaluate the condition
+        condition_result = self._evaluate_condition(if_step.condition, all_variables, previous_output)
+        
+        if verbose:
+            branch = "then" if condition_result else "else"
+            print(f"🔀 Condition '{if_step.condition}' → {condition_result}, executing {branch} branch")
+        
+        # Select the appropriate branch
+        steps_to_execute = if_step.then_steps if condition_result else if_step.else_steps
+        
+        # Execute the selected branch
+        for idx, step in enumerate(steps_to_execute):
+            step_result = self._execute_single_step_internal(
+                step, output, input, all_variables, model, verbose, idx, stream=stream, depth=depth
+            )
+            results.append({"step": step_result["step"], "output": step_result["output"]})
+            output = step_result["output"]
+            all_variables.update(step_result.get("variables", {}))
+            
+            if step_result.get("stop"):
+                break
+        
+        return {"steps": results, "output": output, "variables": all_variables}
+    
+    def _evaluate_condition(
+        self,
+        condition: str,
+        variables: Dict[str, Any],
+        previous_output: Optional[str] = None
+    ) -> bool:
+        """Evaluate a condition expression with variable substitution.
+        
+        Supported formats:
+            - Numeric comparison: "{{var}} > 80", "{{var}} >= 50", "{{var}} < 10"
+            - String equality: "{{var}} == approved", "{{var}} != rejected"
+            - Contains check: "error in {{message}}", "{{status}} contains success"
+            - Boolean: "{{flag}}" (truthy check)
+            - Nested property: "{{item.score}} >= 60"
+        
+        Args:
+            condition: Condition expression with {{var}} placeholders
+            variables: Current workflow variables
+            previous_output: Output from previous step
+            
+        Returns:
+            Boolean result of condition evaluation
+        """
+        import re
+        
+        # Substitute variables in condition
+        substituted = condition
+        
+        # Handle nested property access like {{item.score}}
+        def get_nested_value(var_path: str, vars_dict: Dict[str, Any]) -> Any:
+            parts = var_path.split('.')
+            value = vars_dict
+            for part in parts:
+                if isinstance(value, dict):
+                    value = value.get(part)
+                else:
+                    return None
+            return value
+        
+        # Find all {{var}} patterns and substitute
+        pattern = r'\{\{([^}]+)\}\}'
+        matches = re.findall(pattern, condition)
+        
+        for var_name in matches:
+            if '.' in var_name:
+                # Nested property access
+                value = get_nested_value(var_name, variables)
+            else:
+                value = variables.get(var_name)
+            
+            if value is None:
+                value = ""
+            
+            # Replace the placeholder with the value
+            placeholder = f"{{{{{var_name}}}}}"
+            if isinstance(value, (int, float)):
+                substituted = substituted.replace(placeholder, str(value))
+            elif isinstance(value, bool):
+                substituted = substituted.replace(placeholder, str(value).lower())
+            else:
+                substituted = substituted.replace(placeholder, str(value))
+        
+        # Also substitute {{previous_output}}
+        if previous_output:
+            substituted = substituted.replace("{{previous_output}}", str(previous_output))
+        
+        # Now evaluate the substituted condition
+        try:
+            # Handle different condition formats
+            
+            # Numeric comparisons: "90 > 80", "50 >= 50", "10 < 20", etc.
+            numeric_pattern = r'^(-?\d+(?:\.\d+)?)\s*(>|>=|<|<=|==|!=)\s*(-?\d+(?:\.\d+)?)$'
+            numeric_match = re.match(numeric_pattern, substituted.strip())
+            if numeric_match:
+                left = float(numeric_match.group(1))
+                op = numeric_match.group(2)
+                right = float(numeric_match.group(3))
+                
+                if op == '>':
+                    return left > right
+                if op == '>=':
+                    return left >= right
+                if op == '<':
+                    return left < right
+                if op == '<=':
+                    return left <= right
+                if op == '==':
+                    return left == right
+                if op == '!=':
+                    return left != right
+            
+            # String equality: "approved == approved", "status != rejected"
+            string_eq_pattern = r'^(.+?)\s*(==|!=)\s*(.+)$'
+            string_match = re.match(string_eq_pattern, substituted.strip())
+            if string_match:
+                left = string_match.group(1).strip()
+                op = string_match.group(2)
+                right = string_match.group(3).strip()
+                
+                if op == '==':
+                    return left == right
+                if op == '!=':
+                    return left != right
+            
+            # Contains check: "error in some message", "status contains success"
+            if ' in ' in substituted:
+                parts = substituted.split(' in ', 1)
+                if len(parts) == 2:
+                    needle = parts[0].strip()
+                    haystack = parts[1].strip()
+                    return needle.lower() in haystack.lower()
+            
+            if ' contains ' in substituted:
+                parts = substituted.split(' contains ', 1)
+                if len(parts) == 2:
+                    haystack = parts[0].strip()
+                    needle = parts[1].strip()
+                    return needle.lower() in haystack.lower()
+            
+            # Boolean check: truthy evaluation
+            # Handle "true", "false", "True", "False"
+            if substituted.strip().lower() == 'true':
+                return True
+            if substituted.strip().lower() == 'false':
+                return False
+            
+            # Non-empty string is truthy
+            return bool(substituted.strip())
+            
+        except Exception as e:
+            logger.warning(f"Condition evaluation failed for '{condition}': {e}")
+            return False
     
     def _execute_include(
         self,

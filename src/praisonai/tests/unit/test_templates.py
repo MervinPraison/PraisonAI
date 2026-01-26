@@ -1556,6 +1556,181 @@ agents:
         assert "env" in output.lower() or "Env" in output or "Environment" in output
 
 
+class TestSimplifiedRecipeStructure:
+    """Tests for simplified 2-file recipe structure (agents.yaml + tools.py)."""
+    
+    @pytest.fixture
+    def temp_simplified_recipe(self):
+        """Create a temporary recipe with only agents.yaml + tools.py (no TEMPLATE.yaml)."""
+        temp_dir = tempfile.mkdtemp()
+        recipe_dir = Path(temp_dir) / "my-recipe"
+        recipe_dir.mkdir()
+        
+        # Create agents.yaml with metadata block
+        (recipe_dir / "agents.yaml").write_text("""
+metadata:
+  name: my-recipe
+  version: "2.0.0"
+  description: A simplified recipe
+  author: test-author
+  license: MIT
+  tags:
+    - test
+    - simplified
+  requires:
+    env:
+      - TEST_API_KEY
+
+framework: praisonai
+topic: "Test topic"
+
+agents:
+  assistant:
+    role: AI Assistant
+    goal: Help with tasks
+    tools:
+      - my_custom_tool
+
+steps:
+  - agent: assistant
+    action: "Do the task"
+    expected_output: "Task result"
+""")
+        
+        # Create tools.py
+        (recipe_dir / "tools.py").write_text('''
+"""Custom tools for this recipe."""
+
+def my_custom_tool(query: str) -> str:
+    """A custom tool."""
+    return f"Result: {query}"
+
+# Dynamic variable
+CUSTOM_VAR = "test_value"
+''')
+        
+        yield recipe_dir
+        shutil.rmtree(temp_dir)
+    
+    @pytest.fixture
+    def temp_legacy_recipe(self):
+        """Create a legacy recipe with TEMPLATE.yaml (for backward compat testing)."""
+        temp_dir = tempfile.mkdtemp()
+        recipe_dir = Path(temp_dir) / "legacy-recipe"
+        recipe_dir.mkdir()
+        
+        # Create TEMPLATE.yaml (legacy)
+        (recipe_dir / "TEMPLATE.yaml").write_text("""
+name: legacy-recipe
+version: "1.0.0"
+description: A legacy recipe with TEMPLATE.yaml
+author: legacy-author
+requires:
+  env:
+    - LEGACY_API_KEY
+""")
+        
+        # Create agents.yaml (without metadata)
+        (recipe_dir / "agents.yaml").write_text("""
+framework: praisonai
+topic: "Legacy topic"
+
+agents:
+  worker:
+    role: Worker
+    goal: Do work
+    tools:
+      - read_file
+
+steps:
+  - agent: worker
+    action: "Work"
+""")
+        
+        # Create tools.py
+        (recipe_dir / "tools.py").write_text('# Empty tools\n')
+        
+        yield recipe_dir
+        shutil.rmtree(temp_dir)
+    
+    def test_load_simplified_recipe_metadata(self, temp_simplified_recipe):
+        """Test that metadata is extracted from agents.yaml when TEMPLATE.yaml is absent."""
+        from praisonai.templates.loader import TemplateLoader
+        
+        loader = TemplateLoader()
+        template = loader.load(str(temp_simplified_recipe))
+        
+        # Metadata should be extracted from agents.yaml
+        assert template.name == "my-recipe"
+        assert template.version == "2.0.0"
+        assert template.description == "A simplified recipe"
+        assert template.author == "test-author"
+        assert template.license == "MIT"
+        assert "test" in template.tags
+        assert "simplified" in template.tags
+        assert "TEST_API_KEY" in template.requires.get("env", [])
+    
+    def test_legacy_recipe_still_works(self, temp_legacy_recipe):
+        """Test that legacy recipes with TEMPLATE.yaml still work."""
+        from praisonai.templates.loader import TemplateLoader
+        
+        loader = TemplateLoader()
+        template = loader.load(str(temp_legacy_recipe))
+        
+        # Should use TEMPLATE.yaml metadata
+        assert template.name == "legacy-recipe"
+        assert template.version == "1.0.0"
+        assert template.author == "legacy-author"
+    
+    def test_template_yaml_takes_precedence(self, temp_simplified_recipe):
+        """Test that TEMPLATE.yaml takes precedence over agents.yaml metadata."""
+        # Add TEMPLATE.yaml to the simplified recipe
+        (temp_simplified_recipe / "TEMPLATE.yaml").write_text("""
+name: override-name
+version: "3.0.0"
+author: override-author
+""")
+        
+        from praisonai.templates.loader import TemplateLoader
+        
+        loader = TemplateLoader()
+        template = loader.load(str(temp_simplified_recipe))
+        
+        # TEMPLATE.yaml should take precedence
+        assert template.name == "override-name"
+        assert template.version == "3.0.0"
+        assert template.author == "override-author"
+    
+    def test_tools_py_loaded(self, temp_simplified_recipe):
+        """Test that tools.py is loaded and custom tools are available."""
+        from praisonai.templates.tool_override import create_tool_registry_with_overrides
+        
+        registry = create_tool_registry_with_overrides(
+            template_dir=str(temp_simplified_recipe)
+        )
+        
+        # Custom tool should be in registry
+        assert "my_custom_tool" in registry
+        
+        # Test the tool works
+        result = registry["my_custom_tool"]("test")
+        assert "Result: test" == result
+    
+    def test_workflow_config_loads_from_agents_yaml(self, temp_simplified_recipe):
+        """Test that workflow config is loaded from agents.yaml."""
+        from praisonai.templates.loader import TemplateLoader
+        
+        loader = TemplateLoader()
+        template = loader.load(str(temp_simplified_recipe))
+        
+        # agents.yaml should be used as workflow file
+        workflow_config = loader.load_workflow_config(template)
+        
+        assert "agents" in workflow_config
+        assert "assistant" in workflow_config["agents"]
+        assert workflow_config["agents"]["assistant"]["role"] == "AI Assistant"
+
+
 class TestCLIToolsDoctor:
     """CLI tests for tools doctor command."""
     

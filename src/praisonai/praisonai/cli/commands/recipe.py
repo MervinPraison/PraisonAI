@@ -9,6 +9,56 @@ import typer
 app = typer.Typer(help="Recipe management")
 
 
+@app.command("create")
+def recipe_create(
+    goal: str = typer.Argument(..., help="Natural language goal for the recipe"),
+    output: str = typer.Option(".", "--output", "-o", help="Output directory"),
+    no_optimize: bool = typer.Option(False, "--no-optimize", help="Skip optimization loop"),
+    iterations: int = typer.Option(3, "--iterations", help="Max optimization iterations"),
+    threshold: float = typer.Option(8.0, "--threshold", help="Score threshold to stop"),
+    agents: str = typer.Option(None, "--agents", help="Custom agents (format: name:role=X,goal=Y;name2:...)"),
+    tools: str = typer.Option(None, "--tools", help="Custom tools per agent (format: agent:tool1,tool2;...)"),
+    agent_types: str = typer.Option(None, "--agent-types", help="Agent types (format: agent:image;agent2:audio;...)"),
+):
+    """Create a new recipe from a natural language goal.
+    
+    Examples:
+        praisonai recipe create "Build a web scraper for news"
+        praisonai recipe create "Research AI trends" --no-optimize
+        praisonai recipe create "Research AI" --agents "researcher:role=AI Researcher,goal=Find papers"
+        praisonai recipe create "Research AI" --tools "researcher:internet_search,arxiv"
+    """
+    from praisonai.cli.main import PraisonAI
+    import sys
+    
+    argv = ['recipe', 'create', goal]
+    if output != ".":
+        argv.extend(['--output', output])
+    if no_optimize:
+        argv.append('--no-optimize')
+    if iterations != 3:
+        argv.extend(['--iterations', str(iterations)])
+    if threshold != 8.0:
+        argv.extend(['--threshold', str(threshold)])
+    if agents:
+        argv.extend(['--agents', agents])
+    if tools:
+        argv.extend(['--tools', tools])
+    if agent_types:
+        argv.extend(['--agent-types', agent_types])
+    
+    original_argv = sys.argv
+    sys.argv = ['praisonai'] + argv
+    
+    try:
+        praison = PraisonAI()
+        praison.main()
+    except SystemExit:
+        pass
+    finally:
+        sys.argv = original_argv
+
+
 @app.command("list")
 def recipe_list():
     """List available recipes."""
@@ -197,6 +247,77 @@ def recipe_judge(
         else:
             print("\n💡 Tip: Add --yaml <file> to generate actionable fix recommendations")
             
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        raise typer.Exit(1)
+
+
+@app.command("optimize")
+def recipe_optimize(
+    recipe_path: str = typer.Argument(..., help="Path to recipe folder"),
+    target: str = typer.Argument(None, help="Optional optimization target (e.g., 'improve error handling')"),
+    iterations: int = typer.Option(3, "--iterations", "-i", help="Maximum optimization iterations"),
+    threshold: float = typer.Option(8.0, "--threshold", "-t", help="Score threshold to stop (1-10)"),
+    input_data: str = typer.Option("", "--input", help="Input data for recipe runs"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+):
+    """Optimize a recipe using AI judge feedback.
+    
+    Iteratively runs the recipe, judges output, and applies improvements.
+    
+    Examples:
+        praisonai recipe optimize my-recipe
+        praisonai recipe optimize my-recipe "improve error handling"
+        praisonai recipe optimize my-recipe --iterations 5 --threshold 9.0
+        praisonai recipe optimize my-recipe --input '{"query": "test"}'
+    """
+    from pathlib import Path
+    import logging
+    
+    if verbose:
+        logging.basicConfig(level=logging.INFO)
+    
+    recipe_path_obj = Path(recipe_path)
+    if not recipe_path_obj.exists():
+        print(f"❌ Recipe not found: {recipe_path}")
+        raise typer.Exit(1)
+    
+    print(f"🔄 Optimizing recipe: {recipe_path}")
+    print(f"   Max iterations: {iterations}")
+    print(f"   Score threshold: {threshold}")
+    if target:
+        print(f"   Target: {target}")
+    
+    try:
+        from praisonai.cli.features.recipe_optimizer import RecipeOptimizer
+        
+        optimizer = RecipeOptimizer(
+            max_iterations=iterations,
+            score_threshold=threshold,
+        )
+        
+        final_report = optimizer.optimize(
+            recipe_path=recipe_path_obj,
+            input_data=input_data,
+            optimization_target=target,
+        )
+        
+        if final_report:
+            score = getattr(final_report, 'overall_score', 0)
+            print(f"\n{'✅' if score >= threshold else '📊'} Final score: {score}/10")
+            
+            if score >= threshold:
+                print("   Recipe optimization complete!")
+            else:
+                print("   Threshold not reached. Consider running more iterations.")
+        else:
+            print("❌ Optimization failed - no report generated")
+            raise typer.Exit(1)
+            
+    except ImportError as e:
+        print(f"❌ Missing dependency: {e}")
+        print("   Install with: pip install litellm")
+        raise typer.Exit(1)
     except Exception as e:
         print(f"❌ Error: {e}")
         raise typer.Exit(1)

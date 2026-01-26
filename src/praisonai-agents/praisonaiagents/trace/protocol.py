@@ -85,12 +85,14 @@ class ActionEvent:
 
 
 @runtime_checkable
-class TraceSink(Protocol):
+class TraceSinkProtocol(Protocol):
     """
     Protocol for trace event sinks.
     
     Implementations receive action events and handle them
     (e.g., print to stdout, write to file, send to server).
+    
+    Naming follows AGENTS.md convention: XProtocol for interfaces.
     """
     
     def emit(self, event: ActionEvent) -> None:
@@ -104,6 +106,10 @@ class TraceSink(Protocol):
     def close(self) -> None:
         """Close the sink and release resources."""
         ...
+
+
+# Backward compatibility alias (deprecated)
+TraceSink = TraceSinkProtocol
 
 
 class NoOpSink:
