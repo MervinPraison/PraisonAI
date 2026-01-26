@@ -292,6 +292,7 @@ Methods:
 * <code title="cli">praisonai recipe list <a href="./src/praisonai/praisonai/cli/commands/recipe.py">--help</a></code>
 * <code title="cli">praisonai recipe optimize <a href="./src/praisonai/praisonai/cli/commands/recipe.py">--help</a></code>
 * <code title="cli">praisonai recipe run <a href="./src/praisonai/praisonai/cli/commands/recipe.py">--help</a></code>
+* <code title="cli">praisonai recipe serve <a href="./src/praisonai/praisonai/cli/commands/recipe.py">--help</a></code>
 * <code title="cli">praisonai registry list <a href="./src/praisonai/praisonai/cli/commands/registry.py">--help</a></code>
 * <code title="cli">praisonai registry serve <a href="./src/praisonai/praisonai/cli/commands/registry.py">--help</a></code>
 * <code title="cli">praisonai replay cleanup <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
