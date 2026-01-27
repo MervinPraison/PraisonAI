@@ -5,6 +5,7 @@ Automatically generates recipe folders with agents.yaml, TEMPLATE.yaml, and tool
 based on a natural language goal description.
 
 DRY: Reuses AutoGenerator patterns and SDK knowledge prompt.
+     Imports TOOL_CATEGORIES and TASK_KEYWORD_TO_TOOLS from auto.py to avoid duplication.
 """
 
 import os
@@ -14,6 +15,9 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 from .sdk_knowledge import get_sdk_knowledge_prompt
+
+# DRY: Import tool categories from auto.py instead of duplicating
+from praisonai.auto import TOOL_CATEGORIES, TASK_KEYWORD_TO_TOOLS
 
 logger = logging.getLogger(__name__)
 
@@ -27,79 +31,9 @@ class RecipeCreator:
         path = creator.create("Build a web scraper for news articles")
     """
     
-    # Tool categories for selection (from auto.py)
-    TOOL_CATEGORIES = {
-        'web_search': [
-            'internet_search', 'duckduckgo', 'tavily_search', 'exa_search',
-            'search_web', 'ydc_search', 'searxng_search'
-        ],
-        'web_scraping': [
-            'scrape_page', 'extract_links', 'crawl', 'extract_text',
-            'crawl4ai', 'crawl4ai_extract', 'get_article'
-        ],
-        'file_operations': [
-            'read_file', 'write_file', 'list_files', 'get_file_info',
-            'copy_file', 'move_file', 'delete_file'
-        ],
-        'code_execution': [
-            'execute_command', 'execute_code', 'analyze_code', 'format_code'
-        ],
-        'data_processing': [
-            'read_csv', 'write_csv', 'analyze_csv', 'read_json', 'write_json',
-            'read_excel', 'write_excel', 'read_yaml', 'write_yaml', 'read_xml'
-        ],
-        'research': [
-            'search_arxiv', 'get_arxiv_paper', 'wiki_search', 'wiki_summary',
-            'get_news_sources', 'get_trending_topics'
-        ],
-        'finance': [
-            'get_stock_price', 'get_stock_info', 'get_historical_data'
-        ],
-        'math': [
-            'evaluate', 'solve_equation', 'convert_units', 'calculate_statistics'
-        ],
-        'database': [
-            'query', 'create_table', 'load_data', 'find_documents', 'vector_search'
-        ]
-    }
-    
-    # Keywords that map to tool categories
-    TASK_KEYWORD_TO_TOOLS = {
-        'search': 'web_search',
-        'find': 'web_search',
-        'look up': 'web_search',
-        'google': 'web_search',
-        'scrape': 'web_scraping',
-        'crawl': 'web_scraping',
-        'extract': 'web_scraping',
-        'website': 'web_scraping',
-        'web page': 'web_scraping',
-        'file': 'file_operations',
-        'read': 'file_operations',
-        'write': 'file_operations',
-        'save': 'file_operations',
-        'code': 'code_execution',
-        'run': 'code_execution',
-        'execute': 'code_execution',
-        'script': 'code_execution',
-        'csv': 'data_processing',
-        'json': 'data_processing',
-        'excel': 'data_processing',
-        'data': 'data_processing',
-        'research': 'research',
-        'paper': 'research',
-        'arxiv': 'research',
-        'wikipedia': 'research',
-        'stock': 'finance',
-        'price': 'finance',
-        'market': 'finance',
-        'calculate': 'math',
-        'math': 'math',
-        'equation': 'math',
-        'database': 'database',
-        'sql': 'database',
-        'query': 'database',
-    }
+    # DRY: Use imported TOOL_CATEGORIES and TASK_KEYWORD_TO_TOOLS from auto.py
+    TOOL_CATEGORIES = TOOL_CATEGORIES
+    TASK_KEYWORD_TO_TOOLS = TASK_KEYWORD_TO_TOOLS
     
     def __init__(
         self,
@@ -254,26 +188,120 @@ Create an agents.yaml file for this goal:
 Recommended tools based on the goal: {tools_str}
 {customization_hints}
 
-CRITICAL Requirements:
-1. Use 1-3 agents depending on task complexity
-2. Assign only relevant tools from the recommended list
-3. Include clear backstory and expected_output for each task
-4. Use sequential workflow unless parallel is clearly needed
-5. Output ONLY valid YAML - no markdown, no explanations
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MANDATORY RULES - YOU MUST FOLLOW ALL OF THESE WITHOUT EXCEPTION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-CRITICAL - Agent Behavior:
-6. Each action MUST specify which tool to use (e.g., "Use internet_search to find...")
-7. Actions must be SPECIFIC and ACTIONABLE - agents should act immediately, not ask for input
-8. Include concrete examples or default values in actions (e.g., specific URLs, topics)
-9. Use {{{{previous_agent}}}}_output to reference previous agent's output in subsequent steps
-10. expected_output must describe the exact format expected (list, report, JSON, etc.)
+## RULE 1: TOOL SELECTION (CRITICAL)
+ONLY use these RELIABLE tools that are GUARANTEED to work:
+- `internet_search` - General web search (NO API key needed beyond OPENAI)
+- `tavily_search` - High-quality web search (REQUIRES TAVILY_API_KEY)
+- `read_file` - Read local files (NO extra API key)
+- `write_file` - Write local files (NO extra API key)
 
-Example of GOOD action:
-  action: "Use internet_search to find the latest AI trends in 2024. Compile a list of top 5 trends with brief descriptions."
-  expected_output: "A numbered list of 5 AI trends, each with a 2-3 sentence description and source URL"
+DO NOT USE these tools (they have loading/compatibility issues):
+- scrape_page, crawl, extract_links, extract_text (spider_tools issues)
+- crawl4ai, crawl4ai_extract (loading issues)
+- wiki_search (not reliably available)
 
-Example of BAD action (DO NOT DO THIS):
-  action: "Research AI trends"  # Too vague, agent will ask for clarification
+## RULE 2: ENVIRONMENT VARIABLES (CRITICAL)
+- ALWAYS include: OPENAI_API_KEY
+- ONLY include TAVILY_API_KEY if using tavily_search or tavily_extract
+- NEVER include API keys for tools you're not using
+
+## RULE 3: ACTION FORMAT (CRITICAL)
+Every action MUST:
+1. Start with "Use [tool_name] to..."
+2. Contain CONCRETE values, NOT variables
+3. Specify exact expected format
+
+GOOD: "Use internet_search to find the top 5 developments in quantum computing. Return a numbered list."
+BAD: "Use internet_search to find {{{{topic}}}}" (variables don't work in actions!)
+BAD: "Research quantum computing" (doesn't specify which tool!)
+
+## RULE 4: AGENT STRUCTURE (CRITICAL)
+- Use 1-2 agents maximum for simple tasks
+- Each agent needs: role, goal, backstory, tools, llm
+- llm should be: gpt-4o-mini (default)
+
+## RULE 5: STEPS FORMAT (CRITICAL)
+- Each step needs: agent, action, expected_output
+- Use {{{{agent_name}}}}_output to pass data between agents
+- expected_output must describe exact format (list, report, JSON, etc.)
+
+## RULE 6: NO EMPTY FIELDS
+- Do NOT include: knowledge: [], memory: false, handoffs: []
+- Omit any field that would be empty
+
+## RULE 7: OUTPUT FORMAT
+- Output ONLY valid YAML
+- No markdown code blocks
+- No explanations before or after
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EXAMPLE OF PERFECT RECIPE (COPY THIS STRUCTURE)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+metadata:
+  name: research-report
+  requires:
+    env:
+      - OPENAI_API_KEY
+
+agents:
+  researcher:
+    role: Research Analyst
+    goal: Find comprehensive information on the requested topic
+    backstory: Expert researcher skilled at finding and synthesizing information from multiple sources.
+    tools:
+      - internet_search
+    llm: gpt-4o-mini
+
+steps:
+  - agent: researcher
+    action: "Use internet_search to find the top 5 key facts about [CONCRETE TOPIC FROM GOAL]. Return a numbered list with each fact containing a title and 2-3 sentence explanation."
+    expected_output: "A numbered list of 5 facts, each with: title, explanation (2-3 sentences)"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EXAMPLE WITH TAVILY (when high-quality search needed)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+metadata:
+  name: ai-trends-research
+  requires:
+    env:
+      - OPENAI_API_KEY
+      - TAVILY_API_KEY
+
+agents:
+  researcher:
+    role: Research Analyst
+    goal: Find the latest AI trends and developments
+    backstory: Expert in AI research with access to premium search tools.
+    tools:
+      - tavily_search
+    llm: gpt-4o-mini
+
+  writer:
+    role: Report Writer
+    goal: Compile research into a well-structured report
+    backstory: Technical writer skilled at creating clear, informative reports.
+    tools:
+      - write_file
+    llm: gpt-4o-mini
+
+steps:
+  - agent: researcher
+    action: "Use tavily_search to find the top 5 AI trends in 2024. Return a numbered list with titles, descriptions, and source URLs."
+    expected_output: "A numbered list of 5 trends, each with: title, 2-3 sentence description, source URL"
+
+  - agent: writer
+    action: "Using the research findings: {{{{researcher_output}}}}, write a comprehensive markdown report and save it to ai_trends_report.md using write_file."
+    expected_output: "A markdown report saved to ai_trends_report.md with introduction, findings, and conclusion"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+NOW GENERATE THE RECIPE FOR: "{goal}"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
         
         try:
@@ -426,7 +454,7 @@ steps:
         for tool in tools:
             if tool in ['tavily_search', 'tavily_extract']:
                 if 'tavily' not in str(tool_imports):
-                    tool_imports.append("from praisonaiagents.tools import tavily_search")
+                    tool_imports.append("from praisonai_tools.tools import tavily_search, tavily_extract")
                 tool_exports.append(tool)
             elif tool in ['read_file', 'write_file', 'list_files']:
                 if 'file_tools' not in str(tool_imports):

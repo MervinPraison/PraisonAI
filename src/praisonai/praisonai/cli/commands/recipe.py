@@ -152,6 +152,157 @@ def recipe_run(
 
 
 
+@app.command("info")
+def recipe_info(
+    name: str = typer.Argument(..., help="Recipe name"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show full YAML content"),
+):
+    """Show detailed information about a recipe.
+    
+    Displays recipe metadata, agents, steps, and tools.
+    
+    Examples:
+        praisonai recipe info image-to-blog-generator
+        praisonai recipe info url-to-blog-generator --verbose
+    """
+    from pathlib import Path
+    from rich.console import Console
+    from rich.table import Table
+    from rich.panel import Panel
+    from rich.syntax import Syntax
+    import yaml
+    
+    console = Console()
+    
+    # Find recipe path
+    recipe_path = None
+    
+    # Check template search paths
+    try:
+        from praisonai.recipe.core import get_template_search_paths
+        for search_path in get_template_search_paths():
+            candidate = search_path / name
+            if candidate.exists() and (candidate / "agents.yaml").exists():
+                recipe_path = candidate
+                break
+    except ImportError:
+        pass
+    
+    # Also check agent_recipes package
+    if not recipe_path:
+        try:
+            import agent_recipes
+            if hasattr(agent_recipes, 'get_template_path'):
+                template_base = Path(agent_recipes.get_template_path(""))
+                candidate = template_base / name
+                if candidate.exists() and (candidate / "agents.yaml").exists():
+                    recipe_path = candidate
+        except ImportError:
+            pass
+    
+    # Check current directory
+    if not recipe_path:
+        candidate = Path(name)
+        if candidate.exists() and (candidate / "agents.yaml").exists():
+            recipe_path = candidate
+    
+    if not recipe_path:
+        console.print(f"[red]❌ Recipe not found: {name}[/red]")
+        console.print("[dim]Hint: Run 'praisonai recipe list' to see available recipes[/dim]")
+        raise typer.Exit(1)
+    
+    # Load agents.yaml
+    yaml_path = recipe_path / "agents.yaml"
+    try:
+        with open(yaml_path) as f:
+            config = yaml.safe_load(f)
+    except Exception as e:
+        console.print(f"[red]❌ Error loading recipe: {e}[/red]")
+        raise typer.Exit(1)
+    
+    # Display recipe info
+    console.print()
+    console.print(Panel(f"[bold cyan]{name}[/bold cyan]", title="Recipe Info"))
+    
+    # Metadata
+    metadata = config.get("metadata", {})
+    if metadata:
+        console.print("\n[bold]Metadata:[/bold]")
+        meta_table = Table(show_header=False, box=None)
+        meta_table.add_column("Key", style="dim")
+        meta_table.add_column("Value")
+        for key, value in metadata.items():
+            if isinstance(value, list):
+                value = ", ".join(str(v) for v in value)
+            elif isinstance(value, dict):
+                value = str(value)
+            meta_table.add_row(key, str(value))
+        console.print(meta_table)
+    
+    # Topic
+    topic = config.get("topic", "Not specified")
+    console.print(f"\n[bold]Topic:[/bold] {topic}")
+    
+    # Agents
+    agents = config.get("agents", {})
+    if agents:
+        console.print(f"\n[bold]Agents ({len(agents)}):[/bold]")
+        agent_table = Table(show_header=True, header_style="bold")
+        agent_table.add_column("Name", style="green")
+        agent_table.add_column("Role")
+        agent_table.add_column("Tools", style="cyan")
+        agent_table.add_column("LLM", style="dim")
+        
+        for agent_name, agent_config in agents.items():
+            tools = agent_config.get("tools", [])
+            tools_str = ", ".join(tools) if tools else "-"
+            llm = agent_config.get("llm", "default")
+            agent_table.add_row(
+                agent_name,
+                agent_config.get("role", "-"),
+                tools_str,
+                str(llm)
+            )
+        console.print(agent_table)
+    
+    # Steps
+    steps = config.get("steps", [])
+    if steps:
+        console.print(f"\n[bold]Steps ({len(steps)}):[/bold]")
+        step_table = Table(show_header=True, header_style="bold")
+        step_table.add_column("#", style="dim")
+        step_table.add_column("Name", style="green")
+        step_table.add_column("Agent", style="cyan")
+        step_table.add_column("Action (truncated)")
+        
+        for i, step in enumerate(steps, 1):
+            step_name = step.get("name", f"step_{i}")
+            agent = step.get("agent", "-")
+            action = step.get("action", "")
+            # Truncate action for display
+            action_preview = action[:60].replace("\n", " ") + "..." if len(action) > 60 else action.replace("\n", " ")
+            step_table.add_row(str(i), step_name, agent, action_preview)
+        console.print(step_table)
+    
+    # Tools.py
+    tools_path = recipe_path / "tools.py"
+    if tools_path.exists():
+        console.print("\n[bold]Custom Tools:[/bold] [green]✓ tools.py present[/green]")
+    else:
+        console.print("\n[bold]Custom Tools:[/bold] [dim]No tools.py[/dim]")
+    
+    # Full YAML if verbose
+    if verbose:
+        console.print("\n[bold]Full YAML:[/bold]")
+        with open(yaml_path) as f:
+            yaml_content = f.read()
+        syntax = Syntax(yaml_content, "yaml", theme="monokai", line_numbers=True)
+        console.print(syntax)
+    
+    # Path
+    console.print(f"\n[dim]Path: {recipe_path}[/dim]")
+
+
 @app.command("install")
 def recipe_install(
     source: str = typer.Argument(..., help="Recipe source (path or URL)"),
@@ -184,6 +335,11 @@ def recipe_judge(
     memory: bool = typer.Option(False, "--memory", help="Evaluate memory utilization (store/search effectiveness)"),
     knowledge: bool = typer.Option(False, "--knowledge", help="Evaluate knowledge retrieval effectiveness"),
     goal: str = typer.Option(None, "--goal", "-g", help="Override recipe goal for evaluation (extracted from YAML if not provided)"),
+    chunked: bool = typer.Option(False, "--chunked", help="Use chunked evaluation for large outputs (preserves all content)"),
+    no_auto_chunk: bool = typer.Option(False, "--no-auto-chunk", help="Disable automatic chunking (auto-chunk is enabled by default)"),
+    chunk_size: int = typer.Option(8000, "--chunk-size", help="Max characters per chunk (default: 8000)"),
+    max_chunks: int = typer.Option(5, "--max-chunks", help="Max chunks per agent (default: 5)"),
+    aggregation: str = typer.Option("weighted_average", "--aggregation", help="Score aggregation: weighted_average, average, min, max"),
 ):
     """Judge a recipe execution trace and generate fix recommendations.
     
@@ -223,7 +379,10 @@ def recipe_judge(
         mode = "knowledge"
     
     mode_emoji = {"context": "🔄", "memory": "🧠", "knowledge": "📚"}
-    print(f"{mode_emoji.get(mode, '🔍')} Judging trace: {trace_id} (mode: {mode})")
+    # auto_chunk is True by default unless --no-auto-chunk is specified
+    auto_chunk = not no_auto_chunk
+    chunked_indicator = " [chunked]" if chunked else (" [auto-chunk]" if auto_chunk else "")
+    print(f"{mode_emoji.get(mode, '🔍')} Judging trace: {trace_id} (mode: {mode}){chunked_indicator}")
     
     try:
         reader = ContextTraceReader(trace_id)
@@ -234,9 +393,20 @@ def recipe_judge(
             raise typer.Exit(1)
         
         print(f"  📊 Found {len(events)} events")
+        if chunked:
+            print(f"  📦 Chunked evaluation: {chunk_size} chars/chunk, max {max_chunks} chunks, {aggregation} aggregation")
+        elif auto_chunk:
+            print("  🔄 Auto-chunk: will chunk if content exceeds model context window")
         
         # Run judge with mode-specific evaluation
-        judge = ContextEffectivenessJudge(mode=mode)
+        judge = ContextEffectivenessJudge(
+            mode=mode,
+            chunked=chunked,
+            auto_chunk=auto_chunk,
+            chunk_size=chunk_size,
+            max_chunks=max_chunks,
+            aggregation_strategy=aggregation,
+        )
         report = judge.judge_trace(events, session_id=trace_id, yaml_file=yaml_file)
         
         # Display report

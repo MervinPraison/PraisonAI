@@ -60,6 +60,290 @@ def _estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
+def chunk_split(
+    text: str,
+    max_chars: int = 8000,
+    max_chunks: int = 5,
+    overlap: int = 200,
+    include_metadata: bool = False,
+) -> List:
+    """
+    Split large text into chunks for separate evaluation.
+    
+    Unlike truncation which loses information, chunking preserves ALL content
+    by splitting it into multiple evaluable pieces.
+    
+    Args:
+        text: Text to split into chunks
+        max_chars: Maximum characters per chunk
+        max_chunks: Maximum number of chunks to create
+        overlap: Number of characters to overlap between chunks for context
+        include_metadata: If True, return list of dicts with metadata
+        
+    Returns:
+        List of text chunks (or dicts with metadata if include_metadata=True)
+    """
+    if not text or len(text) <= max_chars:
+        if include_metadata:
+            return [{"content": text, "chunk_index": 0, "total_chunks": 1}]
+        return [text]
+    
+    chunks = []
+    start = 0
+    chunk_index = 0
+    
+    while start < len(text) and chunk_index < max_chunks:
+        # Calculate end position
+        end = min(start + max_chars, len(text))
+        
+        # Try to find a good break point (paragraph, sentence, or word boundary)
+        if end < len(text):
+            # Look for paragraph break first
+            para_break = text.rfind('\n\n', start, end)
+            if para_break > start + max_chars // 2:
+                end = para_break + 2
+            else:
+                # Look for sentence break
+                for sep in ['. ', '.\n', '! ', '!\n', '? ', '?\n']:
+                    sent_break = text.rfind(sep, start, end)
+                    if sent_break > start + max_chars // 2:
+                        end = sent_break + len(sep)
+                        break
+                else:
+                    # Look for word break
+                    word_break = text.rfind(' ', start, end)
+                    if word_break > start + max_chars // 2:
+                        end = word_break + 1
+        
+        chunk_text = text[start:end].strip()
+        
+        if chunk_text:
+            if include_metadata:
+                chunks.append({
+                    "content": chunk_text,
+                    "chunk_index": chunk_index,
+                    "total_chunks": -1,  # Will be updated after
+                    "start_pos": start,
+                    "end_pos": end,
+                })
+            else:
+                chunks.append(chunk_text)
+            chunk_index += 1
+        
+        # Move start position, accounting for overlap
+        start = end - overlap if overlap > 0 and end < len(text) else end
+    
+    # If we hit max_chunks but have remaining text, append it to last chunk
+    if start < len(text) and chunks:
+        remaining = text[start:].strip()
+        if remaining:
+            if include_metadata:
+                chunks[-1]["content"] += "\n\n[CONTINUED...]\n" + remaining
+                chunks[-1]["end_pos"] = len(text)
+            else:
+                chunks[-1] += "\n\n[CONTINUED...]\n" + remaining
+    
+    # Update total_chunks in metadata
+    if include_metadata:
+        for chunk in chunks:
+            chunk["total_chunks"] = len(chunks)
+    
+    return chunks
+
+
+def aggregate_chunk_scores(
+    chunk_scores: List[Dict[str, Any]],
+    strategy: str = "weighted_average",
+) -> float:
+    """
+    Aggregate scores from multiple chunks into a single score.
+    
+    Strategies:
+        - weighted_average: Weight by chunk size (default)
+        - average: Simple average
+        - min: Use minimum score (conservative)
+        - max: Use maximum score (optimistic)
+        - first_last: Average of first and last chunk
+    
+    Args:
+        chunk_scores: List of dicts with 'score' and 'chunk_size' keys
+        strategy: Aggregation strategy
+        
+    Returns:
+        Aggregated score (1-10)
+    """
+    if not chunk_scores:
+        return 5.0
+    
+    if len(chunk_scores) == 1:
+        return chunk_scores[0].get("score", 5.0)
+    
+    scores = [cs.get("score", 5.0) for cs in chunk_scores]
+    sizes = [cs.get("chunk_size", 1) for cs in chunk_scores]
+    
+    if strategy == "min":
+        return min(scores)
+    elif strategy == "max":
+        return max(scores)
+    elif strategy == "average":
+        return sum(scores) / len(scores)
+    elif strategy == "first_last":
+        return (scores[0] + scores[-1]) / 2
+    else:  # weighted_average (default)
+        total_size = sum(sizes)
+        if total_size == 0:
+            return sum(scores) / len(scores)
+        weighted_sum = sum(s * sz for s, sz in zip(scores, sizes))
+        return weighted_sum / total_size
+
+
+class ChunkedEvaluator:
+    """
+    Evaluator that handles large outputs by splitting into chunks.
+    
+    Instead of truncating large outputs (which loses information),
+    this evaluator splits content into chunks, evaluates each separately,
+    and aggregates the scores.
+    """
+    
+    def __init__(
+        self,
+        model: str = "gpt-4o-mini",
+        temperature: float = 0.1,
+        max_tokens: int = 800,
+        chunk_size: int = 8000,
+        max_chunks: int = 5,
+        overlap: int = 200,
+        aggregation_strategy: str = "weighted_average",
+    ):
+        self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.chunk_size = chunk_size
+        self.max_chunks = max_chunks
+        self.overlap = overlap
+        self.aggregation_strategy = aggregation_strategy
+    
+    def _get_litellm(self):
+        """Lazy import litellm."""
+        try:
+            import litellm
+            return litellm
+        except ImportError:
+            raise ImportError(
+                "litellm is required for LLM judging. "
+                "Install with: pip install litellm"
+            )
+    
+    def evaluate_chunk(
+        self,
+        chunk: str,
+        chunk_index: int,
+        total_chunks: int,
+        prompt_template: str,
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """
+        Evaluate a single chunk of content.
+        
+        Args:
+            chunk: The chunk content to evaluate
+            chunk_index: Index of this chunk (0-based)
+            total_chunks: Total number of chunks
+            prompt_template: Prompt template to use
+            **kwargs: Additional template variables
+            
+        Returns:
+            Dict with score and reasoning
+        """
+        litellm = self._get_litellm()
+        
+        # Add chunk context to the prompt
+        chunk_context = f"\n[CHUNK {chunk_index + 1} of {total_chunks}]\n"
+        if chunk_index > 0:
+            chunk_context += "(This is a continuation of the previous content)\n"
+        
+        # Build prompt with chunk
+        prompt = prompt_template.format(
+            output=chunk_context + chunk,
+            **kwargs,
+        )
+        
+        try:
+            response = litellm.completion(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            )
+            
+            response_text = response.choices[0].message.content or ""
+            return {
+                "score": self._extract_score(response_text),
+                "chunk_size": len(chunk),
+                "chunk_index": chunk_index,
+                "reasoning": response_text,
+            }
+            
+        except Exception as e:
+            logger.warning(f"Chunk evaluation failed: {e}")
+            return {
+                "score": 5.0,
+                "chunk_size": len(chunk),
+                "chunk_index": chunk_index,
+                "reasoning": f"Evaluation error: {str(e)}",
+            }
+    
+    def _extract_score(self, response_text: str) -> float:
+        """Extract score from LLM response."""
+        import re
+        
+        # Look for SCORE: pattern
+        match = re.search(r'SCORE:\s*(\d+(?:\.\d+)?)', response_text)
+        if match:
+            return max(1.0, min(10.0, float(match.group(1))))
+        
+        # Look for any number between 1-10
+        numbers = re.findall(r'\b(\d+(?:\.\d+)?)\b', response_text)
+        for num in numbers:
+            val = float(num)
+            if 1 <= val <= 10:
+                return val
+        
+        return 5.0
+    
+    def aggregate_scores(
+        self,
+        chunk_scores: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        Aggregate scores from multiple chunks.
+        
+        Args:
+            chunk_scores: List of chunk evaluation results
+            
+        Returns:
+            Dict with aggregated score and combined reasoning
+        """
+        final_score = aggregate_chunk_scores(
+            chunk_scores,
+            strategy=self.aggregation_strategy,
+        )
+        
+        # Combine reasoning from all chunks
+        reasonings = []
+        for cs in chunk_scores:
+            if cs.get("reasoning"):
+                reasonings.append(f"[Chunk {cs.get('chunk_index', 0) + 1}]: {cs.get('reasoning', '')[:200]}")
+        
+        return {
+            "score": final_score,
+            "chunk_count": len(chunk_scores),
+            "chunk_scores": [cs.get("score", 5.0) for cs in chunk_scores],
+            "reasoning": "\n".join(reasonings),
+        }
+
+
 @dataclass
 class ToolEvaluation:
     """Evaluation of a single tool call."""
@@ -335,6 +619,12 @@ SUGGESTIONS:
         max_tokens: int = 800,
         reports_dir: Optional[Path] = None,
         mode: str = "context",
+        chunked: bool = False,
+        auto_chunk: bool = False,
+        chunk_size: int = 8000,
+        max_chunks: int = 5,
+        chunk_overlap: int = 200,
+        aggregation_strategy: str = "weighted_average",
     ):
         """
         Initialize the judge.
@@ -345,6 +635,16 @@ SUGGESTIONS:
             max_tokens: Max tokens for LLM response
             reports_dir: Directory to save judge reports
             mode: Evaluation mode - 'context', 'memory', or 'knowledge'
+            chunked: If True, always use chunked evaluation for large outputs
+            auto_chunk: If True, automatically decide if chunking is needed based on content size
+            chunk_size: Maximum characters per chunk (default: 8000, optimized for 128K context models)
+            max_chunks: Maximum number of chunks per agent (default: 5, allows up to 40K chars total)
+            chunk_overlap: Characters to overlap between chunks (default: 200)
+            aggregation_strategy: How to aggregate chunk scores
+                - 'weighted_average': Weight by chunk size (default)
+                - 'average': Simple average
+                - 'min': Use minimum score (conservative)
+                - 'max': Use maximum score (optimistic)
         """
         self.model = model or os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini")
         self.temperature = temperature
@@ -352,6 +652,14 @@ SUGGESTIONS:
         self.reports_dir = reports_dir or Path.home() / ".praison" / "judge_reports"
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         self.mode = mode
+        
+        # Chunked evaluation settings
+        self.chunked = chunked
+        self.auto_chunk = auto_chunk
+        self.chunk_size = chunk_size
+        self.max_chunks = max_chunks
+        self.chunk_overlap = chunk_overlap
+        self.aggregation_strategy = aggregation_strategy
         
         # Select prompt template based on mode
         if mode == "memory":
@@ -1021,14 +1329,49 @@ REASONING: [brief explanation]
         """
         litellm = self._get_litellm()
         
-        # Use smart truncation for large outputs to preserve key information
+        # Get raw data
         raw_input = "\n".join(agent_info.get("inputs", [])[:3]) or "No input recorded"
         raw_output = "\n".join(agent_info.get("outputs", [])[:3]) or "No output recorded"
         raw_context = "\n".join(agent_info.get("context", [])[:2]) or "No context recorded"
         
-        # Smart truncate to fit within LLM context while preserving key info
+        # Check if chunked evaluation is needed
+        total_content_size = len(raw_input) + len(raw_output) + len(raw_context)
+        
+        # Determine if we should use chunked evaluation
+        use_chunked = False
+        if self.chunked:
+            # Explicit chunked mode - use if content exceeds chunk size
+            use_chunked = total_content_size > self.chunk_size
+        elif self.auto_chunk:
+            # Auto-chunk mode - use token utilities to decide
+            try:
+                from praisonaiagents.eval.tokens import needs_chunking
+                use_chunked = needs_chunking(
+                    raw_input + raw_output + raw_context,
+                    model=self.model,
+                    safety_margin=0.7,  # Leave room for prompt template
+                )
+            except ImportError:
+                # Fallback to simple size check if praisonaiagents not available
+                use_chunked = total_content_size > self.chunk_size
+        
+        if use_chunked:
+            # Use chunked evaluation for large outputs
+            return self._judge_agent_chunked(
+                agent_name=agent_name,
+                agent_info=agent_info,
+                raw_input=raw_input,
+                raw_output=raw_output,
+                raw_context=raw_context,
+                yaml_info=yaml_info,
+                previous_scores=previous_scores,
+                recipe_goal=recipe_goal,
+                input_validation_issues=input_validation_issues,
+            )
+        
+        # Standard evaluation with smart truncation
         input_text = _smart_truncate(raw_input, max_chars=800)
-        output = _smart_truncate(raw_output, max_chars=2000)  # More space for output
+        output = _smart_truncate(raw_output, max_chars=2000)
         context_summary = _smart_truncate(raw_context, max_chars=1500)
         
         # Format tool calls and extract errors (can be dicts or strings)
@@ -1133,6 +1476,240 @@ REASONING: [brief explanation]
                 input_tokens=agent_info.get("prompt_tokens", 0),
                 output_tokens=agent_info.get("completion_tokens", 0),
             )
+    
+    def _judge_agent_chunked(
+        self,
+        agent_name: str,
+        agent_info: Dict[str, Any],
+        raw_input: str,
+        raw_output: str,
+        raw_context: str,
+        yaml_info: Optional[Dict[str, Any]] = None,
+        previous_scores: Optional[List[ContextEffectivenessScore]] = None,
+        recipe_goal: str = "",
+        input_validation_issues: Optional[List[str]] = None,
+    ) -> ContextEffectivenessScore:
+        """
+        Judge agent using chunked evaluation for large outputs.
+        
+        Instead of truncating large outputs (which loses information),
+        this method splits the output into chunks, evaluates each separately,
+        and aggregates the scores.
+        
+        Args:
+            agent_name: Name of the agent being judged
+            agent_info: Extracted data about the agent's execution
+            raw_input: Raw input text (not truncated)
+            raw_output: Raw output text (not truncated)
+            raw_context: Raw context text (not truncated)
+            yaml_info: Optional YAML structure info
+            previous_scores: Scores from previous agents
+            recipe_goal: Overall recipe goal
+            input_validation_issues: Input validation issues
+            
+        Returns:
+            ContextEffectivenessScore with aggregated scores from all chunks
+        """
+        litellm = self._get_litellm()
+        
+        # Split output into chunks (output is usually the largest)
+        output_chunks = chunk_split(
+            raw_output,
+            max_chars=self.chunk_size,
+            max_chunks=self.max_chunks,
+            overlap=self.chunk_overlap,
+        )
+        
+        logger.info(f"Chunked evaluation for {agent_name}: {len(output_chunks)} chunks")
+        
+        # Prepare common fields (these don't need chunking)
+        input_text = _smart_truncate(raw_input, max_chars=800)
+        context_summary = _smart_truncate(raw_context, max_chars=1000)
+        
+        # Format tool calls
+        raw_tool_calls = agent_info.get("tool_calls", [])[:5]
+        tool_calls_strs = []
+        tool_errors_list = []
+        for tc in raw_tool_calls:
+            if isinstance(tc, dict):
+                tool_calls_strs.append(f"{tc.get('tool_name', 'unknown')}({str(tc.get('args', ''))[:100]})")
+                result = tc.get('result', '')
+                if isinstance(result, dict) and result.get('error'):
+                    tool_errors_list.append(f"{tc.get('tool_name', 'unknown')}: {result.get('error')}")
+                elif isinstance(result, str) and 'error' in result.lower():
+                    tool_errors_list.append(f"{tc.get('tool_name', 'unknown')}: {result[:200]}")
+            else:
+                tool_calls_strs.append(str(tc))
+        tool_calls = "\n".join(tool_calls_strs) or "No tool calls recorded"
+        tool_errors = "\n".join(tool_errors_list) or "No errors"
+        
+        # Extract YAML-aware fields
+        agent_goal = "Complete the assigned task effectively"
+        task_description = "Not specified"
+        expected_output = "Not specified"
+        
+        if yaml_info:
+            agent_map = yaml_info.get("agent_map", {})
+            yaml_key = agent_map.get(agent_name, agent_name)
+            roles = yaml_info.get("roles", {})
+            
+            if yaml_key in roles:
+                role_data = roles[yaml_key]
+                agent_goal = role_data.get("goal", agent_goal)
+                tasks = role_data.get("tasks", {})
+                if tasks:
+                    first_task = list(tasks.values())[0]
+                    if isinstance(first_task, dict):
+                        task_description = first_task.get("description", task_description)[:500]
+                        expected_output = first_task.get("expected_output", expected_output)[:300]
+        
+        # Build previous steps context
+        previous_steps_context = self._build_previous_steps_context(previous_scores or [])
+        
+        # Build input validation status
+        if input_validation_issues:
+            input_validation_status = "⚠️ INPUT ISSUES DETECTED:\n" + "\n".join(f"  - {issue}" for issue in input_validation_issues[:5])
+        else:
+            input_validation_status = "✅ All inputs appear to be properly provided"
+        
+        # Evaluate each chunk
+        chunk_results = []
+        all_scores = {
+            "task": [],
+            "context": [],
+            "quality": [],
+            "instruction": [],
+            "hallucination": [],
+            "error": [],
+        }
+        failure_detected = False
+        failure_reason = ""
+        all_reasoning = []
+        all_suggestions = []
+        
+        for i, chunk in enumerate(output_chunks):
+            # Add chunk indicator to output
+            chunk_header = f"\n[CHUNK {i + 1} of {len(output_chunks)}]\n"
+            if i > 0:
+                chunk_header += "(Continuation of agent output)\n"
+            
+            output_with_header = chunk_header + chunk
+            
+            # Build prompt for this chunk
+            prompt = self.prompt_template.format(
+                agent_name=agent_name,
+                agent_goal=_smart_truncate(agent_goal, max_chars=200),
+                task_description=_smart_truncate(task_description, max_chars=500),
+                expected_output=_smart_truncate(expected_output, max_chars=300),
+                input_text=input_text,
+                input_tokens=agent_info.get("prompt_tokens", 0),
+                context_summary=context_summary,
+                output_tokens=agent_info.get("completion_tokens", 0),
+                output=output_with_header,
+                tool_calls=_smart_truncate(tool_calls, max_chars=500),
+                tool_errors=_smart_truncate(tool_errors, max_chars=500),
+                recipe_goal=recipe_goal or "Not specified",
+                previous_steps_context=previous_steps_context,
+                input_validation_status=input_validation_status,
+                memory_store_count=agent_info.get("memory_store_count", 0),
+                memory_search_count=agent_info.get("memory_search_count", 0),
+                memory_store_details=agent_info.get("memory_store_details", "None"),
+                memory_search_details=agent_info.get("memory_search_details", "None"),
+                knowledge_search_count=agent_info.get("knowledge_search_count", 0),
+                knowledge_add_count=agent_info.get("knowledge_add_count", 0),
+                knowledge_search_details=agent_info.get("knowledge_search_details", "None"),
+                knowledge_sources=agent_info.get("knowledge_sources", "None"),
+            )
+            
+            try:
+                response = litellm.completion(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                )
+                
+                response_text = response.choices[0].message.content or ""
+                chunk_score = self._parse_response(response_text, agent_name, agent_info)
+                
+                # Collect scores from this chunk
+                all_scores["task"].append(chunk_score.task_achievement_score)
+                all_scores["context"].append(chunk_score.context_utilization_score)
+                all_scores["quality"].append(chunk_score.output_quality_score)
+                all_scores["instruction"].append(chunk_score.instruction_following_score)
+                all_scores["hallucination"].append(chunk_score.hallucination_score)
+                all_scores["error"].append(chunk_score.error_handling_score)
+                
+                # Track failures
+                if chunk_score.failure_detected:
+                    failure_detected = True
+                    if chunk_score.failure_reason:
+                        failure_reason = chunk_score.failure_reason
+                
+                # Collect reasoning and suggestions
+                if chunk_score.reasoning:
+                    all_reasoning.append(f"[Chunk {i + 1}]: {chunk_score.reasoning}")
+                all_suggestions.extend(chunk_score.suggestions or [])
+                
+                chunk_results.append({
+                    "chunk_index": i,
+                    "score": chunk_score.overall_score,
+                    "chunk_size": len(chunk),
+                })
+                
+            except Exception as e:
+                logger.warning(f"Chunk {i + 1} evaluation failed for {agent_name}: {e}")
+                # Use default scores for failed chunk
+                for key in all_scores:
+                    all_scores[key].append(5.0)
+                chunk_results.append({
+                    "chunk_index": i,
+                    "score": 5.0,
+                    "chunk_size": len(chunk),
+                })
+        
+        # Aggregate scores using the configured strategy
+        def aggregate_list(scores: List[float]) -> float:
+            if not scores:
+                return 5.0
+            chunk_data = [{"score": s, "chunk_size": cr.get("chunk_size", 1)} 
+                         for s, cr in zip(scores, chunk_results)]
+            return aggregate_chunk_scores(chunk_data, strategy=self.aggregation_strategy)
+        
+        final_task = aggregate_list(all_scores["task"])
+        final_context = aggregate_list(all_scores["context"])
+        final_quality = aggregate_list(all_scores["quality"])
+        final_instruction = aggregate_list(all_scores["instruction"])
+        final_hallucination = aggregate_list(all_scores["hallucination"])
+        final_error = aggregate_list(all_scores["error"])
+        
+        # Calculate overall score
+        overall_score = (final_task + final_context + final_quality + 
+                        final_instruction + final_hallucination + final_error) / 6
+        
+        # Combine reasoning
+        combined_reasoning = f"[Chunked evaluation: {len(output_chunks)} chunks, strategy: {self.aggregation_strategy}]\n"
+        combined_reasoning += "\n".join(all_reasoning[:3])  # Limit to first 3
+        
+        # Deduplicate suggestions
+        unique_suggestions = list(dict.fromkeys(all_suggestions))[:5]
+        
+        return ContextEffectivenessScore(
+            agent_name=agent_name,
+            task_achievement_score=final_task,
+            context_utilization_score=final_context,
+            output_quality_score=final_quality,
+            instruction_following_score=final_instruction,
+            hallucination_score=final_hallucination,
+            error_handling_score=final_error,
+            overall_score=overall_score,
+            reasoning=combined_reasoning,
+            suggestions=unique_suggestions,
+            failure_detected=failure_detected,
+            failure_reason=failure_reason,
+            input_tokens=agent_info.get("prompt_tokens", 0),
+            output_tokens=agent_info.get("completion_tokens", 0),
+        )
     
     def _parse_response(
         self,

@@ -1,0 +1,44 @@
+# Test recipe for tavily_search and tavily_extract tools
+# Requires: TAVILY_API_KEY environment variable
+
+metadata:
+  name: tavily-tools-test
+  version: "1.0.0"
+  description: Test recipe demonstrating tavily_search and tavily_extract usage
+  author: test
+  tags:
+    - test
+    - tavily
+    - web-search
+  requires:
+    env:
+      - OPENAI_API_KEY
+      - TAVILY_API_KEY
+
+framework: praisonai
+topic: "Test Tavily tools integration"
+
+agents:
+  researcher:
+    role: Web Researcher
+    goal: Search the web and extract content using Tavily tools
+    backstory: |
+      You are an expert web researcher who uses Tavily's AI-powered search
+      to find relevant information and extract content from web pages.
+    tools:
+      - tavily_search
+      - tavily_extract
+    llm: gpt-4o-mini
+
+steps:
+  - agent: researcher
+    action: |
+      Use tavily_search to find information about "PraisonAI agents framework".
+      Return the top 3 results with their titles and URLs.
+    expected_output: "A list of 3 search results with titles, URLs, and brief descriptions"
+
+  - agent: researcher
+    action: |
+      Using the URLs from the previous search results, use tavily_extract to get
+      the full content from the first URL. Summarize the key points.
+    expected_output: "A summary of the extracted content with key points about PraisonAI"

@@ -63,6 +63,12 @@ __all__ = [
     "get_judge",
     "list_judges",
     "remove_judge",
+    # Token utilities
+    "estimate_tokens",
+    "get_context_length",
+    "count_tokens",
+    "needs_chunking",
+    "get_recommended_chunk_size",
 ]
 
 _LAZY_IMPORTS = {
@@ -108,6 +114,12 @@ _LAZY_IMPORTS = {
     "get_judge": ("judge", "get_judge"),
     "list_judges": ("judge", "list_judges"),
     "remove_judge": ("judge", "remove_judge"),
+    # Token utilities
+    "estimate_tokens": ("tokens", "estimate_tokens"),
+    "get_context_length": ("tokens", "get_context_length"),
+    "count_tokens": ("tokens", "count_tokens"),
+    "needs_chunking": ("tokens", "needs_chunking"),
+    "get_recommended_chunk_size": ("tokens", "get_recommended_chunk_size"),
 }
 
 
