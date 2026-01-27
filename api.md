@@ -289,6 +289,7 @@ Methods:
 * <code title="cli">praisonai realtime realtime-main <a href="./src/praisonai/praisonai/cli/commands/realtime.py">--help</a></code>
 * <code title="cli">praisonai recipe apply <a href="./src/praisonai/praisonai/cli/commands/recipe.py">--help</a></code>
 * <code title="cli">praisonai recipe create <a href="./src/praisonai/praisonai/cli/commands/recipe.py">--help</a></code>
+* <code title="cli">praisonai recipe info <a href="./src/praisonai/praisonai/cli/commands/recipe.py">--help</a></code>
 * <code title="cli">praisonai recipe install <a href="./src/praisonai/praisonai/cli/commands/recipe.py">--help</a></code>
 * <code title="cli">praisonai recipe judge <a href="./src/praisonai/praisonai/cli/commands/recipe.py">--help</a></code>
 * <code title="cli">praisonai recipe list <a href="./src/praisonai/praisonai/cli/commands/recipe.py">--help</a></code>
