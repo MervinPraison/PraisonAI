@@ -383,7 +383,7 @@ def tavily_search(
     topic: str = "general",
     max_results: int = 5,
     include_answer: bool = False,
-    include_raw_content: bool = False,
+    include_raw_content: bool = True,
     include_images: bool = False,
     include_domains: Optional[List[str]] = None,
     exclude_domains: Optional[List[str]] = None,
@@ -398,16 +398,16 @@ def tavily_search(
         query: The search query
         search_depth: "basic" or "advanced"
         topic: "general", "news", or "finance"
-        max_results: Maximum number of results (1-20)
+        max_results: Maximum number of results (1-20), default 5
         include_answer: Include LLM-generated answer
-        include_raw_content: Include cleaned HTML content
+        include_raw_content: Include cleaned HTML content (default True for research quality)
         include_images: Include query-related images
         include_domains: List of domains to include
         exclude_domains: List of domains to exclude
         time_range: Filter by time - "day", "week", "month", "year"
         
     Returns:
-        Dict containing search results
+        Dict containing search results with full raw content by default
     """
     tools = TavilyTools()
     return tools.search(

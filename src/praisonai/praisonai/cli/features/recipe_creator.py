@@ -193,16 +193,40 @@ MANDATORY RULES - YOU MUST FOLLOW ALL OF THESE WITHOUT EXCEPTION
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ## RULE 1: TOOL SELECTION (CRITICAL)
-ONLY use these RELIABLE tools that are GUARANTEED to work:
-- `internet_search` - General web search (NO API key needed beyond OPENAI)
-- `tavily_search` - High-quality web search (REQUIRES TAVILY_API_KEY)
-- `read_file` - Read local files (NO extra API key)
-- `write_file` - Write local files (NO extra API key)
 
-DO NOT USE these tools (they have loading/compatibility issues):
-- scrape_page, crawl, extract_links, extract_text (spider_tools issues)
-- crawl4ai, crawl4ai_extract (loading issues)
-- wiki_search (not reliably available)
+### SAFE TOOLS (No approval required):
+- `search_web` - Unified web search with auto-fallback (RECOMMENDED - works with any available provider)
+- `tavily_search` - High-quality AI search (REQUIRES TAVILY_API_KEY)
+- `read_file` - Read local files
+- `list_files` - List files in a directory
+- `get_file_info` - Get file metadata
+- `scrape_page` - Scrape web page content
+- `extract_links` - Extract links from a URL
+- `get_system_info` - Get system information
+- `analyze_code` - Analyze Python code structure
+- `format_code` - Format Python code
+
+### APPROVAL-REQUIRED TOOLS (Add to 'approve' field in YAML):
+- `write_file` - Write content to files (approval: high)
+- `copy_file` - Copy files (approval: high)
+- `move_file` - Move files (approval: high)
+- `delete_file` - Delete files (approval: high)
+- `download_file` - Download from URL (approval: medium)
+- `execute_command` - Run shell commands (approval: critical)
+- `execute_code` - Execute Python code (approval: critical)
+- `kill_process` - Kill a process (approval: critical)
+
+To auto-approve tools, add an 'approve' field at the root level:
+```yaml
+approve:
+  - write_file
+  - execute_command
+```
+
+Or set environment variable: PRAISONAI_AUTO_APPROVE=true
+
+IMPORTANT: For research tasks, use ONLY 1 agent (researcher) - do NOT add a writer agent.
+The researcher should return the findings directly as output, NOT save to a file.
 
 ## RULE 2: ENVIRONMENT VARIABLES (CRITICAL)
 - ALWAYS include: OPENAI_API_KEY
@@ -239,7 +263,7 @@ BAD: "Research quantum computing" (doesn't specify which tool!)
 - No explanations before or after
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EXAMPLE OF PERFECT RECIPE (COPY THIS STRUCTURE)
+EXAMPLE OF PERFECT RECIPE (SINGLE AGENT - RECOMMENDED)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 metadata:
@@ -254,16 +278,16 @@ agents:
     goal: Find comprehensive information on the requested topic
     backstory: Expert researcher skilled at finding and synthesizing information from multiple sources.
     tools:
-      - internet_search
+      - search_web
     llm: gpt-4o-mini
 
 steps:
   - agent: researcher
-    action: "Use internet_search to find the top 5 key facts about [CONCRETE TOPIC FROM GOAL]. Return a numbered list with each fact containing a title and 2-3 sentence explanation."
+    action: "Use search_web to find the top 5 key facts about [CONCRETE TOPIC FROM GOAL]. Return a numbered list with each fact containing a title and 2-3 sentence explanation."
     expected_output: "A numbered list of 5 facts, each with: title, explanation (2-3 sentences)"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EXAMPLE WITH TAVILY (when high-quality search needed)
+EXAMPLE WITH TAVILY (SINGLE AGENT - RECOMMENDED)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 metadata:
@@ -282,22 +306,38 @@ agents:
       - tavily_search
     llm: gpt-4o-mini
 
-  writer:
-    role: Report Writer
-    goal: Compile research into a well-structured report
-    backstory: Technical writer skilled at creating clear, informative reports.
+steps:
+  - agent: researcher
+    action: "Use tavily_search to find the top 5 AI trends in 2024. Return a numbered list with titles, 2-3 sentence descriptions, and source URLs."
+    expected_output: "A numbered list of 5 trends, each with: title, description (2-3 sentences), source URL"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EXAMPLE WITH FILE WRITING (APPROVAL REQUIRED)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+metadata:
+  name: research-and-save
+  requires:
+    env:
+      - OPENAI_API_KEY
+
+approve:
+  - write_file
+
+agents:
+  researcher:
+    role: Research Writer
+    goal: Research a topic and save findings to a file
+    backstory: Expert researcher who documents findings.
     tools:
+      - search_web
       - write_file
     llm: gpt-4o-mini
 
 steps:
   - agent: researcher
-    action: "Use tavily_search to find the top 5 AI trends in 2024. Return a numbered list with titles, descriptions, and source URLs."
-    expected_output: "A numbered list of 5 trends, each with: title, 2-3 sentence description, source URL"
-
-  - agent: writer
-    action: "Using the research findings: {{{{researcher_output}}}}, write a comprehensive markdown report and save it to ai_trends_report.md using write_file."
-    expected_output: "A markdown report saved to ai_trends_report.md with introduction, findings, and conclusion"
+    action: "Use search_web to find the top 3 facts about Python programming. Then use write_file to save the findings to research_output.txt"
+    expected_output: "A file named research_output.txt containing the research findings"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 NOW GENERATE THE RECIPE FOR: "{goal}"

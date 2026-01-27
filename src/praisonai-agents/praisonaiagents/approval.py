@@ -11,6 +11,7 @@ import json
 import os
 from typing import Dict, Set, Optional, Callable, Any, Literal, List
 from functools import wraps
+import contextvars
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 
@@ -55,6 +56,9 @@ approval_callback: Optional[Callable] = None
 
 # Context variable to track if we're in an approved execution context
 _approved_context: ContextVar[Set[str]] = ContextVar('approved_context', default=set())
+
+# Context variable for YAML-defined auto-approved tools (from agents.yaml approve field)
+_yaml_approved_tools: ContextVar[Set[str]] = ContextVar('yaml_approved_tools', default=set())
 
 # Global permission allowlist
 _permission_allowlist: Optional["PermissionAllowlist"] = None
@@ -257,6 +261,41 @@ def is_already_approved(tool_name: str) -> bool:
     approved = _approved_context.get(set())
     return tool_name in approved
 
+
+def is_yaml_approved(tool_name: str) -> bool:
+    """Check if a tool is auto-approved via YAML approve field."""
+    try:
+        yaml_approved = _yaml_approved_tools.get()
+        return tool_name in yaml_approved
+    except LookupError:
+        return False
+
+
+def is_env_auto_approve() -> bool:
+    """Check if PRAISONAI_AUTO_APPROVE environment variable is set."""
+    return os.environ.get("PRAISONAI_AUTO_APPROVE", "").lower() in ("true", "1", "yes")
+
+
+def set_yaml_approved_tools(tools: List[str]) -> contextvars.Token:
+    """
+    Set the list of YAML-approved tools for the current context.
+    
+    This is called by the workflow runner when parsing agents.yaml with approve field.
+    
+    Args:
+        tools: List of tool names to auto-approve
+        
+    Returns:
+        Token that can be used to reset the context
+    """
+    return _yaml_approved_tools.set(set(tools))
+
+
+def reset_yaml_approved_tools(token: contextvars.Token) -> None:
+    """Reset YAML-approved tools to previous state."""
+    _yaml_approved_tools.reset(token)
+
+
 def clear_approval_context():
     """Clear the approval context."""
     _approved_context.set(set())
@@ -276,6 +315,16 @@ def require_approval(risk_level: RiskLevel = "high"):
         def wrapper(*args, **kwargs):
             # Skip approval if already approved in current context
             if is_already_approved(tool_name):
+                return func(*args, **kwargs)
+            
+            # Skip approval if tool is auto-approved via YAML approve field (primary)
+            if is_yaml_approved(tool_name):
+                mark_approved(tool_name)
+                return func(*args, **kwargs)
+            
+            # Skip approval if PRAISONAI_AUTO_APPROVE env var is set (secondary)
+            if is_env_auto_approve():
+                mark_approved(tool_name)
                 return func(*args, **kwargs)
             
             # Request approval before executing the function
@@ -308,6 +357,16 @@ def require_approval(risk_level: RiskLevel = "high"):
         async def async_wrapper(*args, **kwargs):
             # Skip approval if already approved in current context
             if is_already_approved(tool_name):
+                return await func(*args, **kwargs)
+            
+            # Skip approval if tool is auto-approved via YAML approve field (primary)
+            if is_yaml_approved(tool_name):
+                mark_approved(tool_name)
+                return await func(*args, **kwargs)
+            
+            # Skip approval if PRAISONAI_AUTO_APPROVE env var is set (secondary)
+            if is_env_auto_approve():
+                mark_approved(tool_name)
                 return await func(*args, **kwargs)
             
             # Request approval before executing the function

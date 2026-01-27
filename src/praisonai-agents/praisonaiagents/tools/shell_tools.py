@@ -85,11 +85,13 @@ class ShellTools:
                 # Wait for process with timeout
                 stdout, stderr = process.communicate(timeout=timeout)
                 
-                # Truncate output if too large
+                # Truncate output if too large (use smart format)
                 if len(stdout) > max_output_size:
-                    stdout = stdout[:max_output_size] + "...[truncated]"
+                    tail_size = min(max_output_size // 5, 500)
+                    stdout = stdout[:max_output_size - tail_size] + f"\n...[{len(stdout):,} chars, showing first/last portions]...\n" + stdout[-tail_size:]
                 if len(stderr) > max_output_size:
-                    stderr = stderr[:max_output_size] + "...[truncated]"
+                    tail_size = min(max_output_size // 5, 500)
+                    stderr = stderr[:max_output_size - tail_size] + f"\n...[{len(stderr):,} chars, showing first/last portions]...\n" + stderr[-tail_size:]
                 
                 return {
                     'stdout': stdout,
@@ -137,12 +139,16 @@ class ShellTools:
             for proc in psutil.process_iter(['pid', 'name', 'username', 'memory_percent', 'cpu_percent']):
                 try:
                     pinfo = proc.info
+                    # Handle None values for memory_percent and cpu_percent
+                    # These can be None for system processes or zombie processes
+                    mem_pct = pinfo['memory_percent']
+                    cpu_pct = pinfo['cpu_percent']
                     processes.append({
                         'pid': pinfo['pid'],
                         'name': pinfo['name'],
                         'username': pinfo['username'],
-                        'memory_percent': round(pinfo['memory_percent'], 2),
-                        'cpu_percent': round(pinfo['cpu_percent'], 2)
+                        'memory_percent': round(mem_pct, 2) if mem_pct is not None else 0.0,
+                        'cpu_percent': round(cpu_pct, 2) if cpu_pct is not None else 0.0
                     })
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     pass

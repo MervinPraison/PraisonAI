@@ -140,6 +140,7 @@ SUGGESTIONS:
         threshold: float = 7.0,
         criteria: Optional[str] = None,
         config: Optional[JudgeConfig] = None,
+        session_id: Optional[str] = None,
     ):
         """
         Initialize the Judge.
@@ -151,6 +152,7 @@ SUGGESTIONS:
             threshold: Score threshold for passing (default: 7.0)
             criteria: Optional custom criteria for evaluation
             config: Optional JudgeConfig for all settings
+            session_id: Optional session ID for trace isolation per recipe run
         """
         # Use config if provided, otherwise use individual params
         if config:
@@ -163,6 +165,7 @@ SUGGESTIONS:
         super().__init__(model=model, temperature=temperature, max_tokens=max_tokens)
         self.threshold = threshold
         self.criteria = criteria
+        self.session_id = session_id
     
     def _build_judge_prompt(
         self,

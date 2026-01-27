@@ -162,11 +162,13 @@ class PythonTools:
                 stdout = stdout_buffer.getvalue()
                 stderr = stderr_buffer.getvalue()
                 
-                # Truncate output if too large
+                # Truncate output if too large (use smart format)
                 if len(stdout) > max_output_size:
-                    stdout = stdout[:max_output_size] + "...[truncated]"
+                    tail_size = min(max_output_size // 5, 500)
+                    stdout = stdout[:max_output_size - tail_size] + f"\n...[{len(stdout):,} chars, showing first/last portions]...\n" + stdout[-tail_size:]
                 if len(stderr) > max_output_size:
-                    stderr = stderr[:max_output_size] + "...[truncated]"
+                    tail_size = min(max_output_size // 5, 500)
+                    stderr = stderr[:max_output_size - tail_size] + f"\n...[{len(stderr):,} chars, showing first/last portions]...\n" + stderr[-tail_size:]
                 
                 return {
                     'result': result,

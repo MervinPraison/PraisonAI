@@ -1228,6 +1228,13 @@ class Workflow:
         # Update workflow status
         self.status = "running"
         
+        # Set YAML-approved tools in approval context (for auto-approval of dangerous tools)
+        _approval_token = None
+        approve_tools = getattr(self, 'approve_tools', [])
+        if approve_tools:
+            from ..approval import set_yaml_approved_tools
+            _approval_token = set_yaml_approved_tools(approve_tools)
+        
         # Call on_workflow_start callback
         if self.on_workflow_start:
             try:
@@ -1616,6 +1623,11 @@ class Workflow:
         
         # Update workflow status
         self.status = "completed"
+        
+        # Reset YAML-approved tools context if it was set
+        if _approval_token is not None:
+            from ..approval import reset_yaml_approved_tools
+            reset_yaml_approved_tools(_approval_token)
         
         final_result = {
             "output": previous_output,

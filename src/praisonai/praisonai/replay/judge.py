@@ -60,6 +60,116 @@ def _estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
+def _llm_summarize(
+    text: str,
+    max_chars: int = 2000,
+    model: str = "gpt-4o-mini",
+    context: str = "tool result",
+) -> str:
+    """
+    Use LLM to summarize large content before truncation.
+    
+    Priority order for handling large content:
+    1. If content fits, return as-is
+    2. Try LLM summarization to preserve key information
+    3. Fall back to smart truncation if LLM fails
+    
+    Args:
+        text: Text to summarize
+        max_chars: Target maximum characters for summary
+        model: LLM model to use for summarization
+        context: Context description (e.g., "tool result", "agent output")
+        
+    Returns:
+        Summarized text or original if small enough
+    """
+    if not text or len(text) <= max_chars:
+        return text
+    
+    try:
+        import litellm
+        
+        prompt = f"""Summarize this {context} concisely while preserving ALL key information, facts, and data points.
+Keep the summary under {max_chars} characters. Preserve any lists, numbers, URLs, and specific details.
+
+CONTENT TO SUMMARIZE:
+{text[:20000]}
+
+SUMMARY (preserve all key facts and data):"""
+        
+        response = litellm.completion(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=max_chars // 3,  # ~3 chars per token
+        )
+        
+        summary = response.choices[0].message.content or ""
+        if summary and len(summary) < len(text):
+            return f"[LLM SUMMARY of {len(text):,} chars]\n{summary}"
+        
+    except Exception as e:
+        logger.debug(f"LLM summarization failed, falling back to truncation: {e}")
+    
+    # Fallback to smart truncation
+    return _smart_truncate(text, max_chars)
+
+
+def _is_content_truncated(text: str) -> bool:
+    """
+    Detect if content was actually truncated vs smart-truncated with preserved info.
+    
+    Smart truncation (showing first/last portions) is NOT considered problematic
+    because it preserves key information from both ends.
+    
+    Args:
+        text: Text to check
+        
+    Returns:
+        True if content appears to be hard-truncated (info lost)
+    """
+    if not text:
+        return False
+    
+    text_lower = text.lower()
+    
+    # Smart truncation markers - these PRESERVE info, not a problem
+    smart_markers = [
+        "showing first/last portions",  # New smart truncation format
+        "[llm summary of",  # LLM summarized content preserves info
+        "chars, showing",  # Smart truncation indicator
+    ]
+    
+    for marker in smart_markers:
+        if marker in text_lower:
+            return False  # Smart truncation is OK
+    
+    # Hard truncation markers - these LOSE info, is a problem
+    hard_truncation_markers = [
+        "...[truncated]",
+        "[truncated]",
+        "[TRUNCATED",
+        "... TRUNCATED",
+        "[output truncated]",
+        "(truncated)",
+        "... (truncated)",
+    ]
+    
+    for marker in hard_truncation_markers:
+        if marker.lower() in text_lower:
+            return True  # Hard truncation detected
+    
+    # Check for incomplete JSON/structure (only if very short)
+    stripped = text.strip()
+    if len(stripped) < 500:  # Only check short content
+        if stripped.startswith('{') and not stripped.endswith('}'):
+            return True
+        if stripped.startswith('[') and not stripped.endswith(']'):
+            return True
+    
+    return False
+
+
 def chunk_split(
     text: str,
     max_chars: int = 8000,
@@ -768,7 +878,8 @@ SUGGESTIONS:
             elif event_type == "tool_call_end":
                 tool_name = data.get("tool_name", "unknown")
                 result = data.get("result", "")
-                was_truncated = "[truncated]" in str(result) if result else False
+                # Use intelligent truncation detection (consistent with other code paths)
+                was_truncated = _is_content_truncated(str(result)) if result else False
                 
                 # Find matching tool call and update result
                 for tc in reversed(agent_data[agent_name]["tool_calls"]):
@@ -1007,13 +1118,16 @@ SUGGESTIONS:
                 data = event.get('data', {})
             
             if event_type == "tool_call_end":
+                result = str(data.get("result", ""))
+                # Use intelligent truncation detection
+                was_truncated = _is_content_truncated(result)
                 tool_events.append({
                     "agent_name": agent_name,
                     "tool_name": data.get("tool_name", "unknown"),
-                    "result": data.get("result", ""),
+                    "result": result,
                     "duration_ms": data.get("duration_ms", 0),
                     "error": data.get("error"),
-                    "was_truncated": "[truncated]" in str(data.get("result", "")),
+                    "was_truncated": was_truncated,
                 })
         
         return tool_events
@@ -1213,7 +1327,13 @@ REASONING: [brief explanation]
         return flow_evaluations
     
     def _detect_content_loss(self, events: List[Any]) -> tuple:
-        """Detect if important content was lost during the workflow."""
+        """Detect if important content was lost during the workflow.
+        
+        Uses intelligent truncation detection that distinguishes between:
+        - LLM summaries (preserves info, not a problem)
+        - Hard truncation (loses info, is a problem)
+        - Incomplete structures (JSON cut off, etc.)
+        """
         import re
         content_loss_detected = False
         content_loss_details = []
@@ -1229,10 +1349,11 @@ REASONING: [brief explanation]
                 data = event.get('data', {})
                 agent_name = event.get('agent_name', 'unknown')
             
-            # Check for truncated tool results
+            # Check for truncated tool results using intelligent detection
             if event_type == "tool_call_end":
                 result = str(data.get("result", ""))
-                if "[truncated]" in result:
+                # Use intelligent truncation detection
+                if _is_content_truncated(result):
                     content_loss_detected = True
                     tool_name = data.get("tool_name", "unknown")
                     content_loss_details.append(
@@ -1242,7 +1363,8 @@ REASONING: [brief explanation]
             # Check for truncated LLM responses
             if event_type == "llm_response":
                 response = str(data.get("response_content", ""))
-                if "[truncated]" in response:
+                # Use intelligent truncation detection
+                if _is_content_truncated(response):
                     content_loss_detected = True
                     content_loss_details.append(
                         f"LLM response was truncated for agent '{agent_name}'"

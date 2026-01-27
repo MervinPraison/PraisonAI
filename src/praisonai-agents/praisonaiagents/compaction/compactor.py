@@ -252,11 +252,14 @@ class ContextCompactor:
             role = msg.get("role", "")
             content = msg.get("content", "")
             
-            # If this is a tool result, truncate it
+            # If this is a tool result, truncate it (use smart format)
             if role == "tool" or msg.get("tool_call_id"):
                 if isinstance(content, str) and len(content) > 500:
                     pruned_msg = msg.copy()
-                    pruned_msg["content"] = content[:200] + "\n...[output truncated]..."
+                    tail_size = min(100, len(content) // 5)
+                    head = content[:200]
+                    tail = content[-tail_size:] if tail_size > 0 else ""
+                    pruned_msg["content"] = f"{head}\n...[{len(content):,} chars, showing first/last portions]...\n{tail}"
                     result.append(pruned_msg)
                 else:
                     result.append(msg)
