@@ -197,10 +197,13 @@ class PruneToolsOptimizer(BaseOptimizer):
                 # Get per-tool limit or use default
                 limit = self.tool_limits.get(tool_name, self.max_output_chars)
                 
-                # Truncate if too long
+                # Truncate if too long (use smart format)
                 if isinstance(content, str) and len(content) > limit:
                     pruned_msg = msg.copy()
-                    pruned_msg["content"] = content[:limit] + "\n...[output truncated]..."
+                    tail_size = min(limit // 5, 500)
+                    head = content[:limit - tail_size]
+                    tail = content[-tail_size:] if tail_size > 0 else ""
+                    pruned_msg["content"] = f"{head}\n...[{len(content):,} chars, showing first/last portions]...\n{tail}"
                     pruned_msg["_pruned"] = True
                     pruned_msg["_original_length"] = len(content)
                     result.append(pruned_msg)

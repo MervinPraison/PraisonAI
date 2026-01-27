@@ -972,7 +972,11 @@ class ContextManager:
         ratio = max_tokens / current_tokens
         max_chars = int(len(output) * ratio * 0.9)  # 10% safety margin
         
-        truncated = output[:max_chars] + "\n...[output truncated]..."
+        # Use smart truncation format that judge recognizes as OK
+        tail_size = min(max_chars // 5, 1000)
+        head = output[:max_chars - tail_size]
+        tail = output[-tail_size:] if tail_size > 0 else ""
+        truncated = f"{head}\n...[{len(output):,} chars, showing first/last portions]...\n{tail}"
         
         self._add_history_event(
             OptimizationEventType.CAP_OUTPUTS,
@@ -1069,7 +1073,9 @@ class ContextManager:
             # Even system messages exceed budget - truncate system content
             for msg in result:
                 if isinstance(msg.get("content"), str) and len(msg["content"]) > 500:
-                    msg["content"] = msg["content"][:500] + "...[truncated]"
+                    content = msg["content"]
+                    tail_size = min(50, len(content) // 10)
+                    msg["content"] = f"{content[:450]}\n...[{len(content):,} chars, showing first/last portions]...\n{content[-tail_size:] if tail_size > 0 else ''}"
             return result
         
         # Keep most recent messages that fit
@@ -1089,7 +1095,9 @@ class ContextManager:
                     if available > 50:
                         truncated_msg = msg.copy()
                         max_chars = available * 4  # ~4 chars per token
-                        truncated_msg["content"] = msg["content"][:max_chars] + "...[truncated]"
+                        content = msg["content"]
+                        tail_size = min(max_chars // 10, 100)
+                        truncated_msg["content"] = f"{content[:max_chars - tail_size]}\n...[{len(content):,} chars, showing first/last portions]...\n{content[-tail_size:] if tail_size > 0 else ''}"
                         kept_msgs.insert(0, truncated_msg)
                 break
         

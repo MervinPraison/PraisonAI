@@ -136,19 +136,43 @@ def _search_youdotcom(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
 
 
 def _search_duckduckgo(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
-    """Search using DuckDuckGo."""
+    """Search using DuckDuckGo with retry logic."""
+    import time
     from duckduckgo_search import DDGS
     
-    results = []
-    ddgs = DDGS()
-    for result in ddgs.text(keywords=query, max_results=max_results):
-        results.append({
-            "title": result.get("title", ""),
-            "url": result.get("href", ""),
-            "snippet": result.get("body", ""),
-            "provider": "duckduckgo"
-        })
-    return results
+    max_retries = 3
+    retry_delay = 1.0
+    
+    for attempt in range(max_retries):
+        try:
+            results = []
+            ddgs = DDGS()
+            search_results = list(ddgs.text(keywords=query, max_results=max_results))
+            
+            for result in search_results:
+                results.append({
+                    "title": result.get("title", ""),
+                    "url": result.get("href", ""),
+                    "snippet": result.get("body", ""),
+                    "provider": "duckduckgo"
+                })
+            
+            if results:
+                return results
+            
+            # Empty results - retry
+            if attempt < max_retries - 1:
+                logger.debug(f"DuckDuckGo returned empty, retrying ({attempt + 1}/{max_retries})...")
+                time.sleep(retry_delay * (attempt + 1))
+                
+        except Exception as e:
+            logger.debug(f"DuckDuckGo attempt {attempt + 1} failed: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay * (attempt + 1))
+            else:
+                raise  # Re-raise on final attempt
+    
+    return []  # All retries exhausted with empty results
 
 
 def _search_searxng(query: str, max_results: int = 5, searxng_url: Optional[str] = None) -> List[Dict[str, Any]]:

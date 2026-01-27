@@ -55,6 +55,10 @@ class ContextTraceWriter:
         self._lock = threading.Lock()
         self._closed = False
         
+        # Clear existing file to prevent appending old traces
+        if self._path.exists():
+            self._path.unlink()
+        
         # Ensure parent directory exists
         self._path.parent.mkdir(parents=True, exist_ok=True)
     

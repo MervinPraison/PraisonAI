@@ -254,6 +254,12 @@ class YAMLWorkflowParser:
         memory_config = workflow_config.get('memory_config')
         output_mode = workflow_config.get('output')  # NEW: parse output mode from YAML
         
+        # Parse approve field for auto-approving tools (e.g., approve: [write_file, delete_file])
+        # This allows recipes to pre-approve dangerous tools for non-interactive execution
+        approve_tools = data.get('approve', [])
+        if isinstance(approve_tools, str):
+            approve_tools = [approve_tools]  # Handle single tool as string
+        
         # Parse variables (YAML defaults), then merge CLI overrides (extra_vars take precedence)
         variables = data.get('variables', {})
         if extra_vars:
@@ -353,6 +359,9 @@ class YAMLWorkflowParser:
         workflow.framework = framework
         workflow.process = process
         workflow.manager_llm = manager_llm
+        
+        # Store approved tools for auto-approval during workflow execution
+        workflow.approve_tools = approve_tools
         
         # Store workflow input (from 'input' or 'topic' field)
         # This is the default input passed to workflow.start() if no input is provided
