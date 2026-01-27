@@ -213,6 +213,14 @@ _LAZY_IMPORTS = {
     'PromptExpanderAgent': ('praisonaiagents.agent.prompt_expander_agent', 'PromptExpanderAgent'),
     'ExpandStrategy': ('praisonaiagents.agent.prompt_expander_agent', 'ExpandStrategy'),
     'ExpandResult': ('praisonaiagents.agent.prompt_expander_agent', 'ExpandResult'),
+    'VisionAgent': ('praisonaiagents.agent.vision_agent', 'VisionAgent'),
+    'VisionConfig': ('praisonaiagents.agent.vision_agent', 'VisionConfig'),
+    'EmbeddingAgent': ('praisonaiagents.agent.embedding_agent', 'EmbeddingAgent'),
+    'EmbeddingConfig': ('praisonaiagents.agent.embedding_agent', 'EmbeddingConfig'),
+    'RealtimeAgent': ('praisonaiagents.agent.realtime_agent', 'RealtimeAgent'),
+    'RealtimeConfig': ('praisonaiagents.agent.realtime_agent', 'RealtimeConfig'),
+    'CodeAgent': ('praisonaiagents.agent.code_agent', 'CodeAgent'),
+    'CodeConfig': ('praisonaiagents.agent.code_agent', 'CodeConfig'),
     
     # Agents
     'Agents': ('praisonaiagents.agents.agents', 'Agents'),

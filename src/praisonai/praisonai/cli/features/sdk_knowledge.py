@@ -28,6 +28,7 @@ metadata:
   requires:
     env:
       - OPENAI_API_KEY
+      - TAVILY_API_KEY  # If using tavily_search or tavily_extract
 
 framework: praisonai
 topic: "{{topic}}"
@@ -38,22 +39,43 @@ variables:
 
 agents:
   agent_name:
+    # Core identity (at least one required)
+    name: Agent Name  # Optional display name
     role: Role Title
     goal: What the agent aims to achieve
     backstory: |
       Background and expertise of the agent.
       Can be multi-line.
+    instructions: |  # Alternative to backstory - direct instructions
+      Step-by-step instructions for the agent.
+    
+    # Tools - list of tool names
     tools:
       - tool_name_1
       - tool_name_2
-    # Optional: LLM configuration
-    llm: gpt-4o-mini
-    # Optional: Memory configuration
-    memory: true
-    # Optional: Knowledge sources
-    knowledge:
+    
+    # LLM configuration
+    llm: gpt-4o-mini  # or model: gpt-4o-mini (alias)
+    
+    # Feature configurations (all optional)
+    memory: true  # Enable memory (bool or config object)
+    knowledge:  # Knowledge sources
       - path/to/file.pdf
       - https://example.com/docs
+    planning: false  # Enable planning mode
+    reflection: false  # Enable self-reflection
+    guardrails: null  # Output validation function
+    context: null  # Context management
+    autonomy: null  # Autonomy settings
+    caching: false  # Response caching
+    
+    # Execution settings
+    allow_code_execution: false
+    code_execution_mode: safe  # safe or unsafe
+    allow_delegation: false
+    
+    # Handoffs for agent-to-agent collaboration
+    handoffs: []  # List of agent names this agent can hand off to
 
 # Workflow steps (optional - defaults to sequential)
 steps:
@@ -65,9 +87,10 @@ steps:
 ## Available Tools by Category
 
 ### Web Search
-- `internet_search` - DuckDuckGo search
+- `internet_search` - DuckDuckGo search (no API key needed)
 - `duckduckgo` - DuckDuckGo search (alias)
-- `tavily_search` - Tavily AI search (requires TAVILY_API_KEY)
+- `tavily_search` - Tavily AI search (requires TAVILY_API_KEY) - RECOMMENDED for quality
+- `tavily_extract` - Extract content from URLs using Tavily (requires TAVILY_API_KEY)
 - `exa_search` - Exa semantic search (requires EXA_API_KEY)
 - `search_web` - Unified search with auto-fallback
 
@@ -77,6 +100,33 @@ steps:
 - `crawl4ai_extract` - Extract structured data
 - `extract_links` - Get all links from page
 - `extract_text` - Get text content
+
+## praisonai-tools Direct Usage
+
+Tools from `praisonai-tools` package can be used directly in agents.yaml:
+
+```yaml
+agents:
+  researcher:
+    role: Research Analyst
+    tools:
+      - tavily_search  # Direct function call - searches web with AI
+      - tavily_extract  # Extract content from URLs
+```
+
+### Tavily Tools (Recommended for Web Research)
+- `tavily_search(query, max_results=5)` - AI-powered web search
+- `tavily_extract(urls)` - Extract content from comma-separated URLs
+
+Example usage in action:
+```yaml
+steps:
+  - agent: researcher
+    action: |
+      Use tavily_search to find the latest information about "{{topic}}".
+      Then use tavily_extract to get full content from the top 3 URLs.
+    expected_output: "Comprehensive research summary with sources"
+```
 
 ### File Operations
 - `read_file` - Read file contents
@@ -342,10 +392,84 @@ agents:
 | ocr, extract text, document, scan | OCRAgent | "Extract text from receipts" |
 | route, optimize, multi-model | RouterAgent | "Smart task routing" |
 
+## tools.py - Custom Tools and Variables
+
+Recipes can include a `tools.py` file for custom functions and variables:
+
+```python
+# tools.py - Custom tools for this recipe
+
+# Variables can be defined and used
+API_ENDPOINT = "https://api.example.com"
+DEFAULT_TIMEOUT = 30
+
+# Custom tool functions
+def my_custom_tool(query: str) -> str:
+    """Custom tool description."""
+    return f"Result for {query}"
+
+def fetch_data(url: str, timeout: int = DEFAULT_TIMEOUT) -> dict:
+    """Fetch data from URL with configurable timeout."""
+    import requests
+    response = requests.get(url, timeout=timeout)
+    return response.json()
+
+# Export tools for use in agents.yaml
+TOOLS = [my_custom_tool, fetch_data]
+```
+
+Then reference in agents.yaml:
+```yaml
+agents:
+  processor:
+    tools:
+      - my_custom_tool
+      - fetch_data
+```
+
+## CRITICAL Quality Rules (MUST FOLLOW)
+
+1. **Environment Variables**: Only include env vars that are ACTUALLY USED by the tools:
+   - `OPENAI_API_KEY` - Always required (for LLM)
+   - `TAVILY_API_KEY` - ONLY if using `tavily_search` or `tavily_extract`
+   - Do NOT include `TAVILY_API_KEY` if using: `wiki_search`, `internet_search`, `scrape_page`, `extract_links`, `read_file`, `write_file`, `read_csv`, `write_csv`, or any non-Tavily tool
+
+2. **Omit Empty/Unused Fields**: Do NOT include these if not used:
+   - `knowledge: []` - Omit entirely if no knowledge sources
+   - `memory: false` - Omit if not using memory (false is default)
+   - `handoffs: []` - Omit if no handoffs
+   - `planning: false` - Omit if not using planning
+
+3. **Tool-Agent Matching**: Assign tools that match the agent's purpose:
+   - Research agents: `tavily_search`, `internet_search`, `wiki_search`
+   - Writer agents: `write_file`
+   - Data agents: `read_csv`, `write_csv`, `read_json`
+   - Scraper agents: `scrape_page`, `extract_links`, `crawl4ai`
+
+4. **Use Variables for File Paths**: Instead of hardcoded paths, use variables:
+   ```yaml
+   variables:
+     input_file: "data/input.csv"
+     output_file: "reports/output.csv"
+   
+   steps:
+     - agent: processor
+       action: "Read data from {{input_file}} and write results to {{output_file}}"
+   ```
+
+5. **Specific Actions with Tool Names**: Every action MUST specify which tool to use:
+   - BAD: "Research AI trends"
+   - GOOD: "Use tavily_search to find the top 5 AI trends in 2024"
+
+6. **Concrete Expected Outputs**: Be specific about format:
+   - BAD: "A report"
+   - GOOD: "A numbered list of 5 items, each with title, description (2-3 sentences), and source URL"
+
 ## Output Format
 
 Generate ONLY valid YAML. Do not include markdown code blocks or explanations.
 The YAML must be parseable by Python's yaml.safe_load().
+Omit any fields that are empty, false, or not needed.
 '''
 
 TOOL_SELECTION_PROMPT = '''

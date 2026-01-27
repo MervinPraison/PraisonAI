@@ -55,6 +55,38 @@ def __getattr__(name):
         from .router_agent import RouterAgent
         _lazy_cache[name] = RouterAgent
         return RouterAgent
+    elif name == 'VisionAgent':
+        from .vision_agent import VisionAgent
+        _lazy_cache[name] = VisionAgent
+        return VisionAgent
+    elif name == 'VisionConfig':
+        from .vision_agent import VisionConfig
+        _lazy_cache[name] = VisionConfig
+        return VisionConfig
+    elif name == 'EmbeddingAgent':
+        from .embedding_agent import EmbeddingAgent
+        _lazy_cache[name] = EmbeddingAgent
+        return EmbeddingAgent
+    elif name == 'EmbeddingConfig':
+        from .embedding_agent import EmbeddingConfig
+        _lazy_cache[name] = EmbeddingConfig
+        return EmbeddingConfig
+    elif name == 'RealtimeAgent':
+        from .realtime_agent import RealtimeAgent
+        _lazy_cache[name] = RealtimeAgent
+        return RealtimeAgent
+    elif name == 'RealtimeConfig':
+        from .realtime_agent import RealtimeConfig
+        _lazy_cache[name] = RealtimeConfig
+        return RealtimeConfig
+    elif name == 'CodeAgent':
+        from .code_agent import CodeAgent
+        _lazy_cache[name] = CodeAgent
+        return CodeAgent
+    elif name == 'CodeConfig':
+        from .code_agent import CodeConfig
+        _lazy_cache[name] = CodeConfig
+        return CodeConfig
     
     # Handoff - lightweight
     _handoff_names = {
@@ -120,6 +152,14 @@ __all__ = [
     'AudioConfig',
     'OCRAgent',
     'OCRConfig',
+    'VisionAgent',
+    'VisionConfig',
+    'EmbeddingAgent',
+    'EmbeddingConfig',
+    'RealtimeAgent',
+    'RealtimeConfig',
+    'CodeAgent',
+    'CodeConfig',
     'ContextAgent',
     'create_context_agent',
     'Handoff',
