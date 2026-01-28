@@ -302,11 +302,10 @@ def create_tool_registry_with_overrides(
     loader = ToolOverrideLoader()
     
     # 7. Start with built-in tools (lowest priority)
-    try:
-        from praisonaiagents.tools import TOOL_MAPPINGS
-        registry.update(TOOL_MAPPINGS)
-    except ImportError:
-        pass
+    # Note: We don't copy TOOL_MAPPINGS directly because it contains tuples
+    # (module_path, class_name) that need to be resolved via __getattr__.
+    # The tools will be resolved on-demand in resolve_tools() via getattr().
+    pass
     
     # 6. Package discovery - try praisonai-tools if installed
     try:
@@ -447,52 +446,56 @@ def resolve_tools(
             # Try exact match first
             if tool_name in registry:
                 tool_obj = registry[tool_name]
-                # Handle lazy-loaded tools (tuples of module, class)
+                # Handle lazy-loaded tools (tuples of module, class) - skip these
+                # They should be resolved via praisonaiagents.tools.__getattr__
                 if isinstance(tool_obj, tuple):
-                    try:
-                        module_name, class_name = tool_obj
-                        import importlib
-                        module = importlib.import_module(module_name)
-                        tool_class = getattr(module, class_name)
-                        resolved.append(tool_class())
-                    except Exception:
-                        pass
-                elif callable(tool_obj):
-                    resolved.append(tool_obj)
-                else:
-                    # Try to instantiate if it's a class
-                    try:
-                        resolved.append(tool_obj())
-                    except Exception:
-                        resolved.append(tool_obj)
-            else:
-                # Try common variations
-                variations = [
-                    tool_name,
-                    tool_name.lower(),
-                    tool_name.replace("-", "_"),
-                    tool_name.replace("_", "-"),
-                    f"{tool_name}_tool",
-                    f"{tool_name}Tool",
-                ]
-                found = False
-                for var in variations:
-                    if var in registry:
-                        tool_obj = registry[var]
-                        if callable(tool_obj):
-                            resolved.append(tool_obj)
-                            found = True
-                            break
-                
-                if not found:
-                    # Try to import from praisonaiagents.tools
+                    # Try to import from praisonaiagents.tools instead
                     try:
                         from praisonaiagents import tools as agent_tools
                         if hasattr(agent_tools, tool_name):
                             resolved.append(getattr(agent_tools, tool_name))
-                        elif hasattr(agent_tools, f"{tool_name}_tool"):
-                            resolved.append(getattr(agent_tools, f"{tool_name}_tool"))
+                            continue
                     except (ImportError, AttributeError):
                         pass
+                elif callable(tool_obj):
+                    resolved.append(tool_obj)
+                    continue
+                else:
+                    # Try to instantiate if it's a class
+                    try:
+                        resolved.append(tool_obj())
+                        continue
+                    except Exception:
+                        resolved.append(tool_obj)
+                        continue
+            
+            # Not in registry or was a tuple, try variations
+            variations = [
+                tool_name,
+                tool_name.lower(),
+                tool_name.replace("-", "_"),
+                tool_name.replace("_", "-"),
+                f"{tool_name}_tool",
+                f"{tool_name}Tool",
+            ]
+            found = False
+            for var in variations:
+                if var in registry:
+                    tool_obj = registry[var]
+                    if callable(tool_obj):
+                        resolved.append(tool_obj)
+                        found = True
+                        break
+            
+            if not found:
+                # Try to import from praisonaiagents.tools
+                try:
+                    from praisonaiagents import tools as agent_tools
+                    if hasattr(agent_tools, tool_name):
+                        resolved.append(getattr(agent_tools, tool_name))
+                    elif hasattr(agent_tools, f"{tool_name}_tool"):
+                        resolved.append(getattr(agent_tools, f"{tool_name}_tool"))
+                except (ImportError, AttributeError):
+                    pass
     
     return resolved

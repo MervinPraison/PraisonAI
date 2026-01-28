@@ -2,7 +2,7 @@ from praisonaiagents import Agent
 
 # Detailed LLM configuration
 llm_config = {
-    "model": "gemini/gemini-1.5-flash-latest",  # Model name without provider prefix
+    "model": "gemini/gemini-3-flash-preview",  # Model name without provider prefix
     
     # Core settings
     "temperature": 0.7,                # Controls randomness (like temperature)
@@ -25,7 +25,7 @@ llm_config = {
     
     # Additional controls
     "seed": 42,                      # For reproducible responses
-    "stop_phrases": ["##", "END"],   # Custom stop sequences
+    "stop_phrases": ["---END---", "END"],   # Custom stop sequences
 }
 
 agent = Agent(

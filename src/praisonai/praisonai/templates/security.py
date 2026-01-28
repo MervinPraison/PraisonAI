@@ -55,7 +55,7 @@ class SecurityConfig:
     # Allowed file extensions
     allowed_extensions: Set[str] = field(default_factory=lambda: {
         ".yaml", ".yml", ".json", ".md", ".txt", ".py",
-        ".toml", ".cfg", ".ini", ".env.example"
+        ".toml", ".cfg", ".ini", ".env.example", ".bak"
     })
 
 

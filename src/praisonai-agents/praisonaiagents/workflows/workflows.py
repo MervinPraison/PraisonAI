@@ -835,6 +835,10 @@ class Workflow:
     default_agent_config: Optional[Dict[str, Any]] = None  # Default agent for all steps
     default_llm: Optional[str] = None  # Default LLM model
     
+    # Process type: "sequential" (default) or "hierarchical" (manager-based validation)
+    process: str = "sequential"  # "sequential", "hierarchical"
+    manager_llm: Optional[str] = None  # LLM for manager agent (hierarchical mode)
+    
     # ============================================================
     # CONSOLIDATED FEATURE PARAMS (workflow-centric API)
     # Precedence: Instance > Config > Array > Dict > String > Bool > Default
@@ -1010,6 +1014,8 @@ class Workflow:
             "file_path": self.file_path,
             "default_agent_config": self.default_agent_config,
             "default_llm": self.default_llm,
+            "process": self.process,
+            "manager_llm": self.manager_llm,
             "output": {"verbose": self._verbose, "stream": self._stream},
             "planning": {"enabled": self._planning_enabled, "llm": self._planning_llm, "reasoning": self._reasoning},
             "memory": self._memory_config.to_dict() if hasattr(self._memory_config, 'to_dict') else bool(self._memory_config),
@@ -1249,6 +1255,19 @@ class Workflow:
                 print(f"📋 Execution Plan: {plan}")
             all_variables["execution_plan"] = plan
         
+        # Hierarchical mode - use manager-based validation
+        if self.process == "hierarchical":
+            if verbose:
+                print("🔄 Running workflow in hierarchical mode with manager validation")
+            return self._run_hierarchical(
+                input=input,
+                model=model,
+                verbose=verbose,
+                stream=stream,
+                all_variables=all_variables,
+                _approval_token=_approval_token
+            )
+        
         # Process steps (may include Route, Parallel, Loop, Repeat)
         i = 0
         while i < len(self.steps):
@@ -1427,8 +1446,14 @@ class Workflow:
                             )
                         else:
                             # Standard Agent with chat() method
-                            # Handle images if present
-                            step_images = getattr(step, 'images', None)
+                            # Handle images/attachments if present - check step.images first, then variables
+                            step_attachments = getattr(step, 'images', None)
+                            if not step_attachments:
+                                # Check for image_path, image_url, or image in variables
+                                image_var = all_variables.get('image_path') or all_variables.get('image_url') or all_variables.get('image')
+                                if image_var:
+                                    step_attachments = [image_var] if isinstance(image_var, str) else image_var
+                                    logger.debug(f"Passing image attachment to agent: {image_var}")
                             # Get structured output options from step
                             step_output_json = getattr(step, '_output_json', None)
                             step_output_pydantic = getattr(step, '_output_pydantic', None)
@@ -1445,12 +1470,18 @@ class Workflow:
                             
                             # Build chat kwargs
                             chat_kwargs = {"stream": stream}
-                            if step_images:
-                                chat_kwargs["images"] = step_images
+                            if step_attachments:
+                                chat_kwargs["attachments"] = step_attachments
                             if step_output_json:
                                 chat_kwargs["output_json"] = step_output_json
                             if step_output_pydantic:
                                 chat_kwargs["output_pydantic"] = step_output_pydantic
+                            
+                            # Pass tool_choice from YAML if specified (auto, required, none)
+                            # This forces the LLM to use tools when tool_choice='required'
+                            yaml_tool_choice = getattr(step.agent, '_yaml_tool_choice', None)
+                            if yaml_tool_choice:
+                                chat_kwargs["tool_choice"] = yaml_tool_choice
                             
                             output = step.agent.chat(action, **chat_kwargs)
                             
@@ -1682,6 +1713,224 @@ class Workflow:
         """Alias for astart() for backward compatibility."""
         return await self.astart(input, llm, verbose)
     
+    def _run_hierarchical(
+        self,
+        input: str,
+        model: str,
+        verbose: bool,
+        stream: bool,
+        all_variables: Dict[str, Any],
+        _approval_token: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """Run workflow with hierarchical manager-based validation.
+        
+        In hierarchical mode, a manager agent validates each step's output
+        before proceeding to the next step. If the manager rejects a step,
+        the workflow stops with status='failed' and includes a failure_reason.
+        
+        This pattern is adapted from Process.hierarchical() for Workflow use.
+        
+        Args:
+            input: The workflow input
+            model: LLM model to use for steps
+            verbose: Print step outputs
+            stream: Enable streaming
+            all_variables: Variables dict
+            _approval_token: Token for YAML-approved tools
+            
+        Returns:
+            Dict with output, steps, variables, status, and optionally failure_reason
+        """
+        from ..llm import LLM
+        
+        results = []
+        previous_output = input
+        failure_reason = None
+        
+        manager_model = self.manager_llm or model
+        
+        normalized_steps = self._normalize_steps()
+        
+        for i, step in enumerate(normalized_steps):
+            step_name = getattr(step, 'name', f'step_{i}')
+            
+            if self.on_step_start:
+                try:
+                    self.on_step_start(self, step, i)
+                except Exception as e:
+                    logger.error(f"on_step_start callback failed: {e}")
+            
+            if hasattr(step, 'status'):
+                step.status = "running"
+            self.step_statuses[step_name] = "running"
+            
+            try:
+                # Use _execute_single_step_internal which returns a dict
+                step_result_internal = self._execute_single_step_internal(
+                    step, previous_output, input, all_variables, model, verbose, i, stream
+                )
+                output = step_result_internal.get("output", "")
+                stop = step_result_internal.get("stop", False)
+                step_vars = step_result_internal.get("variables", {})
+                all_variables.update(step_vars)
+                
+                step_result = {
+                    "step": step_name,
+                    "output": output,
+                    "status": "completed"
+                }
+                results.append(step_result)
+                
+                if hasattr(step, 'status'):
+                    step.status = "completed"
+                self.step_statuses[step_name] = "completed"
+                
+                if self.on_step_complete:
+                    try:
+                        self.on_step_complete(self, step, step_result)
+                    except Exception as e:
+                        logger.error(f"on_step_complete callback failed: {e}")
+                
+                if stop:
+                    if verbose:
+                        print(f"🛑 Workflow stopped at: {step_name}")
+                    break
+                
+                # Check if step has tools assigned
+                step_has_tools = bool(getattr(step, 'tools', None) or (hasattr(step, 'agent') and getattr(step.agent, 'tools', None)))
+                
+                # Build tool evidence guidance for manager
+                tool_evidence_guidance = ""
+                if step_has_tools:
+                    tool_evidence_guidance = """
+4. TOOL USAGE EVIDENCE: If the step required tool usage (e.g., search_web), check for EVIDENCE in the output:
+   - URLs or links (e.g., https://..., [Source](url))
+   - Structured data with sources/citations
+   - Specific facts with references
+   - Multiple distinct items from external sources
+   NOTE: The agent may have called tools successfully even if it doesn't say "I called the tool".
+   Look for RESULTS from tools, not explicit statements about calling them."""
+                
+                validation_prompt = f"""You are reviewing the output of a workflow step.
+
+Step Name: {step_name}
+Step Action: {getattr(step, 'action', 'Execute task')}
+Expected Output: {getattr(step, 'expected_output', 'Task completed successfully')}
+
+Agent Output:
+{output}
+
+Did this step complete successfully? Consider:
+1. Does the output address the task?
+2. Is the output meaningful (not an error message)?
+3. Does it meet the expected output criteria?{tool_evidence_guidance}
+
+IMPORTANT: Approve if the output contains substantive content that addresses the task.
+Only reject if the output is clearly an error, empty, or completely off-topic.
+
+Respond with JSON: {{"approved": true/false, "reason": "Brief explanation"}}
+"""
+                
+                try:
+                    llm_instance = LLM(model=manager_model, verbose=False)
+                    validation_response = llm_instance.get_response(
+                        prompt=validation_prompt,
+                        system_prompt="You are a workflow quality manager. Respond only with valid JSON.",
+                        output_json=True
+                    )
+                    
+                    if isinstance(validation_response, str):
+                        import json
+                        try:
+                            decision_data = json.loads(validation_response)
+                        except json.JSONDecodeError:
+                            decision_data = {"approved": True, "reason": "Could not parse response, assuming success"}
+                    elif isinstance(validation_response, dict):
+                        decision_data = validation_response
+                    else:
+                        decision_data = {"approved": True, "reason": "Unknown response format, assuming success"}
+                    
+                    approved = decision_data.get("approved", True)
+                    reason = decision_data.get("reason", "No reason provided")
+                    
+                    if verbose:
+                        status_icon = "✅" if approved else "❌"
+                        print(f"{status_icon} Manager validation for '{step_name}': {reason}")
+                    
+                    if not approved:
+                        failure_reason = f"Manager rejected step '{step_name}': {reason}"
+                        self.status = "failed"
+                        if hasattr(step, 'status'):
+                            step.status = "failed"
+                        self.step_statuses[step_name] = "failed"
+                        step_result["status"] = "failed"
+                        step_result["failure_reason"] = failure_reason
+                        
+                        if self.on_step_error:
+                            try:
+                                self.on_step_error(self, step, Exception(failure_reason))
+                            except Exception as e:
+                                logger.error(f"on_step_error callback failed: {e}")
+                        break
+                        
+                except Exception as e:
+                    logger.warning(f"Manager validation failed for step '{step_name}': {e}. Continuing workflow.")
+                
+                previous_output = output
+                
+                # Store output in variables for next step's variable substitution
+                # This is critical for {{agent_name}}_output references to work
+                var_name = f"{step_name}_output"
+                all_variables[var_name] = output
+                
+            except Exception as e:
+                error_msg = str(e)
+                if hasattr(step, 'status'):
+                    step.status = "failed"
+                self.step_statuses[step_name] = "failed"
+                
+                step_result = {
+                    "step": step_name,
+                    "output": f"Error: {error_msg}",
+                    "status": "failed"
+                }
+                results.append(step_result)
+                
+                if self.on_step_error:
+                    try:
+                        self.on_step_error(self, step, e)
+                    except Exception as callback_e:
+                        logger.error(f"on_step_error callback failed: {callback_e}")
+                
+                failure_reason = f"Step '{step_name}' failed with error: {error_msg}"
+                self.status = "failed"
+                break
+        
+        if failure_reason is None:
+            self.status = "completed"
+        
+        if _approval_token is not None:
+            from ..approval import reset_yaml_approved_tools
+            reset_yaml_approved_tools(_approval_token)
+        
+        final_result = {
+            "output": previous_output,
+            "steps": results,
+            "variables": all_variables,
+            "status": self.status
+        }
+        
+        if failure_reason:
+            final_result["failure_reason"] = failure_reason
+        
+        if self.on_workflow_complete:
+            try:
+                self.on_workflow_complete(self, final_result)
+            except Exception as e:
+                logger.error(f"on_workflow_complete callback failed: {e}")
+        
+        return final_result
+    
     def _normalize_steps(self) -> List['WorkflowStep']:
         """Convert mixed steps (Agent, function, WorkflowStep) to WorkflowStep list.
         
@@ -1811,15 +2060,55 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             output_file = variables.get('output', 'output.mp4')
             return agent.generate(prompt, output=output_file)
         
-        # ImageAgent - generate
+        # ImageAgent - generate with output path support
         elif agent_class_name == 'ImageAgent':
             prompt = variables.get('prompt', action)
-            return agent.generate(prompt)
+            output_path = variables.get('output') or variables.get('image_output')
+            result = agent.generate(prompt)
+            # Extract URL from result and store in variables for next step
+            if hasattr(result, 'data') and result.data:
+                image_url = result.data[0].url if hasattr(result.data[0], 'url') else None
+                if image_url:
+                    variables['_last_image_url'] = image_url
+                    # Save to file if output path specified
+                    if output_path:
+                        try:
+                            import urllib.request
+                            urllib.request.urlretrieve(image_url, output_path)
+                            variables['_last_image_file'] = output_path
+                        except Exception as e:
+                            logger.warning(f"Failed to save image to {output_path}: {e}")
+            return result
         
-        # OCRAgent - extract
+        # OCRAgent - extract with retry logic for external API failures
         elif agent_class_name == 'OCRAgent':
-            source = variables.get('source', action)
-            return agent.extract(source)
+            source = variables.get('source') or variables.get('url') or variables.get('document')
+            # If no explicit source variable, try to extract URL from action text
+            if not source:
+                import re
+                url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
+                urls = re.findall(url_pattern, action)
+                source = urls[0] if urls else action
+            
+            # Retry logic for external API failures
+            max_retries = 2
+            last_error = None
+            for attempt in range(max_retries + 1):
+                try:
+                    return agent.extract(source)
+                except Exception as e:
+                    last_error = e
+                    error_str = str(e).lower()
+                    # Only retry on transient errors (network, timeout, fetch failures)
+                    if any(x in error_str for x in ['fetch', 'timeout', 'connection', 'network']):
+                        if attempt < max_retries:
+                            import time
+                            time.sleep(1 * (attempt + 1))  # Exponential backoff
+                            continue
+                    # Non-retryable error, raise immediately
+                    raise
+            # All retries exhausted
+            raise last_error
         
         # DeepResearchAgent - research
         elif agent_class_name == 'DeepResearchAgent':

@@ -18,6 +18,9 @@ export interface EvalOptions {
   warmup?: number;
   // Reliability subcommand
   'expected-tools'?: string;
+  // Judge subcommand
+  criteria?: string;
+  threshold?: number;
   // Common
   model?: string;
   verbose?: boolean;
@@ -42,11 +45,11 @@ interface PerformanceResult {
 export async function execute(args: string[], options: EvalOptions): Promise<void> {
   const subcommand = args[0];
   
-  if (!subcommand || !['accuracy', 'performance', 'reliability'].includes(subcommand)) {
+  if (!subcommand || !['accuracy', 'performance', 'reliability', 'judge'].includes(subcommand)) {
     if (options.json || options.output === 'json') {
-      printError(ERROR_CODES.INVALID_ARGS, 'Please specify a subcommand: accuracy, performance, or reliability');
+      printError(ERROR_CODES.INVALID_ARGS, 'Please specify a subcommand: accuracy, performance, reliability, or judge');
     } else {
-      await pretty.error('Please specify a subcommand: accuracy, performance, or reliability');
+      await pretty.error('Please specify a subcommand: accuracy, performance, reliability, or judge');
     }
     process.exit(EXIT_CODES.INVALID_ARGUMENTS);
   }
@@ -70,6 +73,9 @@ export async function execute(args: string[], options: EvalOptions): Promise<voi
         break;
       case 'reliability':
         await runReliabilityEval(options, config, outputFormat);
+        break;
+      case 'judge':
+        await runJudgeEval(options, config, outputFormat);
         break;
     }
   } catch (error) {
@@ -280,4 +286,70 @@ function calculateSimilarity(str1: string, str2: string): number {
   const union = new Set([...words1, ...words2]);
   
   return intersection.length / union.size;
+}
+
+/**
+ * Run LLM-as-Judge evaluation
+ */
+async function runJudgeEval(
+  options: EvalOptions,
+  config: { model: string; verbose: boolean },
+  outputFormat: string
+): Promise<void> {
+  // Lazy import to avoid performance impact
+  const { Judge } = await import('../../eval/judge');
+
+  const output = options.input;
+  if (!output) {
+    throw new Error('--input is required for judge evaluation (the output to judge)');
+  }
+
+  const startTime = Date.now();
+  const threshold = options.threshold ?? 7.0;
+
+  const judge = new Judge({
+    model: config.model,
+    threshold,
+    criteria: options.criteria,
+  });
+
+  const result = await judge.run({
+    output,
+    expected: options.expected,
+    criteria: options.criteria,
+  });
+
+  const duration = Date.now() - startTime;
+
+  if (outputFormat === 'json') {
+    outputJson(formatSuccess(
+      {
+        type: 'judge',
+        threshold,
+        result: {
+          score: result.score,
+          passed: result.passed,
+          reasoning: result.reasoning,
+          suggestions: result.suggestions,
+        }
+      },
+      { duration_ms: duration, model: config.model }
+    ));
+  } else {
+    await pretty.heading('LLM-as-Judge Evaluation Results');
+    await pretty.keyValue({
+      'Score': `${result.score.toFixed(1)}/10`,
+      'Status': result.passed ? '✅ PASSED' : '❌ FAILED',
+      'Threshold': threshold,
+      'Reasoning': result.reasoning,
+      'Duration': `${duration}ms`
+    });
+    
+    if (result.suggestions.length > 0) {
+      await pretty.heading('Suggestions');
+      for (const suggestion of result.suggestions) {
+        console.log(`  • ${suggestion}`);
+      }
+    }
+  }
 }

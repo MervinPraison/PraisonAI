@@ -684,9 +684,38 @@ def describe(name: str, offline: bool = False) -> Optional[RecipeConfig]:
 # --- Internal Functions ---
 
 def _load_recipe(name: str, offline: bool = False) -> Optional[RecipeConfig]:
-    """Load a recipe by name or URI."""
+    """Load a recipe by name or URI or path."""
     try:
         from praisonai.templates import TemplateDiscovery, TemplateLoader
+        
+        # Check if name is an absolute path to a recipe directory
+        name_path = Path(name)
+        if name_path.is_absolute() and name_path.exists() and name_path.is_dir():
+            # Check for agents.yaml or TEMPLATE.yaml in the directory
+            agents_yaml = name_path / "agents.yaml"
+            template_yaml = name_path / "TEMPLATE.yaml"
+            
+            if agents_yaml.exists() or template_yaml.exists():
+                loader = TemplateLoader(offline=offline)
+                template = loader.load(str(name_path))
+                
+                return RecipeConfig(
+                    name=template.name,
+                    version=template.version,
+                    description=template.description,
+                    author=template.author,
+                    license=template.license,
+                    tags=template.tags,
+                    requires=template.requires,
+                    tools=template.raw.get("tools", {}),
+                    config_schema=template.config_schema,
+                    defaults=template.defaults,
+                    outputs=template.raw.get("outputs", []),
+                    governance=template.raw.get("governance", {}),
+                    data_policy=template.raw.get("data_policy", {}),
+                    path=str(template.path) if template.path else None,
+                    raw=template.raw,
+                )
         
         discovery = TemplateDiscovery()
         discovered = discovery.find_template(name)

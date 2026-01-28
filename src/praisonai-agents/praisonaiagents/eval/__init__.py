@@ -63,6 +63,13 @@ __all__ = [
     "get_judge",
     "list_judges",
     "remove_judge",
+    # Dynamic judge configuration (domain-agnostic)
+    "JudgeCriteriaConfig",
+    "OptimizationRuleProtocol",
+    "add_optimization_rule",
+    "get_optimization_rule",
+    "list_optimization_rules",
+    "remove_optimization_rule",
     # Token utilities
     "estimate_tokens",
     "get_context_length",
@@ -114,6 +121,13 @@ _LAZY_IMPORTS = {
     "get_judge": ("judge", "get_judge"),
     "list_judges": ("judge", "list_judges"),
     "remove_judge": ("judge", "remove_judge"),
+    # Dynamic judge configuration (domain-agnostic)
+    "JudgeCriteriaConfig": ("judge", "JudgeCriteriaConfig"),
+    "OptimizationRuleProtocol": ("protocols", "OptimizationRuleProtocol"),
+    "add_optimization_rule": ("judge", "add_optimization_rule"),
+    "get_optimization_rule": ("judge", "get_optimization_rule"),
+    "list_optimization_rules": ("judge", "list_optimization_rules"),
+    "remove_optimization_rule": ("judge", "remove_optimization_rule"),
     # Token utilities
     "estimate_tokens": ("tokens", "estimate_tokens"),
     "get_context_length": ("tokens", "get_context_length"),

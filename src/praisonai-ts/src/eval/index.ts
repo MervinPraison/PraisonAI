@@ -229,3 +229,26 @@ export {
   type AggregatedResults,
   type TrendPoint,
 } from './results';
+
+// Re-export Judge (LLM-as-Judge)
+export {
+  Judge,
+  AccuracyJudge,
+  CriteriaJudge,
+  RecipeJudge,
+  addJudge,
+  getJudge,
+  listJudges,
+  removeJudge,
+  addOptimizationRule,
+  getOptimizationRule,
+  listOptimizationRules,
+  removeOptimizationRule,
+  parseJudgeResponse,
+  type JudgeConfig,
+  type JudgeCriteriaConfig,
+  type JudgeResult,
+  type JudgeRunOptions,
+  type JudgeOptions,
+  type JudgeProtocol,
+} from './judge';

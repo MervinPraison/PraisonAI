@@ -178,6 +178,12 @@ class RecipeCreator:
             types_hint = ", ".join([f"{k}: {v}" for k, v in agent_types.items()])
             customization_hints += f"\nUser-specified agent types: {types_hint}"
         
+        # Define approval-required tools for auto-approve detection
+        approval_required_tools = [
+            'write_file', 'copy_file', 'move_file', 'delete_file',
+            'download_file', 'execute_command', 'execute_code', 'kill_process'
+        ]
+        
         prompt = f"""{sdk_knowledge}
 
 ## Your Task
@@ -189,69 +195,207 @@ Recommended tools based on the goal: {tools_str}
 {customization_hints}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COMPLETE LIST OF AVAILABLE TOOLS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### WEB SEARCH TOOLS (Safe - No approval required):
+- `search_web` - ⭐ RECOMMENDED - Unified search with auto-fallback (tries Tavily→Exa→You.com→DuckDuckGo)
+- `internet_search` - DuckDuckGo search (FREE, no API key needed, fallback option)
+- `tavily_search` - High-quality AI search (REQUIRES TAVILY_API_KEY)
+- `exa_search` - Exa AI search (REQUIRES EXA_API_KEY)
+- `ydc_search` - You.com search (REQUIRES YDC_API_KEY)
+- `searxng_search` - SearXNG meta-search
+
+### WEB SCRAPING TOOLS (Safe):
+- `scrape_page` - Scrape web page content
+- `extract_links` - Extract links from a URL
+- `crawl4ai` - Advanced web crawling
+- `crawl4ai_extract` - Extract structured data from web pages
+- `get_article` - Get article content
+
+### FILE TOOLS - READ (Safe):
+- `read_file` - Read local files
+- `list_files` - List files in a directory
+- `get_file_info` - Get file metadata
+
+### FILE TOOLS - WRITE (⚠️ APPROVAL REQUIRED - add to 'approve' field):
+- `write_file` - Write content to files
+- `copy_file` - Copy files
+- `move_file` - Move files
+- `delete_file` - Delete files
+- `download_file` - Download from URL
+
+### CODE EXECUTION (⚠️ APPROVAL REQUIRED - add to 'approve' field):
+- `execute_command` - Run shell commands
+- `execute_code` - Execute Python code
+- `kill_process` - Kill a process
+
+### CODE ANALYSIS (Safe):
+- `analyze_code` - Analyze Python code structure
+- `format_code` - Format Python code
+
+### DATA PROCESSING (Safe):
+- `read_csv`, `read_json`, `read_yaml`, `read_xml`, `read_excel`
+
+### DATA WRITING (⚠️ APPROVAL REQUIRED):
+- `write_csv`, `write_json`, `write_yaml`, `write_excel`
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SPECIALIZED AGENT TYPES (Use `agent:` field to specify type)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### AudioAgent - Text-to-Speech (TTS) and Speech-to-Text (STT)
+Keywords: "audio", "speech", "voice", "tts", "stt", "transcribe", "speak", "narrate", "read aloud"
+- TTS models: openai/tts-1, openai/tts-1-hd, elevenlabs/eleven_multilingual_v2
+- STT models: openai/whisper-1, groq/whisper-large-v3, deepgram/nova-2
+- Use `agent: AudioAgent` in the agent definition
+- Action for TTS: "Convert the text to speech and save as audio file"
+- Action for STT: "Transcribe the audio file to text"
+
+### VideoAgent - Video Generation
+Keywords: "video", "generate video", "create video", "animation", "sora"
+- Models: openai/sora-2, gemini/veo-3.0-generate-preview, runway/gen-3
+- Use `agent: VideoAgent` in the agent definition
+- Action: "Generate a video based on the prompt"
+
+### ImageAgent - Image Generation
+Keywords: "generate image", "create image", "dall-e", "illustration", "draw"
+- Models: openai/dall-e-3, openai/dall-e-2, stability/stable-diffusion
+- Use `agent: ImageAgent` in the agent definition
+- Action: "Generate an image based on the description"
+- YAML supports `output:` field to save image to a file path
+- Generated image URL is stored in `_last_image_url` variable for next steps
+
+### Image Analysis (Vision) - Analyzing/Understanding Images
+Keywords: "analyze image", "describe image", "understand image", "what's in the image", "image analysis"
+- Use a regular agent with `llm: gpt-4o-mini` (vision-capable model)
+- MUST define `variables:` section with `image_path:` for the input image
+- The image is passed via the `attachments` parameter automatically
+- Action: "Analyze the image at {{image_path}} and describe..."
+- Example YAML structure:
+```yaml
+variables:
+  image_path: ""  # Will be provided at runtime via --var image_path="/path/to/image.jpg"
+
+agents:
+  analyst:
+    role: Image Analyst
+    goal: Analyze the provided image
+    backstory: Expert at interpreting visual content
+    tools: []
+    llm: gpt-4o-mini
+
+steps:
+  - agent: analyst
+    action: "Analyze the image and describe the main elements, colors, and composition."
+    expected_output: "Detailed image analysis"
+```
+
+### OCRAgent - Text Extraction from Documents/Images
+Keywords: "ocr", "extract text", "read document", "pdf", "scan", "document extraction"
+- Models: mistral/mistral-ocr-latest
+- Use `agent: OCRAgent` in the agent definition
+- Requires: MISTRAL_API_KEY
+- Action: "Extract text from the document/image"
+
+### DeepResearchAgent - In-depth Research
+Keywords: "deep research", "comprehensive research", "thorough investigation"
+- Use `agent: DeepResearchAgent` in the agent definition
+- Action: "Conduct deep research on the topic"
+
+### URL Content Analysis - Analyzing Web Pages
+Keywords: "analyze url", "analyze webpage", "read url", "extract from url", "url to blog", "webpage analysis"
+- Use `web_crawl` or `crawl_web` tool to fetch URL content
+- MUST define `variables:` section with `url:` for the input URL
+- Example YAML structure:
+```yaml
+variables:
+  url: ""  # Will be provided at runtime via --var url="https://example.com"
+
+agents:
+  crawler:
+    role: Web Content Extractor
+    goal: Extract content from the provided URL
+    backstory: Expert at extracting and parsing web content
+    tools:
+      - web_crawl
+    llm: gpt-4o-mini
+
+steps:
+  - agent: crawler
+    action: "Use web_crawl to extract content from {{url}}. Return the main content, title, and key information."
+    expected_output: "Extracted web content with title and main text"
+```
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 MANDATORY RULES - YOU MUST FOLLOW ALL OF THESE WITHOUT EXCEPTION
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ## RULE 1: TOOL SELECTION (CRITICAL)
 
-### SAFE TOOLS (No approval required):
-- `search_web` - Unified web search with auto-fallback (RECOMMENDED - works with any available provider)
-- `tavily_search` - High-quality AI search (REQUIRES TAVILY_API_KEY)
-- `read_file` - Read local files
-- `list_files` - List files in a directory
-- `get_file_info` - Get file metadata
-- `scrape_page` - Scrape web page content
-- `extract_links` - Extract links from a URL
-- `get_system_info` - Get system information
-- `analyze_code` - Analyze Python code structure
-- `format_code` - Format Python code
+**DEFAULT SEARCH TOOL**: Use `search_web` for web searches - it automatically detects available API keys and uses the best provider:
+- If TAVILY_API_KEY is set → uses Tavily (highest quality)
+- If EXA_API_KEY is set → uses Exa
+- If YDC_API_KEY is set → uses You.com
+- Otherwise → falls back to DuckDuckGo (no API key needed)
 
-### APPROVAL-REQUIRED TOOLS (Add to 'approve' field in YAML):
-- `write_file` - Write content to files (approval: high)
-- `copy_file` - Copy files (approval: high)
-- `move_file` - Move files (approval: high)
-- `delete_file` - Delete files (approval: high)
-- `download_file` - Download from URL (approval: medium)
-- `execute_command` - Run shell commands (approval: critical)
-- `execute_code` - Execute Python code (approval: critical)
-- `kill_process` - Kill a process (approval: critical)
+**APPROVAL-REQUIRED TOOLS**: If you use ANY of these tools, you MUST add an 'approve' field at the root level:
+- write_file, copy_file, move_file, delete_file, download_file
+- execute_command, execute_code, kill_process
+- write_csv, write_json, write_yaml, write_excel
 
-To auto-approve tools, add an 'approve' field at the root level:
+Example with approval:
 ```yaml
 approve:
   - write_file
   - execute_command
+
+agents:
+  ...
 ```
 
-Or set environment variable: PRAISONAI_AUTO_APPROVE=true
+IMPORTANT: For complex tasks involving research, analysis, or report creation, use 3 AGENTS:
+1. **researcher** - Gathers raw information/data
+2. **analyst** - Analyzes and compares findings
+3. **writer** - Creates final output/report
 
-IMPORTANT: For research tasks, use ONLY 1 agent (researcher) - do NOT add a writer agent.
-The researcher should return the findings directly as output, NOT save to a file.
+Only use 1 agent for very simple tasks like "calculate X" or "explain Y in one sentence".
 
 ## RULE 2: ENVIRONMENT VARIABLES (CRITICAL)
 - ALWAYS include: OPENAI_API_KEY
-- ONLY include TAVILY_API_KEY if using tavily_search or tavily_extract
-- NEVER include API keys for tools you're not using
+- Do NOT include TAVILY_API_KEY unless user explicitly asks for web search
+- Do NOT include any approve field unless user explicitly asks to save files
 
 ## RULE 3: ACTION FORMAT (CRITICAL)
 Every action MUST:
-1. Start with "Use [tool_name] to..."
-2. Contain CONCRETE values, NOT variables
-3. Specify exact expected format
+1. Contain CONCRETE values, NOT variables
+2. Specify exact expected format
+3. If agent has tools=[], use verbs like "Research", "Analyze", "Create", "Compare"
+4. If agent has tools assigned, start with "Use [tool_name] to..."
 
-GOOD: "Use internet_search to find the top 5 developments in quantum computing. Return a numbered list."
-BAD: "Use internet_search to find {{{{topic}}}}" (variables don't work in actions!)
-BAD: "Research quantum computing" (doesn't specify which tool!)
+GOOD (no tools): "Research the top 5 benefits of microservices. List each with title and description."
+GOOD (with tools): "Use search_web to find the top 5 developments in quantum computing."
+BAD: "Use search_web to find {{{{topic}}}}" (variables don't work in actions!)
 
 ## RULE 4: AGENT STRUCTURE (CRITICAL)
-- Use 1-2 agents maximum for simple tasks
+- Use 3 agents for complex tasks (research→analyze→write pattern)
+- Use 1 agent only for trivial tasks (single calculation, simple lookup)
 - Each agent needs: role, goal, backstory, tools, llm
+- **ALL agents should have `tools: []` by default** - LLMs have knowledge and don't need external tools
+- Only add tools if user EXPLICITLY asks to "save to file", "search the web", or "execute code"
+- **CRITICAL: If an agent has tools assigned, ALWAYS add `tool_choice: required`** to force tool usage
 - llm should be: gpt-4o-mini (default)
+- Agents should have DISTINCT roles - don't duplicate responsibilities
 
 ## RULE 5: STEPS FORMAT (CRITICAL)
 - Each step needs: agent, action, expected_output
-- Use {{{{agent_name}}}}_output to pass data between agents
+- Use {{{{agent_name}}}}_output to pass data between agents (DOUBLE curly braces!)
+- Use {{{{variable_name}}}} to reference variables from the variables section (DOUBLE curly braces!)
 - expected_output must describe exact format (list, report, JSON, etc.)
+
+**CRITICAL: Variable References MUST use DOUBLE curly braces:**
+- ✅ CORRECT: {{{{image_path}}}} or {{{{url}}}} or {{{{analyst}}}}_output
+- ❌ WRONG: {{image_path}} or {{url}} or {{analyst}}_output (single braces don't work!)
 
 ## RULE 6: NO EMPTY FIELDS
 - Do NOT include: knowledge: [], memory: false, handoffs: []
@@ -263,85 +407,174 @@ BAD: "Research quantum computing" (doesn't specify which tool!)
 - No explanations before or after
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EXAMPLE OF PERFECT RECIPE (SINGLE AGENT - RECOMMENDED)
+HIERARCHICAL PROCESS (MANDATORY - Use for all multi-agent recipes)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**ALWAYS include these fields at the root level for multi-agent workflows:**
+```yaml
+process: hierarchical
+manager_llm: gpt-4o-mini
+```
+
+**What hierarchical process does:**
+- A manager agent validates each step's output before proceeding
+- If a step fails validation, the workflow stops with a clear failure reason
+- Ensures quality control and prevents cascading errors
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EXAMPLE: SEARCH TASK (hierarchical with manager validation)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 metadata:
-  name: research-report
+  name: latest-trends-research
   requires:
     env:
       - OPENAI_API_KEY
 
+process: hierarchical
+manager_llm: gpt-4o-mini
+
 agents:
   researcher:
-    role: Research Analyst
-    goal: Find comprehensive information on the requested topic
-    backstory: Expert researcher skilled at finding and synthesizing information from multiple sources.
+    role: Research Specialist
+    goal: Find the latest information on the topic
+    backstory: Expert at finding current, accurate information from web sources.
     tools:
       - search_web
+    tool_choice: required
     llm: gpt-4o-mini
+
+  analyst:
+    role: Data Analyst
+    goal: Analyze and synthesize research findings
+    backstory: Expert at identifying patterns, trends, and key insights from raw data.
+    tools: []
+    llm: gpt-4.1
+
+  writer:
+    role: Technical Writer
+    goal: Create clear, well-structured reports
+    backstory: Expert at transforming complex information into readable, actionable content.
+    tools: []
+    llm: gpt-4.1
 
 steps:
   - agent: researcher
-    action: "Use search_web to find the top 5 key facts about [CONCRETE TOPIC FROM GOAL]. Return a numbered list with each fact containing a title and 2-3 sentence explanation."
-    expected_output: "A numbered list of 5 facts, each with: title, explanation (2-3 sentences)"
+    action: "You MUST call the search_web tool to search for the latest developments in [TOPIC]. Do NOT respond without calling search_web first. Return at least 5 key findings with titles, descriptions, and source URLs from the search results."
+    expected_output: "Raw research data with 5+ findings, each containing: title, description, source URL"
+
+  - agent: analyst
+    action: "IMPORTANT: You MUST use ONLY the information from {{researcher_output}} below. Do NOT use your training data or prior knowledge. Read the research findings carefully, then: 1) Quote specific findings from the input, 2) Compare and identify the most significant insights, 3) Explain why each is important with references to the source URLs."
+    expected_output: "Analysis with key insights. Each insight MUST: 1) Quote the original finding, 2) Explain significance, 3) Reference the source URL from the research"
+
+  - agent: writer
+    action: "IMPORTANT: You MUST use ONLY the information from {{analyst_output}} below. Do NOT use your training data or prior knowledge. Read the analysis carefully, then create a professional report that: 1) Summarizes the key insights from the analysis, 2) Includes the source URLs from the analysis, 3) Provides recommendations based on the findings."
+    expected_output: "Professional report with: executive summary (referencing the analysis), key findings (with source URLs), recommendations (based on the findings)"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EXAMPLE WITH TAVILY (SINGLE AGENT - RECOMMENDED)
+CRITICAL: TOOL USAGE RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**WHEN TO USE TOOLS:**
+
+1. **SEARCH TASKS** → Use `search_web` tool for the researcher agent
+   Keywords: "search", "find", "latest", "current", "news", "trending", "recent", "2024", "2025", "2026"
+   - search_web auto-detects API keys (Tavily→Exa→You.com→DuckDuckGo fallback)
+   - Action format: "You MUST call the search_web tool to search for [query]. Do NOT respond without calling search_web first. Return [format] from the search results."
+   - CRITICAL: The action MUST explicitly instruct the agent to call the tool and use its results
+
+2. **FILE TASKS** → Use file tools + approve field
+   Keywords: "save", "write", "create file", "export"
+   - Add `approve: [write_file]` at root level
+   - Action format: "Use write_file to save [content] to [filename]."
+
+3. **ANALYSIS/COMPARISON TASKS** → Use `tools: []`
+   Keywords: "analyze", "compare", "evaluate", "summarize"
+   - LLM knowledge is sufficient
+   - Action format: "Analyze...", "Compare...", "Evaluate..."
+
+**MULTI-AGENT PATTERN:**
+- **researcher**: Gets `search_web` if task involves finding current/latest information
+- **analyst**: Gets `tools: []` - uses LLM to analyze data
+- **writer**: Gets `tools: []` - uses LLM to create reports
+
+4. **SPECIALIZED AGENT TASKS** → Use specialized agent types
+   - Audio/Speech tasks → Use `agent: AudioAgent` with llm: openai/tts-1 or openai/whisper-1
+   - Image generation → Use `agent: ImageAgent` with llm: openai/dall-e-3
+   - Video generation → Use `agent: VideoAgent` with llm: openai/sora-2
+   - OCR/Document extraction → Use `agent: OCRAgent` with llm: mistral/mistral-ocr-latest (needs MISTRAL_API_KEY)
+
+**TOOL CALL RELIABILITY (CRITICAL):**
+When an agent has tools assigned, the action MUST:
+1. Explicitly name the tool: "You MUST call the search_web tool..."
+2. Forbid responding without tool: "Do NOT respond without calling search_web first."
+3. Require using results: "Return [specific format] from the search results."
+4. Be specific about output: "Return at least 5 items with titles, descriptions, and URLs."
+5. Add grounding instruction: "Only use information from the tool results. Do NOT fabricate or use prior knowledge."
+
+**ANTI-HALLUCINATION PATTERN (MANDATORY for tool-using agents):**
+For any agent with tools, add this to the action:
+"IMPORTANT: Your response MUST be based ONLY on the actual tool results. Do NOT:
+- Make up information not in the results
+- Use your training data instead of tool results  
+- Respond if the tool call fails - report the error instead"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EXAMPLE: SPECIALIZED AGENT (OCR + Analysis with hierarchical)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 metadata:
-  name: ai-trends-research
+  name: document-extraction-analysis
   requires:
     env:
       - OPENAI_API_KEY
-      - TAVILY_API_KEY
+      - MISTRAL_API_KEY
+
+process: hierarchical
+manager_llm: gpt-4o-mini
 
 agents:
-  researcher:
-    role: Research Analyst
-    goal: Find the latest AI trends and developments
-    backstory: Expert in AI research with access to premium search tools.
-    tools:
-      - tavily_search
+  extractor:
+    agent: OCRAgent
+    role: Document Extractor
+    goal: Extract text from documents and images
+    backstory: Expert at extracting text from PDFs and images using OCR.
+    llm: mistral/mistral-ocr-latest
+    tools: []
+
+  analyst:
+    role: Content Analyst
+    goal: Analyze extracted document content
+    backstory: Expert at analyzing and summarizing document content.
+    tools: []
     llm: gpt-4o-mini
 
 steps:
-  - agent: researcher
-    action: "Use tavily_search to find the top 5 AI trends in 2024. Return a numbered list with titles, 2-3 sentence descriptions, and source URLs."
-    expected_output: "A numbered list of 5 trends, each with: title, description (2-3 sentences), source URL"
+  - agent: extractor
+    action: "Extract all text from the provided document URL using OCR."
+    expected_output: "Complete extracted text from the document"
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EXAMPLE WITH FILE WRITING (APPROVAL REQUIRED)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-metadata:
-  name: research-and-save
-  requires:
-    env:
-      - OPENAI_API_KEY
-
-approve:
-  - write_file
-
-agents:
-  researcher:
-    role: Research Writer
-    goal: Research a topic and save findings to a file
-    backstory: Expert researcher who documents findings.
-    tools:
-      - search_web
-      - write_file
-    llm: gpt-4o-mini
-
-steps:
-  - agent: researcher
-    action: "Use search_web to find the top 3 facts about Python programming. Then use write_file to save the findings to research_output.txt"
-    expected_output: "A file named research_output.txt containing the research findings"
+  - agent: analyst
+    action: "Analyze the extracted text from {{extractor_output}}. Identify key information, summarize main points."
+    expected_output: "Analysis with: summary, key points, important details"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 NOW GENERATE THE RECIPE FOR: "{goal}"
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️ FINAL CHECKLIST:
+1. **HIERARCHICAL PROCESS (MANDATORY)**: For multi-agent workflows, ALWAYS include at root level:
+   - `process: hierarchical`
+   - `manager_llm: gpt-4o-mini`
+2. Does the goal involve searching/finding current information? YES → researcher gets search_web
+3. Does the goal mention "save to file"? NO → Do NOT add write_file, approve field, or TAVILY_API_KEY
+4. Do NOT include version, description, author, license fields
+5. Only include: metadata.name, metadata.requires.env (just OPENAI_API_KEY), process, manager_llm, agents, steps
+6. Writer should NOT save to file unless explicitly requested - just return the report as output
+7. Does the goal involve audio/speech? YES → Use `agent: AudioAgent` with appropriate llm
+8. Does the goal involve image generation? YES → Use `agent: ImageAgent` with llm: openai/dall-e-3
+9. Does the goal involve video generation? YES → Use `agent: VideoAgent` with llm: openai/sora-2
+10. Does the goal involve OCR/document extraction? YES → Use `agent: OCRAgent` with llm: mistral/mistral-ocr-latest and add MISTRAL_API_KEY
 """
         
         try:
@@ -363,6 +596,12 @@ NOW GENERATE THE RECIPE FOR: "{goal}"
             # Apply custom tools and types if provided
             if tools or agent_types:
                 yaml_content = self._apply_customizations(yaml_content, tools, agent_types)
+            
+            # Auto-add approve field for approval-required tools
+            yaml_content = self._auto_add_approve_field(yaml_content, approval_required_tools)
+            
+            # Fix variable format: convert single braces to double braces
+            yaml_content = self._fix_variable_format(yaml_content)
             
             # Validate YAML
             import yaml
@@ -455,11 +694,117 @@ NOW GENERATE THE RECIPE FOR: "{goal}"
             # If parsing fails, return original
             return yaml_content
     
+    def _auto_add_approve_field(
+        self,
+        yaml_content: str,
+        approval_required_tools: List[str],
+    ) -> str:
+        """
+        Auto-add approve field for approval-required tools.
+        
+        Scans the YAML for tools that require approval and adds them
+        to the 'approve' field at the root level if not already present.
+        """
+        import yaml
+        
+        try:
+            data = yaml.safe_load(yaml_content)
+            if not data:
+                return yaml_content
+            
+            # Collect all tools used across all agents
+            used_tools = set()
+            if 'agents' in data:
+                for agent_config in data['agents'].values():
+                    if 'tools' in agent_config:
+                        used_tools.update(agent_config['tools'])
+            
+            # Find which approval-required tools are being used
+            tools_needing_approval = [
+                tool for tool in used_tools 
+                if tool in approval_required_tools
+            ]
+            
+            if not tools_needing_approval:
+                return yaml_content
+            
+            # Get existing approve list or create new one
+            existing_approve = set(data.get('approve', []) or [])
+            
+            # Add tools that need approval
+            new_approve = existing_approve.union(set(tools_needing_approval))
+            
+            if new_approve:
+                data['approve'] = sorted(list(new_approve))
+                
+                # Rebuild YAML with approve field at the top
+                # Create ordered output
+                ordered_data = {}
+                
+                # Put metadata first if exists
+                if 'metadata' in data:
+                    ordered_data['metadata'] = data.pop('metadata')
+                
+                # Put approve field next
+                ordered_data['approve'] = data.pop('approve')
+                
+                # Add remaining keys
+                ordered_data.update(data)
+                
+                return yaml.dump(ordered_data, default_flow_style=False, sort_keys=False)
+            
+            return yaml_content
+            
+        except Exception:
+            # If parsing fails, return original
+            return yaml_content
+    
+    def _fix_variable_format(self, yaml_content: str) -> str:
+        """
+        Fix variable format: convert single braces to double braces.
+        
+        The LLM sometimes generates {variable} instead of {{variable}}.
+        This post-processor fixes common patterns:
+        - {agent_name}_output -> {{agent_name}}_output
+        - {image_path} -> {{image_path}}
+        - {url} -> {{url}}
+        """
+        import re
+        
+        # Pattern to match single-brace variables that should be double-braced
+        # Matches {word} or {word}_output but NOT {{word}} (already double-braced)
+        # Also avoids matching YAML flow style like {key: value}
+        
+        # Common variable patterns that need double braces
+        variable_patterns = [
+            # CRITICAL FIX: {{agent}}_output -> {{agent_output}} (wrong format to correct format)
+            # This is the most common LLM mistake - it generates {{researcher}}_output instead of {{researcher_output}}
+            (r'\{\{(\w+)\}\}_output', r'{{\1_output}}'),
+            # Agent output references: {agent}_output -> {{agent_output}}
+            (r'\{(\w+)\}_output', r'{{\1_output}}'),
+            # Common input variables (expanded list)
+            (r'\{(image_path|image_url|image|url|source_url|webpage|document|source|input|query|topic|file_path|data|content|text)\}', r'{{\1}}'),
+            # Agent name references in context: from {agent} -> from {{agent}}
+            (r'from \{(\w+)\}', r'from {{\1}}'),
+            # Using {agent} pattern
+            (r'[Uu]sing (?:the )?(?:analysis |output |results? )?from \{(\w+)\}', r'Using the output from {{\1}}'),
+        ]
+        
+        result = yaml_content
+        for pattern, replacement in variable_patterns:
+            # Apply pattern directly - the patterns themselves handle the matching correctly
+            result = re.sub(pattern, replacement, result)
+        
+        return result
+    
     def _get_fallback_yaml(self, goal: str, tools: List[str]) -> str:
         """Generate fallback YAML if LLM fails."""
         tools_yaml = '\n      - '.join(tools[:5]) if tools else 'read_file'
         return f'''framework: praisonai
 topic: "{goal}"
+
+process: hierarchical
+manager_llm: gpt-4o-mini
 
 agents:
   assistant:
