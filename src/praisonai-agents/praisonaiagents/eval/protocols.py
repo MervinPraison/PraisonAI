@@ -137,6 +137,49 @@ class JudgeResultProtocol(Protocol):
 
 
 @runtime_checkable
+class OptimizationRuleProtocol(Protocol):
+    """
+    Protocol for optimization rules (domain-agnostic).
+    
+    Enables pluggable optimization rules for ANY domain:
+    - Recipe/workflow optimization
+    - Water flow optimization
+    - Data pipeline optimization
+    - Manufacturing quality
+    - Any custom domain
+    
+    Example:
+        ```python
+        class WaterLeakRule:
+            name = "water_leak"
+            pattern = r"(leak|overflow|pressure.drop)"
+            severity = "critical"
+            
+            def get_fix(self, context: Dict[str, Any]) -> str:
+                location = context.get("location", "unknown")
+                return f"Check valve at {location} for leaks"
+        
+        rule: OptimizationRuleProtocol = WaterLeakRule()
+        ```
+    """
+    name: str
+    pattern: str  # Regex pattern to match issues
+    severity: str  # critical, high, medium, low
+    
+    def get_fix(self, context: Dict[str, Any]) -> str:
+        """
+        Generate fix suggestion for the matched issue.
+        
+        Args:
+            context: Domain-specific context (e.g., agent_name, location, etc.)
+            
+        Returns:
+            Fix suggestion string
+        """
+        ...
+
+
+@runtime_checkable
 class JudgeProtocol(Protocol):
     """
     Protocol for LLM-as-judge evaluation.
@@ -197,6 +240,7 @@ __all__ = [
     'GraderProtocol',
     'ScoredResultProtocol',
     'AsyncGraderProtocol',
+    'OptimizationRuleProtocol',
     'JudgeProtocol',
     'JudgeResultProtocol',
 ]

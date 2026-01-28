@@ -349,6 +349,8 @@ class YAMLWorkflowParser:
             variables=variables,
             planning=planning_value,
             default_llm=default_llm,
+            process=process,  # Process type: sequential or hierarchical
+            manager_llm=manager_llm,  # LLM for manager agent (hierarchical mode)
             output=workflow_output,  # Pass output mode to Workflow
             memory=memory_value,  # Pass memory config to Workflow
             context=context_value,  # Pass context management config to Workflow
@@ -357,8 +359,6 @@ class YAMLWorkflowParser:
         # Store additional attributes for feature parity with agents.yaml
         workflow.description = description
         workflow.framework = framework
-        workflow.process = process
-        workflow.manager_llm = manager_llm
         
         # Store approved tools for auto-approval during workflow execution
         workflow.approve_tools = approve_tools
@@ -503,6 +503,9 @@ class YAMLWorkflowParser:
         prompt_template = config.get('prompt_template')
         response_template = config.get('response_template')
         
+        # Tool choice configuration (auto, required, none)
+        tool_choice = config.get('tool_choice')
+        
         # Check for specialized agent type via `agent:` field
         agent_type = config.get('agent', '').lower() if config.get('agent') else ''
         
@@ -546,6 +549,9 @@ class YAMLWorkflowParser:
         agent._yaml_system_template = system_template
         agent._yaml_prompt_template = prompt_template
         agent._yaml_response_template = response_template
+        
+        # Store tool_choice for forcing tool usage (auto, required, none)
+        agent._yaml_tool_choice = tool_choice
         
         return agent
     
@@ -684,7 +690,16 @@ class YAMLWorkflowParser:
         for tool_name in tools_config:
             if tool_name in self.tool_registry:
                 tools.append(self.tool_registry[tool_name])
-            # If tool not in registry, skip it (will be resolved later or is a string reference)
+            else:
+                # Fallback: try to import from praisonaiagents.tools
+                try:
+                    from praisonaiagents import tools as builtin_tools
+                    if hasattr(builtin_tools, tool_name):
+                        tool_func = getattr(builtin_tools, tool_name)
+                        if callable(tool_func):
+                            tools.append(tool_func)
+                except (ImportError, AttributeError):
+                    pass
         return tools
     
     def _parse_callbacks(self, callbacks_data: Dict[str, str]) -> None:

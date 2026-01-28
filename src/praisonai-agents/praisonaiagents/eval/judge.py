@@ -56,6 +56,41 @@ class JudgeConfig:
             self.model = os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini")
 
 
+@dataclass
+class JudgeCriteriaConfig:
+    """
+    Dynamic criteria configuration for domain-agnostic judging.
+    
+    Enables judges to evaluate ANY domain, not just agent outputs:
+    - Water flow optimization
+    - Data pipeline efficiency
+    - Manufacturing quality
+    - Recipe/workflow optimization
+    - Any custom domain
+    
+    Attributes:
+        name: Name of the criteria configuration
+        description: Description of what is being evaluated
+        prompt_template: Custom prompt template with {output} placeholder
+        scoring_dimensions: List of dimensions to score (e.g., ["efficiency", "safety"])
+        threshold: Score threshold for passing (default: 7.0)
+    
+    Example:
+        >>> config = JudgeCriteriaConfig(
+        ...     name="water_flow",
+        ...     description="Evaluate water flow optimization",
+        ...     prompt_template="Is the water flow optimal? Output: {output}",
+        ...     scoring_dimensions=["flow_rate", "pressure", "efficiency"],
+        ... )
+        >>> judge = Judge(criteria_config=config)
+    """
+    name: str
+    description: str
+    prompt_template: str
+    scoring_dimensions: List[str]
+    threshold: float = 7.0
+
+
 class Judge(BaseLLMGrader):
     """
     Unified LLM-as-judge for evaluating agent outputs.
@@ -140,6 +175,7 @@ SUGGESTIONS:
         threshold: float = 7.0,
         criteria: Optional[str] = None,
         config: Optional[JudgeConfig] = None,
+        criteria_config: Optional[JudgeCriteriaConfig] = None,
         session_id: Optional[str] = None,
     ):
         """
@@ -152,7 +188,21 @@ SUGGESTIONS:
             threshold: Score threshold for passing (default: 7.0)
             criteria: Optional custom criteria for evaluation
             config: Optional JudgeConfig for all settings
+            criteria_config: Optional JudgeCriteriaConfig for domain-agnostic evaluation
             session_id: Optional session ID for trace isolation per recipe run
+        
+        Example:
+            >>> # Simple usage
+            >>> judge = Judge(criteria="Response is helpful")
+            
+            >>> # Domain-agnostic usage (water flow, data pipeline, etc.)
+            >>> config = JudgeCriteriaConfig(
+            ...     name="water_flow",
+            ...     description="Evaluate water flow",
+            ...     prompt_template="Is the water flow optimal? {output}",
+            ...     scoring_dimensions=["flow_rate", "pressure"],
+            ... )
+            >>> judge = Judge(criteria_config=config)
         """
         # Use config if provided, otherwise use individual params
         if config:
@@ -162,9 +212,16 @@ SUGGESTIONS:
             threshold = config.threshold
             criteria = config.criteria
         
+        # Use criteria_config if provided
+        if criteria_config:
+            threshold = criteria_config.threshold
+            # criteria from criteria_config takes precedence
+            criteria = criteria_config.description
+        
         super().__init__(model=model, temperature=temperature, max_tokens=max_tokens)
         self.threshold = threshold
         self.criteria = criteria
+        self.criteria_config = criteria_config
         self.session_id = session_id
     
     def _build_judge_prompt(
@@ -186,6 +243,18 @@ SUGGESTIONS:
         Returns:
             Formatted prompt string
         """
+        # Use criteria_config custom prompt template if available
+        if self.criteria_config and self.criteria_config.prompt_template:
+            # Domain-agnostic mode: use custom prompt template
+            template = self.criteria_config.prompt_template
+            # Support common placeholders
+            return template.format(
+                output=output,
+                input=input_text or "Not provided",
+                input_text=input_text or "Not provided",
+                expected=expected or "Not specified",
+            )
+        
         # Use instance criteria if not provided
         effective_criteria = criteria or self.criteria
         
@@ -276,7 +345,7 @@ SUGGESTIONS:
         output: str = "",
         expected: Optional[str] = None,
         criteria: Optional[str] = None,
-        input_text: str = "",
+        input: str = "",
         agent: Optional["Agent"] = None,
         agents: Optional["Agents"] = None,
         print_summary: bool = False,
@@ -289,7 +358,7 @@ SUGGESTIONS:
             output: The output to judge (required if no agent)
             expected: Optional expected output for accuracy evaluation
             criteria: Optional criteria for criteria evaluation
-            input_text: Optional input context
+            input: Optional input context
             agent: Optional Agent to run and judge
             agents: Optional Agents to run and judge
             print_summary: Whether to print result summary
@@ -297,12 +366,15 @@ SUGGESTIONS:
             
         Returns:
             JudgeResult with score, passed, reasoning, suggestions
+        
+        Example:
+            >>> result = Judge().run(output="4", expected="4", input="What is 2+2?")
         """
         # Get output from agent if provided
         if agent is not None:
-            output = self._get_agent_output(agent, input_text)
+            output = self._get_agent_output(agent, input)
         elif agents is not None:
-            output = self._get_agents_output(agents, input_text)
+            output = self._get_agents_output(agents, input)
         
         if not output:
             return JudgeResult(
@@ -316,7 +388,7 @@ SUGGESTIONS:
         
         litellm = self._get_litellm()
         
-        prompt = self._build_judge_prompt(output, expected, criteria, input_text)
+        prompt = self._build_judge_prompt(output, expected, criteria, input)
         
         try:
             response = litellm.completion(
@@ -350,7 +422,7 @@ SUGGESTIONS:
         output: str = "",
         expected: Optional[str] = None,
         criteria: Optional[str] = None,
-        input_text: str = "",
+        input: str = "",
         agent: Optional["Agent"] = None,
         agents: Optional["Agents"] = None,
         print_summary: bool = False,
@@ -363,7 +435,7 @@ SUGGESTIONS:
             output: The output to judge
             expected: Optional expected output
             criteria: Optional criteria
-            input_text: Optional input context
+            input: Optional input context
             agent: Optional Agent to run and judge
             agents: Optional Agents to run and judge
             print_summary: Whether to print result summary
@@ -371,12 +443,15 @@ SUGGESTIONS:
             
         Returns:
             JudgeResult with score, passed, reasoning, suggestions
+        
+        Example:
+            >>> result = await Judge().run_async(output="4", expected="4", input="What is 2+2?")
         """
         # Get output from agent if provided
         if agent is not None:
-            output = await self._get_agent_output_async(agent, input_text)
+            output = await self._get_agent_output_async(agent, input)
         elif agents is not None:
-            output = await self._get_agents_output_async(agents, input_text)
+            output = await self._get_agents_output_async(agents, input)
         
         if not output:
             return JudgeResult(
@@ -390,7 +465,7 @@ SUGGESTIONS:
         
         litellm = self._get_litellm()
         
-        prompt = self._build_judge_prompt(output, expected, criteria, input_text)
+        prompt = self._build_judge_prompt(output, expected, criteria, input)
         
         try:
             response = await litellm.acompletion(
@@ -642,14 +717,82 @@ _JUDGE_REGISTRY["criteria"] = CriteriaJudge
 _JUDGE_REGISTRY["recipe"] = RecipeJudge
 
 
+# Optimization Rule Registry - for domain-agnostic optimization rules
+_OPTIMIZATION_RULE_REGISTRY: Dict[str, Type] = {}
+
+
+def add_optimization_rule(name: str, rule_class: Type) -> None:
+    """
+    Register a custom optimization rule.
+    
+    Args:
+        name: Name for the rule
+        rule_class: Rule class implementing OptimizationRuleProtocol
+        
+    Example:
+        >>> class WaterLeakRule:
+        ...     name = "water_leak"
+        ...     pattern = r"(leak|overflow)"
+        ...     severity = "critical"
+        ...     def get_fix(self, context): return "Check for leaks"
+        >>> add_optimization_rule("water_leak", WaterLeakRule)
+    """
+    _OPTIMIZATION_RULE_REGISTRY[name.lower()] = rule_class
+
+
+def get_optimization_rule(name: str) -> Optional[Type]:
+    """
+    Get a registered optimization rule by name.
+    
+    Args:
+        name: Name of the rule
+        
+    Returns:
+        Rule class or None if not found
+    """
+    return _OPTIMIZATION_RULE_REGISTRY.get(name.lower())
+
+
+def list_optimization_rules() -> List[str]:
+    """
+    List all registered optimization rules.
+    
+    Returns:
+        List of rule names
+    """
+    return list(_OPTIMIZATION_RULE_REGISTRY.keys())
+
+
+def remove_optimization_rule(name: str) -> bool:
+    """
+    Remove a registered optimization rule.
+    
+    Args:
+        name: Name of the rule to remove
+        
+    Returns:
+        True if removed, False if not found
+    """
+    if name.lower() in _OPTIMIZATION_RULE_REGISTRY:
+        del _OPTIMIZATION_RULE_REGISTRY[name.lower()]
+        return True
+    return False
+
+
 __all__ = [
     'Judge',
     'JudgeConfig',
+    'JudgeCriteriaConfig',
     'JudgeResult',
     'AccuracyJudge',
     'CriteriaJudge',
+    'RecipeJudge',
     'add_judge',
     'get_judge',
     'list_judges',
     'remove_judge',
+    'add_optimization_rule',
+    'get_optimization_rule',
+    'list_optimization_rules',
+    'remove_optimization_rule',
 ]

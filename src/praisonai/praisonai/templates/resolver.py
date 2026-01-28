@@ -90,7 +90,7 @@ class TemplateResolver:
         r'^(?:https?://|praison://https?/).+'
     )
     LOCAL_PATTERN = re.compile(
-        r'^(?:praison://local/)?([.~]?/.+|[a-zA-Z]:\\.+)$'
+        r'^(?:praison://local/)?([.~]?/.+|/.+|[a-zA-Z]:\\.+)$'
     )
     
     @classmethod

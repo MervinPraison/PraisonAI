@@ -18,6 +18,136 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+def _read_image_for_judge(image_path: str, model: str = "gpt-4o-mini") -> str:
+    """
+    Read and describe an image for judge context.
+    
+    Uses vision LLM to describe the image content so the judge can
+    validate if agent outputs match the actual image.
+    
+    Args:
+        image_path: Local file path or URL to the image
+        model: Vision-capable model to use
+        
+    Returns:
+        Description of the image content
+    """
+    import base64
+    import os
+    
+    try:
+        import litellm
+        
+        # Prepare image content
+        if image_path.startswith(('http://', 'https://')):
+            # URL - pass directly
+            image_content = {
+                "type": "image_url",
+                "image_url": {"url": image_path}
+            }
+        elif os.path.exists(image_path):
+            # Local file - encode as base64
+            with open(image_path, 'rb') as f:
+                image_data = base64.b64encode(f.read()).decode('utf-8')
+            
+            # Detect mime type
+            ext = os.path.splitext(image_path)[1].lower()
+            mime_types = {
+                '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+                '.png': 'image/png', '.gif': 'image/gif',
+                '.webp': 'image/webp', '.bmp': 'image/bmp'
+            }
+            mime_type = mime_types.get(ext, 'image/jpeg')
+            
+            image_content = {
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime_type};base64,{image_data}"}
+            }
+        else:
+            return f"[Image not found: {image_path}]"
+        
+        # Use vision model to describe the image
+        response = litellm.completion(
+            model=model,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Describe this image in detail. Include: main subject, colors, text visible, key elements, and overall composition. Be factual and specific."},
+                    image_content
+                ]
+            }],
+            max_tokens=500,
+        )
+        
+        description = response.choices[0].message.content or ""
+        return f"[IMAGE DESCRIPTION: {description}]"
+        
+    except Exception as e:
+        logger.warning(f"Failed to read image for judge: {e}")
+        return f"[Failed to read image: {str(e)[:100]}]"
+
+
+def _crawl_url_for_judge(url: str) -> str:
+    """
+    Crawl a URL to get content for judge context.
+    
+    Uses the web_crawl tool to extract content so the judge can
+    validate if agent outputs match the actual URL content.
+    
+    Args:
+        url: URL to crawl
+        
+    Returns:
+        Extracted content from the URL (truncated)
+    """
+    try:
+        # Try to use the web_crawl tool
+        from praisonaiagents.tools import web_crawl
+        
+        result = web_crawl(url)
+        
+        if isinstance(result, dict):
+            if result.get('error'):
+                return f"[URL crawl error: {result.get('error')}]"
+            content = result.get('content', '')
+            title = result.get('title', '')
+            provider = result.get('provider', 'unknown')
+            
+            # Truncate content for judge context
+            if len(content) > 3000:
+                content = content[:3000] + "... [truncated]"
+            
+            return f"[URL CONTENT (via {provider})]\nTitle: {title}\n\n{content}"
+        
+        return f"[URL content: {str(result)[:3000]}]"
+        
+    except ImportError:
+        # Fallback to basic HTTP fetch
+        try:
+            import urllib.request
+            import re
+            
+            with urllib.request.urlopen(url, timeout=30) as response:
+                content = response.read().decode('utf-8', errors='ignore')
+            
+            # Basic HTML to text
+            content = re.sub(r'<script[^>]*>.*?</script>', '', content, flags=re.DOTALL | re.IGNORECASE)
+            content = re.sub(r'<style[^>]*>.*?</style>', '', content, flags=re.DOTALL | re.IGNORECASE)
+            content = re.sub(r'<[^>]+>', ' ', content)
+            content = re.sub(r'\s+', ' ', content).strip()
+            
+            if len(content) > 3000:
+                content = content[:3000] + "... [truncated]"
+            
+            return f"[URL CONTENT (via urllib)]\n{content}"
+            
+        except Exception as e:
+            return f"[Failed to crawl URL: {str(e)[:100]}]"
+    except Exception as e:
+        logger.warning(f"Failed to crawl URL for judge: {e}")
+        return f"[Failed to crawl URL: {str(e)[:100]}]"
+
+
 def _smart_truncate(text: str, max_chars: int = 1000, preserve_structure: bool = True) -> str:
     """
     Smart truncation that preserves key information for LLM evaluation.
@@ -598,6 +728,9 @@ RECIPE GOAL (The overall workflow objective - CRITICAL for evaluation):
 
 INPUT VALIDATION STATUS:
 {input_validation_status}
+
+ACTUAL INPUT CONTENT (Image/URL content the agent should have processed):
+{input_content}
 ═══════════════════════════════════════════════════════════════════
 
 AGENT: {agent_name}
@@ -1334,10 +1467,8 @@ REASONING: [brief explanation]
         - Hard truncation (loses info, is a problem)
         - Incomplete structures (JSON cut off, etc.)
         """
-        import re
         content_loss_detected = False
         content_loss_details = []
-        unresolved_templates = set()  # Track unique unresolved templates
         
         for event in events:
             if hasattr(event, 'event_type'):
@@ -1370,27 +1501,16 @@ REASONING: [brief explanation]
                         f"LLM response was truncated for agent '{agent_name}'"
                     )
             
-            # Check for unresolved template variables in LLM requests
-            if event_type == "llm_request":
-                messages = data.get("messages", [])
-                for msg in messages:
-                    if isinstance(msg, dict):
-                        content = str(msg.get("content", ""))
-                    else:
-                        content = str(msg)
-                    
-                    # Find unresolved {{variable}} patterns
-                    template_matches = re.findall(r'\{\{(\w+)\}\}', content)
-                    for match in template_matches:
-                        unresolved_templates.add(match)
-        
-        # Add unresolved template warnings
-        if unresolved_templates:
-            content_loss_detected = True
-            for template in sorted(unresolved_templates):
-                content_loss_details.append(
-                    f"⚠️ Unresolved template variable: {{{{{template}}}}} - variable not substituted"
-                )
+            # Note: We no longer flag {{variable}} patterns in LLM requests as "unresolved"
+            # because the trace stores the original action text BEFORE variable substitution.
+            # The workflow correctly substitutes variables during execution, but the trace
+            # records the template. This was causing false positives where the judge would
+            # flag {{researcher_output}} as unresolved even though it was properly substituted.
+            # 
+            # If we need to detect truly unresolved variables in the future, we should:
+            # 1. Check if the variable name matches a known output variable pattern (e.g., *_output)
+            # 2. Verify if the corresponding agent actually produced output
+            # 3. Only flag if the agent failed to produce output
         
         return content_loss_detected, content_loss_details
     
@@ -1451,10 +1571,27 @@ REASONING: [brief explanation]
         """
         litellm = self._get_litellm()
         
-        # Get raw data
-        raw_input = "\n".join(agent_info.get("inputs", [])[:3]) or "No input recorded"
-        raw_output = "\n".join(agent_info.get("outputs", [])[:3]) or "No output recorded"
-        raw_context = "\n".join(agent_info.get("context", [])[:2]) or "No context recorded"
+        # Get raw data - handle multimodal content (lists) gracefully
+        def _normalize_content(items):
+            """Convert items to strings, handling multimodal content."""
+            result = []
+            for item in items:
+                if isinstance(item, str):
+                    result.append(item)
+                elif isinstance(item, list):
+                    # Multimodal content - extract text parts
+                    text_parts = [p.get("text", "") for p in item if isinstance(p, dict) and p.get("type") == "text"]
+                    result.append(" ".join(text_parts) if text_parts else "[multimodal content]")
+                elif isinstance(item, dict):
+                    # Single dict item - extract text if present
+                    result.append(item.get("text", str(item)))
+                else:
+                    result.append(str(item))
+            return result
+        
+        raw_input = "\n".join(_normalize_content(agent_info.get("inputs", [])[:3])) or "No input recorded"
+        raw_output = "\n".join(_normalize_content(agent_info.get("outputs", [])[:3])) or "No output recorded"
+        raw_context = "\n".join(_normalize_content(agent_info.get("context", [])[:2])) or "No context recorded"
         
         # Check if chunked evaluation is needed
         total_content_size = len(raw_input) + len(raw_output) + len(raw_context)
@@ -1547,6 +1684,9 @@ REASONING: [brief explanation]
         
         # Use mode-specific prompt template
         # Note: input_text, output, context_summary already smart-truncated above
+        # Get input context (image/URL descriptions) if available
+        input_content = yaml_info.get("input_context", "Not provided") if yaml_info else "Not provided"
+        
         prompt = self.prompt_template.format(
             agent_name=agent_name,
             agent_goal=_smart_truncate(agent_goal, max_chars=200),
@@ -1563,6 +1703,7 @@ REASONING: [brief explanation]
             recipe_goal=recipe_goal or "Not specified",
             previous_steps_context=previous_steps_context,
             input_validation_status=input_validation_status,
+            input_content=input_content,  # Image/URL descriptions for validation
             # Memory-specific fields (used in memory mode)
             memory_store_count=agent_info.get("memory_store_count", 0),
             memory_search_count=agent_info.get("memory_search_count", 0),
@@ -1717,6 +1858,9 @@ REASONING: [brief explanation]
             
             output_with_header = chunk_header + chunk
             
+            # Get input context (image/URL descriptions) if available
+            input_content = yaml_info.get("input_context", "Not provided") if yaml_info else "Not provided"
+            
             # Build prompt for this chunk
             prompt = self.prompt_template.format(
                 agent_name=agent_name,
@@ -1733,6 +1877,7 @@ REASONING: [brief explanation]
                 recipe_goal=recipe_goal or "Not specified",
                 previous_steps_context=previous_steps_context,
                 input_validation_status=input_validation_status,
+                input_content=input_content,  # Image/URL descriptions for validation
                 memory_store_count=agent_info.get("memory_store_count", 0),
                 memory_search_count=agent_info.get("memory_search_count", 0),
                 memory_store_details=agent_info.get("memory_store_details", "None"),
@@ -2052,9 +2197,32 @@ REASONING: [brief explanation]
         # Load YAML info if provided
         yaml_info = None
         recipe_goal = ""
+        input_context = ""  # Additional context from input images/URLs
         if yaml_file:
             yaml_info = _detect_yaml_structure(yaml_file)
             recipe_goal = yaml_info.get("recipe_goal", "")
+            
+            # Extract input variables from YAML for image/URL context
+            variables = yaml_info.get("variables", {})
+            
+            # Check for image input and read it for judge context
+            image_path = variables.get("image_path") or variables.get("image_url") or variables.get("image")
+            if image_path:
+                logger.info(f"Reading image for judge context: {image_path}")
+                image_description = _read_image_for_judge(image_path)
+                input_context += f"\n\nINPUT IMAGE CONTENT:\n{image_description}"
+            
+            # Check for URL input and crawl it for judge context
+            url = variables.get("url") or variables.get("source_url") or variables.get("target_url")
+            if url and url.startswith(('http://', 'https://')):
+                logger.info(f"Crawling URL for judge context: {url}")
+                url_content = _crawl_url_for_judge(url)
+                input_context += f"\n\nINPUT URL CONTENT:\n{url_content}"
+        
+        # Store input context for use in agent judging
+        if input_context:
+            yaml_info = yaml_info or {}
+            yaml_info["input_context"] = input_context
         
         # Detect content loss (includes unresolved templates)
         content_loss_detected, content_loss_details = self._detect_content_loss(events)

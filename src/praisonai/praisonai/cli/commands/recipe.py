@@ -437,17 +437,21 @@ def recipe_optimize(
     iterations: int = typer.Option(3, "--iterations", "-i", help="Maximum optimization iterations"),
     threshold: float = typer.Option(8.0, "--threshold", "-t", help="Score threshold to stop (1-10)"),
     input_data: str = typer.Option("", "--input", help="Input data for recipe runs"),
+    criteria: str = typer.Option(None, "--criteria", "-c", help="Custom evaluation criteria (for domain-agnostic optimization)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """Optimize a recipe using AI judge feedback.
     
     Iteratively runs the recipe, judges output, and applies improvements.
     
+    Supports custom criteria for domain-agnostic optimization (e.g., water flow, data pipelines).
+    
     Examples:
         praisonai recipe optimize my-recipe
         praisonai recipe optimize my-recipe "improve error handling"
         praisonai recipe optimize my-recipe --iterations 5 --threshold 9.0
         praisonai recipe optimize my-recipe --input '{"query": "test"}'
+        praisonai recipe optimize my-recipe --criteria "Water flow is optimal: no leaks, pressure within range"
     """
     from pathlib import Path
     import logging
@@ -469,9 +473,21 @@ def recipe_optimize(
     try:
         from praisonai.cli.features.recipe_optimizer import RecipeOptimizer
         
+        # Create custom judge if criteria provided
+        custom_judge = None
+        if criteria:
+            try:
+                from praisonaiagents.eval import Judge
+                custom_judge = Judge(criteria=criteria)
+                print(f"   Custom criteria: {criteria[:50]}{'...' if len(criteria) > 50 else ''}")
+            except ImportError:
+                print("   ⚠️ Custom criteria requires praisonaiagents. Using default judge.")
+        
         optimizer = RecipeOptimizer(
             max_iterations=iterations,
             score_threshold=threshold,
+            judge=custom_judge,
+            criteria=criteria,
         )
         
         final_report = optimizer.optimize(

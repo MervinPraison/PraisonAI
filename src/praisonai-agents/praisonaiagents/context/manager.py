@@ -844,8 +844,9 @@ class ContextManager:
         message_hash = hashlib.sha256(messages_json.encode()).hexdigest()[:16]
         tools_hash = hashlib.sha256(tools_json.encode()).hexdigest()[:16]
         
+        from datetime import timezone
         hook_data = SnapshotHookData(
-            timestamp=datetime.utcnow().isoformat() + "Z",
+            timestamp=datetime.now(tz=timezone.utc).isoformat().replace('+00:00', 'Z'),
             messages=messages,
             tools=tools,
             message_hash=message_hash,
@@ -998,8 +999,9 @@ class ContextManager:
         details: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Add an event to optimization history."""
+        from datetime import timezone
         event = OptimizationEvent(
-            timestamp=datetime.utcnow().isoformat() + "Z",
+            timestamp=datetime.now(tz=timezone.utc).isoformat().replace('+00:00', 'Z'),
             event_type=event_type,
             strategy=strategy,
             tokens_before=tokens_before,

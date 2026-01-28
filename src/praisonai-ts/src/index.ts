@@ -163,9 +163,15 @@ export {
   Evaluator, createEvaluator, createDefaultEvaluator,
   EvalResults, createEvalResults,
   relevanceCriterion, lengthCriterion, containsKeywordsCriterion, noHarmfulContentCriterion,
+  // LLM-as-Judge
+  Judge, AccuracyJudge, CriteriaJudge, RecipeJudge,
+  addJudge, getJudge, listJudges, removeJudge,
+  addOptimizationRule, getOptimizationRule, listOptimizationRules, removeOptimizationRule,
+  parseJudgeResponse,
   type EvalResult, type PerformanceResult, type AccuracyEvalConfig,
   type PerformanceEvalConfig, type ReliabilityEvalConfig, type EvalCriteria, type EvaluatorConfig,
-  type TestResult, type AggregatedResults
+  type TestResult, type AggregatedResults,
+  type JudgeConfig, type JudgeCriteriaConfig, type JudgeResult, type JudgeRunOptions, type JudgeOptions,
 } from './eval';
 
 // Note: Observability exports are at the bottom of this file with the full 14+ integrations

@@ -1,16 +1,23 @@
 {
-  "version": "1.3.0",
-  "lastUpdated": "2025-01-15",
-  "implementationStatus": "Phase 5 Complete - AI SDK Wrapper + Integrations",
+  "version": "1.4.0",
+  "lastUpdated": "2025-01-28",
+  "implementationStatus": "Phase 6 Complete - LLM-as-Judge Evaluation",
   "summary": {
     "pythonCoreFeatures": 85,
     "pythonWrapperFeatures": 45,
-    "typescriptFeatures": 95,
-    "gapCount": 5,
+    "typescriptFeatures": 100,
+    "gapCount": 4,
     "priorityP0": 0,
     "priorityP1": 1,
     "priorityP2": 2,
-    "priorityP3": 2,
+    "priorityP3": 1,
+    "newInV1_4": {
+      "llmAsJudge": ["Judge", "AccuracyJudge", "CriteriaJudge", "RecipeJudge"],
+      "judgeRegistry": ["addJudge", "getJudge", "listJudges", "removeJudge"],
+      "optimizationRules": ["addOptimizationRule", "getOptimizationRule", "listOptimizationRules", "removeOptimizationRule"],
+      "judgeConfig": ["JudgeConfig", "JudgeCriteriaConfig", "JudgeResult"],
+      "cliJudge": ["eval judge --input --expected --criteria --threshold"]
+    },
     "newInV1_3": {
       "aiSdkWrappers": ["generateText", "streamText", "generateObject", "streamObject", "generateImage", "embed", "embedMany"],
       "serverAdapters": ["http", "express", "hono", "fastify", "nest"],
@@ -90,7 +97,7 @@
       "session": ["Session", "SessionManager"],
       "workflows": ["Workflow", "parallel", "route", "loop", "repeat", "WorkflowStep", "WorkflowContext", "parseYAMLWorkflow", "createWorkflowFromYAML"],
       "guardrails": ["Guardrail", "GuardrailManager", "LLMGuardrail", "builtInGuardrails"],
-      "eval": ["accuracyEval", "performanceEval", "reliabilityEval", "EvalSuite"],
+      "eval": ["accuracyEval", "performanceEval", "reliabilityEval", "EvalSuite", "Judge", "AccuracyJudge", "CriteriaJudge", "RecipeJudge", "addJudge", "getJudge", "listJudges", "removeJudge"],
       "observability": ["MemoryObservabilityAdapter", "ConsoleObservabilityProvider", "LangfuseObservabilityProvider", "BaseObservabilityProvider"],
       "skills": ["SkillManager", "parseSkillFile", "createSkillManager"],
       "telemetry": ["TelemetryCollector", "getTelemetry", "enableTelemetry", "disableTelemetry"],
