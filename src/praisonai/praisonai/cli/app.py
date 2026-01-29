@@ -219,6 +219,12 @@ def register_commands():
     from .commands.replay import app as replay_app
     from .commands.loop import app as loop_app
     
+    # Import new moltbot-inspired commands
+    from .commands.bot import app as bot_app
+    from .commands.browser import app as browser_app
+    from .commands.plugins import app as plugins_app
+    from .commands.sandbox import app as sandbox_app
+    
     # Import TUI and queue commands
     from .features.tui.debug import create_debug_app as create_tui_debug_app
     from .features.tui.cli import create_queue_app
@@ -278,6 +284,12 @@ def register_commands():
     app.add_typer(batch_app, name="batch", help="Run all PraisonAI scripts in current folder")
     app.add_typer(replay_app, name="replay", help="Context replay for debugging agent execution")
     app.add_typer(loop_app, name="loop", help="Autonomous agent execution loops")
+    
+    # Register moltbot-inspired commands
+    app.add_typer(bot_app, name="bot", help="Messaging bots with full agent capabilities")
+    app.add_typer(browser_app, name="browser", help="Browser control for agent automation")
+    app.add_typer(plugins_app, name="plugins", help="Plugin management and inspection")
+    app.add_typer(sandbox_app, name="sandbox", help="Sandbox container management")
     
     # Register standardise command
     try:
