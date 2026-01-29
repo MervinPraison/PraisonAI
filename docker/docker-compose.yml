@@ -89,54 +89,7 @@ services:
       PRAISON_CONFIG_DIR: /root/.praison
     networks:
       - praison_network
-
-  # PraisonAI Slack Bot Service
-  slack-bot:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.bot
-    volumes:
-      - praison_data:/root/.praison
-    environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
-      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN}
-      PRAISON_CONFIG_DIR: /root/.praison
-    restart: unless-stopped
-    networks:
-      - praison_network
-
-  # PraisonAI Discord Bot Service
-  discord-bot:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.bot
-    volumes:
-      - praison_data:/root/.praison
-    environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
-      PRAISON_CONFIG_DIR: /root/.praison
-    command: [ "praisonai", "bot", "discord" ]
-    restart: unless-stopped
-    networks:
-      - praison_network
-
-  # PraisonAI Telegram Bot Service
-  telegram-bot:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.bot
-    volumes:
-      - praison_data:/root/.praison
-    environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      PRAISON_CONFIG_DIR: /root/.praison
-    command: [ "praisonai", "bot", "telegram" ]
-    restart: unless-stopped
-    networks:
-      - praison_network
+  # For bot services (Slack, Discord, Telegram), see docker/bots/
 
 volumes:
   praison_data:

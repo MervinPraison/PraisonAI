@@ -1,0 +1,53 @@
+version: '3.8'
+
+# PraisonAI Bot Services
+# Run specific bots: docker compose up slack-bot
+# Run all bots: docker compose up
+
+services:
+  # Slack Bot
+  slack-bot:
+    build:
+      context: ../..
+      dockerfile: docker/bots/Dockerfile
+    volumes:
+      - praison_data:/root/.praison
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN}
+      PRAISON_CONFIG_DIR: /root/.praison
+    command: [ "praisonai", "bot", "slack" ]
+    restart: unless-stopped
+
+  # Discord Bot
+  discord-bot:
+    build:
+      context: ../..
+      dockerfile: docker/bots/Dockerfile
+    volumes:
+      - praison_data:/root/.praison
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
+      PRAISON_CONFIG_DIR: /root/.praison
+    command: [ "praisonai", "bot", "discord" ]
+    restart: unless-stopped
+
+  # Telegram Bot
+  telegram-bot:
+    build:
+      context: ../..
+      dockerfile: docker/bots/Dockerfile
+    volumes:
+      - praison_data:/root/.praison
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      PRAISON_CONFIG_DIR: /root/.praison
+    command: [ "praisonai", "bot", "telegram" ]
+    restart: unless-stopped
+
+volumes:
+  praison_data:
+    driver: local
