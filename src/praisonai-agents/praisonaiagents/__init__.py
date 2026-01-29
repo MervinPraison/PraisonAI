@@ -381,6 +381,38 @@ _LAZY_IMPORTS = {
     # db and obs modules
     'db': ('praisonaiagents.db', 'db'),
     'obs': ('praisonaiagents.obs', 'obs'),
+    
+    # Gateway protocols and config (implementations in praisonai wrapper)
+    'GatewayProtocol': ('praisonaiagents.gateway.protocols', 'GatewayProtocol'),
+    'GatewaySessionProtocol': ('praisonaiagents.gateway.protocols', 'GatewaySessionProtocol'),
+    'GatewayClientProtocol': ('praisonaiagents.gateway.protocols', 'GatewayClientProtocol'),
+    'GatewayEvent': ('praisonaiagents.gateway.protocols', 'GatewayEvent'),
+    'GatewayMessage': ('praisonaiagents.gateway.protocols', 'GatewayMessage'),
+    'EventType': ('praisonaiagents.gateway.protocols', 'EventType'),
+    'GatewayConfig': ('praisonaiagents.gateway.config', 'GatewayConfig'),
+    'SessionConfig': ('praisonaiagents.gateway.config', 'SessionConfig'),
+    
+    # Bot protocols and config (implementations in praisonai wrapper)
+    'BotProtocol': ('praisonaiagents.bots.protocols', 'BotProtocol'),
+    'BotMessage': ('praisonaiagents.bots.protocols', 'BotMessage'),
+    'BotUser': ('praisonaiagents.bots.protocols', 'BotUser'),
+    'BotChannel': ('praisonaiagents.bots.protocols', 'BotChannel'),
+    'MessageType': ('praisonaiagents.bots.protocols', 'MessageType'),
+    'BotConfig': ('praisonaiagents.bots.config', 'BotConfig'),
+    
+    # Sandbox protocols and config (implementations in praisonai wrapper)
+    'SandboxProtocol': ('praisonaiagents.sandbox.protocols', 'SandboxProtocol'),
+    'SandboxResult': ('praisonaiagents.sandbox.protocols', 'SandboxResult'),
+    'SandboxStatus': ('praisonaiagents.sandbox.protocols', 'SandboxStatus'),
+    'ResourceLimits': ('praisonaiagents.sandbox.protocols', 'ResourceLimits'),
+    'SandboxConfig': ('praisonaiagents.sandbox.config', 'SandboxConfig'),
+    'SecurityPolicy': ('praisonaiagents.sandbox.config', 'SecurityPolicy'),
+    
+    # Model failover
+    'AuthProfile': ('praisonaiagents.llm.failover', 'AuthProfile'),
+    'ProviderStatus': ('praisonaiagents.llm.failover', 'ProviderStatus'),
+    'FailoverConfig': ('praisonaiagents.llm.failover', 'FailoverConfig'),
+    'FailoverManager': ('praisonaiagents.llm.failover', 'FailoverManager'),
 }
 
 
