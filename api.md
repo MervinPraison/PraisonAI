@@ -779,6 +779,19 @@ Methods:
 * <code title="cli">praisonai benchmark profile <a href="./src/praisonai/praisonai/cli/commands/benchmark.py">--help</a></code>
 * <code title="cli">praisonai benchmark sdk <a href="./src/praisonai/praisonai/cli/commands/benchmark.py">--help</a></code>
 * <code title="cli">praisonai benchmark workflow <a href="./src/praisonai/praisonai/cli/commands/benchmark.py">--help</a></code>
+* <code title="cli">praisonai bot bot-callback <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
+* <code title="cli">praisonai bot discord <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
+* <code title="cli">praisonai bot slack <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
+* <code title="cli">praisonai bot telegram <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
+* <code title="cli">praisonai browser browser-callback <a href="./src/praisonai/praisonai/cli/commands/browser.py">--help</a></code>
+* <code title="cli">praisonai browser click <a href="./src/praisonai/praisonai/cli/commands/browser.py">--help</a></code>
+* <code title="cli">praisonai browser navigate <a href="./src/praisonai/praisonai/cli/commands/browser.py">--help</a></code>
+* <code title="cli">praisonai browser open <a href="./src/praisonai/praisonai/cli/commands/browser.py">--help</a></code>
+* <code title="cli">praisonai browser profiles <a href="./src/praisonai/praisonai/cli/commands/browser.py">--help</a></code>
+* <code title="cli">praisonai browser screenshot <a href="./src/praisonai/praisonai/cli/commands/browser.py">--help</a></code>
+* <code title="cli">praisonai browser snapshot <a href="./src/praisonai/praisonai/cli/commands/browser.py">--help</a></code>
+* <code title="cli">praisonai browser status <a href="./src/praisonai/praisonai/cli/commands/browser.py">--help</a></code>
+* <code title="cli">praisonai browser type <a href="./src/praisonai/praisonai/cli/commands/browser.py">--help</a></code>
 * <code title="cli">praisonai call call-main <a href="./src/praisonai/praisonai/cli/commands/call.py">--help</a></code>
 * <code title="cli">praisonai chat <a href="./src/praisonai/praisonai/cli/main.py">--help</a></code>
 * <code title="cli">praisonai chat chat-main <a href="./src/praisonai/praisonai/cli/commands/chat.py">--help</a></code>
@@ -882,6 +895,12 @@ Methods:
 * <code title="cli">praisonai package install <a href="./src/praisonai/praisonai/cli/commands/package.py">--help</a></code>
 * <code title="cli">praisonai package list <a href="./src/praisonai/praisonai/cli/commands/package.py">--help</a></code>
 * <code title="cli">praisonai package uninstall <a href="./src/praisonai/praisonai/cli/commands/package.py">--help</a></code>
+* <code title="cli">praisonai plugins disable <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
+* <code title="cli">praisonai plugins doctor <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
+* <code title="cli">praisonai plugins enable <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
+* <code title="cli">praisonai plugins info <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
+* <code title="cli">praisonai plugins list <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
+* <code title="cli">praisonai plugins plugins-callback <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
 * <code title="cli">praisonai profile imports <a href="./src/praisonai/praisonai/cli/commands/profile.py">--help</a></code>
 * <code title="cli">praisonai profile optimize <a href="./src/praisonai/praisonai/cli/commands/profile.py">--help</a></code>
 * <code title="cli">praisonai profile profile-callback <a href="./src/praisonai/praisonai/cli/commands/profile.py">--help</a></code>
@@ -922,6 +941,11 @@ Methods:
 * <code title="cli">praisonai rules list <a href="./src/praisonai/praisonai/cli/commands/rules.py">--help</a></code>
 * <code title="cli">praisonai run <a href="./src/praisonai/praisonai/cli/main.py">--help</a></code>
 * <code title="cli">praisonai run run-main <a href="./src/praisonai/praisonai/cli/commands/run.py">--help</a></code>
+* <code title="cli">praisonai sandbox explain <a href="./src/praisonai/praisonai/cli/commands/sandbox.py">--help</a></code>
+* <code title="cli">praisonai sandbox list <a href="./src/praisonai/praisonai/cli/commands/sandbox.py">--help</a></code>
+* <code title="cli">praisonai sandbox recreate <a href="./src/praisonai/praisonai/cli/commands/sandbox.py">--help</a></code>
+* <code title="cli">praisonai sandbox sandbox-callback <a href="./src/praisonai/praisonai/cli/commands/sandbox.py">--help</a></code>
+* <code title="cli">praisonai sandbox status <a href="./src/praisonai/praisonai/cli/commands/sandbox.py">--help</a></code>
 * <code title="cli">praisonai schedule delete <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
 * <code title="cli">praisonai schedule describe <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
 * <code title="cli">praisonai schedule list <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
@@ -955,7 +979,9 @@ Methods:
 * <code title="cli">praisonai session list <a href="./src/praisonai/praisonai/cli/commands/session.py">--help</a></code>
 * <code title="cli">praisonai session resume <a href="./src/praisonai/praisonai/cli/commands/session.py">--help</a></code>
 * <code title="cli">praisonai session show <a href="./src/praisonai/praisonai/cli/commands/session.py">--help</a></code>
+* <code title="cli">praisonai skills check <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
 * <code title="cli">praisonai skills create <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
+* <code title="cli">praisonai skills eligible <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
 * <code title="cli">praisonai skills info <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
 * <code title="cli">praisonai skills install <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
 * <code title="cli">praisonai skills list <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
