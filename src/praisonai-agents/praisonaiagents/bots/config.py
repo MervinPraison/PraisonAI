@@ -40,6 +40,8 @@ class BotConfig:
     max_message_length: int = 4096
     retry_attempts: int = 3
     timeout: int = 30
+    reply_in_thread: bool = False  # Default to inline, set True for thread replies
+    thread_threshold: int = 500  # Auto-thread responses longer than this (0 = disabled)
     metadata: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -57,6 +59,8 @@ class BotConfig:
             "max_message_length": self.max_message_length,
             "retry_attempts": self.retry_attempts,
             "timeout": self.timeout,
+            "reply_in_thread": self.reply_in_thread,
+            "thread_threshold": self.thread_threshold,
             "metadata": self.metadata,
         }
     
