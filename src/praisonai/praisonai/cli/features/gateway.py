@@ -108,7 +108,17 @@ class GatewayHandler:
 
 
 def handle_gateway_command(args) -> None:
-    """Handle gateway CLI command."""
+    """Handle gateway CLI command.
+    
+    DEPRECATED: Use `praisonai serve gateway` instead.
+    """
+    import sys
+    
+    # Print deprecation warning
+    print("\n\033[93m⚠ DEPRECATION WARNING:\033[0m", file=sys.stderr)
+    print("\033[93m'praisonai gateway' is deprecated and will be removed in a future version.\033[0m", file=sys.stderr)
+    print("\033[93mPlease use 'praisonai serve gateway' instead.\033[0m\n", file=sys.stderr)
+    
     handler = GatewayHandler()
     
     subcommand = getattr(args, "gateway_command", None) or "start"

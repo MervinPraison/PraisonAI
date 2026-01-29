@@ -31,7 +31,17 @@ def acp_main(
     debug: bool = typer.Option(False, "--debug", help="Enable debug logging"),
     profile: Optional[str] = typer.Option(None, "--profile", help="Use named profile from config"),
 ):
-    """Start ACP server for IDE integration."""
+    """Start ACP server for IDE integration.
+    
+    DEPRECATED: Use `praisonai serve acp` instead.
+    """
+    import sys
+    
+    # Print deprecation warning
+    print("\n\033[93m⚠ DEPRECATION WARNING:\033[0m", file=sys.stderr)
+    print("\033[93m'praisonai acp' is deprecated and will be removed in a future version.\033[0m", file=sys.stderr)
+    print("\033[93mPlease use 'praisonai serve acp' instead.\033[0m\n", file=sys.stderr)
+    
     # Build args for existing handler
     args = [
         "--workspace", workspace,

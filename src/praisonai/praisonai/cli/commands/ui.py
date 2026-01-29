@@ -20,6 +20,8 @@ def ui_main(
     """
     Start the default web UI (agents management).
     
+    DEPRECATED: Use `praisonai serve ui` instead.
+    
     All browser-based UIs are under this namespace:
     - praisonai ui         - Default agents UI
     - praisonai ui chat    - Chat interface
@@ -32,6 +34,13 @@ def ui_main(
         praisonai ui --port 3000
         praisonai ui --public
     """
+    import sys
+    
+    # Print deprecation warning
+    print("\n\033[93m⚠ DEPRECATION WARNING:\033[0m", file=sys.stderr)
+    print("\033[93m'praisonai ui' is deprecated and will be removed in a future version.\033[0m", file=sys.stderr)
+    print("\033[93mPlease use 'praisonai serve ui' instead.\033[0m\n", file=sys.stderr)
+    
     # If a subcommand was invoked, don't run the default
     if ctx.invoked_subcommand is not None:
         return

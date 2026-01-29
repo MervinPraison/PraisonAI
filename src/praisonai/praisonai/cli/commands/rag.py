@@ -619,6 +619,8 @@ def rag_serve(
     """
     Start RAG microservice API.
     
+    DEPRECATED: Use `praisonai serve rag` instead.
+    
     Endpoints:
         GET  /health - Health check
         POST /rag/query - Query with JSON body {"question": "...", "top_k": 5, "hybrid": false}
@@ -632,6 +634,13 @@ def rag_serve(
         praisonai rag serve --openai-compat --port 8080
         praisonai rag serve --profile --profile-out ./profile.json
     """
+    import sys
+    
+    # Print deprecation warning
+    print("\n\033[93m⚠ DEPRECATION WARNING:\033[0m", file=sys.stderr)
+    print("\033[93m'praisonai rag serve' is deprecated and will be removed in a future version.\033[0m", file=sys.stderr)
+    print("\033[93mPlease use 'praisonai serve rag' instead.\033[0m\n", file=sys.stderr)
+    
     from rich.console import Console
     
     console = Console()
