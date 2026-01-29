@@ -284,22 +284,41 @@ class BotHandler:
                 llm=capabilities.model if capabilities and capabilities.model else None,
             )
         
-        if not os.path.exists(file_path):
-            print(f"Warning: Agent file not found: {file_path}")
+        # Resolve file path - try current dir first, then check if it's absolute
+        resolved_path = file_path
+        if not os.path.isabs(file_path):
+            # Try relative to current working directory
+            cwd_path = os.path.join(os.getcwd(), file_path)
+            if os.path.exists(cwd_path):
+                resolved_path = cwd_path
+        
+        if not os.path.exists(resolved_path):
+            print(f"Warning: Agent file not found: {file_path} (resolved: {resolved_path})")
             return Agent(
                 name="assistant",
                 instructions="You are a helpful assistant.",
                 tools=tools if tools else None,
+                llm=capabilities.model if capabilities and capabilities.model else None,
             )
         
         try:
             import yaml
-            with open(file_path, "r") as f:
+            with open(resolved_path, "r") as f:
                 config = yaml.safe_load(f)
             
+            # Support both list-style and dict-style YAML agents
+            agent_config = None
             if "agents" in config and config["agents"]:
-                agent_config = config["agents"][0]
-            else:
+                agents = config["agents"]
+                if isinstance(agents, list):
+                    # List style: agents: - name: foo
+                    agent_config = agents[0]
+                elif isinstance(agents, dict):
+                    # Dict style: agents: searcher: name: foo
+                    first_key = next(iter(agents))
+                    agent_config = agents[first_key]
+            
+            if not agent_config:
                 agent_config = config
             
             # Merge tools from YAML and capabilities
@@ -313,11 +332,14 @@ class BotHandler:
                 tools=all_tools if all_tools else None,
             )
         except Exception as e:
+            import traceback
             print(f"Error loading agent: {e}")
+            traceback.print_exc()
             return Agent(
                 name="assistant",
                 instructions="You are a helpful assistant.",
                 tools=tools if tools else None,
+                llm=capabilities.model if capabilities and capabilities.model else None,
             )
     
     def _build_tools(self, capabilities: BotCapabilities) -> List:

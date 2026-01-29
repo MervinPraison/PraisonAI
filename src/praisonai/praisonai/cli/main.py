@@ -1648,8 +1648,12 @@ class PraisonAI:
             
             elif args.command == 'bot':
                 # Bot command - messaging bot runtimes (Telegram, Discord, Slack)
+                # Re-inject flags consumed by main parser into unknown_args for bot handler
+                bot_args = list(unknown_args)
+                if getattr(args, 'model', None) and '--model' not in bot_args and '-m' not in bot_args:
+                    bot_args.extend(['--model', args.model])
                 from .features.bots_cli import handle_bot_command
-                exit_code = handle_bot_command(unknown_args)
+                exit_code = handle_bot_command(bot_args)
                 sys.exit(exit_code)
             
             elif args.command == 'sandbox':
