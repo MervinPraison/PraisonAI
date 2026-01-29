@@ -117,16 +117,10 @@ class BotHandler:
             print("Provide via --token or TELEGRAM_BOT_TOKEN environment variable")
             return
         
-        # Set auto-approve if enabled - use direct API
+        # Set auto-approve if enabled - use environment variable (persists across async contexts)
         if capabilities and capabilities.auto_approve:
-            try:
-                from praisonaiagents.approval import set_yaml_approved_tools, DEFAULT_DANGEROUS_TOOLS
-                approved_tools = list(DEFAULT_DANGEROUS_TOOLS.keys())
-                set_yaml_approved_tools(approved_tools)
-                logger.info(f"Auto-approve enabled for tools: {approved_tools}")
-            except ImportError:
-                os.environ["PRAISONAI_AUTO_APPROVE"] = "true"
-                logger.info("Auto-approve enabled via environment variable")
+            os.environ["PRAISONAI_AUTO_APPROVE"] = "true"
+            logger.info("Auto-approve enabled for all tool executions")
         
         try:
             from praisonai.bots import TelegramBot
@@ -165,16 +159,10 @@ class BotHandler:
             print("Provide via --token or DISCORD_BOT_TOKEN environment variable")
             return
         
-        # Set auto-approve if enabled - use direct API
+        # Set auto-approve if enabled - use environment variable (persists across async contexts)
         if capabilities and capabilities.auto_approve:
-            try:
-                from praisonaiagents.approval import set_yaml_approved_tools, DEFAULT_DANGEROUS_TOOLS
-                approved_tools = list(DEFAULT_DANGEROUS_TOOLS.keys())
-                set_yaml_approved_tools(approved_tools)
-                logger.info(f"Auto-approve enabled for tools: {approved_tools}")
-            except ImportError:
-                os.environ["PRAISONAI_AUTO_APPROVE"] = "true"
-                logger.info("Auto-approve enabled via environment variable")
+            os.environ["PRAISONAI_AUTO_APPROVE"] = "true"
+            logger.info("Auto-approve enabled for all tool executions")
         
         try:
             from praisonai.bots import DiscordBot
@@ -217,18 +205,10 @@ class BotHandler:
             print("Provide via --token or SLACK_BOT_TOKEN environment variable")
             return
         
-        # Set auto-approve if enabled - use direct API instead of env var
+        # Set auto-approve if enabled - use environment variable (persists across async contexts)
         if capabilities and capabilities.auto_approve:
-            try:
-                from praisonaiagents.approval import set_yaml_approved_tools, DEFAULT_DANGEROUS_TOOLS
-                # Approve all dangerous tools directly
-                approved_tools = list(DEFAULT_DANGEROUS_TOOLS.keys())
-                set_yaml_approved_tools(approved_tools)
-                logger.info(f"Auto-approve enabled for tools: {approved_tools}")
-            except ImportError as e:
-                # Fallback to env var
-                os.environ["PRAISONAI_AUTO_APPROVE"] = "true"
-                logger.info("Auto-approve enabled via environment variable")
+            os.environ["PRAISONAI_AUTO_APPROVE"] = "true"
+            logger.info("Auto-approve enabled for all tool executions")
         
         try:
             from praisonai.bots import SlackBot
