@@ -12,16 +12,47 @@ from typing import Optional, Dict, Any, List, Callable, Union, Literal
 
 class HookEvent(str, Enum):
     """Event names for the hook system."""
+    # Tool lifecycle
     BEFORE_TOOL = "before_tool"
     AFTER_TOOL = "after_tool"
+    
+    # Agent lifecycle
     BEFORE_AGENT = "before_agent"
     AFTER_AGENT = "after_agent"
+    
+    # Session lifecycle
     SESSION_START = "session_start"
     SESSION_END = "session_end"
+    
+    # LLM lifecycle
     BEFORE_LLM = "before_llm"
     AFTER_LLM = "after_llm"
+    
+    # Error handling
     ON_ERROR = "on_error"
     ON_RETRY = "on_retry"
+    
+    # Message lifecycle (for bot/channel integrations)
+    MESSAGE_RECEIVED = "message_received"
+    MESSAGE_SENDING = "message_sending"
+    MESSAGE_SENT = "message_sent"
+    
+    # Gateway lifecycle
+    GATEWAY_START = "gateway_start"
+    GATEWAY_STOP = "gateway_stop"
+    
+    # Compaction (memory management)
+    BEFORE_COMPACTION = "before_compaction"
+    AFTER_COMPACTION = "after_compaction"
+    
+    # Tool result persistence (for modifying tool results before storage)
+    TOOL_RESULT_PERSIST = "tool_result_persist"
+    
+    # Claude Code parity events
+    USER_PROMPT_SUBMIT = "user_prompt_submit"  # When user submits a prompt
+    NOTIFICATION = "notification"              # When notification is sent
+    SUBAGENT_STOP = "subagent_stop"           # When subagent completes
+    SETUP = "setup"                           # On initialization/maintenance
 
 
 # Decision types for hook outputs

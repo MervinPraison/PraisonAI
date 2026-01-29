@@ -29,6 +29,25 @@ class TestPermissionAction:
         assert PermissionAction.ASK.value == "ask"
 
 
+class TestPermissionMode:
+    """Tests for PermissionMode enum - Claude Code parity."""
+    
+    def test_mode_values(self):
+        """Test permission mode enum values."""
+        from praisonaiagents.permissions.rules import PermissionMode
+        
+        # DEFAULT - Standard permission checking
+        assert PermissionMode.DEFAULT.value == "default"
+        # ACCEPT_EDITS - Auto-accept file edits
+        assert PermissionMode.ACCEPT_EDITS.value == "accept_edits"
+        # DONT_ASK - Auto-deny prompts
+        assert PermissionMode.DONT_ASK.value == "dont_ask"
+        # BYPASS - Skip all checks (dangerous)
+        assert PermissionMode.BYPASS.value == "bypass_permissions"
+        # PLAN - Read-only exploration
+        assert PermissionMode.PLAN.value == "plan"
+
+
 class TestPermissionRule:
     """Tests for PermissionRule."""
     

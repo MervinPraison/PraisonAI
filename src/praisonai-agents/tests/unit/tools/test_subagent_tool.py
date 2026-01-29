@@ -35,9 +35,10 @@ class TestSubagentTool:
     def test_subagent_with_factory(self):
         """Test subagent execution with factory."""
         class MockAgent:
-            def __init__(self, name, tools=None):
+            def __init__(self, name, tools=None, llm=None):
                 self.name = name
                 self.tools = tools
+                self.llm = llm
             
             def chat(self, prompt):
                 return f"Executed: {prompt}"
@@ -87,6 +88,48 @@ class TestSubagentTool:
         )
         
         assert result["success"] is True
+    
+    def test_subagent_with_llm_selection(self):
+        """Test subagent with custom LLM model selection (Claude Code parity)."""
+        class MockAgent:
+            def __init__(self, name, tools=None, llm=None):
+                self.name = name
+                self.tools = tools
+                self.llm = llm
+            
+            def chat(self, prompt):
+                return f"Model: {self.llm}, Task: {prompt}"
+        
+        tool = create_subagent_tool(
+            agent_factory=lambda **kwargs: MockAgent(**kwargs),
+            default_llm="gpt-4o-mini"
+        )
+        func = tool["function"]
+        
+        # Test with default LLM
+        result = func(task="Test task")
+        assert result["success"] is True
+        assert "gpt-4o-mini" in result["output"]
+        
+        # Test with custom LLM override
+        result2 = func(task="Test task", llm="claude-3-sonnet")
+        assert result2["success"] is True
+        assert "claude-3-sonnet" in result2["output"]
+    
+    def test_subagent_with_permission_mode(self):
+        """Test subagent with permission mode (Claude Code parity)."""
+        tool = create_subagent_tool()
+        func = tool["function"]
+        
+        # Test with permission_mode parameter
+        result = func(
+            task="Analyze code",
+            permission_mode="plan"  # Read-only mode
+        )
+        
+        assert result["success"] is True
+        # Permission mode should be passed through
+        assert result.get("permission_mode") == "plan"
 
 
 class TestBatchTool:

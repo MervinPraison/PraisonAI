@@ -33,6 +33,34 @@ from praisonaiagents.hooks.runner import HookRunner
 # HookResult Tests
 # =============================================================================
 
+class TestHookEvent:
+    """Tests for HookEvent enum - Claude Code parity."""
+    
+    def test_claude_code_parity_events(self):
+        """Test Claude Code parity hook events."""
+        # USER_PROMPT_SUBMIT - when user submits a prompt
+        assert HookEvent.USER_PROMPT_SUBMIT.value == "user_prompt_submit"
+        # NOTIFICATION - when notification is sent
+        assert HookEvent.NOTIFICATION.value == "notification"
+        # SUBAGENT_STOP - when subagent completes
+        assert HookEvent.SUBAGENT_STOP.value == "subagent_stop"
+        # SETUP - on initialization/maintenance
+        assert HookEvent.SETUP.value == "setup"
+    
+    def test_existing_events_unchanged(self):
+        """Verify existing events are unchanged (backward compatibility)."""
+        assert HookEvent.BEFORE_TOOL.value == "before_tool"
+        assert HookEvent.AFTER_TOOL.value == "after_tool"
+        assert HookEvent.BEFORE_AGENT.value == "before_agent"
+        assert HookEvent.AFTER_AGENT.value == "after_agent"
+        assert HookEvent.SESSION_START.value == "session_start"
+        assert HookEvent.SESSION_END.value == "session_end"
+        assert HookEvent.BEFORE_LLM.value == "before_llm"
+        assert HookEvent.AFTER_LLM.value == "after_llm"
+        assert HookEvent.ON_ERROR.value == "on_error"
+        assert HookEvent.ON_RETRY.value == "on_retry"
+
+
 class TestHookResult:
     """Tests for HookResult class."""
     
