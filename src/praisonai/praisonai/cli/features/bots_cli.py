@@ -163,8 +163,44 @@ class BotHandler:
             return Agent(name="assistant", instructions="You are a helpful assistant.")
 
 
-def handle_bot_command(args) -> None:
-    """Handle bot CLI command."""
+def handle_bot_command(args) -> int:
+    """Handle bot CLI command.
+    
+    Args:
+        args: Either a list of command-line arguments (from main.py unknown_args)
+              or an argparse.Namespace object (from legacy add_bot_parser).
+    
+    Returns:
+        Exit code (0 for success, 1 for error)
+    """
+    import argparse
+    
+    # If args is a list, parse it using argparse
+    if isinstance(args, list):
+        parser = argparse.ArgumentParser(prog="praisonai bot")
+        subparsers = parser.add_subparsers(dest="platform", help="Bot platform")
+        
+        # Telegram
+        telegram_parser = subparsers.add_parser("telegram", help="Start a Telegram bot")
+        telegram_parser.add_argument("--token", help="Telegram bot token")
+        telegram_parser.add_argument("--agent", help="Path to agent configuration file")
+        
+        # Discord
+        discord_parser = subparsers.add_parser("discord", help="Start a Discord bot")
+        discord_parser.add_argument("--token", help="Discord bot token")
+        discord_parser.add_argument("--agent", help="Path to agent configuration file")
+        
+        # Slack
+        slack_parser = subparsers.add_parser("slack", help="Start a Slack bot")
+        slack_parser.add_argument("--token", help="Slack bot token")
+        slack_parser.add_argument("--app-token", dest="app_token", help="Slack app token for Socket Mode")
+        slack_parser.add_argument("--agent", help="Path to agent configuration file")
+        
+        try:
+            args = parser.parse_args(args)
+        except SystemExit:
+            return 1
+    
     handler = BotHandler()
     
     platform = getattr(args, "platform", None)
@@ -174,20 +210,29 @@ def handle_bot_command(args) -> None:
             token=getattr(args, "token", None),
             agent_file=getattr(args, "agent", None),
         )
+        return 0
     elif platform == "discord":
         handler.start_discord(
             token=getattr(args, "token", None),
             agent_file=getattr(args, "agent", None),
         )
+        return 0
     elif platform == "slack":
         handler.start_slack(
             token=getattr(args, "token", None),
             app_token=getattr(args, "app_token", None),
             agent_file=getattr(args, "agent", None),
         )
+        return 0
     else:
         print("Available platforms: telegram, discord, slack")
         print("Usage: praisonai bot <platform> [options]")
+        print("")
+        print("Examples:")
+        print("  praisonai bot telegram --token $TELEGRAM_BOT_TOKEN")
+        print("  praisonai bot discord --token $DISCORD_BOT_TOKEN")
+        print("  praisonai bot slack --token $SLACK_BOT_TOKEN")
+        return 1
 
 
 def add_bot_parser(subparsers) -> None:
