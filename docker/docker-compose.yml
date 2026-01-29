@@ -22,7 +22,7 @@ services:
       CHAINLIT_DB_DIR: /root/.praison
     command: praisonai ui --host 0.0.0.0
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8082"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8082" ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -49,7 +49,7 @@ services:
       CHAINLIT_DB_DIR: /root/.praison
     command: praisonai chat --host 0.0.0.0 --port 8083
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8083"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8083" ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -69,7 +69,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       PRAISON_CONFIG_DIR: /root/.praison
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -87,6 +87,54 @@ services:
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       PRAISON_CONFIG_DIR: /root/.praison
+    networks:
+      - praison_network
+
+  # PraisonAI Slack Bot Service
+  slack-bot:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.bot
+    volumes:
+      - praison_data:/root/.praison
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN}
+      PRAISON_CONFIG_DIR: /root/.praison
+    restart: unless-stopped
+    networks:
+      - praison_network
+
+  # PraisonAI Discord Bot Service
+  discord-bot:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.bot
+    volumes:
+      - praison_data:/root/.praison
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
+      PRAISON_CONFIG_DIR: /root/.praison
+    command: [ "praisonai", "bot", "discord" ]
+    restart: unless-stopped
+    networks:
+      - praison_network
+
+  # PraisonAI Telegram Bot Service
+  telegram-bot:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.bot
+    volumes:
+      - praison_data:/root/.praison
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      PRAISON_CONFIG_DIR: /root/.praison
+    command: [ "praisonai", "bot", "telegram" ]
+    restart: unless-stopped
     networks:
       - praison_network
 
