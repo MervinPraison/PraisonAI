@@ -42,6 +42,13 @@ class BotConfig:
     timeout: int = 30
     reply_in_thread: bool = False  # Default to inline, set True for thread replies
     thread_threshold: int = 500  # Auto-thread responses longer than this (0 = disabled)
+    
+    # Default tools enabled for all bots
+    default_tools: List[str] = field(default_factory=lambda: ["execute_command", "search_web"])
+    
+    # Auto-approve tool calls (useful for trusted environments)
+    auto_approve_tools: bool = False  # If True, skip confirmation for tool execution
+    
     metadata: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -61,6 +68,8 @@ class BotConfig:
             "timeout": self.timeout,
             "reply_in_thread": self.reply_in_thread,
             "thread_threshold": self.thread_threshold,
+            "default_tools": self.default_tools,
+            "auto_approve_tools": self.auto_approve_tools,
             "metadata": self.metadata,
         }
     
