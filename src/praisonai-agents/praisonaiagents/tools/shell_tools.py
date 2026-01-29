@@ -64,6 +64,11 @@ class ShellTools:
             else:
                 command = shlex.split(command)
             
+            # Expand tilde in cwd (subprocess doesn't do this)
+            if cwd:
+                cwd = os.path.expanduser(cwd)
+                cwd = os.path.expandvars(cwd)  # Also expand $HOME, $USER, etc.
+            
             # Set up process environment
             process_env = os.environ.copy()
             if env:
