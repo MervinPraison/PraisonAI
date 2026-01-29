@@ -64,6 +64,10 @@ class ShellTools:
             else:
                 command = shlex.split(command)
             
+            # Expand tilde and environment variables in command arguments
+            # (shell=False means the shell won't do this for us)
+            command = [os.path.expanduser(os.path.expandvars(arg)) for arg in command]
+            
             # Expand tilde in cwd (subprocess doesn't do this)
             if cwd:
                 cwd = os.path.expanduser(cwd)

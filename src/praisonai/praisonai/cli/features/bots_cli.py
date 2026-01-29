@@ -218,7 +218,6 @@ class BotHandler:
             return
         
         # Set auto-approve if enabled - use direct API instead of env var
-        logger.info(f"DEBUG: capabilities.auto_approve = {capabilities.auto_approve if capabilities else 'NO CAPS'}")
         if capabilities and capabilities.auto_approve:
             try:
                 from praisonaiagents.approval import set_yaml_approved_tools, DEFAULT_DANGEROUS_TOOLS
