@@ -53,12 +53,16 @@ class AutonomyConfig:
         doom_loop_threshold: Number of repeated actions to trigger doom loop
         auto_escalate: Whether to automatically escalate complexity
         observe: Whether to emit observability events
+        completion_promise: Optional string that signals completion when wrapped in <promise>TEXT</promise>
+        clear_context: Whether to clear chat history between iterations
     """
     enabled: bool = True
     max_iterations: int = 20
     doom_loop_threshold: int = 3
     auto_escalate: bool = True
     observe: bool = False
+    completion_promise: Optional[str] = None
+    clear_context: bool = False
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AutonomyConfig":
@@ -69,6 +73,8 @@ class AutonomyConfig:
             doom_loop_threshold=data.get("doom_loop_threshold", 3),
             auto_escalate=data.get("auto_escalate", True),
             observe=data.get("observe", False),
+            completion_promise=data.get("completion_promise"),
+            clear_context=data.get("clear_context", False),
         )
 
 
@@ -395,6 +401,8 @@ class AutonomyMixin:
         prompt: str,
         max_iterations: Optional[int] = None,
         timeout_seconds: Optional[float] = None,
+        completion_promise: Optional[str] = None,
+        clear_context: bool = False,
     ) -> AutonomyResult:
         """Run an autonomous task execution loop.
         
@@ -403,12 +411,17 @@ class AutonomyMixin:
         - Progressive escalation based on task complexity
         - Doom loop detection and recovery
         - Iteration limits and timeouts
-        - Completion detection
+        - Completion detection (keyword-based or promise-based)
+        - Optional context clearing between iterations
         
         Args:
             prompt: The task to execute
             max_iterations: Override max iterations (default from config)
             timeout_seconds: Timeout in seconds (default: no timeout)
+            completion_promise: Optional string that signals completion when 
+                wrapped in <promise>TEXT</promise> tags in the response
+            clear_context: Whether to clear chat history between iterations
+                (forces agent to rely on external state like files)
             
         Returns:
             AutonomyResult with success status, output, and metadata
@@ -418,7 +431,11 @@ class AutonomyMixin:
             
         Example:
             agent = Agent(instructions="...", autonomy=True)
-            result = agent.run_autonomous("Refactor the auth module")
+            result = agent.run_autonomous(
+                "Refactor the auth module",
+                completion_promise="DONE",
+                clear_context=True
+            )
             if result.success:
                 print(result.output)
         """
@@ -436,8 +453,17 @@ class AutonomyMixin:
         config_max_iter = self.autonomy_config.get("max_iterations", 20)
         effective_max_iter = max_iterations if max_iterations is not None else config_max_iter
         
+        # Get completion_promise from config if not provided as param
+        effective_promise = completion_promise
+        if effective_promise is None:
+            effective_promise = self.autonomy_config.get("completion_promise")
+        
+        # Get clear_context from config if not explicitly set
+        effective_clear_context = clear_context
+        if not clear_context:
+            effective_clear_context = self.autonomy_config.get("clear_context", False)
+        
         # Analyze prompt and get recommended stage
-        signals = self.analyze_prompt(prompt)
         stage = self.get_recommended_stage(prompt)
         
         # Reset doom loop tracker for new task
@@ -474,9 +500,9 @@ class AutonomyMixin:
                     )
                 
                 # Execute one turn using the agent's chat method
-                # The chat method is expected to be provided by the Agent class
+                # Always use the original prompt (prompt re-injection)
                 try:
-                    response = self.chat(prompt if iterations == 1 else "Continue with the task")
+                    response = self.chat(prompt)
                 except Exception as e:
                     logger.error(f"Error during autonomous execution: {e}")
                     return AutonomyResult(
@@ -496,8 +522,24 @@ class AutonomyMixin:
                     "response": str(response)[:500],  # Truncate for storage
                 })
                 
-                # Check for completion signals in response
-                response_lower = str(response).lower()
+                response_str = str(response)
+                
+                # Check for completion promise FIRST (structured signal)
+                if effective_promise:
+                    promise_tag = f"<promise>{effective_promise}</promise>"
+                    if promise_tag in response_str:
+                        return AutonomyResult(
+                            success=True,
+                            output=response_str,
+                            completion_reason="promise",
+                            iterations=iterations,
+                            stage=stage,
+                            actions=actions_taken,
+                            duration_seconds=time.time() - start_time,
+                        )
+                
+                # Check for keyword-based completion signals (fallback)
+                response_lower = response_str.lower()
                 completion_signals = [
                     "task completed",
                     "task complete",
@@ -509,7 +551,7 @@ class AutonomyMixin:
                 if any(signal in response_lower for signal in completion_signals):
                     return AutonomyResult(
                         success=True,
-                        output=str(response),
+                        output=response_str,
                         completion_reason="goal",
                         iterations=iterations,
                         stage=stage,
@@ -521,13 +563,17 @@ class AutonomyMixin:
                 if stage == "direct":
                     return AutonomyResult(
                         success=True,
-                        output=str(response),
+                        output=response_str,
                         completion_reason="goal",
                         iterations=iterations,
                         stage=stage,
                         actions=actions_taken,
                         duration_seconds=time.time() - start_time,
                     )
+                
+                # Clear context between iterations if enabled
+                if effective_clear_context:
+                    self.clear_history()
             
             # Max iterations reached
             return AutonomyResult(

@@ -407,22 +407,21 @@ BAD: "Use search_web to find {{{{topic}}}}" (variables don't work in actions!)
 - No explanations before or after
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-HIERARCHICAL PROCESS (MANDATORY - Use for all multi-agent recipes)
+SEQUENTIAL PROCESS (DEFAULT - Use for all multi-agent recipes)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-**ALWAYS include these fields at the root level for multi-agent workflows:**
+**ALWAYS include this field at the root level:**
 ```yaml
-process: hierarchical
-manager_llm: gpt-4o-mini
+process: sequential
 ```
 
-**What hierarchical process does:**
-- A manager agent validates each step's output before proceeding
-- If a step fails validation, the workflow stops with a clear failure reason
-- Ensures quality control and prevents cascading errors
+**What sequential process does:**
+- Executes steps in order, passing output from one step to the next
+- Each step can reference previous step outputs via {{agent_name}}_output
+- Simple and reliable for most workflows
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EXAMPLE: SEARCH TASK (hierarchical with manager validation)
+EXAMPLE: SEARCH TASK (sequential workflow)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 metadata:
@@ -431,8 +430,7 @@ metadata:
     env:
       - OPENAI_API_KEY
 
-process: hierarchical
-manager_llm: gpt-4o-mini
+process: sequential
 
 agents:
   researcher:
@@ -449,14 +447,14 @@ agents:
     goal: Analyze and synthesize research findings
     backstory: Expert at identifying patterns, trends, and key insights from raw data.
     tools: []
-    llm: gpt-4.1
+    llm: gpt-4o-mini
 
   writer:
     role: Technical Writer
     goal: Create clear, well-structured reports
     backstory: Expert at transforming complex information into readable, actionable content.
     tools: []
-    llm: gpt-4.1
+    llm: gpt-4o-mini
 
 steps:
   - agent: researcher
@@ -831,15 +829,29 @@ steps:
             
         Returns:
             Python code string
+            
+        Notes:
+            - web_crawl: Uses full path import since lazy loading returns module
+            - search_web: Works with standard import from praisonaiagents.tools
+            - tavily_*: Imported from praisonaiagents.tools (not praisonai_tools)
         """
         # Map tools to their import sources
         tool_imports = []
         tool_exports = []
         
         for tool in tools:
-            if tool in ['tavily_search', 'tavily_extract']:
+            if tool in ['web_crawl', 'crawl_web']:
+                # web_crawl needs full path import (lazy loading returns module otherwise)
+                if 'web_crawl' not in str(tool_imports):
+                    tool_imports.append("from praisonaiagents.tools.web_crawl import web_crawl")
+                tool_exports.append('web_crawl')
+            elif tool in ['search_web']:
+                if 'search_web' not in str(tool_imports):
+                    tool_imports.append("from praisonaiagents.tools import search_web")
+                tool_exports.append('search_web')
+            elif tool in ['tavily_search', 'tavily_extract']:
                 if 'tavily' not in str(tool_imports):
-                    tool_imports.append("from praisonai_tools.tools import tavily_search, tavily_extract")
+                    tool_imports.append("from praisonaiagents.tools import tavily_search, tavily_extract")
                 tool_exports.append(tool)
             elif tool in ['read_file', 'write_file', 'list_files']:
                 if 'file_tools' not in str(tool_imports):

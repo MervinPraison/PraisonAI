@@ -1844,6 +1844,8 @@ Summary:"""
         prompt: str,
         max_iterations: Optional[int] = None,
         timeout_seconds: Optional[float] = None,
+        completion_promise: Optional[str] = None,
+        clear_context: bool = False,
     ):
         """Run an autonomous task execution loop.
         
@@ -1852,12 +1854,17 @@ Summary:"""
         - Progressive escalation based on task complexity
         - Doom loop detection and recovery
         - Iteration limits and timeouts
-        - Completion detection
+        - Completion detection (keyword-based or promise-based)
+        - Optional context clearing between iterations
         
         Args:
             prompt: The task to execute
             max_iterations: Override max iterations (default from config)
             timeout_seconds: Timeout in seconds (default: no timeout)
+            completion_promise: Optional string that signals completion when 
+                wrapped in <promise>TEXT</promise> tags in the response
+            clear_context: Whether to clear chat history between iterations
+                (forces agent to rely on external state like files)
             
         Returns:
             AutonomyResult with success status, output, and metadata
@@ -1867,7 +1874,11 @@ Summary:"""
             
         Example:
             agent = Agent(instructions="...", autonomy=True)
-            result = agent.run_autonomous("Refactor the auth module")
+            result = agent.run_autonomous(
+                "Refactor the auth module",
+                completion_promise="DONE",
+                clear_context=True
+            )
             if result.success:
                 print(result.output)
         """
@@ -1887,6 +1898,16 @@ Summary:"""
         # Get config values
         config_max_iter = self.autonomy_config.get("max_iterations", 20)
         effective_max_iter = max_iterations if max_iterations is not None else config_max_iter
+        
+        # Get completion_promise from config if not provided as param
+        effective_promise = completion_promise
+        if effective_promise is None:
+            effective_promise = self.autonomy_config.get("completion_promise")
+        
+        # Get clear_context from config if not explicitly set
+        effective_clear_context = clear_context
+        if not clear_context:
+            effective_clear_context = self.autonomy_config.get("clear_context", False)
         
         # Analyze prompt and get recommended stage
         stage = self.get_recommended_stage(prompt)
@@ -1924,8 +1945,9 @@ Summary:"""
                     )
                 
                 # Execute one turn using the agent's chat method
+                # Always use the original prompt (prompt re-injection)
                 try:
-                    response = self.chat(prompt if iterations == 1 else "Continue with the task")
+                    response = self.chat(prompt)
                 except Exception as e:
                     return AutonomyResult(
                         success=False,
@@ -1944,8 +1966,24 @@ Summary:"""
                     "response": str(response)[:500],
                 })
                 
-                # Check for completion signals in response
-                response_lower = str(response).lower()
+                response_str = str(response)
+                
+                # Check for completion promise FIRST (structured signal)
+                if effective_promise:
+                    promise_tag = f"<promise>{effective_promise}</promise>"
+                    if promise_tag in response_str:
+                        return AutonomyResult(
+                            success=True,
+                            output=response_str,
+                            completion_reason="promise",
+                            iterations=iterations,
+                            stage=stage,
+                            actions=actions_taken,
+                            duration_seconds=time_module.time() - start_time,
+                        )
+                
+                # Check for keyword-based completion signals (fallback)
+                response_lower = response_str.lower()
                 completion_signals = [
                     "task completed", "task complete", "done",
                     "finished", "completed successfully",
@@ -1954,7 +1992,7 @@ Summary:"""
                 if any(signal in response_lower for signal in completion_signals):
                     return AutonomyResult(
                         success=True,
-                        output=str(response),
+                        output=response_str,
                         completion_reason="goal",
                         iterations=iterations,
                         stage=stage,
@@ -1966,13 +2004,17 @@ Summary:"""
                 if stage == "direct":
                     return AutonomyResult(
                         success=True,
-                        output=str(response),
+                        output=response_str,
                         completion_reason="goal",
                         iterations=iterations,
                         stage=stage,
                         actions=actions_taken,
                         duration_seconds=time_module.time() - start_time,
                     )
+                
+                # Clear context between iterations if enabled
+                if effective_clear_context:
+                    self.clear_history()
             
             # Max iterations reached
             return AutonomyResult(
@@ -4027,7 +4069,7 @@ Your Goal: {self.goal}"""
                     "execute_tool_fn": self.execute_tool,
                     "stream": stream,
                     "console": self.console if (self.verbose or stream) else None,
-                    "display_fn": self.display_generating if self.verbose else None,
+                    "display_fn": self._display_generating if self.verbose else None,
                     "reasoning_steps": reasoning_steps,
                     "verbose": self.verbose,
                     "max_iterations": 10

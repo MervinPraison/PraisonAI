@@ -1640,6 +1640,41 @@ class PraisonAI:
                 exit_code = handler.cmd_uninstall(unknown_args)
                 sys.exit(exit_code)
             
+            elif args.command == 'gateway':
+                # Gateway command - WebSocket gateway for multi-agent coordination
+                from .features.gateway import handle_gateway_command
+                exit_code = handle_gateway_command(unknown_args)
+                sys.exit(exit_code)
+            
+            elif args.command == 'bot':
+                # Bot command - messaging bot runtimes (Telegram, Discord, Slack)
+                from .features.bots_cli import handle_bot_command
+                exit_code = handle_bot_command(unknown_args)
+                sys.exit(exit_code)
+            
+            elif args.command == 'sandbox':
+                # Sandbox command - secure code execution environment
+                from .features.sandbox_cli import handle_sandbox_command
+                exit_code = handle_sandbox_command(unknown_args)
+                sys.exit(exit_code)
+            
+            elif args.command == 'wizard':
+                # Wizard command - interactive project setup
+                from .features.wizard import handle_wizard_command
+                exit_code = handle_wizard_command(unknown_args)
+                sys.exit(exit_code)
+            
+            elif args.command == 'migrate':
+                # Migrate command - config migration between formats
+                from .features.migrate import handle_migrate_command
+                exit_code = handle_migrate_command(unknown_args)
+                sys.exit(exit_code)
+            
+            elif args.command == 'security':
+                # Security command - security audit and scanning
+                from .features.audit_cli import handle_audit_command
+                exit_code = handle_audit_command(unknown_args)
+                sys.exit(exit_code)
 
         # Only check framework availability for agent-related operations
         if not args.command and (args.init or args.auto or args.framework):

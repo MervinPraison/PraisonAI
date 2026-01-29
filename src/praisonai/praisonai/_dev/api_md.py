@@ -219,8 +219,18 @@ class ApiMdGenerator:
         dict_sources = self._parse_lazy_imports_dict(tree)
         import_sources.update(dict_sources)
         
+        # Also include symbols from SECTION_GROUPS that exist in lazy imports
+        # This ensures lazy-loaded classes like Workflow appear in api.md
+        # even if they're not in __all__ (which is kept minimal for IDE experience)
+        section_symbols = set()
+        for symbol_list in self.SECTION_GROUPS.values():
+            section_symbols.update(symbol_list)
+        
+        # Merge: __all__ exports + section group symbols that exist in lazy imports
+        exports_to_process = all_exports | (section_symbols & set(import_sources.keys()))
+        
         # For each export, find its definition
-        for export_name in sorted(all_exports):
+        for export_name in sorted(exports_to_process):
             if export_name in import_sources:
                 module_path, original_name = import_sources[export_name]
                 # Resolve to file
