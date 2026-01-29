@@ -21,6 +21,25 @@ class PermissionAction(str, Enum):
     ASK = "ask"
 
 
+class PermissionMode(str, Enum):
+    """
+    Permission modes for agent execution (Claude Code parity).
+    
+    These modes control how permissions are handled during agent execution:
+    - DEFAULT: Standard permission checking with allow/deny/ask rules
+    - ACCEPT_EDITS: Auto-accept file edit operations
+    - DONT_ASK: Auto-deny any prompts that would require user input
+    - BYPASS: Skip all permission checks (dangerous, use with caution)
+    - PLAN: Read-only exploration mode, no write operations allowed
+    """
+    
+    DEFAULT = "default"
+    ACCEPT_EDITS = "accept_edits"
+    DONT_ASK = "dont_ask"
+    BYPASS = "bypass_permissions"
+    PLAN = "plan"
+
+
 @dataclass
 class PermissionRule:
     """

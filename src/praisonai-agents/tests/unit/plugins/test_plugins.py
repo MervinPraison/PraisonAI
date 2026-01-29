@@ -27,6 +27,47 @@ class TestPluginHook:
         assert PluginHook.ON_INIT.value == "on_init"
         assert PluginHook.BEFORE_TOOL.value == "before_tool"
         assert PluginHook.AFTER_AGENT.value == "after_agent"
+    
+    def test_message_hooks(self):
+        """Test message lifecycle hooks (moltbot parity)."""
+        assert PluginHook.MESSAGE_RECEIVED.value == "message_received"
+        assert PluginHook.MESSAGE_SENDING.value == "message_sending"
+        assert PluginHook.MESSAGE_SENT.value == "message_sent"
+    
+    def test_gateway_hooks(self):
+        """Test gateway lifecycle hooks (moltbot parity)."""
+        assert PluginHook.GATEWAY_START.value == "gateway_start"
+        assert PluginHook.GATEWAY_STOP.value == "gateway_stop"
+    
+    def test_session_hooks(self):
+        """Test session lifecycle hooks."""
+        assert PluginHook.SESSION_START.value == "session_start"
+        assert PluginHook.SESSION_END.value == "session_end"
+    
+    def test_compaction_hooks(self):
+        """Test compaction hooks (memory management)."""
+        assert PluginHook.BEFORE_COMPACTION.value == "before_compaction"
+        assert PluginHook.AFTER_COMPACTION.value == "after_compaction"
+    
+    def test_error_hooks(self):
+        """Test error handling hooks."""
+        assert PluginHook.ON_ERROR.value == "on_error"
+        assert PluginHook.ON_RETRY.value == "on_retry"
+    
+    def test_tool_result_persist_hook(self):
+        """Test tool_result_persist hook (moltbot parity)."""
+        assert PluginHook.TOOL_RESULT_PERSIST.value == "tool_result_persist"
+    
+    def test_claude_code_parity_hooks(self):
+        """Test Claude Code parity hooks (new additions)."""
+        # USER_PROMPT_SUBMIT - when user submits a prompt
+        assert PluginHook.USER_PROMPT_SUBMIT.value == "user_prompt_submit"
+        # NOTIFICATION - when notification is sent
+        assert PluginHook.NOTIFICATION.value == "notification"
+        # SUBAGENT_STOP - when subagent completes
+        assert PluginHook.SUBAGENT_STOP.value == "subagent_stop"
+        # SETUP - on initialization/maintenance
+        assert PluginHook.SETUP.value == "setup"
 
 
 class TestPluginInfo:

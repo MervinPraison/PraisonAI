@@ -15,6 +15,8 @@ def create_subagent_tool(
     agent_factory: Optional[Callable[..., Any]] = None,
     allowed_agents: Optional[List[str]] = None,
     max_depth: int = 3,
+    default_llm: Optional[str] = None,
+    default_permission_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Create a subagent tool for task delegation.
@@ -26,6 +28,8 @@ def create_subagent_tool(
         agent_factory: Optional factory function to create agents
         allowed_agents: Optional list of allowed agent names
         max_depth: Maximum nesting depth for subagents
+        default_llm: Default LLM model for subagents (Claude Code parity)
+        default_permission_mode: Default permission mode for subagents (Claude Code parity)
         
     Returns:
         Tool definition dictionary
@@ -38,6 +42,8 @@ def create_subagent_tool(
         agent_name: Optional[str] = None,
         context: Optional[str] = None,
         tools: Optional[List[str]] = None,
+        llm: Optional[str] = None,
+        permission_mode: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Spawn a subagent to handle a specific task.
@@ -47,6 +53,8 @@ def create_subagent_tool(
             agent_name: Optional specific agent to use
             context: Optional additional context
             tools: Optional list of tools to give the subagent
+            llm: Optional LLM model override (Claude Code parity)
+            permission_mode: Optional permission mode (Claude Code parity)
             
         Returns:
             Result from the subagent execution
@@ -72,11 +80,17 @@ def create_subagent_tool(
         try:
             _current_depth += 1
             
+            # Resolve LLM (parameter > default > None)
+            effective_llm = llm or default_llm
+            # Resolve permission mode (parameter > default > None)
+            effective_permission_mode = permission_mode or default_permission_mode
+            
             # If we have an agent factory, use it
             if agent_factory:
                 subagent = agent_factory(
                     name=agent_name or "subagent",
                     tools=tools,
+                    llm=effective_llm,
                 )
                 
                 # Build prompt with context
@@ -92,6 +106,8 @@ def create_subagent_tool(
                     "output": result,
                     "agent_name": agent_name or "subagent",
                     "task": task,
+                    "llm": effective_llm,
+                    "permission_mode": effective_permission_mode,
                 }
             else:
                 # Without factory, return a placeholder
@@ -100,6 +116,8 @@ def create_subagent_tool(
                     "output": f"[Subagent would execute: {task}]",
                     "agent_name": agent_name or "subagent",
                     "task": task,
+                    "llm": effective_llm,
+                    "permission_mode": effective_permission_mode,
                     "note": "No agent factory provided - simulation mode",
                 }
                 
@@ -141,6 +159,15 @@ def create_subagent_tool(
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Optional list of tool names to give the subagent",
+                },
+                "llm": {
+                    "type": "string",
+                    "description": "Optional LLM model to use for the subagent (e.g., 'gpt-4o-mini', 'claude-3-sonnet')",
+                },
+                "permission_mode": {
+                    "type": "string",
+                    "enum": ["default", "accept_edits", "dont_ask", "bypass_permissions", "plan"],
+                    "description": "Optional permission mode for the subagent (default, accept_edits, dont_ask, bypass_permissions, plan)",
                 },
             },
             "required": ["task"],
