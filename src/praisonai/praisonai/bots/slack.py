@@ -159,8 +159,21 @@ class SlackBot:
             
             if should_respond and self._agent:
                 try:
-                    response = self._agent.chat(text)
-                    await self._send_long_message(say, response, thread_ts=event.get("thread_ts") or event.get("ts"))
+                    logger.info(f"Message received: {text[:100]}...")
+                    # Run sync agent.chat() in executor to avoid asyncio.run() conflicts
+                    loop = asyncio.get_event_loop()
+                    response = await loop.run_in_executor(None, self._agent.chat, text)
+                    logger.info(f"Response sent: {response[:100]}...")
+                    
+                    # Determine if we should reply in thread
+                    thread_ts = None
+                    if self.config.reply_in_thread:
+                        thread_ts = event.get("thread_ts") or event.get("ts")
+                    elif self.config.thread_threshold > 0 and len(response) > self.config.thread_threshold:
+                        # Auto-thread long responses
+                        thread_ts = event.get("thread_ts") or event.get("ts")
+                    
+                    await self._send_long_message(say, response, thread_ts=thread_ts)
                 except Exception as e:
                     logger.error(f"Agent error: {e}")
                     await say(f"Error: {str(e)}")
@@ -176,8 +189,21 @@ class SlackBot:
             
             if self._agent:
                 try:
-                    response = self._agent.chat(text)
-                    await self._send_long_message(say, response, thread_ts=event.get("thread_ts") or event.get("ts"))
+                    logger.info(f"@mention received: {text[:100]}...")
+                    # Run sync agent.chat() in executor to avoid asyncio.run() conflicts
+                    loop = asyncio.get_event_loop()
+                    response = await loop.run_in_executor(None, self._agent.chat, text)
+                    logger.info(f"Response sent: {response[:100]}...")
+                    
+                    # Determine if we should reply in thread
+                    thread_ts = None
+                    if self.config.reply_in_thread:
+                        thread_ts = event.get("thread_ts") or event.get("ts")
+                    elif self.config.thread_threshold > 0 and len(response) > self.config.thread_threshold:
+                        # Auto-thread long responses
+                        thread_ts = event.get("thread_ts") or event.get("ts")
+                    
+                    await self._send_long_message(say, response, thread_ts=thread_ts)
                 except Exception as e:
                     logger.error(f"Agent error: {e}")
                     await say(f"Error: {str(e)}")
