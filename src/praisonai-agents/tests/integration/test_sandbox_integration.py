@@ -263,11 +263,11 @@ class TestMockSandboxWorkflow:
         
         # Test successful execution
         import asyncio
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             sandbox.execute('print("Hello")', language='python')
         )
         
-        assert result.success is True
+        assert result.status == SandboxStatus.COMPLETED
         assert len(executions) == 1
         assert executions[0]['language'] == 'python'
     
@@ -291,18 +291,20 @@ class TestMockSandboxWorkflow:
         sandbox.list_files = list_files
         
         import asyncio
-        loop = asyncio.get_event_loop()
         
-        # Write file
-        loop.run_until_complete(sandbox.write_file('/app/script.py', 'print("test")'))
+        async def run_file_ops():
+            # Write file
+            await sandbox.write_file('/app/script.py', 'print("test")')
+            
+            # Read file
+            content = await sandbox.read_file('/app/script.py')
+            assert content == 'print("test")'
+            
+            # List files
+            file_list = await sandbox.list_files('/')
+            assert '/app/script.py' in file_list
         
-        # Read file
-        content = loop.run_until_complete(sandbox.read_file('/app/script.py'))
-        assert content == 'print("test")'
-        
-        # List files
-        file_list = loop.run_until_complete(sandbox.list_files('/'))
-        assert '/app/script.py' in file_list
+        asyncio.run(run_file_ops())
 
 
 @pytest.mark.asyncio

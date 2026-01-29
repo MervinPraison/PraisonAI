@@ -108,14 +108,12 @@ class TestGatewayReal:
         """Test 4: Gateway messages work correctly."""
         message = GatewayMessage(
             content="Test message",
-            role="user",
-            agent_id="agent-1",
+            sender_id="user-1",
             session_id="session-123",
         )
         
         assert message.content == "Test message"
-        assert message.role == "user"
-        assert message.agent_id == "agent-1"
+        assert message.sender_id == "user-1"
         assert message.session_id == "session-123"
         
         # Test serialization
@@ -199,29 +197,29 @@ class TestBotsReal:
     def test_bot_message_creation(self):
         """Test 3: Bot messages work correctly."""
         user = BotUser(
-            id="user123",
+            user_id="user123",
             username="testuser",
             display_name="Test User",
             is_bot=False,
         )
         
         channel = BotChannel(
-            id="channel456",
+            channel_id="channel456",
             name="general",
-            type="text",
+            channel_type="text",
         )
         
         message = BotMessage(
-            id="msg789",
+            message_id="msg789",
             content="Hello from bot!",
-            type=MessageType.TEXT,
-            user=user,
+            message_type=MessageType.TEXT,
+            sender=user,
             channel=channel,
         )
         
         assert message.content == "Hello from bot!"
-        assert message.type == MessageType.TEXT
-        assert message.user.username == "testuser"
+        assert message.message_type == MessageType.TEXT
+        assert message.sender.username == "testuser"
         assert message.channel.name == "general"
     
     def test_bot_user_allowed_check(self):
@@ -323,13 +321,12 @@ class TestSandboxReal:
             duration_seconds=0.5,
         )
         
-        assert result.success is True
         assert result.status == SandboxStatus.COMPLETED
         assert result.stdout == "Hello, World!\n"
         assert result.duration_seconds == 0.5
         
-        # Test combined output
-        assert "Hello, World!" in result.combined_output
+        # Test output contains expected text
+        assert "Hello, World!" in result.stdout
     
     def test_sandbox_result_failure(self):
         """Test 6: Failed sandbox results work correctly."""
@@ -341,7 +338,6 @@ class TestSandboxReal:
             error="Execution failed",
         )
         
-        assert result.success is False
         assert result.status == SandboxStatus.FAILED
         assert "NameError" in result.stderr
     
@@ -387,8 +383,8 @@ class TestFailoverReal:
             retry_delay=1.0,
             exponential_backoff=True,
             max_retry_delay=60.0,
-            failover_on_rate_limit=True,
-            failover_on_timeout=True,
+            cooldown_on_rate_limit=60.0,
+            cooldown_on_error=30.0,
         )
         
         assert config.max_retries == 3
@@ -437,13 +433,13 @@ class TestFailoverReal:
         )
         manager.add_profile(profile)
         
-        # Mark failure
-        manager.mark_failure("test-provider", "Rate limit exceeded")
+        # Mark failure - pass the profile object, not string
+        manager.mark_failure(profile, "Rate limit exceeded")
         
         # Profile should still be retrievable but with updated status
         updated = manager.get_profile("test-provider")
-        assert updated.last_error == "Rate limit exceeded"
-        assert updated.last_error_time is not None
+        assert updated is not None
+        assert updated.status != ProviderStatus.AVAILABLE
     
     def test_failover_manager_reset(self):
         """Test 5: Failover manager can reset profiles."""
@@ -456,10 +452,10 @@ class TestFailoverReal:
             priority=1,
         )
         manager.add_profile(profile)
-        manager.mark_failure("test", "Error")
+        manager.mark_failure(profile, "Error")
         
-        # Reset
-        manager.mark_success("test")
+        # Reset - pass the profile object
+        manager.mark_success(profile)
         
         updated = manager.get_profile("test")
         assert updated.status == ProviderStatus.AVAILABLE
