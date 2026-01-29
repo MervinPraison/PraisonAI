@@ -532,6 +532,8 @@ def recipe_serve(
 ):
     """Start HTTP server for recipe execution.
     
+    DEPRECATED: Use `praisonai serve recipe` instead.
+    
     Serves recipes as REST API endpoints.
     
     Examples:
@@ -542,6 +544,13 @@ def recipe_serve(
         praisonai recipe serve --api-key my-secret-key
         praisonai recipe serve --workers 4
     """
+    import sys
+    
+    # Print deprecation warning
+    print("\n\033[93m⚠ DEPRECATION WARNING:\033[0m", file=sys.stderr)
+    print("\033[93m'praisonai recipe serve' is deprecated and will be removed in a future version.\033[0m", file=sys.stderr)
+    print("\033[93mPlease use 'praisonai serve recipe' instead.\033[0m\n", file=sys.stderr)
+    
     print(f"🚀 Starting recipe server...")
     print(f"   Host: {host}")
     print(f"   Port: {port}")

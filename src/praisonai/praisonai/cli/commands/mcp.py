@@ -418,6 +418,8 @@ def mcp_run(
 ):
     """Run an MCP server from configuration.
     
+    DEPRECATED: Use `praisonai serve mcp --name <server>` instead.
+    
     This command starts an MCP server using the configuration stored
     for the given server name. It can run in stdio mode (default) or
     as an SSE server.
@@ -426,6 +428,13 @@ def mcp_run(
         praisonai mcp run my-server
         praisonai mcp run my-server --transport sse --port 8080
     """
+    import sys
+    
+    # Print deprecation warning
+    print("\n\033[93m⚠ DEPRECATION WARNING:\033[0m", file=sys.stderr)
+    print("\033[93m'praisonai mcp run' is deprecated and will be removed in a future version.\033[0m", file=sys.stderr)
+    print("\033[93mPlease use 'praisonai serve mcp --name <server>' instead.\033[0m\n", file=sys.stderr)
+    
     output = get_output_controller()
     loader = get_config_loader()
     
