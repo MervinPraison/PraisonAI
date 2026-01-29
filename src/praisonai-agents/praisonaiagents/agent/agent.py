@@ -3841,33 +3841,38 @@ Your Goal: {self.goal}"""
         """Internal tool execution implementation."""
 
         # Check if approval is required for this tool
-        from ..approval import is_approval_required, console_approval_callback, get_risk_level, mark_approved, get_approval_callback
+        from ..approval import is_approval_required, console_approval_callback, get_risk_level, mark_approved, get_approval_callback, is_env_auto_approve, is_yaml_approved
         if is_approval_required(function_name):
-            risk_level = get_risk_level(function_name)
-            logging.debug(f"Tool {function_name} requires approval (risk level: {risk_level})")
-            
-            # Use global approval callback or default console callback
-            callback = get_approval_callback() or console_approval_callback
-            
-            try:
-                decision = callback(function_name, arguments, risk_level)
-                if not decision.approved:
-                    error_msg = f"Tool execution denied: {decision.reason}"
-                    logging.warning(error_msg)
-                    return {"error": error_msg, "approval_denied": True}
-                
-                # Mark as approved in context to prevent double approval in decorator
+            # Skip approval if auto-approve env var is set or tool is YAML-approved
+            if is_env_auto_approve() or is_yaml_approved(function_name):
+                logging.debug(f"Tool {function_name} auto-approved (env={is_env_auto_approve()}, yaml={is_yaml_approved(function_name)})")
                 mark_approved(function_name)
+            else:
+                risk_level = get_risk_level(function_name)
+                logging.debug(f"Tool {function_name} requires approval (risk level: {risk_level})")
                 
-                # Use modified arguments if provided
-                if decision.modified_args:
-                    arguments = decision.modified_args
-                    logging.info(f"Using modified arguments: {arguments}")
+                # Use global approval callback or default console callback
+                callback = get_approval_callback() or console_approval_callback
+                
+                try:
+                    decision = callback(function_name, arguments, risk_level)
+                    if not decision.approved:
+                        error_msg = f"Tool execution denied: {decision.reason}"
+                        logging.warning(error_msg)
+                        return {"error": error_msg, "approval_denied": True}
                     
-            except Exception as e:
-                error_msg = f"Error during approval process: {str(e)}"
-                logging.error(error_msg)
-                return {"error": error_msg, "approval_error": True}
+                    # Mark as approved in context to prevent double approval in decorator
+                    mark_approved(function_name)
+                    
+                    # Use modified arguments if provided
+                    if decision.modified_args:
+                        arguments = decision.modified_args
+                        logging.info(f"Using modified arguments: {arguments}")
+                        
+                except Exception as e:
+                    error_msg = f"Error during approval process: {str(e)}"
+                    logging.error(error_msg)
+                    return {"error": error_msg, "approval_error": True}
 
         # Special handling for MCP tools
         # Check if tools is an MCP instance with the requested function name
@@ -6560,18 +6565,23 @@ Write the complete compiled report:"""
             logging.info(f"Executing async tool: {function_name} with arguments: {arguments}")
             
             # Check if approval is required for this tool
-            from ..approval import is_approval_required, request_approval
+            from ..approval import is_approval_required, request_approval, is_env_auto_approve, is_yaml_approved, mark_approved
             if is_approval_required(function_name):
-                decision = await request_approval(function_name, arguments)
-                if not decision.approved:
-                    error_msg = f"Tool execution denied: {decision.reason}"
-                    logging.warning(error_msg)
-                    return {"error": error_msg, "approval_denied": True}
-                
-                # Use modified arguments if provided
-                if decision.modified_args:
-                    arguments = decision.modified_args
-                    logging.info(f"Using modified arguments: {arguments}")
+                # Skip approval if auto-approve env var is set or tool is YAML-approved
+                if is_env_auto_approve() or is_yaml_approved(function_name):
+                    logging.debug(f"Tool {function_name} auto-approved (env={is_env_auto_approve()}, yaml={is_yaml_approved(function_name)})")
+                    mark_approved(function_name)
+                else:
+                    decision = await request_approval(function_name, arguments)
+                    if not decision.approved:
+                        error_msg = f"Tool execution denied: {decision.reason}"
+                        logging.warning(error_msg)
+                        return {"error": error_msg, "approval_denied": True}
+                    
+                    # Use modified arguments if provided
+                    if decision.modified_args:
+                        arguments = decision.modified_args
+                        logging.info(f"Using modified arguments: {arguments}")
             
             # Try to find the function in the agent's tools list first
             func = None
