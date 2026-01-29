@@ -215,21 +215,23 @@ class AutonomyResult:
     Attributes:
         success: Whether the task completed successfully
         output: Final output/response
-        completion_reason: Why execution stopped (goal, timeout, max_iterations, doom_loop, error)
+        completion_reason: Why execution stopped (goal, timeout, max_iterations, doom_loop, error, promise)
         iterations: Number of iterations executed
         stage: Final execution stage
         actions: List of actions taken
         duration_seconds: Total execution time
         error: Error message if failed
+        started_at: ISO 8601 timestamp when execution started
     """
     success: bool
     output: str = ""
-    completion_reason: str = "goal"  # goal, timeout, max_iterations, doom_loop, error
+    completion_reason: str = "goal"  # goal, timeout, max_iterations, doom_loop, error, promise
     iterations: int = 0
     stage: str = "direct"
     actions: List[Dict[str, Any]] = field(default_factory=list)
     duration_seconds: float = 0.0
     error: Optional[str] = None
+    started_at: Optional[str] = None
 
 
 class DoomLoopTracker:

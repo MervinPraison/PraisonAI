@@ -355,3 +355,210 @@ class TestAutonomyConfigFromDict:
         })
         
         assert config.clear_context == True
+
+
+class TestStartedAtTimestamp:
+    """Test started_at timestamp in AutonomyResult."""
+    
+    def test_autonomy_result_has_started_at_field(self):
+        """AutonomyResult should have started_at field."""
+        from praisonaiagents.agent.autonomy import AutonomyResult
+        
+        result = AutonomyResult(success=True, started_at="2026-01-29T12:00:00Z")
+        assert result.started_at == "2026-01-29T12:00:00Z"
+    
+    def test_autonomy_result_started_at_default_none(self):
+        """AutonomyResult.started_at should default to None."""
+        from praisonaiagents.agent.autonomy import AutonomyResult
+        
+        result = AutonomyResult(success=True)
+        assert result.started_at is None
+    
+    def test_run_autonomous_populates_started_at(self):
+        """run_autonomous() should populate started_at in result."""
+        from praisonaiagents import Agent
+        
+        agent = Agent(
+            instructions="Test agent",
+            autonomy=True,
+            output="silent"
+        )
+        
+        with patch.object(agent, 'chat', return_value="<promise>DONE</promise>"):
+            result = agent.run_autonomous(
+                "Test task",
+                max_iterations=5,
+                completion_promise="DONE"
+            )
+        
+        assert result.started_at is not None
+        # Should be ISO 8601 format
+        assert "T" in result.started_at
+        assert result.started_at.endswith("Z") or "+" in result.started_at
+    
+    def test_started_at_is_iso8601_format(self):
+        """started_at should be valid ISO 8601 timestamp."""
+        from praisonaiagents import Agent
+        from datetime import datetime
+        
+        agent = Agent(
+            instructions="Test agent",
+            autonomy=True,
+            output="silent"
+        )
+        
+        with patch.object(agent, 'chat', return_value="<promise>DONE</promise>"):
+            result = agent.run_autonomous(
+                "Test task",
+                max_iterations=5,
+                completion_promise="DONE"
+            )
+        
+        # Should be parseable as ISO 8601
+        try:
+            # Try parsing with fromisoformat (Python 3.7+)
+            parsed = datetime.fromisoformat(result.started_at.replace("Z", "+00:00"))
+            assert parsed is not None
+        except ValueError:
+            pytest.fail(f"started_at is not valid ISO 8601: {result.started_at}")
+
+
+class TestRunAutonomousAsync:
+    """Test async variant of run_autonomous()."""
+    
+    @pytest.mark.asyncio
+    async def test_run_autonomous_async_exists(self):
+        """Agent should have run_autonomous_async method."""
+        from praisonaiagents import Agent
+        
+        agent = Agent(
+            instructions="Test agent",
+            autonomy=True,
+            output="silent"
+        )
+        
+        assert hasattr(agent, 'run_autonomous_async')
+        assert callable(agent.run_autonomous_async)
+    
+    @pytest.mark.asyncio
+    async def test_run_autonomous_async_returns_autonomy_result(self):
+        """run_autonomous_async() should return AutonomyResult."""
+        from praisonaiagents import Agent
+        from praisonaiagents.agent.autonomy import AutonomyResult
+        
+        agent = Agent(
+            instructions="Test agent",
+            autonomy=True,
+            output="silent"
+        )
+        
+        # Mock achat to return a response with promise
+        async def mock_achat(prompt, **kwargs):
+            return "<promise>DONE</promise>"
+        
+        with patch.object(agent, 'achat', side_effect=mock_achat):
+            result = await agent.run_autonomous_async(
+                "Test task",
+                max_iterations=5,
+                completion_promise="DONE"
+            )
+        
+        assert isinstance(result, AutonomyResult)
+        assert result.success == True
+        assert result.completion_reason == "promise"
+    
+    @pytest.mark.asyncio
+    async def test_run_autonomous_async_accepts_same_params(self):
+        """run_autonomous_async() should accept same params as sync version."""
+        from praisonaiagents import Agent
+        
+        agent = Agent(
+            instructions="Test agent",
+            autonomy=True,
+            output="silent"
+        )
+        
+        async def mock_achat(prompt, **kwargs):
+            return "<promise>DONE</promise>"
+        
+        with patch.object(agent, 'achat', side_effect=mock_achat):
+            # Should accept all the same parameters
+            result = await agent.run_autonomous_async(
+                prompt="Test task",
+                max_iterations=10,
+                timeout_seconds=60.0,
+                completion_promise="DONE",
+                clear_context=True
+            )
+        
+        assert result.success == True
+    
+    @pytest.mark.asyncio
+    async def test_run_autonomous_async_uses_achat(self):
+        """run_autonomous_async() should use achat() not chat()."""
+        from praisonaiagents import Agent
+        
+        agent = Agent(
+            instructions="Test agent",
+            autonomy=True,
+            output="silent"
+        )
+        
+        achat_called = [False]
+        chat_called = [False]
+        
+        async def mock_achat(prompt, **kwargs):
+            achat_called[0] = True
+            return "<promise>DONE</promise>"
+        
+        def mock_chat(prompt, **kwargs):
+            chat_called[0] = True
+            return "<promise>DONE</promise>"
+        
+        with patch.object(agent, 'achat', side_effect=mock_achat):
+            with patch.object(agent, 'chat', side_effect=mock_chat):
+                result = await agent.run_autonomous_async(
+                    "Test task",
+                    max_iterations=5,
+                    completion_promise="DONE"
+                )
+        
+        assert achat_called[0] == True, "achat should be called"
+        assert chat_called[0] == False, "chat should NOT be called"
+    
+    @pytest.mark.asyncio
+    async def test_run_autonomous_async_has_started_at(self):
+        """run_autonomous_async() result should have started_at."""
+        from praisonaiagents import Agent
+        
+        agent = Agent(
+            instructions="Test agent",
+            autonomy=True,
+            output="silent"
+        )
+        
+        async def mock_achat(prompt, **kwargs):
+            return "<promise>DONE</promise>"
+        
+        with patch.object(agent, 'achat', side_effect=mock_achat):
+            result = await agent.run_autonomous_async(
+                "Test task",
+                max_iterations=5,
+                completion_promise="DONE"
+            )
+        
+        assert result.started_at is not None
+    
+    @pytest.mark.asyncio
+    async def test_run_autonomous_async_raises_without_autonomy(self):
+        """run_autonomous_async() should raise if autonomy not enabled."""
+        from praisonaiagents import Agent
+        
+        agent = Agent(
+            instructions="Test agent",
+            autonomy=False,  # Disabled
+            output="silent"
+        )
+        
+        with pytest.raises(ValueError, match="Autonomy must be enabled"):
+            await agent.run_autonomous_async("Test task")

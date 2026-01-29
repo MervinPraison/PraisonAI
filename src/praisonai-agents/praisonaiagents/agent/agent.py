@@ -1884,6 +1884,7 @@ Summary:"""
         """
         from .autonomy import AutonomyResult
         import time as time_module
+        from datetime import datetime, timezone
         
         if not self.autonomy_enabled:
             raise ValueError(
@@ -1892,6 +1893,7 @@ Summary:"""
             )
         
         start_time = time_module.time()
+        started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         iterations = 0
         actions_taken = []
         
@@ -1930,6 +1932,7 @@ Summary:"""
                         stage=stage,
                         actions=actions_taken,
                         duration_seconds=time_module.time() - start_time,
+                        started_at=started_at,
                     )
                 
                 # Check doom loop
@@ -1942,6 +1945,7 @@ Summary:"""
                         stage=stage,
                         actions=actions_taken,
                         duration_seconds=time_module.time() - start_time,
+                        started_at=started_at,
                     )
                 
                 # Execute one turn using the agent's chat method
@@ -1958,6 +1962,7 @@ Summary:"""
                         actions=actions_taken,
                         duration_seconds=time_module.time() - start_time,
                         error=str(e),
+                        started_at=started_at,
                     )
                 
                 # Record the action
@@ -1980,6 +1985,7 @@ Summary:"""
                             stage=stage,
                             actions=actions_taken,
                             duration_seconds=time_module.time() - start_time,
+                            started_at=started_at,
                         )
                 
                 # Check for keyword-based completion signals (fallback)
@@ -1998,6 +2004,7 @@ Summary:"""
                         stage=stage,
                         actions=actions_taken,
                         duration_seconds=time_module.time() - start_time,
+                        started_at=started_at,
                     )
                 
                 # For DIRECT stage, complete after first response
@@ -2010,6 +2017,7 @@ Summary:"""
                         stage=stage,
                         actions=actions_taken,
                         duration_seconds=time_module.time() - start_time,
+                        started_at=started_at,
                     )
                 
                 # Clear context between iterations if enabled
@@ -2025,6 +2033,7 @@ Summary:"""
                 stage=stage,
                 actions=actions_taken,
                 duration_seconds=time_module.time() - start_time,
+                started_at=started_at,
             )
             
         except Exception as e:
@@ -2037,6 +2046,226 @@ Summary:"""
                 actions=actions_taken,
                 duration_seconds=time_module.time() - start_time,
                 error=str(e),
+                started_at=started_at,
+            )
+    
+    async def run_autonomous_async(
+        self,
+        prompt: str,
+        max_iterations: Optional[int] = None,
+        timeout_seconds: Optional[float] = None,
+        completion_promise: Optional[str] = None,
+        clear_context: bool = False,
+    ):
+        """Async variant of run_autonomous() for concurrent agent execution.
+        
+        This method executes a task autonomously using async I/O, enabling
+        multiple agents to run concurrently without blocking. It handles:
+        - Progressive escalation based on task complexity
+        - Doom loop detection and recovery
+        - Iteration limits and timeouts
+        - Completion detection (keyword-based or promise-based)
+        - Optional context clearing between iterations
+        
+        Args:
+            prompt: The task to execute
+            max_iterations: Override max iterations (default from config)
+            timeout_seconds: Timeout in seconds (default: no timeout)
+            completion_promise: Optional string that signals completion when 
+                wrapped in <promise>TEXT</promise> tags in the response
+            clear_context: Whether to clear chat history between iterations
+                (forces agent to rely on external state like files)
+            
+        Returns:
+            AutonomyResult with success status, output, and metadata
+            
+        Raises:
+            ValueError: If autonomy is not enabled
+            
+        Example:
+            import asyncio
+            
+            async def main():
+                agent = Agent(instructions="...", autonomy=True)
+                result = await agent.run_autonomous_async(
+                    "Refactor the auth module",
+                    completion_promise="DONE",
+                    clear_context=True
+                )
+                if result.success:
+                    print(result.output)
+            
+            asyncio.run(main())
+        """
+        from .autonomy import AutonomyResult
+        import time as time_module
+        from datetime import datetime, timezone
+        import asyncio
+        
+        if not self.autonomy_enabled:
+            raise ValueError(
+                "Autonomy must be enabled to use run_autonomous_async(). "
+                "Create agent with autonomy=True or autonomy={...}"
+            )
+        
+        start_time = time_module.time()
+        started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        iterations = 0
+        actions_taken = []
+        
+        # Get config values
+        config_max_iter = self.autonomy_config.get("max_iterations", 20)
+        effective_max_iter = max_iterations if max_iterations is not None else config_max_iter
+        
+        # Get completion_promise from config if not provided as param
+        effective_promise = completion_promise
+        if effective_promise is None:
+            effective_promise = self.autonomy_config.get("completion_promise")
+        
+        # Get clear_context from config if not explicitly set
+        effective_clear_context = clear_context
+        if not clear_context:
+            effective_clear_context = self.autonomy_config.get("clear_context", False)
+        
+        # Analyze prompt and get recommended stage
+        stage = self.get_recommended_stage(prompt)
+        
+        # Reset doom loop tracker for new task
+        self._reset_doom_loop()
+        
+        try:
+            # Execute the autonomous loop
+            while iterations < effective_max_iter:
+                iterations += 1
+                
+                # Check timeout
+                if timeout_seconds and (time_module.time() - start_time) > timeout_seconds:
+                    return AutonomyResult(
+                        success=False,
+                        output="Task timed out",
+                        completion_reason="timeout",
+                        iterations=iterations,
+                        stage=stage,
+                        actions=actions_taken,
+                        duration_seconds=time_module.time() - start_time,
+                        started_at=started_at,
+                    )
+                
+                # Check doom loop
+                if self._is_doom_loop():
+                    return AutonomyResult(
+                        success=False,
+                        output="Task stopped due to repeated actions (doom loop)",
+                        completion_reason="doom_loop",
+                        iterations=iterations,
+                        stage=stage,
+                        actions=actions_taken,
+                        duration_seconds=time_module.time() - start_time,
+                        started_at=started_at,
+                    )
+                
+                # Execute one turn using the agent's async chat method
+                # Always use the original prompt (prompt re-injection)
+                try:
+                    response = await self.achat(prompt)
+                except Exception as e:
+                    return AutonomyResult(
+                        success=False,
+                        output=str(e),
+                        completion_reason="error",
+                        iterations=iterations,
+                        stage=stage,
+                        actions=actions_taken,
+                        duration_seconds=time_module.time() - start_time,
+                        error=str(e),
+                        started_at=started_at,
+                    )
+                
+                # Record the action
+                actions_taken.append({
+                    "iteration": iterations,
+                    "response": str(response)[:500],
+                })
+                
+                response_str = str(response)
+                
+                # Check for completion promise FIRST (structured signal)
+                if effective_promise:
+                    promise_tag = f"<promise>{effective_promise}</promise>"
+                    if promise_tag in response_str:
+                        return AutonomyResult(
+                            success=True,
+                            output=response_str,
+                            completion_reason="promise",
+                            iterations=iterations,
+                            stage=stage,
+                            actions=actions_taken,
+                            duration_seconds=time_module.time() - start_time,
+                            started_at=started_at,
+                        )
+                
+                # Check for keyword-based completion signals (fallback)
+                response_lower = response_str.lower()
+                completion_signals = [
+                    "task completed", "task complete", "done",
+                    "finished", "completed successfully",
+                ]
+                
+                if any(signal in response_lower for signal in completion_signals):
+                    return AutonomyResult(
+                        success=True,
+                        output=response_str,
+                        completion_reason="goal",
+                        iterations=iterations,
+                        stage=stage,
+                        actions=actions_taken,
+                        duration_seconds=time_module.time() - start_time,
+                        started_at=started_at,
+                    )
+                
+                # For DIRECT stage, complete after first response
+                if stage == "direct":
+                    return AutonomyResult(
+                        success=True,
+                        output=response_str,
+                        completion_reason="goal",
+                        iterations=iterations,
+                        stage=stage,
+                        actions=actions_taken,
+                        duration_seconds=time_module.time() - start_time,
+                        started_at=started_at,
+                    )
+                
+                # Clear context between iterations if enabled
+                if effective_clear_context:
+                    self.clear_history()
+                
+                # Yield control to allow other async tasks to run
+                await asyncio.sleep(0)
+            
+            # Max iterations reached
+            return AutonomyResult(
+                success=False,
+                output="Max iterations reached",
+                completion_reason="max_iterations",
+                iterations=iterations,
+                stage=stage,
+                actions=actions_taken,
+                duration_seconds=time_module.time() - start_time,
+                started_at=started_at,
+            )
+            
+        except Exception as e:
+            return AutonomyResult(
+                success=False,
+                output=str(e),
+                completion_reason="error",
+                iterations=iterations,
+                stage=stage,
+                actions=actions_taken,
+                duration_seconds=time_module.time() - start_time,
+                error=str(e),
+                started_at=started_at,
             )
     
     def handoff_to(

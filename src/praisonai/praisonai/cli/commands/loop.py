@@ -138,6 +138,8 @@ def _run_loop(
             typer.echo(f"   Reason: {result.completion_reason}")
             typer.echo(f"   Iterations: {result.iterations}")
             typer.echo(f"   Duration: {result.duration_seconds:.2f}s")
+            if result.started_at:
+                typer.echo(f"   Started: {result.started_at}")
             if verbose:
                 typer.echo(f"\n📝 Final output:\n{result.output}")
         else:
@@ -145,6 +147,8 @@ def _run_loop(
             typer.echo(f"   Reason: {result.completion_reason}")
             typer.echo(f"   Iterations: {result.iterations}")
             typer.echo(f"   Duration: {result.duration_seconds:.2f}s")
+            if result.started_at:
+                typer.echo(f"   Started: {result.started_at}")
             if result.error:
                 typer.echo(f"   Error: {result.error}")
             raise typer.Exit(1)

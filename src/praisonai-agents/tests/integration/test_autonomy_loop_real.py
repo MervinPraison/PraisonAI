@@ -249,6 +249,138 @@ class TestAutonomousLoopReal:
         print("✅ TEST 7 PASSED")
 
 
+    def test_8_started_at_timestamp(self):
+        """Test 8: Verify started_at timestamp is populated in result."""
+        print("\n" + "="*60)
+        print("TEST 8: Started At Timestamp")
+        print("="*60)
+        
+        from datetime import datetime
+        
+        agent = Agent(
+            name="timestamp_tester",
+            instructions="""You are a simple agent.
+            Respond with 'Hello!' and then <promise>READY</promise>""",
+            autonomy=True,
+            llm="gpt-4o-mini",
+        )
+        
+        result = agent.run_autonomous(
+            prompt="Say hello and signal you're ready with <promise>READY</promise>",
+            max_iterations=3,
+            completion_promise="READY"
+        )
+        
+        print(f"Success: {result.success}")
+        print(f"Started at: {result.started_at}")
+        print(f"Duration: {result.duration_seconds:.2f}s")
+        
+        assert result.started_at is not None, "started_at should not be None"
+        assert "T" in result.started_at, "started_at should be ISO 8601 format"
+        
+        # Verify it's parseable
+        try:
+            parsed = datetime.fromisoformat(result.started_at.replace("Z", "+00:00"))
+            print(f"Parsed timestamp: {parsed}")
+        except ValueError as e:
+            raise AssertionError(f"started_at is not valid ISO 8601: {result.started_at}") from e
+        
+        print("✅ TEST 8 PASSED")
+
+    def test_9_async_autonomous_loop(self):
+        """Test 9: Verify async autonomous loop works with real API."""
+        print("\n" + "="*60)
+        print("TEST 9: Async Autonomous Loop")
+        print("="*60)
+        
+        import asyncio
+        
+        async def run_async_test():
+            agent = Agent(
+                name="async_tester",
+                instructions="""You are a simple agent.
+                Respond with 'Hello async!' and then <promise>ASYNC_DONE</promise>""",
+                autonomy=True,
+                llm="gpt-4o-mini",
+            )
+            
+            result = await agent.run_autonomous_async(
+                prompt="Say hello async and signal completion with <promise>ASYNC_DONE</promise>",
+                max_iterations=3,
+                completion_promise="ASYNC_DONE"
+            )
+            return result
+        
+        result = asyncio.run(run_async_test())
+        
+        print(f"Success: {result.success}")
+        print(f"Completion reason: {result.completion_reason}")
+        print(f"Iterations: {result.iterations}")
+        print(f"Started at: {result.started_at}")
+        print(f"Output preview: {result.output[:200] if result.output else 'None'}...")
+        
+        assert result.success, f"Expected success, got failure: {result.completion_reason}"
+        assert result.completion_reason == "promise", f"Expected 'promise', got '{result.completion_reason}'"
+        assert result.started_at is not None, "started_at should not be None"
+        
+        print("✅ TEST 9 PASSED")
+
+    def test_10_concurrent_async_agents(self):
+        """Test 10: Verify multiple async agents can run concurrently."""
+        print("\n" + "="*60)
+        print("TEST 10: Concurrent Async Agents")
+        print("="*60)
+        
+        import asyncio
+        
+        async def run_concurrent_test():
+            agent1 = Agent(
+                name="async_agent_1",
+                instructions="""You are agent 1. Say 'Agent 1 reporting!' and <promise>AGENT1_DONE</promise>""",
+                autonomy=True,
+                llm="gpt-4o-mini",
+            )
+            
+            agent2 = Agent(
+                name="async_agent_2",
+                instructions="""You are agent 2. Say 'Agent 2 reporting!' and <promise>AGENT2_DONE</promise>""",
+                autonomy=True,
+                llm="gpt-4o-mini",
+            )
+            
+            # Run both agents concurrently
+            results = await asyncio.gather(
+                agent1.run_autonomous_async(
+                    "Report in with <promise>AGENT1_DONE</promise>",
+                    max_iterations=3,
+                    completion_promise="AGENT1_DONE"
+                ),
+                agent2.run_autonomous_async(
+                    "Report in with <promise>AGENT2_DONE</promise>",
+                    max_iterations=3,
+                    completion_promise="AGENT2_DONE"
+                )
+            )
+            return results
+        
+        start_time = time.time()
+        results = asyncio.run(run_concurrent_test())
+        elapsed = time.time() - start_time
+        
+        print(f"Agent 1 - Success: {results[0].success}, Reason: {results[0].completion_reason}")
+        print(f"Agent 2 - Success: {results[1].success}, Reason: {results[1].completion_reason}")
+        print(f"Total elapsed time: {elapsed:.2f}s")
+        
+        assert results[0].success, f"Agent 1 failed: {results[0].completion_reason}"
+        assert results[1].success, f"Agent 2 failed: {results[1].completion_reason}"
+        
+        # Both should have started_at
+        assert results[0].started_at is not None, "Agent 1 started_at should not be None"
+        assert results[1].started_at is not None, "Agent 2 started_at should not be None"
+        
+        print("✅ TEST 10 PASSED")
+
+
 def run_all_tests():
     """Run all tests and report results."""
     print("\n" + "="*70)
@@ -264,6 +396,9 @@ def run_all_tests():
         ("Test 5: Prompt Re-injection", test_suite.test_5_prompt_reinjection),
         ("Test 6: Autonomy Config from Dict", test_suite.test_6_autonomy_config_from_dict),
         ("Test 7: Timeout Handling", test_suite.test_7_timeout_handling),
+        ("Test 8: Started At Timestamp", test_suite.test_8_started_at_timestamp),
+        ("Test 9: Async Autonomous Loop", test_suite.test_9_async_autonomous_loop),
+        ("Test 10: Concurrent Async Agents", test_suite.test_10_concurrent_async_agents),
     ]
     
     results = []
