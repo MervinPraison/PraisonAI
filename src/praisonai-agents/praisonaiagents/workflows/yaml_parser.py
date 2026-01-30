@@ -217,7 +217,8 @@ class YAMLWorkflowParser:
                     # Copy other task fields
                     for field in ['expected_output', 'context', 'output_file', 
                                   'output_json', 'create_directory', 'callback',
-                                  'async_execution', 'guardrail', 'max_retries']:
+                                  'async_execution', 'guardrail', 'max_retries',
+                                  'skip_on_failure', 'retry_delay']:
                         if field in task_config:
                             step[field] = task_config[field]
                     
@@ -343,6 +344,9 @@ class YAMLWorkflowParser:
         else:
             context_value = None
         
+        # Parse history flag for execution tracing (robustness feature)
+        history_enabled = data.get('history', False)
+        
         workflow = Workflow(
             name=name,
             steps=steps,
@@ -354,6 +358,7 @@ class YAMLWorkflowParser:
             output=workflow_output,  # Pass output mode to Workflow
             memory=memory_value,  # Pass memory config to Workflow
             context=context_value,  # Pass context management config to Workflow
+            history=history_enabled,  # Enable execution history tracking (robustness)
         )
         
         # Store additional attributes for feature parity with agents.yaml
@@ -843,6 +848,16 @@ class YAMLWorkflowParser:
             output_variable = step_data.get('output_variable')
             if output_variable:
                 agent._yaml_output_variable = output_variable
+            
+            # Handle skip_on_failure (robustness: allow workflow to continue if step fails)
+            skip_on_failure = step_data.get('skip_on_failure')
+            if skip_on_failure is not None:
+                agent._yaml_skip_on_failure = skip_on_failure
+            
+            # Handle retry_delay (robustness: seconds between retries)
+            retry_delay = step_data.get('retry_delay')
+            if retry_delay is not None:
+                agent._yaml_retry_delay = retry_delay
             
             return agent
         else:

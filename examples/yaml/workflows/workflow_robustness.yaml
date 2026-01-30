@@ -1,0 +1,66 @@
+# Workflow Robustness Example
+# 
+# Demonstrates graceful degradation and debugging features:
+# - skip_on_failure: Allow workflow to continue if a step fails
+# - retry_delay: Configure delay between retries
+# - history: Enable execution trace for debugging
+#
+# Run: praisonai run workflow_robustness.yaml
+
+name: Robust Research Workflow
+description: A workflow demonstrating robustness features for production use
+history: true  # Enable execution history tracking for debugging
+
+agents:
+  researcher:
+    name: Researcher
+    role: Research Expert
+    goal: Find accurate information about the given topic
+    instructions: |
+      Research topics thoroughly and provide accurate, well-sourced information.
+      Focus on recent developments and key trends.
+    llm: gpt-4o-mini
+  
+  enricher:
+    name: Enricher
+    role: Data Enricher
+    goal: Add additional context and examples to research
+    instructions: |
+      Enrich research with real-world examples and additional context.
+      Make the information more practical and actionable.
+    llm: gpt-4o-mini
+  
+  writer:
+    name: Writer
+    role: Content Writer
+    goal: Create engaging, well-structured content
+    instructions: |
+      Write clear, engaging content based on the research provided.
+      Use a professional but accessible tone.
+    llm: gpt-4o-mini
+
+steps:
+  # Step 1: Research (critical step)
+  - agent: researcher
+    action: Research the latest trends in AI agents and autonomous systems for 2025
+    expected_output: A comprehensive summary of key AI agent trends
+    max_retries: 3
+    retry_delay: 1.0  # 1 second between retries
+  
+  # Step 2: Enrichment (optional step - workflow continues if this fails)
+  - agent: enricher
+    action: Enrich the research with real-world examples and use cases
+    expected_output: Research enriched with practical examples
+    skip_on_failure: true  # Workflow continues even if enrichment fails
+    max_retries: 2
+    retry_delay: 0.5
+  
+  # Step 3: Writing (critical step)
+  - agent: writer
+    action: Write a well-structured summary based on the research
+    expected_output: A polished, engaging summary paragraph
+    max_retries: 3
+    retry_delay: 1.0
+
+# Default input for the workflow
+input: AI agents and autonomous systems
