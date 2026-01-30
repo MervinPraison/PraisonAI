@@ -64,7 +64,7 @@ validate_task = Task(
 )
 
 # 4. AI Agents Workflow
-agents = Agents(
+agents = AgentManager(
     agents=[data_agent],
     tasks=[collect_task, validate_task],
     process="workflow"

@@ -11,7 +11,7 @@ print("\n2. Check if auto_instrument_all was called...")
 print(f"   _initialized: {praisonaiagents.telemetry._initialized}")
 
 print("\n3. Import Agent and Agents...")
-from praisonaiagents import Agent, Agents
+from praisonaiagents import Agent, AgentManager
 print("   Classes imported")
 
 print("\n4. Check if classes are instrumented...")

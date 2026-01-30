@@ -46,7 +46,7 @@ print(f"  - Max Retries: {max_retries}")
 print("\n" + "="*50 + "\n")
 
 # Run agents
-agents = Agents(agents=[agent], tasks=[task])
+agents = AgentManager(agents=[agent], tasks=[task])
 result = agents.start()
 
 # Save to environment-specified location if provided

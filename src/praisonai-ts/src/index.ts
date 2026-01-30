@@ -50,11 +50,11 @@ export {
   Workflow, parallel, route, loop, repeat,
   // New: Python-parity Loop and Repeat classes
   Loop, loopPattern, Repeat, repeatPattern,
-  // WorkflowStep class
-  WorkflowStep,
+  // Task class
+  Task,
 } from './workflows';
 export type {
-  WorkflowContext, StepResult, WorkflowStepConfig,
+  WorkflowContext, StepResult, TaskConfig,
   LoopConfig, LoopResult, RepeatConfig, RepeatResult, RepeatContext,
   StepContextConfig, StepOutputConfig, StepExecutionConfig, StepRoutingConfig
 } from './workflows';

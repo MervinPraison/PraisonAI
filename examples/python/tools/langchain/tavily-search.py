@@ -14,5 +14,5 @@ def search_tool(query: str):
 data_agent = Agent(instructions="I am looking for the top google searches on AI tools of 2025", tools=[search_tool])
 editor_agent = Agent(instructions="Analyze the data and rank the tools based on their popularity")
 
-agents = Agents(agents=[data_agent, editor_agent])
+agents = AgentManager(agents=[data_agent, editor_agent])
 agents.start()

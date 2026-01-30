@@ -105,7 +105,7 @@ adaptation_task = Task(
 )
 
 # Create workflow
-workflow = Agents(
+workflow = AgentManager(
     agents=[assessor, generator, evaluator, adapter],
     tasks=[assessment_task, generation_task, evaluation_task, adaptation_task],
     process="workflow", output="verbose"

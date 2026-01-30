@@ -23,5 +23,5 @@ orchestration_agent = Agent(
 )
 
 # Initialize and run agents
-agents = Agents(agents=[orchestration_agent])
+agents = AgentManager(agents=[orchestration_agent])
 agents.start()

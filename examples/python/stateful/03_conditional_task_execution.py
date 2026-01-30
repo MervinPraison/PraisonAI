@@ -366,7 +366,7 @@ report_task = Task(
 )
 
 # Create workflow
-workflow = Agents(
+workflow = AgentManager(
     agents=[finance_agent, cost_manager, development_agent, performance_agent, report_agent],
     tasks=[
         budget_decision_task,

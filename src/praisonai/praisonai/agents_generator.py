@@ -976,7 +976,7 @@ class AgentsGenerator:
         memory = config.get('memory', False)
         self.logger.debug(f"Memory: {memory}")
         if config.get('process') == 'hierarchical':
-            agents = Agents(
+            agents = AgentManager(
                 agents=list(agents.values()),
                 tasks=tasks,
                 process="hierarchical",
@@ -984,7 +984,7 @@ class AgentsGenerator:
                 memory=memory
             )
         else:
-            agents = Agents(
+            agents = AgentManager(
                 agents=list(agents.values()),
                 tasks=tasks,
                 memory=memory

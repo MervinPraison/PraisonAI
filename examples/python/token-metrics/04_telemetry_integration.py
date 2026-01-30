@@ -6,7 +6,7 @@ telemetry system for comprehensive monitoring and analytics.
 Demonstrates privacy-first tracking and export capabilities.
 """
 
-from praisonaiagents import Agents, Agent, Task
+from praisonaiagents import AgentManager, Agent, Task
 import json
 
 def export_metrics_to_file(agents, filename="token_metrics_export.json"):
@@ -126,7 +126,7 @@ def main():
     )
     
     # Initialize with telemetry awareness
-    agents = Agents(
+    agents = AgentManager(
         agents=[data_agent, monitor_agent],
         tasks=[processing_task, monitoring_task], output="verbose"
     )

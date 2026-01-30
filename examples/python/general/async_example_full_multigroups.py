@@ -99,7 +99,7 @@ async_task = Task(
 async def run_single_task():
     """Run single async task"""
     print("\nRunning Single Async Task...")
-    agents = Agents(
+    agents = AgentManager(
         agents=[async_agent],
         tasks=[async_task],
         process="sequential"
@@ -182,7 +182,7 @@ Present the summary in a clear, structured format with sections for findings, pa
     )
     
     # First run parallel search tasks
-    agents = Agents(
+    agents = AgentManager(
         agents=[async_agent],
         tasks=parallel_tasks,  # Only run search tasks first
         process="sequential"
@@ -206,7 +206,7 @@ Present the summary in a clear, structured format with sections for findings, pa
     summary_task.context = completed_tasks
     
     # Run summarization task with summary agent
-    summary_agents = Agents(
+    summary_agents = AgentManager(
         agents=[summary_agent],  # Use summary agent for synthesis
         tasks=[summary_task],
         process="sequential"

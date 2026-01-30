@@ -540,7 +540,7 @@ tasks = [
 ]
 
 # Create workflow
-workflow = Agents(
+workflow = AgentManager(
     agents=[state_manager, cache_manager, metrics_calculator, report_generator],
     tasks=tasks,
     process="sequential"

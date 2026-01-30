@@ -13,7 +13,7 @@ import sys
 # Add the package to path for testing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from praisonaiagents import Workflow, WorkflowStep
+from praisonaiagents import Workflow, Task
 from praisonaiagents.workflows import WorkflowManager
 
 

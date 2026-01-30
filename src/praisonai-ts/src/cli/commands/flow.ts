@@ -52,7 +52,7 @@ async function handleShow(args: string[], options: Record<string, unknown>, isJs
     compact: Boolean(options.compact)
   });
   
-  display.fromWorkflowSteps(steps);
+  display.fromTasks(steps);
 
   if (isJson) {
     const graph = display.getGraph();
@@ -93,7 +93,7 @@ async function handleDot(args: string[], options: Record<string, unknown>, isJso
   }
 
   const display = createFlowDisplay();
-  display.fromWorkflowSteps(steps);
+  display.fromTasks(steps);
   const dot = display.toDot();
 
   if (isJson) {

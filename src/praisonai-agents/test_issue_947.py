@@ -1,7 +1,7 @@
 # agentic_parallelization_varied_tasks.py
 
 import asyncio
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentManager
 
 # Example tools (replace with real implementations as needed)
 def fetch_favorite_article():
@@ -90,7 +90,7 @@ aggregate_task = Task(
 )
 
 async def main():
-    workflow = Agents(
+    workflow = AgentManager(
         agents=[article_agent, news_agent, twitter_agent, aggregator],
         tasks=[article_task, news_task, twitter_task, aggregate_task],
         process="workflow",

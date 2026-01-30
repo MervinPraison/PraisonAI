@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentManager
 from praisonaiagents.memory import Memory
 from praisonaiagents.agent import ContextAgent
 import pymongo
@@ -35,7 +35,7 @@ implementation_task = Task(
     context=context_output,
 )
 
-implementation_system = Agents(
+implementation_system = AgentManager(
     agents=[implementation_agent],
     tasks=[implementation_task],
     memory=True,

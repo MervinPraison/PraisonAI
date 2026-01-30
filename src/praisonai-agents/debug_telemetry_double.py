@@ -3,7 +3,7 @@
 Debug double-counting in telemetry.
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentManager
 from praisonaiagents.telemetry import get_telemetry
 
 # Get telemetry instance
@@ -33,7 +33,7 @@ task = Task(
 
 # Create workflow with ONE agent and ONE task
 print("Creating workflow with 1 agent and 1 task...")
-workflow = Agents(
+workflow = AgentManager(
     agents=[agent],
     tasks=[task],
     process="sequential"

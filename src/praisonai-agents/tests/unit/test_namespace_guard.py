@@ -103,7 +103,7 @@ class TestAgentImportIntegrity:
         assert hasattr(Agent, 'chat')
     
     def test_agents_class_import(self):
-        """Verify Agents class can be imported."""
+        """Verify Agents class can be imported (silent alias for AgentManager)."""
         from praisonaiagents import Agents
         assert Agents is not None
     

@@ -1,11 +1,11 @@
 """
 Integration tests for Dict support in consolidated param resolution.
 
-Tests that Agent, Agents, and Workflow classes correctly handle dict params
+Tests that Agent, AgentManager, and Workflow classes correctly handle dict params
 through the unified canonical resolver.
 
 Note: Agent tests are skipped as they require LLM setup. The core dict
-resolution is tested in unit tests. These tests focus on Workflow/WorkflowStep
+resolution is tested in unit tests. These tests focus on Workflow/Task
 which don't require LLM setup.
 """
 
@@ -133,7 +133,7 @@ class TestAgentsDictParamsResolver:
 # =============================================================================
 
 class TestWorkflowDictParams:
-    """Test Workflow and WorkflowStep with dict params."""
+    """Test Workflow and Task with dict params."""
     
     def test_workflow_output_dict(self):
         """Workflow accepts output as dict."""
@@ -172,10 +172,10 @@ class TestWorkflowDictParams:
         assert workflow.memory is not None
     
     def test_workflowstep_context_dict(self):
-        """WorkflowStep accepts context as dict."""
-        from praisonaiagents.workflows.workflows import WorkflowStep
+        """Task accepts context as dict."""
+        from praisonaiagents.workflows.workflows import Task
         
-        step = WorkflowStep(
+        step = Task(
             name="step1",
             context={"from_steps": ["step0"], "retain_full": True},
         )
@@ -183,10 +183,10 @@ class TestWorkflowDictParams:
         assert step.retain_full_context is True
     
     def test_workflowstep_output_dict(self):
-        """WorkflowStep accepts output as dict."""
-        from praisonaiagents.workflows.workflows import WorkflowStep
+        """Task accepts output as dict."""
+        from praisonaiagents.workflows.workflows import Task
         
-        step = WorkflowStep(
+        step = Task(
             name="step1",
             output={"file": "output.txt", "variable": "result"},
         )
@@ -194,10 +194,10 @@ class TestWorkflowDictParams:
         assert step.output_variable == "result"
     
     def test_workflowstep_execution_dict(self):
-        """WorkflowStep accepts execution as dict."""
-        from praisonaiagents.workflows.workflows import WorkflowStep
+        """Task accepts execution as dict."""
+        from praisonaiagents.workflows.workflows import Task
         
-        step = WorkflowStep(
+        step = Task(
             name="step1",
             execution={"max_retries": 5, "quality_check": True},
         )
@@ -205,10 +205,10 @@ class TestWorkflowDictParams:
         assert step.quality_check is True
     
     def test_workflowstep_routing_dict(self):
-        """WorkflowStep accepts routing as dict."""
-        from praisonaiagents.workflows.workflows import WorkflowStep
+        """Task accepts routing as dict."""
+        from praisonaiagents.workflows.workflows import Task
         
-        step = WorkflowStep(
+        step = Task(
             name="step1",
             routing={"next_steps": ["step2", "step3"]},
         )
@@ -292,10 +292,10 @@ class TestBackwardCompatibility:
         assert workflow is not None
     
     def test_workflowstep_list_context_still_works(self):
-        """WorkflowStep with list context still works."""
-        from praisonaiagents.workflows.workflows import WorkflowStep
+        """Task with list context still works."""
+        from praisonaiagents.workflows.workflows import Task
         
-        step = WorkflowStep(
+        step = Task(
             name="step1",
             context=["step0", "step_prev"],
         )

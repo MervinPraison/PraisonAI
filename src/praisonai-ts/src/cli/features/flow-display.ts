@@ -71,7 +71,7 @@ export class FlowDisplay {
   /**
    * Build graph from workflow steps
    */
-  fromWorkflowSteps(steps: Array<{ name: string; type?: string; condition?: string }>): void {
+  fromTasks(steps: Array<{ name: string; type?: string; condition?: string }>): void {
     this.graph.nodes.clear();
     this.graph.edges = [];
 
@@ -314,6 +314,6 @@ export function createFlowDisplay(config?: FlowDisplayConfig): FlowDisplay {
  */
 export function renderWorkflow(steps: Array<{ name: string; type?: string }>): string {
   const display = createFlowDisplay();
-  display.fromWorkflowSteps(steps);
+  display.fromTasks(steps);
   return display.render();
 }

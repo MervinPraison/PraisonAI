@@ -11,9 +11,9 @@ from praisonaiagents import Workflow, WorkflowContext, StepResult, Pipeline
 from praisonaiagents.workflows import (
     route, parallel, loop, repeat,
     Route, Parallel, Loop, Repeat,
-    WorkflowStep, WorkflowManager,
+    Task, WorkflowManager,
     WorkflowHooksConfig, WorkflowPlanningConfig, WorkflowOutputConfig,
-    WorkflowStepExecutionConfig, WorkflowStepOutputConfig,
+    TaskExecutionConfig, TaskOutputConfig,
 )
 
 
@@ -102,8 +102,8 @@ class TestBasicWorkflow:
         def is_special(ctx): return "special" in ctx.input.lower()
         
         workflow = Workflow(steps=[
-            WorkflowStep(name="always", handler=always),
-            WorkflowStep(name="conditional", handler=conditional, should_run=is_special)
+            Task(name="always", handler=always),
+            Task(name="conditional", handler=conditional, should_run=is_special)
         ])
         
         # Without "special" - conditional should be skipped
@@ -460,7 +460,7 @@ class TestBackwardCompatibility:
     def test_import_from_memory_workflows(self):
         """Test imports from praisonaiagents.memory.workflows still work."""
         from praisonaiagents.memory.workflows import (
-            Workflow, WorkflowStep, WorkflowContext, StepResult,
+            Workflow, Task, WorkflowContext, StepResult,
             route, parallel, loop, repeat
         )
         
@@ -657,7 +657,7 @@ class TestGuardrails:
         def step1(ctx): return StepResult(output="Valid output")
         
         workflow = Workflow(steps=[
-            WorkflowStep(name="step1", handler=step1, guardrails=validator)
+            Task(name="step1", handler=step1, guardrails=validator)
         ])
         result = workflow.start("test")
         
@@ -678,7 +678,7 @@ class TestGuardrails:
             return StepResult(output=f"Output attempt {attempt[0]}")
         
         workflow = Workflow(steps=[
-            WorkflowStep(name="step1", handler=step1, guardrails=validator, execution=WorkflowStepExecutionConfig(max_retries=5))
+            Task(name="step1", handler=step1, guardrails=validator, execution=TaskExecutionConfig(max_retries=5))
         ])
         result = workflow.start("test")
         
@@ -697,7 +697,7 @@ class TestGuardrails:
             return StepResult(output=f"Attempt {attempt[0]}")
         
         workflow = Workflow(steps=[
-            WorkflowStep(name="step1", handler=step1, guardrails=validator, execution=WorkflowStepExecutionConfig(max_retries=2))
+            Task(name="step1", handler=step1, guardrails=validator, execution=TaskExecutionConfig(max_retries=2))
         ])
         result = workflow.start("test")
         
@@ -721,7 +721,7 @@ class TestGuardrails:
             return StepResult(output="initial")
         
         workflow = Workflow(steps=[
-            WorkflowStep(name="step1", handler=step1, guardrails=validator, execution=WorkflowStepExecutionConfig(max_retries=3))
+            Task(name="step1", handler=step1, guardrails=validator, execution=TaskExecutionConfig(max_retries=3))
         ])
         result = workflow.start("test")
         
@@ -766,7 +766,7 @@ class TestStatusTracking:
         
         workflow = Workflow(steps=[
             step1,
-            WorkflowStep(name="step2", handler=step2, should_run=never_run)
+            Task(name="step2", handler=step2, should_run=never_run)
         ])
         result = workflow.start("test")
         
@@ -1013,7 +1013,7 @@ class TestDocumentationExamples:
             return (False, "Please fix the output")
         
         workflow = Workflow(steps=[
-            WorkflowStep(name="gen", handler=generator, guardrails=validator, execution=WorkflowStepExecutionConfig(max_retries=3))
+            Task(name="gen", handler=generator, guardrails=validator, execution=TaskExecutionConfig(max_retries=3))
         ])
         
         result = workflow.start("test")
@@ -1029,7 +1029,7 @@ class TestAgentWorkflows:
     """Test Agent objects as workflow steps."""
     
     def test_agent_normalization(self):
-        """Test that Agent objects are properly normalized to WorkflowStep."""
+        """Test that Agent objects are properly normalized to Task."""
         # Create a mock agent
         class MockAgent:
             def __init__(self, name, tools=None):
@@ -1230,17 +1230,17 @@ class TestWorkflowConfiguration:
 
 
 # =============================================================================
-# Test: WorkflowStep with Tools
+# Test: Task with Tools
 # =============================================================================
 
-class TestWorkflowStepTools:
-    """Test WorkflowStep with tools configuration."""
+class TestTaskTools:
+    """Test Task with tools configuration."""
     
     def test_step_with_tools(self):
-        """Test WorkflowStep with tools parameter."""
+        """Test Task with tools parameter."""
         def my_tool(): return "tool result"
         
-        step = WorkflowStep(
+        step = Task(
             name="step_with_tools",
             action="Do something",
             tools=[my_tool]
@@ -1249,10 +1249,10 @@ class TestWorkflowStepTools:
         assert step.tools == [my_tool]
     
     def test_step_with_agent_config_tools(self):
-        """Test WorkflowStep with tools in agent_config."""
+        """Test Task with tools in agent_config."""
         def my_tool(): return "tool result"
         
-        step = WorkflowStep(
+        step = Task(
             name="step_with_config",
             action="Do something",
             agent_config={
@@ -1273,7 +1273,7 @@ class TestMigratedFeatures:
     """Test features migrated from process='workflow'."""
     
     def test_step_output_file(self):
-        """Test WorkflowStep with output_file parameter."""
+        """Test Task with output_file parameter."""
         import tempfile
         import os
         
@@ -1284,10 +1284,10 @@ class TestMigratedFeatures:
                 return StepResult(output="Generated content for file")
             
             workflow = Workflow(steps=[
-                WorkflowStep(
+                Task(
                     name="generator",
                     handler=generate_content,
-                    output=WorkflowStepOutputConfig(file=output_path)
+                    output=TaskOutputConfig(file=output_path)
                 )
             ])
             
@@ -1300,8 +1300,8 @@ class TestMigratedFeatures:
             assert "Generated content" in content
     
     def test_step_images_parameter(self):
-        """Test WorkflowStep with images parameter."""
-        step = WorkflowStep(
+        """Test Task with images parameter."""
+        step = Task(
             name="vision_step",
             action="Analyze this image",
             images=["image1.jpg", "image2.png"]
@@ -1310,47 +1310,47 @@ class TestMigratedFeatures:
         assert step.images == ["image1.jpg", "image2.png"]
     
     def test_step_output_pydantic_parameter(self):
-        """Test WorkflowStep with output_pydantic parameter."""
+        """Test Task with output_pydantic parameter."""
         from pydantic import BaseModel
         
         class OutputModel(BaseModel):
             title: str
             content: str
         
-        step = WorkflowStep(
+        step = Task(
             name="structured_step",
             action="Generate structured output",
-            output=WorkflowStepOutputConfig(pydantic_model=OutputModel)
+            output=TaskOutputConfig(pydantic_model=OutputModel)
         )
         
         assert step.output_pydantic == OutputModel
     
     def test_step_async_execution_parameter(self):
-        """Test WorkflowStep with async_execution parameter."""
-        step = WorkflowStep(
+        """Test Task with async_execution parameter."""
+        step = Task(
             name="async_step",
             action="Run async",
-            execution=WorkflowStepExecutionConfig(async_exec=True)
+            execution=TaskExecutionConfig(async_exec=True)
         )
         
         assert step.async_execution == True
     
     def test_step_quality_check_parameter(self):
-        """Test WorkflowStep with quality_check parameter."""
-        step = WorkflowStep(
+        """Test Task with quality_check parameter."""
+        step = Task(
             name="quality_step",
             action="Check quality",
-            execution=WorkflowStepExecutionConfig(quality_check=False)
+            execution=TaskExecutionConfig(quality_check=False)
         )
         
         assert step.quality_check == False
     
     def test_step_rerun_parameter(self):
-        """Test WorkflowStep with rerun parameter."""
-        step = WorkflowStep(
+        """Test Task with rerun parameter."""
+        step = Task(
             name="rerun_step",
             action="Can rerun",
-            execution=WorkflowStepExecutionConfig(rerun=False)
+            execution=TaskExecutionConfig(rerun=False)
         )
         
         assert step.rerun == False
@@ -1375,12 +1375,12 @@ class TestMigratedFeatures:
     
     def test_step_to_dict_includes_new_fields(self):
         """Test that to_dict includes all new fields."""
-        step = WorkflowStep(
+        step = Task(
             name="test_step",
             action="Test action",
-            output=WorkflowStepOutputConfig(file="output.txt"),
+            output=TaskOutputConfig(file="output.txt"),
             images=["img.jpg"],
-            execution=WorkflowStepExecutionConfig(async_exec=True, quality_check=False, rerun=False)
+            execution=TaskExecutionConfig(async_exec=True, quality_check=False, rerun=False)
         )
         
         d = step.to_dict()
@@ -1436,11 +1436,11 @@ class TestToolsPerStep:
     """Test tools per step functionality."""
     
     def test_step_with_tools_list(self):
-        """Test WorkflowStep with tools list."""
+        """Test Task with tools list."""
         def my_tool():
             return "tool result"
         
-        step = WorkflowStep(
+        step = Task(
             name="test",
             action="Do something",
             tools=[my_tool]
@@ -1449,11 +1449,11 @@ class TestToolsPerStep:
         assert step.tools == [my_tool]
     
     def test_step_with_agent_config_tools(self):
-        """Test WorkflowStep with tools in agent_config."""
+        """Test Task with tools in agent_config."""
         def my_tool():
             return "tool result"
         
-        step = WorkflowStep(
+        step = Task(
             name="test",
             action="Do something",
             agent_config={

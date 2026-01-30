@@ -71,7 +71,7 @@ def main():
     print(f"Agents: {[a.name for a in agents]}")
     
     # Create multi-agent system
-    praison = Agents(agents=agents)
+    praison = AgentManager(agents=agents)
     
     print("\nLaunching multi-agent router as HTTP API...")
     print("Endpoints:")

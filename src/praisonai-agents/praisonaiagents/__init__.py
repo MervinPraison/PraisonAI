@@ -76,7 +76,7 @@ from . import tools
 # Supports: embedding, embeddings, aembedding, aembeddings, EmbeddingResult, get_dimensions
 
 # Workflows - LAZY LOADED (moved to __getattr__)
-# Workflow, WorkflowStep, WorkflowContext, StepResult, Route, Parallel, Loop, Repeat, etc.
+# Workflow, Task, WorkflowContext, StepResult, Route, Parallel, Loop, Repeat, etc.
 
 # Guardrails - LAZY LOADED (imports main.py which imports rich)
 # GuardrailResult and LLMGuardrail moved to __getattr__
@@ -142,7 +142,7 @@ _LAZY_IMPORTS = {
     
     # Workflows
     'Workflow': ('praisonaiagents.workflows', 'Workflow'),
-    'WorkflowStep': ('praisonaiagents.workflows', 'WorkflowStep'),
+    'Task': ('praisonaiagents.workflows', 'Task'),
     'WorkflowContext': ('praisonaiagents.workflows', 'WorkflowContext'),
     'StepResult': ('praisonaiagents.workflows', 'StepResult'),
     'Route': ('praisonaiagents.workflows', 'Route'),
@@ -425,45 +425,20 @@ def _custom_handler(name, cache):
     """Handle special cases that need custom logic."""
     import warnings
     
-    # Agents deprecation warning (use AgentManager instead)
+    # Agents is a silent alias for AgentManager
     if name == "Agents":
-        warnings.warn(
-            "Agents is deprecated, use AgentManager instead. "
-            "Example: from praisonaiagents import AgentManager",
-            DeprecationWarning,
-            stacklevel=4
-        )
         value = lazy_import('praisonaiagents.agents.agents', 'AgentManager', cache)
         cache['AgentManager'] = value
         cache['Agents'] = value
         return value
     
-    # PraisonAIAgents deprecation warning (use AgentManager instead)
-    if name == "PraisonAIAgents":
-        warnings.warn(
-            "PraisonAIAgents is deprecated, use AgentManager instead. "
-            "Example: from praisonaiagents import AgentManager",
-            DeprecationWarning,
-            stacklevel=4
+    # Task removed in v4.0.0 - use Task instead
+    if name == "Task":
+        raise ImportError(
+            "Task has been removed in v4.0.0. Use Task instead.\n"
+            "Migration: Replace 'from praisonaiagents import Task' with 'from praisonaiagents import Task'\n"
+            "Task supports all Task features including action, handler, loop_over, etc."
         )
-        value = lazy_import('praisonaiagents.agents.agents', 'AgentManager', cache)
-        cache['AgentManager'] = value
-        cache['PraisonAIAgents'] = value
-        return value
-    
-    # WorkflowStep deprecation warning (use Task instead) - Phase 4 Consolidation
-    if name == "WorkflowStep":
-        warnings.warn(
-            "WorkflowStep is deprecated, use Task instead. "
-            "Task now supports all WorkflowStep features including action, handler, loop_over, etc. "
-            "Example: from praisonaiagents import Task",
-            DeprecationWarning,
-            stacklevel=4
-        )
-        value = lazy_import('praisonaiagents.task.task', 'Task', cache)
-        cache['Task'] = value
-        cache['WorkflowStep'] = value
-        return value
     
     # Module imports (return the module itself)
     if name == 'memory':
@@ -650,7 +625,7 @@ def __dir__():
 # - Session, Memory, db, obs, Knowledge, Chunking
 # - GuardrailResult, LLMGuardrail, Handoff, handoff, handoff_filters
 # - MemoryConfig, KnowledgeConfig, PlanningConfig, OutputConfig, etc.
-# - Workflow, WorkflowStep, Route, Parallel, Loop, Repeat, Pipeline, etc.
+# - Workflow, Task, Route, Parallel, Loop, Repeat, Pipeline, etc.
 # - MCP, FlowDisplay, track_workflow, FastContext, etc.
 # - Plan, PlanStep, TodoList, PlanningAgent, ApprovalCallback, etc.
 # - RAG, RAGConfig, RAGResult, AGUI, A2A, etc.

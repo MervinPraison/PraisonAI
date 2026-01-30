@@ -46,5 +46,5 @@ execution_agent_task = Task(
     agent=execution_agent
 )
 
-agents = Agents(agents=[code_agent, execution_agent], tasks=[code_agent_task, execution_agent_task])
+agents = AgentManager(agents=[code_agent, execution_agent], tasks=[code_agent_task, execution_agent_task])
 agents.start()

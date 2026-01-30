@@ -9,7 +9,7 @@ from pathlib import Path
 # Add the src directory to the path
 sys.path.insert(0, str(Path(__file__).parent / "src" / "praisonai-agents"))
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentManager
 
 def google_web_search_llm(query: str) -> str:
     """Mock implementation of the user's custom search tool"""
@@ -39,7 +39,7 @@ def test_user_code_pattern_with_tools():
 
     # Create and start the agents
     try:
-        agents = Agents(
+        agents = AgentManager(
             agents=[agent],
             tasks=[task],
             process="sequential"
@@ -80,7 +80,7 @@ def test_user_code_pattern_without_tools():
 
     # Create and start the agents
     try:
-        agents = Agents(
+        agents = AgentManager(
             agents=[agent],
             tasks=[task],
             process="sequential"

@@ -162,7 +162,7 @@ def reflection_workflow_example():
         context=[create_task, review_task]
     )
     
-    workflow = Agents(
+    workflow = AgentManager(
         agents=[creator_agent, reviewer_agent, polisher_agent],
         tasks=[create_task, review_task, polish_task],
         process="sequential", output="verbose"

@@ -105,7 +105,7 @@ coordinate_task = Task(
 )
 
 # Create workflow
-workflow = Agents(
+workflow = AgentManager(
     agents=[router, dispatcher, monitor, synthesizer],
     tasks=[assessment_task, dispatch_task, monitor_task, coordinate_task],
     process="workflow", output="verbose"

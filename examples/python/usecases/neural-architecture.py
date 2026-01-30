@@ -173,7 +173,7 @@ deployment_task = Task(
 )
 
 # Create workflow
-workflow = Agents(
+workflow = AgentManager(
     agents=[hardware_analyzer, architecture_generator, hyperparameter_optimizer,
             performance_estimator, deployment_optimizer],
     tasks=[hardware_task, architecture_task, hyperparameter_task,

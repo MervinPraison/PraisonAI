@@ -228,7 +228,7 @@ initial_tasks = [
 ]
 
 # Create workflow with memory enabled
-workflow = Agents(
+workflow = AgentManager(
     agents=[data_processor, status_monitor, task_runner, report_generator],
     tasks=initial_tasks,
     process="sequential",
@@ -300,7 +300,7 @@ resumed_tasks = [
 ]
 
 # Create new workflow instance for resumed session
-resumed_workflow = Agents(
+resumed_workflow = AgentManager(
     agents=[data_processor, status_monitor, task_runner, report_generator],
     tasks=resumed_tasks,
     process="sequential",

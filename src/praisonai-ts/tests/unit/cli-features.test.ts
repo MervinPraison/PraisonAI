@@ -408,9 +408,9 @@ describe('Flow Display', () => {
     expect(graph.edges[0]).toEqual({ from: 'node-1', to: 'node-2', label: undefined });
   });
 
-  test('fromWorkflowSteps builds graph', () => {
+  test('fromTasks builds graph', () => {
     const display = createFlowDisplay();
-    display.fromWorkflowSteps([
+    display.fromTasks([
       { name: 'Step 1', type: 'agent' },
       { name: 'Step 2', type: 'tool' }
     ]);
@@ -421,7 +421,7 @@ describe('Flow Display', () => {
 
   test('render produces text output', () => {
     const display = createFlowDisplay();
-    display.fromWorkflowSteps([
+    display.fromTasks([
       { name: 'Step 1', type: 'agent' }
     ]);
     

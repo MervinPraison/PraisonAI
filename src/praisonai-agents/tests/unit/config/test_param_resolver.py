@@ -598,7 +598,7 @@ class TestWebParameter:
 # Test: Workflow Step Context/Routing
 # =============================================================================
 
-class TestWorkflowStepParams:
+class TestTaskParams:
     """Test workflow step specific parameters."""
     
     def test_context_step_names_array(self):

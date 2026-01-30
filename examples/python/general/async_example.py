@@ -156,7 +156,7 @@ workflow_async_task = Task(
 def run_sync_example():
     """Run synchronous example"""
     display_instruction("\nRunning Synchronous Example...", console)
-    agents = Agents(
+    agents = AgentManager(
         agents=[sync_agent],
         tasks=[sync_task],
         process="sequential"
@@ -167,7 +167,7 @@ def run_sync_example():
 async def run_async_example():
     """Run asynchronous example"""
     display_instruction("\nRunning Asynchronous Example...", console)
-    agents = Agents(
+    agents = AgentManager(
         agents=[async_agent],
         tasks=[async_task],
         process="sequential"
@@ -178,7 +178,7 @@ async def run_async_example():
 async def run_mixed_example():
     """Run mixed sync/async example"""
     display_instruction("\nRunning Mixed Sync/Async Example...", console)
-    agents = Agents(
+    agents = AgentManager(
         agents=[sync_agent, async_agent],
         tasks=[sync_task, async_task],
         process="sequential"
@@ -189,7 +189,7 @@ async def run_mixed_example():
 async def run_workflow_example():
     """Run workflow example with both sync and async tasks"""
     display_instruction("\nRunning Workflow Example...", console)
-    agents = Agents(
+    agents = AgentManager(
         agents=[sync_agent, async_agent],
         tasks=[workflow_sync_task, workflow_async_task],
         process="workflow"

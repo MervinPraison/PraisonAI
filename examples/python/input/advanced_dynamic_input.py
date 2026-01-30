@@ -137,7 +137,7 @@ class DynamicAgentSystem:
         
         # Run the system
         print(f"\n🚀 Starting {process} analysis for '{inputs['topic']}'...")
-        praison_agents = Agents(
+        praison_agents = AgentManager(
             agents=agents,
             tasks=tasks,
             process=process,

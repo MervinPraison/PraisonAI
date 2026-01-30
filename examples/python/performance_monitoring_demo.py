@@ -213,7 +213,7 @@ def execute_monitored_task(agent, task_description):
         agent=agent
     )
     
-    agents_workflow = Agents(
+    agents_workflow = AgentManager(
         agents=[agent],
         tasks=[task], output="minimal"
     )

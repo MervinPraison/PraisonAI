@@ -101,7 +101,7 @@ def main():
     with track_api_call("multi_agent_workflow"):
         print("\n🚀 Starting multi-agent workflow...")
         
-        workflow = Agents(
+        workflow = AgentManager(
             agents=[researcher, analyst, writer],
             tasks=[research_task, analysis_task, report_task], 
             process="sequential", output="verbose"

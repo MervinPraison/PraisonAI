@@ -6,7 +6,7 @@ writer = Agent(instructions="You write content.")
 editor = Agent(instructions="You edit content.")
 
 # Multi-agent with consolidated params
-agents = Agents(
+agents = AgentManager(
     agents=[writer, editor],
     memory=True,
     planning=True,

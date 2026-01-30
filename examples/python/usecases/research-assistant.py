@@ -163,7 +163,7 @@ prediction_task = Task(
 )
 
 # Create workflow
-workflow = Agents(
+workflow = AgentManager(
     agents=[paper_analyzer, gap_identifier, experiment_designer,
             methodology_validator, impact_predictor],
     tasks=[analysis_task, gap_task, design_task,

@@ -195,7 +195,7 @@ final_report = Task(
 )
 
 # Create workflow with conditional execution
-workflow = Agents(
+workflow = AgentManager(
     agents=[research_agent, quality_checker, analyst, decision_maker, report_writer],
     tasks=[
         initial_research, 

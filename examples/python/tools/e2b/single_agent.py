@@ -66,7 +66,7 @@ task = Task(
     agent=web_scraper_agent,
 )
 
-agents = Agents(
+agents = AgentManager(
     agents=[web_scraper_agent],
     tasks=[task],
     process="sequential"

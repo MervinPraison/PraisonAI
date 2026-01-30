@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from .telemetry import MinimalTelemetry
     from ..agent.agent import Agent
     from ..task.task import Task
-    from ..agents.agents import Agents
+    from ..agents.agents import AgentManager
 
 # Performance mode flag for auto-instrumentation (define early to avoid NameError)
 _performance_mode_enabled = False
@@ -567,7 +567,7 @@ def auto_instrument_all(telemetry: Optional['MinimalTelemetry'] = None, performa
     try:
         # Import the classes
         from ..agent.agent import Agent
-        from ..agents.agents import Agents
+        from ..agents.agents import AgentManager
         
         # Store original __init__ methods
         original_agent_init = Agent.__init__

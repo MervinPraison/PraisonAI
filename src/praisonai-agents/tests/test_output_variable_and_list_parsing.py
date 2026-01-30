@@ -45,10 +45,10 @@ steps:
     
     def test_output_variable_used_in_workflow_execution(self):
         """Test that output_variable stores output in the specified variable name."""
-        from praisonaiagents.workflows import WorkflowStep
+        from praisonaiagents.workflows import Task
         
         # Create a simple workflow step with output_variable
-        step = WorkflowStep(
+        step = Task(
             name="test_step",
             action="Return a list",
             output={"variable": "custom_var"}

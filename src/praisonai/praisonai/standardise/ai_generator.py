@@ -925,7 +925,7 @@ print(result)
             "## CRITICAL RULES:",
             f"1. ONE-LINE docstring: `\"\"\"{name} - Advanced Example\"\"\"`",
             "2. MUST use real imports: `from praisonaiagents import Agent, Task, Agents`",
-            "3. Use Agents() NOT PraisonAIAgents() - Agents is the correct alias",
+            "3. Use AgentManager() NOT PraisonAIAgentManager() - Agents is the correct alias",
             "4. NO mock classes - use the REAL classes from praisonaiagents",
             "5. FLAT CODE - NO class definitions (simple def OK for tools/guardrails)",
             "6. Short # comments only (one line each)",
@@ -1054,7 +1054,7 @@ print(f'Section 3: {{result3}}')
 # Section 4: Multi-agent with shared {slug}
 agent4 = Agent(name="Agent4", instructions="Multi-agent {slug}", {param_name}={param_value})
 task = Task(description="Use {slug}", agent=agent4)
-agents = Agents(agents=[agent4], tasks=[task])
+agents = AgentManager(agents=[agent4], tasks=[task])
 result4 = agents.start()
 print(f'Section 4: {{result4}}')
 

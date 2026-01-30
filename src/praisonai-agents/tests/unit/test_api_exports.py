@@ -2,7 +2,7 @@
 Tests for API export simplification.
 
 Verifies:
-1. Core imports work (Agent, Agents, Task, tool, Tools)
+1. Core imports work (Agent, AgentManager, Task, tool, Tools)
 2. Backwards compat imports work (MemoryConfig, etc.)
 3. Organized imports work (from praisonaiagents.config import X)
 4. Namespace style works (import praisonaiagents as pa)
@@ -22,7 +22,7 @@ class TestCoreImports:
         assert hasattr(Agent, '__init__')
     
     def test_agents_import(self):
-        """Agents class is importable from root."""
+        """Agents class is importable from root (silent alias for AgentManager)."""
         from praisonaiagents import Agents
         assert Agents is not None
     

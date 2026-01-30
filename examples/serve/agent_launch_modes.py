@@ -83,7 +83,7 @@ def demo_multi_agent_launch():
         llm="gpt-4o-mini"
     )
     
-    agents = Agents(agents=[researcher, writer])
+    agents = AgentManager(agents=[researcher, writer])
     
     print(f"Agents: {[researcher.name, writer.name]}")
     print("Launching as HTTP API on port 8000...")

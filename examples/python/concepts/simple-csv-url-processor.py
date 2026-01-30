@@ -59,7 +59,7 @@ def main():
     )
     
     # Step 4: Run the agents
-    agents = Agents(
+    agents = AgentManager(
         agents=[url_agent],
         tasks=[url_task],
         process="workflow",

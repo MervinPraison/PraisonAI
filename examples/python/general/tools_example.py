@@ -22,7 +22,7 @@ news_task = Task(
 
 
 # Run agent
-agents = Agents(
+agents = AgentManager(
     agents=[news_agent],
     tasks=[news_task],
     process="sequential"

@@ -56,7 +56,7 @@ def test_callback_enhancement():
 
     # Run the agents
     try:
-        agents = Agents(
+        agents = AgentManager(
             agents=[agent],
             tasks=[task],
             output="verbose"

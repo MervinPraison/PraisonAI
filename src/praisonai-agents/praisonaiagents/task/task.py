@@ -17,12 +17,12 @@ class Task:
     A unit of work that can be executed by an Agent or a custom handler function.
     
     Task is the unified abstraction for both AgentManager tasks and Workflow steps.
-    It supports all features from the legacy WorkflowStep class.
+    It supports all features from the legacy Task class.
     
     Simple Usage:
         task = Task(description="Research AI trends")
         
-    With action alias (from WorkflowStep):
+    With action alias (from Task):
         task = Task(action="Write a blog post about {{topic}}")
         
     With custom handler function:
@@ -91,11 +91,11 @@ class Task:
         # Loop support - iterate over a list
         loop_over: Optional[str] = None,
         loop_var: str = "item",
-        # Consolidated config objects (from WorkflowStep)
+        # Consolidated config objects (from Task)
         execution: Optional[Any] = None,
         routing: Optional[Any] = None,
         output_config: Optional[Any] = None,
-        # Feature configs (from WorkflowStep)
+        # Feature configs (from Task)
         autonomy: Optional[Any] = None,
         knowledge: Optional[Any] = None,
         web: Optional[Any] = None,
@@ -103,6 +103,8 @@ class Task:
         planning: Optional[Any] = None,
         hooks: Optional[Any] = None,
         caching: Optional[Any] = None,
+        # Output variable name for workflow variable assignment
+        output_variable: Optional[str] = None,
     ):
         # Add check if memory config is provided
         if memory is not None or (config and config.get('memory_config')):
@@ -115,16 +117,17 @@ class Task:
                 MEMORY_AVAILABLE = False
                 # Don't raise - let it continue with limited functionality
 
-        # Handle action as alias for description (from WorkflowStep)
+        # Handle action as alias for description (from Task)
         # If action provided but description not, use action as description
         if action is not None and description is None:
             description = action
         # Store both - action is the user-friendly alias
         self.action = action if action is not None else description
         
-        # Validate that we have either description or action
-        if description is None:
-            raise ValueError("Task requires either 'description' or 'action' parameter")
+        # Validate that we have either description, action, or handler
+        # A handler (callable) is valid on its own - it IS the task logic
+        if description is None and handler is None:
+            raise ValueError("Task requires either 'description', 'action', or 'handler' parameter")
         
         self.input_file = input_file
         self.id = str(uuid.uuid4()) if id is None else str(id)
@@ -177,11 +180,11 @@ class Task:
         # Loop support - iterate over a list
         self.loop_over = loop_over
         self.loop_var = loop_var
-        # Consolidated config objects (from WorkflowStep)
+        # Consolidated config objects (from Task)
         self.execution = execution
         self.routing = routing
         self.output_config = output_config
-        # Feature configs (from WorkflowStep)
+        # Feature configs (from Task)
         self.autonomy = autonomy
         self.knowledge = knowledge
         self.web = web
@@ -189,6 +192,8 @@ class Task:
         self.planning = planning
         self.hooks = hooks
         self.caching = caching
+        # Output variable name - for storing output in workflow variables
+        self.output_variable = output_variable
 
         # Set logger level based on config verbose level
         verbose = self.config.get("verbose", 0)

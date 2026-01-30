@@ -123,7 +123,7 @@ def solve_math_problem_workflow():
         context=[solve_task]
     )
     
-    workflow = Agents(
+    workflow = AgentManager(
         agents=[problem_solver_agent, calculation_agent, math_tutor_agent],
         tasks=[understand_task, solve_task, verify_task],
         process="sequential", output="verbose"

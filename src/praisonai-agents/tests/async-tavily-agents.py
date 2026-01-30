@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import List, Dict, Any
 from pydantic import BaseModel
-from praisonaiagents import Agent, Task, Agents, TaskOutput
+from praisonaiagents import Agent, Task, AgentManager, TaskOutput
 from tavily import AsyncTavilyClient
 
 # Configure logging
@@ -90,7 +90,7 @@ async def run_parallel_searches():
     )
     
     # Initialize agents manager
-    agents = Agents(
+    agents = AgentManager(
         agents=[search_agent, summary_agent],
         tasks=search_tasks + [summary_task]
     )

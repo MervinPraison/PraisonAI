@@ -6,7 +6,7 @@ Tests cover:
 2. Array PRESET_OVERRIDE invalid preset error UX
 3. Precedence ladder for all consolidated params
 4. Agent consolidated params via canonical resolver
-5. Workflow/WorkflowStep resolution consistency
+5. Workflow/Task resolution consistency
 """
 
 import pytest
@@ -404,49 +404,50 @@ class TestAgentConsolidatedParams:
 
 
 # =============================================================================
-# PHASE 1E: Workflow/WorkflowStep Resolution Tests
+# PHASE 1E: Workflow/Task Resolution Tests
 # =============================================================================
 
 class TestWorkflowResolution:
-    """Tests for Workflow and WorkflowStep resolution consistency."""
+    """Tests for Workflow and Task resolution consistency."""
     
-    def test_workflow_step_context_resolved(self):
-        """WorkflowStep context should be resolved to config."""
-        from praisonaiagents.workflows.workflows import WorkflowStep
+    def test_workflow_task_context_stored(self):
+        """Task context should be stored correctly."""
+        from praisonaiagents.workflows.workflows import Task
         
-        step = WorkflowStep(
+        step = Task(
             name="test",
+            description="Test task",
             context=["step1", "step2"],
         )
         
-        # Should have resolved _context_from
-        assert step._context_from == ["step1", "step2"]
+        # Task stores context in 'context' attribute
+        assert step.context == ["step1", "step2"]
     
-    def test_workflow_step_execution_resolved(self):
-        """WorkflowStep execution should be resolved to config."""
-        from praisonaiagents.workflows.workflows import WorkflowStep
+    def test_workflow_task_execution_stored(self):
+        """Task execution should be stored correctly."""
+        from praisonaiagents.workflows.workflows import Task
         
-        step = WorkflowStep(
+        step = Task(
             name="test",
+            description="Test task",
             execution="fast",
         )
         
-        # Should have resolved execution config
-        assert step._async_execution is not None or step._max_retries is not None
+        # Task stores execution in 'execution' attribute
+        assert step.execution == "fast" or step.max_retries is not None
     
-    def test_workflow_step_output_resolved(self):
-        """WorkflowStep output should be resolved to config."""
-        from praisonaiagents.workflows.workflows import WorkflowStep
-        from praisonaiagents.workflows.workflow_configs import WorkflowStepOutputConfig
+    def test_workflow_task_output_file(self):
+        """Task output_file should be stored correctly."""
+        from praisonaiagents.workflows.workflows import Task
         
-        # Test with config object
-        step = WorkflowStep(
+        step = Task(
             name="test",
-            output=WorkflowStepOutputConfig(file="result.txt"),
+            description="Test task",
+            output_file="result.txt",
         )
         
-        # Should have resolved output file
-        assert step._output_file == "result.txt"
+        # Task stores output_file directly
+        assert step.output_file == "result.txt"
     
     def test_workflow_output_resolved(self):
         """Workflow output should be resolved to config."""
@@ -478,22 +479,30 @@ class TestWorkflowResolution:
 # =============================================================================
 
 class TestNamingAlias:
-    """Tests for Agents vs PraisonAIAgents naming."""
+    """Tests for Agents vs PraisonAIAgents naming.
     
-    def test_agents_is_primary(self):
-        """Agents should be the primary import."""
-        from praisonaiagents import Agents
-        assert Agents is not None
+    v4.0.0 Updates:
+    - Agents is now a SILENT alias for AgentManager (no deprecation warning)
+    - PraisonAIAgents has been REMOVED entirely (raises ImportError)
+    """
     
-    def test_praisonaiagents_alias_works(self):
-        """PraisonAIAgents alias should still work."""
-        from praisonaiagents import PraisonAIAgents
-        assert PraisonAIAgents is not None
+    def test_agents_is_silent_alias(self):
+        """Agents should be available as silent alias for AgentManager."""
+        from praisonaiagents import AgentManager, Agents
+        # Agents is now a silent alias
+        assert Agents is AgentManager
     
-    def test_both_are_same_class(self):
-        """Both names should refer to the same class."""
-        from praisonaiagents import Agents, PraisonAIAgents
-        assert Agents is PraisonAIAgents
+    def test_praisonaiagents_removed_v4(self):
+        """PraisonAIAgents was removed in v4 - should raise ImportError."""
+        import pytest
+        with pytest.raises(ImportError):
+            from praisonaiagents import PraisonAIAgents
+    
+    def test_agent_manager_is_primary(self):
+        """AgentManager should be the primary class."""
+        from praisonaiagents import AgentManager
+        assert AgentManager is not None
+        assert AgentManager.__name__ == 'AgentManager'
 
 
 # =============================================================================

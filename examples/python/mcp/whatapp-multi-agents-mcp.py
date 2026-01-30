@@ -12,6 +12,6 @@ whatsapp_agent = Agent(
     tools=MCP("python /Users/praison/whatsapp-mcp/whatsapp-mcp-server/main.py")
 )
 
-agents = Agents(agents=[airbnb_agent, whatsapp_agent])
+agents = AgentManager(agents=[airbnb_agent, whatsapp_agent])
 
 agents.start()

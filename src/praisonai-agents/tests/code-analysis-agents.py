@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentManager
 from pydantic import BaseModel
 from typing import List, Dict
 from gitingest import ingest
@@ -83,7 +83,7 @@ def analyze_code(code_source: str) -> CodeAnalysisReport:
     """
     
     # Initialize and run analysis
-    agents = Agents(
+    agents = AgentManager(
         agents=[code_analyzer],
         tasks=[code_analysis_task]
     )

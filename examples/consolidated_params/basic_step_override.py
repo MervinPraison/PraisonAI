@@ -1,18 +1,18 @@
 """Basic example showing step-level override of workflow defaults."""
 from praisonaiagents import Agent
-from praisonaiagents.workflows import Workflow, WorkflowStep
+from praisonaiagents.workflows import Workflow, Task
 
 # Workflow with defaults
 workflow = Workflow(
     name="StepOverrideWorkflow",
     steps=[
-        WorkflowStep(
+        Task(
             name="step1",
             action="Process with workflow defaults",
             agent=Agent(instructions="You are a processor."),
             # Uses workflow-level web=True (inherited)
         ),
-        WorkflowStep(
+        Task(
             name="step2",
             action="Process with step override",
             agent=Agent(instructions="You are a processor."),

@@ -57,7 +57,7 @@ task = Task(
     agent=system_ops_agent,
 )
 
-agents = Agents(
+agents = AgentManager(
     agents=[system_ops_agent],
     tasks=[task],
     process="sequential"

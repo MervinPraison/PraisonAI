@@ -1,6 +1,6 @@
 from praisonaiagents.agent import Agent
 from praisonaiagents.task import Task
-from praisonaiagents.agents import Agents
+from praisonaiagents.agents import AgentManager
 from typing import List, Dict
 import time
 
@@ -65,7 +65,7 @@ def create_prompt_chain():
     )
 
     # Create the workflow manager
-    workflow = Agents(
+    workflow = AgentManager(
         agents=[agent1, agent2, agent3],
         tasks=[initial_task, analysis_task, final_task],
         process="workflow",  # Use workflow process type

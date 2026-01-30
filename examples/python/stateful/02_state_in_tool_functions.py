@@ -265,7 +265,7 @@ task6 = Task(
 )
 
 # Create workflow (global variable for state access in tools)
-workflow = Agents(
+workflow = AgentManager(
     agents=[progress_tracker, data_processor, error_handler, config_manager],
     tasks=[task1, task2, task3, task4, task5, task6],
     process="sequential"

@@ -13,16 +13,16 @@ import os
 # Add the package to path for testing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from praisonaiagents import Workflow, WorkflowStep
+from praisonaiagents import Workflow, Task
 from praisonaiagents.workflows import WorkflowManager
 
 
-class TestWorkflowStepAgentFields:
-    """Test WorkflowStep dataclass agent-related fields."""
+class TestTaskAgentFields:
+    """Test Task dataclass agent-related fields."""
     
     def test_workflow_step_has_agent_config_field(self):
-        """WorkflowStep should have agent_config field."""
-        step = WorkflowStep(
+        """Task should have agent_config field."""
+        step = Task(
             name="test_step",
             action="do something",
             agent_config={
@@ -35,8 +35,8 @@ class TestWorkflowStepAgentFields:
         assert step.agent_config["role"] == "Researcher"
     
     def test_workflow_step_has_tools_field(self):
-        """WorkflowStep should have tools field."""
-        step = WorkflowStep(
+        """Task should have tools field."""
+        step = Task(
             name="test_step",
             action="do something",
             tools=["search", "calculator"]
@@ -46,17 +46,17 @@ class TestWorkflowStepAgentFields:
     
     def test_workflow_step_agent_config_default_none(self):
         """agent_config should default to None."""
-        step = WorkflowStep(name="test_step", action="do something")
+        step = Task(name="test_step", action="do something")
         assert step.agent_config is None
     
     def test_workflow_step_tools_default_none(self):
         """tools should default to None."""
-        step = WorkflowStep(name="test_step", action="do something")
+        step = Task(name="test_step", action="do something")
         assert step.tools is None
     
     def test_workflow_step_to_dict_includes_agent_fields(self):
         """to_dict() should include agent-related fields."""
-        step = WorkflowStep(
+        step = Task(
             name="test_step",
             action="do something",
             agent_config={"role": "Writer"},
@@ -116,7 +116,7 @@ class TestCreateStepAgent:
         """Should create agent from step's agent_config."""
         manager = WorkflowManager()
         
-        step = WorkflowStep(
+        step = Task(
             name="research",
             action="Research topic",
             agent_config={
@@ -144,7 +144,7 @@ class TestCreateStepAgent:
         """Should return default_agent when no agent_config."""
         manager = WorkflowManager()
         
-        step = WorkflowStep(
+        step = Task(
             name="simple_step",
             action="Do something"
         )
@@ -163,7 +163,7 @@ class TestCreateStepAgent:
         manager = WorkflowManager()
         
         mock_tool = Mock()
-        step = WorkflowStep(
+        step = Task(
             name="research",
             action="Research topic",
             agent_config={"role": "Researcher"},
@@ -185,7 +185,7 @@ class TestCreateStepAgent:
         """Should include memory in agent config."""
         manager = WorkflowManager()
         
-        step = WorkflowStep(
+        step = Task(
             name="research",
             action="Research topic",
             agent_config={"role": "Researcher"}
@@ -221,8 +221,8 @@ class TestExecuteWithAgents:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(name="step1", action="Action 1"),
-                WorkflowStep(name="step2", action="Action 2")
+                Task(name="step1", action="Action 1"),
+                Task(name="step2", action="Action 2")
             ]
         )
         self._register_workflow(manager, workflow)
@@ -246,7 +246,7 @@ class TestExecuteWithAgents:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(
+                Task(
                     name="research",
                     action="Research AI",
                     agent_config={
@@ -278,7 +278,7 @@ class TestExecuteWithAgents:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(
+                Task(
                     name="step1",
                     action="Action 1",
                     agent_config={"role": "Should not be used"}
@@ -308,7 +308,7 @@ class TestExecuteWithAgents:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(name="step1", action="Action 1")
+                Task(name="step1", action="Action 1")
             ]
         )
         self._register_workflow(manager, workflow)
@@ -343,7 +343,7 @@ class TestWorkflowLevelDefaults:
             name="test_workflow",
             default_llm="gpt-4o",
             steps=[
-                WorkflowStep(
+                Task(
                     name="step1",
                     action="Action 1",
                     agent_config={"role": "Helper"}
@@ -370,7 +370,7 @@ class TestWorkflowLevelDefaults:
             name="test_workflow",
             default_llm="gpt-3.5-turbo",
             steps=[
-                WorkflowStep(
+                Task(
                     name="step1",
                     action="Action 1",
                     agent_config={"role": "Helper"}

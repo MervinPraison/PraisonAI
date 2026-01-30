@@ -7,7 +7,7 @@ This is the SINGLE, DRY resolver used by:
 - Agent
 - Agents
 - Workflow
-- WorkflowStep
+- Task
 
 Performance: O(1) happy path. Typo suggestions only on error path.
 """

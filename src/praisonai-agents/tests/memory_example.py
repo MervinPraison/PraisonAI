@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentManager
 import logging
 import os
 
@@ -25,7 +25,7 @@ def main():
     # else:
     #     logger.info("Creating new memory database")
     
-    # Create task config (without memory config since it's moved to Agents)
+    # Create task config (without memory config since it's moved to AgentManager)
     task_config = {}
 
     # Create agents with different roles
@@ -102,7 +102,7 @@ def main():
 
     # Initialize Agents with memory configuration
     # Option 1: Use default OpenAI embeddings
-    # agents = Agents(
+    # agents = AgentManager(
     #     agents=[researcher, retriever],
     #     tasks=[store_task, verify_task, query_task, query_both_task],
     #     verbose=True,
@@ -110,7 +110,7 @@ def main():
     # )
     
     # Option 2: Explicitly configure OpenAI embeddings
-    agents = Agents(
+    agents = AgentManager(
         agents=[researcher, retriever],
         tasks=[store_task, verify_task, query_task, query_both_task],
         verbose=True,  # Use same verbose level as memory
@@ -124,7 +124,7 @@ def main():
     )
     
     # Option 3: Use Gemini embeddings
-    # agents = Agents(
+    # agents = AgentManager(
     #     agents=[researcher, retriever],
     #     tasks=[store_task, verify_task, query_task, query_both_task],
     #     verbose=True,

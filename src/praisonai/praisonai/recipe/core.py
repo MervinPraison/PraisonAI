@@ -1034,7 +1034,7 @@ def _execute_praisonai_workflow(
     if not output_mode and options.get("verbose"):
         output_mode = "verbose"
     
-    praison = Agents(
+    praison = AgentManager(
         agents=agents,
         tasks=tasks,
         process=workflow_config.get("process", "sequential"),

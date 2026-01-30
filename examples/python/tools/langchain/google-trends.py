@@ -14,5 +14,5 @@ summarise_agent = Agent(
     instructions="Summarise findings from the research agent",
 )
 
-agents = Agents(agents=[research_agent, summarise_agent])
+agents = AgentManager(agents=[research_agent, summarise_agent])
 agents.start()

@@ -31,8 +31,8 @@ def test_issue_950_goal():
         print(f"✅ Agent class is properly available: {Agent}")
         
         # Test that we can also import other common classes mentioned in the issue
-        from praisonai import Task, Agents
-        print("✅ SUCCESS: `from praisonai import Task, Agents` works!")
+        from praisonai import Task, AgentManager
+        print("✅ SUCCESS: `from praisonai import Task, AgentManager` works!")
         
         assert Task is not None, "Task class should be available"
         assert Agents is not None, "Agents class should be available"

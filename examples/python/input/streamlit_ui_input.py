@@ -125,7 +125,7 @@ if st.button("🚀 Submit", type="primary", use_container_width=True):
                     )
                     
                     # Run agents
-                    agents = Agents(
+                    agents = AgentManager(
                         agents=[agent],
                         tasks=[task],
                         process=process_type

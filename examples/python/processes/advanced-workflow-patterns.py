@@ -203,7 +203,7 @@ for request in sample_requests:
     )
     
     # Execute the workflow with conditional routing
-    workflow_agents = Agents(
+    workflow_agents = AgentManager(
         agents=[
             intake_agent, specialist_agent, review_agent, 
             coordinator_agent

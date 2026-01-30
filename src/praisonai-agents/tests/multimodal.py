@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentManager
 
 # Create Vision Analysis Agent
 vision_agent = Agent(
@@ -43,7 +43,7 @@ task3 = Task(
 )
 
 # Create Agents instance
-agents = Agents(
+agents = AgentManager(
     agents=[vision_agent],
     tasks=[task1, task2, task3],
     process="sequential",

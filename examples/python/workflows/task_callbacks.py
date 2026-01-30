@@ -43,7 +43,7 @@ def on_complete(task, output):
 
 if __name__ == "__main__":
     # Create agents with callbacks
-    agents = Agents(
+    agents = AgentManager(
         agents=[researcher],
         tasks=[task1, task2],
         process="workflow",

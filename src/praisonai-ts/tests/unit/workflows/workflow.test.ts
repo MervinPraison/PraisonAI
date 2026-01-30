@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from '@jest/globals';
-import { Workflow, WorkflowStep, parallel, route, loop, repeat } from '../../../src/workflows';
+import { Workflow, Task, parallel, route, loop, repeat } from '../../../src/workflows';
 
 describe('Workflow', () => {
   describe('Basic Workflow', () => {

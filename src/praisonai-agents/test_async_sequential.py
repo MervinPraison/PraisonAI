@@ -10,7 +10,7 @@ from datetime import datetime
 import sys
 sys.path.insert(0, '/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents')
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentManager
 
 # Create test agents
 async_agent = Agent(
@@ -147,7 +147,7 @@ async def test_sequential_async_execution():
     
     try:
         # Create workflow
-        workflow = Agents(
+        workflow = AgentManager(
             agents=[async_agent, sync_agent],
             tasks=tasks,
             process="sequential",

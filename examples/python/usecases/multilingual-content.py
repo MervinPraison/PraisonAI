@@ -132,7 +132,7 @@ quality_task = Task(
 )
 
 # Create workflow
-workflow = Agents(
+workflow = AgentManager(
     agents=[content_generator, translator, cultural_checker, 
             content_adapter, quality_assessor],
     tasks=[generation_task, translation_task, cultural_task, 

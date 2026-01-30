@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentManager
 
 def search_web(query: str) -> str:
     return f"Results: AI trends include LLMs, multimodal AI, autonomous agents"
@@ -9,7 +9,7 @@ writer = Agent(name="Writer", role="Content Writer", llm="gpt-4o-mini")
 task1 = Task(description="Research AI trends in 2025", agent=researcher)
 task2 = Task(description="Write a 2 sentence summary", agent=writer)
 
-agents = Agents(
+agents = AgentManager(
     agents=[researcher, writer],
     tasks=[task1, task2],
     planning=True,

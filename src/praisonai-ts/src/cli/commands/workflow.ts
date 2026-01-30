@@ -20,7 +20,7 @@ export interface WorkflowOptions {
   json?: boolean;
 }
 
-interface WorkflowStep {
+interface Task {
   name: string;
   agent?: string;
   task?: string;
@@ -31,7 +31,7 @@ interface WorkflowDefinition {
   name?: string;
   description?: string;
   agents?: Record<string, any>;
-  steps?: WorkflowStep[];
+  steps?: Task[];
 }
 
 /**

@@ -122,7 +122,7 @@ export class Repeat<TStep = any> {
             return await (this.step as any).chat(prompt);
         }
 
-        // If step has an execute method (WorkflowStep-like)
+        // If step has an execute method (Task-like)
         if (this.step && typeof (this.step as any).execute === 'function') {
             return await (this.step as any).execute(prompt, context);
         }

@@ -131,7 +131,7 @@ class CameraVideoAnalyzer:
             images=[video_path]  # PraisonAI supports video files in images parameter
         )
         
-        agents = Agents(
+        agents = AgentManager(
             agents=[self.video_agent],
             tasks=[task],
             process="sequential",

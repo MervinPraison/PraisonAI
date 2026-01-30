@@ -83,7 +83,7 @@ coordination_task = Task(
 )
 
 # Create Hierarchical Process
-agents = Agents(
+agents = AgentManager(
     agents=[manager, researcher, data_analyst, writer],
     tasks=[research_task, analysis_task, writing_task, coordination_task],
     process="hierarchical",  # Hierarchical process type

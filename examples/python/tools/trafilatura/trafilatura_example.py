@@ -131,7 +131,7 @@ async def agent_example():
     )
     
     # Run the analysis
-    agents = Agents(
+    agents = AgentManager(
         agents=[research_agent],
         tasks=[analysis_task]
     )

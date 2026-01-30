@@ -81,7 +81,7 @@ def method_1_simple_loop():
     )
     
     # Initialize the agents system
-    agents = Agents(
+    agents = AgentManager(
         agents=[loop_agent],
         tasks=[loop_task],
         process="workflow",
@@ -145,7 +145,7 @@ def method_2_manual_csv():
     )
     
     # Initialize and run
-    agents = Agents(
+    agents = AgentManager(
         agents=[csv_agent],
         tasks=[csv_task],
         process="sequential"
@@ -211,7 +211,7 @@ def method_3_url_processing():
     )
     
     # Initialize and run
-    agents = Agents(
+    agents = AgentManager(
         agents=[url_agent],
         tasks=[url_task],
         process="sequential"
@@ -319,7 +319,7 @@ def method_4_advanced_processing():
     )
     
     # Initialize and run with sequential processing
-    agents = Agents(
+    agents = AgentManager(
         agents=[validator_agent, processor_agent],
         tasks=[validation_task, processing_task],
         process="sequential"  # Validation must complete before processing

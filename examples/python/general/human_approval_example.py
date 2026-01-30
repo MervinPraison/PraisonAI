@@ -109,7 +109,7 @@ def main():
     ]
     
     # Create and run process
-    process = Agents(
+    process = AgentManager(
         agents=[agent],
         tasks=tasks, output="verbose"
     )
@@ -166,7 +166,7 @@ async def async_demo():
         expected_output="Async execution result"
     )
     
-    process = Agents(
+    process = AgentManager(
         agents=[agent],
         tasks=[task], output="verbose"
     )
