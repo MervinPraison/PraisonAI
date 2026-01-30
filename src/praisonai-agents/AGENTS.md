@@ -372,6 +372,9 @@ class MyTool(BaseTool):
 - `praisonaiagents/tools/decorator.py` - @tool decorator
 - `praisonaiagents/tools/registry.py` - Tool registry
 
+> [!IMPORTANT]
+> **Agents only recognize parameters.** When creating tools, always expose all options as function parameters—agents cannot discover env vars or config files.
+
 ### 6.2 Hooks & Middleware
 
 ```python

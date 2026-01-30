@@ -40,7 +40,12 @@ TYPER_COMMANDS = {
     'replay',
     # Standardisation commands
     'standardise', 'standardize',
+    # Moltbot-inspired commands (bots, browser, plugins, sandbox)
+    'bot', 'browser', 'plugins', 'sandbox', 'loop',
+    # RAG commands
+    'rag', 'index', 'query', 'search',
 }
+
 
 
 def is_legacy_invocation(argv: List[str]) -> bool:
