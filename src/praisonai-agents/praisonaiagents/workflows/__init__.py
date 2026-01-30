@@ -27,6 +27,7 @@ from .workflows import (
     loop,
     repeat,
     include,
+    when,
     if_,
     
     # Constants
@@ -86,6 +87,7 @@ __all__ = [
     "loop",
     "repeat",
     "include",
+    "when",
     "if_",
     
     # Constants
