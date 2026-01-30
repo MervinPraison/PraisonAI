@@ -9,6 +9,10 @@ __all__ = [
     "multiedit",
     "glob_files",
     "grep_search",
+    "tts_tool",
+    "stt_tool",
+    "create_tts_tool",
+    "create_stt_tool",
 ]
 
 _lazy_cache = {}
@@ -33,5 +37,25 @@ def __getattr__(name: str):
         from .grep_tool import grep_search
         _lazy_cache[name] = grep_search
         return grep_search
+    
+    if name == "tts_tool":
+        from .audio import tts_tool
+        _lazy_cache[name] = tts_tool
+        return tts_tool
+    
+    if name == "stt_tool":
+        from .audio import stt_tool
+        _lazy_cache[name] = stt_tool
+        return stt_tool
+    
+    if name == "create_tts_tool":
+        from .audio import create_tts_tool
+        _lazy_cache[name] = create_tts_tool
+        return create_tts_tool
+    
+    if name == "create_stt_tool":
+        from .audio import create_stt_tool
+        _lazy_cache[name] = create_stt_tool
+        return create_stt_tool
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

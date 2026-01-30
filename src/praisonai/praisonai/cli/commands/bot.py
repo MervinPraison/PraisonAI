@@ -43,6 +43,12 @@ def bot_telegram(
     session_id: Optional[str] = typer.Option(None, "--session-id", help="Session ID"),
     user_id: Optional[str] = typer.Option(None, "--user-id", help="User ID for memory isolation"),
     thinking: Optional[str] = typer.Option(None, "--thinking", help="Thinking mode (off, minimal, low, medium, high)"),
+    tts: bool = typer.Option(False, "--tts", help="Enable TTS tool for text-to-speech"),
+    tts_voice: str = typer.Option("alloy", "--tts-voice", help="TTS voice (alloy, echo, fable, onyx, nova, shimmer)"),
+    tts_model: Optional[str] = typer.Option(None, "--tts-model", help="TTS model (default: openai/tts-1)"),
+    auto_tts: bool = typer.Option(False, "--auto-tts", help="Auto-convert all responses to speech"),
+    stt: bool = typer.Option(False, "--stt", help="Enable STT tool for speech-to-text"),
+    stt_model: Optional[str] = typer.Option(None, "--stt-model", help="STT model (default: openai/whisper-1)"),
 ):
     """Start a Telegram bot with full agent capabilities.
     
@@ -71,6 +77,12 @@ def bot_telegram(
         auto_approve=auto_approve,
         model=model,
         thinking=thinking,
+        tts=tts,
+        tts_voice=tts_voice,
+        tts_model=tts_model,
+        auto_tts=auto_tts,
+        stt=stt,
+        stt_model=stt_model,
         session_id=session_id,
         user_id=user_id,
     )
@@ -102,6 +114,12 @@ def bot_discord(
     session_id: Optional[str] = typer.Option(None, "--session-id", help="Session ID"),
     user_id: Optional[str] = typer.Option(None, "--user-id", help="User ID for memory isolation"),
     thinking: Optional[str] = typer.Option(None, "--thinking", help="Thinking mode (off, minimal, low, medium, high)"),
+    tts: bool = typer.Option(False, "--tts", help="Enable TTS tool for text-to-speech"),
+    tts_voice: str = typer.Option("alloy", "--tts-voice", help="TTS voice (alloy, echo, fable, onyx, nova, shimmer)"),
+    tts_model: Optional[str] = typer.Option(None, "--tts-model", help="TTS model (default: openai/tts-1)"),
+    auto_tts: bool = typer.Option(False, "--auto-tts", help="Auto-convert all responses to speech"),
+    stt: bool = typer.Option(False, "--stt", help="Enable STT tool for speech-to-text"),
+    stt_model: Optional[str] = typer.Option(None, "--stt-model", help="STT model (default: openai/whisper-1)"),
 ):
     """Start a Discord bot with full agent capabilities.
     
@@ -130,6 +148,12 @@ def bot_discord(
         auto_approve=auto_approve,
         model=model,
         thinking=thinking,
+        tts=tts,
+        tts_voice=tts_voice,
+        tts_model=tts_model,
+        auto_tts=auto_tts,
+        stt=stt,
+        stt_model=stt_model,
         session_id=session_id,
         user_id=user_id,
     )
@@ -162,6 +186,12 @@ def bot_slack(
     session_id: Optional[str] = typer.Option(None, "--session-id", help="Session ID"),
     user_id: Optional[str] = typer.Option(None, "--user-id", help="User ID for memory isolation"),
     thinking: Optional[str] = typer.Option(None, "--thinking", help="Thinking mode (off, minimal, low, medium, high)"),
+    tts: bool = typer.Option(False, "--tts", help="Enable TTS tool for text-to-speech"),
+    tts_voice: str = typer.Option("alloy", "--tts-voice", help="TTS voice (alloy, echo, fable, onyx, nova, shimmer)"),
+    tts_model: Optional[str] = typer.Option(None, "--tts-model", help="TTS model (default: openai/tts-1)"),
+    auto_tts: bool = typer.Option(False, "--auto-tts", help="Auto-convert all responses to speech"),
+    stt: bool = typer.Option(False, "--stt", help="Enable STT tool for speech-to-text"),
+    stt_model: Optional[str] = typer.Option(None, "--stt-model", help="STT model (default: openai/whisper-1)"),
 ):
     """Start a Slack bot with full agent capabilities.
     
@@ -190,6 +220,12 @@ def bot_slack(
         auto_approve=auto_approve,
         model=model,
         thinking=thinking,
+        tts=tts,
+        tts_voice=tts_voice,
+        tts_model=tts_model,
+        auto_tts=auto_tts,
+        stt=stt,
+        stt_model=stt_model,
         session_id=session_id,
         user_id=user_id,
     )
@@ -221,6 +257,9 @@ Start a bot on any platform with: praisonai bot <platform>
   [yellow]--knowledge[/yellow]           Enable knowledge/RAG
   [yellow]--tools TOOL...[/yellow]       Enable specific tools
   [yellow]--sandbox[/yellow]             Enable sandbox mode
+  [yellow]--tts[/yellow]                 Enable TTS tool
+  [yellow]--stt[/yellow]                 Enable STT tool
+  [yellow]--auto-tts[/yellow]            Auto-convert responses to speech
 
 [bold]Examples:[/bold]
   praisonai bot telegram --token $TELEGRAM_BOT_TOKEN

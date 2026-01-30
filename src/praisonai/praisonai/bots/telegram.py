@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import tempfile
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
@@ -21,6 +23,8 @@ from praisonaiagents.bots import (
     BotChannel,
     MessageType,
 )
+
+from .media import split_media_from_output, is_audio_file
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +74,18 @@ class TelegramBot:
         
         self._message_handlers: List[Callable] = []
         self._command_handlers: Dict[str, Callable] = {}
+        
+        # Audio capabilities (set by BotCapabilities)
+        self._stt_enabled: bool = False
+        self._auto_tts: bool = False
+    
+    def enable_stt(self, enabled: bool = True) -> None:
+        """Enable STT for voice message transcription."""
+        self._stt_enabled = enabled
+    
+    def enable_auto_tts(self, enabled: bool = True) -> None:
+        """Enable auto-TTS for responses."""
+        self._auto_tts = enabled
     
     @property
     def is_running(self) -> bool:
@@ -115,10 +131,20 @@ class TelegramBot:
         )
         
         async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            if not update.message or not update.message.text:
+            # Handle text OR audio messages
+            message_text = None
+            
+            if update.message:
+                # Check for voice/audio first
+                if update.message.voice or update.message.audio:
+                    message_text = await self._transcribe_audio(update)
+                elif update.message.text:
+                    message_text = update.message.text
+            
+            if not update.message or not message_text:
                 return
             
-            message = self._convert_update_to_message(update)
+            message = self._convert_update_to_message(update, override_text=message_text)
             
             if not self.config.is_user_allowed(message.sender.user_id if message.sender else ""):
                 return
@@ -139,8 +165,8 @@ class TelegramBot:
                     await update.message.chat.send_action("typing")
                 
                 try:
-                    response = self._agent.chat(message.text)
-                    await self._send_long_message(
+                    response = self._agent.chat(message_text)
+                    await self._send_response_with_media(
                         update.message.chat_id,
                         response,
                         reply_to=update.message.message_id,
@@ -148,6 +174,10 @@ class TelegramBot:
                 except Exception as e:
                     logger.error(f"Agent error: {e}")
                     await update.message.reply_text(f"Error: {str(e)}")
+        
+        async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            """Handle voice messages."""
+            await handle_message(update, context)
         
         async def handle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message or not update.message.text:
@@ -171,6 +201,11 @@ class TelegramBot:
         
         self._application.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
+        )
+        
+        # Add voice/audio handlers
+        self._application.add_handler(
+            MessageHandler(filters.VOICE | filters.AUDIO, handle_voice)
         )
         
         self._is_running = True
@@ -258,6 +293,82 @@ class TelegramBot:
                 if i == 0 and reply_to:
                     kwargs["reply_to_message_id"] = reply_to
                 await self._application.bot.send_message(**kwargs)
+    
+    async def _transcribe_audio(self, update) -> Optional[str]:
+        """Download and transcribe voice/audio message."""
+        if not self._stt_enabled:
+            return None
+        
+        try:
+            # Get file info
+            if update.message.voice:
+                file = await update.message.voice.get_file()
+            elif update.message.audio:
+                file = await update.message.audio.get_file()
+            else:
+                return None
+            
+            # Download to temp file
+            temp_path = os.path.join(tempfile.gettempdir(), f"voice_{file.file_id}.ogg")
+            await file.download_to_drive(temp_path)
+            
+            # Transcribe using existing stt_tool
+            try:
+                from praisonai.tools.audio import stt_tool
+                result = stt_tool(temp_path)
+                if result.get("success"):
+                    text = result.get("text", "")
+                    logger.info(f"Transcribed voice message: {text[:50]}...")
+                    return f"[Voice message]: {text}"
+                else:
+                    logger.warning(f"STT failed: {result.get('error')}")
+                    return None
+            finally:
+                # Clean up temp file
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                    
+        except Exception as e:
+            logger.error(f"Audio transcription error: {e}")
+            return None
+    
+    async def _send_response_with_media(
+        self,
+        chat_id: int,
+        response: str,
+        reply_to: Optional[int] = None,
+    ) -> None:
+        """Send response, extracting and sending any MEDIA: files."""
+        # Parse response for media
+        parsed = split_media_from_output(response)
+        text = parsed["text"]
+        media_urls = parsed.get("media_urls", [])
+        audio_as_voice = parsed.get("audio_as_voice", False)
+        
+        # Send text first if present
+        if text:
+            await self._send_long_message(chat_id, text, reply_to=reply_to)
+        
+        # Send audio files
+        for media_path in media_urls:
+            if not os.path.exists(media_path):
+                logger.warning(f"Media file not found: {media_path}")
+                continue
+            
+            if is_audio_file(media_path):
+                try:
+                    with open(media_path, "rb") as f:
+                        if audio_as_voice:
+                            await self._application.bot.send_voice(
+                                chat_id=chat_id, voice=f
+                            )
+                        else:
+                            await self._application.bot.send_audio(
+                                chat_id=chat_id, audio=f
+                            )
+                except Exception as e:
+                    logger.error(f"Failed to send audio: {e}")
+
     
     async def edit_message(
         self,
@@ -355,7 +466,7 @@ class TelegramBot:
         except Exception:
             return None
     
-    def _convert_update_to_message(self, update) -> BotMessage:
+    def _convert_update_to_message(self, update, override_text: Optional[str] = None) -> BotMessage:
         """Convert Telegram Update to BotMessage."""
         msg = update.message
         
@@ -373,14 +484,17 @@ class TelegramBot:
             channel_type=channel_type,
         )
         
-        msg_type = MessageType.COMMAND if msg.text and msg.text.startswith("/") else MessageType.TEXT
+        # Use override text for transcribed audio, otherwise message text
+        content = override_text if override_text else (msg.text or "")
+        msg_type = MessageType.COMMAND if content and content.startswith("/") else MessageType.TEXT
         
         return BotMessage(
             message_id=str(msg.message_id),
-            content=msg.text or "",
+            content=content,
             message_type=msg_type,
             sender=sender,
             channel=channel,
             timestamp=msg.date.timestamp() if msg.date else 0,
             thread_id=str(msg.message_thread_id) if msg.message_thread_id else None,
         )
+

@@ -222,8 +222,9 @@ _LAZY_IMPORTS = {
     'CodeAgent': ('praisonaiagents.agent.code_agent', 'CodeAgent'),
     'CodeConfig': ('praisonaiagents.agent.code_agent', 'CodeConfig'),
     
-    # Agents
-    'Agents': ('praisonaiagents.agents.agents', 'Agents'),
+    # Agents / AgentManager
+    'AgentManager': ('praisonaiagents.agents.agents', 'AgentManager'),
+    # Note: 'Agents' is handled by _custom_handler for deprecation warning
     'Task': ('praisonaiagents.task.task', 'Task'),
     'AutoAgents': ('praisonaiagents.agents.autoagents', 'AutoAgents'),
     'AutoRagAgent': ('praisonaiagents.agents.auto_rag_agent', 'AutoRagAgent'),
@@ -232,6 +233,10 @@ _LAZY_IMPORTS = {
     
     # Session
     'Session': ('praisonaiagents.session', 'Session'),
+    
+    # App (AgentApp protocol and config)
+    'AgentAppProtocol': ('praisonaiagents.app.protocols', 'AgentAppProtocol'),
+    'AgentAppConfig': ('praisonaiagents.app.config', 'AgentAppConfig'),
     
     # MCP (optional)
     'MCP': ('praisonaiagents.mcp.mcp', 'MCP'),
@@ -420,16 +425,29 @@ def _custom_handler(name, cache):
     """Handle special cases that need custom logic."""
     import warnings
     
-    # PraisonAIAgents deprecation warning
-    if name == "PraisonAIAgents":
+    # Agents deprecation warning (use AgentManager instead)
+    if name == "Agents":
         warnings.warn(
-            "PraisonAIAgents is deprecated, use Agents instead. "
-            "Example: from praisonaiagents import Agents",
+            "Agents is deprecated, use AgentManager instead. "
+            "Example: from praisonaiagents import AgentManager",
             DeprecationWarning,
             stacklevel=4
         )
-        value = lazy_import('praisonaiagents.agents.agents', 'Agents', cache)
+        value = lazy_import('praisonaiagents.agents.agents', 'AgentManager', cache)
+        cache['AgentManager'] = value
         cache['Agents'] = value
+        return value
+    
+    # PraisonAIAgents deprecation warning (use AgentManager instead)
+    if name == "PraisonAIAgents":
+        warnings.warn(
+            "PraisonAIAgents is deprecated, use AgentManager instead. "
+            "Example: from praisonaiagents import AgentManager",
+            DeprecationWarning,
+            stacklevel=4
+        )
+        value = lazy_import('praisonaiagents.agents.agents', 'AgentManager', cache)
+        cache['AgentManager'] = value
         cache['PraisonAIAgents'] = value
         return value
     
@@ -567,7 +585,8 @@ def warmup(include_litellm: bool = False, include_openai: bool = True) -> dict:
 __all__ = [
     # Core classes - the essentials
     'Agent',
-    'Agents',
+    'AgentManager',  # Primary class for multi-agent coordination (v0.14.16+)
+    'Agents',  # Deprecated alias for AgentManager
     'Task',
     
     # Tool essentials

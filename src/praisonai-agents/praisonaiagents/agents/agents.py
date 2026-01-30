@@ -169,7 +169,34 @@ def process_task_context(context_item, verbose=0, user_id=None):
     else:
         return str(context_item)  # Fallback for unknown types
 
-class Agents:
+class AgentManager:
+    """
+    Multi-agent coordinator that manages and delegates work to multiple agents.
+    
+    AgentManager orchestrates the execution of tasks across multiple Agent instances,
+    supporting sequential, parallel, and hierarchical execution patterns.
+    
+    Example:
+        from praisonaiagents import Agent, AgentManager, Task
+        
+        researcher = Agent(role="Researcher", instructions="Research topics")
+        writer = Agent(role="Writer", instructions="Write content")
+        
+        task1 = Task(description="Research AI trends", agent=researcher)
+        task2 = Task(description="Write article", agent=writer)
+        
+        manager = AgentManager(
+            agents=[researcher, writer],
+            tasks=[task1, task2],
+            process="sequential"
+        )
+        result = manager.start()
+    
+    Note:
+        The class was renamed from `Agents` to `AgentManager` in v0.14.16.
+        `Agents` remains as a deprecated alias for backward compatibility.
+    """
+    
     def __init__(
         self,
         agents,
@@ -194,7 +221,7 @@ class Agents:
         caching: Optional[Any] = None,  # Union[bool, CachingConfig] - caching
     ):
         """
-        Initialize PraisonAIAgents with consolidated feature parameters.
+        Initialize AgentManager with consolidated feature parameters.
         
         Args:
             agents: List of Agent instances
@@ -2373,6 +2400,7 @@ Context:
         # Keep plan tasks for results but note original tasks are preserved in _plan_tasks
 
 
-# Backward compatibility alias - Agents points to Agents
-Agents = Agents
-PraisonAIAgents = Agents
+# Backward compatibility aliases
+# Agents is deprecated in favor of AgentManager (v0.14.16+)
+Agents = AgentManager
+PraisonAIAgents = AgentManager

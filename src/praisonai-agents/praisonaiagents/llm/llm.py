@@ -829,6 +829,12 @@ Respond with ONLY a valid JSON tool call in this format:
             # For simple numeric results, create a more natural response
             if isinstance(result, (int, float)):
                 return f"The result is {result}."
+            # For search results (list of dicts with title/url/snippet), format nicely
+            elif isinstance(result, list) and len(result) > 0 and isinstance(result[0], dict):
+                first_item = result[0]
+                # Check if this looks like search results
+                if 'title' in first_item or 'url' in first_item or 'snippet' in first_item:
+                    return self._format_search_results_summary(result)
             return str(result)
         else:
             # Multiple tool results - create coherent summary
@@ -851,6 +857,29 @@ Respond with ONLY a valid JSON tool call in this format:
             
             # Join the parts naturally
             return " ".join(summary_parts)
+    
+    def _format_search_results_summary(self, results: List[Dict]) -> str:
+        """Format search results into a natural language summary."""
+        if not results:
+            return "No search results found."
+        
+        lines = ["Here's what I found:\n"]
+        for i, item in enumerate(results[:5], 1):  # Limit to 5 results
+            title = item.get('title', 'Untitled')
+            url = item.get('url', '')
+            snippet = item.get('snippet', item.get('content', ''))
+            
+            lines.append(f"**{i}. {title}**")
+            if snippet:
+                # Truncate long snippets
+                if len(snippet) > 200:
+                    snippet = snippet[:200] + "..."
+                lines.append(f"   {snippet}")
+            if url:
+                lines.append(f"   Link: {url}")
+            lines.append("")  # Empty line between results
+        
+        return "\n".join(lines).strip()
 
     def _format_ollama_tool_result_message(self, function_name: str, tool_result: Any) -> Dict[str, str]:
         """
