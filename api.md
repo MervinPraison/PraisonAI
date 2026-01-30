@@ -210,6 +210,7 @@ Methods:
 * <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">arun</a>(input: str = '', llm: Optional[str] = None, verbose: bool = False) -> Dict[str, Any]</code>
 * <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">astart</a>(input: str = '', llm: Optional[str] = None, verbose: bool = False) -> Dict[str, Any]</code>
 * <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">from_template</a>(uri: str, config: Optional[Dict[str, Any]] = None, offline: bool = False, **kwargs) -> 'Workflow'</code>
+* <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">get_history</a>() -> List[Dict[str, Any]]</code>
 * <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">memory_config</a>() -> Optional[Dict[str, Any]]</code>
 * <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">on_step_complete</a>() -> Optional[Callable]</code>
 * <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">on_step_error</a>() -> Optional[Callable]</code>
