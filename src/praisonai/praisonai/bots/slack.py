@@ -176,7 +176,9 @@ class SlackBot:
                     await self._send_long_message(say, response, thread_ts=thread_ts)
                 except Exception as e:
                     logger.error(f"Agent error: {e}")
-                    await say(f"Error: {str(e)}")
+                    error_msg = str(e)
+                    if error_msg:
+                        await say(text=f"Error: {error_msg}", thread_ts=event.get("ts"))
         
         @self._app.event("app_mention")
         async def handle_mention(event, say):
@@ -206,7 +208,9 @@ class SlackBot:
                     await self._send_long_message(say, response, thread_ts=thread_ts)
                 except Exception as e:
                     logger.error(f"Agent error: {e}")
-                    await say(f"Error: {str(e)}")
+                    error_msg = str(e)
+                    if error_msg:
+                        await say(text=f"Error: {error_msg}", thread_ts=event.get("ts"))
         
         for command, handler in self._command_handlers.items():
             @self._app.command(f"/{command}")
@@ -289,12 +293,17 @@ class SlackBot:
         """Send a long message, splitting if necessary."""
         max_len = min(self.config.max_message_length, 4000)
         
+        if not text or not text.strip():
+            logger.warning("Attempted to send empty message")
+            return
+
         if len(text) <= max_len:
-            await say(text=text, thread_ts=thread_ts)
+            await say(text=text.strip(), thread_ts=thread_ts)
         else:
             chunks = [text[i:i+max_len] for i in range(0, len(text), max_len)]
             for chunk in chunks:
-                await say(text=chunk, thread_ts=thread_ts)
+                if chunk and chunk.strip():
+                    await say(text=chunk.strip(), thread_ts=thread_ts)
     
     async def edit_message(
         self,

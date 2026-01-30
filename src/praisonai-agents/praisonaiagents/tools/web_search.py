@@ -5,10 +5,11 @@ multiple search providers in order, falling back to the next if one fails.
 
 Search Provider Priority:
 1. Tavily (requires TAVILY_API_KEY + tavily-python)
-2. Exa (requires EXA_API_KEY + exa_py)
-3. You.com (requires YDC_API_KEY + youdotcom)
-4. DuckDuckGo (requires duckduckgo_search package, no API key)
-5. SearxNG (requires requests + running SearxNG instance)
+2. Brave (requires BRAVE_API_KEY + requests)
+3. Exa (requires EXA_API_KEY + exa_py)
+4. You.com (requires YDC_API_KEY + youdotcom)
+5. DuckDuckGo (requires duckduckgo_search package, no API key)
+6. SearxNG (requires requests + running SearxNG instance)
 
 Usage:
     from praisonaiagents.tools import search_web
@@ -62,6 +63,15 @@ def _check_duckduckgo() -> tuple[bool, Optional[str]]:
     return True, None
 
 
+def _check_brave() -> tuple[bool, Optional[str]]:
+    """Check if Brave Search is available."""
+    if not os.environ.get("BRAVE_API_KEY"):
+        return False, "BRAVE_API_KEY not set"
+    if util.find_spec("requests") is None:
+        return False, "requests package not installed"
+    return True, None
+
+
 def _check_searxng() -> tuple[bool, Optional[str]]:
     """Check if SearxNG is available."""
     if util.find_spec("requests") is None:
@@ -69,37 +79,51 @@ def _check_searxng() -> tuple[bool, Optional[str]]:
     return True, None
 
 
-def _search_tavily(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
+def _search_tavily(query: str, max_results: int = 5, search_depth: str = "basic", raw_content: bool = False) -> List[Dict[str, Any]]:
     """Search using Tavily."""
     from tavily import TavilyClient
     
     client = TavilyClient(api_key=os.environ.get("TAVILY_API_KEY"))
-    response = client.search(query=query, max_results=max_results)
+    depth = os.environ.get("TAVILY_SEARCH_DEPTH", search_depth).lower()
+    if depth not in ("basic", "advanced"):
+        depth = "basic"
+    response = client.search(
+        query=query, 
+        max_results=max_results, 
+        search_depth=depth,
+        include_raw_content=raw_content
+    )
     
     results = []
     for r in response.get("results", []):
+        snippet = r.get("raw_content", "") if raw_content else r.get("content", "")
         results.append({
             "title": r.get("title", ""),
             "url": r.get("url", ""),
-            "snippet": r.get("content", ""),
+            "snippet": snippet,
             "provider": "tavily"
         })
     return results
 
 
-def _search_exa(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
-    """Search using Exa."""
+def _search_exa(query: str, max_results: int = 5, full_text: bool = True) -> List[Dict[str, Any]]:
+    """Search using Exa.
+    
+    Args:
+        full_text: True for full page text (more tokens), False for highlights only.
+    """
     from exa_py import Exa
     
     client = Exa(os.environ.get("EXA_API_KEY"))
-    response = client.search(query=query, num_results=max_results)
+    response = client.search(query=query, num_results=max_results, text=full_text)
     
     results = []
     for r in response.results:
+        snippet = getattr(r, "text", "") if full_text else getattr(r, "highlights", [""])[0] if getattr(r, "highlights", None) else ""
         results.append({
             "title": getattr(r, "title", "") or "",
             "url": r.url,
-            "snippet": getattr(r, "text", "") or "",
+            "snippet": snippet or "",
             "provider": "exa"
         })
     return results
@@ -117,21 +141,76 @@ def _search_youdotcom(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
     if hasattr(response, 'results'):
         web_results = getattr(response.results, 'web', []) or []
         for r in web_results[:max_results]:
+            description = getattr(r, "description", "") or ""
+            snippets = getattr(r, "snippets", []) or []
+            full_snippet = description
+            if snippets:
+                full_snippet += "\n" + "\n".join(snippets)
+                
             results.append({
                 "title": getattr(r, "title", "") or "",
                 "url": getattr(r, "url", "") or "",
-                "snippet": getattr(r, "description", "") or "",
+                "snippet": full_snippet.strip(),
                 "provider": "youdotcom"
             })
     elif isinstance(response, dict):
         web_results = response.get("results", {}).get("web", [])
         for r in web_results[:max_results]:
+            description = r.get("description", "")
+            snippets = r.get("snippets", [])
+            full_snippet = description
+            if snippets:
+                full_snippet += "\n" + "\n".join(snippets)
+                
             results.append({
                 "title": r.get("title", ""),
                 "url": r.get("url", ""),
-                "snippet": r.get("description", ""),
+                "snippet": full_snippet.strip(),
                 "provider": "youdotcom"
             })
+    return results
+
+
+def _search_brave(query: str, max_results: int = 5, extra_snippets: bool = True) -> List[Dict[str, Any]]:
+    """Search using Brave Search.
+    
+    Args:
+        extra_snippets: Include extra snippets for richer content (True by default).
+    """
+    import requests
+    
+    url = "https://api.search.brave.com/res/v1/web/search"
+    headers = {
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+        "X-Subscription-Token": os.environ.get("BRAVE_API_KEY")
+    }
+    params = {
+        "q": query, 
+        "count": max_results,
+        "result_filter": "web"
+    }
+    
+    response = requests.get(url, headers=headers, params=params, timeout=10)
+    response.raise_for_status()
+    data = response.json()
+    
+    results = []
+    for r in data.get("web", {}).get("results", []):
+        description = r.get("description", "")
+        full_snippet = description
+        
+        if extra_snippets:
+            extra = r.get("extra_snippets", [])
+            if extra:
+                full_snippet += "\n" + "\n".join(extra)
+            
+        results.append({
+            "title": r.get("title", ""),
+            "url": r.get("url", ""),
+            "snippet": full_snippet.strip(),
+            "provider": "brave"
+        })
     return results
 
 
@@ -207,6 +286,7 @@ def _search_searxng(query: str, max_results: int = 5, searxng_url: Optional[str]
 # Provider configuration: (name, check_func, search_func)
 SEARCH_PROVIDERS = [
     ("tavily", _check_tavily, _search_tavily),
+    ("brave", _check_brave, _search_brave),
     ("exa", _check_exa, _search_exa),
     ("youdotcom", _check_youdotcom, _search_youdotcom),
     ("duckduckgo", _check_duckduckgo, _search_duckduckgo),
@@ -219,52 +299,62 @@ def search_web(
     max_results: int = 5,
     providers: Optional[List[str]] = None,
     searxng_url: Optional[str] = None,
+    search_depth: str = "basic",
+    tavily_raw_content: bool = False,
+    exa_full_text: bool = True,
+    brave_extra_snippets: bool = True,
 ) -> List[Dict[str, Any]]:
-    """Search the web using multiple providers with automatic fallback.
+    """Search the web using one or more providers with automatic fallback.
     
-    Tries each search provider in order until one succeeds. For each provider,
-    it first checks if the API key is set (if required) and if the package is
-    installed, then attempts the search. If the search fails, it moves to the
-    next provider.
+    VALID PROVIDER NAMES: tavily, brave, exa, youdotcom, duckduckgo, searxng
     
     Args:
-        query: The search query string
-        max_results: Maximum number of results to return (default: 5)
-        providers: Optional list of provider names to try, in order.
-                  If not specified, uses default order:
-                  ["tavily", "exa", "youdotcom", "duckduckgo", "searxng"]
-        searxng_url: Optional custom SearxNG instance URL
+        query: Search query string
+        max_results: Maximum results to return (default: 5)
+        providers: Which provider(s) to use. Accepts:
+                   - Single string: "tavily" (uses just that provider)
+                   - Comma-separated: "tavily, brave" (tries in order, falls back on failure)
+                   - List: ["tavily", "brave"] (same as comma-separated)
+                   If not specified, tries all providers in order until one succeeds.
+        
+        Provider-specific options (only used by their respective provider):
+        - searxng_url: [SearxNG] Custom instance URL
+        - search_depth: [Tavily] "basic" (1 credit) or "advanced" (2 credits)
+        - tavily_raw_content: [Tavily] Include full page content (default: False for snippets)
+        - exa_full_text: [Exa] Full page text (True) vs highlights (False)
+        - brave_extra_snippets: [Brave] Include extra snippets (True) for richer content
         
     Returns:
-        List of search results, each containing:
-        - title: Result title
-        - url: Result URL
-        - snippet: Result description/snippet
-        - provider: Name of the provider that returned the result
-        
-        If all providers fail, returns a list with a single error dict.
-        
-    Example:
-        # Use default provider order
-        results = search_web("AI news 2024")
-        
-        # Specify providers to try
-        results = search_web("Python tutorials", providers=["duckduckgo", "tavily"])
-        
-        # With custom SearxNG URL
-        results = search_web("tech news", searxng_url="http://my-searxng:8080/search")
+        List of dicts with: title, url, snippet, provider. Returns error dict if all fail.
     """
     errors = []
     
+    # Valid provider names for reference
+    valid_provider_names = [p[0] for p in SEARCH_PROVIDERS]
+    
     # Determine which providers to try
     if providers:
+        # Handle string input (LLM might pass "provider1, provider2" instead of list)
+        if isinstance(providers, str):
+            providers = [p.strip() for p in providers.split(",")]
+        
         # Filter to only valid provider names
         provider_order = []
         for name in providers:
+            name_lower = name.lower().strip()
+            matched = False
             for pname, check_fn, search_fn in SEARCH_PROVIDERS:
-                if pname == name.lower():
+                if pname == name_lower:
                     provider_order.append((pname, check_fn, search_fn))
+                    matched = True
                     break
+            if not matched:
+                logger.warning(f"Invalid provider '{name}'. Valid providers: {valid_provider_names}")
+        
+        # If no valid providers specified, fall back to default order
+        if not provider_order:
+            logger.warning(f"No valid providers in {providers}. Using default order: {valid_provider_names}")
+            provider_order = SEARCH_PROVIDERS
     else:
         provider_order = SEARCH_PROVIDERS
     
@@ -282,6 +372,12 @@ def search_web(
             
             if provider_name == "searxng":
                 results = search_func(query, max_results, searxng_url)
+            elif provider_name == "tavily":
+                results = _search_tavily(query, max_results, search_depth, tavily_raw_content)
+            elif provider_name == "exa":
+                results = _search_exa(query, max_results, exa_full_text)
+            elif provider_name == "brave":
+                results = _search_brave(query, max_results, brave_extra_snippets)
             else:
                 results = search_func(query, max_results)
             
