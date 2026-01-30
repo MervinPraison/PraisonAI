@@ -13,9 +13,35 @@ import time
 logger = logging.getLogger(__name__)
 
 class Task:
+    """
+    A unit of work that can be executed by an Agent or a custom handler function.
+    
+    Task is the unified abstraction for both AgentManager tasks and Workflow steps.
+    It supports all features from the legacy WorkflowStep class.
+    
+    Simple Usage:
+        task = Task(description="Research AI trends")
+        
+    With action alias (from WorkflowStep):
+        task = Task(action="Write a blog post about {{topic}}")
+        
+    With custom handler function:
+        task = Task(
+            name="process_data",
+            action="Process the input",
+            handler=my_custom_function
+        )
+        
+    With loop iteration:
+        task = Task(
+            action="Process {{item}}",
+            loop_over="items",
+            loop_var="item"
+        )
+    """
     def __init__(
         self,
-        description: str,
+        description: Optional[str] = None,
         expected_output: Optional[str] = None,
         agent: Optional[Agent] = None,
         name: Optional[str] = None,
@@ -40,14 +66,38 @@ class Task:
         memory=None,
         quality_check=True,
         input_file: Optional[str] = None,
-        rerun: bool = False, # Renamed from can_rerun and logic inverted, default True for backward compatibility
-        retain_full_context: bool = False, # By default, only use previous task output, not all previous tasks
+        rerun: bool = False,
+        retain_full_context: bool = False,
         guardrail: Optional[Union[Callable[[TaskOutput], Tuple[bool, Any]], str]] = None,
-        guardrails: Optional[Union[Callable[[TaskOutput], Tuple[bool, Any]], str]] = None,  # Alias for guardrail
+        guardrails: Optional[Union[Callable[[TaskOutput], Tuple[bool, Any]], str]] = None,
         max_retries: int = 3,
         retry_count: int = 0,
         agent_config: Optional[Dict[str, Any]] = None,
-        variables: Optional[Dict[str, Any]] = None
+        variables: Optional[Dict[str, Any]] = None,
+        # ============================================================
+        # NEW PARAMS FROM WORKFLOWSTEP (Phase 4 Consolidation)
+        # ============================================================
+        # Action alias - alternative to description (user-friendly)
+        action: Optional[str] = None,
+        # Handler function - custom function instead of agent
+        handler: Optional[Callable] = None,
+        # Condition function - check if task should run
+        should_run: Optional[Callable] = None,
+        # Loop support - iterate over a list
+        loop_over: Optional[str] = None,
+        loop_var: str = "item",
+        # Consolidated config objects (from WorkflowStep)
+        execution: Optional[Any] = None,
+        routing: Optional[Any] = None,
+        output_config: Optional[Any] = None,
+        # Feature configs (from WorkflowStep)
+        autonomy: Optional[Any] = None,
+        knowledge: Optional[Any] = None,
+        web: Optional[Any] = None,
+        reflection: Optional[Any] = None,
+        planning: Optional[Any] = None,
+        hooks: Optional[Any] = None,
+        caching: Optional[Any] = None,
     ):
         # Add check if memory config is provided
         if memory is not None or (config and config.get('memory_config')):
@@ -60,6 +110,17 @@ class Task:
                 MEMORY_AVAILABLE = False
                 # Don't raise - let it continue with limited functionality
 
+        # Handle action as alias for description (from WorkflowStep)
+        # If action provided but description not, use action as description
+        if action is not None and description is None:
+            description = action
+        # Store both - action is the user-friendly alias
+        self.action = action if action is not None else description
+        
+        # Validate that we have either description or action
+        if description is None:
+            raise ValueError("Task requires either 'description' or 'action' parameter")
+        
         self.input_file = input_file
         self.id = str(uuid.uuid4()) if id is None else str(id)
         self.name = name
@@ -94,6 +155,29 @@ class Task:
         self.validation_feedback = None  # Store validation failure feedback for retry attempts
         self.agent_config = agent_config  # Per-task agent configuration {role, goal, backstory, llm}
         self.variables = variables if variables else {}  # Variables for substitution in description
+
+        # ============================================================
+        # NEW PARAMS FROM WORKFLOWSTEP (Phase 4 Consolidation)
+        # ============================================================
+        # Handler function - custom function instead of agent
+        self.handler = handler
+        # Condition function - check if task should run
+        self.should_run = should_run
+        # Loop support - iterate over a list
+        self.loop_over = loop_over
+        self.loop_var = loop_var
+        # Consolidated config objects (from WorkflowStep)
+        self.execution = execution
+        self.routing = routing
+        self.output_config = output_config
+        # Feature configs (from WorkflowStep)
+        self.autonomy = autonomy
+        self.knowledge = knowledge
+        self.web = web
+        self.reflection = reflection
+        self.planning = planning
+        self.hooks = hooks
+        self.caching = caching
 
         # Set logger level based on config verbose level
         verbose = self.config.get("verbose", 0)

@@ -451,6 +451,20 @@ def _custom_handler(name, cache):
         cache['PraisonAIAgents'] = value
         return value
     
+    # WorkflowStep deprecation warning (use Task instead) - Phase 4 Consolidation
+    if name == "WorkflowStep":
+        warnings.warn(
+            "WorkflowStep is deprecated, use Task instead. "
+            "Task now supports all WorkflowStep features including action, handler, loop_over, etc. "
+            "Example: from praisonaiagents import Task",
+            DeprecationWarning,
+            stacklevel=4
+        )
+        value = lazy_import('praisonaiagents.task.task', 'Task', cache)
+        cache['Task'] = value
+        cache['WorkflowStep'] = value
+        return value
+    
     # Module imports (return the module itself)
     if name == 'memory':
         import importlib

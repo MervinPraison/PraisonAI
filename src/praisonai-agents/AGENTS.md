@@ -22,6 +22,8 @@ Simpler than competitors • More extensible • Faster • Agent-centric
 | **Performance-First** | Lazy loading, optional dependencies, no hot-path regressions |
 | **Production-Ready** | Safe by default, multi-agent safe, async-safe |
 Powerful, lightweight, highly reliable and robust
+Easy and developer frienldy for non developers
+Easy and user friendly
 ---
 
 ## 2. Repository Structure

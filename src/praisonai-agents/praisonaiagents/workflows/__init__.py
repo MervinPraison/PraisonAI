@@ -8,7 +8,7 @@ from .workflows import (
     # Core classes
     Workflow,
     Pipeline,  # Alias for Workflow
-    WorkflowStep,
+    WorkflowStep as _OriginalWorkflowStep,  # Keep original for internal use
     WorkflowContext,
     StepResult,
     WorkflowManager,
@@ -130,7 +130,21 @@ _LAZY_IMPORTS = {
 
 
 def __getattr__(name: str):
-    """Lazy import mechanism for heavy modules."""
+    """Lazy import mechanism for heavy modules and deprecation handling."""
+    import warnings
+    
+    # WorkflowStep deprecation - return Task with warning (Phase 4 Consolidation)
+    if name == "WorkflowStep":
+        warnings.warn(
+            "WorkflowStep is deprecated, use Task instead. "
+            "Task now supports all WorkflowStep features including action, handler, loop_over, etc. "
+            "Example: from praisonaiagents import Task",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        from ..task.task import Task
+        return Task
+    
     if name in _LAZY_IMPORTS:
         module_name = _LAZY_IMPORTS[name]
         import importlib
