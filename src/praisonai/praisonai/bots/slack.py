@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import tempfile
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
@@ -21,6 +23,8 @@ from praisonaiagents.bots import (
     BotChannel,
     MessageType,
 )
+
+from .media import split_media_from_output, is_audio_file
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +85,13 @@ class SlackBot:
         
         self._message_handlers: List[Callable] = []
         self._command_handlers: Dict[str, Callable] = {}
+        
+        # Audio capabilities
+        self._stt_enabled: bool = False
+    
+    def enable_stt(self, enabled: bool = True) -> None:
+        """Enable STT for audio file transcription."""
+        self._stt_enabled = enabled
     
     @property
     def is_running(self) -> bool:
@@ -173,7 +184,9 @@ class SlackBot:
                         # Auto-thread long responses
                         thread_ts = event.get("thread_ts") or event.get("ts")
                     
-                    await self._send_long_message(say, response, thread_ts=thread_ts)
+                    await self._send_response_with_media(
+                        event.get("channel"), say, response, thread_ts=thread_ts
+                    )
                 except Exception as e:
                     logger.error(f"Agent error: {e}")
                     error_msg = str(e)
@@ -205,7 +218,9 @@ class SlackBot:
                         # Auto-thread long responses
                         thread_ts = event.get("thread_ts") or event.get("ts")
                     
-                    await self._send_long_message(say, response, thread_ts=thread_ts)
+                    await self._send_response_with_media(
+                        event.get("channel"), say, response, thread_ts=thread_ts
+                    )
                 except Exception as e:
                     logger.error(f"Agent error: {e}")
                     error_msg = str(e)
@@ -304,6 +319,41 @@ class SlackBot:
             for chunk in chunks:
                 if chunk and chunk.strip():
                     await say(text=chunk.strip(), thread_ts=thread_ts)
+    
+    async def _send_response_with_media(
+        self,
+        channel_id: str,
+        say,
+        response: str,
+        thread_ts: Optional[str] = None,
+    ) -> None:
+        """Send response, extracting and uploading any MEDIA: files."""
+        # Parse response for media
+        parsed = split_media_from_output(response)
+        text = parsed["text"]
+        media_urls = parsed.get("media_urls", [])
+        
+        # Send text first if present
+        if text:
+            await self._send_long_message(say, text, thread_ts=thread_ts)
+        
+        # Upload audio files to Slack
+        for media_path in media_urls:
+            if not os.path.exists(media_path):
+                logger.warning(f"Media file not found: {media_path}")
+                continue
+            
+            if is_audio_file(media_path) and self._client:
+                try:
+                    # Upload file to Slack
+                    await self._client.files_upload_v2(
+                        channel=channel_id,
+                        file=media_path,
+                        title=os.path.basename(media_path),
+                        thread_ts=thread_ts,
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to upload audio to Slack: {e}")
     
     async def edit_message(
         self,

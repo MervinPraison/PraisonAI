@@ -332,6 +332,13 @@ def search_web(
     # Valid provider names for reference
     valid_provider_names = [p[0] for p in SEARCH_PROVIDERS]
     
+    # Check for WEB_SEARCH_PROVIDER env var (set by CLI --web-provider flag)
+    if providers is None:
+        env_provider = os.environ.get("WEB_SEARCH_PROVIDER")
+        if env_provider:
+            providers = env_provider
+            logger.debug(f"Using provider from WEB_SEARCH_PROVIDER env var: {env_provider}")
+    
     # Determine which providers to try
     if providers:
         # Handle string input (LLM might pass "provider1, provider2" instead of list)

@@ -63,6 +63,14 @@ class BotCapabilities:
     model: Optional[str] = None
     thinking: Optional[str] = None  # off, minimal, low, medium, high
     
+    # Audio (TTS/STT)
+    tts: bool = False  # Enable TTS tool
+    tts_voice: str = "alloy"  # TTS voice
+    tts_model: Optional[str] = None  # TTS model (default: openai/tts-1)
+    auto_tts: bool = False  # Auto-convert responses to speech
+    stt: bool = False  # Enable STT tool
+    stt_model: Optional[str] = None  # STT model (default: openai/whisper-1)
+    
     # Session
     session_id: Optional[str] = None
     user_id: Optional[str] = None
@@ -87,6 +95,12 @@ class BotCapabilities:
             "auto_approve": self.auto_approve,
             "model": self.model,
             "thinking": self.thinking,
+            "tts": self.tts,
+            "tts_voice": self.tts_voice,
+            "tts_model": self.tts_model,
+            "auto_tts": self.auto_tts,
+            "stt": self.stt,
+            "stt_model": self.stt_model,
             "session_id": self.session_id,
             "user_id": self.user_id,
         }
@@ -228,6 +242,45 @@ class BotHandler:
             print("\nStopping bot...")
             asyncio.run(bot.stop())
     
+    def _get_agent_kwargs(self, capabilities: Optional[BotCapabilities]) -> Dict[str, Any]:
+        """Extract Agent constructor kwargs from BotCapabilities (DRY).
+        
+        Follows progressive disclosure pattern from agents.md:
+        - bool True enables defaults
+        - List/Config provides custom configuration
+        """
+        if not capabilities:
+            return {}
+        
+        kwargs: Dict[str, Any] = {}
+        
+        # LLM model
+        if capabilities.model:
+            kwargs["llm"] = capabilities.model
+        
+        # Memory: True enables defaults (agents.md pattern)
+        if capabilities.memory:
+            kwargs["memory"] = True
+        
+        # Knowledge: List of sources or True
+        if capabilities.knowledge and capabilities.knowledge_sources:
+            kwargs["knowledge"] = capabilities.knowledge_sources
+        elif capabilities.knowledge:
+            kwargs["knowledge"] = True
+        
+        # Skills: List of skill names
+        if capabilities.skills:
+            kwargs["skills"] = capabilities.skills
+        
+        # Thinking mode → reflection (maps off/minimal/low/medium/high)
+        if capabilities.thinking:
+            # Map thinking mode to reflection config
+            # medium/high enables extended thinking, off/minimal/low disables
+            if capabilities.thinking in ("medium", "high"):
+                kwargs["reflection"] = True
+        
+        return kwargs
+
     def _print_startup_info(self, platform: str, capabilities: Optional[BotCapabilities]) -> None:
         """Print startup information with enabled capabilities."""
         print(f"Starting {platform} bot...")
@@ -275,13 +328,16 @@ class BotHandler:
         # Build tools list from capabilities
         tools = self._build_tools(capabilities) if capabilities else []
         
+        # Get agent kwargs from capabilities (DRY)
+        agent_kwargs = self._get_agent_kwargs(capabilities)
+        
         # Default agent if no file
         if not file_path:
             return Agent(
                 name="assistant",
                 instructions="You are a helpful assistant.",
                 tools=tools if tools else None,
-                llm=capabilities.model if capabilities and capabilities.model else None,
+                **agent_kwargs,
             )
         
         # Resolve file path - try current dir first, then check if it's absolute
@@ -298,7 +354,7 @@ class BotHandler:
                 name="assistant",
                 instructions="You are a helpful assistant.",
                 tools=tools if tools else None,
-                llm=capabilities.model if capabilities and capabilities.model else None,
+                **agent_kwargs,
             )
         
         try:
@@ -325,11 +381,15 @@ class BotHandler:
             yaml_tools = agent_config.get("tools", [])
             all_tools = self._resolve_tools(yaml_tools) + tools
             
+            # Override llm from YAML if not provided in capabilities
+            if "llm" not in agent_kwargs and agent_config.get("llm"):
+                agent_kwargs["llm"] = agent_config.get("llm")
+            
             return Agent(
                 name=agent_config.get("name", "assistant"),
                 instructions=agent_config.get("instructions", "You are a helpful assistant."),
-                llm=capabilities.model if capabilities and capabilities.model else agent_config.get("llm"),
                 tools=all_tools if all_tools else None,
+                **agent_kwargs,
             )
         except Exception as e:
             import traceback
@@ -339,12 +399,19 @@ class BotHandler:
                 name="assistant",
                 instructions="You are a helpful assistant.",
                 tools=tools if tools else None,
-                llm=capabilities.model if capabilities and capabilities.model else None,
+                **agent_kwargs,
             )
     
     def _build_tools(self, capabilities: BotCapabilities) -> List:
         """Build tools list from capabilities."""
+        import os
         tools = []
+        
+        # Set WEB_SEARCH_PROVIDER env var to respect --web-provider CLI flag
+        # This must be done BEFORE importing search_web
+        if capabilities.web_search_provider:
+            os.environ["WEB_SEARCH_PROVIDER"] = capabilities.web_search_provider
+            logger.info(f"Web search provider set to: {capabilities.web_search_provider}")
         
         # Default tools: execute_command and search_web (always enabled)
         try:
@@ -386,6 +453,26 @@ class BotHandler:
         # Exec tool (code execution) - already included in default via execute_command
         if capabilities.exec_enabled:
             logger.info("Exec mode enabled (execute_command already included)")
+        
+        # TTS tool
+        if capabilities.tts:
+            try:
+                from praisonai.tools.audio import create_tts_tool
+                tts_tool = create_tts_tool()
+                tools.append(tts_tool)
+                logger.info("TTS tool enabled")
+            except ImportError as e:
+                logger.warning(f"TTS tool not available: {e}")
+        
+        # STT tool
+        if capabilities.stt:
+            try:
+                from praisonai.tools.audio import create_stt_tool
+                stt_tool = create_stt_tool()
+                tools.append(stt_tool)
+                logger.info("STT tool enabled")
+            except ImportError as e:
+                logger.warning(f"STT tool not available: {e}")
         
         # Named tools
         for tool_name in capabilities.tools:
@@ -465,6 +552,14 @@ def _add_capability_args(parser) -> None:
     
     # Thinking mode
     parser.add_argument("--thinking", choices=["off", "minimal", "low", "medium", "high"], help="Thinking mode")
+    
+    # Audio (TTS/STT)
+    parser.add_argument("--tts", action="store_true", help="Enable TTS tool for text-to-speech")
+    parser.add_argument("--tts-voice", default="alloy", help="TTS voice (alloy, echo, fable, onyx, nova, shimmer)")
+    parser.add_argument("--tts-model", help="TTS model (default: openai/tts-1)")
+    parser.add_argument("--auto-tts", action="store_true", help="Auto-convert all responses to speech")
+    parser.add_argument("--stt", action="store_true", help="Enable STT tool for speech-to-text")
+    parser.add_argument("--stt-model", help="STT model (default: openai/whisper-1)")
 
 
 def _build_capabilities_from_args(args) -> BotCapabilities:
@@ -487,6 +582,12 @@ def _build_capabilities_from_args(args) -> BotCapabilities:
         auto_approve=getattr(args, "auto_approve", False),
         model=getattr(args, "model", None),
         thinking=getattr(args, "thinking", None),
+        tts=getattr(args, "tts", False),
+        tts_voice=getattr(args, "tts_voice", "alloy"),
+        tts_model=getattr(args, "tts_model", None),
+        auto_tts=getattr(args, "auto_tts", False),
+        stt=getattr(args, "stt", False),
+        stt_model=getattr(args, "stt_model", None),
         session_id=getattr(args, "session_id", None),
         user_id=getattr(args, "user_id", None),
     )
