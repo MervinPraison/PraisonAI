@@ -406,8 +406,6 @@ class Agent:
         # LLM configuration
         llm: Optional[Union[str, Any]] = None,
         model: Optional[Union[str, Any]] = None,  # Alias for llm=
-        function_calling_llm: Optional[Any] = None,  # DEPRECATED: use llm= with LLMConfig
-        llm_config: Optional[Dict[str, Any]] = None,  # DEPRECATED: use llm= with LLMConfig
         base_url: Optional[str] = None,  # Kept separate (connection/auth)
         api_key: Optional[str] = None,  # Kept separate (connection/auth)
         # Tools
@@ -450,8 +448,6 @@ class Agent:
             llm: Model name string ("gpt-4o", "anthropic/claude-3-sonnet") or LLM object.
                 Defaults to OPENAI_MODEL_NAME env var or "gpt-4o-mini".
             model: Alias for llm parameter.
-            function_calling_llm: Dedicated LLM for function calling. Deprecated: use llm=.
-            llm_config: LLM configuration dict. Deprecated: use llm=.
             base_url: Custom LLM endpoint URL (e.g., for Ollama). Kept separate for auth.
             api_key: API key for LLM provider. Kept separate for auth.
             tools: List of tools, functions, callables, or MCP instances.
@@ -1089,21 +1085,9 @@ class Agent:
         self.__stream_emitter = None  # Will be initialized on first access
         self._hooks_registry_param = hooks  # Store for lazy init
         
-        # Store llm_config for configurable model switching
-        self._llm_config = llm_config or {}
-        self._llm_configurable = self._llm_config.get('configurable', False)
-        
-        # ============================================================
-        # LLM CONSOLIDATION: Handle model= alias and deprecation warnings
-        # Precedence: llm= > model= > default
-        # ============================================================
-        
         # Handle model= alias for llm= (NO warnings - both are valid)
         if llm is None and model is not None:
             llm = model  # model= is an alias for llm=
-        
-        # Legacy params (llm_config, function_calling_llm) are accepted silently
-        # for backward compatibility - NO deprecation warnings per policy
         
         # Store rate limiter (optional, zero overhead when None)
         self._rate_limiter = rate_limiter
@@ -1211,9 +1195,7 @@ class Agent:
             else:
                 self.tools = list(tools)
         else:
-            # Handle all falsy values (None, False, 0, "", etc.) by defaulting to empty list
             self.tools = tools or []
-        self.function_calling_llm = function_calling_llm
         self.max_iter = max_iter
         self.max_rpm = max_rpm
         self.max_execution_time = max_execution_time

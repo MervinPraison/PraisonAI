@@ -1,6 +1,6 @@
 """Simplest Planning Mode Example - Just enable planning=True"""
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentManager
 
 # Create agents
 researcher = Agent(name="Researcher", role="Research Analyst")
@@ -11,7 +11,7 @@ task1 = Task(description="Research the benefits of meditation", agent=researcher
 task2 = Task(description="Write a short article about meditation benefits", agent=writer)
 
 # Run with planning enabled - that's it!
-agents = Agents(
+agents = AgentManager(
     agents=[researcher, writer],
     tasks=[task1, task2],
     planning=True

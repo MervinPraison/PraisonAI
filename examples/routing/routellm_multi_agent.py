@@ -44,6 +44,6 @@ task2 = Task(
     expected_output="Short article about AI trends"
 )
 
-agents = Agents(agents=[researcher, writer], tasks=[task1, task2])
+agents = AgentManager(agents=[researcher, writer], tasks=[task1, task2])
 result = agents.start()
 print(result)

@@ -111,7 +111,7 @@ def main():
     print("🚀 Starting MongoDB Tools Demo System...")
     print("=" * 60)
     
-    mongodb_system = Agents(
+    mongodb_system = AgentManager(
         agents=[db_agent, analysis_agent],
         tasks=mongodb_tasks, output="verbose"
     )

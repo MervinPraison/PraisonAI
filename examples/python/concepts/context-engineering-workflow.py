@@ -302,7 +302,7 @@ class ContextEngineeringWorkflow:
         print("\n⚙️ Executing Context Engineering Workflow")
         print("-" * 50)
         
-        agents_workflow = Agents(
+        agents_workflow = AgentManager(
             agents=[
                 self.product_manager,
                 self.architect, 

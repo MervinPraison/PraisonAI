@@ -991,7 +991,7 @@ class TestWorkflowAgentAdvancedFields:
     """Tests for advanced agent fields in workflow.yaml."""
     
     def test_agent_with_function_calling_llm(self):
-        """Test that agents can have function_calling_llm."""
+        """Test that function_calling_llm in YAML is ignored (removed in v4)."""
         from praisonaiagents.workflows import YAMLWorkflowParser
         
         yaml_content = """
@@ -1003,7 +1003,7 @@ agents:
     goal: Research topics
     instructions: "Provide research findings"
     llm: gpt-4o-mini
-    function_calling_llm: gpt-4o
+    function_calling_llm: gpt-4o  # This is ignored in v4
 
 steps:
   - agent: researcher
@@ -1015,7 +1015,9 @@ steps:
         assert workflow is not None
         researcher = parser._agents.get('researcher')
         assert researcher is not None
-        assert hasattr(researcher, '_yaml_function_calling_llm') or hasattr(researcher, 'function_calling_llm')
+        # function_calling_llm is removed in v4 - should NOT be stored
+        assert not hasattr(researcher, '_yaml_function_calling_llm')
+        assert not hasattr(researcher, 'function_calling_llm')
     
     def test_agent_with_max_rpm(self):
         """Test that agents can have max_rpm for rate limiting."""
@@ -1130,7 +1132,7 @@ steps:
         assert hasattr(researcher, '_yaml_response_template')
 
 
-class TestWorkflowStepAdvancedFields:
+class TestTaskAdvancedFields:
     """Tests for advanced step fields in workflow.yaml."""
     
     def test_step_with_output_json(self):

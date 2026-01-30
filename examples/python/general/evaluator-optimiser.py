@@ -53,7 +53,7 @@ evaluate_task = Task(
 )
 
 # Create workflow manager
-workflow = Agents(
+workflow = AgentManager(
     agents=[generator, evaluator],
     tasks=[generate_task, evaluate_task],
     process="workflow", output="verbose"

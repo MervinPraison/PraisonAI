@@ -86,7 +86,7 @@ strategy_task = Task(
 )
 
 # Create workflow
-workflow = Agents(
+workflow = AgentManager(
     agents=[monitor_agent, impact_analyzer, strategy_generator],
     tasks=[monitoring_task, impact_task, strategy_task],
     process="workflow", output="verbose"

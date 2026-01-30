@@ -8,7 +8,6 @@ from .workflows import (
     # Core classes
     Workflow,
     Pipeline,  # Alias for Workflow
-    WorkflowStep as _OriginalWorkflowStep,  # Keep original for internal use
     WorkflowContext,
     StepResult,
     WorkflowManager,
@@ -45,13 +44,13 @@ from .workflow_configs import (
     WorkflowMemoryConfig,
     WorkflowHooksConfig,
     # Step-level configs
-    WorkflowStepContextConfig,
-    WorkflowStepOutputConfig,
-    WorkflowStepExecutionConfig,
-    WorkflowStepRoutingConfig,
+    TaskContextConfig,
+    TaskOutputConfig,
+    TaskExecutionConfig,
+    TaskRoutingConfig,
     # Enums
     WorkflowOutputPreset,
-    WorkflowStepExecutionPreset,
+    TaskExecutionPreset,
     # Resolution helpers
     resolve_output_config,
     resolve_planning_config,
@@ -67,7 +66,7 @@ __all__ = [
     # Core
     "Workflow",
     "Pipeline",
-    "WorkflowStep",
+    "Task",
     "WorkflowContext",
     "StepResult",
     "WorkflowManager",
@@ -100,14 +99,14 @@ __all__ = [
     "WorkflowHooksConfig",
     
     # Step Config Classes
-    "WorkflowStepContextConfig",
-    "WorkflowStepOutputConfig",
-    "WorkflowStepExecutionConfig",
-    "WorkflowStepRoutingConfig",
+    "TaskContextConfig",
+    "TaskOutputConfig",
+    "TaskExecutionConfig",
+    "TaskRoutingConfig",
     
     # Enums
     "WorkflowOutputPreset",
-    "WorkflowStepExecutionPreset",
+    "TaskExecutionPreset",
     
     # Resolution Helpers
     "resolve_output_config",
@@ -133,18 +132,9 @@ _LAZY_IMPORTS = {
 
 def __getattr__(name: str):
     """Lazy import mechanism for heavy modules and deprecation handling."""
-    import warnings
-    
-    # WorkflowStep deprecation - return Task with warning (Phase 4 Consolidation)
-    if name == "WorkflowStep":
-        warnings.warn(
-            "WorkflowStep is deprecated, use Task instead. "
-            "Task now supports all WorkflowStep features including action, handler, loop_over, etc. "
-            "Example: from praisonaiagents import Task",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        from ..task.task import Task
+    # Re-export Task from the unified location for backward compatibility
+    if name == "Task":
+        from praisonaiagents.task import Task
         return Task
     
     if name in _LAZY_IMPORTS:

@@ -14,7 +14,8 @@ from typing import Any, Callable, Dict, List, Optional, Union
 from pathlib import Path
 
 from ..agent.agent import Agent
-from .workflows import Workflow, WorkflowStep, route, parallel, loop, repeat, Include, include
+from .workflows import Workflow, route, parallel, loop, repeat, Include, include
+from ..task.task import Task
 
 
 class YAMLWorkflowParser:
@@ -498,7 +499,6 @@ class YAMLWorkflowParser:
         cache = config.get('cache', True)
         
         # Additional agents.yaml fields
-        function_calling_llm = config.get('function_calling_llm')
         max_rpm = config.get('max_rpm')
         max_execution_time = config.get('max_execution_time')
         reflect_llm = config.get('reflect_llm')
@@ -545,7 +545,6 @@ class YAMLWorkflowParser:
         agent._yaml_cache = cache
         
         # Store additional agents.yaml fields for feature parity
-        agent._yaml_function_calling_llm = function_calling_llm
         agent._yaml_max_rpm = max_rpm
         agent._yaml_max_execution_time = max_execution_time
         agent._yaml_reflect_llm = reflect_llm
@@ -728,7 +727,7 @@ class YAMLWorkflowParser:
             steps_data: List of step definitions
             
         Returns:
-            List of workflow steps (Agent, WorkflowStep, or pattern objects)
+            List of workflow steps (Agent, Task, or pattern objects)
         """
         steps = []
         
@@ -747,7 +746,7 @@ class YAMLWorkflowParser:
             step_data: Step definition dictionary
             
         Returns:
-            Step object (Agent, WorkflowStep, or pattern)
+            Step object (Agent, Task, or pattern)
         """
         # Check for pattern types
         if 'route' in step_data:
@@ -1187,7 +1186,7 @@ class YAMLWorkflowParser:
             return condition_str.lower() in result
         return condition
     
-    def _parse_generic_step(self, step_data: Dict) -> WorkflowStep:
+    def _parse_generic_step(self, step_data: Dict) -> Task:
         """
         Parse a generic workflow step.
         
@@ -1195,12 +1194,12 @@ class YAMLWorkflowParser:
             step_data: Step definition dictionary
             
         Returns:
-            WorkflowStep object
+            Task object
         """
         name = step_data.get('name', 'step')
         action = step_data.get('action', '')
         
-        return WorkflowStep(
+        return Task(
             name=name,
             action=action,
         )

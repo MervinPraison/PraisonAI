@@ -90,7 +90,7 @@ export interface StepRoutingConfig {
   exitIf?: (output: any, context: WorkflowContext) => boolean;
 }
 
-export interface WorkflowStepConfig<TInput = any, TOutput = any> {
+export interface TaskConfig<TInput = any, TOutput = any> {
   name: string;
   execute: StepFunction<TInput, TOutput>;
   condition?: (context: WorkflowContext) => boolean;
@@ -107,7 +107,7 @@ export interface WorkflowStepConfig<TInput = any, TOutput = any> {
 /**
  * Workflow Step - Enhanced with Python-parity configuration
  */
-export class WorkflowStep<TInput = any, TOutput = any> {
+export class Task<TInput = any, TOutput = any> {
   readonly id: string;
   readonly name: string;
   readonly execute: StepFunction<TInput, TOutput>;
@@ -121,7 +121,7 @@ export class WorkflowStep<TInput = any, TOutput = any> {
   readonly executionConfig?: StepExecutionConfig;
   readonly routingConfig?: StepRoutingConfig;
 
-  constructor(config: WorkflowStepConfig<TInput, TOutput>) {
+  constructor(config: TaskConfig<TInput, TOutput>) {
     this.id = randomUUID();
     this.name = config.name;
     this.execute = config.execute;
@@ -366,7 +366,7 @@ function createContext(workflowId: string): WorkflowContext {
 export class Workflow<TInput = any, TOutput = any> {
   readonly id: string;
   readonly name: string;
-  private steps: WorkflowStep[] = [];
+  private steps: Task[] = [];
 
   constructor(name: string) {
     this.id = randomUUID();
@@ -377,9 +377,9 @@ export class Workflow<TInput = any, TOutput = any> {
    * Add a step to the workflow
    */
   addStep<TStepInput = any, TStepOutput = any>(
-    config: WorkflowStepConfig<TStepInput, TStepOutput>
+    config: TaskConfig<TStepInput, TStepOutput>
   ): this {
-    this.steps.push(new WorkflowStep(config));
+    this.steps.push(new Task(config));
     return this;
   }
 

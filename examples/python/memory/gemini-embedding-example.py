@@ -82,7 +82,7 @@ def main():
     
     # Configure with Gemini embeddings
     # Option 1: Using stable text-embedding-004
-    agents = Agents(
+    agents = AgentManager(
         agents=[researcher, retriever],
         tasks=[store_task, retrieve_task],
         memory={
@@ -97,7 +97,7 @@ def main():
     )
     
     # Alternative: Using experimental model with advanced features
-    # agents = Agents(
+    # agents = AgentManager(
     #     agents=[researcher, retriever],
     #     tasks=[store_task, retrieve_task],
     #

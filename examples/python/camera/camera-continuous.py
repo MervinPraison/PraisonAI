@@ -71,7 +71,7 @@ class ContinuousCameraMonitor:
             images=[image_path]
         )
         
-        agents = Agents(
+        agents = AgentManager(
             agents=[self.vision_agent],
             tasks=[task],
             process="sequential",

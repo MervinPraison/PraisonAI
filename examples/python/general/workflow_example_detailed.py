@@ -225,7 +225,7 @@ process_task = Task(
 )
 
 # Create Agents instance with workflow process
-workflow = Agents(
+workflow = AgentManager(
     agents=[data_agent, process_agent],
     tasks=[collect_task, validate_task, process_task],
     process="workflow"

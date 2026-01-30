@@ -36,7 +36,7 @@ task2 = Task(
 )
 
 # Create Agents instance
-agents = Agents(
+agents = AgentManager(
     agents=[image_agent],
     tasks=[task1, task2],
     process="sequential",

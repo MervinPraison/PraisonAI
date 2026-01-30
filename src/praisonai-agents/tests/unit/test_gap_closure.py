@@ -38,27 +38,23 @@ class TestNoDeprecationWarnings:
             deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
             assert len(deprecation_warnings) == 0, f"Unexpected warnings: {[str(x.message) for x in deprecation_warnings]}"
     
-    def test_no_warning_for_llm_config(self):
-        """llm_config= should work without deprecation warning (backward compat)."""
+    def test_llm_config_removed(self):
+        """llm_config= is removed in v4 - should raise TypeError."""
         from praisonaiagents import Agent
         
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        with pytest.raises(TypeError) as exc_info:
             agent = Agent(instructions="Test", llm_config={"temperature": 0.7})
-            
-            deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
-            assert len(deprecation_warnings) == 0, f"Unexpected warnings: {[str(x.message) for x in deprecation_warnings]}"
+        
+        assert 'llm_config' in str(exc_info.value)
     
-    def test_no_warning_for_function_calling_llm(self):
-        """function_calling_llm= should work without deprecation warning (backward compat)."""
+    def test_function_calling_llm_removed(self):
+        """function_calling_llm= is removed in v4 - should raise TypeError."""
         from praisonaiagents import Agent
         
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        with pytest.raises(TypeError) as exc_info:
             agent = Agent(instructions="Test", function_calling_llm="gpt-4o-mini")
-            
-            deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
-            assert len(deprecation_warnings) == 0, f"Unexpected warnings: {[str(x.message) for x in deprecation_warnings]}"
+        
+        assert 'function_calling_llm' in str(exc_info.value)
     
     def test_model_and_llm_are_equivalent(self):
         """model= and llm= should produce identical behavior."""
@@ -94,20 +90,18 @@ class TestAutoAgentsConsolidation:
         auto = AutoAgents(instructions="Test task", llm="gpt-4o-mini")
         assert auto.llm == "gpt-4o-mini"
     
-    def test_autoagents_no_deprecation_warnings(self):
-        """AutoAgents should not emit deprecation warnings."""
+    def test_autoagents_does_not_accept_function_calling_llm(self):
+        """AutoAgents should reject function_calling_llm in v4."""
         from praisonaiagents.agents.autoagents import AutoAgents
         
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        with pytest.raises(TypeError) as exc_info:
             auto = AutoAgents(
                 instructions="Test task",
                 llm="gpt-4o-mini",
-                function_calling_llm="gpt-4o-mini"  # Legacy param
+                function_calling_llm="gpt-4o-mini"  # Should be rejected
             )
-            
-            deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
-            assert len(deprecation_warnings) == 0, f"Unexpected warnings: {[str(x.message) for x in deprecation_warnings]}"
+        
+        assert 'function_calling_llm' in str(exc_info.value)
 
 
 class TestYAMLParserConsolidation:

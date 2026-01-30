@@ -144,7 +144,7 @@ task4 = Task(
 )
 
 # Create workflow (global variable for state access in tools)
-workflow = Agents(
+workflow = AgentManager(
     agents=[project_manager, developer, finance_manager],
     tasks=[task1, task2, task3, task4],
     process="sequential"

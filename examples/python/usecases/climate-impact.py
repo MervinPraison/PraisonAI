@@ -186,7 +186,7 @@ strategy_task = Task(
 )
 
 # Create workflow
-workflow = Agents(
+workflow = AgentManager(
     agents=[environmental_monitor, urban_analyzer, climate_modeler,
             impact_predictor, strategy_generator],
     tasks=[monitoring_task, urban_task, modeling_task,

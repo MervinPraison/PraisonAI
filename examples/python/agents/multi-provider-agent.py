@@ -48,7 +48,7 @@ def example_auto_routing():
     )
     
     # Run the tasks
-    agents = Agents(
+    agents = AgentManager(
         agents=[research_agent],
         tasks=[simple_task, moderate_task, complex_task],
         process="sequential", output="verbose"
@@ -113,7 +113,7 @@ def example_cost_optimized_workflow():
     )
     
     # Run workflow
-    workflow = Agents(
+    workflow = AgentManager(
         agents=[analyzer, writer],
         tasks=[analysis_task, writing_task],
         process="sequential", output="verbose"
@@ -135,7 +135,7 @@ def example_auto_agents_multi_provider():
     from praisonaiagents.agents import AutoAgents
     
     # Create AutoAgents that will automatically assign appropriate models
-    auto_agents = AutoAgents(
+    auto_agents = AutoAgentManager(
         instructions="Create a market research report on electric vehicles. Include data analysis, competitor analysis, and future projections.",
         max_agents=3,
         llm="gpt-4o-mini",  # Default model for agent generation
@@ -239,7 +239,7 @@ def example_custom_routing():
     ]
     
     # Run tasks
-    agents = Agents(
+    agents = AgentManager(
         agents=[coder],
         tasks=tasks,
         process="sequential", output="verbose"

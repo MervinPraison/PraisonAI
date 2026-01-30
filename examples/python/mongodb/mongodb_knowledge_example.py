@@ -122,7 +122,7 @@ def main():
     print("🚀 Starting MongoDB Knowledge Management System...")
     print("=" * 60)
     
-    knowledge_system = Agents(
+    knowledge_system = AgentManager(
         agents=[research_agent, knowledge_agent],
         tasks=knowledge_tasks,
         memory=True, output="verbose"

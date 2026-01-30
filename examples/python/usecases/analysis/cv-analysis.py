@@ -71,7 +71,7 @@ final_evaluation_task = Task(
 )
 
 # Create and run the agents
-agents = Agents(
+agents = AgentManager(
     agents=[skill_analyst, experience_analyst, cv_evaluator],
     tasks=[skills_analysis_task, experience_analysis_task, final_evaluation_task],
     process="sequential", output="verbose"

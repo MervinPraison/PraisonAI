@@ -81,7 +81,7 @@ fix_task = Task(
 )
 
 # Create workflow
-workflow = Agents(
+workflow = AgentManager(
     agents=[analyzer, fix_suggester, fix_applier],
     tasks=[analysis_task, suggestion_task, fix_task],
     process="workflow", output="verbose"

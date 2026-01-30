@@ -151,7 +151,7 @@ scheduling_task = Task(
 )
 
 # Create workflow
-workflow = Agents(
+workflow = AgentManager(
     agents=[sensor_monitor, performance_analyzer, anomaly_detector,
             failure_predictor, maintenance_scheduler],
     tasks=[sensor_task, performance_task, anomaly_task,

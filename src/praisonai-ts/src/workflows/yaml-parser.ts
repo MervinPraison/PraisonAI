@@ -3,7 +3,7 @@
  * Parse YAML workflow definitions into executable workflows
  */
 
-import { Workflow, WorkflowStep, WorkflowStepConfig } from './index';
+import { Workflow, Task, TaskConfig } from './index';
 
 export interface YAMLWorkflowDefinition {
   name: string;
@@ -135,7 +135,7 @@ function createStepConfig(
   agents: Record<string, any>,
   tools: Record<string, any>,
   errors: string[]
-): WorkflowStepConfig | null {
+): TaskConfig | null {
   const { name, type, agent, tool, onError, maxRetries, timeout, condition } = stepDef;
 
   let execute: any;

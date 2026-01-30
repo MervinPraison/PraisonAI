@@ -85,7 +85,7 @@ def analyze_code(code_source: str) -> CodeAnalysisReport:
     """
     
     # Initialize and run analysis
-    agents = Agents(
+    agents = AgentManager(
         agents=[code_analyzer],
         tasks=[code_analysis_task]
     )

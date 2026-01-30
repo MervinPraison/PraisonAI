@@ -6,7 +6,7 @@ functions that return StepResult with stop_workflow=True.
 """
 
 from praisonaiagents import (
-    Workflow, WorkflowStep, WorkflowContext, StepResult
+    Workflow, Task, WorkflowContext, StepResult
 )
 from praisonaiagents.workflows import WorkflowManager
 
@@ -34,15 +34,15 @@ workflow = Workflow(
         "data": {"value": -5}  # Invalid data - will trigger early stop
     },
     steps=[
-        WorkflowStep(
+        Task(
             name="validate",
             handler=validate_data  # Custom function
         ),
-        WorkflowStep(
+        Task(
             name="process",
             action="Process the validated data."  # Won't run if validation fails
         ),
-        WorkflowStep(
+        Task(
             name="report",
             action="Generate final report."  # Won't run if validation fails
         )

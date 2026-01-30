@@ -982,7 +982,7 @@ Use the recommended tools: {', '.join(recommended_tools)}
 # Workflow Auto-Generation (Feature Parity)
 # =============================================================================
 
-class WorkflowStepDetails(BaseModel):
+class TaskDetails(BaseModel):
     """Details for a workflow step."""
     agent: str
     action: str
@@ -996,7 +996,7 @@ class WorkflowRouteDetails(BaseModel):
 class WorkflowParallelDetails(BaseModel):
     """Details for a parallel step."""
     name: str
-    parallel: List[WorkflowStepDetails]
+    parallel: List[TaskDetails]
 
 class WorkflowAgentDetails(BaseModel):
     """Details for a workflow agent."""

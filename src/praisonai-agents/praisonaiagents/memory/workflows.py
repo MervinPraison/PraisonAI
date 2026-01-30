@@ -23,8 +23,9 @@ import os
 import re
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Callable, Literal
+from typing import Any, Dict, List, Optional, Callable
 from dataclasses import dataclass, field
+from ..task.task import Task
 
 logger = logging.getLogger(__name__)
 
@@ -180,66 +181,6 @@ def repeat(step: Any, until: Optional[Callable[[WorkflowContext], bool]] = None,
     return Repeat(step=step, until=until, max_iterations=max_iterations)
 
 
-@dataclass
-class WorkflowStep:
-    """A single step in a workflow."""
-    name: str
-    description: str = ""
-    action: str = ""  # The action/prompt to execute
-    condition: Optional[str] = None  # Optional condition for execution (string)
-    should_run: Optional[Callable[['WorkflowContext'], bool]] = None  # Function to check if step should run
-    handler: Optional[Callable[['WorkflowContext'], 'StepResult']] = None  # Custom function instead of agent
-    on_error: Literal["stop", "continue", "retry"] = "stop"
-    max_retries: int = 1
-    
-    # Context passing fields
-    context_from: Optional[List[str]] = None  # Which previous steps to include context from
-    retain_full_context: bool = True  # Include all previous outputs vs only last
-    output_variable: Optional[str] = None  # Store output in this variable name
-    
-    # Agent configuration fields
-    agent_config: Optional[Dict[str, Any]] = None  # Per-step agent config {role, goal, backstory, llm}
-    agent: Optional[Any] = None  # Direct agent instance for this step
-    tools: Optional[List[Any]] = None  # Tools for this step
-    
-    # Branching fields
-    next_steps: Optional[List[str]] = None  # Next step names for branching
-    branch_condition: Optional[Dict[str, List[str]]] = None  # {"success": ["step2"], "failure": ["step3"]}
-    
-    # Loop fields
-    loop_over: Optional[str] = None  # Variable name to iterate over (e.g., "items")
-    loop_var: str = "item"  # Variable name for current item in loop
-    
-    # Backward compatibility aliases
-    @property
-    def evaluator(self):
-        return self.should_run
-    
-    @property
-    def executor(self):
-        return self.handler
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "name": self.name,
-            "description": self.description,
-            "action": self.action,
-            "condition": self.condition,
-            "should_run": self.should_run is not None,
-            "handler": self.handler is not None,
-            "agent": self.agent is not None,
-            "on_error": self.on_error,
-            "max_retries": self.max_retries,
-            "context_from": self.context_from,
-            "retain_full_context": self.retain_full_context,
-            "output_variable": self.output_variable,
-            "agent_config": self.agent_config,
-            "tools": self.tools,
-            "next_steps": self.next_steps,
-            "branch_condition": self.branch_condition,
-            "loop_over": self.loop_over,
-            "loop_var": self.loop_var
-        }
 
 
 @dataclass
@@ -247,7 +188,7 @@ class Workflow:
     """A complete workflow with multiple steps."""
     name: str = "Workflow"
     description: str = ""
-    steps: List = field(default_factory=list)  # Can be WorkflowStep, Agent, or function
+    steps: List = field(default_factory=list)  # Can be Task, Agent, or function
     variables: Dict[str, Any] = field(default_factory=dict)
     file_path: Optional[str] = None
     
@@ -460,52 +401,52 @@ class Workflow:
             "variables": all_variables
         }
     
-    def _normalize_steps(self) -> List['WorkflowStep']:
-        """Convert mixed steps (Agent, function, WorkflowStep) to WorkflowStep list."""
+    def _normalize_steps(self) -> List['Task']:
+        """Convert mixed steps (Agent, function, Task) to Task list."""
         normalized = []
         
         for i, step in enumerate(self.steps):
-            if isinstance(step, WorkflowStep):
+            if isinstance(step, Task):
                 normalized.append(step)
             elif callable(step):
                 # It's a function - wrap as handler
-                normalized.append(WorkflowStep(
+                normalized.append(Task(
                     name=getattr(step, '__name__', f'step_{i+1}'),
                     handler=step
                 ))
             elif hasattr(step, 'chat'):
                 # It's an Agent - wrap with agent reference
-                normalized.append(WorkflowStep(
+                normalized.append(Task(
                     name=getattr(step, 'name', f'agent_{i+1}'),
                     agent=step,
                     action="{{input}}"
                 ))
             else:
                 # Unknown type - try to use as string action
-                normalized.append(WorkflowStep(
+                normalized.append(Task(
                     name=f'step_{i+1}',
                     action=str(step)
                 ))
         
         return normalized
     
-    def _normalize_single_step(self, step: Any, index: int) -> 'WorkflowStep':
-        """Normalize a single step to WorkflowStep."""
-        if isinstance(step, WorkflowStep):
+    def _normalize_single_step(self, step: Any, index: int) -> 'Task':
+        """Normalize a single step to Task."""
+        if isinstance(step, Task):
             return step
         elif callable(step):
-            return WorkflowStep(
+            return Task(
                 name=getattr(step, '__name__', f'step_{index+1}'),
                 handler=step
             )
         elif hasattr(step, 'chat'):
-            return WorkflowStep(
+            return Task(
                 name=getattr(step, 'name', f'agent_{index+1}'),
                 agent=step,
                 action="{{input}}"
             )
         else:
-            return WorkflowStep(
+            return Task(
                 name=f'step_{index+1}',
                 action=str(step)
             )
@@ -904,7 +845,7 @@ class WorkflowManager:
         
         return frontmatter, body
     
-    def _parse_steps(self, body: str) -> List[WorkflowStep]:
+    def _parse_steps(self, body: str) -> List[Task]:
         """Parse workflow steps from markdown body."""
         steps = []
         
@@ -1012,7 +953,7 @@ class WorkflowManager:
             description = re.sub(r'loop_var:.*', '', description)
             description = description.strip()
             
-            steps.append(WorkflowStep(
+            steps.append(Task(
                 name=step_name,
                 description=description,
                 action=action,
@@ -1167,7 +1108,7 @@ class WorkflowManager:
     
     def _build_step_context(
         self,
-        step: WorkflowStep,
+        step: Task,
         step_index: int,
         results: List[Dict[str, Any]],
         variables: Dict[str, Any]
@@ -1212,7 +1153,7 @@ class WorkflowManager:
     
     def _update_variables_with_output(
         self,
-        step: WorkflowStep,
+        step: Task,
         output: str,
         variables: Dict[str, Any],
         results: List[Dict[str, Any]]
@@ -1242,8 +1183,8 @@ class WorkflowManager:
         workflow_name: str,
         executor: Optional[Callable[[str], str]] = None,
         variables: Optional[Dict[str, Any]] = None,
-        on_step: Optional[Callable[[WorkflowStep, int], None]] = None,
-        on_result: Optional[Callable[[WorkflowStep, str], None]] = None,
+        on_step: Optional[Callable[[Task, int], None]] = None,
+        on_result: Optional[Callable[[Task, str], None]] = None,
         default_agent: Optional[Any] = None,
         default_llm: Optional[str] = None,
         memory: Optional[Any] = None,
@@ -1470,7 +1411,7 @@ class WorkflowManager:
     
     def _execute_single_step(
         self,
-        step: WorkflowStep,
+        step: Task,
         step_idx: int,
         results: List[Dict[str, Any]],
         all_variables: Dict[str, Any],
@@ -1480,8 +1421,8 @@ class WorkflowManager:
         memory: Optional[Any] = None,
         planning: bool = False,
         verbose: int = 0,
-        on_step: Optional[Callable[[WorkflowStep, int], None]] = None,
-        on_result: Optional[Callable[[WorkflowStep, str], None]] = None,
+        on_step: Optional[Callable[[Task, int], None]] = None,
+        on_result: Optional[Callable[[Task, str], None]] = None,
         original_input: str = ""
     ) -> Dict[str, Any]:
         """Execute a single workflow step."""
@@ -1620,8 +1561,8 @@ class WorkflowManager:
         workflow_name: str,
         executor: Optional[Callable[[str], str]] = None,
         variables: Optional[Dict[str, Any]] = None,
-        on_step: Optional[Callable[[WorkflowStep, int], None]] = None,
-        on_result: Optional[Callable[[WorkflowStep, str], None]] = None,
+        on_step: Optional[Callable[[Task, int], None]] = None,
+        on_result: Optional[Callable[[Task, str], None]] = None,
         default_agent: Optional[Any] = None,
         default_llm: Optional[str] = None,
         memory: Optional[Any] = None,
@@ -1779,7 +1720,7 @@ class WorkflowManager:
     
     def _create_step_agent(
         self,
-        step: WorkflowStep,
+        step: Task,
         default_agent: Optional[Any] = None,
         default_llm: Optional[str] = None,
         memory: Optional[Any] = None,
@@ -1875,7 +1816,7 @@ class WorkflowManager:
                 lines.append("```")
                 lines.append("")
                 
-                workflow_steps.append(WorkflowStep(
+                workflow_steps.append(Task(
                     name=step_name,
                     description=step_desc,
                     action=step_action

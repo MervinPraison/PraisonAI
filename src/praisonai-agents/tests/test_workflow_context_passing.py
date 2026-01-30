@@ -13,46 +13,46 @@ import os
 # Add the package to path for testing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from praisonaiagents import Workflow, WorkflowStep
-from praisonaiagents.workflows import WorkflowManager, WorkflowStepContextConfig, WorkflowStepOutputConfig
+from praisonaiagents import Workflow, Task
+from praisonaiagents.workflows import WorkflowManager, TaskContextConfig, TaskOutputConfig
 
 
-class TestWorkflowStepContextFields:
-    """Test WorkflowStep dataclass context-related fields."""
+class TestTaskContextFields:
+    """Test Task dataclass context-related fields."""
     
     def test_workflow_step_has_context_from_field(self):
-        """WorkflowStep should have context_from via consolidated context param."""
-        step = WorkflowStep(
+        """Task should have context_from via consolidated context param."""
+        step = Task(
             name="test_step",
             action="do something",
-            context=WorkflowStepContextConfig(from_steps=["step1", "step2"])
+            context=TaskContextConfig(from_steps=["step1", "step2"])
         )
         assert hasattr(step, 'context_from')
         assert step.context_from == ["step1", "step2"]
     
     def test_workflow_step_has_retain_full_context_field(self):
-        """WorkflowStep should have retain_full_context field with default True."""
-        step = WorkflowStep(name="test_step", action="do something")
+        """Task should have retain_full_context field with default True."""
+        step = Task(name="test_step", action="do something")
         assert hasattr(step, 'retain_full_context')
         assert step.retain_full_context == True
     
     def test_workflow_step_has_output_variable_field(self):
-        """WorkflowStep should have output_variable via consolidated output param."""
-        step = WorkflowStep(
+        """Task should have output_variable via consolidated output param."""
+        step = Task(
             name="test_step",
             action="do something",
-            output=WorkflowStepOutputConfig(variable="research_result")
+            output=TaskOutputConfig(variable="research_result")
         )
         assert hasattr(step, 'output_variable')
         assert step.output_variable == "research_result"
     
     def test_workflow_step_to_dict_includes_new_fields(self):
         """to_dict() should include context-related fields."""
-        step = WorkflowStep(
+        step = Task(
             name="test_step",
             action="do something",
-            context=WorkflowStepContextConfig(from_steps=["step1"], retain_full=False),
-            output=WorkflowStepOutputConfig(variable="result")
+            context=TaskContextConfig(from_steps=["step1"], retain_full=False),
+            output=TaskOutputConfig(variable="result")
         )
         d = step.to_dict()
         # Check that consolidated params are in dict
@@ -77,8 +77,8 @@ class TestContextPassing:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(name="step1", action="Generate data"),
-                WorkflowStep(name="step2", action="Process {{previous_output}}")
+                Task(name="step1", action="Generate data"),
+                Task(name="step2", action="Process {{previous_output}}")
             ]
         )
         self._register_workflow(manager, workflow)
@@ -106,9 +106,9 @@ class TestContextPassing:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(name="step1", action="First action", context=WorkflowStepContextConfig(retain_full=True)),
-                WorkflowStep(name="step2", action="Second action", context=WorkflowStepContextConfig(retain_full=True)),
-                WorkflowStep(name="step3", action="Third with context: {{step1_output}} and {{step2_output}}", context=WorkflowStepContextConfig(retain_full=True))
+                Task(name="step1", action="First action", context=TaskContextConfig(retain_full=True)),
+                Task(name="step2", action="Second action", context=TaskContextConfig(retain_full=True)),
+                Task(name="step3", action="Third with context: {{step1_output}} and {{step2_output}}", context=TaskContextConfig(retain_full=True))
             ]
         )
         self._register_workflow(manager, workflow)
@@ -137,12 +137,12 @@ class TestContextPassing:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(name="research", action="Research topic"),
-                WorkflowStep(name="analysis", action="Analyze data"),
-                WorkflowStep(
+                Task(name="research", action="Research topic"),
+                Task(name="analysis", action="Analyze data"),
+                Task(
                     name="summary",
                     action="Summarize based on: {{research_output}}",
-                    context=WorkflowStepContextConfig(from_steps=["research"], retain_full=False)
+                    context=TaskContextConfig(from_steps=["research"], retain_full=False)
                 )
             ]
         )
@@ -171,12 +171,12 @@ class TestContextPassing:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(
+                Task(
                     name="step1",
                     action="Generate report",
-                    output=WorkflowStepOutputConfig(variable="report_data")
+                    output=TaskOutputConfig(variable="report_data")
                 ),
-                WorkflowStep(
+                Task(
                     name="step2",
                     action="Use report: {{report_data}}"
                 )
@@ -200,12 +200,12 @@ class TestContextPassing:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(name="step1", action="First"),
-                WorkflowStep(name="step2", action="Second"),
-                WorkflowStep(
+                Task(name="step1", action="First"),
+                Task(name="step2", action="Second"),
+                Task(
                     name="step3",
                     action="Third with {{previous_output}}",
-                    context=WorkflowStepContextConfig(retain_full=False)
+                    context=TaskContextConfig(retain_full=False)
                 )
             ]
         )
@@ -243,8 +243,8 @@ class TestContextVariableSubstitution:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(name="step1", action="Generate"),
-                WorkflowStep(name="step2", action="Process: {{previous_output}}")
+                Task(name="step1", action="Generate"),
+                Task(name="step2", action="Process: {{previous_output}}")
             ]
         )
         self._register_workflow(manager, workflow)
@@ -269,8 +269,8 @@ class TestContextVariableSubstitution:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(name="research", action="Research topic"),
-                WorkflowStep(name="write", action="Write about {{research_output}}")
+                Task(name="research", action="Research topic"),
+                Task(name="write", action="Write about {{research_output}}")
             ]
         )
         self._register_workflow(manager, workflow)
@@ -304,8 +304,8 @@ class TestWorkflowExecuteResults:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(name="step1", action="Action 1"),
-                WorkflowStep(name="step2", action="Action 2")
+                Task(name="step1", action="Action 1"),
+                Task(name="step2", action="Action 2")
             ]
         )
         self._register_workflow(manager, workflow)
@@ -327,8 +327,8 @@ class TestWorkflowExecuteResults:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(name="step1", action="Action 1"),
-                WorkflowStep(name="step2", action="Action 2")
+                Task(name="step1", action="Action 1"),
+                Task(name="step2", action="Action 2")
             ]
         )
         self._register_workflow(manager, workflow)

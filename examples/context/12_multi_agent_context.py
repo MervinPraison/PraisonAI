@@ -9,7 +9,7 @@ Agent-Centric Quick Start:
     from praisonaiagents import Agent, Agents
     from praisonaiagents.context import ManagerConfig
     
-    agents = Agents(
+    agents = AgentManager(
         agents=[agent1, agent2],
         context=ManagerConfig(policy="isolated"),  # or "shared"
     )
@@ -49,7 +49,7 @@ def agent_centric_example():
     # Multi-agent setup with isolated context policy
     # (each agent maintains its own context)
     print("Created agents with context=True")
-    print("Use Agents(agents=[...], context=ManagerConfig(policy='isolated'))")
+    print("Use AgentManager(agents=[...], context=ManagerConfig(policy='isolated'))")
     print("for multi-agent context isolation")
 
 

@@ -109,7 +109,7 @@ alert_task = Task(
 )
 
 # Create workflow
-workflow = Agents(
+workflow = AgentManager(
     agents=[transaction_analyzer, pattern_checker, identity_verifier, alert_generator],
     tasks=[analysis_task, pattern_task, verification_task, alert_task],
     process="workflow", output="verbose"

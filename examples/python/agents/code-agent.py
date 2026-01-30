@@ -84,7 +84,7 @@ def demonstrate_code_agent():
     )
     
     # Create workflow
-    workflow = Agents(
+    workflow = AgentManager(
         agents=[code_writer, code_reviewer, code_executor],
         tasks=[write_task, review_task, execute_task],
         process="sequential", output="verbose"

@@ -128,7 +128,7 @@ upload_to_huggingface_task = Task(
 )
 
 # Initialize workflow
-agents = Agents(
+agents = AgentManager(
     agents=[qa_generator, total_questions_evaluator, cot_generator, upload_to_huggingface],
     tasks=[generate_task, evaluate_total_questions_task, generate_cot_task, upload_to_huggingface_task],
     process="workflow",

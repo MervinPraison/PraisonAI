@@ -4796,14 +4796,14 @@ Now, {final_instruction.lower()}:"""
         
         # Create and launch - with tasks if defined
         if tasks_list:
-            praison = Agents(
+            praison = AgentManager(
                 agents=agents_list, 
                 tasks=tasks_list,
                 process=process_type,
                 verbose=1 if verbose else 0
             )
         else:
-            praison = Agents(
+            praison = AgentManager(
                 agents=agents_list,
                 process=process_type,
                 verbose=1 if verbose else 0
@@ -5079,7 +5079,7 @@ Now, {final_instruction.lower()}:"""
                 )
                 
                 print("[cyan]Gathering information with tools...[/cyan]")
-                agents = Agents(agents=[research_assistant], tasks=[gather_task], verbose=0)
+                agents = AgentManager(agents=[research_assistant], tasks=[gather_task], verbose=0)
                 tool_results = agents.start()
                 
                 # Enhance query with tool results

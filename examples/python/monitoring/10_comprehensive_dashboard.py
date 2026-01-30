@@ -139,7 +139,7 @@ def simulate_complex_workflow():
     
     # Execute workflow
     with track_api_call("complex_workflow_execution"):
-        workflow = Agents(
+        workflow = AgentManager(
             agents=[planner, executor, reviewer],
             tasks=[planning_task, execution_task, review_task],
             process="sequential", output="minimal"

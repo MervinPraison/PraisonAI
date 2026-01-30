@@ -190,7 +190,7 @@ execution_task = Task(
 )
 
 # Create workflow
-workflow = Agents(
+workflow = AgentManager(
     agents=[market_analyzer, arbitrage_detector, liquidity_optimizer,
             risk_assessor, trade_executor],
     tasks=[market_task, arbitrage_task, liquidity_task,

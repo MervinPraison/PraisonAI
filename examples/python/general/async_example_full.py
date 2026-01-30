@@ -111,7 +111,7 @@ async def run_parallel_tasks():
     )
     
     # Create a single Agents instance with both agents
-    agents = Agents(
+    agents = AgentManager(
         agents=[async_agent, summary_agent],
         tasks=parallel_tasks + [summary_task],
         process="sequential"

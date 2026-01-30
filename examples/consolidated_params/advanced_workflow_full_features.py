@@ -1,6 +1,6 @@
 """Advanced Workflow with all consolidated params configured."""
 from praisonaiagents import Agent
-from praisonaiagents.workflows import Workflow, WorkflowStep
+from praisonaiagents.workflows import Workflow, Task
 from praisonaiagents.workflows.workflow_configs import (
     WorkflowOutputConfig, WorkflowPlanningConfig, WorkflowMemoryConfig,
 )
@@ -10,21 +10,21 @@ workflow = Workflow(
     name="FullFeaturedWorkflow",
     description="Demonstrates all agent-like consolidated params",
     steps=[
-        WorkflowStep(
+        Task(
             name="researcher",
             action="Research: {{input}}",
             agent=Agent(instructions="You are a researcher."),
             knowledge=["research_docs/"],  # Step-specific knowledge
             web="duckduckgo",  # Use DuckDuckGo for this step
         ),
-        WorkflowStep(
+        Task(
             name="analyzer",
             action="Analyze the research",
             agent=Agent(instructions="You are an analyst."),
             reflection="thorough",  # Thorough reflection for analysis
             guardrails="strict",  # Strict validation
         ),
-        WorkflowStep(
+        Task(
             name="writer",
             action="Write the final report",
             agent=Agent(instructions="You are a writer."),

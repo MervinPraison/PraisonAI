@@ -1,14 +1,16 @@
 """
 Tests for AgentManager rename (Agents → AgentManager).
 
-TDD: These tests define the expected behavior for the API consolidation.
+v4.0.0 Updates:
+- Agents is now a SILENT alias (no deprecation warning)
+- PraisonAIAgents has been REMOVED entirely
 """
 import pytest
 import warnings
 
 
 class TestAgentManagerRename:
-    """Test that AgentManager is the primary class and Agents is deprecated alias."""
+    """Test that AgentManager is the primary class and Agents is silent alias."""
     
     def test_agent_manager_importable(self):
         """AgentManager should be importable from praisonaiagents."""
@@ -25,11 +27,10 @@ class TestAgentManagerRename:
         from praisonaiagents import AgentManager, Agents
         assert AgentManager is Agents
     
-    def test_agents_emits_deprecation_warning(self):
-        """Importing Agents should emit a DeprecationWarning."""
+    def test_agents_is_silent_alias_v4(self):
+        """Agents should be a SILENT alias in v4 (no deprecation warning)."""
         # Clear any cached imports
         import sys
-        # Remove from cache to trigger fresh import
         modules_to_remove = [k for k in sys.modules.keys() if 'praisonaiagents' in k]
         for mod in modules_to_remove:
             del sys.modules[mod]
@@ -41,10 +42,10 @@ class TestAgentManagerRename:
             # Access Agents to trigger lazy loading
             _ = praisonaiagents.Agents
             
-            # Check for deprecation warning
+            # v4.0.0: Agents is now a SILENT alias - no warnings expected
             deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
             agents_warnings = [x for x in deprecation_warnings if 'Agents' in str(x.message)]
-            assert len(agents_warnings) >= 1, f"Expected deprecation warning for Agents, got: {[str(x.message) for x in w]}"
+            assert len(agents_warnings) == 0, f"Agents should be silent alias in v4, got: {[str(x.message) for x in agents_warnings]}"
     
     def test_agent_manager_no_deprecation_warning(self):
         """Importing AgentManager should NOT emit a deprecation warning."""
@@ -85,13 +86,12 @@ class TestAgentManagerFunctionality:
         """Agents alias should work identically to AgentManager."""
         from praisonaiagents import Agents, Agent
         
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")  # Ignore deprecation for this test
-            agent = Agent(name="test", instructions="Test agent")
-            manager = Agents(agents=[agent])
-            
-            assert manager is not None
-            assert len(manager.agents) == 1
+        # No warning expected in v4
+        agent = Agent(name="test", instructions="Test agent")
+        manager = Agents(agents=[agent])
+        
+        assert manager is not None
+        assert len(manager.agents) == 1
 
 
 class TestBackwardCompatibility:
@@ -107,12 +107,7 @@ class TestBackwardCompatibility:
         from praisonaiagents.agents import AgentManager
         assert AgentManager is not None
     
-    def test_praison_ai_agents_deprecated(self):
-        """PraisonAIAgents should still work as deprecated alias."""
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+    def test_praison_ai_agents_removed_v4(self):
+        """PraisonAIAgents has been removed in v4 - should raise ImportError."""
+        with pytest.raises(ImportError):
             from praisonaiagents import PraisonAIAgents
-            
-            # Should emit deprecation warning
-            deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
-            assert len(deprecation_warnings) >= 1

@@ -123,7 +123,7 @@ roles:
     
     def test_execute_include_with_handler_workflow(self):
         """Test executing a workflow with Include step using handler function."""
-        from praisonaiagents.workflows import Workflow, Include, WorkflowStep, StepResult
+        from praisonaiagents.workflows import Workflow, Include, Task, StepResult
         import tempfile
         from pathlib import Path
         import os

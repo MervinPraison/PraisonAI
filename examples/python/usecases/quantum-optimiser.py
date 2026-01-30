@@ -168,7 +168,7 @@ validation_task = Task(
 )
 
 # Create workflow
-workflow = Agents(
+workflow = AgentManager(
     agents=[circuit_analyzer, optimization_finder, optimizer,
             benchmarker, validator],
     tasks=[analysis_task, optimization_task, optimization_execution_task,

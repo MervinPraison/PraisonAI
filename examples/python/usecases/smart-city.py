@@ -157,7 +157,7 @@ feedback_task = Task(
 )
 
 # Create workflow
-workflow = Agents(
+workflow = AgentManager(
     agents=[utility_monitor, pattern_analyzer, resource_optimizer, 
             implementation_agent, feedback_monitor],
     tasks=[monitoring_task, pattern_task, optimization_task, 

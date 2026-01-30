@@ -204,7 +204,7 @@ compliance_task = Task(
 )
 
 # Create workflow
-workflow = Agents(
+workflow = AgentManager(
     agents=[crypto_analyzer, attack_simulator, performance_benchmarker,
             implementation_assessor, compliance_validator],
     tasks=[analysis_task, attack_task, benchmark_task,

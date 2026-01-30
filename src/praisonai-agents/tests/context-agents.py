@@ -1,5 +1,5 @@
 import streamlit as st
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentManager
 from pydantic import BaseModel
 from typing import List, Dict
 import json
@@ -77,7 +77,7 @@ async def analyze_cv_async(cv_content):
         output_pydantic=CVAnalysisReport
     )
 
-    agents = Agents(
+    agents = AgentManager(
         agents=[cv_analyzer],
         tasks=[cv_analysis_task]
     )

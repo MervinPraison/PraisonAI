@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentManager
 
 class Recipe(BaseModel):
     recipe_name: str
@@ -17,7 +17,7 @@ task = Task(
     output_pydantic=Recipe  # Will use Gemini's native structured output!
 )
 
-agents = Agents(
+agents = AgentManager(
     agents=[agent],
     tasks=[task]
 )

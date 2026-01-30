@@ -18,8 +18,8 @@ def test_new_import_pattern():
     
     try:
         # Test importing from PraisonAI (note: this is actually importing from praisonai package)
-        from praisonai import Agent, Task, Agents
-        print("✓ Successfully imported Agent, Task, Agents from praisonai")
+        from praisonai import Agent, Task, AgentManager
+        print("✓ Successfully imported Agent, Task, AgentManager from praisonai")
         
         # Test that the classes are available
         assert Agent is not None, "Agent class should be available"
@@ -45,8 +45,8 @@ def test_backward_compatibility():
     
     try:
         # Test the old import pattern still works
-        from praisonaiagents import Agent, Task, Agents
-        print("✓ Successfully imported Agent, Task, Agents from praisonaiagents")
+        from praisonaiagents import Agent, Task, AgentManager
+        print("✓ Successfully imported Agent, Task, AgentManager from praisonaiagents")
         
         # Test that the classes are available
         assert Agent is not None, "Agent class should be available"

@@ -9,7 +9,7 @@ import logging
 # Add the source directory to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src/praisonai-agents'))
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentManager
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -40,7 +40,7 @@ def test_gemini_embedding():
     )
     
     # Test with default OpenAI embeddings
-    agents_openai = Agents(
+    agents_openai = AgentManager(
         agents=[agent],
         tasks=[task],
         output="debug",
@@ -69,7 +69,7 @@ def test_gemini_embedding():
         agent=agent2
     )
     
-    agents_openai_explicit = Agents(
+    agents_openai_explicit = AgentManager(
         agents=[agent2],
         tasks=[task2],
         output="debug",
@@ -105,7 +105,7 @@ def test_gemini_embedding():
     )
     
     # Configure with Gemini embeddings
-    agents_gemini = Agents(
+    agents_gemini = AgentManager(
         agents=[agent3],
         tasks=[task3],
         output="debug",

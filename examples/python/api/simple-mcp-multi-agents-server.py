@@ -15,5 +15,5 @@ def internet_search_tool(query: str):
 agent = Agent(name="SearchAgent", instructions="You Search the internet for information", tools=[internet_search_tool])
 agent2 = Agent(name="SummariseAgent", instructions="You Summarise the information")
 
-agents = Agents(name="MultiAgents", agents=[agent, agent2])
+agents = AgentManager(name="MultiAgents", agents=[agent, agent2])
 agents.launch(port=8080, protocol="mcp")

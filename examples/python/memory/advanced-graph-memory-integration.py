@@ -57,7 +57,7 @@ query_task = Task(
 )
 
 # Run with graph memory integration
-agents_system = Agents(
+agents_system = AgentManager(
     agents=[knowledge_agent],
     tasks=[build_task, query_task],
     memory=True,

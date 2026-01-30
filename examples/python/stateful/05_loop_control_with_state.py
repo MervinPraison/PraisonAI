@@ -355,7 +355,7 @@ report_task = Task(
 )
 
 # Create workflow
-workflow = Agents(
+workflow = AgentManager(
     agents=[batch_processor, data_collector, validator, reporter],
     tasks=[batch_loop_task, retry_loop_task, pagination_loop_task, validation_loop_task, report_task],
     process="sequential"

@@ -149,7 +149,7 @@ def main():
     )
     
     # Run the multi-agent system with graph memory
-    agents_system = Agents(
+    agents_system = AgentManager(
         agents=[researcher],
         tasks=[build_knowledge_task, query_knowledge_task, expand_knowledge_task],
         memory=True,

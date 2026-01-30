@@ -21,13 +21,13 @@ class TestWorkflowContextPropagation:
     
     def test_workflow_context_true_propagates_to_temp_agents(self):
         """When workflow has context=True, temp agents should receive context=True."""
-        from praisonaiagents import Workflow, WorkflowStep
+        from praisonaiagents import Workflow, Task
         
         # Create workflow with context enabled
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(
+                Task(
                     name="step1",
                     action="Test action {{input}}",
                 )
@@ -57,12 +57,12 @@ class TestWorkflowContextPropagation:
     
     def test_workflow_context_false_no_overhead(self):
         """When workflow has context=False, no context manager should be created."""
-        from praisonaiagents import Workflow, WorkflowStep
+        from praisonaiagents import Workflow, Task
         
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(
+                Task(
                     name="step1",
                     action="Test action",
                 )
@@ -105,7 +105,7 @@ class TestParallelLoopContextIsolation:
     
     def test_parallel_loop_workers_have_isolated_chat_history(self):
         """Each parallel worker should have its own isolated chat history."""
-        from praisonaiagents.workflows.workflows import Workflow, Loop, WorkflowStep
+        from praisonaiagents.workflows.workflows import Workflow, Loop, Task
         
         # Track chat histories from each worker
         worker_histories = []
@@ -121,7 +121,7 @@ class TestParallelLoopContextIsolation:
             name="parallel_test",
             steps=[
                 Loop(
-                    step=WorkflowStep(
+                    step=Task(
                         name="worker",
                         handler=capture_history_handler,
                     ),
@@ -142,7 +142,7 @@ class TestParallelLoopContextIsolation:
     
     def test_parallel_workers_dont_share_accumulated_context(self):
         """Parallel workers should not accumulate context from other workers."""
-        from praisonaiagents.workflows.workflows import Workflow, Loop, WorkflowStep
+        from praisonaiagents.workflows.workflows import Workflow, Loop, Task
         
         # This test verifies that when using agents in parallel loops,
         # each agent starts with a clean chat_history, not accumulated from others
@@ -162,7 +162,7 @@ class TestParallelLoopContextIsolation:
             name="isolation_test",
             steps=[
                 Loop(
-                    step=WorkflowStep(
+                    step=Task(
                         name="checker",
                         handler=check_history_length,
                     ),
@@ -232,7 +232,7 @@ class TestWorkflowContextManagerConfig:
     
     def test_workflow_accepts_manager_config(self):
         """Workflow should accept ManagerConfig for detailed configuration."""
-        from praisonaiagents import Workflow, WorkflowStep
+        from praisonaiagents import Workflow, Task
         from praisonaiagents.context import ManagerConfig
         
         config = ManagerConfig(
@@ -244,7 +244,7 @@ class TestWorkflowContextManagerConfig:
         workflow = Workflow(
             name="configured_workflow",
             steps=[
-                WorkflowStep(name="step1", action="test"),
+                Task(name="step1", action="test"),
             ],
             context=config,
         )
@@ -255,13 +255,13 @@ class TestWorkflowContextManagerConfig:
     
     def test_workflow_context_string_preset(self):
         """Workflow should accept string presets for context."""
-        from praisonaiagents import Workflow, WorkflowStep
+        from praisonaiagents import Workflow, Task
         
         # This tests future functionality where context="auto" enables smart defaults
         workflow = Workflow(
             name="preset_workflow",
             steps=[
-                WorkflowStep(name="step1", action="test"),
+                Task(name="step1", action="test"),
             ],
             context=True,  # Simple boolean for now
         )
@@ -274,12 +274,12 @@ class TestZeroOverhead:
     
     def test_no_context_manager_import_when_disabled(self):
         """ContextManager should not be imported when context=False."""
-        from praisonaiagents import Workflow, WorkflowStep
+        from praisonaiagents import Workflow, Task
         
         workflow = Workflow(
             name="no_context",
             steps=[
-                WorkflowStep(name="step1", action="test"),
+                Task(name="step1", action="test"),
             ],
             context=False,
         )

@@ -268,7 +268,7 @@ async def run_market_research(config: MarketResearchConfig) -> Dict[str, Any]:
     tasks = create_research_tasks(agents, config)
     
     # Create workflow
-    workflow = Agents(
+    workflow = AgentManager(
         agents=list(agents.values()),
         tasks=tasks,
         process="workflow")

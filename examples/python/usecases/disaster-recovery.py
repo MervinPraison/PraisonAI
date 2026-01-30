@@ -381,7 +381,7 @@ monitoring_task = Task(
 )
 
 # Create workflow
-workflow = Agents(
+workflow = AgentManager(
     agents=[network_monitor, emergency_assessor, resource_assessor,
             priority_analyzer, distribution_planner, execution_manager,
             effectiveness_monitor],

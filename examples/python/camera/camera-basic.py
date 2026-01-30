@@ -58,7 +58,7 @@ def capture_and_analyze():
             )
             
             # Run analysis
-            agents = Agents(
+            agents = AgentManager(
                 agents=[vision_agent],
                 tasks=[task],
                 process="sequential",

@@ -58,7 +58,7 @@ search_task = Task(
 )
 
 # Run with memory optimization
-agents_system = Agents(
+agents_system = AgentManager(
     agents=[research_agent],
     tasks=[build_memory_task, search_task],
     memory=True,

@@ -637,7 +637,7 @@ class TemplatesHandler:
                     tasks.append(task)
                 
                 # Run
-                praison_agents = Agents(
+                praison_agents = AgentManager(
                     agents=agents,
                     tasks=tasks,
                     process=workflow_config.get("process", "sequential"),

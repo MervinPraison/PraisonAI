@@ -106,7 +106,7 @@ task = Task(
 )
 
 # Create and start the workflow
-agents = Agents(
+agents = AgentManager(
     agents=[agent],
     tasks=[task], output="verbose"
 )

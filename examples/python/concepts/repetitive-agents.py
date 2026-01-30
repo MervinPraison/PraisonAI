@@ -12,7 +12,7 @@ task = Task(
     input_file="tasks.csv"
 )
 
-agents = Agents(
+agents = AgentManager(
     agents=[agent],
     tasks=[task],
     process="workflow",

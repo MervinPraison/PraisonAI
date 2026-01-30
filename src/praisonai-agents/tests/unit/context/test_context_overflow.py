@@ -61,9 +61,9 @@ class TestWorkflowContextDefault:
     
     def test_workflow_context_default_is_true(self):
         """Workflow should have context=True by default."""
-        from praisonaiagents.workflows import Workflow, WorkflowStep
+        from praisonaiagents.workflows import Workflow, Task
         
-        step = WorkflowStep(name="test", action="test action")
+        step = Task(name="test", action="test action")
         workflow = Workflow(name="test", steps=[step])
         
         # context should be True by default
@@ -71,9 +71,9 @@ class TestWorkflowContextDefault:
     
     def test_workflow_context_can_be_disabled(self):
         """Workflow context can be explicitly disabled."""
-        from praisonaiagents.workflows import Workflow, WorkflowStep
+        from praisonaiagents.workflows import Workflow, Task
         
-        step = WorkflowStep(name="test", action="test action")
+        step = Task(name="test", action="test action")
         workflow = Workflow(name="test", steps=[step], context=False)
         
         assert workflow.context is False

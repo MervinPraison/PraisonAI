@@ -103,7 +103,7 @@ task_with_llm_guardrail = Task(
 
 # Run with GuardrailResult example
 print("=== Running with GuardrailResult guardrail ===")
-agents_gr = Agents(
+agents_gr = AgentManager(
     agents=[agent],
     tasks=[task_with_guardrailresult]
 )
@@ -113,7 +113,7 @@ agents_gr = Agents(
 
 # Run with Tuple example
 print("\n=== Running with Tuple[bool, Any] guardrail ===")
-agents_tuple = Agents(
+agents_tuple = AgentManager(
     agents=[agent],
     tasks=[task_with_tuple]
 )
@@ -123,7 +123,7 @@ agents_tuple = Agents(
 
 # Run with LLM guardrail example
 print("\n=== Running with LLM-based guardrail ===")
-agents_llm = Agents(
+agents_llm = AgentManager(
     agents=[agent],
     tasks=[task_with_llm_guardrail]
 )

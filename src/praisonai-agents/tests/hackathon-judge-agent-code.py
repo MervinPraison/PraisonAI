@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentManager
 from pydantic import BaseModel
 from typing import List, Dict
 import os
@@ -64,7 +64,7 @@ def evaluate_project(video_path: str) -> ProjectEvaluation:
     )
 
     # Initialize and run evaluation
-    agents = Agents(
+    agents = AgentManager(
         agents=[hackathon_judge],
         tasks=[evaluation_task],
         process="sequential",

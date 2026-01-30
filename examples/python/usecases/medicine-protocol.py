@@ -188,7 +188,7 @@ simulation_task = Task(
 )
 
 # Create workflow
-workflow = Agents(
+workflow = AgentManager(
     agents=[genetic_analyzer, history_analyzer, interaction_analyzer,
             protocol_generator, effectiveness_simulator],
     tasks=[genetic_task, history_task, interaction_task,

@@ -25,7 +25,7 @@ task1 = Task(
 )
 
 # Create Agents instance
-agents = Agents(
+agents = AgentManager(
     agents=[video_agent],
     tasks=[task1],
     process="sequential",

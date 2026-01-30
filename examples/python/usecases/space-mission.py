@@ -202,7 +202,7 @@ simulation_task = Task(
 )
 
 # Create workflow
-workflow = Agents(
+workflow = AgentManager(
     agents=[mission_analyzer, resource_calculator, contingency_planner,
             resource_optimizer, scenario_simulator],
     tasks=[mission_task, resource_task, contingency_task,

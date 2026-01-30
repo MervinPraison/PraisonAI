@@ -183,7 +183,7 @@ def main():
     )
 
     # Create and run agents manager
-    agents = Agents(
+    agents = AgentManager(
         agents=[researcher, writer],
         tasks=[task1, task2, task3, task4],
         process="sequential",

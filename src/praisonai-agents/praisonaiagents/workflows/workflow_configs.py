@@ -6,10 +6,10 @@ Provides dataclasses for consolidated workflow feature configuration:
 - WorkflowPlanningConfig: Planning mode settings
 - WorkflowMemoryConfig: Memory configuration
 - WorkflowHooksConfig: Workflow lifecycle callbacks
-- WorkflowStepContextConfig: Step context settings
-- WorkflowStepOutputConfig: Step output settings
-- WorkflowStepExecutionConfig: Step execution settings
-- WorkflowStepRoutingConfig: Step routing/branching settings
+- TaskContextConfig: Step context settings
+- TaskOutputConfig: Step output settings
+- TaskExecutionConfig: Step execution settings
+- TaskRoutingConfig: Step routing/branching settings
 
 All configs follow the workflow-centric pattern with precedence:
 Instance > Config > Dict > Array > String > Bool > Default
@@ -137,20 +137,20 @@ class WorkflowHooksConfig:
 
 
 # =============================================================================
-# WorkflowStep-Level Config Classes
+# Task-Level Config Classes
 # =============================================================================
 
 @dataclass
-class WorkflowStepContextConfig:
+class TaskContextConfig:
     """
     Configuration for step context handling.
     
     Consolidates: context_from, retain_full_context
     
     Usage:
-        WorkflowStep(
+        Task(
             name="step1",
-            context=WorkflowStepContextConfig(from_steps=["step0"], retain_full=True)
+            context=TaskContextConfig(from_steps=["step0"], retain_full=True)
         )
     """
     from_steps: Optional[List[str]] = None
@@ -161,16 +161,16 @@ class WorkflowStepContextConfig:
 
 
 @dataclass
-class WorkflowStepOutputConfig:
+class TaskOutputConfig:
     """
     Configuration for step output handling.
     
     Consolidates: output_file, output_json, output_pydantic, output_variable
     
     Usage:
-        WorkflowStep(
+        Task(
             name="step1",
-            output=WorkflowStepOutputConfig(file="output.txt", variable="result")
+            output=TaskOutputConfig(file="output.txt", variable="result")
         )
     """
     file: Optional[str] = None
@@ -187,7 +187,7 @@ class WorkflowStepOutputConfig:
         }
 
 
-class WorkflowStepExecutionPreset(str, Enum):
+class TaskExecutionPreset(str, Enum):
     """Execution preset names for workflow steps."""
     FAST = "fast"
     BALANCED = "balanced"
@@ -195,7 +195,7 @@ class WorkflowStepExecutionPreset(str, Enum):
 
 
 @dataclass
-class WorkflowStepExecutionConfig:
+class TaskExecutionConfig:
     """
     Configuration for step execution behavior.
     
@@ -203,12 +203,12 @@ class WorkflowStepExecutionConfig:
     
     Usage:
         # Preset
-        WorkflowStep(name="step1", execution="thorough")
+        Task(name="step1", execution="thorough")
         
         # Config
-        WorkflowStep(
+        Task(
             name="step1",
-            execution=WorkflowStepExecutionConfig(async_exec=True, max_retries=5)
+            execution=TaskExecutionConfig(async_exec=True, max_retries=5)
         )
     """
     async_exec: bool = False
@@ -228,16 +228,16 @@ class WorkflowStepExecutionConfig:
 
 
 @dataclass
-class WorkflowStepRoutingConfig:
+class TaskRoutingConfig:
     """
     Configuration for step routing/branching.
     
     Consolidates: next_steps, branch_condition
     
     Usage:
-        WorkflowStep(
+        Task(
             name="decision",
-            routing=WorkflowStepRoutingConfig(
+            routing=TaskRoutingConfig(
                 branches={"success": ["step2"], "failure": ["step3"]}
             )
         )
@@ -373,39 +373,39 @@ def resolve_hooks_config(value: Any) -> Optional[WorkflowHooksConfig]:
     return result
 
 
-def resolve_step_context_config(value: Any) -> Optional[WorkflowStepContextConfig]:
+def resolve_step_context_config(value: Any) -> Optional[TaskContextConfig]:
     """Resolve step context parameter using canonical resolver."""
     from ..config.param_resolver import resolve, ArrayMode
     
     result = resolve(
         value=value,
         param_name="context",
-        config_class=WorkflowStepContextConfig,
+        config_class=TaskContextConfig,
         array_mode=ArrayMode.STEP_NAMES,
         default=None,
     )
     return result
 
 
-def resolve_step_output_config(value: Any) -> Optional[WorkflowStepOutputConfig]:
+def resolve_step_output_config(value: Any) -> Optional[TaskOutputConfig]:
     """Resolve step output parameter using canonical resolver."""
     # Handle string -> file conversion directly (string = output file path)
     if isinstance(value, str):
-        return WorkflowStepOutputConfig(file=value)
+        return TaskOutputConfig(file=value)
     
     # Handle config instance
-    if isinstance(value, WorkflowStepOutputConfig):
+    if isinstance(value, TaskOutputConfig):
         return value
     
     # Handle dict
     if isinstance(value, dict):
-        return WorkflowStepOutputConfig(**value)
+        return TaskOutputConfig(**value)
     
     # None or other
     return None
 
 
-def resolve_step_execution_config(value: Any) -> WorkflowStepExecutionConfig:
+def resolve_step_execution_config(value: Any) -> TaskExecutionConfig:
     """Resolve step execution parameter using canonical resolver."""
     from ..config.param_resolver import resolve, ArrayMode
     from ..config.presets import WORKFLOW_STEP_EXECUTION_PRESETS
@@ -413,22 +413,22 @@ def resolve_step_execution_config(value: Any) -> WorkflowStepExecutionConfig:
     result = resolve(
         value=value,
         param_name="execution",
-        config_class=WorkflowStepExecutionConfig,
+        config_class=TaskExecutionConfig,
         presets=WORKFLOW_STEP_EXECUTION_PRESETS,
         array_mode=ArrayMode.PRESET_OVERRIDE,
-        default=WorkflowStepExecutionConfig(),
+        default=TaskExecutionConfig(),
     )
-    return result if result else WorkflowStepExecutionConfig()
+    return result if result else TaskExecutionConfig()
 
 
-def resolve_step_routing_config(value: Any) -> Optional[WorkflowStepRoutingConfig]:
+def resolve_step_routing_config(value: Any) -> Optional[TaskRoutingConfig]:
     """Resolve step routing parameter using canonical resolver."""
     from ..config.param_resolver import resolve, ArrayMode
     
     result = resolve(
         value=value,
         param_name="routing",
-        config_class=WorkflowStepRoutingConfig,
+        config_class=TaskRoutingConfig,
         array_mode=ArrayMode.STEP_NAMES,
         default=None,
     )
@@ -444,26 +444,26 @@ WorkflowPlanningParam = Union[str, bool, WorkflowPlanningConfig, None]
 WorkflowMemoryParam = Union[bool, WorkflowMemoryConfig, Any, None]  # Any = instance
 WorkflowHooksParam = Union[WorkflowHooksConfig, Dict[str, Callable], None]
 
-StepContextParam = Union[bool, List[str], WorkflowStepContextConfig, None]
-StepOutputParam = Union[str, WorkflowStepOutputConfig, None]
-StepExecutionParam = Union[str, WorkflowStepExecutionConfig, None]
-StepRoutingParam = Union[List[str], WorkflowStepRoutingConfig, None]
+StepContextParam = Union[bool, List[str], TaskContextConfig, None]
+StepOutputParam = Union[str, TaskOutputConfig, None]
+StepExecutionParam = Union[str, TaskExecutionConfig, None]
+StepRoutingParam = Union[List[str], TaskRoutingConfig, None]
 
 
 __all__ = [
     # Enums
     "WorkflowOutputPreset",
-    "WorkflowStepExecutionPreset",
+    "TaskExecutionPreset",
     # Workflow configs
     "WorkflowOutputConfig",
     "WorkflowPlanningConfig",
     "WorkflowMemoryConfig",
     "WorkflowHooksConfig",
     # Step configs
-    "WorkflowStepContextConfig",
-    "WorkflowStepOutputConfig",
-    "WorkflowStepExecutionConfig",
-    "WorkflowStepRoutingConfig",
+    "TaskContextConfig",
+    "TaskOutputConfig",
+    "TaskExecutionConfig",
+    "TaskRoutingConfig",
     # Resolution helpers
     "resolve_param",
     "resolve_output_config",

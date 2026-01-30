@@ -14,5 +14,5 @@ def search_brave(query: str):
 
 data_agent = Agent(instructions="Search about AI job trends in 2025", tools=[search_brave])
 editor_agent = Agent(instructions="Write a blog article")
-agents = Agents(agents=[data_agent, editor_agent])
+agents = AgentManager(agents=[data_agent, editor_agent])
 agents.start()

@@ -47,7 +47,7 @@ analyze_task = Task(
 )
 
 # Run sequential process
-agents = Agents(
+agents = AgentManager(
     agents=[search_agent, analysis_agent],
     tasks=[search_task, analyze_task],
     process="sequential"

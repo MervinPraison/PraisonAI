@@ -259,7 +259,7 @@ ciso_review_task = Task(
 )
 
 # SOLUTION 4: Agents with Shared Memory Configuration
-agents = Agents(
+agents = AgentManager(
     agents=[manager_agent, tool_agent, sr_pentester_agent, ciso_agent],
     tasks=[tool_query_task, pentester_analysis_task, ciso_review_task],
     process="hierarchical",

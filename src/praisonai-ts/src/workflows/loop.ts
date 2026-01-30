@@ -209,7 +209,7 @@ export class Loop<TStep = any, TItem = any, TOutput = string> {
             return await (this.step as any).chat(prompt);
         }
 
-        // If step has an execute method (WorkflowStep-like)
+        // If step has an execute method (Task-like)
         if (this.step && typeof (this.step as any).execute === 'function') {
             const input = typeof item === 'string' ? item : JSON.stringify(item);
             return await (this.step as any).execute(input, context);

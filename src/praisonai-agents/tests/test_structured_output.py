@@ -85,11 +85,11 @@ steps:
 
 
 class TestStructuredOutputWiring:
-    """Test that output_json is wired from YAML to WorkflowStep."""
+    """Test that output_json is wired from YAML to Task."""
     
     def test_normalize_step_includes_output_json(self):
-        """Test that _normalize_single_step transfers output_json to WorkflowStep."""
-        from praisonaiagents.workflows.workflows import Workflow, WorkflowStep
+        """Test that _normalize_single_step transfers output_json to Task."""
+        from praisonaiagents.workflows.workflows import Workflow, Task
         
         # Create a mock agent with _yaml_output_json
         agent = Mock()
@@ -107,13 +107,13 @@ class TestStructuredOutputWiring:
         workflow = Workflow(steps=[])
         normalized = workflow._normalize_single_step(agent, 0)
         
-        # Verify WorkflowStep has output_json
-        assert isinstance(normalized, WorkflowStep)
+        # Verify Task has output_json
+        assert isinstance(normalized, Task)
         assert normalized._output_json == {"type": "array", "items": {"type": "string"}}
         
     def test_normalize_step_includes_output_pydantic(self):
-        """Test that _normalize_single_step transfers output_pydantic to WorkflowStep."""
-        from praisonaiagents.workflows.workflows import Workflow, WorkflowStep
+        """Test that _normalize_single_step transfers output_pydantic to Task."""
+        from praisonaiagents.workflows.workflows import Workflow, Task
         
         # Create a mock agent with _yaml_output_pydantic
         agent = Mock()
@@ -128,7 +128,7 @@ class TestStructuredOutputWiring:
         workflow = Workflow(steps=[])
         normalized = workflow._normalize_single_step(agent, 0)
         
-        assert isinstance(normalized, WorkflowStep)
+        assert isinstance(normalized, Task)
         assert normalized._output_pydantic == "TopicList"
 
 
@@ -137,7 +137,7 @@ class TestStructuredOutputExecution:
     
     def test_agent_chat_receives_output_json(self):
         """Test that agent.chat() is called with output_json parameter."""
-        from praisonaiagents.workflows.workflows import Workflow, WorkflowStep
+        from praisonaiagents.workflows.workflows import Workflow, Task
         
         # Create mock agent
         mock_agent = Mock()
@@ -145,7 +145,7 @@ class TestStructuredOutputExecution:
         mock_agent.chat = Mock(return_value='["topic1", "topic2"]')
         
         # Create step with output_json
-        step = WorkflowStep(
+        step = Task(
             name="test_step",
             agent=mock_agent,
             action="Find topics",
@@ -211,13 +211,13 @@ class TestBackwardCompatibility:
     
     def test_workflow_without_output_json_still_works(self):
         """Test that workflows without output_json continue to work."""
-        from praisonaiagents.workflows.workflows import Workflow, WorkflowStep
+        from praisonaiagents.workflows.workflows import Workflow, Task
         
         mock_agent = Mock()
         mock_agent.name = "test_agent"
         mock_agent.chat = Mock(return_value="test output")
         
-        step = WorkflowStep(
+        step = Task(
             name="test_step",
             agent=mock_agent,
             action="Test action"

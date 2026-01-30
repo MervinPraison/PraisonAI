@@ -100,7 +100,7 @@ def demonstrate_reasoning_extraction():
         context=[problem_task]
     )
     
-    workflow = Agents(
+    workflow = AgentManager(
         agents=[cot_agent, reasoning_extractor],
         tasks=[problem_task, extract_task],
         process="sequential", output="verbose"
@@ -183,7 +183,7 @@ def advanced_reasoning_patterns():
         context=[deductive_task, inductive_task, abductive_task]
     )
     
-    workflow = Agents(
+    workflow = AgentManager(
         agents=[cot_agent, reasoning_validator],
         tasks=[deductive_task, inductive_task, abductive_task, validation_task],
         process="sequential", output="verbose"

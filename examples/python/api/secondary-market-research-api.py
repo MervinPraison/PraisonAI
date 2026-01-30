@@ -260,7 +260,7 @@ async def generate_market_research_report(job_id: str, config: MarketResearchCon
         job_status[job_id]["message"] = "Setting up research workflow..."
         
         # Create workflow
-        workflow = Agents(
+        workflow = AgentManager(
             agents=list(agents.values()),
             tasks=tasks,
             process="sequential", output="minimal"

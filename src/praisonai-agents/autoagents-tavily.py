@@ -7,7 +7,7 @@ def tavily(query: str):
     return results
     
 # Create AutoAgents instance
-agents = AutoAgents(
+agents = AutoAgentManager(
     instructions="Search for information about AI Agents",
     tools=[tavily],
     process="sequential",
@@ -47,7 +47,7 @@ def get_stock_price(company_name: str) -> str:
         return f"The stock price of {company_name} is 50"
 
 # Create AutoAgents instance  
-agents = AutoAgents(
+agents = AutoAgentManager(
     instructions="Get the stock price of google and compare it to the stock price of apple",
     tools=[evaluate, get_stock_price],
     process="sequential",

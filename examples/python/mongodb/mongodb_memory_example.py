@@ -90,7 +90,7 @@ def main():
     print("🚀 Starting MongoDB Memory Research System...")
     print("=" * 60)
     
-    research_system = Agents(
+    research_system = AgentManager(
         agents=[research_agent],
         tasks=research_tasks,
         memory=True,

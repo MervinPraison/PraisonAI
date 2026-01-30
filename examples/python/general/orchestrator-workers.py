@@ -93,7 +93,7 @@ synthesize_task = Task(
 )
 
 # Create workflow manager
-workflow = Agents(
+workflow = AgentManager(
     agents=[router, worker1, worker2, worker3, synthesizer],
     tasks=[router_task, worker1_task, worker2_task, worker3_task, synthesize_task],
     process="workflow", output="verbose"

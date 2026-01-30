@@ -42,7 +42,7 @@ def test_hierarchical_without_openai():
     
     try:
         # Create AutoAgents instance with Gemini
-        agents = AutoAgents(
+        agents = AutoAgentManager(
             instructions="Write a poem on the stock price of apple",
             tools=[get_stock_price],
             process="hierarchical",
@@ -79,7 +79,7 @@ def test_hierarchical_with_mock_llm():
     
     try:
         # Create AutoAgents instance with a mock configuration
-        agents = AutoAgents(
+        agents = AutoAgentManager(
             instructions="Simple test task",
             tools=[get_stock_price],
             process="hierarchical",

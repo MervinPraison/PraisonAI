@@ -112,7 +112,7 @@ optimization_task = Task(
 )
 
 # Create workflow
-workflow = Agents(
+workflow = AgentManager(
     agents=[classifier, handler, evaluator, optimizer],
     tasks=[classification_task, handling_task, evaluation_task, optimization_task],
     process="workflow", output="verbose"

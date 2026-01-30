@@ -15,8 +15,8 @@ try:
     
     # Test importing specific classes
     try:
-        from praisonaiagents import Agent, Task, Agents
-        print("✓ Successfully imported Agent, Task, Agents from praisonaiagents")
+        from praisonaiagents import Agent, Task, AgentManager
+        print("✓ Successfully imported Agent, Task, AgentManager from praisonaiagents")
     except ImportError as e:
         print(f"❌ Failed to import specific classes: {e}")
         
@@ -30,8 +30,8 @@ try:
     
     # Test importing from praisonai
     try:
-        from praisonai import Agent, Task, Agents
-        print("✓ Successfully imported Agent, Task, Agents from praisonai")
+        from praisonai import Agent, Task, AgentManager
+        print("✓ Successfully imported Agent, Task, AgentManager from praisonai")
     except ImportError as e:
         print(f"❌ Failed to import from praisonai: {e}")
         

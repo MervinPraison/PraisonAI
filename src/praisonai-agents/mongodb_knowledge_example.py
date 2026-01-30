@@ -19,7 +19,7 @@ Features demonstrated:
 """
 
 import os
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentManager
 
 # Ensure OpenAI API key is set
 if not os.environ.get("OPENAI_API_KEY"):
@@ -123,7 +123,7 @@ def main():
     print("🚀 Starting MongoDB Knowledge Management System...")
     print("=" * 60)
     
-    knowledge_system = Agents(
+    knowledge_system = AgentManager(
         agents=[research_agent, knowledge_agent],
         tasks=knowledge_tasks,
         memory=True,

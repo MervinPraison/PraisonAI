@@ -69,9 +69,9 @@ def __getattr__(name):
     if name == "Workflow":
         from ..workflows import Workflow
         return Workflow
-    if name == "WorkflowStep":
-        from ..workflows import WorkflowStep
-        return WorkflowStep
+    if name == "Task":
+        from ..workflows import Task
+        return Task
     if name == "WorkflowContext":
         from ..workflows import WorkflowContext
         return WorkflowContext
@@ -169,7 +169,7 @@ __all__ = [
     "WorkflowManager",
     "Workflow",
     "Pipeline",
-    "WorkflowStep",
+    "Task",
     "WorkflowContext",
     "StepResult",
     "create_workflow_manager",

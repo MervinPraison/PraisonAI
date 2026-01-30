@@ -54,7 +54,7 @@ blog_task = Task(
     agent=blog_agent
 )
 
-agents = Agents(
+agents = AgentManager(
     agents=[fact_agent, research_agent, blog_agent],
     tasks=[fact_task, research_task, research_task2, research_task3, research_task4, blog_task],
     memory=True

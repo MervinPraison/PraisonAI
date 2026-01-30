@@ -5,7 +5,7 @@ Demonstrates using should_run to conditionally execute agent steps
 based on input or previous results.
 """
 
-from praisonaiagents import Agent, Workflow, WorkflowStep
+from praisonaiagents import Agent, Workflow, Task
 
 # Condition functions
 def is_technical(ctx) -> bool:
@@ -52,12 +52,12 @@ workflow = Workflow(
     name="Conditional Agentic Pipeline",
     steps=[
         analyzer,  # Always runs
-        WorkflowStep(
+        Task(
             name="tech_review",
             agent=tech_reviewer,
             should_run=is_technical  # Only runs for technical content
         ),
-        WorkflowStep(
+        Task(
             name="creative_enhance",
             agent=creative_enhancer,
             should_run=needs_creative  # Only runs for creative content

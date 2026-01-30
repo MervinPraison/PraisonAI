@@ -63,7 +63,7 @@ finalize_task = Task(
 )
 
 # Run with state management
-agents_system = Agents(
+agents_system = AgentManager(
     agents=[state_agent],
     tasks=[init_task, continue_task, finalize_task],
     memory=True, output="verbose"

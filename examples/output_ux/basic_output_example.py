@@ -106,7 +106,7 @@ def example_multi_agent():
         agent=writer
     )
     
-    agents = Agents(
+    agents = AgentManager(
         agents=[researcher, writer],
         tasks=[task1, task2],
         process="sequential",

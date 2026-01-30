@@ -13,7 +13,7 @@ from .results import PerformanceResult, PerformanceMetrics
 
 if TYPE_CHECKING:
     from ..agent.agent import Agent
-    from ..agents.agents import Agents
+    from ..agents.agents import AgentManager
 
 logger = logging.getLogger(__name__)
 

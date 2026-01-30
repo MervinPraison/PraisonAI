@@ -86,7 +86,7 @@ feedback_task = Task(
 )
 
 # Create workflow manager
-workflow = Agents(
+workflow = AgentManager(
     agents=[llm_caller, action_agent, feedback_agent],
     tasks=[monitor_task, action_task, feedback_task],
     process="workflow", output="verbose"

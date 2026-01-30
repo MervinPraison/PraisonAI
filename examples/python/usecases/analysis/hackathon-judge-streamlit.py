@@ -77,7 +77,7 @@ def evaluate_project(video_path: str) -> ProjectEvaluation:
     )
 
     # Initialize and run evaluation
-    agents = Agents(
+    agents = AgentManager(
         agents=[hackathon_judge],
         tasks=[evaluation_task],
         process="sequential", output="verbose"

@@ -1234,7 +1234,7 @@ Context:
         Example:
             ```python
             # Interactive - shows Rich panels
-            agents = Agents(agents=[agent1, agent2])
+            agents = AgentManager(agents=[agent1, agent2])
             result = agents.start()  # Verbose output by default
             
             # Force silent mode

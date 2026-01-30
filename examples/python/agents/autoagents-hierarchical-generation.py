@@ -54,7 +54,7 @@ execution_task = Task(
 )
 
 # Run hierarchical workflow
-agents_system = Agents(
+agents_system = AgentManager(
     agents=[manager_agent, research_agent],
     tasks=[planning_task, execution_task],
     process="sequential", output="verbose"

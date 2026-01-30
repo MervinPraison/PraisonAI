@@ -5,7 +5,7 @@ This class provides a simplified interface for creating and running AI agents wi
 It automatically handles agent creation, task setup, and execution flow.
 """
 
-from .agents import Agents
+from .agents import AgentManager
 from ..agent.agent import Agent
 from ..task.task import Task
 from typing import List, Any, Optional, Dict, Tuple
@@ -38,7 +38,7 @@ class AutoAgentsConfig(BaseModel):
     process_type: str
     agents: List[AgentConfig]
 
-class AutoAgents(Agents):
+class AutoAgents(AgentManager):
     def __init__(
         self,
         instructions: str,
@@ -55,7 +55,6 @@ class AutoAgents(Agents):
         max_reflect: int = 3,
         min_reflect: int = 1,
         llm: Optional[str] = None,
-        function_calling_llm: Optional[str] = None,
         code_execution_mode: str = "safe",
         embedder_config: Optional[Dict[str, Any]] = None,
         knowledge_sources: Optional[List[Any]] = None,
@@ -104,7 +103,6 @@ class AutoAgents(Agents):
         self.max_reflect = max_reflect
         self.min_reflect = min_reflect
         self.llm = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o-mini')
-        self.function_calling_llm = function_calling_llm
         self.code_execution_mode = code_execution_mode
         self.embedder_config = embedder_config
         self.knowledge_sources = knowledge_sources
@@ -524,3 +522,4 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
         Returns the task status and results dictionary.
         """
         return super().start()
+# AutoAgents is now the primary class name (no alias needed)

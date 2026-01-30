@@ -13,19 +13,19 @@ import os
 # Add the package to path for testing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from praisonaiagents import Workflow, WorkflowStep
+from praisonaiagents import Workflow, Task
 from praisonaiagents.workflows import WorkflowManager
 
 
-class TestWorkflowStepToolsField:
-    """Test WorkflowStep tools field."""
+class TestTaskToolsField:
+    """Test Task tools field."""
     
     def test_workflow_step_tools_accepts_list(self):
-        """WorkflowStep should accept a list of tools."""
+        """Task should accept a list of tools."""
         mock_tool1 = Mock()
         mock_tool2 = Mock()
         
-        step = WorkflowStep(
+        step = Task(
             name="research",
             action="Research topic",
             tools=[mock_tool1, mock_tool2]
@@ -37,11 +37,11 @@ class TestWorkflowStepToolsField:
         assert mock_tool2 in step.tools
     
     def test_workflow_step_tools_accepts_callable(self):
-        """WorkflowStep should accept callable tools."""
+        """Task should accept callable tools."""
         def search_tool(query):
             return f"Results for {query}"
         
-        step = WorkflowStep(
+        step = Task(
             name="search",
             action="Search for info",
             tools=[search_tool]
@@ -52,7 +52,7 @@ class TestWorkflowStepToolsField:
     
     def test_workflow_step_tools_in_to_dict(self):
         """to_dict() should include tools field."""
-        step = WorkflowStep(
+        step = Task(
             name="test",
             action="test action",
             tools=["tool1", "tool2"]
@@ -77,7 +77,7 @@ class TestToolsPassedToAgent:
         manager = WorkflowManager()
         
         mock_tool = Mock()
-        step = WorkflowStep(
+        step = Task(
             name="research",
             action="Research topic",
             agent_config={"role": "Researcher"},
@@ -100,7 +100,7 @@ class TestToolsPassedToAgent:
         tool2 = Mock(name="calculator")
         tool3 = Mock(name="browser")
         
-        step = WorkflowStep(
+        step = Task(
             name="research",
             action="Research topic",
             agent_config={"role": "Researcher"},
@@ -134,13 +134,13 @@ class TestDifferentToolsPerStep:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(
+                Task(
                     name="research",
                     action="Research AI",
                     agent_config={"role": "Researcher"},
                     tools=[search_tool]
                 ),
-                WorkflowStep(
+                Task(
                     name="write",
                     action="Write article",
                     agent_config={"role": "Writer"},
@@ -176,7 +176,7 @@ class TestDifferentToolsPerStep:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(
+                Task(
                     name="think",
                     action="Think about topic",
                     agent_config={"role": "Thinker"}
@@ -217,7 +217,7 @@ class TestToolsWithExecutor:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(
+                Task(
                     name="step1",
                     action="Action 1",
                     tools=[mock_tool]  # Tools defined but executor provided
@@ -261,19 +261,19 @@ class TestToolsIntegration:
         workflow = Workflow(
             name="research_workflow",
             steps=[
-                WorkflowStep(
+                Task(
                     name="search",
                     action="Search for {{topic}}",
                     agent_config={"role": "Searcher"},
                     tools=[search_tool]
                 ),
-                WorkflowStep(
+                Task(
                     name="analyze",
                     action="Analyze: {{previous_output}}",
                     agent_config={"role": "Analyzer"},
                     tools=[analyze_tool]
                 ),
-                WorkflowStep(
+                Task(
                     name="summarize",
                     action="Summarize findings",
                     agent_config={"role": "Summarizer"}

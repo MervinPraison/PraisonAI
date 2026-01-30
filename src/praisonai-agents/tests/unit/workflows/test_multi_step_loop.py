@@ -177,7 +177,7 @@ class TestMultiStepLoopExecution:
     
     def test_multi_step_loop_executes_all_steps_sequentially(self):
         """Each iteration should execute all nested steps sequentially."""
-        from praisonaiagents.workflows.workflows import Workflow, WorkflowStep, Loop
+        from praisonaiagents.workflows.workflows import Workflow, Task, Loop
         
         # Track execution order
         execution_order = []
@@ -190,8 +190,8 @@ class TestMultiStepLoopExecution:
             execution_order.append(f"step2_{ctx.variables.get('loop_index')}")
             return f"output2_{ctx.variables.get('loop_index')}"
         
-        step1 = WorkflowStep(name="step1", handler=step1_handler)
-        step2 = WorkflowStep(name="step2", handler=step2_handler)
+        step1 = Task(name="step1", handler=step1_handler)
+        step2 = Task(name="step2", handler=step2_handler)
         
         loop_step = Loop(
             steps=[step1, step2],
@@ -215,7 +215,7 @@ class TestMultiStepLoopExecution:
     
     def test_previous_output_chains_between_nested_steps(self):
         """previous_output should flow from step N to step N+1 within iteration."""
-        from praisonaiagents.workflows.workflows import Workflow, WorkflowStep, Loop
+        from praisonaiagents.workflows.workflows import Workflow, Task, Loop
         
         received_previous = []
         
@@ -226,8 +226,8 @@ class TestMultiStepLoopExecution:
             received_previous.append(ctx.previous_result)
             return "from_step2"
         
-        step1 = WorkflowStep(name="step1", handler=step1_handler)
-        step2 = WorkflowStep(name="step2", handler=step2_handler)
+        step1 = Task(name="step1", handler=step1_handler)
+        step2 = Task(name="step2", handler=step2_handler)
         
         loop_step = Loop(
             steps=[step1, step2],
@@ -252,7 +252,7 @@ class TestParallelMultiStepLoop:
     
     def test_parallel_multi_step_loop_isolates_iterations(self):
         """Parallel iterations should be isolated from each other."""
-        from praisonaiagents.workflows.workflows import Workflow, WorkflowStep, Loop
+        from praisonaiagents.workflows.workflows import Workflow, Task, Loop
         import threading
         
         # Track which thread executed which step
@@ -271,8 +271,8 @@ class TestParallelMultiStepLoop:
                 thread_ids[f"step2_{idx}"] = threading.current_thread().ident
             return f"output2_{idx}"
         
-        step1 = WorkflowStep(name="step1", handler=step1_handler)
-        step2 = WorkflowStep(name="step2", handler=step2_handler)
+        step1 = Task(name="step1", handler=step1_handler)
+        step2 = Task(name="step2", handler=step2_handler)
         
         loop_step = Loop(
             steps=[step1, step2],
@@ -355,7 +355,7 @@ class TestParallelLoopItemIsolation:
     
     def test_parallel_loop_each_iteration_gets_correct_item(self):
         """Each parallel iteration should process its own item, not duplicates."""
-        from praisonaiagents.workflows.workflows import Workflow, WorkflowStep, Loop
+        from praisonaiagents.workflows.workflows import Workflow, Task, Loop
         import threading
         
         # Track which item each iteration received
@@ -369,7 +369,7 @@ class TestParallelLoopItemIsolation:
                 received_items[idx] = item
             return f"processed_{item}"
         
-        step = WorkflowStep(name="capture", handler=capture_item_handler)
+        step = Task(name="capture", handler=capture_item_handler)
         
         loop_step = Loop(
             steps=[step],
@@ -392,7 +392,7 @@ class TestParallelLoopItemIsolation:
     
     def test_parallel_loop_dict_items_expanded_correctly(self):
         """Dict items should have properties expanded for template access."""
-        from praisonaiagents.workflows.workflows import Workflow, WorkflowStep, Loop
+        from praisonaiagents.workflows.workflows import Workflow, Task, Loop
         import threading
         
         received_titles = {}
@@ -406,7 +406,7 @@ class TestParallelLoopItemIsolation:
                 received_titles[idx] = title
             return f"processed_{title}"
         
-        step = WorkflowStep(name="capture", handler=capture_title_handler)
+        step = Task(name="capture", handler=capture_title_handler)
         
         loop_step = Loop(
             steps=[step],
@@ -437,7 +437,7 @@ class TestLoopOutputVariable:
     
     def test_output_variable_stores_final_step_output(self):
         """output_variable should store the last step's output for each iteration."""
-        from praisonaiagents.workflows.workflows import Workflow, WorkflowStep, Loop
+        from praisonaiagents.workflows.workflows import Workflow, Task, Loop
         
         def step1_handler(ctx):
             return f"step1_output_{ctx.variables.get('loop_index')}"
@@ -445,8 +445,8 @@ class TestLoopOutputVariable:
         def step2_handler(ctx):
             return f"final_output_{ctx.variables.get('loop_index')}"
         
-        step1 = WorkflowStep(name="step1", handler=step1_handler)
-        step2 = WorkflowStep(name="step2", handler=step2_handler)
+        step1 = Task(name="step1", handler=step1_handler)
+        step2 = Task(name="step2", handler=step2_handler)
         
         loop_step = Loop(
             steps=[step1, step2],

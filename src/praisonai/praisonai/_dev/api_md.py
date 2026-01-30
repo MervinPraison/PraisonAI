@@ -98,7 +98,7 @@ class ApiMdGenerator:
                    'AutoAgents', 'AutoRagAgent', 'PlanningAgent', 'create_context_agent'],
         'Tools': ['Tools', 'BaseTool', 'tool', 'FunctionTool', 'ToolRegistry',
                   'get_registry', 'register_tool', 'get_tool', 'validate_tool'],
-        'Workflows': ['Workflow', 'WorkflowStep', 'Pipeline', 'Route', 'Parallel',
+        'Workflows': ['Workflow', 'Task', 'Pipeline', 'Route', 'Parallel',
                       'Loop', 'Repeat', 'route', 'parallel', 'loop', 'repeat'],
         'DB': ['db', 'DbAdapter', 'AsyncDbAdapter'],
         'Memory': ['Memory', 'MemoryConfig', 'MemoryBackend'],

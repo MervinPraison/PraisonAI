@@ -29,8 +29,9 @@ from dataclasses import dataclass, field
 
 from .workflow_configs import (
     WorkflowPlanningConfig, WorkflowMemoryConfig,
-    WorkflowStepContextConfig, WorkflowStepOutputConfig, WorkflowStepExecutionConfig, WorkflowStepRoutingConfig,
+    TaskContextConfig, TaskOutputConfig, TaskExecutionConfig, TaskRoutingConfig,
 )
+from ..task.task import Task
 
 logger = logging.getLogger(__name__)
 
@@ -490,8 +491,7 @@ def if_(
     """
     Create a conditional branching step.
     
-    .. deprecated::
-        Use :func:`when` instead. `if_` will be removed in a future version.
+    Alias for :func:`when`. Both functions work identically.
     
     Args:
         condition: Condition expression with {{var}} placeholders
@@ -501,344 +501,8 @@ def if_(
     Returns:
         If object for conditional execution
     """
-    import warnings
-    warnings.warn(
-        "if_() is deprecated, use when() instead for cleaner syntax",
-        DeprecationWarning,
-        stacklevel=2
-    )
     return If(condition=condition, then_steps=then_steps, else_steps=else_steps)
 
-
-@dataclass
-class WorkflowStep:
-    """
-    A single step in a workflow.
-    
-    Workflow-centric API with consolidated feature parameters.
-    All params follow precedence: Instance > Config > String > Bool > Default
-    
-    Usage:
-        from praisonaiagents import WorkflowStep, Agent
-        
-        # Simple step
-        step = WorkflowStep(
-            name="writer",
-            action="Write content about {{input}}",
-            agent=Agent(instructions="You are a writer"),
-        )
-        
-        # With consolidated configs
-        from praisonaiagents.workflows import WorkflowStepExecutionConfig
-        
-        step = WorkflowStep(
-            name="processor",
-            action="Process data",
-            execution=WorkflowStepExecutionConfig(max_retries=5, async_exec=True),
-            context=["step1", "step2"],  # Get context from these steps
-            output="result.txt",  # Save to file
-        )
-    """
-    name: str
-    description: str = ""
-    action: str = ""  # The action/prompt to execute
-    condition: Optional[str] = None  # Optional condition for execution (string)
-    should_run: Optional[Callable[['WorkflowContext'], bool]] = None  # Function to check if step should run
-    handler: Optional[Callable[['WorkflowContext'], 'StepResult']] = None  # Custom function instead of agent
-    
-    # Agent configuration fields
-    agent_config: Optional[Dict[str, Any]] = None  # Per-step agent config {role, goal, backstory, llm}
-    agent: Optional[Any] = None  # Direct agent instance for this step
-    tools: Optional[List[Any]] = None  # Tools for this step
-    
-    # Loop fields
-    loop_over: Optional[str] = None  # Variable name to iterate over (e.g., "items")
-    loop_var: str = "item"  # Variable name for current item in loop
-    
-    # Guardrails (standardized plural naming)
-    # Accepts: callable, str (LLM prompt), GuardrailConfig, or list [preset, overrides]
-    guardrails: Optional[Any] = None  # Union[Callable, str, GuardrailConfig] - validation
-    
-    # Backward compatibility alias (deprecated - use guardrails instead)
-    guardrail: Optional[Callable[['StepResult'], Tuple[bool, Any]]] = None  # DEPRECATED: use guardrails
-    
-    # Image handling (migrated from Task)
-    images: Optional[List[str]] = None  # Image paths/URLs for vision tasks
-    
-    # ============================================================
-    # CONSOLIDATED FEATURE PARAMS (workflow-centric API)
-    # Precedence: Instance > Config > Array > Dict > String > Bool > Default
-    # ============================================================
-    context: Optional[Any] = None  # Union[bool, List[str], WorkflowStepContextConfig] - context handling
-    output: Optional[Any] = None  # Union[str, WorkflowStepOutputConfig] - output handling
-    execution: Optional[Any] = None  # Union[str, WorkflowStepExecutionConfig] - execution control
-    routing: Optional[Any] = None  # Union[List[str], WorkflowStepRoutingConfig] - branching
-    # NEW: Agent-like consolidated params for feature parity
-    autonomy: Optional[Any] = None  # Union[bool, AutonomyConfig] - agent autonomy
-    knowledge: Optional[Any] = None  # Union[bool, List[str], KnowledgeConfig] - RAG
-    web: Optional[Any] = None  # Union[bool, WebConfig] - web search/fetch
-    reflection: Optional[Any] = None  # Union[bool, ReflectionConfig] - self-reflection
-    memory: Optional[Any] = None  # Union[bool, MemoryConfig] - step-level memory
-    planning: Optional[Any] = None  # Union[bool, PlanningConfig] - step-level planning
-    hooks: Optional[Any] = None  # Union[List, HooksConfig] - step lifecycle hooks
-    caching: Optional[Any] = None  # Union[bool, CachingConfig] - step-level caching
-    
-    # Status tracking
-    status: str = "pending"  # pending, running, completed, failed, skipped
-    retry_count: int = 0
-    
-    # Private resolved fields (set in __post_init__)
-    _context_from: Optional[List[str]] = field(default=None, repr=False)
-    _retain_full_context: bool = field(default=True, repr=False)
-    _output_variable: Optional[str] = field(default=None, repr=False)
-    _output_file: Optional[str] = field(default=None, repr=False)
-    _output_json: Optional[Any] = field(default=None, repr=False)
-    _output_pydantic: Optional[Any] = field(default=None, repr=False)
-    _async_execution: bool = field(default=False, repr=False)
-    _quality_check: bool = field(default=True, repr=False)
-    _rerun: bool = field(default=True, repr=False)
-    _max_retries: int = field(default=3, repr=False)
-    _on_error: str = field(default="stop", repr=False)
-    _next_steps: Optional[List[str]] = field(default=None, repr=False)
-    _branch_condition: Optional[Dict[str, List[str]]] = field(default=None, repr=False)
-    # NEW: Resolved configs for agent-like params
-    _autonomy_config: Optional[Any] = field(default=None, repr=False)
-    _knowledge_config: Optional[Any] = field(default=None, repr=False)
-    _web_config: Optional[Any] = field(default=None, repr=False)
-    _reflection_config: Optional[Any] = field(default=None, repr=False)
-    _memory_config: Optional[Any] = field(default=None, repr=False)
-    _planning_config: Optional[Any] = field(default=None, repr=False)
-    _hooks_config: Optional[Any] = field(default=None, repr=False)
-    _caching_config: Optional[Any] = field(default=None, repr=False)
-    
-    def __post_init__(self):
-        """Resolve consolidated params to internal values."""
-        from .workflow_configs import (
-            resolve_step_context_config, resolve_step_output_config,
-            resolve_step_execution_config, resolve_step_routing_config,
-        )
-        
-        # Handle guardrails/guardrail compatibility
-        # guardrails (plural) takes precedence; guardrail (singular) is deprecated
-        if self.guardrails is None and self.guardrail is not None:
-            # Use deprecated guardrail value, map to guardrails
-            import warnings
-            warnings.warn(
-                "WorkflowStep 'guardrail' parameter is deprecated. Use 'guardrails' instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            object.__setattr__(self, 'guardrails', self.guardrail)
-        
-        # Resolve context param
-        ctx_cfg = resolve_step_context_config(self.context)
-        if ctx_cfg:
-            self._context_from = ctx_cfg.from_steps
-            self._retain_full_context = ctx_cfg.retain_full
-        
-        # Resolve output param
-        out_cfg = resolve_step_output_config(self.output)
-        if out_cfg:
-            self._output_file = out_cfg.file
-            self._output_json = out_cfg.json_model
-            self._output_pydantic = out_cfg.pydantic_model
-            self._output_variable = out_cfg.variable
-        
-        # Resolve execution param
-        exec_cfg = resolve_step_execution_config(self.execution)
-        if exec_cfg:
-            self._async_execution = exec_cfg.async_exec
-            self._quality_check = exec_cfg.quality_check
-            self._rerun = exec_cfg.rerun
-            self._max_retries = exec_cfg.max_retries
-            self._on_error = exec_cfg.on_error
-        
-        # Resolve routing param
-        route_cfg = resolve_step_routing_config(self.routing)
-        if route_cfg:
-            self._next_steps = route_cfg.next_steps
-            self._branch_condition = route_cfg.branches
-        
-        # Resolve NEW agent-like params using canonical resolver
-        from ..config.param_resolver import resolve, ArrayMode
-        from ..config.presets import (
-            WEB_PRESETS, REFLECTION_PRESETS, AUTONOMY_PRESETS, KNOWLEDGE_PRESETS,
-        )
-        try:
-            from ..config.feature_configs import (
-                AutonomyConfig, KnowledgeConfig, WebConfig, ReflectionConfig,
-            )
-        except ImportError:
-            AutonomyConfig = KnowledgeConfig = WebConfig = ReflectionConfig = None
-        
-        # Resolve autonomy
-        if AutonomyConfig and self.autonomy is not None:
-            self._autonomy_config = resolve(
-                value=self.autonomy, param_name="autonomy",
-                config_class=AutonomyConfig, presets=AUTONOMY_PRESETS,
-                default=None,
-            )
-        
-        # Resolve knowledge
-        if KnowledgeConfig and self.knowledge is not None:
-            self._knowledge_config = resolve(
-                value=self.knowledge, param_name="knowledge",
-                config_class=KnowledgeConfig, presets=KNOWLEDGE_PRESETS,
-                array_mode=ArrayMode.SOURCES, default=None,
-            )
-        
-        # Resolve web
-        if WebConfig and self.web is not None:
-            self._web_config = resolve(
-                value=self.web, param_name="web",
-                config_class=WebConfig, presets=WEB_PRESETS,
-                default=None,
-            )
-        
-        # Resolve reflection
-        if ReflectionConfig and self.reflection is not None:
-            self._reflection_config = resolve(
-                value=self.reflection, param_name="reflection",
-                config_class=ReflectionConfig, presets=REFLECTION_PRESETS,
-                default=None,
-            )
-        
-        # Resolve memory (NEW for feature parity)
-        try:
-            from ..config.feature_configs import MemoryConfig
-            from ..config.presets import MEMORY_PRESETS
-        except ImportError:
-            MemoryConfig = None
-            MEMORY_PRESETS = {}
-        if MemoryConfig and self.memory is not None:
-            self._memory_config = resolve(
-                value=self.memory, param_name="memory",
-                config_class=MemoryConfig, presets=MEMORY_PRESETS,
-                default=None,
-            )
-        
-        # Resolve planning (NEW for feature parity)
-        try:
-            from ..config.feature_configs import PlanningConfig
-            from ..config.presets import PLANNING_PRESETS
-        except ImportError:
-            PlanningConfig = None
-            PLANNING_PRESETS = {}
-        if PlanningConfig and self.planning is not None:
-            self._planning_config = resolve(
-                value=self.planning, param_name="planning",
-                config_class=PlanningConfig, presets=PLANNING_PRESETS,
-                default=None,
-            )
-        
-        # Resolve hooks (NEW for feature parity)
-        try:
-            from ..config.feature_configs import HooksConfig
-        except ImportError:
-            HooksConfig = None
-        if HooksConfig and self.hooks is not None:
-            # Hooks don't have presets, just config class
-            if isinstance(self.hooks, list):
-                self._hooks_config = HooksConfig(callbacks=self.hooks)
-            elif hasattr(self.hooks, 'callbacks'):
-                self._hooks_config = self.hooks
-            else:
-                self._hooks_config = self.hooks
-        
-        # Resolve caching (NEW for feature parity)
-        try:
-            from ..config.feature_configs import CachingConfig
-            from ..config.presets import CACHING_PRESETS
-        except ImportError:
-            CachingConfig = None
-            CACHING_PRESETS = {}
-        if CachingConfig and self.caching is not None:
-            self._caching_config = resolve(
-                value=self.caching, param_name="caching",
-                config_class=CachingConfig, presets=CACHING_PRESETS,
-                default=None,
-            )
-    
-    # Property accessors for backward compatibility
-    @property
-    def context_from(self) -> Optional[List[str]]:
-        return self._context_from
-    
-    @property
-    def retain_full_context(self) -> bool:
-        return self._retain_full_context
-    
-    @property
-    def output_variable(self) -> Optional[str]:
-        return self._output_variable
-    
-    @property
-    def output_file(self) -> Optional[str]:
-        return self._output_file
-    
-    @property
-    def output_json(self) -> Optional[Any]:
-        return self._output_json
-    
-    @property
-    def output_pydantic(self) -> Optional[Any]:
-        return self._output_pydantic
-    
-    @property
-    def async_execution(self) -> bool:
-        return self._async_execution
-    
-    @property
-    def quality_check(self) -> bool:
-        return self._quality_check
-    
-    @property
-    def rerun(self) -> bool:
-        return self._rerun
-    
-    @property
-    def max_retries(self) -> int:
-        return self._max_retries
-    
-    @property
-    def on_error(self) -> str:
-        return self._on_error
-    
-    @property
-    def next_steps(self) -> Optional[List[str]]:
-        return self._next_steps
-    
-    @property
-    def branch_condition(self) -> Optional[Dict[str, List[str]]]:
-        return self._branch_condition
-    
-    @property
-    def evaluator(self):
-        return self.should_run
-    
-    @property
-    def executor(self):
-        return self.handler
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "name": self.name,
-            "description": self.description,
-            "action": self.action,
-            "condition": self.condition,
-            "should_run": self.should_run is not None,
-            "handler": self.handler is not None,
-            "agent": self.agent is not None,
-            "context": {"from_steps": self._context_from, "retain_full": self._retain_full_context},
-            "output": {"file": self._output_file, "variable": self._output_variable},
-            "execution": {"max_retries": self._max_retries, "on_error": self._on_error, "async": self._async_execution},
-            "routing": {"next_steps": self._next_steps, "branches": self._branch_condition},
-            "agent_config": self.agent_config,
-            "tools": self.tools,
-            "loop_over": self.loop_over,
-            "loop_var": self.loop_var,
-            "images": self.images,
-        }
 
 
 @dataclass
@@ -871,7 +535,7 @@ class Workflow:
     """
     name: str = "Workflow"
     description: str = ""
-    steps: List = field(default_factory=list)  # Can be WorkflowStep, Agent, or function
+    steps: List = field(default_factory=list)  # Can be Task, Agent, or function
     variables: Dict[str, Any] = field(default_factory=dict)
     file_path: Optional[str] = None
     
@@ -1996,8 +1660,8 @@ Respond with JSON: {{"approved": true/false, "reason": "Brief explanation"}}
         
         return final_result
     
-    def _normalize_steps(self) -> List['WorkflowStep']:
-        """Convert mixed steps (Agent, function, WorkflowStep) to WorkflowStep list.
+    def _normalize_steps(self) -> List['Task']:
+        """Convert mixed steps (Agent, function, Task) to Task list.
         
         This method uses _normalize_single_step to ensure consistent normalization
         and avoid duplicated code paths (DRY principle).
@@ -2021,7 +1685,7 @@ Respond with JSON: {{"approved": true/false, "reason": "Brief explanation"}}
             # Describe the steps
             step_descriptions = []
             for i, step in enumerate(self.steps):
-                if isinstance(step, WorkflowStep):
+                if isinstance(step, Task):
                     step_descriptions.append(f"{i+1}. {step.name}: {step.description or step.action or 'Execute step'}")
                 elif hasattr(step, 'name'):
                     role = getattr(step, 'role', 'Agent')
@@ -2067,7 +1731,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         agent: Any,
         agent_class_name: str,
         action: str,
-        step: 'WorkflowStep',
+        step: 'Task',
         variables: Dict[str, Any],
         stream: bool
     ) -> Any:
@@ -2184,17 +1848,17 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         else:
             return agent.chat(action, stream=stream)
     
-    def _normalize_single_step(self, step: Any, index: int) -> 'WorkflowStep':
-        """Normalize a single step to WorkflowStep.
+    def _normalize_single_step(self, step: Any, index: int) -> 'Task':
+        """Normalize a single step to Task.
         
         Supports:
-        - WorkflowStep objects (passed through)
+        - Task objects (passed through)
         - Agent objects (wrapped with agent reference and tools)
         - Specialized agents (AudioAgent, VideoAgent, ImageAgent, OCRAgent)
         - Callable functions (wrapped as handler)
         - Strings (used as action)
         """
-        if isinstance(step, WorkflowStep):
+        if isinstance(step, Task):
             return step
         
         # Check for standard Agent (has chat method) or specialized agents
@@ -2226,21 +1890,23 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             if yaml_output_pydantic:
                 output_config["pydantic_model"] = yaml_output_pydantic
             # Only pass output_config if it has values
-            output_config = output_config if output_config else None
-            return WorkflowStep(
+            output_json_model = output_config.get('json_model') if output_config else None
+            output_pydantic_model = output_config.get('pydantic_model') if output_config else None
+            return Task(
                 name=yaml_step_name or getattr(step, 'name', f'agent_{index+1}'),
                 agent=step,
                 tools=agent_tools,
                 action=action,
-                output=output_config
+                output_json=output_json_model,
+                output_pydantic=output_pydantic_model
             )
         elif callable(step):
-            return WorkflowStep(
+            return Task(
                 name=getattr(step, '__name__', f'step_{index+1}'),
                 handler=step
             )
         else:
-            return WorkflowStep(
+            return Task(
                 name=f'step_{index+1}',
                 action=str(step)
             )
@@ -3436,7 +3102,7 @@ class WorkflowManager:
         
         return frontmatter, body
     
-    def _parse_steps(self, body: str) -> List[WorkflowStep]:
+    def _parse_steps(self, body: str) -> List[Task]:
         """Parse workflow steps from markdown body."""
         steps = []
         
@@ -3596,7 +3262,7 @@ class WorkflowManager:
             context_config = None
             if context_from or not retain_full_context:
                 # Only create config if context_from is set OR retain_full_context is False (non-default)
-                context_config = WorkflowStepContextConfig(
+                context_config = TaskContextConfig(
                     from_steps=context_from,
                     retain_full=retain_full_context
                 )
@@ -3604,7 +3270,7 @@ class WorkflowManager:
             # Build consolidated output config if needed
             output_config = None
             if output_variable or output_file:
-                output_config = WorkflowStepOutputConfig(
+                output_config = TaskOutputConfig(
                     variable=output_variable,
                     file=output_file
                 )
@@ -3612,19 +3278,19 @@ class WorkflowManager:
             # Build consolidated execution config if needed
             execution_config = None
             if max_retries != 3:  # Only if non-default
-                execution_config = WorkflowStepExecutionConfig(
+                execution_config = TaskExecutionConfig(
                     max_retries=max_retries
                 )
             
             # Build consolidated routing config if needed
             routing_config = None
             if next_steps or branch_condition:
-                routing_config = WorkflowStepRoutingConfig(
+                routing_config = TaskRoutingConfig(
                     next_steps=next_steps,
                     branches=branch_condition
                 )
             
-            steps.append(WorkflowStep(
+            steps.append(Task(
                 name=step_name,
                 description=description,
                 action=action,
@@ -3794,7 +3460,7 @@ class WorkflowManager:
     
     def _build_step_context(
         self,
-        step: WorkflowStep,
+        step: Task,
         step_index: int,
         results: List[Dict[str, Any]],
         variables: Dict[str, Any]
@@ -3839,7 +3505,7 @@ class WorkflowManager:
     
     def _update_variables_with_output(
         self,
-        step: WorkflowStep,
+        step: Task,
         output: str,
         variables: Dict[str, Any],
         results: List[Dict[str, Any]]
@@ -3981,8 +3647,8 @@ class WorkflowManager:
         workflow_name: str,
         executor: Optional[Callable[[str], str]] = None,
         variables: Optional[Dict[str, Any]] = None,
-        on_step: Optional[Callable[[WorkflowStep, int], None]] = None,
-        on_result: Optional[Callable[[WorkflowStep, str], None]] = None,
+        on_step: Optional[Callable[[Task, int], None]] = None,
+        on_result: Optional[Callable[[Task, str], None]] = None,
         default_agent: Optional[Any] = None,
         default_llm: Optional[str] = None,
         memory: Optional[Any] = None,
@@ -4209,7 +3875,7 @@ class WorkflowManager:
     
     def _execute_single_step(
         self,
-        step: WorkflowStep,
+        step: Task,
         step_idx: int,
         results: List[Dict[str, Any]],
         all_variables: Dict[str, Any],
@@ -4219,8 +3885,8 @@ class WorkflowManager:
         memory: Optional[Any] = None,
         planning: bool = False,
         verbose: int = 0,
-        on_step: Optional[Callable[[WorkflowStep, int], None]] = None,
-        on_result: Optional[Callable[[WorkflowStep, str], None]] = None,
+        on_step: Optional[Callable[[Task, int], None]] = None,
+        on_result: Optional[Callable[[Task, str], None]] = None,
         original_input: str = ""
     ) -> Dict[str, Any]:
         """Execute a single workflow step."""
@@ -4359,8 +4025,8 @@ class WorkflowManager:
         workflow_name: str,
         executor: Optional[Callable[[str], str]] = None,
         variables: Optional[Dict[str, Any]] = None,
-        on_step: Optional[Callable[[WorkflowStep, int], None]] = None,
-        on_result: Optional[Callable[[WorkflowStep, str], None]] = None,
+        on_step: Optional[Callable[[Task, int], None]] = None,
+        on_result: Optional[Callable[[Task, str], None]] = None,
         default_agent: Optional[Any] = None,
         default_llm: Optional[str] = None,
         memory: Optional[Any] = None,
@@ -4518,7 +4184,7 @@ class WorkflowManager:
     
     def _create_step_agent(
         self,
-        step: WorkflowStep,
+        step: Task,
         default_agent: Optional[Any] = None,
         default_llm: Optional[str] = None,
         memory: Optional[Any] = None,
@@ -4616,7 +4282,7 @@ class WorkflowManager:
                 lines.append("```")
                 lines.append("")
                 
-                workflow_steps.append(WorkflowStep(
+                workflow_steps.append(Task(
                     name=step_name,
                     description=step_desc,
                     action=step_action

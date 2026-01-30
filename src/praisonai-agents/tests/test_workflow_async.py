@@ -13,7 +13,7 @@ import os
 # Add the package to path for testing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from praisonaiagents import Workflow, WorkflowStep
+from praisonaiagents import Workflow, Task
 from praisonaiagents.workflows import WorkflowManager
 
 
@@ -41,8 +41,8 @@ class TestAexecuteMethod:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(name="step1", action="Action 1"),
-                WorkflowStep(name="step2", action="Action 2")
+                Task(name="step1", action="Action 1"),
+                Task(name="step2", action="Action 2")
             ]
         )
         self._register_workflow(manager, workflow)
@@ -63,8 +63,8 @@ class TestAexecuteMethod:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(name="step1", action="Action 1"),
-                WorkflowStep(name="step2", action="Action 2")
+                Task(name="step1", action="Action 1"),
+                Task(name="step2", action="Action 2")
             ]
         )
         self._register_workflow(manager, workflow)
@@ -87,8 +87,8 @@ class TestAexecuteMethod:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(name="step1", action="Generate data"),
-                WorkflowStep(name="step2", action="Process {{previous_output}}")
+                Task(name="step1", action="Generate data"),
+                Task(name="step2", action="Process {{previous_output}}")
             ]
         )
         self._register_workflow(manager, workflow)
@@ -126,7 +126,7 @@ class TestAexecuteMethod:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(name="step1", action="Action 1")
+                Task(name="step1", action="Action 1")
             ]
         )
         self._register_workflow(manager, workflow)
@@ -150,7 +150,7 @@ class TestAexecuteMethod:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(
+                Task(
                     name="step1",
                     action="Action 1",
                     agent_config={"role": "Helper"}
@@ -181,7 +181,7 @@ class TestAexecuteMethod:
             name="test_workflow",
             variables={"initial": "value"},
             steps=[
-                WorkflowStep(name="step1", action="Action 1")
+                Task(name="step1", action="Action 1")
             ]
         )
         self._register_workflow(manager, workflow)

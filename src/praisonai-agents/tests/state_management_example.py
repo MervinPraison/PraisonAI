@@ -9,7 +9,7 @@ This example demonstrates various state management features:
 4. State-based decision making
 """
 
-from praisonaiagents import Agent, Task, Agents, Session
+from praisonaiagents import Agent, Task, AgentManager, Session
 from typing import Dict, Any
 import json
 import time
@@ -211,7 +211,7 @@ analyze_project_task = Task(
 )
 
 # Create workflow with state management
-workflow = Agents(
+workflow = AgentManager(
     agents=[project_manager, developer, analyst],
     tasks=[init_task, plan_features_task, implement_features_task, analyze_project_task],
     verbose=1,

@@ -114,7 +114,7 @@ def main():
     # Run the multi-agent workflow
     print("\n🔄 Running multi-agent workflow...")
     
-    agents = Agents(
+    agents = AgentManager(
         agents=[researcher, summarizer, writer],
         tasks=[research_task, summary_task, report_task],
         process="sequential",

@@ -26,5 +26,5 @@ task = Task(
 )
 
 # Run
-agents = Agents(agents=[agent], tasks=[task])
+agents = AgentManager(agents=[agent], tasks=[task])
 agents.start()

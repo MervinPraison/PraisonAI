@@ -62,7 +62,7 @@ research_task1 = Task(
 )
 
 # Create agents with session
-agents_session1 = Agents(
+agents_session1 = AgentManager(
     agents=[research_agent],
     tasks=[research_task1],
     session=session1, output="verbose"
@@ -101,7 +101,7 @@ analysis_task = Task(
     context_variables={"previous_research": str(result1)}
 )
 
-agents_session2 = Agents(
+agents_session2 = AgentManager(
     agents=[analysis_agent],
     tasks=[analysis_task], 
     session=session2, output="verbose"
@@ -151,7 +151,7 @@ synthesis_task = Task(
     }
 )
 
-agents_recovery = Agents(
+agents_recovery = AgentManager(
     agents=[synthesis_agent],
     tasks=[synthesis_task],
     session=recovery_session, output="verbose"
@@ -201,7 +201,7 @@ review_task = Task(
     }
 )
 
-agents_reviewer = Agents(
+agents_reviewer = AgentManager(
     agents=[review_agent],
     tasks=[review_task],
     session=reviewer_session, output="verbose"

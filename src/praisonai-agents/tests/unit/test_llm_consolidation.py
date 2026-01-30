@@ -4,9 +4,9 @@ Tests for LLM parameter consolidation.
 TDD: These tests define the expected behavior for:
 1. Agent accepts `llm=` consolidated usage (new)
 2. Agent accepts `model=` alias (new)
-3. Agent still accepts `llm_config=` and `function_calling_llm=` but maps them internally (deprecated)
+3. Agent rejects `llm_config=` and `function_calling_llm=` (removed in v4)
 4. base_url/api_key remain separate and unchanged
-5. Deprecation warnings emitted only when legacy params are used
+5. No deprecation warnings for valid params
 """
 import pytest
 import warnings
@@ -56,33 +56,27 @@ class TestLLMConsolidation:
         )
         assert agent.llm == "gpt-4o"
     
-    def test_llm_config_still_works_without_warning(self):
-        """llm_config= still works without deprecation warning (backward compat)."""
+    def test_llm_config_removed_in_v4(self):
+        """llm_config= is removed in v4 - should raise TypeError."""
         from praisonaiagents import Agent
         
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        with pytest.raises(TypeError) as exc_info:
             agent = Agent(
                 instructions="Test",
                 llm_config={"temperature": 0.7}
             )
-            # Should NOT emit deprecation warning (per new policy)
-            deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
-            assert len(deprecation_warnings) == 0, f"Unexpected warnings: {[str(x.message) for x in deprecation_warnings]}"
+        assert 'llm_config' in str(exc_info.value)
     
-    def test_function_calling_llm_still_works_without_warning(self):
-        """function_calling_llm= still works without deprecation warning (backward compat)."""
+    def test_function_calling_llm_removed_in_v4(self):
+        """function_calling_llm= is removed in v4 - should raise TypeError."""
         from praisonaiagents import Agent
         
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        with pytest.raises(TypeError) as exc_info:
             agent = Agent(
                 instructions="Test",
                 function_calling_llm="gpt-4o-mini"
             )
-            # Should NOT emit deprecation warning (per new policy)
-            deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
-            assert len(deprecation_warnings) == 0, f"Unexpected warnings: {[str(x.message) for x in deprecation_warnings]}"
+        assert 'function_calling_llm' in str(exc_info.value)
     
     def test_base_url_remains_separate(self):
         """base_url= remains a separate parameter, not consolidated."""

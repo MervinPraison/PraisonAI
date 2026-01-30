@@ -23,7 +23,7 @@ task = Task(
 )
 
 # Run
-agents = Agents(agents=[writer], tasks=[task])
+agents = AgentManager(agents=[writer], tasks=[task])
 result = agents.start()
 
 print("✅ Task completed!")

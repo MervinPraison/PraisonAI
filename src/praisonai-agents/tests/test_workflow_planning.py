@@ -13,7 +13,7 @@ import os
 # Add the package to path for testing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from praisonaiagents import Workflow, WorkflowStep
+from praisonaiagents import Workflow, Task
 from praisonaiagents.workflows import WorkflowManager, WorkflowPlanningConfig, WorkflowMemoryConfig
 
 
@@ -106,7 +106,7 @@ class TestExecutePlanningParameter:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(name="step1", action="Action 1")
+                Task(name="step1", action="Action 1")
             ]
         )
         self._register_workflow(manager, workflow)
@@ -131,7 +131,7 @@ class TestExecutePlanningParameter:
             name="test_workflow",
             planning=True,  # Workflow-level planning enabled
             steps=[
-                WorkflowStep(name="step1", action="Action 1")
+                Task(name="step1", action="Action 1")
             ]
         )
         self._register_workflow(manager, workflow)
@@ -164,7 +164,7 @@ class TestExecuteMemoryParameter:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(name="step1", action="Action 1")
+                Task(name="step1", action="Action 1")
             ]
         )
         self._register_workflow(manager, workflow)
@@ -190,7 +190,7 @@ class TestExecuteMemoryParameter:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(
+                Task(
                     name="step1",
                     action="Action 1",
                     agent_config={"role": "Helper"}
@@ -233,7 +233,7 @@ class TestExecuteStreamParameter:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(name="step1", action="Action 1")
+                Task(name="step1", action="Action 1")
             ]
         )
         self._register_workflow(manager, workflow)
@@ -267,7 +267,7 @@ class TestExecuteVerboseParameter:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(name="step1", action="Action 1")
+                Task(name="step1", action="Action 1")
             ]
         )
         self._register_workflow(manager, workflow)
@@ -291,7 +291,7 @@ class TestExecuteVerboseParameter:
         workflow = Workflow(
             name="test_workflow",
             steps=[
-                WorkflowStep(
+                Task(
                     name="step1",
                     action="Action 1",
                     agent_config={"role": "Helper"}
@@ -333,8 +333,8 @@ class TestExecuteResultsWithVariables:
             name="test_workflow",
             variables={"initial": "value"},
             steps=[
-                WorkflowStep(name="step1", action="Action 1"),
-                WorkflowStep(name="step2", action="Action 2")
+                Task(name="step1", action="Action 1"),
+                Task(name="step2", action="Action 2")
             ]
         )
         self._register_workflow(manager, workflow)
