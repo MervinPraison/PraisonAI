@@ -75,6 +75,11 @@ class Task:
         agent_config: Optional[Dict[str, Any]] = None,
         variables: Optional[Dict[str, Any]] = None,
         # ============================================================
+        # ROBUSTNESS PARAMS (graceful degradation & retry control)
+        # ============================================================
+        skip_on_failure: bool = False,  # Allow workflow to continue if this task fails
+        retry_delay: float = 0.0,  # Seconds between retries (supports exponential backoff)
+        # ============================================================
         # NEW PARAMS FROM WORKFLOWSTEP (Phase 4 Consolidation)
         # ============================================================
         # Action alias - alternative to description (user-friendly)
@@ -155,6 +160,12 @@ class Task:
         self.validation_feedback = None  # Store validation failure feedback for retry attempts
         self.agent_config = agent_config  # Per-task agent configuration {role, goal, backstory, llm}
         self.variables = variables if variables else {}  # Variables for substitution in description
+
+        # ============================================================
+        # ROBUSTNESS PARAMS (graceful degradation & retry control)
+        # ============================================================
+        self.skip_on_failure = skip_on_failure
+        self.retry_delay = retry_delay
 
         # ============================================================
         # NEW PARAMS FROM WORKFLOWSTEP (Phase 4 Consolidation)

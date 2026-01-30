@@ -357,14 +357,15 @@ def repeat(step: Any, until: Optional[Callable[[WorkflowContext], bool]] = None,
 @dataclass
 class Include:
     """
-    Include another recipe as a workflow step.
+    Include another recipe or workflow as a workflow step.
     
-    Enables modular recipe composition - recipes can include other recipes.
+    Enables modular composition - recipes can include other recipes or workflows.
     
     Usage:
         workflow = Workflow(steps=[
             content_writer,
             include("wordpress-publisher"),  # Include another recipe
+            include(workflow=my_other_workflow),  # Include another workflow
         ])
         
     YAML syntax:
@@ -377,17 +378,30 @@ class Include:
               recipe: wordpress-publisher
               input: "{{previous_output}}"
     """
-    recipe: str = ""  # Recipe name or path
+    recipe: Optional[str] = None  # Recipe name or path
+    workflow: Optional[Any] = None  # Workflow instance for composition
     input: Optional[str] = None  # Input override (default: previous_output)
     
-    def __init__(self, recipe: str, input: Optional[str] = None):
+    def __init__(self, recipe: Optional[str] = None, workflow: Optional[Any] = None, input: Optional[str] = None):
+        if recipe is None and workflow is None:
+            raise ValueError("Either 'recipe' or 'workflow' must be provided")
         self.recipe = recipe
+        self.workflow = workflow
         self.input = input
 
 
-def include(recipe: str, input: Optional[str] = None) -> Include:
-    """Include another recipe as a workflow step."""
-    return Include(recipe=recipe, input=input)
+def include(recipe: Optional[str] = None, workflow: Optional[Any] = None, input: Optional[str] = None) -> Include:
+    """Include another recipe or workflow as a workflow step.
+    
+    Args:
+        recipe: Recipe name or path to include
+        workflow: Workflow instance to include
+        input: Input override (default: previous_output)
+    
+    Returns:
+        Include object for workflow composition
+    """
+    return Include(recipe=recipe, workflow=workflow, input=input)
 
 
 # Maximum nesting depth for patterns (prevents stack overflow)
@@ -440,13 +454,15 @@ class If:
         self.else_steps = else_steps or []
 
 
-def if_(
+def when(
     condition: str,
     then_steps: List[Any],
     else_steps: Optional[List[Any]] = None
 ) -> If:
     """
     Create a conditional branching step.
+    
+    This is the preferred function for conditional branching (cleaner name than if_).
     
     Args:
         condition: Condition expression with {{var}} placeholders
@@ -457,12 +473,40 @@ def if_(
         If object for conditional execution
     
     Example:
-        if_(
+        when(
             condition="{{score}} > 80",
             then_steps=[approve_agent],
             else_steps=[reject_agent]
         )
     """
+    return If(condition=condition, then_steps=then_steps, else_steps=else_steps)
+
+
+def if_(
+    condition: str,
+    then_steps: List[Any],
+    else_steps: Optional[List[Any]] = None
+) -> If:
+    """
+    Create a conditional branching step.
+    
+    .. deprecated::
+        Use :func:`when` instead. `if_` will be removed in a future version.
+    
+    Args:
+        condition: Condition expression with {{var}} placeholders
+        then_steps: Steps to execute if condition is true
+        else_steps: Steps to execute if condition is false (optional)
+    
+    Returns:
+        If object for conditional execution
+    """
+    import warnings
+    warnings.warn(
+        "if_() is deprecated, use when() instead for cleaner syntax",
+        DeprecationWarning,
+        stacklevel=2
+    )
     return If(condition=condition, then_steps=then_steps, else_steps=else_steps)
 
 
@@ -858,6 +902,11 @@ class Workflow:
     execution: Optional[Any] = None  # Union[str, ExecutionConfig] - execution control
     caching: Optional[Any] = None  # Union[bool, CachingConfig] - caching
     
+    # ============================================================
+    # ROBUSTNESS PARAMS (debugging & audit trail)
+    # ============================================================
+    history: bool = False  # Enable execution history tracking for debugging
+    
     # Status tracking
     status: str = "not_started"  # not_started, running, completed, failed
     step_statuses: Dict[str, str] = field(default_factory=dict)  # {step_name: status}
@@ -880,6 +929,8 @@ class Workflow:
     _guardrails_config: Optional[Any] = field(default=None, repr=False)
     _web_config: Optional[Any] = field(default=None, repr=False)
     _reflection_config: Optional[Any] = field(default=None, repr=False)
+    # Execution history for debugging (only populated when history=True)
+    _execution_history: List[Dict[str, Any]] = field(default_factory=list, repr=False)
     
     def __post_init__(self):
         """Resolve consolidated params to internal values."""
@@ -1004,6 +1055,20 @@ class Workflow:
                 self._session_dedup_cache = SessionDeduplicationCache()
             except ImportError:
                 pass
+    
+    def get_history(self) -> List[Dict[str, Any]]:
+        """Return execution trace for debugging.
+        
+        Returns a list of step execution records, each containing:
+        - step: Step name
+        - timestamp: ISO format timestamp
+        - success: Whether the step succeeded
+        - output: Truncated output (first 500 chars)
+        - error: Error message if failed
+        
+        Only populated when history=True is set on the workflow.
+        """
+        return self._execution_history
     
     def to_dict(self) -> Dict[str, Any]:
         return {
