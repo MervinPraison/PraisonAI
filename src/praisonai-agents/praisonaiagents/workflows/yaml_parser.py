@@ -250,7 +250,7 @@ class YAMLWorkflowParser:
         workflow_config = data.get('workflow', {})
         planning = workflow_config.get('planning', False)
         planning_llm = workflow_config.get('planning_llm')
-        default_llm = workflow_config.get('default_llm')
+        llm = workflow_config.get('llm') or workflow_config.get('default_llm')  # llm preferred, default_llm for backward compat
         reasoning = workflow_config.get('reasoning', False)
         verbose = workflow_config.get('verbose', False)
         memory_config = workflow_config.get('memory_config')
@@ -353,7 +353,7 @@ class YAMLWorkflowParser:
             steps=steps,
             variables=variables,
             planning=planning_value,
-            default_llm=default_llm,
+            llm=llm,
             process=process,  # Process type: sequential or hierarchical
             manager_llm=manager_llm,  # LLM for manager agent (hierarchical mode)
             output=workflow_output,  # Pass output mode to Workflow

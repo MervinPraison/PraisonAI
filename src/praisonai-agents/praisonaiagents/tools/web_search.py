@@ -8,7 +8,7 @@ Search Provider Priority:
 2. Brave (requires BRAVE_API_KEY + requests)
 3. Exa (requires EXA_API_KEY + exa_py)
 4. You.com (requires YDC_API_KEY + youdotcom)
-5. DuckDuckGo (requires duckduckgo_search package, no API key)
+5. DuckDuckGo (requires ddgs package, no API key)
 6. SearxNG (requires requests + running SearxNG instance)
 
 Usage:
@@ -58,8 +58,8 @@ def _check_youdotcom() -> tuple[bool, Optional[str]]:
 
 def _check_duckduckgo() -> tuple[bool, Optional[str]]:
     """Check if DuckDuckGo is available."""
-    if util.find_spec("duckduckgo_search") is None:
-        return False, "duckduckgo_search package not installed"
+    if util.find_spec("ddgs") is None:
+        return False, "ddgs package not installed"
     return True, None
 
 
@@ -217,7 +217,7 @@ def _search_brave(query: str, max_results: int = 5, extra_snippets: bool = True)
 def _search_duckduckgo(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
     """Search using DuckDuckGo with retry logic."""
     import time
-    from duckduckgo_search import DDGS
+    from ddgs import DDGS
     
     max_retries = 3
     retry_delay = 1.0

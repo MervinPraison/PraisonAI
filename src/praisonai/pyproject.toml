@@ -12,7 +12,7 @@ dependencies = [
     "rich>=13.7",
     "markdown>=3.5",
     "pyparsing>=3.0.0",
-    "praisonaiagents>=1.2.0",
+    "praisonaiagents>=1.2.1",
     "python-dotenv>=0.19.0",
     "litellm>=1.81.0",
     "PyYAML>=6.0",
@@ -69,7 +69,7 @@ realtime = [
     "websockets>=12.0",
     "plotly>=5.24.0",
     "yfinance>=0.2.44",
-    "duckduckgo_search>=6.3.0",
+    "ddgs>=8.0.0",
     "sqlalchemy>=2.0.36"
 ]
 call = [

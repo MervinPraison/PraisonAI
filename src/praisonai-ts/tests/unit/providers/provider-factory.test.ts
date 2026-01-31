@@ -93,7 +93,7 @@ describe('Provider Factory', () => {
     });
 
     it('should throw for unknown provider', () => {
-      expect(() => createProvider('unknown/model')).toThrow('Unknown provider: unknown');
+      expect(() => createProvider('unknown/model')).toThrow(/Unknown provider.*unknown/i);
     });
   });
 

@@ -130,7 +130,7 @@ class TestPluginDiscovery:
         from praisonaiagents.plugins.discovery import discover_plugins
         
         with tempfile.TemporaryDirectory() as tmpdir:
-            plugins = discover_plugins([tmpdir])
+            plugins = discover_plugins([tmpdir], include_defaults=False)
             assert plugins == []
     
     def test_discover_plugins_with_valid_plugin(self):
@@ -153,7 +153,7 @@ def get_weather(city: str) -> str:
     return f"Sunny in {city}"
 ''')
             
-            plugins = discover_plugins([tmpdir])
+            plugins = discover_plugins([tmpdir], include_defaults=False)
             
             assert len(plugins) == 1
             assert plugins[0]["name"] == "Weather Plugin"
@@ -182,7 +182,7 @@ def foo():
     pass
 ''')
             
-            plugins = discover_plugins([tmpdir])
+            plugins = discover_plugins([tmpdir], include_defaults=False)
             
             assert len(plugins) == 1
             assert plugins[0]["name"] == "Valid Plugin"
@@ -201,7 +201,7 @@ Version: 1.0.0
 """
 ''')
             
-            plugins = discover_plugins([tmpdir])
+            plugins = discover_plugins([tmpdir], include_defaults=False)
             assert len(plugins) == 0
 
 
