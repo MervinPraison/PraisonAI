@@ -3,6 +3,7 @@
 import pytest
 import tempfile
 import json
+import importlib
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -47,15 +48,29 @@ class TestBaseEvaluator:
     
     def test_before_run_verbose(self):
         """Test before_run hook with verbose logging."""
-        evaluator = ConcreteEvaluator(verbose=True)
-        with patch('praisonaiagents.eval.base.logger') as mock_logger:
+        # Reload module and create fresh class to get correct logger binding
+        import praisonaiagents.eval.base as eval_base
+        importlib.reload(eval_base)
+        
+        class FreshEvaluator(eval_base.BaseEvaluator):
+            def run(self, **kwargs): return {}
+        
+        evaluator = FreshEvaluator(verbose=True)
+        with patch.object(eval_base, 'logger') as mock_logger:
             evaluator.before_run()
             mock_logger.info.assert_called()
     
     def test_after_run_verbose(self):
         """Test after_run hook with verbose logging."""
-        evaluator = ConcreteEvaluator(verbose=True)
-        with patch('praisonaiagents.eval.base.logger') as mock_logger:
+        # Reload module and create fresh class to get correct logger binding
+        import praisonaiagents.eval.base as eval_base
+        importlib.reload(eval_base)
+        
+        class FreshEvaluator(eval_base.BaseEvaluator):
+            def run(self, **kwargs): return {}
+        
+        evaluator = FreshEvaluator(verbose=True)
+        with patch.object(eval_base, 'logger') as mock_logger:
             evaluator.after_run({"result": "test"})
             mock_logger.info.assert_called()
     
@@ -124,16 +139,30 @@ class TestBaseEvaluator:
     @pytest.mark.asyncio
     async def test_async_before_run(self):
         """Test async before_run hook."""
-        evaluator = ConcreteEvaluator(verbose=True)
-        with patch('praisonaiagents.eval.base.logger') as mock_logger:
+        # Reload module and create fresh class to get correct logger binding
+        import praisonaiagents.eval.base as eval_base
+        importlib.reload(eval_base)
+        
+        class FreshEvaluator(eval_base.BaseEvaluator):
+            def run(self, **kwargs): return {}
+        
+        evaluator = FreshEvaluator(verbose=True)
+        with patch.object(eval_base, 'logger') as mock_logger:
             await evaluator.async_before_run()
             mock_logger.info.assert_called()
     
     @pytest.mark.asyncio
     async def test_async_after_run(self):
         """Test async after_run hook."""
-        evaluator = ConcreteEvaluator(verbose=True)
-        with patch('praisonaiagents.eval.base.logger') as mock_logger:
+        # Reload module and create fresh class to get correct logger binding
+        import praisonaiagents.eval.base as eval_base
+        importlib.reload(eval_base)
+        
+        class FreshEvaluator(eval_base.BaseEvaluator):
+            def run(self, **kwargs): return {}
+        
+        evaluator = FreshEvaluator(verbose=True)
+        with patch.object(eval_base, 'logger') as mock_logger:
             await evaluator.async_after_run({"result": "test"})
             mock_logger.info.assert_called()
     

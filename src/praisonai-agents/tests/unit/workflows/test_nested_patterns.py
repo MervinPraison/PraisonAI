@@ -294,6 +294,8 @@ class TestConditionalBranching:
     
     def test_if_true_branch(self):
         """Test if: executes then branch when condition is true."""
+        # Reimport all classes fresh to avoid module cache pollution
+        from praisonaiagents import Workflow, WorkflowContext, StepResult
         from praisonaiagents.workflows import if_
         
         results = []
@@ -325,6 +327,8 @@ class TestConditionalBranching:
     
     def test_if_false_branch(self):
         """Test if: executes else branch when condition is false."""
+        # Reimport all classes fresh to avoid module cache pollution
+        from praisonaiagents import Workflow, WorkflowContext, StepResult
         from praisonaiagents.workflows import if_
         
         results = []
@@ -382,6 +386,8 @@ class TestConditionalBranching:
     
     def test_if_string_condition(self):
         """Test if: with string equality condition."""
+        # Reimport all classes fresh to avoid module cache pollution
+        from praisonaiagents import Workflow, WorkflowContext, StepResult
         from praisonaiagents.workflows import if_
         
         results = []
@@ -412,6 +418,8 @@ class TestConditionalBranching:
     
     def test_if_contains_condition(self):
         """Test if: with 'contains' condition."""
+        # Reimport all classes fresh to avoid module cache pollution
+        from praisonaiagents import Workflow, WorkflowContext, StepResult
         from praisonaiagents.workflows import if_
         
         results = []
@@ -441,7 +449,9 @@ class TestConditionalBranching:
     
     def test_if_inside_loop(self):
         """Test if: pattern inside a loop."""
-        from praisonaiagents.workflows import if_
+        # Reimport all classes fresh to avoid module cache pollution
+        from praisonaiagents import Workflow, WorkflowContext, StepResult
+        from praisonaiagents.workflows import if_, loop
         
         results = []
         
@@ -495,6 +505,7 @@ class TestYAMLParsing:
     def test_parse_nested_loop_yaml(self):
         """Test parsing nested loop from YAML."""
         from praisonaiagents.workflows.yaml_parser import YAMLWorkflowParser
+        from praisonaiagents.workflows import Loop
         import tempfile
         import os
         
@@ -535,7 +546,8 @@ steps:
             # Should have parsed the nested loop structure
             assert len(workflow.steps) >= 1
             first_step = workflow.steps[0]
-            assert isinstance(first_step, Loop)
+            # Check by class name to handle module cache pollution
+            assert first_step.__class__.__name__ == "Loop"
         finally:
             os.unlink(yaml_path)
     
