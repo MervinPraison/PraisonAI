@@ -12,7 +12,7 @@ dependencies = [
     "rich>=13.7",
     "markdown>=3.5",
     "pyparsing>=3.0.0",
-    "praisonaiagents>=1.2.1",
+    "praisonaiagents>=1.2.2",
     "python-dotenv>=0.19.0",
     "litellm>=1.81.0",
     "PyYAML>=6.0",
@@ -97,6 +97,31 @@ acp = [
 lite = [
     # Minimal installation without TUI, litellm - just core agent functionality
     # Use: pip install praisonai[lite] for lightweight deployments
+]
+all = [
+    # Full installation with all main features
+    "chainlit>=2.8.5,<=2.9.4",
+    "sqlalchemy>=2.0.36",
+    "aiosqlite>=0.20.0",
+    "greenlet>=3.0.3",
+    "gradio>=4.26.0",
+    "flask>=3.0.0",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.34.0",
+    "sse-starlette>=1.6.0",
+    "tavily-python==0.5.0",
+    "crawl4ai>=0.7.0",
+    "playwright>=1.47.0",
+    "websockets>=12.0",
+    "plotly>=5.24.0",
+    "yfinance>=0.2.44",
+    "ddgs>=8.0.0",
+]
+bot = [
+    # Dependencies for Telegram, Discord, and Slack bots
+    "python-telegram-bot>=20.0",
+    "discord.py>=2.0.0",
+    "slack_sdk>=3.0.0",
 ]
 dev = [
     "textual-dev>=1.0.0",
