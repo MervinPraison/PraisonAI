@@ -1037,6 +1037,19 @@ wheels = [
 ]
 
 [[package]]
+name = "discord-py"
+version = "2.6.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "audioop-lts", marker = "python_full_version >= '3.13'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ce/e7/9b1dbb9b2fc07616132a526c05af23cfd420381793968a189ee08e12e35f/discord_py-2.6.4.tar.gz", hash = "sha256:44384920bae9b7a073df64ae9b14c8cf85f9274b5ad5d1d07bd5a67539de2da9", size = 1092623, upload-time = "2025-10-08T21:45:43.593Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ca/ae/3d3a89b06f005dc5fa8618528dde519b3ba7775c365750f7932b9831ef05/discord_py-2.6.4-py3-none-any.whl", hash = "sha256:2783b7fb7f8affa26847bfc025144652c294e8fe6e0f8877c67ed895749eb227", size = 1209284, upload-time = "2025-10-08T21:45:41.679Z" },
+]
+
+[[package]]
 name = "diskcache"
 version = "5.6.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1588,9 +1601,28 @@ wheels = [
 name = "h11"
 version = "0.14.0"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version == '3.13.*'",
+    "python_full_version >= '3.12.4' and python_full_version < '3.13'",
+    "python_full_version >= '3.12' and python_full_version < '3.12.4'",
+    "python_full_version == '3.11.*'",
+    "python_full_version < '3.11'",
+]
 sdist = { url = "https://files.pythonhosted.org/packages/f5/38/3af3d3633a34a3316095b39c8e8fb4853a28a536e55d347bd8d8e9a14b03/h11-0.14.0.tar.gz", hash = "sha256:8f19fbbe99e72420ff35c00b27a34cb9937e902a8b810e2c88300c6f0a3b699d", size = 100418, upload-time = "2022-09-25T15:40:01.519Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/95/04/ff642e65ad6b90db43e668d70ffb6736436c7ce41fcc549f4e9472234127/h11-0.14.0-py3-none-any.whl", hash = "sha256:e3fe4ac4b851c468cc8363d500db52c2ead036020723024a109d37346efaa761", size = 58259, upload-time = "2022-09-25T15:39:59.68Z" },
+]
+
+[[package]]
+name = "h11"
+version = "0.16.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.14'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/01/ee/02a2c011bdab74c6fb3c75474d40b3052059d95df7e73351460c8588d963/h11-0.16.0.tar.gz", hash = "sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1", size = 101250, upload-time = "2025-04-24T03:35:25.427Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl", hash = "sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86", size = 37515, upload-time = "2025-04-24T03:35:24.344Z" },
 ]
 
 [[package]]
@@ -1632,13 +1664,36 @@ wheels = [
 name = "httpcore"
 version = "1.0.7"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version == '3.13.*'",
+    "python_full_version >= '3.12.4' and python_full_version < '3.13'",
+    "python_full_version >= '3.12' and python_full_version < '3.12.4'",
+    "python_full_version == '3.11.*'",
+    "python_full_version < '3.11'",
+]
 dependencies = [
-    { name = "certifi" },
-    { name = "h11" },
+    { name = "certifi", marker = "python_full_version < '3.14'" },
+    { name = "h11", version = "0.14.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/6a/41/d7d0a89eb493922c37d343b607bc1b5da7f5be7e383740b4753ad8943e90/httpcore-1.0.7.tar.gz", hash = "sha256:8551cb62a169ec7162ac7be8d4817d561f60e08eaa485234898414bb5a8a0b4c", size = 85196, upload-time = "2024-11-15T12:30:47.531Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/87/f5/72347bc88306acb359581ac4d52f23c0ef445b57157adedb9aee0cd689d2/httpcore-1.0.7-py3-none-any.whl", hash = "sha256:a3fff8f43dc260d5bd363d9f9cf1830fa3a458b332856f34282de498ed420edd", size = 78551, upload-time = "2024-11-15T12:30:45.782Z" },
+]
+
+[[package]]
+name = "httpcore"
+version = "1.0.9"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.14'",
+]
+dependencies = [
+    { name = "certifi", marker = "python_full_version >= '3.14'" },
+    { name = "h11", version = "0.16.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/06/94/82699a10bca87a5556c9c59b5963f2d039dbd239f25bc2a63907a05a14cb/httpcore-1.0.9.tar.gz", hash = "sha256:6e34463af53fd2ab5d807f399a9b45ea31c3dfa2276f15a2c3f00afff6e176e8", size = 85484, upload-time = "2025-04-24T22:06:22.219Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7e/f5/f66802a942d491edb555dd61e3a9961140fd64c90bce1eafd741609d334d/httpcore-1.0.9-py3-none-any.whl", hash = "sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55", size = 78784, upload-time = "2025-04-24T22:06:20.566Z" },
 ]
 
 [[package]]
@@ -1684,7 +1739,8 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "certifi" },
-    { name = "httpcore" },
+    { name = "httpcore", version = "1.0.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
+    { name = "httpcore", version = "1.0.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
     { name = "idna" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b1/df/48c586a5fe32a0f01324ee087459e112ebb7224f646c0b5023f5e79e9956/httpx-0.28.1.tar.gz", hash = "sha256:75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc", size = 141406, upload-time = "2024-12-06T15:37:23.222Z" }
@@ -3840,6 +3896,24 @@ acp = [
 agentops = [
     { name = "agentops" },
 ]
+all = [
+    { name = "aiosqlite" },
+    { name = "chainlit" },
+    { name = "crawl4ai" },
+    { name = "ddgs" },
+    { name = "fastapi" },
+    { name = "flask" },
+    { name = "gradio" },
+    { name = "greenlet" },
+    { name = "playwright" },
+    { name = "plotly" },
+    { name = "sqlalchemy" },
+    { name = "sse-starlette" },
+    { name = "tavily-python" },
+    { name = "uvicorn" },
+    { name = "websockets" },
+    { name = "yfinance" },
+]
 api = [
     { name = "fastapi" },
     { name = "flask" },
@@ -3857,6 +3931,11 @@ autogen-v4 = [
     { name = "autogen-ext", extra = ["openai"] },
     { name = "crewai" },
     { name = "praisonai-tools" },
+]
+bot = [
+    { name = "discord-py" },
+    { name = "python-telegram-bot" },
+    { name = "slack-sdk" },
 ]
 call = [
     { name = "fastapi" },
@@ -3921,6 +4000,7 @@ ui = [
 requires-dist = [
     { name = "agent-client-protocol", marker = "extra == 'acp'", specifier = ">=0.7.0" },
     { name = "agentops", marker = "extra == 'agentops'", specifier = ">=0.3.12" },
+    { name = "aiosqlite", marker = "extra == 'all'", specifier = ">=0.20.0" },
     { name = "aiosqlite", marker = "extra == 'chat'", specifier = ">=0.20.0" },
     { name = "aiosqlite", marker = "extra == 'code'", specifier = ">=0.20.0" },
     { name = "aiosqlite", marker = "extra == 'realtime'", specifier = ">=0.20.0" },
@@ -3928,22 +4008,30 @@ requires-dist = [
     { name = "autogen-agentchat", marker = "extra == 'autogen-v4'", specifier = ">=0.4.0" },
     { name = "autogen-core", marker = "extra == 'autogen-v4'", specifier = ">=0.4.0" },
     { name = "autogen-ext", extras = ["openai"], marker = "extra == 'autogen-v4'", specifier = ">=0.4.0" },
+    { name = "chainlit", marker = "extra == 'all'", specifier = ">=2.8.5,<=2.9.4" },
     { name = "chainlit", marker = "extra == 'chat'", specifier = ">=2.8.5,<=2.9.4" },
     { name = "chainlit", marker = "extra == 'code'", specifier = ">=2.8.5,<=2.9.4" },
     { name = "chainlit", marker = "extra == 'realtime'", specifier = ">=2.8.5,<=2.9.4" },
     { name = "chainlit", marker = "extra == 'ui'", specifier = ">=2.8.5,<=2.9.4" },
+    { name = "crawl4ai", marker = "extra == 'all'", specifier = ">=0.7.0" },
     { name = "crawl4ai", marker = "extra == 'chat'", specifier = ">=0.7.0" },
     { name = "crawl4ai", marker = "extra == 'code'", specifier = ">=0.7.0" },
     { name = "crawl4ai", marker = "extra == 'realtime'", specifier = ">=0.7.0" },
     { name = "crewai", marker = "extra == 'autogen'" },
     { name = "crewai", marker = "extra == 'autogen-v4'" },
     { name = "crewai", marker = "extra == 'crewai'", specifier = ">=0.157.0" },
+    { name = "ddgs", marker = "extra == 'all'", specifier = ">=8.0.0" },
     { name = "ddgs", marker = "extra == 'realtime'", specifier = ">=8.0.0" },
+    { name = "discord-py", marker = "extra == 'bot'", specifier = ">=2.0.0" },
+    { name = "fastapi", marker = "extra == 'all'", specifier = ">=0.115.0" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115.0" },
     { name = "fastapi", marker = "extra == 'call'", specifier = ">=0.95.0" },
     { name = "flaml", extras = ["automl"], marker = "extra == 'call'", specifier = ">=2.3.1" },
+    { name = "flask", marker = "extra == 'all'", specifier = ">=3.0.0" },
     { name = "flask", marker = "extra == 'api'", specifier = ">=3.0.0" },
+    { name = "gradio", marker = "extra == 'all'", specifier = ">=4.26.0" },
     { name = "gradio", marker = "extra == 'gradio'", specifier = ">=4.26.0" },
+    { name = "greenlet", marker = "extra == 'all'", specifier = ">=3.0.3" },
     { name = "greenlet", marker = "extra == 'chat'", specifier = ">=3.0.3" },
     { name = "greenlet", marker = "extra == 'code'", specifier = ">=3.0.3" },
     { name = "greenlet", marker = "extra == 'realtime'", specifier = ">=3.0.3" },
@@ -3951,28 +4039,35 @@ requires-dist = [
     { name = "litellm", specifier = ">=1.81.0" },
     { name = "markdown", specifier = ">=3.5" },
     { name = "mcp", specifier = ">=1.20.0" },
+    { name = "playwright", marker = "extra == 'all'", specifier = ">=1.47.0" },
     { name = "playwright", marker = "extra == 'chat'", specifier = ">=1.47.0" },
     { name = "playwright", marker = "extra == 'code'", specifier = ">=1.47.0" },
+    { name = "plotly", marker = "extra == 'all'", specifier = ">=5.24.0" },
     { name = "plotly", marker = "extra == 'realtime'", specifier = ">=5.24.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen-v4'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.1.0" },
-    { name = "praisonaiagents", specifier = ">=1.2.1" },
+    { name = "praisonaiagents", specifier = ">=1.2.2" },
     { name = "pyautogen", marker = "extra == 'autogen'", specifier = "==0.2.29" },
     { name = "pyngrok", marker = "extra == 'call'", specifier = ">=1.4.0" },
     { name = "pyparsing", specifier = ">=3.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
     { name = "python-dotenv", specifier = ">=0.19.0" },
+    { name = "python-telegram-bot", marker = "extra == 'bot'", specifier = ">=20.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich", specifier = ">=13.7" },
     { name = "rich", marker = "extra == 'call'" },
     { name = "rich", marker = "extra == 'chat'" },
+    { name = "slack-sdk", marker = "extra == 'bot'", specifier = ">=3.0.0" },
+    { name = "sqlalchemy", marker = "extra == 'all'", specifier = ">=2.0.36" },
     { name = "sqlalchemy", marker = "extra == 'chat'", specifier = ">=2.0.36" },
     { name = "sqlalchemy", marker = "extra == 'code'", specifier = ">=2.0.36" },
     { name = "sqlalchemy", marker = "extra == 'realtime'", specifier = ">=2.0.36" },
     { name = "sqlalchemy", marker = "extra == 'ui'", specifier = ">=2.0.36" },
+    { name = "sse-starlette", marker = "extra == 'all'", specifier = ">=1.6.0" },
     { name = "sse-starlette", marker = "extra == 'api'", specifier = ">=1.6.0" },
+    { name = "tavily-python", marker = "extra == 'all'", specifier = "==0.5.0" },
     { name = "tavily-python", marker = "extra == 'chat'", specifier = "==0.5.0" },
     { name = "tavily-python", marker = "extra == 'code'", specifier = "==0.5.0" },
     { name = "tavily-python", marker = "extra == 'realtime'", specifier = "==0.5.0" },
@@ -3980,13 +4075,16 @@ requires-dist = [
     { name = "textual-dev", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "twilio", marker = "extra == 'call'", specifier = ">=7.0.0" },
     { name = "typer", specifier = ">=0.9.0" },
+    { name = "uvicorn", marker = "extra == 'all'", specifier = ">=0.34.0" },
     { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.34.0" },
     { name = "uvicorn", marker = "extra == 'call'", specifier = ">=0.20.0" },
+    { name = "websockets", marker = "extra == 'all'", specifier = ">=12.0" },
     { name = "websockets", marker = "extra == 'call'", specifier = ">=12.0" },
     { name = "websockets", marker = "extra == 'realtime'", specifier = ">=12.0" },
+    { name = "yfinance", marker = "extra == 'all'", specifier = ">=0.2.44" },
     { name = "yfinance", marker = "extra == 'realtime'", specifier = ">=0.2.44" },
 ]
-provides-extras = ["ui", "gradio", "api", "agentops", "chat", "code", "realtime", "call", "train", "crewai", "autogen", "autogen-v4", "acp", "lite", "dev"]
+provides-extras = ["ui", "gradio", "api", "agentops", "chat", "code", "realtime", "call", "train", "crewai", "autogen", "autogen-v4", "acp", "lite", "all", "bot", "dev"]
 
 [[package]]
 name = "praisonai-tools"
@@ -4002,7 +4100,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.2.1"
+version = "1.2.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -4011,9 +4109,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/22/cf/d6f6eea03a44ff82c074352ab3a1e1ab60132f4df4de06b53ef1e3bbb9c9/praisonaiagents-1.2.1.tar.gz", hash = "sha256:e9531f64481a7b107cdaf976336019d304307ed858224e01cca83d36dd27b674", size = 1163122, upload-time = "2026-01-31T16:52:43.831Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a5/fd/dc1591930e10108c04b21de9e620ef0910ad0d7c34ecb1a7616ce0ccc8c7/praisonaiagents-1.2.2.tar.gz", hash = "sha256:c790107dfd278a46c52a0191b77c13900f091fb5a7051195cb1926d9ca19e991", size = 1163165, upload-time = "2026-01-31T20:23:29.288Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/13/28/2c3f2a1b88441a573d6d6b0898c75196f7ee56cb095adf3056748cce8b6d/praisonaiagents-1.2.1-py3-none-any.whl", hash = "sha256:c1fd251d8b80f6c21d5daaa1010908e66420600e153cc5e44da41fc4ddf3daee", size = 1156029, upload-time = "2026-01-31T16:52:41.531Z" },
+    { url = "https://files.pythonhosted.org/packages/0b/21/406275ba1c6f1d7dcef710c7aa62a6fccb5cafbbb4883a39fe48715837ea/praisonaiagents-1.2.2-py3-none-any.whl", hash = "sha256:8732cdd90526b1fba0feb192c97b8c0b2387eda2827cf89d7d9867cd02aeaad8", size = 1156030, upload-time = "2026-01-31T20:23:27.414Z" },
 ]
 
 [[package]]
@@ -4707,6 +4805,19 @@ wheels = [
 ]
 
 [[package]]
+name = "python-telegram-bot"
+version = "22.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpcore", version = "1.0.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
+    { name = "httpx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/cd/9b/8df90c85404166a6631e857027866263adb27440d8af1dbeffbdc4f0166c/python_telegram_bot-22.6.tar.gz", hash = "sha256:50ae8cc10f8dff01445628687951020721f37956966b92a91df4c1bf2d113742", size = 1503761, upload-time = "2026-01-24T13:57:00.269Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/13/97/7298f0e1afe3a1ae52ff4c5af5087ed4de319ea73eb3b5c8c4dd4e76e708/python_telegram_bot-22.6-py3-none-any.whl", hash = "sha256:e598fe171c3dde2dfd0f001619ee9110eece66761a677b34719fb18934935ce0", size = 737267, upload-time = "2026-01-24T13:56:58.06Z" },
+]
+
+[[package]]
 name = "pytz"
 version = "2024.2"
 source = { registry = "https://pypi.org/simple" }
@@ -5346,6 +5457,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
+]
+
+[[package]]
+name = "slack-sdk"
+version = "3.39.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b6/dd/645f3eb93fce38eadbb649e85684730b1fc3906c2674ca59bddc2ca2bd2e/slack_sdk-3.39.0.tar.gz", hash = "sha256:6a56be10dc155c436ff658c6b776e1c082e29eae6a771fccf8b0a235822bbcb1", size = 247207, upload-time = "2025-11-20T15:27:57.556Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ef/1f/32bcf088e535c1870b1a1f2e3b916129c66fdfe565a793316317241d41e5/slack_sdk-3.39.0-py2.py3-none-any.whl", hash = "sha256:b1556b2f5b8b12b94e5ea3f56c4f2c7f04462e4e1013d325c5764ff118044fa8", size = 309850, upload-time = "2025-11-20T15:27:55.729Z" },
 ]
 
 [[package]]
@@ -6032,7 +6152,8 @@ version = "0.40.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
-    { name = "h11" },
+    { name = "h11", version = "0.14.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
+    { name = "h11", version = "0.16.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
     { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c3/d1/8f3c683c9561a4e6689dd3b1d345c815f10f86acd044ee1fb9a4dcd0b8c5/uvicorn-0.40.0.tar.gz", hash = "sha256:839676675e87e73694518b5574fd0f24c9d97b46bea16df7b8c05ea1a51071ea", size = 81761, upload-time = "2025-12-21T14:16:22.45Z" }
@@ -6290,7 +6411,8 @@ name = "wsproto"
 version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11" },
+    { name = "h11", version = "0.14.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
+    { name = "h11", version = "0.16.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c9/4a/44d3c295350d776427904d73c189e10aeae66d7f555bb2feee16d1e4ba5a/wsproto-1.2.0.tar.gz", hash = "sha256:ad565f26ecb92588a3e43bc3d96164de84cd9902482b130d0ddbaa9664a85065", size = 53425, upload-time = "2022-08-23T19:58:21.447Z" }
 wheels = [
