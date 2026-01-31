@@ -16,6 +16,7 @@ from typing import Any, Dict
 # =============================================================================
 
 MEMORY_PRESETS: Dict[str, Dict[str, Any]] = {
+    # Backend presets
     "file": {"backend": "file"},
     "sqlite": {"backend": "sqlite"},
     "redis": {"backend": "redis"},
@@ -23,6 +24,8 @@ MEMORY_PRESETS: Dict[str, Dict[str, Any]] = {
     "postgresql": {"backend": "postgres"},
     "mem0": {"backend": "mem0"},
     "mongodb": {"backend": "mongodb"},
+    # Feature presets
+    "learn": {"backend": "file", "learn": True},  # Enable Agent Learn with file backend
 }
 
 MEMORY_URL_SCHEMES: Dict[str, str] = {
