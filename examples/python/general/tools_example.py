@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.tools import get_article, get_news_sources, get_articles_from_source, get_trending_topics
 
 # Create Wikipedia agent
@@ -22,7 +22,7 @@ news_task = Task(
 
 
 # Run agent
-agents = AgentManager(
+agents = AgentTeam(
     agents=[news_agent],
     tasks=[news_task],
     process="sequential"

@@ -4,7 +4,7 @@ from praisonaiagents.tools import duckduckgo
 agent = Agent(instructions="You are a Image Analysis Agent", tools=[duckduckgo])
 agent.start("I want to go London next week, find me a good hotel and flight")
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 
 # Create Image Analysis Agent
 image_agent = Agent(
@@ -36,7 +36,7 @@ task2 = Task(
 )
 
 # Create Agents instance
-agents = AgentManager(
+agents = AgentTeam(
     agents=[image_agent],
     tasks=[task1, task2],
     process="sequential",

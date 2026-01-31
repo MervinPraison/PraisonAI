@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, AgentManager
+from praisonaiagents import Agent, Task, AgentTeam
 
 def search_web(query: str) -> str:
     return "AI trends: LLMs, multimodal AI, autonomous agents"
@@ -15,7 +15,7 @@ task = Task(
     agent=agent
 )
 
-agents = AgentManager(
+agents = AgentTeam(
     agents=[agent],
     tasks=[task],
     planning=True,

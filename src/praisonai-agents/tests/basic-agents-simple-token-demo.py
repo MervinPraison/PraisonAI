@@ -7,7 +7,7 @@ after running a PraisonAI agent. Shows how to get token usage
 information from your agent workflows.
 """
 
-from praisonaiagents import AgentManager, Agent, Task
+from praisonaiagents import AgentTeam, Agent, Task
 
 def main():
     # Create an agent to answer questions
@@ -29,7 +29,7 @@ def main():
     )
     
     # Initialize the agents system
-    agents = AgentManager(
+    agents = AgentTeam(
         agents=[question_agent],
         tasks=[answer_task],
         verbose=True

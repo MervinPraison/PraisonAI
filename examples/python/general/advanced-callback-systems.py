@@ -5,7 +5,7 @@ This example demonstrates callback systems using PraisonAI's built-in
 callback functionality for monitoring agent interactions and tool usage.
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.display_callback import register_display_callback
 from praisonaiagents.tools import internet_search
 

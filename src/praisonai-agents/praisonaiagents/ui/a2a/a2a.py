@@ -12,7 +12,7 @@ from praisonaiagents.ui.a2a.agent_card import generate_agent_card
 from praisonaiagents.ui.a2a.task_store import TaskStore
 
 if TYPE_CHECKING:
-    from praisonaiagents import Agent, AgentManager
+    from praisonaiagents import Agent, AgentTeam
     from fastapi import APIRouter
 
 logger = logging.getLogger(__name__)

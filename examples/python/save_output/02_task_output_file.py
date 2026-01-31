@@ -4,7 +4,7 @@ Example 2: Save Agent Output Using Task.output_file
 Task output is automatically saved to the specified file.
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 
 # Create agent
 writer = Agent(
@@ -23,7 +23,7 @@ task = Task(
 )
 
 # Run
-agents = AgentManager(agents=[writer], tasks=[task])
+agents = AgentTeam(agents=[writer], tasks=[task])
 result = agents.start()
 
 print("✅ Task completed!")

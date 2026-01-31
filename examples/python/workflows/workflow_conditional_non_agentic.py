@@ -5,7 +5,7 @@ Demonstrates using should_run to conditionally execute steps
 based on input or previous results.
 """
 
-from praisonaiagents import Workflow, Task, WorkflowContext, StepResult
+from praisonaiagents import AgentFlow, Task, WorkflowContext, StepResult
 
 # Condition functions - return True to run the step, False to skip
 def is_sensitive_content(ctx: WorkflowContext) -> bool:
@@ -32,7 +32,7 @@ def finalize(ctx: WorkflowContext) -> StepResult:
     return StepResult(output=f"📄 Final: {ctx.previous_result}")
 
 # Create workflow with conditional steps
-workflow = Workflow(
+workflow = AgentFlow(
     name="Conditional Pipeline",
     steps=[
         Task(name="process", handler=process_content),

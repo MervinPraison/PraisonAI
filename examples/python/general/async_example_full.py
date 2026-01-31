@@ -1,7 +1,7 @@
 import asyncio
 import time
 from typing import List, Dict
-from praisonaiagents import Agent, Task, Agents, TaskOutput
+from praisonaiagents import Agent, Task, AgentTeam, TaskOutput
 from duckduckgo_search import DDGS
 from pydantic import BaseModel
 
@@ -111,7 +111,7 @@ async def run_parallel_tasks():
     )
     
     # Create a single Agents instance with both agents
-    agents = AgentManager(
+    agents = AgentTeam(
         agents=[async_agent, summary_agent],
         tasks=parallel_tasks + [summary_task],
         process="sequential"

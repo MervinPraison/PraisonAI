@@ -9,7 +9,7 @@ This is the simplest possible implementation for processing URLs from a CSV file
 Author: Generated for GitHub Issue #23
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.tools import write_csv
 
 def create_url_csv():
@@ -59,7 +59,7 @@ def main():
     )
     
     # Step 4: Run the agents
-    agents = AgentManager(
+    agents = AgentTeam(
         agents=[url_agent],
         tasks=[url_task],
         process="workflow",

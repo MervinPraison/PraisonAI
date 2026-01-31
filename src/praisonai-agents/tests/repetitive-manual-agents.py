@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, AgentManager
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.tools import read_csv, write_csv
 import pandas as pd
 
@@ -130,7 +130,7 @@ update_task = Task(
 )
 
 # Create and run agents manager
-agents = AgentManager(
+agents = AgentTeam(
     agents=[identify_agent, repetitive_agent],
     tasks=[identify_task, process_task, update_task],
     process="workflow"

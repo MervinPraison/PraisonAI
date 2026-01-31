@@ -18,7 +18,7 @@ from praisonaiagents import AutoAgents
 from praisonaiagents.tools import duckduckgo
 
 # Basic usage - AutoAgents analyzes complexity and creates optimal agents
-agents = AutoAgentManager(
+agents = AutoAgentTeam(
     instructions="Search for information about AI Agents",
     tools=[duckduckgo],
     process="sequential",  # or "hierarchical"

@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, AgentManager
+from praisonaiagents import Agent, Task, AgentTeam
 from pydantic import BaseModel
 from typing import List, Dict
 
@@ -49,7 +49,7 @@ cv_analysis_task = Task(
 )
 
 # Create and run the agent
-agents = AgentManager(
+agents = AgentTeam(
     agents=[cv_analyzer],
     tasks=[cv_key_strengths,cv_analysis_task],
     process="sequential"

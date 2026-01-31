@@ -9,7 +9,7 @@ This example shows how to use state for:
 4. State-based error handling and recovery
 """
 
-from praisonaiagents import Agent, Task, AgentManager
+from praisonaiagents import Agent, Task, AgentTeam
 from typing import Dict, Any, List
 import random
 import json
@@ -260,7 +260,7 @@ report_task = Task(
 )
 
 # Create workflow
-workflow = AgentManager(
+workflow = AgentTeam(
     agents=[data_analyst, data_engineer, report_generator],
     tasks=[analyze_task, decision_task, clean_task, process_task, report_task],
     verbose=1,

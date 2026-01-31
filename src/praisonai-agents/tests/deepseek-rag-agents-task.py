@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, AgentManager
+from praisonaiagents import Agent, Task, AgentTeam
 
 config = {
     "vector_store": {
@@ -44,7 +44,7 @@ rag_task = Task(
 )
 
 # Build Agents
-agents = AgentManager(
+agents = AgentTeam(
     agents=[rag_agent],
     tasks=[rag_task],
     user_id="user1"

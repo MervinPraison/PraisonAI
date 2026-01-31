@@ -1,12 +1,12 @@
 """Advanced Workflow with all consolidated params configured."""
 from praisonaiagents import Agent
-from praisonaiagents.workflows import Workflow, Task
+from praisonaiagents import AgentFlow, Task
 from praisonaiagents.workflows.workflow_configs import (
     WorkflowOutputConfig, WorkflowPlanningConfig, WorkflowMemoryConfig,
 )
 
 # Full-featured workflow with all consolidated params
-workflow = Workflow(
+workflow = AgentFlow(
     name="FullFeaturedWorkflow",
     description="Demonstrates all agent-like consolidated params",
     steps=[

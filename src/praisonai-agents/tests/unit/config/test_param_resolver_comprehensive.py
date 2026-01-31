@@ -498,11 +498,12 @@ class TestNamingAlias:
         with pytest.raises(ImportError):
             from praisonaiagents import PraisonAIAgents
     
-    def test_agent_manager_is_primary(self):
-        """AgentManager should be the primary class."""
-        from praisonaiagents import AgentManager
+    def test_agent_manager_is_alias_for_agent_team(self):
+        """AgentManager is now a silent alias for AgentTeam (v1.0+)."""
+        from praisonaiagents import AgentManager, AgentTeam
         assert AgentManager is not None
-        assert AgentManager.__name__ == 'AgentManager'
+        assert AgentManager is AgentTeam
+        assert AgentManager.__name__ == 'AgentTeam'
 
 
 # =============================================================================

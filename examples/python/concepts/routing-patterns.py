@@ -8,7 +8,7 @@ This example demonstrates various routing patterns in PraisonAI including:
 - Dynamic task selection
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from typing import Dict, Any
 import random
 
@@ -77,7 +77,7 @@ def conditional_routing_example():
         agent=processor_agent
     )
     
-    workflow = AgentManager(
+    workflow = AgentTeam(
         agents=[analyzer_agent, processor_agent],
         tasks=[analysis_task, premium_task, standard_task, basic_task],
         process="workflow", output="verbose"
@@ -109,7 +109,7 @@ def loop_pattern_example():
         agent=validator_agent
     )
     
-    workflow = AgentManager(
+    workflow = AgentTeam(
         agents=[processor_agent, validator_agent],
         tasks=[process_task, finalize_task],
         process="workflow", output="verbose"
@@ -183,7 +183,7 @@ def decision_tree_example():
     
     all_tasks = [categorize_task, technical_task, business_task] + terminal_tasks
     
-    workflow = AgentManager(
+    workflow = AgentTeam(
         agents=[analyzer_agent, processor_agent],
         tasks=all_tasks,
         process="workflow", output="verbose"
@@ -269,7 +269,7 @@ def dynamic_routing_example():
         agent=processor_agent
     )
     
-    workflow = AgentManager(
+    workflow = AgentTeam(
         agents=[dynamic_router, processor_agent],
         tasks=[route_task, escalate_task, automate_task, review_task, standard_task],
         process="workflow", output="verbose"

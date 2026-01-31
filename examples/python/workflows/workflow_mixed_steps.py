@@ -7,7 +7,7 @@ Demonstrates combining different step types in a single workflow:
 - Task with action strings
 """
 
-from praisonaiagents import Workflow, Task, WorkflowContext, StepResult, Agent
+from praisonaiagents import AgentFlow, Task, WorkflowContext, StepResult, Agent
 
 # Create an agent
 analyzer = Agent(
@@ -35,7 +35,7 @@ def format_output(ctx: WorkflowContext) -> StepResult:
     )
 
 # Create workflow with mixed step types
-workflow = Workflow(
+workflow = AgentFlow(
     name="Mixed Pipeline",
     steps=[
         # Step 1: Function - validates input

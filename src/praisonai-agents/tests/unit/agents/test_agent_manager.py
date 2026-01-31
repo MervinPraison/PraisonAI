@@ -64,9 +64,11 @@ class TestAgentManagerRename:
         assert 'AgentManager' in praisonaiagents.__all__
     
     def test_agent_manager_class_name(self):
-        """The class should be named AgentManager."""
-        from praisonaiagents import AgentManager
-        assert AgentManager.__name__ == 'AgentManager'
+        """AgentManager is now an alias for AgentTeam (v1.0+)."""
+        from praisonaiagents import AgentManager, AgentTeam
+        # AgentManager is a silent alias pointing to AgentTeam
+        assert AgentManager is AgentTeam
+        assert AgentManager.__name__ == 'AgentTeam'
 
 
 class TestAgentManagerFunctionality:

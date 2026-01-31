@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 import time
 
 def get_time_check():
@@ -93,7 +93,7 @@ synthesize_task = Task(
 )
 
 # Create workflow manager
-workflow = AgentManager(
+workflow = AgentTeam(
     agents=[router, worker1, worker2, worker3, synthesizer],
     tasks=[router_task, worker1_task, worker2_task, worker3_task, synthesize_task],
     process="workflow", output="verbose"

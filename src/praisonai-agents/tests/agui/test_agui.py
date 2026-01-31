@@ -26,11 +26,11 @@ class TestAGUIInitialization:
     def test_agui_init_with_agents(self):
         """Test AGUI initialization with Agents."""
         from praisonaiagents.ui.agui import AGUI
-        from praisonaiagents import Agent, Task, AgentManager
+        from praisonaiagents import Agent, Task, AgentTeam
         
         agent = Agent(name="Test", role="Tester", goal="Test things")
         task = Task(description="Test task", expected_output="Result", agent=agent)
-        agents = AgentManager(agents=[agent], tasks=[task])
+        agents = AgentTeam(agents=[agent], tasks=[task])
         
         agui = AGUI(agents=agents)
         

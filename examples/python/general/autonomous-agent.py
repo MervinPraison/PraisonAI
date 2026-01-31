@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 import time
 
 def get_environment_state():
@@ -86,7 +86,7 @@ feedback_task = Task(
 )
 
 # Create workflow manager
-workflow = AgentManager(
+workflow = AgentTeam(
     agents=[llm_caller, action_agent, feedback_agent],
     tasks=[monitor_task, action_task, feedback_task],
     process="workflow", output="verbose"

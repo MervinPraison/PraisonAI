@@ -13,7 +13,7 @@ Features:
 - FastAPI integration ready
 """
 
-from praisonaiagents import Agent, Task, Agents, Tools
+from praisonaiagents import Agent, Task, AgentTeam, Tools
 from typing import Dict, List, Any, Optional
 import asyncio
 import json
@@ -268,7 +268,7 @@ async def run_market_research(config: MarketResearchConfig) -> Dict[str, Any]:
     tasks = create_research_tasks(agents, config)
     
     # Create workflow
-    workflow = AgentManager(
+    workflow = AgentTeam(
         agents=list(agents.values()),
         tasks=tasks,
         process="workflow")

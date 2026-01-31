@@ -12,7 +12,7 @@ The if: pattern enables dynamic workflow paths based on
 runtime conditions and variable values.
 """
 
-from praisonaiagents import Workflow, WorkflowContext, StepResult
+from praisonaiagents import AgentFlow, WorkflowContext, StepResult
 from praisonaiagents.workflows import if_, loop
 
 
@@ -39,7 +39,7 @@ def basic_if_example():
         return StepResult(output="Application rejected")
     
     # Test with passing score
-    workflow_pass = Workflow(
+    workflow_pass = AgentFlow(
         steps=[
             if_(
                 condition="{{score}} >= 70",
@@ -54,7 +54,7 @@ def basic_if_example():
     workflow_pass.start("Evaluate application")
     
     # Test with failing score
-    workflow_fail = Workflow(
+    workflow_fail = AgentFlow(
         steps=[
             if_(
                 condition="{{score}} >= 70",
@@ -90,7 +90,7 @@ def string_condition_example():
         return StepResult(output="Inactive user archived")
     
     # Test with active status
-    workflow = Workflow(
+    workflow = AgentFlow(
         steps=[
             if_(
                 condition="{{status}} == active",
@@ -105,7 +105,7 @@ def string_condition_example():
     workflow.start("Process user")
     
     # Test with inactive status
-    workflow2 = Workflow(
+    workflow2 = AgentFlow(
         steps=[
             if_(
                 condition="{{status}} == active",
@@ -141,7 +141,7 @@ def contains_condition_example():
         return StepResult(output="Content approved")
     
     # Test with flagged content
-    workflow1 = Workflow(
+    workflow1 = AgentFlow(
         steps=[
             if_(
                 condition="error in {{message}}",
@@ -156,7 +156,7 @@ def contains_condition_example():
     workflow1.start("Filter content")
     
     # Test with clean content
-    workflow2 = Workflow(
+    workflow2 = AgentFlow(
         steps=[
             if_(
                 condition="error in {{message}}",
@@ -200,7 +200,7 @@ def if_inside_loop_example():
         print(f"  📦 {name}: Standard service activated")
         return StepResult(output=f"Standard service for {name}")
     
-    workflow = Workflow(
+    workflow = AgentFlow(
         steps=[
             loop(
                 steps=[
@@ -258,7 +258,7 @@ def nested_conditions_example():
     
     # Outer condition: Is premium?
     # Inner condition (if premium): Is VIP?
-    workflow = Workflow(
+    workflow = AgentFlow(
         steps=[
             if_(
                 condition="{{tier}} == premium",
@@ -278,7 +278,7 @@ def nested_conditions_example():
     print("\nTest 1: Premium tier, high spend")
     workflow.start("Determine support level")
     
-    workflow2 = Workflow(
+    workflow2 = AgentFlow(
         steps=[
             if_(
                 condition="{{tier}} == premium",
@@ -298,7 +298,7 @@ def nested_conditions_example():
     print("\nTest 2: Premium tier, low spend")
     workflow2.start("Determine support level")
     
-    workflow3 = Workflow(
+    workflow3 = AgentFlow(
         steps=[
             if_(
                 condition="{{tier}} == premium",
@@ -340,7 +340,7 @@ def no_else_example():
         return StepResult(output="Continued")
     
     # Only send notification if opted in
-    workflow = Workflow(
+    workflow = AgentFlow(
         steps=[
             if_(
                 condition="{{notify}} == true",
@@ -355,7 +355,7 @@ def no_else_example():
     print("\nTest 1: notify = true")
     workflow.start("Process with notification")
     
-    workflow2 = Workflow(
+    workflow2 = AgentFlow(
         steps=[
             if_(
                 condition="{{notify}} == true",

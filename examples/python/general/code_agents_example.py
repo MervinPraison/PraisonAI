@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 import json
 from e2b_code_interpreter import Sandbox
 
@@ -46,5 +46,5 @@ execution_agent_task = Task(
     agent=execution_agent
 )
 
-agents = AgentManager(agents=[code_agent, execution_agent], tasks=[code_agent_task, execution_agent_task])
+agents = AgentTeam(agents=[code_agent, execution_agent], tasks=[code_agent_task, execution_agent_task])
 agents.start()

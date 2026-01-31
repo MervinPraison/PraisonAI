@@ -1,12 +1,12 @@
 """Basic Agents (multi-agent) example with consolidated params."""
-from praisonaiagents import Agent, Agents
+from praisonaiagents import Agent, AgentTeam
 
 # Create agents
 writer = Agent(instructions="You write content.")
 editor = Agent(instructions="You edit content.")
 
 # Multi-agent with consolidated params
-agents = AgentManager(
+agents = AgentTeam(
     agents=[writer, editor],
     memory=True,
     planning=True,

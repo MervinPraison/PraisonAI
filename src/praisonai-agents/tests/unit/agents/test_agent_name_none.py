@@ -42,13 +42,13 @@ class TestAgentNameNone:
     
     def test_multi_agent_workflow_with_instructions_only_agents(self):
         """Multi-agent workflow should not crash with instructions-only agents."""
-        from praisonaiagents import Agent, AgentManager
+        from praisonaiagents import Agent, AgentTeam
         
         research_agent = Agent(instructions="Research about AI")
         summarise_agent = Agent(instructions="Summarise research agent's findings")
         
         # This should NOT raise TypeError
-        agents = AgentManager(agents=[research_agent, summarise_agent])
+        agents = AgentTeam(agents=[research_agent, summarise_agent])
         
         # The workflow should be able to display agent names
         agent_names = " → ".join([a.display_name for a in agents.agents])
@@ -57,12 +57,12 @@ class TestAgentNameNone:
     
     def test_agents_start_with_instructions_only_agents_no_crash(self):
         """Agents.start() should not crash with instructions-only agents."""
-        from praisonaiagents import Agent, AgentManager
+        from praisonaiagents import Agent, AgentTeam
         
         research_agent = Agent(instructions="Research about AI")
         summarise_agent = Agent(instructions="Summarise findings")
         
-        agents = AgentManager(agents=[research_agent, summarise_agent])
+        agents = AgentTeam(agents=[research_agent, summarise_agent])
         
         # Mock the actual LLM call to avoid API calls in tests
         with patch.object(research_agent, 'chat', return_value="AI research findings"):
@@ -117,12 +117,12 @@ class TestUniqueDisplayNames:
     
     def test_multi_agent_workflow_shows_unique_names(self):
         """Multi-agent workflow should show unique names for nameless agents."""
-        from praisonaiagents import Agent, AgentManager
+        from praisonaiagents import Agent, AgentTeam
         
         agent1 = Agent(instructions="Research")
         agent2 = Agent(instructions="Summarize")
         
-        agents = AgentManager(agents=[agent1, agent2])
+        agents = AgentTeam(agents=[agent1, agent2])
         agent_names = " → ".join([a.display_name for a in agents.agents])
         
         # Should not be "Agent → Agent"

@@ -6,7 +6,7 @@ agent-based selection for cost optimization and performance.
 """
 
 import os
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.agent import RouterAgent
 from praisonaiagents.llm.model_router import ModelRouter, ModelProfile, TaskComplexity
 
@@ -48,7 +48,7 @@ def example_auto_routing():
     )
     
     # Run the tasks
-    agents = AgentManager(
+    agents = AgentTeam(
         agents=[research_agent],
         tasks=[simple_task, moderate_task, complex_task],
         process="sequential", output="verbose"
@@ -113,7 +113,7 @@ def example_cost_optimized_workflow():
     )
     
     # Run workflow
-    workflow = AgentManager(
+    workflow = AgentTeam(
         agents=[analyzer, writer],
         tasks=[analysis_task, writing_task],
         process="sequential", output="verbose"
@@ -135,7 +135,7 @@ def example_auto_agents_multi_provider():
     from praisonaiagents.agents import AutoAgents
     
     # Create AutoAgents that will automatically assign appropriate models
-    auto_agents = AutoAgentManager(
+    auto_agents = AutoAgentTeam(
         instructions="Create a market research report on electric vehicles. Include data analysis, competitor analysis, and future projections.",
         max_agents=3,
         llm="gpt-4o-mini",  # Default model for agent generation
@@ -239,7 +239,7 @@ def example_custom_routing():
     ]
     
     # Run tasks
-    agents = AgentManager(
+    agents = AgentTeam(
         agents=[coder],
         tasks=tasks,
         process="sequential", output="verbose"

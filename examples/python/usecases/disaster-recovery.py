@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 import time
 from typing import Dict, List
 import asyncio
@@ -381,7 +381,7 @@ monitoring_task = Task(
 )
 
 # Create workflow
-workflow = AgentManager(
+workflow = AgentTeam(
     agents=[network_monitor, emergency_assessor, resource_assessor,
             priority_analyzer, distribution_planner, execution_manager,
             effectiveness_monitor],

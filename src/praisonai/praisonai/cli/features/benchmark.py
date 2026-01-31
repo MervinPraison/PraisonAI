@@ -797,7 +797,7 @@ t_import = time.perf_counter()
 
 agent = Agent(name="Helper", instructions="You are helpful", llm="{self.DEFAULT_MODEL}", output="minimal")
 task = Task(name="respond", description="{prompt}", expected_output="response", agent=agent)
-agents = AgentManager(agents=[agent], tasks=[task], verbose=0)
+agents = AgentTeam(agents=[agent], tasks=[task], verbose=0)
 t_init = time.perf_counter()
 
 result = agents.start()
@@ -845,7 +845,7 @@ agent1 = Agent(name="Analyzer", instructions="Analyze the request", llm="{self.D
 agent2 = Agent(name="Responder", instructions="Provide a response", llm="{self.DEFAULT_MODEL}", output="minimal")
 task1 = Task(name="analyze", description="Analyze: {prompt}", expected_output="analysis", agent=agent1)
 task2 = Task(name="respond", description="Respond based on analysis", expected_output="response", agent=agent2)
-agents = AgentManager(agents=[agent1, agent2], tasks=[task1, task2], verbose=0)
+agents = AgentTeam(agents=[agent1, agent2], tasks=[task1, task2], verbose=0)
 t_init = time.perf_counter()
 
 result = agents.start()

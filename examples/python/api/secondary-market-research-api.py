@@ -32,7 +32,7 @@ import os
 from pathlib import Path
 
 # Import our market research system
-from praisonaiagents import Agent, Task, Agents, Tools
+from praisonaiagents import Agent, Task, AgentTeam, Tools
 
 # Create FastAPI app
 app = FastAPI(
@@ -260,7 +260,7 @@ async def generate_market_research_report(job_id: str, config: MarketResearchCon
         job_status[job_id]["message"] = "Setting up research workflow..."
         
         # Create workflow
-        workflow = AgentManager(
+        workflow = AgentTeam(
             agents=list(agents.values()),
             tasks=tasks,
             process="sequential", output="minimal"

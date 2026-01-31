@@ -5,7 +5,7 @@ This example demonstrates production guardrail patterns using PraisonAI's
 built-in validation and safety mechanisms for secure agent operations.
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.tools import internet_search
 
 print("=== Production Guardrails Patterns Example ===\n")

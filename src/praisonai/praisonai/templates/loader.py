@@ -641,9 +641,9 @@ def create_agents_from_template(
     workflow_config = loader.load_workflow_config(template)
     
     # Import Agents lazily
-    from praisonaiagents import AgentManager
+    from praisonaiagents import AgentTeam
     
     # Merge with kwargs
     final_config = {**workflow_config, **agents_kwargs}
     
-    return AgentManager(**final_config)
+    return AgentTeam(**final_config)

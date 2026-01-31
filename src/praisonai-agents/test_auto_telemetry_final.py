@@ -4,7 +4,7 @@ Final test of automatic telemetry.
 """
 
 print("Step 1: Import praisonaiagents...")
-from praisonaiagents import Agent, Task, AgentManager, get_telemetry
+from praisonaiagents import Agent, Task, AgentTeam, get_telemetry
 
 print("\nStep 2: Check if telemetry is initialized...")
 telemetry = get_telemetry()
@@ -20,7 +20,7 @@ print(f"  agent.chat wrapped: {hasattr(agent.chat, '__wrapped__')}")
 
 print("\nStep 5: Create and run a simple workflow...")
 task = Task(description="Say hello", expected_output="A greeting", agent=agent)
-workflow = AgentManager(agents=[agent], tasks=[task], process="sequential")
+workflow = AgentTeam(agents=[agent], tasks=[task], process="sequential")
 
 # Check workflow instrumentation
 print(f"  workflow.execute_task wrapped: {hasattr(workflow.execute_task, '__wrapped__')}")

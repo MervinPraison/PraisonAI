@@ -1,5 +1,5 @@
 import streamlit as st
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from pydantic import BaseModel
 from typing import List, Dict, Any
 from gitingest import ingest
@@ -85,7 +85,7 @@ def analyze_code(code_source: str) -> CodeAnalysisReport:
     """
     
     # Initialize and run analysis
-    agents = AgentManager(
+    agents = AgentTeam(
         agents=[code_analyzer],
         tasks=[code_analysis_task]
     )

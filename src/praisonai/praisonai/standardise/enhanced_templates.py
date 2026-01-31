@@ -123,7 +123,7 @@ task = Task(
     agent=agent1,
 )
 
-agents = AgentManager(agents=[agent1, agent2], tasks=[task])
+agents = AgentTeam(agents=[agent1, agent2], tasks=[task])
 result = agents.start()
 ```
 </CodeGroup>
@@ -558,7 +558,7 @@ verification_task = Task(
 
 if __name__ == "__main__":
     # Create agents team
-    agents = AgentManager(
+    agents = AgentTeam(
         agents=[primary_agent, secondary_agent],
         tasks=[primary_task, verification_task],
         verbose=True,

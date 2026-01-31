@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 
 # Create Video Analysis Agent
 video_agent = Agent(
@@ -25,7 +25,7 @@ task1 = Task(
 )
 
 # Create Agents instance
-agents = AgentManager(
+agents = AgentTeam(
     agents=[video_agent],
     tasks=[task1],
     process="sequential",

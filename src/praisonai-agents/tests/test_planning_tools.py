@@ -185,7 +185,7 @@ class TestAgentsPlanningTools:
     
     def test_praisonaiagents_accepts_planning_tools(self):
         """Test that Agents accepts planning_tools parameter."""
-        from praisonaiagents import Agent, Task, AgentManager
+        from praisonaiagents import Agent, Task, AgentTeam
         
         def search_tool(query: str) -> str:
             return "results"
@@ -194,7 +194,7 @@ class TestAgentsPlanningTools:
         task = Task(description="Test task", agent=agent)
         
         from praisonaiagents.config import MultiAgentPlanningConfig
-        agents = AgentManager(
+        agents = AgentTeam(
             agents=[agent],
             tasks=[task],
             planning=MultiAgentPlanningConfig(tools=[search_tool])
@@ -205,12 +205,12 @@ class TestAgentsPlanningTools:
         
     def test_praisonaiagents_planning_tools_default_none(self):
         """Test that planning_tools defaults to None."""
-        from praisonaiagents import Agent, Task, AgentManager
+        from praisonaiagents import Agent, Task, AgentTeam
         
         agent = Agent(name="Test", role="Tester")
         task = Task(description="Test task", agent=agent)
         
-        agents = AgentManager(
+        agents = AgentTeam(
             agents=[agent],
             tasks=[task],
             planning=True
@@ -220,7 +220,7 @@ class TestAgentsPlanningTools:
         
     def test_praisonaiagents_passes_tools_to_planning_agent(self):
         """Test that planning_tools are passed to PlanningAgent."""
-        from praisonaiagents import Agent, Task, AgentManager
+        from praisonaiagents import Agent, Task, AgentTeam
         
         def search_tool(query: str) -> str:
             return "results"
@@ -229,7 +229,7 @@ class TestAgentsPlanningTools:
         task = Task(description="Test task", agent=agent)
         
         from praisonaiagents.config import MultiAgentPlanningConfig
-        agents = AgentManager(
+        agents = AgentTeam(
             agents=[agent],
             tasks=[task],
             planning=MultiAgentPlanningConfig(tools=[search_tool])
@@ -292,13 +292,13 @@ class TestAgentsPlanningReasoning:
     
     def test_praisonaiagents_accepts_planning_reasoning(self):
         """Test that Agents accepts planning_reasoning parameter."""
-        from praisonaiagents import Agent, Task, AgentManager
+        from praisonaiagents import Agent, Task, AgentTeam
         
         agent = Agent(name="Test", role="Tester")
         task = Task(description="Test task", agent=agent)
         
         from praisonaiagents.config import MultiAgentPlanningConfig
-        agents = AgentManager(
+        agents = AgentTeam(
             agents=[agent],
             tasks=[task],
             planning=MultiAgentPlanningConfig(reasoning=True)
@@ -308,12 +308,12 @@ class TestAgentsPlanningReasoning:
         
     def test_praisonaiagents_planning_reasoning_default_false(self):
         """Test that planning_reasoning defaults to False."""
-        from praisonaiagents import Agent, Task, AgentManager
+        from praisonaiagents import Agent, Task, AgentTeam
         
         agent = Agent(name="Test", role="Tester")
         task = Task(description="Test task", agent=agent)
         
-        agents = AgentManager(
+        agents = AgentTeam(
             agents=[agent],
             tasks=[task],
             planning=True
@@ -323,13 +323,13 @@ class TestAgentsPlanningReasoning:
         
     def test_praisonaiagents_passes_reasoning_to_planning_agent(self):
         """Test that planning_reasoning is passed to PlanningAgent."""
-        from praisonaiagents import Agent, Task, AgentManager
+        from praisonaiagents import Agent, Task, AgentTeam
         
         agent = Agent(name="Test", role="Tester")
         task = Task(description="Test task", agent=agent)
         
         from praisonaiagents.config import MultiAgentPlanningConfig
-        agents = AgentManager(
+        agents = AgentTeam(
             agents=[agent],
             tasks=[task],
             planning=MultiAgentPlanningConfig(reasoning=True)
@@ -349,7 +349,7 @@ class TestPlanningToolsIntegration:
     
     def test_planning_with_tools_and_reasoning(self):
         """Test planning with both tools and reasoning enabled."""
-        from praisonaiagents import Agent, Task, AgentManager
+        from praisonaiagents import Agent, Task, AgentTeam
         
         def search_tool(query: str) -> str:
             return "search results"
@@ -358,7 +358,7 @@ class TestPlanningToolsIntegration:
         task = Task(description="Research AI trends", agent=agent)
         
         from praisonaiagents.config import MultiAgentPlanningConfig
-        agents = AgentManager(
+        agents = AgentTeam(
             agents=[agent],
             tasks=[task],
             planning=MultiAgentPlanningConfig(

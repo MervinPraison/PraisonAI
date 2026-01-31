@@ -5,7 +5,7 @@ This example demonstrates hierarchical agent patterns using PraisonAI
 for structured task delegation and coordinated workflows.
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.tools import internet_search
 
 print("=== AutoAgents Hierarchical Generation Example ===\n")
@@ -54,7 +54,7 @@ execution_task = Task(
 )
 
 # Run hierarchical workflow
-agents_system = AgentManager(
+agents_system = AgentTeam(
     agents=[manager_agent, research_agent],
     tasks=[planning_task, execution_task],
     process="sequential", output="verbose"

@@ -8,7 +8,7 @@ This example demonstrates how to extract and utilize reasoning patterns in Prais
 - Decision rationale extraction
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from typing import Dict, List, Tuple
 from pydantic import BaseModel
 import json
@@ -100,7 +100,7 @@ def demonstrate_reasoning_extraction():
         context=[problem_task]
     )
     
-    workflow = AgentManager(
+    workflow = AgentTeam(
         agents=[cot_agent, reasoning_extractor],
         tasks=[problem_task, extract_task],
         process="sequential", output="verbose"
@@ -183,7 +183,7 @@ def advanced_reasoning_patterns():
         context=[deductive_task, inductive_task, abductive_task]
     )
     
-    workflow = AgentManager(
+    workflow = AgentTeam(
         agents=[cot_agent, reasoning_validator],
         tasks=[deductive_task, inductive_task, abductive_task, validation_task],
         process="sequential", output="verbose"

@@ -163,12 +163,18 @@ class TestInputValidationStatus:
     """Test input validation status tracking."""
     
     def test_detect_unresolved_templates(self):
-        """Should detect unresolved {{variable}} templates."""
+        """Test that {{variable}} templates are NOT flagged as content loss.
+        
+        Note: The implementation intentionally does NOT flag {{variable}} patterns
+        because traces store the original action text BEFORE variable substitution.
+        Variables are correctly substituted during execution, but the trace records
+        the template. See judge.py _detect_content_loss comments for rationale.
+        """
         from praisonai.replay.judge import ContextEffectivenessJudge
         
         judge = ContextEffectivenessJudge()
         
-        # Mock events with unresolved template
+        # Mock events with template variable (this is normal in traces)
         events = [
             {
                 "event_type": "llm_request",
@@ -183,8 +189,8 @@ class TestInputValidationStatus:
         
         content_loss, details = judge._detect_content_loss(events)
         
-        assert content_loss is True
-        assert any("image_path" in d for d in details)
+        # Template variables are NOT content loss (per design decision)
+        assert content_loss is False
     
     def test_input_validation_in_prompt(self):
         """Should include input validation status in the judge prompt."""

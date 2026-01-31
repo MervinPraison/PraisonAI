@@ -23,7 +23,7 @@ writer = Agent(
 )
 
 # Create workflow with agents as steps
-workflow = Workflow(
+workflow = AgentFlow(
     name="Simple Agentic Pipeline",
     steps=[researcher, writer]
 )

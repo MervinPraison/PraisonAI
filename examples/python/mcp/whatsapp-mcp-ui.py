@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Agents, MCP
+from praisonaiagents import Agent, AgentTeam, MCP
 import gradio as gr
 
 def search_airbnb(query):
@@ -14,7 +14,7 @@ def search_airbnb(query):
         tools=MCP("python /Users/praison/whatsapp-mcp/whatsapp-mcp-server/main.py")
     )
 
-    agents = AgentManager(agents=[airbnb_agent, whatsapp_agent])
+    agents = AgentTeam(agents=[airbnb_agent, whatsapp_agent])
 
     result = agents.start()
     return f"## Airbnb Search Results\n\n{result}"

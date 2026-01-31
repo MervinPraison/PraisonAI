@@ -11,7 +11,7 @@ Author: Generated for GitHub Issue #23
 """
 
 import os
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.tools import read_csv, write_csv
 
 def create_sample_urls_csv():
@@ -81,7 +81,7 @@ def method_1_simple_loop():
     )
     
     # Initialize the agents system
-    agents = AgentManager(
+    agents = AgentTeam(
         agents=[loop_agent],
         tasks=[loop_task],
         process="workflow",
@@ -145,7 +145,7 @@ def method_2_manual_csv():
     )
     
     # Initialize and run
-    agents = AgentManager(
+    agents = AgentTeam(
         agents=[csv_agent],
         tasks=[csv_task],
         process="sequential"
@@ -211,7 +211,7 @@ def method_3_url_processing():
     )
     
     # Initialize and run
-    agents = AgentManager(
+    agents = AgentTeam(
         agents=[url_agent],
         tasks=[url_task],
         process="sequential"
@@ -319,7 +319,7 @@ def method_4_advanced_processing():
     )
     
     # Initialize and run with sequential processing
-    agents = AgentManager(
+    agents = AgentTeam(
         agents=[validator_agent, processor_agent],
         tasks=[validation_task, processing_task],
         process="sequential"  # Validation must complete before processing

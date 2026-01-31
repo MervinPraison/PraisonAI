@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 import time
 from typing import Dict
 
@@ -105,7 +105,7 @@ adaptation_task = Task(
 )
 
 # Create workflow
-workflow = AgentManager(
+workflow = AgentTeam(
     agents=[assessor, generator, evaluator, adapter],
     tasks=[assessment_task, generation_task, evaluation_task, adaptation_task],
     process="workflow", output="verbose"

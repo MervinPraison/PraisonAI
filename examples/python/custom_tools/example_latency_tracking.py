@@ -4,7 +4,7 @@ Example: Using Latency Tracking Tool with PraisonAI
 This example shows how to track latency without modifying core files.
 """
 
-from praisonaiagents import Agent, Agents
+from praisonaiagents import Agent, AgentTeam
 from latency_tracker_tool import (
     latency_tracking_tool, 
     create_tracked_agent,

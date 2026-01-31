@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents, error_logs
+from praisonaiagents import Agent, Task, AgentTeam, error_logs
 from duckduckgo_search import DDGS
 
 def my_callback(output):
@@ -92,7 +92,7 @@ task4 = Task(
 )
 
 # Create and run agents manager
-agents = AgentManager(
+agents = AgentTeam(
     agents=[researcher, writer],
     tasks=[task1, task2, task3, task4],
     output="minimal",

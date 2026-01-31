@@ -337,19 +337,19 @@ def register_commands():
         name: str = typer.Option("PraisonAI App", "--name", "-n", help="Application name"),
     ):
         """
-        Start an AgentApp server for production deployment.
+        Start an AgentOS server for production deployment.
         
-        AgentApp provides a FastAPI-based web service for deploying AI agents
+        AgentOS provides a FastAPI-based web service for deploying AI agents
         with REST and WebSocket endpoints.
         """
         from rich.console import Console
         console = Console()
         
         try:
-            from praisonai import AgentApp
-            from praisonaiagents import AgentAppConfig
+            from praisonai import AgentOS
+            from praisonaiagents import AgentOSConfig
         except ImportError as e:
-            console.print(f"[red]Error importing AgentApp: {e}[/red]")
+            console.print(f"[red]Error importing AgentOS: {e}[/red]")
             console.print("[yellow]Install with: pip install praisonai[api][/yellow]")
             raise typer.Abort()
         
@@ -359,7 +359,7 @@ def register_commands():
             agents = _load_agents_from_config_file(config, console)
         
         # Create config
-        app_config = AgentAppConfig(
+        app_config = AgentOSConfig(
             name=name,
             host=host,
             port=port,
@@ -377,7 +377,7 @@ def register_commands():
         console.print()
         
         try:
-            agent_app = AgentApp(
+            agent_app = AgentOS(
                 name=name,
                 agents=agents,
                 config=app_config,

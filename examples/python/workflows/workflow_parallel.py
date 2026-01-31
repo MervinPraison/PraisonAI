@@ -39,7 +39,7 @@ aggregator = Agent(
 )
 
 # Create workflow with parallel execution
-workflow = Workflow(
+workflow = AgentFlow(
     name="Parallel Research Pipeline",
     steps=[
         parallel([market_researcher, competitor_researcher, customer_researcher]),

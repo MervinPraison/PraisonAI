@@ -2,12 +2,16 @@
 Workflows module for PraisonAI Agents.
 
 Provides workflow/pipeline patterns for orchestrating agents and functions.
+
+AgentFlow is the primary class for deterministic pipelines (v1.0+).
+Workflow and Pipeline are silent aliases for backward compatibility.
 """
 
 from .workflows import (
     # Core classes
-    Workflow,
-    Pipeline,  # Alias for Workflow
+    AgentFlow,  # Primary class (v1.0+)
+    Workflow,  # Silent alias for AgentFlow
+    Pipeline,  # Silent alias for AgentFlow
     WorkflowContext,
     StepResult,
     WorkflowManager,
@@ -64,8 +68,9 @@ from .workflow_configs import (
 
 __all__ = [
     # Core
-    "Workflow",
-    "Pipeline",
+    "AgentFlow",  # Primary class (v1.0+)
+    "Workflow",  # Silent alias for AgentFlow
+    "Pipeline",  # Silent alias for AgentFlow
     "Task",
     "WorkflowContext",
     "StepResult",

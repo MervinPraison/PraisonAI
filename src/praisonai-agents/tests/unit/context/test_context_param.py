@@ -155,12 +155,12 @@ class TestAgentsContextParam:
     
     def test_agents_context_false_default(self):
         """Agents context=False should have zero overhead."""
-        from praisonaiagents import Agent, AgentManager, Task
+        from praisonaiagents import Agent, AgentTeam, Task
         
         agent = Agent(instructions="Test agent")
         task = Task(description="Test task", agent=agent)
         
-        agents = AgentManager(agents=[agent], tasks=[task], context=False)
+        agents = AgentTeam(agents=[agent], tasks=[task], context=False)
         
         assert agents._context_param is False
         assert agents._context_manager is None
@@ -168,12 +168,12 @@ class TestAgentsContextParam:
     
     def test_agents_context_true_lazy_init(self):
         """Agents context=True should lazy-init MultiAgentContextManager."""
-        from praisonaiagents import Agent, AgentManager, Task
+        from praisonaiagents import Agent, AgentTeam, Task
         
         agent = Agent(instructions="Test agent")
         task = Task(description="Test task", agent=agent)
         
-        agents = AgentManager(agents=[agent], tasks=[task], context=True)
+        agents = AgentTeam(agents=[agent], tasks=[task], context=True)
         
         # Not initialized until first access
         assert agents._context_manager_initialized is False
@@ -185,7 +185,7 @@ class TestAgentsContextParam:
     
     def test_agents_context_manager_config(self):
         """Agents context=ManagerConfig should use provided config."""
-        from praisonaiagents import Agent, AgentManager, Task
+        from praisonaiagents import Agent, AgentTeam, Task
         from praisonaiagents.context import ManagerConfig
         
         config = ManagerConfig(
@@ -196,7 +196,7 @@ class TestAgentsContextParam:
         agent = Agent(instructions="Test agent")
         task = Task(description="Test task", agent=agent)
         
-        agents = AgentManager(agents=[agent], tasks=[task], context=config)
+        agents = AgentTeam(agents=[agent], tasks=[task], context=config)
         
         manager = agents.context_manager
         assert manager is not None

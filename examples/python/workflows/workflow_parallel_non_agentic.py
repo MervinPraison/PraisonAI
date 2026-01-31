@@ -5,7 +5,7 @@ Demonstrates running multiple steps concurrently and
 combining their results.
 """
 
-from praisonaiagents import Workflow, WorkflowContext, StepResult
+from praisonaiagents import AgentFlow, WorkflowContext, StepResult
 from praisonaiagents.workflows import parallel
 import time
 
@@ -33,7 +33,7 @@ def summarize_research(ctx: WorkflowContext) -> StepResult:
     return StepResult(output=summary)
 
 # Create workflow with parallel execution
-workflow = Workflow(
+workflow = AgentFlow(
     name="Parallel Research",
     steps=[
         parallel([research_market, research_competitors, research_customers]),

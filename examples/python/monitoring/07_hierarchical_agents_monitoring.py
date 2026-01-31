@@ -11,7 +11,7 @@ Shows how to monitor complex organizational agent structures.
 """
 
 import time
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.telemetry import (
     monitor_function, track_api_call, get_function_stats,
     visualize_execution_flow, generate_comprehensive_report

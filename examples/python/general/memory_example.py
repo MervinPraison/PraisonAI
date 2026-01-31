@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 import logging
 import os
 
@@ -101,7 +101,7 @@ def main():
     )
 
     # Initialize Agents with memory configuration
-    agents = AgentManager(
+    agents = AgentTeam(
         agents=[researcher, retriever],
         tasks=[store_task, verify_task, query_task, query_both_task],  # Use same verbose level as memory
         memory={
@@ -115,7 +115,7 @@ def main():
         }
     )
 
-    # agents = AgentManager(
+    # agents = AgentTeam(
     #     agents=[researcher, retriever],
     #     tasks=[store_task, verify_task, query_task, query_both_task],
     #     # Use same verbose level as memory

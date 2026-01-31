@@ -169,15 +169,15 @@ def process_task_context(context_item, verbose=0, user_id=None):
     else:
         return str(context_item)  # Fallback for unknown types
 
-class AgentManager:
+class AgentTeam:
     """
     Multi-agent coordinator that manages and delegates work to multiple agents.
     
-    AgentManager orchestrates the execution of tasks across multiple Agent instances,
+    AgentTeam orchestrates the execution of tasks across multiple Agent instances,
     supporting sequential, parallel, and hierarchical execution patterns.
     
     Example:
-        from praisonaiagents import Agent, AgentManager, Task
+        from praisonaiagents import Agent, AgentTeam, Task
         
         researcher = Agent(role="Researcher", instructions="Research topics")
         writer = Agent(role="Writer", instructions="Write content")
@@ -185,16 +185,16 @@ class AgentManager:
         task1 = Task(description="Research AI trends", agent=researcher)
         task2 = Task(description="Write article", agent=writer)
         
-        manager = AgentManager(
+        team = AgentTeam(
             agents=[researcher, writer],
             tasks=[task1, task2],
             process="sequential"
         )
-        result = manager.start()
+        result = team.start()
     
     Note:
-        The class was renamed from `Agents` to `AgentManager` in v0.14.16.
-        `Agents` remains as a deprecated alias for backward compatibility.
+        The class was renamed from `AgentManager` to `AgentTeam` in v1.0.
+        `AgentManager` and `Agents` remain as silent aliases for backward compatibility.
     """
     
     def __init__(
@@ -2400,7 +2400,9 @@ Context:
         # Keep plan tasks for results but note original tasks are preserved in _plan_tasks
 
 
-# Backward compatibility aliases
-# Agents is deprecated in favor of AgentManager (v0.14.16+)
-Agents = AgentManager
-PraisonAIAgents = AgentManager
+# Backward compatibility aliases (silent - no deprecation warnings)
+# AgentTeam is the primary name (v1.0+)
+# AgentManager, Agents, PraisonAIAgents are silent aliases
+AgentManager = AgentTeam
+Agents = AgentTeam
+PraisonAIAgents = AgentTeam

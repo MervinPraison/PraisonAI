@@ -1,9 +1,9 @@
 """Basic Workflow with Agent-like consolidated params."""
 from praisonaiagents import Agent
-from praisonaiagents.workflows import Workflow, Task
+from praisonaiagents import AgentFlow, Task
 
 # Workflow with agent-like params (knowledge, web, guardrails, reflection)
-workflow = Workflow(
+workflow = AgentFlow(
     name="AgentLikeWorkflow",
     steps=[
         Task(

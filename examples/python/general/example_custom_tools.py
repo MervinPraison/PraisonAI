@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from typing import List, Dict, Union
 from duckduckgo_search import DDGS
 from langchain_community.tools import YouTubeSearchTool
@@ -141,7 +141,7 @@ validate_task = Task(
 )
 
 # 4. Workflow
-agents = AgentManager(
+agents = AgentTeam(
     agents=[data_agent],
     tasks=[collect_task, validate_task],
     process="workflow"

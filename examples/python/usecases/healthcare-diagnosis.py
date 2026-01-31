@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 import time
 from typing import Dict, List
 
@@ -136,7 +136,7 @@ treatment_task = Task(
 )
 
 # Create workflow
-workflow = AgentManager(
+workflow = AgentTeam(
     agents=[symptom_analyzer, lab_processor, history_analyzer, 
             diagnosis_generator, treatment_recommender],
     tasks=[symptom_task, lab_task, history_task, diagnosis_task, treatment_task],

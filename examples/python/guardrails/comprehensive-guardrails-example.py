@@ -12,7 +12,7 @@ Features demonstrated:
 - Quality assurance workflows
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.task import TaskOutput
 from typing import Tuple, Any
 import re
@@ -181,7 +181,7 @@ llm_guardrail_task = Task(
 )
 
 # Execute tasks with guardrails
-agents = AgentManager(
+agents = AgentTeam(
     agents=[email_agent, content_agent, business_agent, research_agent, llm_guardrail_agent],
     tasks=[email_task, content_task, business_task, research_task, llm_guardrail_task], output="verbose"
 )

@@ -10,7 +10,7 @@ To run this example:
 """
 
 import streamlit as st
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.tools import duckduckgo
 
 # Set page configuration
@@ -125,7 +125,7 @@ if st.button("🚀 Submit", type="primary", use_container_width=True):
                     )
                     
                     # Run agents
-                    agents = AgentManager(
+                    agents = AgentTeam(
                         agents=[agent],
                         tasks=[task],
                         process=process_type

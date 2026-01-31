@@ -1,46 +1,46 @@
 """
-AgentApp implementation for production deployment.
+AgentOS implementation for production deployment.
 
-This module provides the AgentApp class which implements the AgentAppProtocol.
+This module provides the AgentOS class which implements the AgentOSProtocol.
 It creates a FastAPI-based web service for deploying agents.
 """
 
 from typing import Any, Dict, List, Optional, Union
 
-from praisonaiagents import AgentAppConfig, AgentAppProtocol
+from praisonaiagents import AgentOSConfig, AgentOSProtocol
 
 
-class AgentApp:
+class AgentOS:
     """
     Production platform for deploying AI agents as web services.
     
-    AgentApp wraps agents, managers, and workflows into a unified FastAPI
+    AgentOS wraps agents, managers, and workflows into a unified FastAPI
     application with REST and WebSocket endpoints.
     
     Example:
-        from praisonai import AgentApp
+        from praisonai import AgentOS
         from praisonaiagents import Agent
         
         assistant = Agent(name="assistant", instructions="Be helpful")
         
         # Simple usage
-        app = AgentApp(agents=[assistant])
+        app = AgentOS(agents=[assistant])
         app.serve(port=8000)
         
         # With configuration
-        app = AgentApp(
+        app = AgentOS(
             name="My AI App",
             agents=[assistant],
-            config=AgentAppConfig(port=9000, reload=True)
+            config=AgentOSConfig(port=9000, reload=True)
         )
         app.serve()
     
     Attributes:
         name: Name of the application
         agents: List of Agent instances
-        managers: List of AgentManager instances
+        managers: List of AgentTeam instances
         workflows: List of Workflow instances
-        config: AgentAppConfig instance
+        config: AgentOSConfig instance
     """
     
     def __init__(
@@ -49,19 +49,19 @@ class AgentApp:
         agents: Optional[List[Any]] = None,
         managers: Optional[List[Any]] = None,
         workflows: Optional[List[Any]] = None,
-        config: Optional[AgentAppConfig] = None,
+        config: Optional[AgentOSConfig] = None,
         **kwargs: Any
     ):
         """
-        Initialize AgentApp.
+        Initialize AgentOS.
         
         Args:
             name: Name of the application
             agents: List of Agent instances to serve
-            managers: List of AgentManager instances to serve
+            managers: List of AgentTeam instances to serve
             workflows: List of Workflow instances to serve
-            config: AgentAppConfig for server configuration
-            **kwargs: Additional configuration passed to AgentAppConfig
+            config: AgentOSConfig for server configuration
+            **kwargs: Additional configuration passed to AgentOSConfig
         """
         self.name = name
         self.agents = agents or []
@@ -70,7 +70,7 @@ class AgentApp:
         
         # Merge kwargs into config
         if config is None:
-            config = AgentAppConfig(name=name, **kwargs)
+            config = AgentOSConfig(name=name, **kwargs)
         self.config = config
         
         # FastAPI app instance (lazy initialized)
@@ -83,7 +83,7 @@ class AgentApp:
             from fastapi.middleware.cors import CORSMiddleware
         except ImportError:
             raise ImportError(
-                "FastAPI is required for AgentApp. "
+                "FastAPI is required for AgentOS. "
                 "Install with: pip install praisonai[api]"
             )
         
@@ -199,7 +199,7 @@ class AgentApp:
         **kwargs: Any
     ) -> None:
         """
-        Start the AgentApp server.
+        Start the AgentOS server.
         
         Args:
             host: Host address to bind to (default from config)
@@ -211,7 +211,7 @@ class AgentApp:
             import uvicorn
         except ImportError:
             raise ImportError(
-                "Uvicorn is required for AgentApp. "
+                "Uvicorn is required for AgentOS. "
                 "Install with: pip install praisonai[api]"
             )
         
@@ -229,9 +229,9 @@ class AgentApp:
 
 # Verify protocol compliance
 def _verify_protocol():
-    """Verify that AgentApp implements AgentAppProtocol."""
-    assert isinstance(AgentApp(agents=[]), AgentAppProtocol), \
-        "AgentApp must implement AgentAppProtocol"
+    """Verify that AgentOS implements AgentOSProtocol."""
+    assert isinstance(AgentOS(agents=[]), AgentOSProtocol), \
+        "AgentOS must implement AgentOSProtocol"
 
 # Run verification at import time (only in debug mode)
 # _verify_protocol()

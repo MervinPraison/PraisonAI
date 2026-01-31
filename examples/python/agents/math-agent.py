@@ -5,7 +5,7 @@ This example demonstrates a mathematical problem-solving agent that can handle v
 including calculations, equation solving, and step-by-step explanations.
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from typing import Dict, Any
 import math
 import re
@@ -123,7 +123,7 @@ def solve_math_problem_workflow():
         context=[solve_task]
     )
     
-    workflow = AgentManager(
+    workflow = AgentTeam(
         agents=[problem_solver_agent, calculation_agent, math_tutor_agent],
         tasks=[understand_task, solve_task, verify_task],
         process="sequential", output="verbose"

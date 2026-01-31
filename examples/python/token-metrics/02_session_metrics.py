@@ -4,7 +4,7 @@ This example shows how to track token usage across multiple agents
 with the simplified Agent(metrics=True) approach. Metrics are 
 automatically displayed when any agent has metrics enabled!
 """
-from praisonaiagents import AgentManager, Agent, Task
+from praisonaiagents import AgentTeam, Agent, Task
 
 def main():
     # Create multiple agents - just add metrics=True to enable tracking
@@ -41,7 +41,7 @@ def main():
     )
     
     # Initialize the agents system
-    agents = AgentManager(
+    agents = AgentTeam(
         agents=[analyst_agent, writer_agent],
         tasks=[analysis_task, writing_task], output="verbose"
     )

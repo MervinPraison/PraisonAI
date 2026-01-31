@@ -13,7 +13,7 @@ Shows how to create a comprehensive performance monitoring solution.
 import time
 import json
 from datetime import datetime, timedelta
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.telemetry import (
     monitor_function, track_api_call, performance_monitor,
     get_performance_report, get_function_stats, get_api_stats,
@@ -139,7 +139,7 @@ def simulate_complex_workflow():
     
     # Execute workflow
     with track_api_call("complex_workflow_execution"):
-        workflow = AgentManager(
+        workflow = AgentTeam(
             agents=[planner, executor, reviewer],
             tasks=[planning_task, execution_task, review_task],
             process="sequential", output="minimal"

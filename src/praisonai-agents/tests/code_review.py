@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, AgentManager
+from praisonaiagents import Agent, Task, AgentTeam
 import time
 from typing import List, Dict
 
@@ -97,7 +97,7 @@ fix_task = Task(
 )
 
 # Create workflow
-workflow = AgentManager(
+workflow = AgentTeam(
     agents=[analyzer, fix_suggester, fix_applier],
     tasks=[analysis_task, suggestion_task, fix_task],
     process="workflow",

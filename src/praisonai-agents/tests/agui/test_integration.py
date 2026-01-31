@@ -61,7 +61,7 @@ class TestMultiAgentIntegration:
         """Test complete workflow with multiple agents."""
         from fastapi.testclient import TestClient
         from praisonaiagents.ui.agui import AGUI
-        from praisonaiagents import Agent, Task, AgentManager
+        from praisonaiagents import Agent, Task, AgentTeam
         from fastapi import FastAPI
         import json
         
@@ -92,7 +92,7 @@ class TestMultiAgentIntegration:
         )
         
         # Create Agents
-        agents = AgentManager(
+        agents = AgentTeam(
             agents=[researcher, writer],
             tasks=[research_task, write_task]
         )

@@ -12,7 +12,7 @@ pip install trafilatura newspaper3k requests beautifulsoup4
 """
 
 import asyncio
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from custom_trafilatura_tools import TrafilaturaTools, create_trafilatura_tools
 
 # Create tools instance (global for reuse across examples)
@@ -131,7 +131,7 @@ async def agent_example():
     )
     
     # Run the analysis
-    agents = AgentManager(
+    agents = AgentTeam(
         agents=[research_agent],
         tasks=[analysis_task]
     )

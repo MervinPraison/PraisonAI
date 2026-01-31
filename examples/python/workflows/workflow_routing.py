@@ -39,7 +39,7 @@ general_agent = Agent(
 )
 
 # Create workflow with routing
-workflow = Workflow(
+workflow = AgentFlow(
     name="Agentic Router",
     steps=[
         classifier,

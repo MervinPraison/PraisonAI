@@ -83,7 +83,7 @@ print("  ✓ Manual flush called - events sent to PostHog")
 
 # Test 6: Workflow integration
 print("\n7. Testing workflow integration:")
-from praisonaiagents import AgentManager
+from praisonaiagents import AgentTeam
 
 agents = [
     Agent(name="Agent1", role="First", goal="Do first task", backstory="I'm first"),
@@ -95,7 +95,7 @@ tasks = [
     Task(description="Task 2", expected_output="Output 2", agent=agents[1])
 ]
 
-workflow = AgentManager(
+workflow = AgentTeam(
     agents=agents,
     tasks=tasks,
     process="sequential"

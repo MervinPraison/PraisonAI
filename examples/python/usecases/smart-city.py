@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 import time
 from typing import Dict, List
 
@@ -157,7 +157,7 @@ feedback_task = Task(
 )
 
 # Create workflow
-workflow = AgentManager(
+workflow = AgentTeam(
     agents=[utility_monitor, pattern_analyzer, resource_optimizer, 
             implementation_agent, feedback_monitor],
     tasks=[monitoring_task, pattern_task, optimization_task, 

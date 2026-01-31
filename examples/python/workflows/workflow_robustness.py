@@ -11,7 +11,7 @@ Run: python workflow_robustness.py
 """
 
 from praisonaiagents import Agent, Task
-from praisonaiagents.workflows import Workflow, when
+from praisonaiagents import AgentFlow, when
 
 
 def main():
@@ -68,7 +68,7 @@ def main():
     )
     
     # Create workflow with history tracking enabled
-    workflow = Workflow(
+    workflow = AgentFlow(
         name="Robust Research Workflow",
         steps=[research_task, enrich_task, write_task],
         history=True,  # Enable execution trace for debugging
@@ -127,7 +127,7 @@ def example_with_conditional():
     )
     
     # Workflow with conditional branching
-    workflow = Workflow(
+    workflow = AgentFlow(
         name="Quality Control Workflow",
         steps=[
             scorer,

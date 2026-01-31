@@ -30,7 +30,7 @@ def main():
     print("Example 1: Status Output (output='status')")
     print("=" * 50)
     
-    workflow_status = Workflow(
+    workflow_status = AgentFlow(
         name="Status Example",
         steps=[researcher],
         output="status"  # Shows: ▸ tool → result ✓
@@ -45,7 +45,7 @@ def main():
     print("Example 2: Trace Output (output='trace')")
     print("=" * 50)
     
-    workflow_trace = Workflow(
+    workflow_trace = AgentFlow(
         name="Trace Example",
         steps=[researcher],
         output="trace"  # Shows: [HH:MM:SS] ▸ tool → result [0.2s] ✓
@@ -59,7 +59,7 @@ def main():
     print("Example 3: Verbose Output (output='verbose')")
     print("=" * 50)
     
-    workflow_verbose = Workflow(
+    workflow_verbose = AgentFlow(
         name="Verbose Example",
         steps=[researcher],
         output="verbose"  # Full interactive display
@@ -73,7 +73,7 @@ def main():
     print("Example 4: Silent Output (output='silent' or default)")
     print("=" * 50)
     
-    workflow_silent = Workflow(
+    workflow_silent = AgentFlow(
         name="Silent Example",
         steps=[researcher],
         output="silent"  # No output - zero overhead
@@ -88,7 +88,7 @@ def main():
     print("Example 5: JSON Output (output='json')")
     print("=" * 50)
     
-    workflow_json = Workflow(
+    workflow_json = AgentFlow(
         name="JSON Example",
         steps=[researcher],
         output="json"  # JSONL output for scripting

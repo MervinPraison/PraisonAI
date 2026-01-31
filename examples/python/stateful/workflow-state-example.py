@@ -6,7 +6,7 @@ Demonstrates advanced state management in multi-agent workflows with
 persistence, conditional execution, and cross-task communication.
 """
 
-from praisonaiagents import AgentManager, Agent, Task
+from praisonaiagents import AgentTeam, Agent, Task
 
 def research_tool(topic: str, num_sources: int = 5):
     """Simulated research tool that updates workflow state"""
@@ -85,7 +85,7 @@ def main():
     )
     
     # Create stateful workflow
-    workflow = AgentManager(
+    workflow = AgentTeam(
         agents=[researcher, analyzer, writer],
         tasks=[research_task, analysis_task, report_task],
         memory=True,

@@ -114,7 +114,7 @@ task = Task(
 # Section 4: Execution
 # ============================================================
 
-agents = PraisonAIAgentManager(agents=[agent1, agent2], tasks=[task])
+agents = PraisonAIAgentTeam(agents=[agent1, agent2], tasks=[task])
 result = agents.start()
 print(result)
 

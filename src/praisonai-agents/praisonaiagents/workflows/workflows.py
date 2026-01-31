@@ -506,34 +506,38 @@ def if_(
 
 
 @dataclass
-class Workflow:
+class AgentFlow:
     """
-    A complete workflow with multiple steps.
+    A complete workflow with multiple steps (deterministic pipeline).
     
-    Workflow-centric API with consolidated feature parameters.
+    AgentFlow-centric API with consolidated feature parameters.
     All params follow precedence: Instance > Config > String > Bool > Default
     
     Usage:
-        from praisonaiagents import Workflow, Agent
+        from praisonaiagents import AgentFlow, Agent
         
-        # Simple workflow
-        workflow = Workflow(
+        # Simple flow
+        flow = AgentFlow(
             steps=[Agent(instructions="Write content"), Agent(instructions="Edit content")],
             output="verbose",
         )
-        result = workflow.run("Write about AI")
+        result = flow.run("Write about AI")
         
         # With consolidated configs
         from praisonaiagents.workflows import WorkflowOutputConfig, WorkflowPlanningConfig
         
-        workflow = Workflow(
+        flow = AgentFlow(
             steps=[...],
             output=WorkflowOutputConfig(verbose=True, stream=True),
             planning=WorkflowPlanningConfig(llm="gpt-4o", reasoning=True),
             hooks=WorkflowHooksConfig(on_step_complete=my_callback),
         )
+    
+    Note:
+        The class was renamed from `Workflow` to `AgentFlow` in v1.0.
+        `Workflow` and `Pipeline` remain as silent aliases for backward compatibility.
     """
-    name: str = "Workflow"
+    name: str = "AgentFlow"
     description: str = ""
     steps: List = field(default_factory=list)  # Can be Task, Agent, or function
     variables: Dict[str, Any] = field(default_factory=dict)
@@ -2977,8 +2981,11 @@ CONCISE SUMMARY:"""
         return self.run(input, **kwargs)
 
 
-# Alias: Pipeline = Workflow (they are the same concept)
-Pipeline = Workflow
+# Backward compatibility aliases (silent - no deprecation warnings)
+# AgentFlow is the primary name (v1.0+)
+# Workflow and Pipeline are silent aliases
+Workflow = AgentFlow
+Pipeline = AgentFlow
 
 
 class WorkflowManager:

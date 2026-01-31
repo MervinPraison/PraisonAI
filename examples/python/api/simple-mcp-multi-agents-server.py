@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Agents
+from praisonaiagents import Agent, AgentTeam
 from duckduckgo_search import DDGS
 
 def internet_search_tool(query: str):
@@ -15,5 +15,5 @@ def internet_search_tool(query: str):
 agent = Agent(name="SearchAgent", instructions="You Search the internet for information", tools=[internet_search_tool])
 agent2 = Agent(name="SummariseAgent", instructions="You Summarise the information")
 
-agents = AgentManager(name="MultiAgents", agents=[agent, agent2])
+agents = AgentTeam(name="MultiAgents", agents=[agent, agent2])
 agents.launch(port=8080, protocol="mcp")

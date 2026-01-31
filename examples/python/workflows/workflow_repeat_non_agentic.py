@@ -5,7 +5,7 @@ Demonstrates repeating a step until a condition is met.
 This is useful for iterative improvement patterns.
 """
 
-from praisonaiagents import Workflow, WorkflowContext, StepResult
+from praisonaiagents import AgentFlow, WorkflowContext, StepResult
 from praisonaiagents.workflows import repeat
 
 # Simulated content generator that improves each iteration
@@ -45,7 +45,7 @@ def has_enough_content(ctx: WorkflowContext) -> bool:
 generator = ContentGenerator()
 
 # Create workflow with repeat pattern
-workflow = Workflow(
+workflow = AgentFlow(
     name="Content Generator",
     steps=[
         repeat(

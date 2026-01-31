@@ -16,7 +16,7 @@ from praisonaiagents import Agent, Workflow
 
 ROUTELLM_URL = "http://localhost:6060/v1"
 
-workflow = Workflow(
+workflow = AgentFlow(
     name="Analysis Pipeline",
     steps=[
         Agent(
