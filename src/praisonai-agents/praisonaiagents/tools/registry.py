@@ -209,6 +209,27 @@ class ToolRegistry:
         self._discovered = True
         return count
     
+    def discover_single_file_plugins(self) -> int:
+        """Discover and load tools from single-file plugins.
+        
+        Scans default plugin directories for WordPress-style plugins:
+        - ./.praison/plugins/ (project-level)
+        - ~/.praison/plugins/ (user-level)
+        
+        Returns:
+            Number of plugins loaded
+        """
+        try:
+            from ..plugins.discovery import discover_and_load_plugins
+            loaded = discover_and_load_plugins(plugin_dirs=None, include_defaults=True)
+            return len(loaded)
+        except ImportError:
+            logging.debug("Plugin discovery module not available")
+            return 0
+        except Exception as e:
+            logging.warning(f"Error discovering single-file plugins: {e}")
+            return 0
+    
     def clear(self) -> None:
         """Clear all registered tools. Thread-safe."""
         with self._lock:
@@ -306,3 +327,16 @@ def list_tools() -> List[str]:
     """
     registry = get_registry()
     return list(registry._tools.keys()) + list(registry._functions.keys())
+
+
+def discover_plugins() -> int:
+    """Discover and load tools from single-file plugins.
+    
+    Scans default plugin directories for WordPress-style plugins:
+    - ./.praison/plugins/ (project-level)
+    - ~/.praison/plugins/ (user-level)
+    
+    Returns:
+        Number of plugins loaded
+    """
+    return get_registry().discover_single_file_plugins()

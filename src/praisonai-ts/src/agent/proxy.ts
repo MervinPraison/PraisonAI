@@ -1,5 +1,5 @@
-import { Agent as SimpleAgent, PraisonAIAgents as SimplePraisonAIAgents, SimpleAgentConfig } from './simple';
-import { Agent as TaskAgent, PraisonAIAgents as TaskPraisonAIAgents, TaskAgentConfig } from './types';
+import { Agent as SimpleAgent, AgentTeam as SimpleAgentTeam, SimpleAgentConfig } from './simple';
+import { Agent as TaskAgent, TaskAgentTeam, TaskAgentConfig } from './types';
 import { Task } from './types';
 import type { ChatCompletionTool } from 'openai/resources/chat/completions';
 
@@ -121,16 +121,16 @@ export class Agent {
   }
 }
 
-export class PraisonAIAgents {
-  private simpleImpl: SimplePraisonAIAgents | null = null;
-  private taskImpl: TaskPraisonAIAgents | null = null;
+export class AgentTeam {
+  private simpleImpl: SimpleAgentTeam | null = null;
+  private taskImpl: TaskAgentTeam | null = null;
 
   constructor(config: any) {
     // Auto-detect mode based on tasks type
     if (Array.isArray(config.tasks)) {
       // If tasks are provided and are strings, use simple mode
       if (config.tasks.length > 0 && typeof config.tasks[0] === 'string') {
-        this.simpleImpl = new SimplePraisonAIAgents({
+        this.simpleImpl = new SimpleAgentTeam({
           agents: config.agents,
           tasks: config.tasks,
           verbose: config.verbose,
@@ -138,7 +138,7 @@ export class PraisonAIAgents {
         });
       } else if (config.tasks.length > 0) {
         // If tasks are provided but not strings, use task mode
-        this.taskImpl = new TaskPraisonAIAgents({
+        this.taskImpl = new TaskAgentTeam({
           agents: config.agents,
           tasks: config.tasks,
           verbose: config.verbose,
@@ -150,7 +150,7 @@ export class PraisonAIAgents {
     
     // If no tasks provided, create simple implementation with auto-generated tasks
     if (!this.simpleImpl && !this.taskImpl) {
-      this.simpleImpl = new SimplePraisonAIAgents({
+      this.simpleImpl = new SimpleAgentTeam({
         agents: config.agents,
         verbose: config.verbose,
         process: config.process
@@ -177,5 +177,17 @@ export class PraisonAIAgents {
     throw new Error('No implementation available');
   }
 }
+
+/**
+ * PraisonAIAgents - Silent alias for AgentTeam (backward compatibility)
+ * @deprecated Use AgentTeam instead
+ */
+export const PraisonAIAgents = AgentTeam;
+
+/**
+ * Agents - Silent alias for AgentTeam (backward compatibility)
+ * @deprecated Use AgentTeam instead
+ */
+export const Agents = AgentTeam;
 
 export { Task } from './types';

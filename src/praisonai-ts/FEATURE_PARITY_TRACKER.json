@@ -1,7 +1,7 @@
 {
-  "version": "1.4.0",
-  "lastUpdated": "2025-01-28",
-  "implementationStatus": "Phase 6 Complete - LLM-as-Judge Evaluation",
+  "version": "1.5.5",
+  "lastUpdated": "2026-01-31",
+  "implementationStatus": "Phase 7 Complete - Agent* Prefix Renaming (Python Parity)",
   "summary": {
     "pythonCoreFeatures": 85,
     "pythonWrapperFeatures": 45,
@@ -33,16 +33,17 @@
     "path": "/Users/praison/praisonai-package/src/praisonai-agents/praisonaiagents",
     "exports": [
       "Agent", "ImageAgent", "ContextAgent", "DeepResearchAgent", "QueryRewriterAgent", "PromptExpanderAgent",
-      "PraisonAIAgents", "Agents", "Task", "Tools", "BaseTool", "ToolResult", "tool", "FunctionTool",
+      "AgentTeam", "AgentFlow", "PraisonAIAgents", "Agents", "Workflow", "Pipeline",
+      "Task", "Tools", "BaseTool", "ToolResult", "tool", "FunctionTool",
       "ToolRegistry", "get_registry", "register_tool", "get_tool", "AutoAgents", "Session", "Memory",
-      "Knowledge", "Chunking", "db", "obs", "MCP", "Workflow", "Pipeline", "WorkflowStep", "WorkflowContext",
+      "Knowledge", "Chunking", "db", "obs", "MCP", "WorkflowStep", "WorkflowContext",
       "StepResult", "Route", "Parallel", "Loop", "Repeat", "GuardrailResult", "LLMGuardrail",
       "Handoff", "handoff", "FlowDisplay", "FastContext", "SkillManager", "SkillProperties",
       "get_telemetry", "enable_telemetry", "MinimalTelemetry", "TelemetryCollector", "AGUI", "A2A"
     ],
     "modules": {
       "agent": ["Agent", "ImageAgent", "ContextAgent", "DeepResearchAgent", "QueryRewriterAgent", "PromptExpanderAgent", "RouterAgent", "Handoff"],
-      "agents": ["PraisonAIAgents", "AutoAgents"],
+      "agents": ["AgentTeam", "PraisonAIAgents", "Agents", "AutoAgents"],
       "task": ["Task"],
       "tools": ["Tools", "BaseTool", "ToolResult", "tool", "FunctionTool", "ToolRegistry", "40+ built-in tools"],
       "llm": ["LLM", "OpenAIClient", "ModelRouter", "RateLimiter", "ModelCapabilities"],

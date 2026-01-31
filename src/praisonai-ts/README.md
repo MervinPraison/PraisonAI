@@ -33,7 +33,7 @@ Here are examples of different ways to use PraisonAI:
 ### 1. Single Agent Example
 
 ```typescript
-import { Agent, PraisonAIAgents } from 'praisonai';
+import { Agent, AgentTeam } from 'praisonai';
 
 async function main() {
     // Create a simple agent (no task specified)
@@ -43,8 +43,8 @@ async function main() {
         verbose: true
     });
 
-    // Run the agent
-    const praisonAI = new PraisonAIAgents({
+    // Run the agent with AgentTeam
+    const team = new AgentTeam({
         agents: [agent],
         tasks: ["Explain the process of photosynthesis in detail."],
         verbose: true
@@ -52,7 +52,7 @@ async function main() {
 
     try {
         console.log('Starting single agent example...');
-        const results = await praisonAI.start();
+        const results = await team.start();
         console.log('\nFinal Results:', results);
     } catch (error) {
         console.error('Error:', error);
@@ -65,7 +65,7 @@ main();
 ### 2. Multi-Agent Example
 
 ```typescript
-import { Agent, PraisonAIAgents } from 'praisonai';
+import { Agent, AgentTeam } from 'praisonai';
 
 async function main() {
     // Create multiple agents with different roles
@@ -87,8 +87,8 @@ async function main() {
         verbose: true
     });
 
-    // Run the agents in sequence
-    const praisonAI = new PraisonAIAgents({
+    // Run the agents in sequence with AgentTeam
+    const team = new AgentTeam({
         agents: [researchAgent, summaryAgent, recommendationAgent],
         tasks: [
             "Research and analyze current renewable energy technologies and their implementation.",
@@ -100,7 +100,7 @@ async function main() {
 
     try {
         console.log('Starting multi-agent example...');
-        const results = await praisonAI.start();
+        const results = await team.start();
         console.log('\nFinal Results:', results);
     } catch (error) {
         console.error('Error:', error);
@@ -113,7 +113,7 @@ main();
 ### 3. Task-Based Agent Example
 
 ```typescript
-import { Agent, Task, PraisonAIAgents } from 'praisonai';
+import { Agent, Task, AgentTeam } from 'praisonai';
 
 async function main() {
     // Create agents first
@@ -160,15 +160,15 @@ The blog post should:
         dependencies: [createRecipesTask]  // This task depends on the recipes being created first
     });
 
-    // Run the tasks
-    const praisonAI = new PraisonAIAgents({
+    // Run the tasks with AgentTeam
+    const team = new AgentTeam({
         tasks: [createRecipesTask, writeBlogTask],
         verbose: true
     });
 
     try {
         console.log('Starting task-based example...');
-        const results = await praisonAI.start();
+        const results = await team.start();
         console.log('\nFinal Results:', results);
     } catch (error) {
         console.error('Error:', error);

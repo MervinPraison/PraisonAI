@@ -361,9 +361,23 @@ function createContext(workflowId: string): WorkflowContext {
 }
 
 /**
- * Workflow - Sequential pipeline execution
+ * AgentFlow - Sequential pipeline execution (renamed from Workflow for Python parity)
+ * 
+ * @example
+ * ```typescript
+ * import { Agent, AgentFlow } from 'praisonai';
+ * 
+ * const researcher = new Agent({ instructions: "Research the topic" });
+ * const writer = new Agent({ instructions: "Write based on research" });
+ * 
+ * const flow = new AgentFlow("Research Pipeline")
+ *   .agent(researcher, "Research AI trends")
+ *   .agent(writer, "Write article based on research");
+ * 
+ * await flow.run("AI in 2025");
+ * ```
  */
-export class Workflow<TInput = any, TOutput = any> {
+export class AgentFlow<TInput = any, TOutput = any> {
   readonly id: string;
   readonly name: string;
   private steps: Task[] = [];
@@ -466,9 +480,16 @@ export class Workflow<TInput = any, TOutput = any> {
 }
 
 /**
- * Pipeline - Alias for Workflow
+ * Workflow - Silent alias for AgentFlow (backward compatibility)
+ * @deprecated Use AgentFlow instead
  */
-export const Pipeline = Workflow;
+export const Workflow = AgentFlow;
+
+/**
+ * Pipeline - Silent alias for AgentFlow (backward compatibility)
+ * @deprecated Use AgentFlow instead
+ */
+export const Pipeline = AgentFlow;
 
 /**
  * Parallel execution helper

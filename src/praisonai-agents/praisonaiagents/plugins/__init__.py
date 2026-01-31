@@ -50,6 +50,17 @@ __all__ = [
     "HookPluginProtocol",
     "AgentPluginProtocol",
     "LLMPluginProtocol",
+    # Single-file plugin support
+    "PluginMetadata",
+    "PluginParseError",
+    "parse_plugin_header",
+    "parse_plugin_header_from_file",
+    "discover_plugins",
+    "load_plugin",
+    "discover_and_load_plugins",
+    "get_default_plugin_dirs",
+    "get_plugin_template",
+    "ensure_plugin_dir",
 ]
 
 
@@ -100,5 +111,47 @@ def __getattr__(name: str):
     if name == "LLMPluginProtocol":
         from .protocols import LLMPluginProtocol
         return LLMPluginProtocol
+    
+    # Single-file plugin support - parser
+    if name == "PluginMetadata":
+        from .parser import PluginMetadata
+        return PluginMetadata
+    
+    if name == "PluginParseError":
+        from .parser import PluginParseError
+        return PluginParseError
+    
+    if name == "parse_plugin_header":
+        from .parser import parse_plugin_header
+        return parse_plugin_header
+    
+    if name == "parse_plugin_header_from_file":
+        from .parser import parse_plugin_header_from_file
+        return parse_plugin_header_from_file
+    
+    # Single-file plugin support - discovery
+    if name == "discover_plugins":
+        from .discovery import discover_plugins
+        return discover_plugins
+    
+    if name == "load_plugin":
+        from .discovery import load_plugin
+        return load_plugin
+    
+    if name == "discover_and_load_plugins":
+        from .discovery import discover_and_load_plugins
+        return discover_and_load_plugins
+    
+    if name == "get_default_plugin_dirs":
+        from .discovery import get_default_plugin_dirs
+        return get_default_plugin_dirs
+    
+    if name == "get_plugin_template":
+        from .discovery import get_plugin_template
+        return get_plugin_template
+    
+    if name == "ensure_plugin_dir":
+        from .discovery import ensure_plugin_dir
+        return ensure_plugin_dir
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
