@@ -202,11 +202,15 @@ Methods:
 
 Types:
 ```python
-from praisonaiagents import Loop, Parallel, Pipeline, Repeat, Route, Workflow, loop, parallel, repeat, route
+from praisonaiagents import Loop, Parallel, Pipeline, Repeat, Route, Task, Workflow, loop, parallel, repeat, route
 ```
 
 Methods:
 
+* <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">execute_callback</a>(task_output: TaskOutput) -> None</code>
+* <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">execute_callback_sync</a>(task_output: TaskOutput) -> None</code>
+* <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">initialize_memory</a>()</code>
+* <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">store_in_memory</a>(content: str, agent_name: str = None, task_id: str = None)</code>
 * <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">arun</a>(input: str = '', llm: Optional[str] = None, verbose: bool = False) -> Dict[str, Any]</code>
 * <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">astart</a>(input: str = '', llm: Optional[str] = None, verbose: bool = False) -> Dict[str, Any]</code>
 * <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">from_template</a>(uri: str, config: Optional[Dict[str, Any]] = None, offline: bool = False, **kwargs) -> 'Workflow'</code>
@@ -681,7 +685,7 @@ Methods:
 
 Types:
 ```python
-from praisonaiagents import AgentManager, EmbeddingResult, Task, aembedding, aembeddings, embedding, embeddings, get_dimensions
+from praisonaiagents import AgentManager, EmbeddingResult, aembedding, aembeddings, embedding, embeddings, get_dimensions
 ```
 
 Methods:
@@ -725,10 +729,6 @@ Methods:
 * <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">todo_list</a>()</code>
 * <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">update_plan_step_status</a>(step_id: str, status: str) -> bool</code>
 * <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">update_state</a>(updates: Dict) -> None</code>
-* <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">execute_callback</a>(task_output: TaskOutput) -> None</code>
-* <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">execute_callback_sync</a>(task_output: TaskOutput) -> None</code>
-* <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">initialize_memory</a>()</code>
-* <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">store_in_memory</a>(content: str, agent_name: str = None, task_id: str = None)</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/embedding/embed.py">aembedding</a>(input: Union[str, List[str]], model: str = 'text-embedding-3-small', dimensions: Optional[int] = None, encoding_format: str = 'float', timeout: float = 600.0, api_key: Optional[str] = None, api_base: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None, **kwargs) -> EmbeddingResult</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/embedding/embed.py">aembeddings</a>(input: Union[str, List[str]], model: str = 'text-embedding-3-small', dimensions: Optional[int] = None, encoding_format: str = 'float', timeout: float = 600.0, api_key: Optional[str] = None, api_base: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None, **kwargs) -> EmbeddingResult</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/embedding/embed.py">embedding</a>(input: Union[str, List[str]], model: str = 'text-embedding-3-small', dimensions: Optional[int] = None, encoding_format: str = 'float', timeout: float = 600.0, api_key: Optional[str] = None, api_base: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None, **kwargs) -> EmbeddingResult</code>
@@ -1108,9 +1108,9 @@ export { MissingDependencyError, MissingEnvVarError, ToolsRegistry, composeMiddl
 export type { InstallHints, PraisonTool, RedactionHooks, RegisteredTool, ToolCapabilities, ToolExecutionContext, ToolExecutionResult, ToolFactory, ToolHooks, ToolInstallStatus, ToolLimits, ToolLogger, ToolMetadata, ToolMiddleware, ToolParameterProperty, ToolParameterSchema } from "./tools/registry";
 export { registerBuiltinTools, tools } from "./tools/tools";
 export { // New: Python-parity Loop and Repeat classes
-  Loop, // WorkflowStep class
-  WorkflowStep, Repeat, Workflow, loop, loopPattern, parallel, repeat, repeatPattern, route } from "./workflows";
-export type { LoopConfig, LoopResult, RepeatConfig, RepeatContext, RepeatResult, StepContextConfig, StepExecutionConfig, StepOutputConfig, StepResult, StepRoutingConfig, WorkflowContext, WorkflowStepConfig } from "./workflows";
+  Loop, // Task class
+  Task, Repeat, Workflow, loop, loopPattern, parallel, repeat, repeatPattern, route } from "./workflows";
+export type { LoopConfig, LoopResult, RepeatConfig, RepeatContext, RepeatResult, StepContextConfig, StepExecutionConfig, StepOutputConfig, StepResult, StepRoutingConfig, TaskConfig, WorkflowContext } from "./workflows";
 export { createWorkflowFromYAML, loadWorkflowFromFile, parseYAMLWorkflow, validateWorkflowDefinition } from "./workflows/yaml-parser";
 ```
 
