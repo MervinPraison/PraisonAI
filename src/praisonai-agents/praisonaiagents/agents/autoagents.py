@@ -154,6 +154,7 @@ class AutoAgents(AgentManager):
             tasks=tasks,
             process=process,
             manager_llm=manager_llm or self.llm,
+            llm=self.llm,  # Pass llm to parent for API consistency
             output=self._output,  # Consolidated output param
             execution=self._execution,
             hooks=self._hooks,

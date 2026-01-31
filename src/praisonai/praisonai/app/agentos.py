@@ -14,12 +14,12 @@ class AgentOS:
     """
     Production platform for deploying AI agents as web services.
     
-    AgentOS wraps agents, managers, and workflows into a unified FastAPI
+    AgentOS wraps agents, teams, and flows into a unified FastAPI
     application with REST and WebSocket endpoints.
     
     Example:
         from praisonai import AgentOS
-        from praisonaiagents import Agent
+        from praisonaiagents import Agent, AgentTeam, AgentFlow
         
         assistant = Agent(name="assistant", instructions="Be helpful")
         
@@ -27,10 +27,12 @@ class AgentOS:
         app = AgentOS(agents=[assistant])
         app.serve(port=8000)
         
-        # With configuration
+        # With teams and flows
         app = AgentOS(
             name="My AI App",
             agents=[assistant],
+            teams=[my_team],
+            flows=[my_flow],
             config=AgentOSConfig(port=9000, reload=True)
         )
         app.serve()
@@ -38,8 +40,8 @@ class AgentOS:
     Attributes:
         name: Name of the application
         agents: List of Agent instances
-        managers: List of AgentTeam instances
-        workflows: List of Workflow instances
+        teams: List of AgentTeam instances (alias: managers)
+        flows: List of AgentFlow instances (alias: workflows)
         config: AgentOSConfig instance
     """
     
@@ -47,9 +49,12 @@ class AgentOS:
         self,
         name: str = "PraisonAI App",
         agents: Optional[List[Any]] = None,
-        managers: Optional[List[Any]] = None,
-        workflows: Optional[List[Any]] = None,
+        teams: Optional[List[Any]] = None,
+        flows: Optional[List[Any]] = None,
         config: Optional[AgentOSConfig] = None,
+        # Backward compatibility aliases
+        managers: Optional[List[Any]] = None,  # Deprecated: use teams
+        workflows: Optional[List[Any]] = None,  # Deprecated: use flows
         **kwargs: Any
     ):
         """
@@ -58,15 +63,16 @@ class AgentOS:
         Args:
             name: Name of the application
             agents: List of Agent instances to serve
-            managers: List of AgentTeam instances to serve
-            workflows: List of Workflow instances to serve
+            teams: List of AgentTeam instances to serve (alias: managers)
+            flows: List of AgentFlow instances to serve (alias: workflows)
             config: AgentOSConfig for server configuration
             **kwargs: Additional configuration passed to AgentOSConfig
         """
         self.name = name
         self.agents = agents or []
-        self.managers = managers or []
-        self.workflows = workflows or []
+        # Support both new names and legacy aliases
+        self.teams = teams or managers or []
+        self.flows = flows or workflows or []
         
         # Merge kwargs into config
         if config is None:
@@ -130,8 +136,8 @@ class AgentOS:
                 "name": self.name,
                 "status": "running",
                 "agents": [getattr(a, 'name', str(a)) for a in self.agents],
-                "managers": len(self.managers),
-                "workflows": len(self.workflows),
+                "teams": len(self.teams),
+                "flows": len(self.flows),
             }
         
         @app.get("/health")

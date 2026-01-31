@@ -61,6 +61,16 @@ export type {
   StepContextConfig, StepOutputConfig, StepExecutionConfig, StepRoutingConfig
 } from './workflows';
 
+// AgentOS - Production deployment platform for AI agents
+// AgentOS is the primary class (Python parity), AgentApp is a silent alias
+export {
+  AgentOS, AgentApp,
+  AgentOSConfig, AgentAppConfig,
+  AgentOSProtocol, AgentAppProtocol,
+  DEFAULT_AGENTOS_CONFIG, mergeConfig,
+} from './os';
+export type { AgentOSOptions, AgentAppOptions } from './os';
+
 // Database factory - Python-like db() shortcut
 export { db, createDbAdapter, getDefaultDbAdapter, setDefaultDbAdapter } from './db';
 export type { DbAdapter, DbConfig, DbMessage, DbRun, DbTrace } from './db';

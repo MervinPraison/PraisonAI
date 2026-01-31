@@ -238,6 +238,272 @@ def plugins_doctor():
         raise typer.Exit(1)
 
 
+# ============ Single-File Plugin Commands ============
+
+@app.command("create")
+def plugins_create(
+    name: str = typer.Argument(..., help="Plugin name (will be converted to snake_case)"),
+    description: str = typer.Option("A PraisonAI plugin", "--description", "-d", help="Plugin description"),
+    author: str = typer.Option("", "--author", "-a", help="Plugin author"),
+    output_dir: str = typer.Option(None, "--output", "-o", help="Output directory (default: ~/.praison/plugins/)"),
+):
+    """Create a new single-file plugin from template.
+    
+    Creates a new plugin with WordPress-style docstring header in the
+    user's plugin directory (~/.praison/plugins/).
+    
+    Examples:
+        praisonai plugins create weather
+        praisonai plugins create weather --description "Weather API tools"
+        praisonai plugins create weather -o ./my_plugins/
+    """
+    try:
+        from pathlib import Path
+        from praisonaiagents.plugins.discovery import get_plugin_template, ensure_plugin_dir
+        
+        # Sanitize plugin name
+        safe_name = name.lower().replace("-", "_").replace(" ", "_")
+        
+        # Determine output directory
+        if output_dir:
+            plugin_dir = Path(output_dir).expanduser().resolve()
+            plugin_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            plugin_dir = ensure_plugin_dir()
+        
+        plugin_path = plugin_dir / f"{safe_name}.py"
+        
+        # Check if file already exists
+        if plugin_path.exists():
+            overwrite = typer.confirm(f"Plugin {plugin_path} already exists. Overwrite?")
+            if not overwrite:
+                typer.echo("Cancelled.")
+                raise typer.Exit(0)
+        
+        # Generate template
+        template = get_plugin_template(name, description, author)
+        
+        # Write file
+        plugin_path.write_text(template)
+        
+        typer.echo(f"[green]✓[/green] Created plugin: {plugin_path}")
+        typer.echo(f"\nNext steps:")
+        typer.echo(f"  1. Edit {plugin_path} to add your tools")
+        typer.echo(f"  2. Run 'praisonai plugins discover' to verify")
+        typer.echo(f"  3. Use tools with Agent(tools=['example_tool'])")
+        
+    except ImportError as e:
+        typer.echo(f"Error: praisonaiagents package not found. Install with: pip install praisonaiagents", err=True)
+        raise typer.Exit(1)
+    except Exception as e:
+        typer.echo(f"Error creating plugin: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@app.command("install")  
+def plugins_install(
+    source: str = typer.Argument(..., help="Path to plugin file to install"),
+    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing plugin"),
+):
+    """Install a single-file plugin.
+    
+    Copies a plugin file to the user's plugin directory (~/.praison/plugins/).
+    
+    Examples:
+        praisonai plugins install ./my_weather_plugin.py
+        praisonai plugins install ./my_weather_plugin.py --force
+    """
+    try:
+        from pathlib import Path
+        import shutil
+        from praisonaiagents.plugins.discovery import ensure_plugin_dir
+        from praisonaiagents.plugins.parser import parse_plugin_header_from_file
+        
+        source_path = Path(source).expanduser().resolve()
+        
+        # Validate source file
+        if not source_path.exists():
+            typer.echo(f"Error: File not found: {source}", err=True)
+            raise typer.Exit(1)
+        
+        if not source_path.suffix == ".py":
+            typer.echo(f"Error: Plugin must be a Python file (.py)", err=True)
+            raise typer.Exit(1)
+        
+        # Validate plugin header
+        try:
+            metadata = parse_plugin_header_from_file(str(source_path))
+            plugin_name = metadata.get("name", source_path.stem)
+        except Exception as e:
+            typer.echo(f"Error: Invalid plugin header: {e}", err=True)
+            raise typer.Exit(1)
+        
+        # Install to user plugin directory
+        plugin_dir = ensure_plugin_dir()
+        dest_path = plugin_dir / source_path.name
+        
+        if dest_path.exists() and not force:
+            overwrite = typer.confirm(f"Plugin {dest_path.name} already exists. Overwrite?")
+            if not overwrite:
+                typer.echo("Cancelled.")
+                raise typer.Exit(0)
+        
+        shutil.copy2(source_path, dest_path)
+        
+        typer.echo(f"[green]✓[/green] Installed '{plugin_name}' to {dest_path}")
+        typer.echo(f"\nTools will be available on next run.")
+        
+    except ImportError:
+        typer.echo(f"Error: praisonaiagents package not found.", err=True)
+        raise typer.Exit(1)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        typer.echo(f"Error installing plugin: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@app.command("discover")
+def plugins_discover(
+    plugin_dirs: str = typer.Option(None, "--dirs", "-d", help="Additional plugin directories (comma-separated)"),
+    load: bool = typer.Option(False, "--load", "-l", help="Actually load the plugins"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+):
+    """Discover single-file plugins from plugin directories.
+    
+    Scans ~/.praison/plugins/ and ./.praison/plugins/ for valid plugins.
+    
+    Examples:
+        praisonai plugins discover
+        praisonai plugins discover --load
+        praisonai plugins discover --json
+    """
+    try:
+        from praisonaiagents.plugins.discovery import discover_plugins, discover_and_load_plugins
+        
+        extra_dirs = plugin_dirs.split(",") if plugin_dirs else None
+        
+        if load:
+            plugins = discover_and_load_plugins(extra_dirs)
+        else:
+            plugins = discover_plugins(extra_dirs)
+        
+        if json_output:
+            import json
+            print(json.dumps(plugins, indent=2, default=str))
+        else:
+            from rich.console import Console
+            from rich.table import Table
+            
+            console = Console()
+            
+            if not plugins:
+                console.print("[yellow]No single-file plugins found.[/yellow]")
+                console.print("\nCreate one with: praisonai plugins init <name>")
+                return
+            
+            table = Table(title=f"Single-File Plugins ({len(plugins)} found)")
+            table.add_column("Name", style="cyan")
+            table.add_column("Version")
+            table.add_column("Tools", style="green")
+            table.add_column("Path")
+            
+            for plugin in plugins:
+                tools = plugin.get("tools", [])
+                tools_str = ", ".join(tools[:3])
+                if len(tools) > 3:
+                    tools_str += f" (+{len(tools)-3})"
+                
+                table.add_row(
+                    plugin.get("name", "-"),
+                    plugin.get("version", "-"),
+                    tools_str or "-",
+                    str(plugin.get("path", "-"))[:40],
+                )
+            
+            console.print(table)
+            
+            if load:
+                console.print("\n[green]Plugins loaded.[/green] Tools are now available.")
+            
+    except ImportError:
+        typer.echo(f"Error: praisonaiagents package not found.", err=True)
+        raise typer.Exit(1)
+    except Exception as e:
+        typer.echo(f"Error discovering plugins: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@app.command("remove")
+def plugins_remove(
+    name: str = typer.Argument(..., help="Plugin name or filename to remove"),
+    force: bool = typer.Option(False, "--force", "-f", help="Remove without confirmation"),
+):
+    """Remove a single-file plugin.
+    
+    Removes a plugin from the user's plugin directory.
+    
+    Examples:
+        praisonai plugins remove weather
+        praisonai plugins remove weather_plugin.py --force
+    """
+    try:
+        from pathlib import Path
+        from praisonaiagents.plugins.discovery import get_default_plugin_dirs
+        
+        # Normalize name
+        if not name.endswith(".py"):
+            name = f"{name}.py"
+        
+        # Search in plugin directories
+        plugin_path = None
+        for plugin_dir in get_default_plugin_dirs():
+            candidate = plugin_dir / name
+            if candidate.exists():
+                plugin_path = candidate
+                break
+        
+        # Also check user directory explicitly
+        if not plugin_path:
+            user_dir = Path.home() / ".praison" / "plugins"
+            candidate = user_dir / name
+            if candidate.exists():
+                plugin_path = candidate
+        
+        if not plugin_path:
+            typer.echo(f"Plugin not found: {name}", err=True)
+            raise typer.Exit(1)
+        
+        if not force:
+            confirm = typer.confirm(f"Remove plugin {plugin_path}?")
+            if not confirm:
+                typer.echo("Cancelled.")
+                raise typer.Exit(0)
+        
+        plugin_path.unlink()
+        typer.echo(f"[green]✓[/green] Removed: {plugin_path}")
+        
+    except ImportError:
+        # Fallback without praisonaiagents
+        from pathlib import Path
+        user_dir = Path.home() / ".praison" / "plugins"
+        if not name.endswith(".py"):
+            name = f"{name}.py"
+        plugin_path = user_dir / name
+        if plugin_path.exists():
+            if force or typer.confirm(f"Remove plugin {plugin_path}?"):
+                plugin_path.unlink()
+                typer.echo(f"[green]✓[/green] Removed: {plugin_path}")
+        else:
+            typer.echo(f"Plugin not found: {name}", err=True)
+            raise typer.Exit(1)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        typer.echo(f"Error removing plugin: {e}", err=True)
+        raise typer.Exit(1)
+
+
 def _get_available_plugins():
     """Get list of available plugins."""
     # Built-in plugins

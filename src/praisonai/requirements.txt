@@ -5,6 +5,6 @@ python-dotenv>=1.0.1
 instructor>=0.4.8
 PyYAML>=6.0
 praisonaiagents>=0.0.4
-duckduckgo_search
+ddgs
 praisonai_tools
 flask>=2.0.0

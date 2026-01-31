@@ -29,9 +29,9 @@ def internet_search(query: str, max_results: int = 5, retries: int = MAX_RETRIES
     Returns:
         List of search results with title, url, and snippet
     """
-    # Check if duckduckgo_search is installed
-    if util.find_spec("duckduckgo_search") is None:
-        error_msg = "DuckDuckGo search is not available. Please install duckduckgo_search package using: pip install duckduckgo_search"
+    # Check if ddgs is installed
+    if util.find_spec("ddgs") is None:
+        error_msg = "DuckDuckGo search is not available. Please install ddgs package using: pip install ddgs"
         logging.error(error_msg)
         return [{"error": error_msg}]
 
@@ -39,7 +39,7 @@ def internet_search(query: str, max_results: int = 5, retries: int = MAX_RETRIES
     for attempt in range(retries):
         try:
             # Import only when needed
-            from duckduckgo_search import DDGS
+            from ddgs import DDGS
             results = []
             ddgs = DDGS()
             

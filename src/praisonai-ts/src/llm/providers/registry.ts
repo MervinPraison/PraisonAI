@@ -238,22 +238,37 @@ export class ProviderRegistry implements IProviderRegistry {
    * Constructors have a prototype with constructor
    */
   private isLoaderFunction(value: ProviderConstructor | ProviderLoader): boolean {
-    // If it has a prototype with more than just constructor, it's likely a class
+    // Check if it's a class by looking at the string representation
+    const str = value.toString();
+    
+    // Classes start with 'class ' in their toString
+    if (str.startsWith('class ')) {
+      return false;
+    }
+    
+    // If it has a prototype with methods (more than just constructor), it's a class
     if (value.prototype && Object.getOwnPropertyNames(value.prototype).length > 1) {
       return false;
     }
     
-    // Check if it looks like a class (has 'prototype' that is an object with constructor)
-    if (value.prototype && value.prototype.constructor === value) {
-      // Additional check: classes typically have a name and their toString starts with 'class'
-      const str = value.toString();
-      if (str.startsWith('class ') || str.includes('function ')) {
-        return false;
+    // Jest mock functions and arrow functions are loaders
+    // They don't have a meaningful prototype or their prototype doesn't match class pattern
+    if (typeof value === 'function') {
+      // Arrow functions have no prototype or an empty prototype
+      if (!value.prototype) {
+        return true;
+      }
+      // Jest mocks have _isMockFunction property
+      if ((value as any)._isMockFunction) {
+        return true;
+      }
+      // Regular functions that aren't classes are loaders
+      if (!str.startsWith('class ') && !str.startsWith('function ')) {
+        return true;
       }
     }
 
-    // Arrow functions and simple functions are loaders
-    return typeof value === 'function' && !value.prototype?.constructor;
+    return false;
   }
 }
 

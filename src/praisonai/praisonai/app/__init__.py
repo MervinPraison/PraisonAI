@@ -2,7 +2,7 @@
 AgentOS module for production deployment of AI agents.
 
 This module provides the AgentOS class which implements the AgentOSProtocol
-from the core SDK. It wraps agents, managers, and workflows into a unified
+from the core SDK. It wraps agents, teams, and flows into a unified
 FastAPI-based web service.
 
 Example:
@@ -18,6 +18,7 @@ Example:
     app.serve(port=8000)
 """
 
-from .app import AgentOS
+from .agentos import AgentOS
 
 __all__ = ['AgentOS']
+

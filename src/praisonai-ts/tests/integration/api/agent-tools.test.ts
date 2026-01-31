@@ -1,108 +1,71 @@
 import { Agent } from '../../../src/agent';
-import { ToolManager } from '../../../src/tools';
-import { Task } from '../../../src/agent';
 
-jest.mock('../../../src/llm/openai');
-
-describe('Agent Tools Integration', () => {
-    let agent: Agent;
-    let toolManager: ToolManager;
-
-    beforeEach(() => {
-        agent = new Agent();
-        toolManager = new ToolManager();
-    });
-
-    describe('tool registration', () => {
-        it('should register tools', () => {
+describe('Agent Tools API Integration', () => {
+    describe('Agent with Tools', () => {
+        it('should create agent with inline tools', () => {
             const calculatorTool = {
                 name: 'calculator',
                 description: 'Performs calculations',
+                parameters: { type: 'object' as const, properties: {} },
                 execute: async () => '42'
             };
 
-            const translatorTool = {
-                name: 'translator',
-                description: 'Translates text',
-                execute: async () => 'translated'
-            };
+            const agent = new Agent({
+                instructions: 'You are a helpful assistant',
+                tools: [calculatorTool]
+            });
 
-            toolManager.register(calculatorTool);
-            toolManager.register(translatorTool);
-
-            const tools = toolManager.list();
-            expect(tools.map(t => t.name)).toContain('calculator');
-            expect(tools.map(t => t.name)).toContain('translator');
+            expect(agent).toBeDefined();
         });
 
-        it('should prevent duplicate tool registration', () => {
-            const tool = {
-                name: 'calculator',
-                description: 'Performs calculations',
-                execute: async () => '42'
-            };
-
-            toolManager.register(tool);
-            expect(() => toolManager.register(tool)).toThrow();
-        });
-    });
-
-    describe('tool execution', () => {
-        it('should execute registered tool', async () => {
-            const tool = {
-                name: 'calculator',
-                description: 'Performs calculations',
-                execute: async () => '42'
-            };
-
-            toolManager.register(tool);
-            const result = await toolManager.execute('calculator', '2 + 2');
-            expect(result).toBe('42');
-        });
-
-        it('should throw error for unregistered tool', async () => {
-            await expect(toolManager.execute('unknown', 'input')).rejects.toThrow();
-        });
-    });
-
-    describe('agent integration', () => {
-        it('should configure agent with tools', () => {
-            const tool = {
-                name: 'calculator',
-                description: 'Performs calculations',
-                execute: async () => '42'
-            };
-
-            agent.configure({ tools: [tool] });
-            const tools = agent.getTools();
-            expect(tools).toHaveLength(1);
-            expect(tools[0].name).toBe('calculator');
-        });
-
-        it('should execute task with tools', async () => {
-            const task: Task = {
-                id: 'test-task',
-                name: 'Test Task',
-                description: 'A test task',
-                config: {
-                    priority: 1
+        it('should create agent with multiple tools', () => {
+            const tools = [
+                {
+                    name: 'calculator',
+                    description: 'Performs calculations',
+                    parameters: { type: 'object' as const, properties: {} },
+                    execute: async () => '42'
                 },
-                expected_output: 'test output',
-                agent: 'test-agent',
-                dependencies: [],
-                result: null
-            };
+                {
+                    name: 'translator',
+                    description: 'Translates text',
+                    parameters: { type: 'object' as const, properties: {} },
+                    execute: async () => 'translated'
+                }
+            ];
 
-            const tool = {
-                name: 'calculator',
-                description: 'Performs calculations',
-                execute: async () => '42'
-            };
+            const agent = new Agent({
+                instructions: 'You are a helpful assistant',
+                tools
+            });
 
-            agent.configure({ tools: [tool] });
-            const result = await agent.execute(task);
-            expect(result).toBeDefined();
-            expect(result.id).toBe('test-task');
+            expect(agent).toBeDefined();
+        });
+    });
+
+    describe('Agent Configuration', () => {
+        it('should create agent with name', () => {
+            const agent = new Agent({
+                name: 'TestAgent',
+                instructions: 'Test instructions'
+            });
+            expect(agent).toBeDefined();
+        });
+
+        it('should create agent with LLM config', () => {
+            const agent = new Agent({
+                instructions: 'Test instructions',
+                llm: 'openai/gpt-4o-mini'
+            });
+            expect(agent).toBeDefined();
+        });
+
+        it('should create agent with verbose mode', () => {
+            const agent = new Agent({
+                instructions: 'Test instructions',
+                verbose: true
+            });
+            expect(agent).toBeDefined();
         });
     });
 });

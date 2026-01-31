@@ -205,6 +205,7 @@ class AgentTeam:
         manager_llm=None,
         name: Optional[str] = None,
         variables: Optional[Dict[str, Any]] = None,
+        llm: Optional[str] = None,  # Default LLM for all agents (API consistency)
         # Consolidated feature params (agent-centric API)
         memory: Optional[Any] = False,  # Union[bool, MultiAgentMemoryConfig]
         planning: Optional[Any] = False,  # Union[bool, MultiAgentPlanningConfig]
@@ -228,6 +229,7 @@ class AgentTeam:
             tasks: Optional list of Task instances (auto-generated from agents if None)
             process: Execution process type ("sequential", "parallel", "hierarchical")
             manager_llm: LLM model for manager agent
+            llm: Default LLM model for all agents
             name: Name for this agent collection
             variables: Global variables for substitution
             memory: Memory configuration (bool | MultiAgentMemoryConfig)
@@ -243,6 +245,7 @@ class AgentTeam:
             reflection: Self-reflection configuration (bool | ReflectionConfig)
         """
         # Store new params for propagation to agents
+        self.llm = llm  # Store default LLM for API consistency
         self._autonomy = autonomy
         self._knowledge = knowledge
         self._guardrails = guardrails
@@ -2058,7 +2061,7 @@ Context:
             backstory=agent_config.get('backstory'),
             llm=agent_config.get('llm'),
             tools=agent_config.get('tools'),
-            verbose=self.verbose >= 1,
+            output='verbose' if self.verbose >= 1 else 'silent',
             memory=self.memory
         )
     

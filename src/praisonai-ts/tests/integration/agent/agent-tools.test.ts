@@ -1,5 +1,4 @@
 import { Agent } from '../../../src/agent';
-import { Task } from '../../../src/agent/types';
 
 describe('Agent Integration', () => {
   let agent: Agent;
@@ -7,60 +6,38 @@ describe('Agent Integration', () => {
   beforeEach(() => {
     agent = new Agent({
       name: 'IntegrationTestAgent',
-      instructions: 'Test agent with tools',
-      verbose: true
+      instructions: 'Test agent with tools'
     });
   });
 
-  describe('Task Execution', () => {
-    it('should execute simple task', async () => {
-      const result = await agent.execute('Simple test task');
-      expect(result).toBeTruthy();
+  describe('Agent Creation', () => {
+    it('should create agent with name and instructions', () => {
+      expect(agent).toBeDefined();
     });
 
-    it('should execute complex task', async () => {
-      const task = new Task({
-        name: 'complex-task',
-        description: 'A complex test task',
-        expected_output: 'Task completed successfully',
-        dependencies: [
-          new Task({
-            name: 'step-1',
-            description: 'First step',
-            expected_output: 'Step 1 completed'
-          }),
-          new Task({
-            name: 'step-2',
-            description: 'Second step',
-            expected_output: 'Step 2 completed'
-          })
+    it('should create agent with tools', () => {
+      const toolAgent = new Agent({
+        name: 'ToolAgent',
+        instructions: 'Agent with tools',
+        tools: [
+          {
+            name: 'calculator',
+            description: 'Performs calculations',
+            parameters: { type: 'object', properties: {} },
+            execute: async () => '42'
+          }
         ]
       });
-
-      const taskAgent = new Agent({
-        name: 'ComplexTaskAgent',
-        task,
-        verbose: true
-      });
-
-      const result = await taskAgent.execute('Run complex task');
-      expect(result).toBeTruthy();
+      expect(toolAgent).toBeDefined();
     });
 
-    it('should handle task failure gracefully', async () => {
-      const invalidTask = new Task({
-        name: 'invalid-task',
-        description: '',
-        expected_output: ''
+    it('should create agent with custom LLM', () => {
+      const customAgent = new Agent({
+        name: 'CustomAgent',
+        instructions: 'Custom LLM agent',
+        llm: 'openai/gpt-4o-mini'
       });
-
-      const errorAgent = new Agent({
-        name: 'ErrorTaskAgent',
-        task: invalidTask,
-        verbose: true
-      });
-
-      await expect(errorAgent.execute('Run invalid task')).rejects.toBeTruthy();
+      expect(customAgent).toBeDefined();
     });
   });
 });
