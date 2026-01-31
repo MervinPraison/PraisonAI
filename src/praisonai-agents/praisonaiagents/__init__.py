@@ -587,6 +587,12 @@ __all__ = [
     'Workflow',  # Silent alias for AgentFlow
     'Pipeline',  # Silent alias for AgentFlow
     
+    # AgentOS (production deployment protocols)
+    'AgentOSProtocol',  # Primary protocol for deployment (v1.0+)
+    'AgentOSConfig',  # Primary config for deployment (v1.0+)
+    'AgentAppProtocol',  # Silent alias for AgentOSProtocol
+    'AgentAppConfig',  # Silent alias for AgentOSConfig
+    
     # Tool essentials
     'tool',
     'Tools',

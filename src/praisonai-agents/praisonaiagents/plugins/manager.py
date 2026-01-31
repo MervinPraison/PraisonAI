@@ -36,6 +36,7 @@ class PluginManager:
     def __init__(self):
         self._plugins: Dict[str, Plugin] = {}
         self._enabled: Dict[str, bool] = {}
+        self._single_file_plugins: Dict[str, Dict[str, Any]] = {}  # WordPress-style plugins
     
     def register(self, plugin: Plugin) -> bool:
         """
@@ -285,6 +286,107 @@ class PluginManager:
         """Shutdown all plugins."""
         for name in list(self._plugins.keys()):
             self.unregister(name)
+    
+    # =========================================================================
+    # Single-File Plugin Support (WordPress-style)
+    # =========================================================================
+    
+    def load_single_file_plugin(self, filepath: str) -> bool:
+        """
+        Load a single-file plugin with WordPress-style docstring header.
+        
+        This is the SIMPLEST plugin format - just a Python file with:
+        - A docstring header at the top with metadata
+        - @tool decorated functions for tools
+        - @add_hook decorated functions for hooks
+        
+        Example plugin file:
+            '''
+            Plugin Name: Weather Tools
+            Description: Get weather for any city
+            Version: 1.0.0
+            '''
+            
+            from praisonaiagents import tool
+            
+            @tool
+            def get_weather(city: str) -> str:
+                return f"Weather in {city}"
+        
+        Args:
+            filepath: Path to the Python plugin file
+            
+        Returns:
+            True if loaded successfully
+        """
+        from .discovery import load_plugin
+        
+        result = load_plugin(filepath)
+        if result is None:
+            return False
+        
+        # Track the loaded plugin metadata
+        name = result.get("name", "Unknown")
+        self._single_file_plugins[name] = result
+        
+        logger.info(f"Loaded single-file plugin: {name}")
+        return True
+    
+    def load_single_file_plugins_from_directory(
+        self,
+        directory: str,
+        include_defaults: bool = False
+    ) -> int:
+        """
+        Load all single-file plugins from a directory.
+        
+        Args:
+            directory: Path to scan for plugin files
+            include_defaults: Also scan default plugin directories
+            
+        Returns:
+            Number of plugins loaded
+        """
+        from .discovery import discover_and_load_plugins
+        
+        dirs = [directory] if directory else []
+        loaded = discover_and_load_plugins(dirs, include_defaults)
+        
+        # Track loaded plugins
+        for plugin_meta in loaded:
+            name = plugin_meta.get("name", "Unknown")
+            self._single_file_plugins[name] = plugin_meta
+        
+        return len(loaded)
+    
+    def auto_discover_plugins(self) -> int:
+        """
+        Auto-discover and load plugins from default directories.
+        
+        Scans:
+        - ./.praison/plugins/ (project-level)
+        - ~/.praison/plugins/ (user-level)
+        
+        Returns:
+            Number of plugins loaded
+        """
+        from .discovery import discover_and_load_plugins
+        
+        loaded = discover_and_load_plugins(plugin_dirs=None, include_defaults=True)
+        
+        for plugin_meta in loaded:
+            name = plugin_meta.get("name", "Unknown")
+            self._single_file_plugins[name] = plugin_meta
+        
+        return len(loaded)
+    
+    def list_single_file_plugins(self) -> List[Dict[str, Any]]:
+        """List all loaded single-file plugins."""
+        return list(self._single_file_plugins.values())
+    
+    def get_single_file_plugin(self, name: str) -> Optional[Dict[str, Any]]:
+        """Get a single-file plugin by name."""
+        return self._single_file_plugins.get(name)
 
 
 # Global plugin manager instance

@@ -729,7 +729,23 @@ export class Agent {
 /**
  * Configuration for multi-agent orchestration
  */
-export interface PraisonAIAgentsConfig {
+export interface AgentTeamConfig {
+  agents: Agent[];
+  tasks?: string[];
+  verbose?: boolean;
+  pretty?: boolean;
+  process?: 'sequential' | 'parallel';
+}
+
+/**
+ * @deprecated Use AgentTeamConfig instead. This is a silent alias for backward compatibility.
+ */
+export type PraisonAIAgentsConfig = AgentTeamConfig;
+
+/**
+ * @deprecated Use AgentTeamConfig instead. This is a silent alias for backward compatibility.
+ */
+export interface AgentsConfig {
   agents: Agent[];
   tasks?: string[];
   verbose?: boolean;
@@ -759,7 +775,7 @@ export interface PraisonAIAgentsConfig {
  * });
  * ```
  */
-export class PraisonAIAgents {
+export class AgentTeam {
   private agents: Agent[];
   private tasks: string[];
   private verbose: boolean;
@@ -770,9 +786,9 @@ export class PraisonAIAgents {
    * Create a multi-agent orchestration
    * @param configOrAgents - Either an array of agents or a config object
    */
-  constructor(configOrAgents: PraisonAIAgentsConfig | Agent[]) {
-    // Support array syntax: new Agents([a1, a2])
-    const config: PraisonAIAgentsConfig = Array.isArray(configOrAgents) 
+  constructor(configOrAgents: AgentTeamConfig | Agent[]) {
+    // Support array syntax: new AgentTeam([a1, a2])
+    const config: AgentTeamConfig = Array.isArray(configOrAgents) 
       ? { agents: configOrAgents }
       : configOrAgents;
     
@@ -821,7 +837,7 @@ export class PraisonAIAgents {
   }
 
   async start(): Promise<string[]> {
-    await Logger.debug('Starting PraisonAI Agents execution...');
+    await Logger.debug('Starting AgentTeam execution...');
     await Logger.debug('Process mode:', this.process);
     await Logger.debug('Tasks:', this.tasks);
 
@@ -840,7 +856,7 @@ export class PraisonAIAgents {
     }
 
     if (this.verbose) {
-      await Logger.info('PraisonAI Agents execution completed.');
+      await Logger.info('AgentTeam execution completed.');
       for (let i = 0; i < results.length; i++) {
         await Logger.section(`Result from Agent ${i + 1}`, results[i]);
       }
@@ -855,20 +871,24 @@ export class PraisonAIAgents {
 }
 
 /**
- * Agents - Alias for PraisonAIAgents
- * 
- * This is the recommended class name for multi-agent orchestration.
- * PraisonAIAgents is kept for backward compatibility.
+ * PraisonAIAgents - Silent alias for AgentTeam (backward compatibility)
+ * @deprecated Use AgentTeam instead
+ */
+export const PraisonAIAgents = AgentTeam;
+
+/**
+ * Agents - Silent alias for AgentTeam (backward compatibility)
+ * @deprecated Use AgentTeam instead
  * 
  * @example
  * ```typescript
- * import { Agent, Agents } from 'praisonai';
+ * import { Agent, AgentTeam } from 'praisonai';
  * 
- * const agents = new Agents([
+ * const team = new AgentTeam([
  *   new Agent({ instructions: "Research the topic" }),
  *   new Agent({ instructions: "Write based on research" })
  * ]);
- * await agents.start();
+ * await team.start();
  * ```
  */
-export const Agents = PraisonAIAgents;
+export const Agents = AgentTeam;

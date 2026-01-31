@@ -127,7 +127,7 @@ Based on these results, please complete your task.`;
     }
 }
 
-export interface TaskPraisonAIAgentsConfig {
+export interface TaskAgentTeamConfig {
     agents: Agent[];
     tasks: Task[];
     verbose?: boolean;
@@ -135,24 +135,29 @@ export interface TaskPraisonAIAgentsConfig {
     manager_llm?: string;
 }
 
-export class PraisonAIAgents {
+/**
+ * @deprecated Use TaskAgentTeamConfig instead
+ */
+export type TaskPraisonAIAgentsConfig = TaskAgentTeamConfig;
+
+export class TaskAgentTeam {
     private agents: Agent[];
     private tasks: Task[];
     private verbose: boolean;
     private process: 'sequential' | 'parallel' | 'hierarchical';
     private manager_llm: string;
 
-    constructor(config: TaskPraisonAIAgentsConfig) {
+    constructor(config: TaskAgentTeamConfig) {
         this.agents = config.agents;
         this.tasks = config.tasks;
         this.verbose = config.verbose || false;
         this.process = config.process || 'sequential';
         this.manager_llm = config.manager_llm || 'gpt-5-nano';
-        Logger.debug('PraisonAIAgents initialized', { config });
+        Logger.debug('TaskAgentTeam initialized', { config });
     }
 
     async start(): Promise<any[]> {
-        Logger.debug('Starting PraisonAI Agents execution...');
+        Logger.debug('Starting TaskAgentTeam execution...');
         Logger.debug('Starting with process mode:', this.process);
 
         let results: any[];
@@ -175,7 +180,7 @@ export class PraisonAIAgents {
         }
 
         if (this.verbose) {
-            Logger.info('\nPraisonAI Agents execution completed.');
+            Logger.info('\nTaskAgentTeam execution completed.');
             results.forEach((result, index) => {
                 Logger.info(`\nFinal Result from Task ${index + 1}:`);
                 console.log(result);

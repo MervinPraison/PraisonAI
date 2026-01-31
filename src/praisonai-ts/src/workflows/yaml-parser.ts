@@ -3,7 +3,7 @@
  * Parse YAML workflow definitions into executable workflows
  */
 
-import { Workflow, Task, TaskConfig } from './index';
+import { AgentFlow, Task, TaskConfig } from './index';
 
 export interface YAMLWorkflowDefinition {
   name: string;
@@ -30,7 +30,7 @@ export interface YAMLStepDefinition {
 }
 
 export interface ParsedWorkflow {
-  workflow: Workflow;
+  workflow: AgentFlow;
   definition: YAMLWorkflowDefinition;
   errors: string[];
 }
@@ -114,7 +114,7 @@ export function createWorkflowFromYAML(
   tools: Record<string, any> = {}
 ): ParsedWorkflow {
   const errors: string[] = [];
-  const workflow = new Workflow(definition.name);
+  const workflow = new AgentFlow(definition.name);
 
   for (const stepDef of definition.steps) {
     try {

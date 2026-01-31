@@ -42,12 +42,14 @@
 // ============================================================================
 
 // Agent - Single agent with instructions, tools, and optional persistence
-export { Agent, Agents, PraisonAIAgents, Router } from './agent';
-export type { SimpleAgentConfig, PraisonAIAgentsConfig, SimpleRouterConfig, SimpleRouteConfig } from './agent';
+// AgentTeam is the primary class (Python parity), Agents/PraisonAIAgents are silent aliases
+export { Agent, AgentTeam, Agents, PraisonAIAgents, Router } from './agent';
+export type { SimpleAgentConfig, AgentTeamConfig, PraisonAIAgentsConfig, SimpleRouterConfig, SimpleRouteConfig } from './agent';
 
 // Workflow - Step-based workflow execution
+// AgentFlow is the primary class (Python parity), Workflow/Pipeline are silent aliases
 export {
-  Workflow, parallel, route, loop, repeat,
+  AgentFlow, Workflow, Pipeline, parallel, route, loop, repeat,
   // New: Python-parity Loop and Repeat classes
   Loop, loopPattern, Repeat, repeatPattern,
   // Task class
@@ -262,7 +264,7 @@ export {
 } from './telemetry';
 
 // Export AutoAgents
-export { AutoAgents, createAutoAgents, type AgentConfig, type TaskConfig, type TeamStructure, type AutoAgentsConfig } from './auto';
+export { AutoAgents, createAutoAgents, type AgentConfig, type TaskConfig as AutoTaskConfig, type TeamStructure, type AutoAgentsConfig } from './auto';
 
 // Export ImageAgent
 export { ImageAgent, createImageAgent, type ImageAgentConfig, type ImageGenerationConfig, type ImageAnalysisConfig } from './agent/image';
