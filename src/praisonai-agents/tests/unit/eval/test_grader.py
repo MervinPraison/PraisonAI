@@ -5,6 +5,7 @@ TDD: Tests for the DRY base grader implementation.
 """
 
 import pytest
+import importlib
 from unittest.mock import patch, MagicMock
 
 from praisonaiagents.eval.grader import BaseLLMGrader, GradeResult
@@ -212,9 +213,12 @@ REASONING: Invalid"""
             
             assert "litellm" in str(exc_info.value)
     
-    @patch('praisonaiagents.eval.grader.BaseLLMGrader._get_litellm')
-    def test_grade_success(self, mock_get_litellm):
+    def test_grade_success(self):
         """Test successful grading."""
+        # Reload module to get fresh reference for patching
+        import praisonaiagents.eval.grader as grader_module
+        importlib.reload(grader_module)
+        
         # Mock litellm
         mock_litellm = MagicMock()
         mock_response = MagicMock()
@@ -223,38 +227,44 @@ REASONING: Invalid"""
 REASONING: Good response
 SUGGESTIONS: None"""
         mock_litellm.completion.return_value = mock_response
-        mock_get_litellm.return_value = mock_litellm
         
-        grader = BaseLLMGrader()
-        result = grader.grade(
-            input_text="What is Python?",
-            output="Python is a programming language",
-        )
+        with patch.object(grader_module.BaseLLMGrader, '_get_litellm', return_value=mock_litellm):
+            grader = grader_module.BaseLLMGrader()
+            result = grader.grade(
+                input_text="What is Python?",
+                output="Python is a programming language",
+            )
         
-        assert result.score == 8.0
-        assert "Good response" in result.reasoning
-        mock_litellm.completion.assert_called_once()
+            assert result.score == 8.0
+            assert "Good response" in result.reasoning
+            mock_litellm.completion.assert_called_once()
     
-    @patch('praisonaiagents.eval.grader.BaseLLMGrader._get_litellm')
-    def test_grade_error_handling(self, mock_get_litellm):
+    def test_grade_error_handling(self):
         """Test grading error handling."""
+        # Reload module to get fresh reference for patching
+        import praisonaiagents.eval.grader as grader_module
+        importlib.reload(grader_module)
+        
         mock_litellm = MagicMock()
         mock_litellm.completion.side_effect = Exception("API Error")
-        mock_get_litellm.return_value = mock_litellm
         
-        grader = BaseLLMGrader()
-        result = grader.grade(
-            input_text="test",
-            output="test output",
-        )
+        with patch.object(grader_module.BaseLLMGrader, '_get_litellm', return_value=mock_litellm):
+            grader = grader_module.BaseLLMGrader()
+            result = grader.grade(
+                input_text="test",
+                output="test output",
+            )
         
-        assert result.score == 5.0
-        assert "Grading error" in result.reasoning
+            assert result.score == 5.0
+            assert "Grading error" in result.reasoning
     
     @pytest.mark.asyncio
-    @patch('praisonaiagents.eval.grader.BaseLLMGrader._get_litellm')
-    async def test_grade_async_success(self, mock_get_litellm):
+    async def test_grade_async_success(self):
         """Test async grading."""
+        # Reload module to get fresh reference for patching
+        import praisonaiagents.eval.grader as grader_module
+        importlib.reload(grader_module)
+        
         mock_litellm = MagicMock()
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
@@ -267,16 +277,16 @@ SUGGESTIONS: None"""
             return mock_response
         
         mock_litellm.acompletion = mock_acompletion
-        mock_get_litellm.return_value = mock_litellm
         
-        grader = BaseLLMGrader()
-        result = await grader.grade_async(
-            input_text="test",
-            output="test output",
-        )
+        with patch.object(grader_module.BaseLLMGrader, '_get_litellm', return_value=mock_litellm):
+            grader = grader_module.BaseLLMGrader()
+            result = await grader.grade_async(
+                input_text="test",
+                output="test output",
+            )
         
-        assert result.score == 9.0
-        assert "Excellent" in result.reasoning
+            assert result.score == 9.0
+            assert "Excellent" in result.reasoning
 
 
 class TestProtocolCompliance:

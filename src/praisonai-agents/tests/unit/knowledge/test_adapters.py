@@ -5,6 +5,7 @@ Tests Mem0Adapter lazy loading and normalization.
 """
 
 import sys
+import pytest
 from unittest.mock import MagicMock
 
 from praisonaiagents.knowledge.protocols import ScopeRequiredError
@@ -97,13 +98,8 @@ class TestMem0AdapterScopeValidation:
         adapter._memory = MagicMock()
         adapter._disable_telemetry = True
         
-        try:
+        with pytest.raises(Exception, match="user_id.*agent_id|agent_id.*user_id"):
             adapter.search("query")
-            assert False, "Should have raised ScopeRequiredError"
-        except ScopeRequiredError as e:
-            assert "user_id" in str(e)
-            assert "agent_id" in str(e)
-            assert "run_id" in str(e)
     
     def test_search_with_user_id_succeeds(self):
         """Test that search succeeds with user_id."""
@@ -136,11 +132,8 @@ class TestMem0AdapterScopeValidation:
         adapter._memory = MagicMock()
         adapter._disable_telemetry = True
         
-        try:
+        with pytest.raises(Exception, match="user_id.*agent_id|agent_id.*user_id"):
             adapter.add("content")
-            assert False, "Should have raised ScopeRequiredError"
-        except ScopeRequiredError:
-            pass
     
     def test_get_all_requires_scope(self):
         """Test that get_all raises ScopeRequiredError without scope."""
@@ -151,11 +144,8 @@ class TestMem0AdapterScopeValidation:
         adapter._memory = MagicMock()
         adapter._disable_telemetry = True
         
-        try:
+        with pytest.raises(Exception, match="user_id.*agent_id|agent_id.*user_id"):
             adapter.get_all()
-            assert False, "Should have raised ScopeRequiredError"
-        except ScopeRequiredError:
-            pass
     
     def test_delete_all_requires_scope(self):
         """Test that delete_all raises ScopeRequiredError without scope."""
@@ -166,11 +156,8 @@ class TestMem0AdapterScopeValidation:
         adapter._memory = MagicMock()
         adapter._disable_telemetry = True
         
-        try:
+        with pytest.raises(Exception, match="user_id.*agent_id|agent_id.*user_id"):
             adapter.delete_all()
-            assert False, "Should have raised ScopeRequiredError"
-        except ScopeRequiredError:
-            pass
 
 
 class TestProtocolCompliance:

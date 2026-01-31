@@ -324,6 +324,9 @@ class TestLoadFromDirectory:
     
     def test_load_plugin_file(self):
         """Test loading a plugin from file."""
+        # Reimport PluginManager fresh to ensure class identity matches dynamically loaded plugins
+        from praisonaiagents.plugins.manager import PluginManager
+        
         # Create a plugin file
         plugin_code = '''
 from praisonaiagents.plugins.plugin import Plugin, PluginInfo
