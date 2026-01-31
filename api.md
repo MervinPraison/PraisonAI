@@ -211,24 +211,6 @@ Methods:
 * <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">execute_callback_sync</a>(task_output: TaskOutput) -> None</code>
 * <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">initialize_memory</a>()</code>
 * <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">store_in_memory</a>(content: str, agent_name: str = None, task_id: str = None)</code>
-* <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">arun</a>(input: str = '', llm: Optional[str] = None, verbose: bool = False) -> Dict[str, Any]</code>
-* <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">astart</a>(input: str = '', llm: Optional[str] = None, verbose: bool = False) -> Dict[str, Any]</code>
-* <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">from_template</a>(uri: str, config: Optional[Dict[str, Any]] = None, offline: bool = False, **kwargs) -> 'Workflow'</code>
-* <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">get_history</a>() -> List[Dict[str, Any]]</code>
-* <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">memory_config</a>() -> Optional[Dict[str, Any]]</code>
-* <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">on_step_complete</a>() -> Optional[Callable]</code>
-* <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">on_step_error</a>() -> Optional[Callable]</code>
-* <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">on_step_start</a>() -> Optional[Callable]</code>
-* <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">on_workflow_complete</a>() -> Optional[Callable]</code>
-* <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">on_workflow_start</a>() -> Optional[Callable]</code>
-* <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">planning_llm</a>() -> Optional[str]</code>
-* <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">reasoning</a>() -> bool</code>
-* <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">run</a>(input: str = '', llm: Optional[str] = None, verbose: bool = False, stream: bool = None) -> Dict[str, Any]</code>
-* <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">start</a>(input: str = '', **kwargs) -> Dict[str, Any]</code>
-* <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">stream</a>() -> bool</code>
-* <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">to_dict</a>() -> Dict[str, Any]</code>
-* <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">verbose</a>() -> bool</code>
-* <code title="class Workflow">Workflow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">verbose</a>(value: bool)</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">loop</a>(step: Any = None, steps: Optional[List[Any]] = None, over: Optional[str] = None, from_csv: Optional[str] = None, from_file: Optional[str] = None, var_name: str = 'item', parallel: bool = False, max_workers: Optional[int] = None, output_variable: Optional[str] = None) -> Loop</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">parallel</a>(steps: List) -> Parallel</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">repeat</a>(step: Any, until: Optional[Callable[[WorkflowContext], bool]] = None, max_iterations: int = 10) -> Repeat</code>
@@ -685,50 +667,68 @@ Methods:
 
 Types:
 ```python
-from praisonaiagents import AgentManager, EmbeddingResult, aembedding, aembeddings, embedding, embeddings, get_dimensions
+from praisonaiagents import AgentFlow, AgentManager, AgentTeam, EmbeddingResult, aembedding, aembeddings, embedding, embeddings, get_dimensions
 ```
 
 Methods:
 
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">add_task</a>(task)</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">aexecute_task</a>(task_id)</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">append_to_state</a>(key: str, value: Any, max_length: Optional[int] = None) -> List[Any]</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">arun_all_tasks</a>()</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">arun_task</a>(task_id)</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">astart</a>(content = None, return_dict = False, **kwargs)</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">clean_json_output</a>(output: str) -> str</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">clear_state</a>() -> None</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">context_manager</a>()</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">current_plan</a>()</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">default_completion_checker</a>(task, agent_output)</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">delete_state</a>(key: str) -> bool</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">display_token_usage</a>()</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">execute_task</a>(task_id)</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_agent_details</a>(agent_name)</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_all_state</a>() -> Dict[str, Any]</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_all_tasks_status</a>()</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_detailed_token_report</a>() -> Dict[str, Any]</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_plan_markdown</a>() -> str</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_state</a>(key: str, default: Any = None) -> Any</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_task_details</a>(task_id)</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_task_result</a>(task_id)</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_task_status</a>(task_id)</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_todo_markdown</a>() -> str</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_token_usage_summary</a>() -> Dict[str, Any]</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">has_state</a>(key: str) -> bool</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">increment_state</a>(key: str, amount: float = 1, default: float = 0) -> float</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">launch</a>(path: str = '/agents', port: int = 8000, host: str = '0.0.0.0', debug: bool = False, protocol: str = 'http')</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">restore_session_state</a>(session_id: str) -> bool</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">run</a>(content = None, return_dict = False, **kwargs)</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">run_all_tasks</a>()</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">run_task</a>(task_id)</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">save_output_to_file</a>(task, task_output)</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">save_session_state</a>(session_id: str, include_memory: bool = True) -> None</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">set_state</a>(key: str, value: Any) -> None</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">start</a>(content = None, return_dict = False, output = None, **kwargs)</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">todo_list</a>()</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">update_plan_step_status</a>(step_id: str, status: str) -> bool</code>
-* <code title="class AgentManager">AgentManager.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">update_state</a>(updates: Dict) -> None</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">arun</a>(input: str = '', llm: Optional[str] = None, verbose: bool = False) -> Dict[str, Any]</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">astart</a>(input: str = '', llm: Optional[str] = None, verbose: bool = False) -> Dict[str, Any]</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">from_template</a>(uri: str, config: Optional[Dict[str, Any]] = None, offline: bool = False, **kwargs) -> 'Workflow'</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">get_history</a>() -> List[Dict[str, Any]]</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">memory_config</a>() -> Optional[Dict[str, Any]]</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">on_step_complete</a>() -> Optional[Callable]</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">on_step_error</a>() -> Optional[Callable]</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">on_step_start</a>() -> Optional[Callable]</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">on_workflow_complete</a>() -> Optional[Callable]</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">on_workflow_start</a>() -> Optional[Callable]</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">planning_llm</a>() -> Optional[str]</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">reasoning</a>() -> bool</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">run</a>(input: str = '', llm: Optional[str] = None, verbose: bool = False, stream: bool = None) -> Dict[str, Any]</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">start</a>(input: str = '', **kwargs) -> Dict[str, Any]</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">stream</a>() -> bool</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">to_dict</a>() -> Dict[str, Any]</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">verbose</a>() -> bool</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">verbose</a>(value: bool)</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">add_task</a>(task)</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">aexecute_task</a>(task_id)</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">append_to_state</a>(key: str, value: Any, max_length: Optional[int] = None) -> List[Any]</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">arun_all_tasks</a>()</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">arun_task</a>(task_id)</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">astart</a>(content = None, return_dict = False, **kwargs)</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">clean_json_output</a>(output: str) -> str</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">clear_state</a>() -> None</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">context_manager</a>()</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">current_plan</a>()</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">default_completion_checker</a>(task, agent_output)</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">delete_state</a>(key: str) -> bool</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">display_token_usage</a>()</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">execute_task</a>(task_id)</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_agent_details</a>(agent_name)</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_all_state</a>() -> Dict[str, Any]</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_all_tasks_status</a>()</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_detailed_token_report</a>() -> Dict[str, Any]</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_plan_markdown</a>() -> str</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_state</a>(key: str, default: Any = None) -> Any</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_task_details</a>(task_id)</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_task_result</a>(task_id)</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_task_status</a>(task_id)</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_todo_markdown</a>() -> str</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_token_usage_summary</a>() -> Dict[str, Any]</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">has_state</a>(key: str) -> bool</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">increment_state</a>(key: str, amount: float = 1, default: float = 0) -> float</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">launch</a>(path: str = '/agents', port: int = 8000, host: str = '0.0.0.0', debug: bool = False, protocol: str = 'http')</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">restore_session_state</a>(session_id: str) -> bool</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">run</a>(content = None, return_dict = False, **kwargs)</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">run_all_tasks</a>()</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">run_task</a>(task_id)</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">save_output_to_file</a>(task, task_output)</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">save_session_state</a>(session_id: str, include_memory: bool = True) -> None</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">set_state</a>(key: str, value: Any) -> None</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">start</a>(content = None, return_dict = False, output = None, **kwargs)</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">todo_list</a>()</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">update_plan_step_status</a>(step_id: str, status: str) -> bool</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">update_state</a>(updates: Dict) -> None</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/embedding/embed.py">aembedding</a>(input: Union[str, List[str]], model: str = 'text-embedding-3-small', dimensions: Optional[int] = None, encoding_format: str = 'float', timeout: float = 600.0, api_key: Optional[str] = None, api_base: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None, **kwargs) -> EmbeddingResult</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/embedding/embed.py">aembeddings</a>(input: Union[str, List[str]], model: str = 'text-embedding-3-small', dimensions: Optional[int] = None, encoding_format: str = 'float', timeout: float = 600.0, api_key: Optional[str] = None, api_base: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None, **kwargs) -> EmbeddingResult</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/embedding/embed.py">embedding</a>(input: Union[str, List[str]], model: str = 'text-embedding-3-small', dimensions: Optional[int] = None, encoding_format: str = 'float', timeout: float = 600.0, api_key: Optional[str] = None, api_base: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None, **kwargs) -> EmbeddingResult</code>
@@ -739,7 +739,7 @@ Methods:
 
 Types:
 ```python
-from praisonai import AgentApp, CloudProvider, Deploy, DeployConfig, DeployType, PraisonAI, __version__
+from praisonai import AgentOS, CloudProvider, Deploy, DeployConfig, DeployType, PraisonAI, __version__
 ```
 
 # CLI
