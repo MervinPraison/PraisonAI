@@ -185,6 +185,7 @@ Methods:
 * <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">run</a>(**kwargs) -> Any</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">clear</a>() -> None</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">discover_plugins</a>() -> int</code>
+* <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">discover_single_file_plugins</a>() -> int</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get</a>(name: str) -> Optional[Union[BaseTool, Callable]]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get_all</a>() -> Dict[str, Union[BaseTool, Callable]]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_base_tools</a>() -> List[BaseTool]</code>
@@ -667,7 +668,7 @@ Methods:
 
 Types:
 ```python
-from praisonaiagents import AgentFlow, AgentManager, AgentTeam, EmbeddingResult, aembedding, aembeddings, embedding, embeddings, get_dimensions
+from praisonaiagents import AgentAppConfig, AgentAppProtocol, AgentFlow, AgentManager, AgentOSConfig, AgentOSProtocol, AgentTeam, EmbeddingResult, aembedding, aembeddings, embedding, embeddings, get_dimensions
 ```
 
 Methods:
@@ -690,6 +691,8 @@ Methods:
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">to_dict</a>() -> Dict[str, Any]</code>
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">verbose</a>() -> bool</code>
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">verbose</a>(value: bool)</code>
+* <code title="class AgentOSProtocol">AgentOSProtocol.<a href="./src/praisonai-agents/praisonaiagents/app/protocols.py">get_app</a>() -> Any</code>
+* <code title="class AgentOSProtocol">AgentOSProtocol.<a href="./src/praisonai-agents/praisonaiagents/app/protocols.py">serve</a>(host: Optional[str] = None, port: Optional[int] = None, reload: bool = False, **kwargs: Any) -> None</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">add_task</a>(task)</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">aexecute_task</a>(task_id)</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">append_to_state</a>(key: str, value: Any, max_length: Optional[int] = None) -> List[Any]</code>
@@ -739,7 +742,7 @@ Methods:
 
 Types:
 ```python
-from praisonai import AgentOS, CloudProvider, Deploy, DeployConfig, DeployType, PraisonAI, __version__
+from praisonai import AgentApp, AgentOS, CloudProvider, Deploy, DeployConfig, DeployType, PraisonAI, __version__
 ```
 
 # CLI
@@ -1014,8 +1017,8 @@ Methods:
 
 Types/Exports:
 ```ts
-export { Agent, Agents, PraisonAIAgents, Router } from "./agent";
-export type { PraisonAIAgentsConfig, SimpleAgentConfig, SimpleRouteConfig, SimpleRouterConfig } from "./agent";
+export { Agent, AgentTeam, Agents, PraisonAIAgents, Router } from "./agent";
+export type { AgentTeamConfig, PraisonAIAgentsConfig, SimpleAgentConfig, SimpleRouteConfig, SimpleRouterConfig } from "./agent";
 export { AudioAgent, createAudioAgent } from "./agent/audio";
 export type { AudioAgentConfig, AudioProvider, AudioSpeakOptions, AudioSpeakResult, AudioTranscribeOptions, AudioTranscribeResult } from "./agent/audio";
 export { ContextAgent, createContextAgent } from "./agent/context";
@@ -1040,7 +1043,7 @@ export { // Agent loop
   ApprovalManager, // Tools
   defineTool, // UI Message (AI SDK v6 parity)
   convertToModelMessages, AIAgentStep, AIEmbedManyResult, AIEmbedOptions, AIEmbedResult, AIFilePart, AIGenerateImageOptions, AIGenerateImageResult, AIGenerateObjectOptions, AIGenerateObjectResult, AIGenerateTextOptions, AIGenerateTextResult, AIImagePart, AIMiddleware, AIMiddlewareConfig, AIModelMessage, AISpan, AISpanKind, AISpanOptions, AISpanStatus, AIStreamObjectOptions, AIStreamObjectResult, AIStreamTextOptions, AIStreamTextResult, AITelemetryEvent, AITelemetrySettings, AITextPart, AIToolDefinition, AITracer, AgentLoop, DANGEROUS_PATTERNS, MCPClientType, MODEL_ALIASES, SPEECH_MODELS, TRANSCRIPTION_MODELS, ToolApprovalDeniedError, ToolApprovalTimeoutError, aiEmbed, aiEmbedMany, aiGenerateImage, aiGenerateObject, aiGenerateText, aiStreamObject, aiStreamText, applyMiddleware, autoEnableDevTools, base64ToUint8Array, clearAICache, clearEvents, closeAllMCPClients, closeMCPClient, convertToUIMessages, createAILoggingMiddleware, createAISpan, createApprovalResponse, createDangerousPatternChecker, createDevToolsMiddleware, createExpressHandler, createFastifyHandler, createFilePart, createHonoHandler, createMultimodalMessage, createNestHandler, createPagesHandler, createPdfPart, createSystemMessage, createTelemetryMiddleware, createTelemetrySettings, createTextMessage, createTextPart, createToolSet, disableAITelemetry, disableDevTools, enableAITelemetry, functionToTool, getAICacheStats, getApprovalManager, getDevToolsState, getDevToolsUrl, getEvents, getMCPClient, getModel, getTelemetrySettings, getToolsNeedingApproval, getTracer, hasModelAlias, hasPendingApprovals, initOpenTelemetry, isDangerous, isDataUrl, isDevToolsEnabled, isTelemetryEnabled, isUrl, listModelAliases, mcpToolsToAITools, parseModel, pipeUIMessageStreamToResponse, recordEvent, resolveModelAlias, safeValidateUIMessages, setApprovalManager, stopAfterSteps, stopWhen, stopWhenNoToolCalls, toMessageContent, toUIMessageStreamResponse, transcribe, uint8ArrayToBase64, validateUIMessages, withApproval, withSpan, wrapModel } from "./ai";
-export { AutoAgents, createAutoAgents } from "./auto";
+export { AutoAgents, AutoTaskConfig, createAutoAgents } from "./auto";
 export { BaseCache, FileCache, MemoryCache, createFileCache, createMemoryCache } from "./cache";
 export { CLI_SPEC_VERSION, executeCommand, parseArgs } from "./cli";
 export { // Autonomy Mode
@@ -1109,7 +1112,7 @@ export type { InstallHints, PraisonTool, RedactionHooks, RegisteredTool, ToolCap
 export { registerBuiltinTools, tools } from "./tools/tools";
 export { // New: Python-parity Loop and Repeat classes
   Loop, // Task class
-  Task, Repeat, Workflow, loop, loopPattern, parallel, repeat, repeatPattern, route } from "./workflows";
+  Task, AgentFlow, Pipeline, Repeat, Workflow, loop, loopPattern, parallel, repeat, repeatPattern, route } from "./workflows";
 export type { LoopConfig, LoopResult, RepeatConfig, RepeatContext, RepeatResult, StepContextConfig, StepExecutionConfig, StepOutputConfig, StepResult, StepRoutingConfig, TaskConfig, WorkflowContext } from "./workflows";
 export { createWorkflowFromYAML, loadWorkflowFromFile, parseYAMLWorkflow, validateWorkflowDefinition } from "./workflows/yaml-parser";
 ```
