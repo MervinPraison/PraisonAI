@@ -884,12 +884,16 @@ Methods:
 * <code title="cli">praisonai package install <a href="./src/praisonai/praisonai/cli/commands/package.py">--help</a></code>
 * <code title="cli">praisonai package list <a href="./src/praisonai/praisonai/cli/commands/package.py">--help</a></code>
 * <code title="cli">praisonai package uninstall <a href="./src/praisonai/praisonai/cli/commands/package.py">--help</a></code>
+* <code title="cli">praisonai plugins create <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
 * <code title="cli">praisonai plugins disable <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
+* <code title="cli">praisonai plugins discover <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
 * <code title="cli">praisonai plugins doctor <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
 * <code title="cli">praisonai plugins enable <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
 * <code title="cli">praisonai plugins info <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
+* <code title="cli">praisonai plugins install <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
 * <code title="cli">praisonai plugins list <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
 * <code title="cli">praisonai plugins plugins-callback <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
+* <code title="cli">praisonai plugins remove <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
 * <code title="cli">praisonai profile imports <a href="./src/praisonai/praisonai/cli/commands/profile.py">--help</a></code>
 * <code title="cli">praisonai profile optimize <a href="./src/praisonai/praisonai/cli/commands/profile.py">--help</a></code>
 * <code title="cli">praisonai profile profile-callback <a href="./src/praisonai/praisonai/cli/commands/profile.py">--help</a></code>
@@ -1101,6 +1105,8 @@ export { // Adapters
   OBSERVABILITY_TOOLS, // Global adapter management
   setObservabilityAdapter, // Types
   type SpanKind, ConsoleObservabilityAdapter, MemoryObservabilityAdapter, clearAdapterCache, createConsoleAdapter, createMemoryAdapter, createObservabilityAdapter, getObservabilityAdapter, getObservabilityToolInfo, hasObservabilityToolEnvVar, listObservabilityTools, noopAdapter, resetObservabilityAdapter, trace } from "./observability";
+export { AgentApp, AgentAppConfig, AgentAppProtocol, AgentOS, AgentOSConfig, AgentOSProtocol, DEFAULT_AGENTOS_CONFIG, mergeConfig } from "./os";
+export type { AgentAppOptions, AgentOSOptions } from "./os";
 export { Plan, PlanStep, PlanStorage, PlanningAgent, TaskAgent, TodoItem, TodoList, createPlan, createPlanStorage, createPlanningAgent, createTaskAgent, createTodoList } from "./planning";
 export { SkillManager, createSkillManager, parseSkillFile } from "./skills";
 export { AgentTelemetry, PerformanceMonitor, TelemetryCollector, TelemetryIntegration, cleanupTelemetry, createAgentTelemetry, createConsoleSink, createHTTPSink, createPerformanceMonitor, createTelemetryIntegration, disableTelemetry, enableTelemetry, getTelemetry } from "./telemetry";
