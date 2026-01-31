@@ -31,17 +31,17 @@ PYTHON_CMD="${PRAISONAI_PYTHON:-}"
 SKIP_VENV="${PRAISONAI_SKIP_VENV:-0}"
 MIN_PYTHON_VERSION="3.10"
 
-# Logging functions
+# Logging functions - all output to stderr to avoid capturing in $()
 log_info() {
-    echo -e "${BLUE}==>${NC} $1"
+    echo -e "${BLUE}==>${NC} $1" >&2
 }
 
 log_success() {
-    echo -e "${GREEN}✓${NC} $1"
+    echo -e "${GREEN}✓${NC} $1" >&2
 }
 
 log_warn() {
-    echo -e "${YELLOW}⚠${NC} $1"
+    echo -e "${YELLOW}⚠${NC} $1" >&2
 }
 
 log_error() {
@@ -49,7 +49,7 @@ log_error() {
 }
 
 log_step() {
-    echo -e "${CYAN}→${NC} $1"
+    echo -e "${CYAN}→${NC} $1" >&2
 }
 
 # Print banner
