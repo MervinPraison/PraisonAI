@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 
 # Define the configuration for the Knowledge instance
 config = {
@@ -29,7 +29,7 @@ rag_task = Task(
 )
 
 # Build Agents
-agents = AgentManager(
+agents = AgentTeam(
     agents=[rag_agent],
     tasks=[rag_task],
     user_id="user1"

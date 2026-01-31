@@ -72,7 +72,7 @@ def basic_telemetry_example():
     )
     
     # Create workflow
-    workflow = AgentManager(
+    workflow = AgentTeam(
         agents=[researcher, writer],
         tasks=[research_task, writing_task],
         process="sequential",

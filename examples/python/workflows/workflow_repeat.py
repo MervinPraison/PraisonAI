@@ -29,7 +29,7 @@ def is_approved(ctx) -> bool:
     return "approved" in ctx.previous_result.lower()
 
 # Create workflow with evaluator-optimizer pattern
-workflow = Workflow(
+workflow = AgentFlow(
     name="Evaluator-Optimizer Pipeline",
     steps=[
         generator,  # First, generate content

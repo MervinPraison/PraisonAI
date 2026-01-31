@@ -61,7 +61,7 @@ task1 = Task(
 )
 
 try:
-    agents1 = AgentManager(
+    agents1 = AgentTeam(
         agents=[agent1],
         tasks=[task1]
     )
@@ -99,7 +99,7 @@ task2 = Task(
 )
 
 try:
-    agents2 = AgentManager(
+    agents2 = AgentTeam(
         agents=[agent2],
         tasks=[task2]
     )

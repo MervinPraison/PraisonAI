@@ -1,13 +1,13 @@
 """Basic workflow example with consolidated params."""
 from praisonaiagents import Agent
-from praisonaiagents.workflows import Workflow, Task
+from praisonaiagents import AgentFlow, Task
 
 # Create agents
 writer = Agent(instructions="You are a content writer.")
 editor = Agent(instructions="You are an editor.")
 
 # Create workflow with consolidated params
-workflow = Workflow(
+workflow = AgentFlow(
     name="Content Pipeline",
     steps=[
         Task(name="write", agent=writer, action="Write about {{topic}}"),

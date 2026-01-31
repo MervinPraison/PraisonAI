@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 import time
 from typing import Dict, List
 import asyncio
@@ -168,7 +168,7 @@ validation_task = Task(
 )
 
 # Create workflow
-workflow = AgentManager(
+workflow = AgentTeam(
     agents=[circuit_analyzer, optimization_finder, optimizer,
             benchmarker, validator],
     tasks=[analysis_task, optimization_task, optimization_execution_task,

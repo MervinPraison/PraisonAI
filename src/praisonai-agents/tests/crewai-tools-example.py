@@ -13,7 +13,7 @@ class InternetSearchTool(BaseTool):
 
 # Example agent
 from praisonaiagents import Agent
-from praisonaiagents import AgentManager
+from praisonaiagents import AgentTeam
 agent = Agent(
     name="Internet Search Agent",
     tools=[InternetSearchTool],
@@ -23,5 +23,5 @@ agent = Agent(
 )
 
 # Run the agent
-result = AgentManager(agents=[agent], verbose=10).start()
+result = AgentTeam(agents=[agent], verbose=10).start()
 print(result)

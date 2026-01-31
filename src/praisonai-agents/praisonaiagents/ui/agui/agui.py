@@ -25,7 +25,7 @@ from praisonaiagents.ui.agui.streaming import (
 from praisonaiagents.ui.agui.encoder import EventEncoder
 
 if TYPE_CHECKING:
-    from praisonaiagents import Agent, AgentManager
+    from praisonaiagents import Agent, AgentTeam
     from fastapi import APIRouter
 
 logger = logging.getLogger(__name__)

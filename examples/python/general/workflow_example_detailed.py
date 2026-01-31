@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 import random
 from typing import List, Dict, Union
 import json
@@ -225,7 +225,7 @@ process_task = Task(
 )
 
 # Create Agents instance with workflow process
-workflow = AgentManager(
+workflow = AgentTeam(
     agents=[data_agent, process_agent],
     tasks=[collect_task, validate_task, process_task],
     process="workflow"

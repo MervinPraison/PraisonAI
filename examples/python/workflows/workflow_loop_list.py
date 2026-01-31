@@ -4,7 +4,7 @@ Workflow Loop with List Example
 Demonstrates iterating over a list of items, processing each one.
 """
 
-from praisonaiagents import Workflow, WorkflowContext, StepResult
+from praisonaiagents import AgentFlow, WorkflowContext, StepResult
 from praisonaiagents.workflows import loop
 
 # Sample data
@@ -33,7 +33,7 @@ def summarize(ctx: WorkflowContext) -> StepResult:
     return StepResult(output=summary)
 
 # Create workflow
-workflow = Workflow(
+workflow = AgentFlow(
     name="Fruit Processor",
     steps=[
         loop(process_fruit, over="fruits"),

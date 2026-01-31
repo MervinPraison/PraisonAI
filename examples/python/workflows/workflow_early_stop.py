@@ -8,7 +8,7 @@ functions that return StepResult with stop_workflow=True.
 from praisonaiagents import (
     Workflow, Task, WorkflowContext, StepResult
 )
-from praisonaiagents.workflows import WorkflowManager
+from praisonaiagents import AgentFlowManager
 
 # Custom validator that can stop the workflow
 def validate_data(context: WorkflowContext) -> StepResult:
@@ -27,7 +27,7 @@ def validate_data(context: WorkflowContext) -> StepResult:
     )
 
 # Create workflow with early stop capability
-workflow = Workflow(
+workflow = AgentFlow(
     name="Data Processing",
     description="Process data with validation gate",
     variables={

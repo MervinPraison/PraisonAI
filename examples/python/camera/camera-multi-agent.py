@@ -17,7 +17,7 @@ Environment Variables:
 import cv2
 import os
 from datetime import datetime
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 
 
 def capture_camera_frame(camera_id=0):
@@ -114,7 +114,7 @@ def analyze_with_multiple_agents():
     )
     
     # Run multi-agent analysis
-    agents = AgentManager(
+    agents = AgentTeam(
         agents=[security_agent, object_detector, scene_analyst],
         tasks=[security_task, object_task, scene_task],
         process="parallel",  # Run all analyses in parallel

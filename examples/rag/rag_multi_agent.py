@@ -8,7 +8,7 @@ Usage:
     python rag_multi_agent.py
 """
 
-from praisonaiagents import Agent, Agents, Task
+from praisonaiagents import Agent, AgentTeam, Task
 
 
 # Shared knowledge base content
@@ -114,7 +114,7 @@ def main():
     # Run the multi-agent workflow
     print("\n🔄 Running multi-agent workflow...")
     
-    agents = AgentManager(
+    agents = AgentTeam(
         agents=[researcher, summarizer, writer],
         tasks=[research_task, summary_task, report_task],
         process="sequential",

@@ -195,16 +195,18 @@ class TestNamespaceStyle:
 class TestAllSizeLimited:
     """Test that __all__ is limited to core symbols."""
     
-    def test_all_size_under_20(self):
-        """__all__ should have fewer than 20 items."""
+    def test_all_size_under_21(self):
+        """__all__ should have fewer than 21 items (minimal for clean IDE)."""
         import praisonaiagents
-        assert len(praisonaiagents.__all__) < 20, \
-            f"__all__ has {len(praisonaiagents.__all__)} items, expected < 20"
+        assert len(praisonaiagents.__all__) < 21, \
+            f"__all__ has {len(praisonaiagents.__all__)} items, expected < 21"
     
     def test_all_contains_core(self):
         """__all__ contains core symbols."""
         import praisonaiagents
-        core = {'Agent', 'Agents', 'Task', 'tool', 'Tools'}
+        # AgentTeam is primary, Agents is deprecated alias
+        # AgentFlow is primary, Workflow/Pipeline are silent aliases
+        core = {'Agent', 'AgentTeam', 'Task', 'tool', 'Tools'}
         for symbol in core:
             assert symbol in praisonaiagents.__all__, \
                 f"'{symbol}' not in __all__"

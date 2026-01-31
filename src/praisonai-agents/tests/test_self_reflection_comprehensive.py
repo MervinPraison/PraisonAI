@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Comprehensive test script to verify self-reflection works with tools after the fix"""
 
-from praisonaiagents import Agent, Task, AgentManager
+from praisonaiagents import Agent, Task, AgentTeam
 
 # Define duckduckgo_search tool locally to avoid import issues
 def duckduckgo_search(query: str) -> str:
@@ -49,7 +49,7 @@ def test_self_reflection_with_tools():
     )
 
     # Create and start the agents
-    agents = AgentManager(
+    agents = AgentTeam(
         agents=[agent],
         tasks=[task],
         process="sequential"
@@ -90,7 +90,7 @@ def test_self_reflection_without_tools():
     )
 
     # Create and start the agents
-    agents = AgentManager(
+    agents = AgentTeam(
         agents=[agent],
         tasks=[task],
         process="sequential"

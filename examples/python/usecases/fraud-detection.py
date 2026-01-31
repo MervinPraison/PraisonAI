@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 import time
 from typing import Dict, List
 import asyncio
@@ -109,7 +109,7 @@ alert_task = Task(
 )
 
 # Create workflow
-workflow = AgentManager(
+workflow = AgentTeam(
     agents=[transaction_analyzer, pattern_checker, identity_verifier, alert_generator],
     tasks=[analysis_task, pattern_task, verification_task, alert_task],
     process="workflow", output="verbose"

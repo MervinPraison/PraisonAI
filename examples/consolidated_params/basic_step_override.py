@@ -1,9 +1,9 @@
 """Basic example showing step-level override of workflow defaults."""
 from praisonaiagents import Agent
-from praisonaiagents.workflows import Workflow, Task
+from praisonaiagents import AgentFlow, Task
 
 # Workflow with defaults
-workflow = Workflow(
+workflow = AgentFlow(
     name="StepOverrideWorkflow",
     steps=[
         Task(

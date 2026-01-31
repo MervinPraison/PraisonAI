@@ -51,7 +51,7 @@ with open('callback_test_log.txt', 'w') as f:
 
 # Run the agent
 try:
-    agents = AgentManager(
+    agents = AgentTeam(
         agents=[agent],
         tasks=[task]
     )

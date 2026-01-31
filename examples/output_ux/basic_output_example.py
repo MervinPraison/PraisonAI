@@ -13,7 +13,7 @@ Features demonstrated:
 
 import sys
 sys.path.insert(0, '/Users/praison/praisonai-package/src/praisonai-agents')
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 
 
 def get_weather(city: str) -> str:
@@ -106,7 +106,7 @@ def example_multi_agent():
         agent=writer
     )
     
-    agents = AgentManager(
+    agents = AgentTeam(
         agents=[researcher, writer],
         tasks=[task1, task2],
         process="sequential",

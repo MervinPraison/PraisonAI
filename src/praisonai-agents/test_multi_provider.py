@@ -7,7 +7,7 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from praisonaiagents import Agent, Task, AgentManager
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.agent import RouterAgent
 from praisonaiagents.llm import ModelRouter, TaskComplexity
 
@@ -100,7 +100,7 @@ def test_integration():
     )
     
     # Create agents system
-    agents_system = AgentManager(
+    agents_system = AgentTeam(
         agents=[agent],
         tasks=[task],
         process="sequential",

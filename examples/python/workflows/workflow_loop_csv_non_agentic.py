@@ -4,7 +4,7 @@ Workflow Loop with CSV Example
 Demonstrates iterating over a CSV file, processing each row.
 """
 
-from praisonaiagents import Workflow, WorkflowContext, StepResult
+from praisonaiagents import AgentFlow, WorkflowContext, StepResult
 from praisonaiagents.workflows import loop
 import tempfile
 import os
@@ -40,7 +40,7 @@ if __name__ == "__main__":
         print(f"CSV file: {csv_path}\n")
         
         # Create workflow
-        workflow = Workflow(
+        workflow = AgentFlow(
             name="CSV Task Processor",
             steps=[loop(process_task, from_csv=csv_path)]
         )

@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Agents, MCP
+from praisonaiagents import Agent, AgentTeam, MCP
 
 airbnb_agent = Agent(
     instructions="""Search for Apartments in Paris for 2 nights on Airbnb. 04/28 - 04/30 for 2 adults""",
@@ -12,6 +12,6 @@ whatsapp_agent = Agent(
     tools=MCP("python /Users/praison/whatsapp-mcp/whatsapp-mcp-server/main.py")
 )
 
-agents = AgentManager(agents=[airbnb_agent, whatsapp_agent])
+agents = AgentTeam(agents=[airbnb_agent, whatsapp_agent])
 
 agents.start()

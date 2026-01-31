@@ -5,7 +5,7 @@ This example demonstrates how to use basic user input to create dynamic agents a
 The user is prompted for a search query, and the agent searches for information about it.
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 
 # Get user input
 user_query = input("What would you like to search for? ")
@@ -26,5 +26,5 @@ task = Task(
 )
 
 # Run
-agents = AgentManager(agents=[agent], tasks=[task])
+agents = AgentTeam(agents=[agent], tasks=[task])
 agents.start()

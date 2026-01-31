@@ -14,7 +14,7 @@ Usage:
 
 from praisonai_tools.observability import obs
 from praisonai_tools.observability.base import SpanKind
-from praisonaiagents import Agent, Agents
+from praisonaiagents import Agent, AgentTeam
 
 # Initialize observability
 obs.init()

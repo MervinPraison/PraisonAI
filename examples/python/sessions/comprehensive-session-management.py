@@ -12,7 +12,7 @@ Features demonstrated:
 - Session-specific memory and knowledge
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.session import Session
 from praisonaiagents.tools import duckduckgo
 import tempfile
@@ -62,7 +62,7 @@ research_task1 = Task(
 )
 
 # Create agents with session
-agents_session1 = AgentManager(
+agents_session1 = AgentTeam(
     agents=[research_agent],
     tasks=[research_task1],
     session=session1, output="verbose"
@@ -101,7 +101,7 @@ analysis_task = Task(
     context_variables={"previous_research": str(result1)}
 )
 
-agents_session2 = AgentManager(
+agents_session2 = AgentTeam(
     agents=[analysis_agent],
     tasks=[analysis_task], 
     session=session2, output="verbose"
@@ -151,7 +151,7 @@ synthesis_task = Task(
     }
 )
 
-agents_recovery = AgentManager(
+agents_recovery = AgentTeam(
     agents=[synthesis_agent],
     tasks=[synthesis_task],
     session=recovery_session, output="verbose"
@@ -201,7 +201,7 @@ review_task = Task(
     }
 )
 
-agents_reviewer = AgentManager(
+agents_reviewer = AgentTeam(
     agents=[review_agent],
     tasks=[review_task],
     session=reviewer_session, output="verbose"

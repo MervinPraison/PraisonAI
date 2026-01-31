@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 import time
 from typing import Dict, List
 import asyncio
@@ -173,7 +173,7 @@ deployment_task = Task(
 )
 
 # Create workflow
-workflow = AgentManager(
+workflow = AgentTeam(
     agents=[hardware_analyzer, architecture_generator, hyperparameter_optimizer,
             performance_estimator, deployment_optimizer],
     tasks=[hardware_task, architecture_task, hyperparameter_task,

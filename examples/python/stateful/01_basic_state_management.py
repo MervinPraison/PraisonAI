@@ -10,7 +10,7 @@ Run this example:
     python 01_basic_state_management.py
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 import json
 from typing import Dict, Any
 
@@ -144,7 +144,7 @@ task4 = Task(
 )
 
 # Create workflow (global variable for state access in tools)
-workflow = AgentManager(
+workflow = AgentTeam(
     agents=[project_manager, developer, finance_manager],
     tasks=[task1, task2, task3, task4],
     process="sequential"

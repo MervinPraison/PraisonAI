@@ -15,7 +15,7 @@ try:
     
     # Test importing specific classes
     try:
-        from praisonaiagents import Agent, Task, AgentManager
+        from praisonaiagents import Agent, Task, AgentTeam
         print("✓ Successfully imported Agent, Task, AgentManager from praisonaiagents")
     except ImportError as e:
         print(f"❌ Failed to import specific classes: {e}")

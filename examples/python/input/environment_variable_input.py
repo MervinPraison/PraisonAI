@@ -6,7 +6,7 @@ to create flexible agent configurations that can be pre-configured via environme
 """
 
 import os
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 
 # Set via environment or use default
 default_topic = os.getenv("RESEARCH_TOPIC", "AI trends")
@@ -46,7 +46,7 @@ print(f"  - Max Retries: {max_retries}")
 print("\n" + "="*50 + "\n")
 
 # Run agents
-agents = AgentManager(agents=[agent], tasks=[task])
+agents = AgentTeam(agents=[agent], tasks=[task])
 result = agents.start()
 
 # Save to environment-specified location if provided

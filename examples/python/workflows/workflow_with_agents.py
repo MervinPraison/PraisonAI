@@ -5,7 +5,7 @@ Demonstrates using Agent instances directly as workflow steps.
 Agents are automatically wrapped and executed in sequence.
 """
 
-from praisonaiagents import Workflow, Agent
+from praisonaiagents import AgentFlow, Agent
 
 # Create agents
 researcher = Agent(
@@ -30,7 +30,7 @@ editor = Agent(
 )
 
 # Create workflow with agents as steps
-workflow = Workflow(
+workflow = AgentFlow(
     name="Content Pipeline",
     steps=[researcher, writer, editor]
 )

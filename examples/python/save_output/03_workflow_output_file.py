@@ -4,7 +4,7 @@ Example 3: Save Agent Output Using Workflow output_file
 Workflow step output is automatically saved with variable substitution.
 """
 
-from praisonaiagents import Workflow
+from praisonaiagents import AgentFlow
 
 # Define workflow with output_file
 workflow_config = {
@@ -34,7 +34,7 @@ workflow_config = {
 }
 
 # Run workflow
-workflow = Workflow(config=workflow_config)
+workflow = AgentFlow(config=workflow_config)
 result = workflow.run()
 
 print("✅ Workflow completed!")

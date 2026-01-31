@@ -16,7 +16,7 @@ Setup:
 """
 
 import os
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 
 def main():
     # Example with Neo4j (uncomment and configure as needed)
@@ -149,7 +149,7 @@ def main():
     )
     
     # Run the multi-agent system with graph memory
-    agents_system = AgentManager(
+    agents_system = AgentTeam(
         agents=[researcher],
         tasks=[build_knowledge_task, query_knowledge_task, expand_knowledge_task],
         memory=True,

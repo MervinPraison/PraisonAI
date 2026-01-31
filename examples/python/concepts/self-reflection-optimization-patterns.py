@@ -5,7 +5,7 @@ This example demonstrates self-reflection capabilities using PraisonAI's
 built-in reflection features for iterative improvement and quality optimization.
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.tools import internet_search
 
 print("=== Self-Reflection Optimization Patterns Example ===\n")

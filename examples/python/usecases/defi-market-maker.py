@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 import time
 from typing import Dict, List
 import asyncio
@@ -190,7 +190,7 @@ execution_task = Task(
 )
 
 # Create workflow
-workflow = AgentManager(
+workflow = AgentTeam(
     agents=[market_analyzer, arbitrage_detector, liquidity_optimizer,
             risk_assessor, trade_executor],
     tasks=[market_task, arbitrage_task, liquidity_task,

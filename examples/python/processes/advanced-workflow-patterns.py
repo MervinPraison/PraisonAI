@@ -12,7 +12,7 @@ Features demonstrated:
 - State-based workflow management
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.tools import duckduckgo
 import random
 
@@ -203,7 +203,7 @@ for request in sample_requests:
     )
     
     # Execute the workflow with conditional routing
-    workflow_agents = AgentManager(
+    workflow_agents = AgentTeam(
         agents=[
             intake_agent, specialist_agent, review_agent, 
             coordinator_agent

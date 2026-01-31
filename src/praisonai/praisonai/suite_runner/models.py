@@ -56,7 +56,7 @@ class RunItem:
     
     # Agent-centric detection
     uses_agent: bool = False  # Agent() class
-    uses_agents: bool = False  # AgentManager() / PraisonAIAgents class
+    uses_agents: bool = False  # AgentTeam() / PraisonAIAgents class
     uses_workflow: bool = False  # Workflow class
     
     # Server detection

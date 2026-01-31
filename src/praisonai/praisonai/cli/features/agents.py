@@ -217,7 +217,7 @@ class MultiAgentHandler:
                     print(f"  - {agent.name}: {agent.role}")
                 print()
             
-            praison_agents = AgentManager(
+            praison_agents = AgentTeam(
                 agents=agents,
                 tasks=tasks,
                 process=process,

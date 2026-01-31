@@ -10,7 +10,7 @@ from pathlib import Path
 # Add the src directory to the path
 sys.path.insert(0, str(Path(__file__).parent / "src" / "praisonai-agents"))
 
-from praisonaiagents import Agent, Task, AgentManager
+from praisonaiagents import Agent, Task, AgentTeam
 
 def create_mock_tool():
     """Create a mock tool that mimics the user's custom search tool"""
@@ -52,7 +52,7 @@ def test_self_reflection_with_tools():
     
     # Create and start the agents
     try:
-        agents = AgentManager(
+        agents = AgentTeam(
             agents=[agent],
             tasks=[task],
             process="sequential"
@@ -91,7 +91,7 @@ def test_self_reflection_without_tools():
     
     # Create and start the agents
     try:
-        agents = AgentManager(
+        agents = AgentTeam(
             agents=[agent],
             tasks=[task],
             process="sequential"

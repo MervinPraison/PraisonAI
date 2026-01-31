@@ -805,23 +805,23 @@ class TestAgentsPlanningIntegration:
     
     def test_agents_planning_disabled_by_default(self):
         """Test that planning is disabled by default."""
-        from praisonaiagents import Agent, Task, AgentManager
+        from praisonaiagents import Agent, Task, AgentTeam
         
         agent = Agent(name="Test", role="Tester")
         task = Task(description="Test task", agent=agent)
         
-        agents = AgentManager(agents=[agent], tasks=[task])
+        agents = AgentTeam(agents=[agent], tasks=[task])
         
         assert agents.planning is False
         
     def test_agents_planning_enabled(self):
         """Test enabling planning mode."""
-        from praisonaiagents import Agent, Task, AgentManager
+        from praisonaiagents import Agent, Task, AgentTeam
         
         agent = Agent(name="Test", role="Tester")
         task = Task(description="Test task", agent=agent)
         
-        agents = AgentManager(
+        agents = AgentTeam(
             agents=[agent],
             tasks=[task],
             planning=True
@@ -831,13 +831,13 @@ class TestAgentsPlanningIntegration:
         
     def test_agents_planning_custom_llm(self):
         """Test custom planning LLM."""
-        from praisonaiagents import Agent, Task, AgentManager
+        from praisonaiagents import Agent, Task, AgentTeam
         
         agent = Agent(name="Test", role="Tester")
         task = Task(description="Test task", agent=agent)
         
         from praisonaiagents.config import MultiAgentPlanningConfig
-        agents = AgentManager(
+        agents = AgentTeam(
             agents=[agent],
             tasks=[task],
             planning=MultiAgentPlanningConfig(llm="gpt-4o-mini")
@@ -847,13 +847,13 @@ class TestAgentsPlanningIntegration:
         
     def test_agents_auto_approve_plan(self):
         """Test auto-approve plan option."""
-        from praisonaiagents import Agent, Task, AgentManager
+        from praisonaiagents import Agent, Task, AgentTeam
         
         agent = Agent(name="Test", role="Tester")
         task = Task(description="Test task", agent=agent)
         
         from praisonaiagents.config import MultiAgentPlanningConfig
-        agents = AgentManager(
+        agents = AgentTeam(
             agents=[agent],
             tasks=[task],
             planning=MultiAgentPlanningConfig(auto_approve=True)
@@ -864,14 +864,14 @@ class TestAgentsPlanningIntegration:
     @pytest.mark.asyncio
     async def test_agents_start_with_planning(self):
         """Test starting agents with planning enabled."""
-        from praisonaiagents import Agent, Task, AgentManager
+        from praisonaiagents import Agent, Task, AgentTeam
         from praisonaiagents.planning import Plan, PlanStep
         
         agent = Agent(name="Test", role="Tester", llm="gpt-4o-mini")
         task = Task(description="Test task", agent=agent)
         
         from praisonaiagents.config import MultiAgentPlanningConfig
-        agents = AgentManager(
+        agents = AgentTeam(
             agents=[agent],
             tasks=[task],
             planning=MultiAgentPlanningConfig(auto_approve=True)
@@ -887,13 +887,13 @@ class TestAgentsPlanningIntegration:
                 
     def test_agents_get_current_plan(self):
         """Test getting current plan."""
-        from praisonaiagents import Agent, Task, AgentManager
+        from praisonaiagents import Agent, Task, AgentTeam
         from praisonaiagents.planning import Plan
         
         agent = Agent(name="Test", role="Tester")
         task = Task(description="Test task", agent=agent)
         
-        agents = AgentManager(
+        agents = AgentTeam(
             agents=[agent],
             tasks=[task],
             planning=True
@@ -904,12 +904,12 @@ class TestAgentsPlanningIntegration:
         
     def test_agents_get_todo_list(self):
         """Test getting todo list."""
-        from praisonaiagents import Agent, Task, AgentManager
+        from praisonaiagents import Agent, Task, AgentTeam
         
         agent = Agent(name="Test", role="Tester")
         task = Task(description="Test task", agent=agent)
         
-        agents = AgentManager(
+        agents = AgentTeam(
             agents=[agent],
             tasks=[task],
             planning=True

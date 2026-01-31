@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from typing import List, Dict
 from duckduckgo_search import DDGS
 
@@ -64,7 +64,7 @@ validate_task = Task(
 )
 
 # 4. AI Agents Workflow
-agents = AgentManager(
+agents = AgentTeam(
     agents=[data_agent],
     tasks=[collect_task, validate_task],
     process="workflow"

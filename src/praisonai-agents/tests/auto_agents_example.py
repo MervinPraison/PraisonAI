@@ -1,7 +1,7 @@
 from praisonaiagents import AutoAgents
 from praisonaiagents.tools import duckduckgo
 
-agents = AutoAgentManager(
+agents = AutoAgentTeam(
     instructions="Search for information about AI Agents",
     tools=[duckduckgo],
     process="sequential",

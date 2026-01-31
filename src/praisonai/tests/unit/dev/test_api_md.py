@@ -64,11 +64,11 @@ class TestApiMdGenerator:
         assert "agent.py" in agent_info.file_path
     
     def test_discovers_agents_class(self, generator):
-        """Test that Agents class is discovered."""
+        """Test that AgentTeam class is discovered (primary class for multi-agent coordination)."""
         generator.discover_all()
         
-        assert "Agents" in generator.agents_symbols
-        agents_info = generator.agents_symbols["Agents"]
+        assert "AgentTeam" in generator.agents_symbols
+        agents_info = generator.agents_symbols["AgentTeam"]
         assert agents_info.kind == "class"
     
     def test_discovers_workflow_exports(self, generator):

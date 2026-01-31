@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 import subprocess
 import os
 
@@ -57,7 +57,7 @@ task = Task(
     agent=system_ops_agent,
 )
 
-agents = AgentManager(
+agents = AgentTeam(
     agents=[system_ops_agent],
     tasks=[task],
     process="sequential"

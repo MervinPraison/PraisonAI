@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from pydantic import BaseModel
 from typing import List, Dict
 
@@ -71,7 +71,7 @@ final_evaluation_task = Task(
 )
 
 # Create and run the agents
-agents = AgentManager(
+agents = AgentTeam(
     agents=[skill_analyst, experience_analyst, cv_evaluator],
     tasks=[skills_analysis_task, experience_analysis_task, final_evaluation_task],
     process="sequential", output="verbose"

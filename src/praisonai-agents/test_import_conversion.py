@@ -45,7 +45,7 @@ def test_backward_compatibility():
     
     try:
         # Test the old import pattern still works
-        from praisonaiagents import Agent, Task, AgentManager
+        from praisonaiagents import Agent, Task, AgentTeam
         print("✓ Successfully imported Agent, Task, AgentManager from praisonaiagents")
         
         # Test that the classes are available

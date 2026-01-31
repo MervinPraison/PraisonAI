@@ -11,7 +11,7 @@ These patterns enable complex data processing pipelines
 while maintaining clean, readable workflow definitions.
 """
 
-from praisonaiagents import Workflow, WorkflowContext, StepResult
+from praisonaiagents import AgentFlow, WorkflowContext, StepResult
 from praisonaiagents.workflows import loop, parallel, route
 
 
@@ -51,7 +51,7 @@ def nested_loop_example():
         var_name="row"
     )
     
-    workflow = Workflow(
+    workflow = AgentFlow(
         steps=[outer_loop],
         variables={
             "rows": [
@@ -101,7 +101,7 @@ def parallel_inside_loop_example():
     parallel_analysis = parallel([security_scan, performance_test, code_review])
     
     # Loop through projects, running parallel analysis for each
-    workflow = Workflow(
+    workflow = AgentFlow(
         steps=[
             loop(
                 steps=[parallel_analysis],
@@ -161,7 +161,7 @@ def route_inside_loop_example():
         item_type = item.get("type", "unknown")
         return StepResult(output=item_type)
     
-    workflow = Workflow(
+    workflow = AgentFlow(
         steps=[
             loop(
                 steps=[get_type, type_router],
@@ -214,7 +214,7 @@ def three_level_nesting_example():
     # Level 1: Process each department (contains team loop)
     dept_loop = loop(steps=[team_loop], over="departments", var_name="dept")
     
-    workflow = Workflow(
+    workflow = AgentFlow(
         steps=[dept_loop],
         variables={
             "departments": [

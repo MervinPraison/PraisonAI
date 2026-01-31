@@ -9,7 +9,7 @@ This example demonstrates:
 4. Historical state tracking
 """
 
-from praisonaiagents import Agent, Task, AgentManager
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.memory import Memory
 from typing import Dict, Any, List
 import json
@@ -325,7 +325,7 @@ save_state_task = Task(
 )
 
 # Create workflow with shared memory
-workflow = AgentManager(
+workflow = AgentTeam(
     agents=[conversation_manager, memory_analyst],
     tasks=[
         init_conversation_task,
@@ -382,7 +382,7 @@ test_task = Task(
     tools=[search_conversation_memory]
 )
 
-test_workflow = AgentManager(
+test_workflow = AgentTeam(
     agents=[test_agent],
     tasks=[test_task],
     memory=memory_config,

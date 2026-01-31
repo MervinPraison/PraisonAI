@@ -14,7 +14,7 @@ Run this example:
     python 06_advanced_state_operations.py
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 import json
 import time
 import hashlib
@@ -540,7 +540,7 @@ tasks = [
 ]
 
 # Create workflow
-workflow = AgentManager(
+workflow = AgentTeam(
     agents=[state_manager, cache_manager, metrics_calculator, report_generator],
     tasks=tasks,
     process="sequential"

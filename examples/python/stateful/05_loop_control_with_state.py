@@ -10,7 +10,7 @@ Run this example:
     python 05_loop_control_with_state.py
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 import time
 import random
 from datetime import datetime
@@ -355,7 +355,7 @@ report_task = Task(
 )
 
 # Create workflow
-workflow = AgentManager(
+workflow = AgentTeam(
     agents=[batch_processor, data_collector, validator, reporter],
     tasks=[batch_loop_task, retry_loop_task, pagination_loop_task, validation_loop_task, report_task],
     process="sequential"

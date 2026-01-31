@@ -24,7 +24,7 @@ import sys
 # Add the local development path to use the current implementation
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'src', 'praisonai-agents'))
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.tools import python_tools, file_tools, shell_tools
 from praisonaiagents.main import register_approval_callback
 from praisonaiagents.approval import (
@@ -109,7 +109,7 @@ def main():
     ]
     
     # Create and run process
-    process = AgentManager(
+    process = AgentTeam(
         agents=[agent],
         tasks=tasks, output="verbose"
     )
@@ -166,7 +166,7 @@ async def async_demo():
         expected_output="Async execution result"
     )
     
-    process = AgentManager(
+    process = AgentTeam(
         agents=[agent],
         tasks=[task], output="verbose"
     )

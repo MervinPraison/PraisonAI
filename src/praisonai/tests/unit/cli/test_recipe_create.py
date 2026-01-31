@@ -173,8 +173,8 @@ agents:
             creator = RecipeCreator()
             path = creator.create("Build a test recipe", output_dir=Path(tmpdir))
             
+            # Simplified 2-file structure: agents.yaml + tools.py
             assert (path / "agents.yaml").exists()
-            assert (path / "TEMPLATE.yaml").exists()
             assert (path / "tools.py").exists()
 
 

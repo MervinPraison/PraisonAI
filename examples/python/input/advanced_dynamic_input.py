@@ -5,7 +5,7 @@ This example demonstrates an advanced system that dynamically creates agents and
 based on user inputs, including conditional logic, custom configurations, and file output.
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.tools import duckduckgo
 import os
 from typing import Dict, List
@@ -137,7 +137,7 @@ class DynamicAgentSystem:
         
         # Run the system
         print(f"\n🚀 Starting {process} analysis for '{inputs['topic']}'...")
-        praison_agents = AgentManager(
+        praison_agents = AgentTeam(
             agents=agents,
             tasks=tasks,
             process=process,

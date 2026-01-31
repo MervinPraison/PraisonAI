@@ -1,4 +1,4 @@
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.tools import cot_save, cot_upload_to_huggingface
 from pydantic import BaseModel
 import os
@@ -128,7 +128,7 @@ upload_to_huggingface_task = Task(
 )
 
 # Initialize workflow
-agents = AgentManager(
+agents = AgentTeam(
     agents=[qa_generator, total_questions_evaluator, cot_generator, upload_to_huggingface],
     tasks=[generate_task, evaluate_total_questions_task, generate_cot_task, upload_to_huggingface_task],
     process="workflow",

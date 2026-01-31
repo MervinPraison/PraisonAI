@@ -5,7 +5,7 @@ Demonstrates decision-based routing where the workflow
 takes different paths based on the output of a decision step.
 """
 
-from praisonaiagents import Workflow, WorkflowContext, StepResult
+from praisonaiagents import AgentFlow, WorkflowContext, StepResult
 from praisonaiagents.workflows import route
 
 # Decision maker - determines which route to take
@@ -31,7 +31,7 @@ def handle_normal(ctx: WorkflowContext) -> StepResult:
     return StepResult(output="📋 NORMAL: Added to standard processing queue.")
 
 # Create workflow with routing
-workflow = Workflow(
+workflow = AgentFlow(
     name="Request Router",
     steps=[
         classify_request,

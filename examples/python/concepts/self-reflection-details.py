@@ -8,7 +8,7 @@ This example demonstrates the self-reflection capabilities in PraisonAI agents:
 - Impact on output quality
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from typing import Dict, Any
 import time
 
@@ -162,7 +162,7 @@ def reflection_workflow_example():
         context=[create_task, review_task]
     )
     
-    workflow = AgentManager(
+    workflow = AgentTeam(
         agents=[creator_agent, reviewer_agent, polisher_agent],
         tasks=[create_task, review_task, polish_task],
         process="sequential", output="verbose"

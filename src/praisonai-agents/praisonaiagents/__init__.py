@@ -140,9 +140,10 @@ _LAZY_IMPORTS = {
     'sync_display_callbacks': ('praisonaiagents.main', 'sync_display_callbacks'),
     'async_display_callbacks': ('praisonaiagents.main', 'async_display_callbacks'),
     
-    # Workflows
-    'Workflow': ('praisonaiagents.workflows', 'Workflow'),
-    'Task': ('praisonaiagents.workflows', 'Task'),
+    # AgentFlow (primary) / Workflow (alias)
+    'AgentFlow': ('praisonaiagents.workflows', 'AgentFlow'),
+    'Workflow': ('praisonaiagents.workflows', 'Workflow'),  # Silent alias
+    'Pipeline': ('praisonaiagents.workflows', 'Pipeline'),  # Silent alias
     'WorkflowContext': ('praisonaiagents.workflows', 'WorkflowContext'),
     'StepResult': ('praisonaiagents.workflows', 'StepResult'),
     'Route': ('praisonaiagents.workflows', 'Route'),
@@ -153,7 +154,6 @@ _LAZY_IMPORTS = {
     'parallel': ('praisonaiagents.workflows', 'parallel'),
     'loop': ('praisonaiagents.workflows', 'loop'),
     'repeat': ('praisonaiagents.workflows', 'repeat'),
-    'Pipeline': ('praisonaiagents.workflows', 'Pipeline'),
     
     # Handoff
     'Handoff': ('praisonaiagents.agent.handoff', 'Handoff'),
@@ -222,8 +222,9 @@ _LAZY_IMPORTS = {
     'CodeAgent': ('praisonaiagents.agent.code_agent', 'CodeAgent'),
     'CodeConfig': ('praisonaiagents.agent.code_agent', 'CodeConfig'),
     
-    # Agents / AgentManager
-    'AgentManager': ('praisonaiagents.agents.agents', 'AgentManager'),
+    # AgentTeam (primary) / AgentManager (alias)
+    'AgentTeam': ('praisonaiagents.agents.agents', 'AgentTeam'),
+    'AgentManager': ('praisonaiagents.agents.agents', 'AgentManager'),  # Silent alias
     # Note: 'Agents' is handled by _custom_handler for deprecation warning
     'Task': ('praisonaiagents.task.task', 'Task'),
     'AutoAgents': ('praisonaiagents.agents.autoagents', 'AutoAgents'),
@@ -234,9 +235,11 @@ _LAZY_IMPORTS = {
     # Session
     'Session': ('praisonaiagents.session', 'Session'),
     
-    # App (AgentApp protocol and config)
-    'AgentAppProtocol': ('praisonaiagents.app.protocols', 'AgentAppProtocol'),
-    'AgentAppConfig': ('praisonaiagents.app.config', 'AgentAppConfig'),
+    # AgentOS (primary) / AgentApp (alias) - protocol and config
+    'AgentOSProtocol': ('praisonaiagents.app.protocols', 'AgentOSProtocol'),
+    'AgentOSConfig': ('praisonaiagents.app', 'AgentOSConfig'),
+    'AgentAppProtocol': ('praisonaiagents.app.protocols', 'AgentAppProtocol'),  # Silent alias
+    'AgentAppConfig': ('praisonaiagents.app.config', 'AgentAppConfig'),  # Silent alias
     
     # MCP (optional)
     'MCP': ('praisonaiagents.mcp.mcp', 'MCP'),
@@ -574,9 +577,15 @@ def warmup(include_litellm: bool = False, include_openai: bool = True) -> dict:
 __all__ = [
     # Core classes - the essentials
     'Agent',
-    'AgentManager',  # Primary class for multi-agent coordination (v0.14.16+)
-    'Agents',  # Deprecated alias for AgentManager
+    'AgentTeam',  # Primary class for multi-agent coordination (v1.0+)
+    'AgentManager',  # Silent alias for AgentTeam
+    'Agents',  # Deprecated alias for AgentTeam (emits warning)
     'Task',
+    
+    # AgentFlow (deterministic pipelines)
+    'AgentFlow',  # Primary class for workflows (v1.0+)
+    'Workflow',  # Silent alias for AgentFlow
+    'Pipeline',  # Silent alias for AgentFlow
     
     # Tool essentials
     'tool',

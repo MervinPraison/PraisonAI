@@ -10,7 +10,7 @@ Run this example:
     python 04_session_state_persistence.py
 """
 
-from praisonaiagents import Agent, Task, Agents, Session
+from praisonaiagents import Agent, Task, AgentTeam, Session
 import json
 import time
 from datetime import datetime
@@ -228,7 +228,7 @@ initial_tasks = [
 ]
 
 # Create workflow with memory enabled
-workflow = AgentManager(
+workflow = AgentTeam(
     agents=[data_processor, status_monitor, task_runner, report_generator],
     tasks=initial_tasks,
     process="sequential",
@@ -300,7 +300,7 @@ resumed_tasks = [
 ]
 
 # Create new workflow instance for resumed session
-resumed_workflow = AgentManager(
+resumed_workflow = AgentTeam(
     agents=[data_processor, status_monitor, task_runner, report_generator],
     tasks=resumed_tasks,
     process="sequential",

@@ -278,7 +278,7 @@ def test_backward_compatibility():
         print("✅ ImageAgent still works")
         
         # Test that we can import other PraisonAI components
-        from praisonaiagents import Task, AgentManager
+        from praisonaiagents import Task, AgentTeam
         print("✅ Task and Agents can still be imported")
         
         # Test that __all__ exports are working

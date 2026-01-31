@@ -5,7 +5,7 @@ The easiest way to create and run workflows in PraisonAI.
 Just pass functions or agents as steps - no complex configuration needed!
 """
 
-from praisonaiagents import Workflow, WorkflowContext, StepResult
+from praisonaiagents import AgentFlow, WorkflowContext, StepResult
 
 # Define simple handler functions
 def validate(ctx: WorkflowContext) -> StepResult:
@@ -23,7 +23,7 @@ def format_output(ctx: WorkflowContext) -> StepResult:
     return StepResult(output=f"✅ Final: {ctx.previous_result}")
 
 # Create workflow - just list your functions!
-workflow = Workflow(
+workflow = AgentFlow(
     name="Simple Pipeline",
     steps=[validate, process, format_output]
 )

@@ -5,7 +5,7 @@ This example demonstrates a comprehensive code agent that can write, analyze, de
 It includes self-reflection for improving code quality and multiple specialized tools.
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.tools import CodeInterpreter
 
 # Initialize code execution tool
@@ -84,7 +84,7 @@ def demonstrate_code_agent():
     )
     
     # Create workflow
-    workflow = AgentManager(
+    workflow = AgentTeam(
         agents=[code_writer, code_reviewer, code_executor],
         tasks=[write_task, review_task, execute_task],
         process="sequential", output="verbose"

@@ -5,7 +5,7 @@ This shows how to add latency tracking to an MCP server
 without modifying PraisonAI core files.
 """
 
-from praisonaiagents import Agent, Agents
+from praisonaiagents import Agent, AgentTeam
 from hosted_server import HostedMCPServer  # Import from local file
 from latency_tracker_tool import tracker, get_latency_metrics
 import json

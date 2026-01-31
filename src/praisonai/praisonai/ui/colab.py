@@ -421,7 +421,7 @@ async def ui_run_praisonai(config, topic, tools_dict):
 
         # Create and run the PraisonAI agents
         if config.get('process') == 'hierarchical':
-            crew = AgentManager(
+            crew = AgentTeam(
                 agents=list(agents.values()),
                 tasks=tasks,
                 verbose=True,
@@ -429,7 +429,7 @@ async def ui_run_praisonai(config, topic, tools_dict):
                 manager_llm=config.get('manager_llm', 'gpt-5-nano')
             )
         else:
-            crew = AgentManager(
+            crew = AgentTeam(
                 agents=list(agents.values()),
                 tasks=tasks,
                 verbose=2

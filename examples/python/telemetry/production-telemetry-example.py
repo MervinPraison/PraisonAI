@@ -13,7 +13,7 @@ Features demonstrated:
 - Usage analytics and reporting
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.tools import duckduckgo
 from praisonaiagents.telemetry import enable_telemetry
 import time
@@ -139,7 +139,7 @@ for i, request in enumerate(customer_requests):
         try:
             # Customer service response
             with telemetry.trace_agent_execution("CustomerServiceAgent") as agent_trace:
-                agents = AgentManager(
+                agents = AgentTeam(
                     agents=[customer_service_agent],
                     tasks=[customer_task],
                     output="minimal"  # Reduce verbosity for telemetry demo
@@ -162,7 +162,7 @@ for i, request in enumerate(customer_requests):
                         context=[customer_task]
                     )
                     
-                    tech_agents = AgentManager(
+                    tech_agents = AgentTeam(
                         agents=[technical_support_agent],
                         tasks=[tech_task], output="minimal"
                     )
@@ -182,7 +182,7 @@ for i, request in enumerate(customer_requests):
                     agent=quality_assurance_agent
                 )
                 
-                qa_agents = AgentManager(
+                qa_agents = AgentTeam(
                     agents=[quality_assurance_agent],
                     tasks=[qa_task], output="minimal"
                 )

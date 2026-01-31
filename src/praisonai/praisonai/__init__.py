@@ -18,7 +18,7 @@ __all__ = [
     'DeployConfig',
     'DeployType',
     'CloudProvider',
-    'AgentApp',  # Production deployment platform (v0.14.16+)
+    'AgentOS',  # Production deployment platform (v0.14.16+)
     'recipe',
     'embed',
     'embedding',
@@ -63,9 +63,9 @@ def __getattr__(name):
     elif name == 'EmbeddingResult':
         from praisonaiagents.embedding import EmbeddingResult
         return EmbeddingResult
-    elif name == 'AgentApp':
-        from .app import AgentApp
-        return AgentApp
+    elif name == 'AgentOS':
+        from .app import AgentOS
+        return AgentOS
     
     # Try praisonaiagents exports
     try:

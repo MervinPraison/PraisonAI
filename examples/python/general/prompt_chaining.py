@@ -64,7 +64,7 @@ final_task = Task(
 )
 
 # Create the workflow manager
-workflow = AgentManager(
+workflow = AgentTeam(
     agents=[agent1, agent2, agent3],
     tasks=[initial_task, analysis_task, final_task],
     process="workflow",  # Use workflow process type
