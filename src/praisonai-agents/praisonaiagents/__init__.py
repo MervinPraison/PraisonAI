@@ -150,10 +150,12 @@ _LAZY_IMPORTS = {
     'Parallel': ('praisonaiagents.workflows', 'Parallel'),
     'Loop': ('praisonaiagents.workflows', 'Loop'),
     'Repeat': ('praisonaiagents.workflows', 'Repeat'),
+    'If': ('praisonaiagents.workflows', 'If'),
     'route': ('praisonaiagents.workflows', 'route'),
     'parallel': ('praisonaiagents.workflows', 'parallel'),
     'loop': ('praisonaiagents.workflows', 'loop'),
     'repeat': ('praisonaiagents.workflows', 'repeat'),
+    'when': ('praisonaiagents.workflows', 'when'),
     
     # Handoff
     'Handoff': ('praisonaiagents.agent.handoff', 'Handoff'),
