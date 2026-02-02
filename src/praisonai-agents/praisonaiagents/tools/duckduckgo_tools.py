@@ -43,8 +43,8 @@ def internet_search(query: str, max_results: int = 5, retries: int = MAX_RETRIES
             results = []
             ddgs = DDGS()
             
-            # Try text search
-            search_results = list(ddgs.text(keywords=query, max_results=max_results))
+            # Try text search (use positional 'query' for v8+ compatibility)
+            search_results = list(ddgs.text(query, max_results=max_results))
             
             for result in search_results:
                 results.append({

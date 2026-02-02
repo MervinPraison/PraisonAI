@@ -11,6 +11,15 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 from pathlib import Path
 
+from ..paths import get_checkpoints_dir
+
+
+def _parse_iso_timestamp(timestamp: str) -> datetime:
+    """Parse ISO format timestamp, handling 'Z' suffix for Python 3.9 compatibility."""
+    if timestamp.endswith('Z'):
+        timestamp = timestamp[:-1] + '+00:00'
+    return datetime.fromisoformat(timestamp)
+
 
 class CheckpointEvent(str, Enum):
     """Events emitted by the checkpoint service."""
@@ -46,8 +55,8 @@ class CheckpointConfig:
         if self.storage_dir:
             self.storage_dir = os.path.expanduser(self.storage_dir)
         else:
-            # Default storage in user's home directory
-            self.storage_dir = os.path.expanduser("~/.praison/checkpoints")
+            # Default storage in user's home directory (uses centralized paths - DRY)
+            self.storage_dir = str(get_checkpoints_dir())
     
     def get_checkpoint_dir(self) -> str:
         """Get the checkpoint directory for this workspace."""
@@ -77,7 +86,7 @@ class Checkpoint:
             id=commit_hash,
             short_id=commit_hash[:8],
             message=message,
-            timestamp=datetime.fromisoformat(timestamp) if isinstance(timestamp, str) else timestamp
+            timestamp=_parse_iso_timestamp(timestamp) if isinstance(timestamp, str) else timestamp
         )
     
     def to_dict(self) -> Dict[str, Any]:

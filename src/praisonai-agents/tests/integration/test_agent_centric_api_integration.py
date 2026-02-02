@@ -6,12 +6,13 @@ Requires OPENAI_API_KEY environment variable.
 """
 
 import os
-import sys
+import pytest
 
-# Skip if no API key
-if not os.environ.get("OPENAI_API_KEY"):
-    print("Skipping integration tests - OPENAI_API_KEY not set")
-    sys.exit(0)
+# Skip entire module if no API key
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("OPENAI_API_KEY"),
+    reason="OPENAI_API_KEY not set"
+)
 
 
 def test_guardrail_string_preset():

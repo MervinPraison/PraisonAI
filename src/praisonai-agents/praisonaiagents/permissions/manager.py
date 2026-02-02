@@ -14,10 +14,12 @@ from typing import Any, Callable, Dict, List, Optional
 from .rules import PermissionRule, PermissionAction, PermissionResult, PersistentApproval
 from .doom_loop import DoomLoopDetector
 
+from ..paths import get_permissions_dir
+
 logger = logging.getLogger(__name__)
 
-# Default storage path
-DEFAULT_PERMISSIONS_DIR = os.path.expanduser("~/.praison/permissions")
+# Default storage path (uses centralized paths - DRY)
+DEFAULT_PERMISSIONS_DIR = str(get_permissions_dir())
 
 
 class PermissionManager:

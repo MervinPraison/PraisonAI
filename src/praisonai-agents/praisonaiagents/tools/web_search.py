@@ -226,7 +226,8 @@ def _search_duckduckgo(query: str, max_results: int = 5) -> List[Dict[str, Any]]
         try:
             results = []
             ddgs = DDGS()
-            search_results = list(ddgs.text(keywords=query, max_results=max_results))
+            # Use positional 'query' (v8+) instead of keywords= (deprecated)
+            search_results = list(ddgs.text(query, max_results=max_results))
             
             for result in search_results:
                 results.append({

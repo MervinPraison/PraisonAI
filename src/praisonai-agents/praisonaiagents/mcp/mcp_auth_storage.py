@@ -25,11 +25,10 @@ def get_default_auth_filepath() -> str:
     Returns:
         Path to mcp-auth.json in user's praison config directory
     """
-    # Use ~/.praison/ directory for config
-    home = Path.home()
-    praison_dir = home / ".praison"
-    praison_dir.mkdir(parents=True, exist_ok=True)
-    return str(praison_dir / "mcp-auth.json")
+    # Use centralized paths (DRY)
+    from ..paths import get_mcp_auth_path, ensure_dir, get_data_dir
+    ensure_dir(get_data_dir())
+    return str(get_mcp_auth_path())
 
 
 class MCPAuthStorage:

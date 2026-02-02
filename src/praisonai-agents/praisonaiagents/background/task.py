@@ -48,7 +48,16 @@ class BackgroundTask:
     _cancel_event: Optional[asyncio.Event] = field(default=None, repr=False)
     
     def __post_init__(self):
-        self._cancel_event = asyncio.Event()
+        # Lazily create asyncio.Event() to avoid Python 3.9 event loop issues
+        self._cancel_event = None
+        # Simple flag for sync cancellation check (doesn't require event loop)
+        self._cancelled = False
+    
+    def _get_cancel_event(self) -> asyncio.Event:
+        """Get or create the cancel event lazily (Python 3.9 compatible)."""
+        if self._cancel_event is None:
+            self._cancel_event = asyncio.Event()
+        return self._cancel_event
     
     @property
     def is_running(self) -> bool:
@@ -93,7 +102,10 @@ class BackgroundTask:
     
     def cancel(self):
         """Request task cancellation."""
-        if self._cancel_event:
+        # Set simple flag (works without event loop)
+        self._cancelled = True
+        # Also set the event if it exists (for async waiters)
+        if self._cancel_event is not None:
             self._cancel_event.set()
         self.status = TaskStatus.CANCELLED
         self.completed_at = datetime.now()
@@ -135,6 +147,10 @@ class BackgroundTask:
     
     def should_cancel(self) -> bool:
         """Check if cancellation was requested."""
+        # Check simple flag first (works without event loop)
+        if self._cancelled:
+            return True
+        # Also check event if it exists
         return self._cancel_event is not None and self._cancel_event.is_set()
     
     def to_dict(self) -> Dict[str, Any]:

@@ -1085,9 +1085,19 @@ class Agent:
         self.__stream_emitter = None  # Will be initialized on first access
         self._hooks_registry_param = hooks  # Store for lazy init
         
-        # Handle model= alias for llm= (NO warnings - both are valid)
-        if llm is None and model is not None:
-            llm = model  # model= is an alias for llm=
+        # Handle llm= deprecation: model= is the preferred parameter name
+        # llm= still works but shows deprecation warning
+        if llm is not None and model is None:
+            import warnings
+            warnings.warn(
+                "Parameter 'llm' is deprecated, use 'model' instead. "
+                "Example: Agent(model='gpt-4o-mini') instead of Agent(llm='gpt-4o-mini')",
+                DeprecationWarning,
+                stacklevel=2
+            )
+        # model= is the preferred parameter (no warning)
+        if model is not None:
+            llm = model  # model= takes precedence
         
         # Store rate limiter (optional, zero overhead when None)
         self._rate_limiter = rate_limiter

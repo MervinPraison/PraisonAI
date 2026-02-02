@@ -2,9 +2,16 @@
 Tests for bot CLI commands.
 
 Tests the enhanced bot command with full capability options.
+
+NOTE: These tests require the praisonai package to be installed.
+They are skipped if praisonai is not available.
 """
 
+import pytest
 from unittest.mock import patch, MagicMock
+
+# Skip entire module if praisonai is not installed
+pytest.importorskip("praisonai", reason="praisonai package not installed")
 
 
 class TestBotCapabilities:

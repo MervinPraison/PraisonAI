@@ -47,6 +47,7 @@ class Task:
         name: Optional[str] = None,
         tools: Optional[List[Any]] = None,
         context: Optional[List[Union[str, List, 'Task']]] = None,
+        depends_on: Optional[List[Union[str, List, 'Task']]] = None,  # Alias for context (clearer semantics)
         async_execution: Optional[bool] = False,
         config: Optional[Dict[str, Any]] = None,
         output_file: Optional[str] = None,
@@ -93,8 +94,17 @@ class Task:
         loop_var: str = "item",
         # Consolidated config objects (from Task)
         execution: Optional[Any] = None,
-        routing: Optional[Any] = None,
+        routing: Optional[Dict[str, List[str]]] = None,  # Renamed from condition for clarity
         output_config: Optional[Any] = None,
+        # ============================================================
+        # UNIFIED CONDITION SYNTAX (same as AgentFlow)
+        # ============================================================
+        # String-based condition expression (e.g., "{{score}} > 80")
+        when: Optional[str] = None,
+        # Task to route to when condition is True
+        then_task: Optional[str] = None,
+        # Task to route to when condition is False
+        else_task: Optional[str] = None,
         # Feature configs (from Task)
         autonomy: Optional[Any] = None,
         knowledge: Optional[Any] = None,
@@ -136,7 +146,13 @@ class Task:
         self.expected_output = expected_output if expected_output is not None else "Complete the task successfully"
         self.agent = agent
         self.tools = tools if tools else []
-        self.context = context if context else []
+        # Handle depends_on as alias for context (depends_on takes precedence)
+        if depends_on is not None:
+            self.context = depends_on
+        else:
+            self.context = context if context else []
+        # Store depends_on as property alias for context
+        self._depends_on = self.context
         self.async_execution = async_execution
         self.config = config if config else {}
         self.output_file = output_file
@@ -156,7 +172,17 @@ class Task:
         self.quality_check = quality_check
         self.rerun = rerun # Assigning the rerun parameter
         self.retain_full_context = retain_full_context
-        self.guardrail = guardrail if guardrail is not None else guardrails  # guardrails is alias
+        # Handle guardrail/guardrails: guardrails (plural) is canonical, guardrail (singular) is deprecated
+        if guardrail is not None and guardrails is None:
+            import warnings
+            warnings.warn(
+                "Parameter 'guardrail' is deprecated, use 'guardrails' instead. "
+                "Example: Task(guardrails=my_fn) instead of Task(guardrail=my_fn)",
+                DeprecationWarning,
+                stacklevel=2
+            )
+        # guardrails takes precedence over guardrail
+        self.guardrail = guardrails if guardrails is not None else guardrail
         self.max_retries = max_retries
         self.retry_count = retry_count
         self._guardrail_fn = None
@@ -182,8 +208,17 @@ class Task:
         self.loop_var = loop_var
         # Consolidated config objects (from Task)
         self.execution = execution
-        self.routing = routing
+        # Handle routing parameter - use routing if provided, else fall back to condition
+        if routing is not None:
+            self.condition = routing
+        self.routing = self.condition  # Alias for backward compat
         self.output_config = output_config
+        # ============================================================
+        # UNIFIED CONDITION SYNTAX (same as AgentFlow)
+        # ============================================================
+        self.when = when
+        self.then_task = then_task
+        self.else_task = else_task
         # Feature configs (from Task)
         self.autonomy = autonomy
         self.knowledge = knowledge
@@ -258,6 +293,16 @@ class Task:
         # Initialize guardrail
         self._setup_guardrail()
 
+    @property
+    def depends_on(self):
+        """Alias for context - returns the list of dependent tasks."""
+        return self.context
+    
+    @depends_on.setter
+    def depends_on(self, value):
+        """Alias for context - sets the list of dependent tasks."""
+        self.context = value
+
     def _setup_guardrail(self):
         """Setup the guardrail function based on the provided guardrail parameter."""
         if self.guardrail is None:
@@ -315,6 +360,40 @@ class Task:
 
     def __str__(self):
         return f"Task(name='{self.name if self.name else 'None'}', description='{self.description}', agent='{self.agent.name if self.agent else 'None'}', status='{self.status}')"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize the Task to a dictionary.
+        
+        Returns:
+            Dictionary representation of the Task.
+        """
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "action": self.action,
+            "expected_output": self.expected_output,
+            "status": self.status,
+            "task_type": self.task_type,
+            "tools": self.tools,
+            "context": [str(c) if hasattr(c, '__str__') else c for c in self.context] if self.context else [],
+            "next_tasks": self.next_tasks,
+            "condition": self.condition,
+            "routing": self.routing,
+            "is_start": self.is_start,
+            "max_retries": self.max_retries,
+            "async_execution": self.async_execution,
+            "output_file": self.output_file,
+            "output_variable": self.output_variable,
+            "retain_full_context": self.retain_full_context,
+            "loop_over": self.loop_over,
+            "loop_var": self.loop_var,
+            "when": self.when,
+            "then_task": self.then_task,
+            "else_task": self.else_task,
+            "agent_config": self.agent_config,
+            "variables": self.variables,
+        }
 
     def initialize_memory(self):
         """Initialize memory if config exists but memory doesn't"""
@@ -633,3 +712,50 @@ Context:
                 await self.callback(task_output)
             else:
                 self.callback(task_output)
+
+    def evaluate_when(self, context: Dict[str, Any]) -> bool:
+        """
+        Evaluate the 'when' condition against the given context.
+        
+        Uses the shared evaluate_condition function from the conditions module
+        for DRY compliance with AgentFlow condition evaluation.
+        
+        Args:
+            context: Dictionary containing variables for evaluation.
+                     May include workflow variables, previous outputs, etc.
+            
+        Returns:
+            True if condition is met or no condition is set.
+            False if condition is not met.
+        """
+        if self.when is None:
+            return True
+        
+        from ..conditions.evaluator import evaluate_condition
+        return evaluate_condition(
+            self.when,
+            context,
+            previous_output=context.get('previous_output')
+        )
+    
+    def get_next_task(self, context: Dict[str, Any]) -> Optional[str]:
+        """
+        Get the next task name based on the 'when' condition evaluation.
+        
+        This provides a simple routing mechanism for Task objects,
+        similar to AgentFlow's when() function.
+        
+        Args:
+            context: Dictionary containing variables for evaluation.
+            
+        Returns:
+            then_task if condition is True, else_task if False.
+            None if no routing is configured.
+        """
+        if self.when is None and self.then_task is None and self.else_task is None:
+            return None
+        
+        if self.evaluate_when(context):
+            return self.then_task
+        else:
+            return self.else_task

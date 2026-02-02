@@ -36,16 +36,21 @@ class PlanStorage:
         todos_dir: Directory for todo files
     """
     
-    DEFAULT_BASE_PATH = ".praison"
+    DEFAULT_BASE_PATH = ".praisonai"  # Updated to use branded path
     
     def __init__(self, base_path: Optional[str] = None):
         """
         Initialize PlanStorage.
         
         Args:
-            base_path: Base directory for storage. Defaults to .praison/
+            base_path: Base directory for storage. Defaults to .praisonai/
         """
-        self.base_path = base_path or self.DEFAULT_BASE_PATH
+        # Use centralized paths for project-level data (DRY)
+        if base_path is None:
+            from ..paths import get_project_data_dir
+            self.base_path = str(get_project_data_dir())
+        else:
+            self.base_path = base_path
         self.plans_dir = os.path.join(self.base_path, "plans")
         self.todos_dir = os.path.join(self.base_path, "todos")
         

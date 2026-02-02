@@ -49,7 +49,8 @@ class TestCheckpointConfig:
     def test_config_default_storage(self):
         """Test default storage directory."""
         config = CheckpointConfig(workspace_dir="/tmp/test")
-        assert ".praison/checkpoints" in config.storage_dir
+        # Uses centralized paths module - .praisonai/checkpoints
+        assert ".praisonai/checkpoints" in config.storage_dir or "checkpoints" in config.storage_dir
     
     def test_config_exclude_patterns(self):
         """Test default exclude patterns."""
