@@ -26,6 +26,10 @@ MEMORY_PRESETS: Dict[str, Dict[str, Any]] = {
     "mongodb": {"backend": "mongodb"},
     # Feature presets
     "learn": {"backend": "file", "learn": True},  # Enable Agent Learn with file backend
+    # History presets (auto-inject session history into context)
+    "history": {"backend": "file", "history": True, "history_limit": 10},
+    "session": {"backend": "file", "history": True, "history_limit": 10},  # Alias
+    "chat": {"backend": "file", "history": True, "history_limit": 20},  # Conversational
 }
 
 MEMORY_URL_SCHEMES: Dict[str, str] = {

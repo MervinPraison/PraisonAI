@@ -43,6 +43,10 @@ class StreamEvent:
         tool_call: Tool call data for DELTA_TOOL_CALL events
         metadata: Additional event-specific metadata
         error: Error message for ERROR events
+        is_reasoning: Whether this content is reasoning/thinking (default False)
+        agent_id: Optional agent identifier for multi-agent scenarios
+        session_id: Optional session identifier for tracking
+        run_id: Optional run identifier for correlation
     """
     type: StreamEventType
     timestamp: float = field(default_factory=time.perf_counter)
@@ -50,6 +54,10 @@ class StreamEvent:
     tool_call: Optional[Dict[str, Any]] = None
     metadata: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    is_reasoning: bool = False
+    agent_id: Optional[str] = None
+    session_id: Optional[str] = None
+    run_id: Optional[str] = None
     
     def __repr__(self) -> str:
         parts = [f"StreamEvent({self.type.value}"]

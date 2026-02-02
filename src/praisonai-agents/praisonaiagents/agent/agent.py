@@ -150,6 +150,7 @@ if TYPE_CHECKING:
     from ..task.task import Task
     from .handoff import Handoff, HandoffConfig, HandoffResult
     from ..rag.models import RAGResult, ContextPack
+    from ..eval.results import EvaluationLoopResult
 
 class Agent:
     # Class-level counter for generating unique display names for nameless agents
@@ -852,6 +853,24 @@ class Agent:
             memory = None
         
         # ─────────────────────────────────────────────────────────────────────
+        # Resolve HISTORY from MemoryConfig - FAST PATH
+        # History is enabled via memory="history" preset or MemoryConfig(history=True)
+        # ─────────────────────────────────────────────────────────────────────
+        _history_enabled = False
+        _history_limit = 10
+        _history_session_id = None
+        
+        # Check if memory config has history settings
+        if _memory_config is not None and isinstance(_memory_config, MemoryConfig):
+            if _memory_config.history:
+                _history_enabled = True
+                _history_limit = _memory_config.history_limit
+        
+        # Use auto_save session if no explicit session and history is enabled
+        if _history_enabled and _history_session_id is None and auto_save:
+            _history_session_id = auto_save
+        
+        # ─────────────────────────────────────────────────────────────────────
         # Resolve KNOWLEDGE param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
         retrieval_config = None
@@ -1353,6 +1372,11 @@ Your Goal: {self.goal}
         # Used when session_id is provided but no DB adapter
         self._session_store = None
         self._session_store_initialized = False
+        
+        # History injection settings (for auto-injecting session history into context)
+        self._history_enabled = _history_enabled
+        self._history_limit = _history_limit
+        self._history_session_id = _history_session_id
 
         # Agent-centric feature instances (lazy loaded for zero performance impact)
         self._auto_memory = auto_memory
@@ -2297,6 +2321,99 @@ Summary:"""
             config=config or HandoffConfig(),
         )
         return handoff_obj.execute_programmatic(self, prompt, context)
+    
+    def run_until(
+        self,
+        prompt: str,
+        criteria: str,
+        threshold: float = 8.0,
+        max_iterations: int = 5,
+        mode: str = "optimize",
+        on_iteration: Optional[Callable[[Any], None]] = None,
+        verbose: bool = False,
+    ) -> "EvaluationLoopResult":
+        """
+        Run agent iteratively until output meets quality criteria.
+        
+        This method implements the "Ralph Loop" pattern: run agent → judge output
+        → improve based on feedback → repeat until threshold met.
+        
+        Args:
+            prompt: The prompt to send to the agent
+            criteria: Evaluation criteria for the Judge (e.g., "Response is thorough")
+            threshold: Score threshold for success (default: 8.0, scale 1-10)
+            max_iterations: Maximum iterations before stopping (default: 5)
+            mode: "optimize" (stop on success) or "review" (run all iterations)
+            on_iteration: Optional callback called after each iteration
+            verbose: Enable verbose logging
+            
+        Returns:
+            EvaluationLoopResult with iteration history and final score
+            
+        Example:
+            ```python
+            agent = Agent(name="analyzer", instructions="Analyze systems")
+            result = agent.run_until(
+                "Analyze the auth flow",
+                criteria="Analysis is thorough and actionable",
+                threshold=8.0,
+            )
+            print(result.final_score)  # 8.5
+            print(result.success)      # True
+            ```
+        """
+        from ..eval.loop import EvaluationLoop
+        
+        loop = EvaluationLoop(
+            agent=self,
+            criteria=criteria,
+            threshold=threshold,
+            max_iterations=max_iterations,
+            mode=mode,
+            on_iteration=on_iteration,
+            verbose=verbose,
+        )
+        return loop.run(prompt)
+    
+    async def run_until_async(
+        self,
+        prompt: str,
+        criteria: str,
+        threshold: float = 8.0,
+        max_iterations: int = 5,
+        mode: str = "optimize",
+        on_iteration: Optional[Callable[[Any], None]] = None,
+        verbose: bool = False,
+    ) -> "EvaluationLoopResult":
+        """
+        Async version of run_until().
+        
+        Run agent iteratively until output meets quality criteria.
+        
+        Args:
+            prompt: The prompt to send to the agent
+            criteria: Evaluation criteria for the Judge
+            threshold: Score threshold for success (default: 8.0)
+            max_iterations: Maximum iterations before stopping (default: 5)
+            mode: "optimize" (stop on success) or "review" (run all iterations)
+            on_iteration: Optional callback called after each iteration
+            verbose: Enable verbose logging
+            
+        Returns:
+            EvaluationLoopResult with iteration history and final score
+        """
+        from ..eval.loop import EvaluationLoop
+        
+        loop = EvaluationLoop(
+            agent=self,
+            criteria=criteria,
+            threshold=threshold,
+            max_iterations=max_iterations,
+            mode=mode,
+            on_iteration=on_iteration,
+            verbose=verbose,
+        )
+        return await loop.run_async(prompt)
     
     async def handoff_to_async(
         self,
@@ -3442,7 +3559,19 @@ Your Goal: {self.goal}"""
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
             
-            # Add chat history
+            # Inject session history if enabled (from persistent storage)
+            if self._history_enabled and self._session_store is not None:
+                try:
+                    session_history = self._session_store.get_chat_history(
+                        self._history_session_id,
+                        max_messages=self._history_limit
+                    )
+                    if session_history:
+                        messages.extend(session_history)
+                except Exception as e:
+                    logging.debug(f"Failed to load session history: {e}")
+            
+            # Add in-memory chat history (current conversation)
             if self.chat_history:
                 messages.extend(self.chat_history)
             

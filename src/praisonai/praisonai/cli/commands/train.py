@@ -314,9 +314,22 @@ def train_list(
 @app.command("show")
 def train_show(
     session_id: str = typer.Argument(..., help="Session ID to show"),
+    iterations_flag: bool = typer.Option(False, "--iterations", "-i", help="Show detailed iteration info"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
-    """Show details of a training session."""
+    """
+    Show details of a training session.
+    
+    Examples:
+        # Show session summary
+        praisonai train show train-abc123
+        
+        # Show with detailed iterations
+        praisonai train show train-abc123 --iterations
+        
+        # Output as JSON
+        praisonai train show train-abc123 --json
+    """
     from ..output.console import get_output_controller
     
     output = get_output_controller()
@@ -346,11 +359,174 @@ def train_show(
     
     if report:
         report.print_summary()
+        
+        # Show best iteration
+        best = report.get_best_iteration()
+        if best:
+            output.print(f"\n✨ Best Iteration: #{best.iteration_num} (Score: {best.score}/10)")
     
     if iterations:
         output.print("\nIterations:")
+        
+        # Find best score for highlighting
+        best_score = max(it.score for it in iterations) if iterations else 0
+        
         for it in iterations:
-            output.print(f"  [{it.iteration_num}] Score: {it.score}/10 - {it.feedback[:50]}...")
+            # Highlight best iteration
+            marker = "★" if it.score == best_score else " "
+            feedback_preview = it.feedback[:50] + "..." if len(it.feedback) > 50 else it.feedback
+            output.print(f"  {marker} [{it.iteration_num}] Score: {it.score}/10 - {feedback_preview}")
+            
+            # Show suggestions if --iterations flag
+            if iterations_flag and it.suggestions:
+                for suggestion in it.suggestions[:3]:  # Show top 3 suggestions
+                    output.print(f"      → {suggestion}")
+
+
+@app.command("apply")
+def train_apply(
+    session_id: str = typer.Argument(..., help="Training session ID to apply"),
+    agent_file: Optional[str] = typer.Option(
+        None,
+        "--agent", "-a",
+        help="Path to agent YAML file"
+    ),
+    iteration: Optional[int] = typer.Option(
+        None,
+        "--iteration", "-n",
+        help="Specific iteration number (default: best score)"
+    ),
+    run_prompt: Optional[str] = typer.Option(
+        None,
+        "--run", "-r",
+        help="Run agent with this prompt after applying training"
+    ),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """
+    Apply training to an agent.
+    
+    Loads training suggestions from a session and applies them to an agent
+    via hooks. By default, uses the iteration with the best score.
+    
+    Examples:
+        # Apply best iteration to default agent
+        praisonai train apply train-abc123
+        
+        # Apply specific iteration
+        praisonai train apply train-abc123 --iteration 2
+        
+        # Apply to agent from YAML file
+        praisonai train apply train-abc123 --agent my_agent.yaml
+        
+        # Apply and run immediately
+        praisonai train apply train-abc123 --run "Hello, how are you?"
+    """
+    from ..output.console import get_output_controller
+    
+    output = get_output_controller()
+    
+    try:
+        from praisonai.train.agents import apply_training, get_training_profile
+        from praisonai.train.agents.storage import TrainingStorage
+    except ImportError as e:
+        output.print_error(f"Training module not available: {e}")
+        raise typer.Exit(1)
+    
+    # Verify session exists
+    storage = TrainingStorage(session_id=session_id)
+    if not storage.storage_path.exists():
+        output.print_error(f"Session not found: {session_id}")
+        raise typer.Exit(1)
+    
+    # Get the training profile
+    profile = get_training_profile(
+        session_id=session_id,
+        iteration=iteration,
+        agent_name="agent",
+    )
+    
+    if profile is None:
+        output.print_error(f"Could not load training profile from session {session_id}")
+        raise typer.Exit(1)
+    
+    if json_output or output.is_json_mode:
+        output.print_json({
+            "session_id": session_id,
+            "iteration": profile.iteration_num,
+            "score": profile.quality_score,
+            "suggestions": profile.suggestions,
+            "summary": profile.summary,
+        })
+        if not run_prompt:
+            return
+    
+    # Show profile info
+    output.print_panel(
+        f"Session: {profile.session_id}\n"
+        f"Iteration: {profile.iteration_num}\n"
+        f"Score: {profile.quality_score}/10\n"
+        f"Suggestions: {len(profile.suggestions)}",
+        title="Training Profile"
+    )
+    
+    if profile.suggestions:
+        output.print("\nSuggestions:")
+        for i, suggestion in enumerate(profile.suggestions, 1):
+            output.print(f"  {i}. {suggestion}")
+    
+    # If run_prompt provided, create agent and run
+    if run_prompt:
+        # Create or load agent
+        agent = None
+        if agent_file:
+            agent = _load_agent_from_file(agent_file, output)
+            if agent is None:
+                raise typer.Exit(1)
+        else:
+            try:
+                from praisonaiagents import Agent
+                agent = Agent(
+                    instructions="You are a helpful assistant."
+                )
+            except ImportError:
+                output.print_error(
+                    "praisonaiagents not installed",
+                    remediation="pip install praisonaiagents"
+                )
+                raise typer.Exit(1)
+        
+        # Apply training
+        success = apply_training(agent, profile=profile)
+        if not success:
+            output.print_error("Failed to apply training to agent")
+            raise typer.Exit(1)
+        
+        output.print_success("Training applied successfully!")
+        output.print(f"\nRunning agent with prompt: {run_prompt}\n")
+        
+        # Run the agent
+        try:
+            if hasattr(agent, 'chat'):
+                response = agent.chat(run_prompt)
+            elif hasattr(agent, 'start'):
+                response = agent.start(run_prompt)
+            else:
+                output.print_error("Agent has no chat or start method")
+                raise typer.Exit(1)
+            
+            output.print_panel(str(response), title="Agent Response")
+        except Exception as e:
+            output.print_error(f"Agent execution failed: {e}")
+            raise typer.Exit(1)
+    else:
+        output.print_info(
+            "\nTo apply this training to an agent, use:\n"
+            f"  praisonai train apply {session_id} --run 'Your prompt here'\n"
+            "\nOr in Python:\n"
+            f"  from praisonai.train.agents import apply_training\n"
+            f"  apply_training(agent, session_id='{session_id}')"
+        )
 
 
 def _load_agent_from_file(file_path: str, output) -> Optional[object]:

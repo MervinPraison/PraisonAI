@@ -764,6 +764,14 @@ class OpenAIClient:
                             if rc:
                                 reasoning_content += rc
                                 live.update(display_fn(f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
+                                # Emit reasoning content as StreamEvent with is_reasoning=True
+                                if _emit:
+                                    stream_callback(StreamEvent(
+                                        type=StreamEventType.DELTA_TEXT,
+                                        timestamp=time.perf_counter(),
+                                        content=rc,
+                                        is_reasoning=True
+                                    ))
                 
                 # Clear the last generating display with a blank line
                 console.print()
@@ -978,6 +986,14 @@ class OpenAIClient:
                             if rc:
                                 reasoning_content += rc
                                 live.update(display_fn(f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
+                                # Emit reasoning content as StreamEvent with is_reasoning=True
+                                if _emit:
+                                    stream_callback(StreamEvent(
+                                        type=StreamEventType.DELTA_TEXT,
+                                        timestamp=time.perf_counter(),
+                                        content=rc,
+                                        is_reasoning=True
+                                    ))
                 
                 # Clear the last generating display with a blank line
                 console.print()
@@ -1543,6 +1559,8 @@ class OpenAIClient:
         reasoning_steps: bool = False,
         verbose: bool = True,
         max_iterations: int = 10,
+        stream_callback: Optional[Callable] = None,
+        emit_events: bool = False,
         **kwargs
     ):
         """
@@ -1560,6 +1578,8 @@ class OpenAIClient:
             reasoning_steps: Whether to show reasoning
             verbose: Whether to show verbose output
             max_iterations: Maximum tool calling iterations
+            stream_callback: Optional callback for StreamEvent emission
+            emit_events: Whether to emit StreamEvents via callback
             **kwargs: Additional API parameters
             
         Yields:
@@ -1568,8 +1588,19 @@ class OpenAIClient:
         # Format tools for OpenAI API
         formatted_tools = self.format_tools(tools)
         
+        # Setup StreamEvent emission if enabled
+        _emit = emit_events and stream_callback is not None
+        if _emit:
+            from ..streaming.events import StreamEvent, StreamEventType
+            stream_callback(StreamEvent(
+                type=StreamEventType.REQUEST_START,
+                timestamp=time.perf_counter(),
+                metadata={"model": model, "provider": "openai"}
+            ))
+        
         # Continue tool execution loop until no more tool calls are needed
         iteration_count = 0
+        _first_token_emitted = False
         
         while iteration_count < max_iterations:
             try:
@@ -1594,6 +1625,20 @@ class OpenAIClient:
                         content = chunk.choices[0].delta.content
                         full_response_text += content
                         yield content
+                        # Emit StreamEvent for text delta
+                        if _emit:
+                            if not _first_token_emitted:
+                                stream_callback(StreamEvent(
+                                    type=StreamEventType.FIRST_TOKEN,
+                                    timestamp=time.perf_counter()
+                                ))
+                                _first_token_emitted = True
+                            stream_callback(StreamEvent(
+                                type=StreamEventType.DELTA_TEXT,
+                                timestamp=time.perf_counter(),
+                                content=content,
+                                is_reasoning=False
+                            ))
                     
                     # Handle reasoning content if enabled
                     if reasoning_steps and chunk.choices and hasattr(chunk.choices[0].delta, "reasoning_content"):
@@ -1601,6 +1646,14 @@ class OpenAIClient:
                         if rc:
                             reasoning_content += rc
                             yield f"[Reasoning: {rc}]"
+                            # Emit StreamEvent for reasoning content
+                            if _emit:
+                                stream_callback(StreamEvent(
+                                    type=StreamEventType.DELTA_TEXT,
+                                    timestamp=time.perf_counter(),
+                                    content=rc,
+                                    is_reasoning=True
+                                ))
                 
                 # Process the complete response to check for tool calls
                 final_response = process_stream_chunks(chunks)

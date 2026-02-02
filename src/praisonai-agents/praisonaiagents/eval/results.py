@@ -547,3 +547,189 @@ class CriteriaResult:
             print(f"  Average Score: {self.avg_score:.2f}")
             print(f"  Pass Rate: {self.pass_rate:.1%}")
             print(f"  Status: {'PASSED' if self.passed else 'FAILED'}")
+
+
+@dataclass
+class IterationResult:
+    """
+    Result from a single iteration of an evaluation loop.
+    
+    Attributes:
+        iteration: The iteration number (1-indexed)
+        output: The agent's output for this iteration
+        score: Quality score (1-10)
+        reasoning: Explanation for the score
+        findings: List of findings/suggestions from this iteration
+        timestamp: When this iteration completed
+        metadata: Additional metadata
+    """
+    iteration: int
+    output: str
+    score: float
+    reasoning: str
+    findings: List[str] = field(default_factory=list)
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    @property
+    def passed(self) -> bool:
+        """Check if this iteration passed (score >= 7.0)."""
+        return self.score >= 7.0
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert result to dictionary."""
+        return {
+            "iteration": self.iteration,
+            "output": self.output,
+            "score": self.score,
+            "reasoning": self.reasoning,
+            "findings": self.findings,
+            "timestamp": self.timestamp,
+            "passed": self.passed,
+            "metadata": self.metadata,
+        }
+
+
+@dataclass
+class EvaluationLoopResult:
+    """
+    Result from running an evaluation loop.
+    
+    Attributes:
+        iterations: List of IterationResult from each iteration
+        success: Whether the loop achieved the threshold
+        total_duration_seconds: Total time taken
+        threshold: The score threshold used
+        mode: The mode used ('optimize' or 'review')
+        metadata: Additional metadata
+    """
+    iterations: List[IterationResult] = field(default_factory=list)
+    success: bool = False
+    total_duration_seconds: float = 0.0
+    threshold: float = 8.0
+    mode: str = "optimize"
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    @property
+    def final_score(self) -> float:
+        """Get the final iteration's score."""
+        if not self.iterations:
+            return 0.0
+        return self.iterations[-1].score
+    
+    @property
+    def score_history(self) -> List[float]:
+        """Get list of all scores across iterations."""
+        return [it.score for it in self.iterations]
+    
+    @property
+    def final_output(self) -> str:
+        """Get the final iteration's output."""
+        if not self.iterations:
+            return ""
+        return self.iterations[-1].output
+    
+    @property
+    def accumulated_findings(self) -> List[str]:
+        """Get all findings accumulated across iterations."""
+        findings = []
+        for it in self.iterations:
+            findings.extend(it.findings)
+        return findings
+    
+    @property
+    def num_iterations(self) -> int:
+        """Get the number of iterations completed."""
+        return len(self.iterations)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert result to dictionary."""
+        return {
+            "success": self.success,
+            "final_score": self.final_score,
+            "score_history": self.score_history,
+            "final_output": self.final_output,
+            "accumulated_findings": self.accumulated_findings,
+            "num_iterations": self.num_iterations,
+            "total_duration_seconds": self.total_duration_seconds,
+            "threshold": self.threshold,
+            "mode": self.mode,
+            "iterations": [it.to_dict() for it in self.iterations],
+            "metadata": self.metadata,
+        }
+    
+    def to_json(self) -> str:
+        """Convert result to JSON string."""
+        return json.dumps(self.to_dict(), indent=2)
+    
+    @property
+    def final_report(self) -> str:
+        """Generate a markdown report of the evaluation loop."""
+        lines = [
+            "# Evaluation Loop Report",
+            "",
+            f"**Status**: {'✅ Success' if self.success else '❌ Failed'}",
+            f"**Final Score**: {self.final_score:.1f}/10",
+            f"**Threshold**: {self.threshold}/10",
+            f"**Iterations**: {self.num_iterations}",
+            f"**Duration**: {self.total_duration_seconds:.2f}s",
+            f"**Mode**: {self.mode}",
+            "",
+            "## Score History",
+            "",
+        ]
+        
+        for i, score in enumerate(self.score_history, 1):
+            status = "✅" if score >= self.threshold else "⬜"
+            lines.append(f"- Iteration {i}: {score:.1f}/10 {status}")
+        
+        lines.append("")
+        lines.append("## Iteration Details")
+        lines.append("")
+        
+        for it in self.iterations:
+            lines.append(f"### Iteration {it.iteration}")
+            lines.append(f"**Score**: {it.score:.1f}/10")
+            lines.append(f"**Reasoning**: {it.reasoning}")
+            if it.findings:
+                lines.append("**Findings**:")
+                for f in it.findings:
+                    lines.append(f"  - {f}")
+            lines.append("")
+        
+        if self.accumulated_findings:
+            lines.append("## All Findings")
+            lines.append("")
+            for f in self.accumulated_findings:
+                lines.append(f"- {f}")
+        
+        return "\n".join(lines)
+    
+    def print_summary(self) -> None:
+        """Print a summary of the evaluation loop results."""
+        try:
+            from rich.console import Console
+            from rich.table import Table
+            
+            console = Console()
+            
+            table = Table(title="Evaluation Loop Summary")
+            table.add_column("Metric", style="cyan")
+            table.add_column("Value", style="green" if self.success else "red")
+            
+            table.add_row("Status", "✅ SUCCESS" if self.success else "❌ FAILED")
+            table.add_row("Final Score", f"{self.final_score:.1f}/10")
+            table.add_row("Threshold", f"{self.threshold}/10")
+            table.add_row("Iterations", str(self.num_iterations))
+            table.add_row("Duration", f"{self.total_duration_seconds:.2f}s")
+            table.add_row("Mode", self.mode)
+            table.add_row("Score History", " → ".join(f"{s:.1f}" for s in self.score_history))
+            
+            console.print(table)
+        except ImportError:
+            print("Evaluation Loop Summary")
+            print(f"  Status: {'SUCCESS' if self.success else 'FAILED'}")
+            print(f"  Final Score: {self.final_score:.1f}/10")
+            print(f"  Threshold: {self.threshold}/10")
+            print(f"  Iterations: {self.num_iterations}")
+            print(f"  Duration: {self.total_duration_seconds:.2f}s")
