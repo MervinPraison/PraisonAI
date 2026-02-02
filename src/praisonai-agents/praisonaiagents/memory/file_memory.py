@@ -6,7 +6,7 @@ Provides short-term, long-term, entity, and episodic memory
 without requiring any external packages.
 
 Storage Structure:
-    .praison/memory/{user_id}/
+    .praisonai/memory/{user_id}/
     ├── config.json           # Memory configuration
     ├── short_term.json       # Rolling buffer (recent context)
     ├── long_term.json        # Persistent facts/knowledge
@@ -129,7 +129,7 @@ class FileMemory:
         
         Args:
             user_id: Unique identifier for the user/session
-            base_path: Base directory for memory storage (default: .praison/memory)
+            base_path: Base directory for memory storage (default: .praisonai/memory)
             config: Configuration overrides
             verbose: Verbosity level (0=quiet, 1=info, 2+=debug)
         """
@@ -140,7 +140,7 @@ class FileMemory:
         if base_path:
             self.base_path = Path(base_path)
         else:
-            self.base_path = Path(".praison/memory")
+            self.base_path = Path(".praisonai/memory")
         
         self.user_path = self.base_path / user_id
         self.episodic_path = self.user_path / "episodic"

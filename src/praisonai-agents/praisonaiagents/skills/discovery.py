@@ -5,14 +5,16 @@ from typing import List, Optional
 
 from .parser import find_skill_md, read_properties
 from .models import SkillProperties
+from ..paths import get_skills_dir, get_project_data_dir
 
 
 def get_default_skill_dirs() -> List[Path]:
     """Get default skill directory locations.
 
+    Uses centralized paths.py for consistent path management.
     Returns directories in precedence order (high to low):
-    1. Project: ./.praison/skills/ or ./.claude/skills/
-    2. User: ~/.praison/skills/
+    1. Project: ./.praisonai/skills/ or ./.claude/skills/
+    2. User: ~/.praisonai/skills/
     3. System: /etc/praison/skills/ (admin-managed)
 
     Returns:
@@ -21,19 +23,21 @@ def get_default_skill_dirs() -> List[Path]:
     dirs = []
     cwd = Path.cwd()
 
-    # Project-level directories
-    project_dirs = [
-        cwd / ".praison" / "skills",
-        cwd / ".claude" / "skills",
-    ]
-    for d in project_dirs:
-        if d.exists() and d.is_dir():
-            dirs.append(d)
+    # Project-level directories (use centralized path)
+    project_data_dir = get_project_data_dir()
+    project_skills = project_data_dir / "skills"
+    if project_skills.exists() and project_skills.is_dir():
+        dirs.append(project_skills)
+    
+    # Also check .claude/skills for compatibility
+    claude_skills = cwd / ".claude" / "skills"
+    if claude_skills.exists() and claude_skills.is_dir():
+        dirs.append(claude_skills)
 
-    # User-level directory
-    user_dir = Path.home() / ".praison" / "skills"
-    if user_dir.exists() and user_dir.is_dir():
-        dirs.append(user_dir)
+    # User-level directory (use centralized path)
+    user_skills = get_skills_dir()
+    if user_skills.exists() and user_skills.is_dir():
+        dirs.append(user_skills)
 
     # System-level directory (Unix-like systems)
     system_dir = Path("/etc/praison/skills")

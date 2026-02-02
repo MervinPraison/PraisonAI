@@ -213,7 +213,7 @@ class DefaultSessionStore:
         Initialize session store.
         
         Args:
-            session_dir: Directory for session files. Defaults to ~/.praison/sessions/
+            session_dir: Directory for session files. Defaults to ~/.praisonai/sessions/
             max_messages: Maximum messages to keep per session.
             lock_timeout: Timeout for file lock acquisition.
         """

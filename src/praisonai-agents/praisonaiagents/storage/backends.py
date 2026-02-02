@@ -167,7 +167,7 @@ class SQLiteBackend:
     
     Example:
         ```python
-        backend = SQLiteBackend(db_path="~/.praison/data.db")
+        backend = SQLiteBackend(db_path="~/.praisonai/data.db")
         backend.save("session_123", {"messages": []})
         data = backend.load("session_123")
         ```
@@ -175,7 +175,7 @@ class SQLiteBackend:
     
     def __init__(
         self,
-        db_path: str = "~/.praison/storage.db",
+        db_path: str = "~/.praisonai/storage.db",
         table_name: str = "praison_storage",
         auto_create: bool = True,
     ):
@@ -473,10 +473,10 @@ def get_backend(
     Example:
         ```python
         # File backend (default)
-        backend = get_backend("file", storage_dir="~/.praison/data")
+        backend = get_backend("file", storage_dir="~/.praisonai/data")
         
         # SQLite backend
-        backend = get_backend("sqlite", db_path="~/.praison/data.db")
+        backend = get_backend("sqlite", db_path="~/.praisonai/data.db")
         
         # Redis backend
         backend = get_backend("redis", url="redis://localhost:6379")

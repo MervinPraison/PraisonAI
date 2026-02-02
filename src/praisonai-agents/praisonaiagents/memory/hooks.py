@@ -6,12 +6,12 @@ allowing custom actions before/after agent operations.
 
 Features:
 - Pre/post hooks for read, write, command, prompt operations
-- JSON configuration (.praison/hooks.json)
+- JSON configuration (.praisonai/hooks.json)
 - Script execution with timeout
 - Exit code handling
 - Lazy loading for performance
 
-Configuration (.praison/hooks.json):
+Configuration (.praisonai/hooks.json):
     {
         "hooks": {
             "pre_write_code": "./scripts/lint.sh",
@@ -85,7 +85,7 @@ class HooksManager:
     """
     Manages hook discovery, loading, and execution.
     
-    Hooks are configured in .praison/hooks.json and can execute
+    Hooks are configured in .praisonai/hooks.json and can execute
     scripts before/after agent operations.
     
     Example:
@@ -103,7 +103,7 @@ class HooksManager:
         ```
     """
     
-    CONFIG_FILE = ".praison/hooks.json"
+    CONFIG_FILE = ".praisonai/hooks.json"
     
     def __init__(
         self,
@@ -384,7 +384,7 @@ class HooksManager:
             timeout: Global timeout in seconds
             enabled: Whether hooks are enabled
         """
-        config_dir = self.workspace_path / ".praison"
+        config_dir = self.workspace_path / ".praisonai"
         config_dir.mkdir(parents=True, exist_ok=True)
         
         config = {

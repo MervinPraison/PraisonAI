@@ -6,14 +6,14 @@ allowing users to define and execute complex task sequences.
 
 Features:
 - YAML/Markdown workflow definitions
-- Auto-discovery from .praison/workflows/
+- Auto-discovery from .praisonai/workflows/
 - Step-by-step execution with context passing
 - Variable substitution
 - Conditional steps
 - Lazy loading for performance
 
 Storage Structure:
-    .praison/workflows/
+    .praisonai/workflows/
     ├── deploy.md           # Deployment workflow
     ├── test.md             # Testing workflow
     └── review.md           # Code review workflow
@@ -731,7 +731,7 @@ class WorkflowManager:
     Workflows are defined in markdown files with YAML frontmatter
     and step definitions.
     
-    Example workflow file (.praison/workflows/deploy.md):
+    Example workflow file (.praisonai/workflows/deploy.md):
         ```markdown
         ---
         name: Deploy to Production
@@ -782,7 +782,7 @@ class WorkflowManager:
         ```
     """
     
-    WORKFLOWS_DIR = ".praison/workflows"
+    WORKFLOWS_DIR = ".praisonai/workflows"
     SUPPORTED_EXTENSIONS = [".md", ".yaml", ".yml"]
     
     def __init__(
@@ -1857,7 +1857,7 @@ class WorkflowManager:
     
     def _get_checkpoints_dir(self) -> Path:
         """Get the checkpoints directory path."""
-        checkpoints_dir = self.workspace_path / ".praison" / "checkpoints"
+        checkpoints_dir = self.workspace_path / ".praisonai" / "checkpoints"
         checkpoints_dir.mkdir(parents=True, exist_ok=True)
         return checkpoints_dir
     

@@ -513,9 +513,9 @@ class AgentTeam:
                         "use_embedding": True,
                         "storage": {
                             "type": "sqlite",
-                            "path": "./.praison/memory.db"
+                            "path": "./.praisonai/memory.db"
                         },
-                        "rag_db_path": "./.praison/chroma_db"
+                        "rag_db_path": "./.praisonai/chroma_db"
                     }
                 if _embedder:
                     if isinstance(_embedder, dict):
@@ -2345,7 +2345,7 @@ Context:
                 context=context if context else None,
                 # Inherit from original task if available
                 memory=original_task.memory if original_task else None,
-                callback=original_task.callback if original_task else None,
+                on_task_complete=original_task.callback if original_task else None,
                 guardrails=original_task.guardrail if original_task else None,
                 max_retries=original_task.max_retries if original_task else 3,
                 output_json=original_task.output_json if original_task else None,

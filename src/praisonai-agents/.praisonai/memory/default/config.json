@@ -1,0 +1,9 @@
+{
+  "short_term_limit": 100,
+  "long_term_limit": 1000,
+  "episodic_retention_days": 30,
+  "enable_summarization": false,
+  "summarization_threshold": 50,
+  "importance_threshold": 0.7,
+  "auto_promote": true
+}

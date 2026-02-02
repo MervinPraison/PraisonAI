@@ -226,15 +226,15 @@ class Memory:
         self.embedding_dimensions = self._get_embedding_dimensions(self.embedding_model)
         self._log_verbose(f"Using embedding dimensions: {self.embedding_dimensions}")
 
-        # Create .praison directory if it doesn't exist
-        os.makedirs(".praison", exist_ok=True)
+        # Create .praisonai directory if it doesn't exist
+        os.makedirs(".praisonai", exist_ok=True)
 
         # Short-term DB
-        self.short_db = self.cfg.get("short_db", ".praison/short_term.db")
+        self.short_db = self.cfg.get("short_db", ".praisonai/short_term.db")
         self._init_stm()
 
         # Long-term DB
-        self.long_db = self.cfg.get("long_db", ".praison/long_term.db")
+        self.long_db = self.cfg.get("long_db", ".praisonai/long_term.db")
         self._init_ltm()
 
         # Conditionally init Mem0, MongoDB, or local RAG

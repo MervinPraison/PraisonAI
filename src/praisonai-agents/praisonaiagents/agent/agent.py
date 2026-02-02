@@ -2621,8 +2621,8 @@ Summary:"""
         Initialize RulesManager for persistent rules/instructions.
         
         Automatically discovers rules from:
-        - ~/.praison/rules/ (global)
-        - .praison/rules/ (workspace)
+        - ~/.praisonai/rules/ (global)
+        - .praisonai/rules/ (workspace)
         - Subdirectory rules
         
         NOTE: This is called lazily via the rules_manager property for performance.

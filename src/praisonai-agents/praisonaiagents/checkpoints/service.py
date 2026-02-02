@@ -51,7 +51,7 @@ class CheckpointService:
     Example:
         service = CheckpointService(
             workspace_dir="/path/to/project",
-            storage_dir="~/.praison/checkpoints"
+            storage_dir="~/.praisonai/checkpoints"
         )
         
         await service.initialize()

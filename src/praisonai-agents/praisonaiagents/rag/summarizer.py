@@ -99,7 +99,7 @@ class HierarchicalSummarizer:
     def __init__(
         self,
         llm=None,
-        persist_path: str = ".praison/summaries",
+        persist_path: str = ".praisonai/summaries",
         verbose: bool = False,
     ):
         """

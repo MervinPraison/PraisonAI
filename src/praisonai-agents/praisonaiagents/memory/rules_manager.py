@@ -18,7 +18,7 @@ Features:
 - Symlink support for shared rules
 
 Storage Structure:
-    .praison/rules/
+    .praisonai/rules/
     ├── global.md           # Always applied (global)
     ├── python.md           # Glob: **/*.py
     ├── testing.md          # Glob: **/*.test.*
@@ -99,9 +99,9 @@ class RulesManager:
     Manages rules/instructions for AI agents.
     
     Supports multiple rule sources:
-    - Global rules (~/.praison/rules/)
-    - Workspace rules (.praison/rules/)
-    - Subdirectory rules (subdir/.praison/rules/)
+    - Global rules (~/.praisonai/rules/)
+    - Workspace rules (.praisonai/rules/)
+    - Subdirectory rules (subdir/.praisonai/rules/)
     - Root instruction files (CLAUDE.md, AGENTS.md, GEMINI.md, .cursorrules, .windsurfrules)
     
     Example:
@@ -122,7 +122,7 @@ class RulesManager:
         ```
     """
     
-    RULES_DIR_NAME = ".praison/rules"
+    RULES_DIR_NAME = ".praisonai/rules"
     SUPPORTED_EXTENSIONS = [".md", ".mdc", ".txt"]
     
     # Root-level instruction files (like Claude, Codex, Gemini, Cursor, Windsurf)
@@ -161,11 +161,11 @@ class RulesManager:
         
         Args:
             workspace_path: Path to workspace/project root
-            global_rules_path: Path to global rules (default: ~/.praison/rules)
+            global_rules_path: Path to global rules (default: ~/.praisonai/rules)
             verbose: Verbosity level
         """
         self.workspace_path = Path(workspace_path) if workspace_path else Path.cwd()
-        self.global_rules_path = Path(global_rules_path) if global_rules_path else Path.home() / ".praison" / "rules"
+        self.global_rules_path = Path(global_rules_path) if global_rules_path else Path.home() / ".praisonai" / "rules"
         self.verbose = verbose
         
         self._rules: Dict[str, Rule] = {}
@@ -457,7 +457,7 @@ class RulesManager:
             if rule:
                 self._rules[f"root:{rule.name}"] = rule
         
-        # 4. Load workspace rules from .praison/rules/
+        # 4. Load workspace rules from .praisonai/rules/
         workspace_rules_dir = self.workspace_path / self.RULES_DIR_NAME.replace("/", os.sep)
         workspace_rules = self._discover_rules_in_dir(workspace_rules_dir)
         for rule in workspace_rules:
@@ -485,7 +485,7 @@ class RulesManager:
         stop_at = git_root if git_root else self.workspace_path
         current = Path.cwd()
         while current != stop_at and current != current.parent:
-            # Check .praison/rules/
+            # Check .praisonai/rules/
             subdir_rules_dir = current / self.RULES_DIR_NAME.replace("/", os.sep)
             subdir_rules = self._discover_rules_in_dir(subdir_rules_dir)
             for rule in subdir_rules:

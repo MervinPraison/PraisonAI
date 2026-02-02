@@ -234,6 +234,56 @@ def get_mcp_auth_path() -> Path:
     return get_data_dir() / "mcp-auth.json"
 
 
+def get_memory_dir() -> Path:
+    """
+    Get memory directory for short/long term databases.
+    
+    Returns:
+        Path to ~/.praisonai/memory/
+    """
+    return get_data_dir() / "memory"
+
+
+def get_workflows_dir() -> Path:
+    """
+    Get workflows directory.
+    
+    Returns:
+        Path to ~/.praisonai/workflows/
+    """
+    return get_data_dir() / "workflows"
+
+
+def get_summaries_dir() -> Path:
+    """
+    Get summaries directory for RAG.
+    
+    Returns:
+        Path to ~/.praisonai/summaries/
+    """
+    return get_data_dir() / "summaries"
+
+
+def get_prp_dir() -> Path:
+    """
+    Get PRP (Prompt Response Pair) output directory.
+    
+    Returns:
+        Path to ~/.praisonai/prp/
+    """
+    return get_data_dir() / "prp"
+
+
+def get_runs_dir() -> Path:
+    """
+    Get runs directory for artifacts.
+    
+    Returns:
+        Path to ~/.praisonai/runs/
+    """
+    return get_data_dir() / "runs"
+
+
 def get_project_data_dir(project_path: Optional[Union[str, Path]] = None) -> Path:
     """
     Get project-level data directory.
@@ -307,4 +357,9 @@ def get_all_paths() -> Dict[str, Path]:
         "learn": get_learn_dir(),
         "cache": get_cache_dir(),
         "mcp_auth": get_mcp_auth_path(),
+        "memory": get_memory_dir(),
+        "workflows": get_workflows_dir(),
+        "summaries": get_summaries_dir(),
+        "prp": get_prp_dir(),
+        "runs": get_runs_dir(),
     }

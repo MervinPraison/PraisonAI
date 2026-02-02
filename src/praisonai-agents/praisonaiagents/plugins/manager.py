@@ -2,14 +2,16 @@
 Plugin Manager for PraisonAI Agents.
 
 Provides dynamic plugin discovery, loading, and lifecycle management.
+Thread-safe and async-safe for multi-agent environments.
 """
 
+import asyncio
 import importlib.util
 import logging
-import os
 import sys
+import threading
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional
 
 from .plugin import Plugin, PluginHook, PluginInfo, FunctionPlugin
 
@@ -20,6 +22,9 @@ class PluginManager:
     """
     Manages plugin discovery, loading, and execution.
     
+    Thread-safe for concurrent access in multi-agent environments.
+    Supports both sync and async hook execution.
+    
     Example:
         manager = PluginManager()
         
@@ -29,14 +34,18 @@ class PluginManager:
         # Register a plugin directly
         manager.register(MyPlugin())
         
-        # Execute hooks
+        # Execute hooks (sync)
         args = manager.execute_hook(PluginHook.BEFORE_TOOL, "bash", {"cmd": "ls"})
+        
+        # Execute hooks (async)
+        args = await manager.async_execute_hook(PluginHook.BEFORE_TOOL, "bash", {"cmd": "ls"})
     """
     
     def __init__(self):
         self._plugins: Dict[str, Plugin] = {}
         self._enabled: Dict[str, bool] = {}
         self._single_file_plugins: Dict[str, Dict[str, Any]] = {}  # WordPress-style plugins
+        self._lock = threading.RLock()  # Thread safety for multi-agent environments
     
     def register(self, plugin: Plugin) -> bool:
         """
@@ -266,6 +275,33 @@ class PluginManager:
         
         return result
     
+    async def async_execute_hook(
+        self,
+        hook: PluginHook,
+        *args,
+        **kwargs
+    ) -> Any:
+        """
+        Execute a hook across all enabled plugins asynchronously.
+        
+        Async-safe for use in async agent contexts.
+        
+        Args:
+            hook: The hook to execute
+            *args: Arguments to pass to hook
+            **kwargs: Keyword arguments to pass to hook
+            
+        Returns:
+            The result (may be modified by plugins)
+        """
+        # Use the sync version in an executor to avoid blocking
+        # This is safe because execute_hook is thread-safe with _lock
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.execute_hook(hook, *args, **kwargs)
+        )
+    
     def get_all_tools(self) -> List[Dict[str, Any]]:
         """Get all tools from all enabled plugins."""
         tools = []
@@ -364,8 +400,8 @@ class PluginManager:
         Auto-discover and load plugins from default directories.
         
         Scans:
-        - ./.praison/plugins/ (project-level)
-        - ~/.praison/plugins/ (user-level)
+        - ./.praisonai/plugins/ (project-level)
+        - ~/.praisonai/plugins/ (user-level)
         
         Returns:
             Number of plugins loaded

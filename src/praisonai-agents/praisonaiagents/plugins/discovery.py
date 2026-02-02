@@ -5,8 +5,8 @@ Discovers and loads plugins from directories.
 Plugins are simple Python files with WordPress-style docstring headers.
 
 Default plugin directories (in precedence order):
-1. Project: ./.praison/plugins/
-2. User: ~/.praison/plugins/
+1. Project: ./.praisonai/plugins/
+2. User: ~/.praisonai/plugins/
 
 Usage:
     from praisonaiagents.plugins.discovery import discover_plugins, load_plugin
@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .parser import parse_plugin_header_from_file, PluginParseError
+from ..paths import get_plugins_dir, get_project_data_dir
 
 logger = logging.getLogger(__name__)
 
@@ -32,25 +33,26 @@ logger = logging.getLogger(__name__)
 def get_default_plugin_dirs() -> List[Path]:
     """Get default plugin directory locations.
     
+    Uses centralized paths.py for consistent path management.
     Returns directories in precedence order (high to low):
-    1. Project: ./.praison/plugins/
-    2. User: ~/.praison/plugins/
+    1. Project: ./.praisonai/plugins/
+    2. User: ~/.praisonai/plugins/
     
     Returns:
         List of existing plugin directories
     """
     dirs = []
-    cwd = Path.cwd()
     
-    # Project-level directory
-    project_dir = cwd / ".praison" / "plugins"
-    if project_dir.exists() and project_dir.is_dir():
-        dirs.append(project_dir)
+    # Project-level directory (use centralized path)
+    project_data_dir = get_project_data_dir()
+    project_plugins = project_data_dir / "plugins"
+    if project_plugins.exists() and project_plugins.is_dir():
+        dirs.append(project_plugins)
     
-    # User-level directory
-    user_dir = Path.home() / ".praison" / "plugins"
-    if user_dir.exists() and user_dir.is_dir():
-        dirs.append(user_dir)
+    # User-level directory (use centralized path)
+    user_plugins = get_plugins_dir()
+    if user_plugins.exists() and user_plugins.is_dir():
+        dirs.append(user_plugins)
     
     return dirs
 
@@ -253,12 +255,13 @@ def unload_plugin(module_name: str) -> bool:
 def ensure_plugin_dir() -> Path:
     """Ensure the user plugin directory exists.
     
-    Creates ~/.praison/plugins/ if it doesn't exist.
+    Creates ~/.praisonai/plugins/ if it doesn't exist.
+    Uses centralized paths.py for consistent path management.
     
     Returns:
         Path to the user plugin directory
     """
-    user_dir = Path.home() / ".praison" / "plugins"
+    user_dir = get_plugins_dir()
     user_dir.mkdir(parents=True, exist_ok=True)
     return user_dir
 

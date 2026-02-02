@@ -749,7 +749,7 @@ class SkillsConfig:
         # With config
         Agent(skills=SkillsConfig(
             paths=["./my-skill"],
-            dirs=["~/.praison/skills/"],
+            dirs=["~/.praisonai/skills/"],
             auto_discover=True,
         ))
     """

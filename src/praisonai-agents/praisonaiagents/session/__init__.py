@@ -22,7 +22,7 @@ Usage:
     )
     agent.start("What did I say before?")  # Remembers!
 
-Default storage: ~/.praison/sessions/{session_id}.json
+Default storage: ~/.praisonai/sessions/{session_id}.json
 """
 
 from typing import TYPE_CHECKING

@@ -11,7 +11,15 @@ from typing import Optional, Dict, Any, List, Callable, Union, Literal
 
 
 class HookEvent(str, Enum):
-    """Event names for the hook system."""
+    """Event names for the hook system.
+    
+    This enum is also aliased as PluginHook for backward compatibility.
+    All plugin lifecycle events are included here for DRY compliance.
+    """
+    # Plugin/System lifecycle
+    ON_INIT = "on_init"
+    ON_SHUTDOWN = "on_shutdown"
+    
     # Tool lifecycle
     BEFORE_TOOL = "before_tool"
     AFTER_TOOL = "after_tool"
@@ -33,6 +41,8 @@ class HookEvent(str, Enum):
     ON_RETRY = "on_retry"
     
     # Message lifecycle (for bot/channel integrations)
+    BEFORE_MESSAGE = "before_message"
+    AFTER_MESSAGE = "after_message"
     MESSAGE_RECEIVED = "message_received"
     MESSAGE_SENDING = "message_sending"
     MESSAGE_SENT = "message_sent"
@@ -47,6 +57,11 @@ class HookEvent(str, Enum):
     
     # Tool result persistence (for modifying tool results before storage)
     TOOL_RESULT_PERSIST = "tool_result_persist"
+    
+    # Permission/Config/Auth hooks
+    ON_PERMISSION_ASK = "on_permission_ask"
+    ON_CONFIG = "on_config"
+    ON_AUTH = "on_auth"
     
     # Claude Code parity events
     USER_PROMPT_SUBMIT = "user_prompt_submit"  # When user submits a prompt
