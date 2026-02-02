@@ -220,10 +220,11 @@ class LearnManager:
         """
         Generate context suitable for injection into system prompt.
         
-        Returns a formatted string with relevant learnings.
+        Returns a formatted string with relevant learnings from all enabled stores.
         """
         parts = []
         
+        # 1. Persona - User preferences and profile
         if "persona" in self._stores:
             personas = self.get_persona_context(limit=5)
             if personas:
@@ -231,11 +232,46 @@ class LearnManager:
                 for p in personas:
                     parts.append(f"- {p}")
         
+        # 2. Insights - Observations and learnings
         if "insights" in self._stores:
             insights = self.get_insights_context(limit=5)
             if insights:
                 parts.append("\nLearned Insights:")
                 for i in insights:
                     parts.append(f"- {i}")
+        
+        # 3. Patterns - Reusable knowledge patterns
+        if "patterns" in self._stores:
+            entries = self._stores["patterns"].list_all(limit=3)
+            if entries:
+                parts.append("\nKnown Patterns:")
+                for e in entries:
+                    parts.append(f"- {e.content}")
+        
+        # 4. Decisions - Past decision records (for consistency)
+        if "decisions" in self._stores:
+            entries = self._stores["decisions"].list_all(limit=3)
+            if entries:
+                parts.append("\nPast Decisions:")
+                for e in entries:
+                    parts.append(f"- {e.content}")
+        
+        # 5. Feedback - User feedback signals
+        if "feedback" in self._stores:
+            entries = self._stores["feedback"].list_all(limit=3)
+            if entries:
+                parts.append("\nUser Feedback:")
+                for e in entries:
+                    parts.append(f"- {e.content}")
+        
+        # 6. Improvements - Self-improvement proposals
+        if "improvements" in self._stores:
+            entries = self._stores["improvements"].list_all(limit=3)
+            if entries:
+                parts.append("\nImprovement Areas:")
+                for e in entries:
+                    parts.append(f"- {e.content}")
+        
+        # Note: threads are session-specific and not included in system prompt
         
         return "\n".join(parts) if parts else ""
