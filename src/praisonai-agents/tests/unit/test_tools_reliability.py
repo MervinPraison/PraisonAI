@@ -4,9 +4,15 @@ TDD tests for:
 1. list_processes NoneType bug fix
 2. internet_search retry logic
 3. search_web reliability
+
+NOTE: These tests require psutil to be installed.
 """
 
+import pytest
 from unittest.mock import patch, MagicMock
+
+# Skip entire module if psutil is not installed
+pytest.importorskip("psutil", reason="psutil package not installed")
 
 
 class TestListProcessesReliability:

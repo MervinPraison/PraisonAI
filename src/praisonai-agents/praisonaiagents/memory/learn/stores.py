@@ -88,9 +88,10 @@ class BaseStore(ABC):
         pass
     
     def _default_path(self) -> str:
-        """Default storage path."""
-        base = Path.home() / ".praison" / "learn" / self.scope / self.user_id
-        base.mkdir(parents=True, exist_ok=True)
+        """Default storage path (uses centralized paths - DRY)."""
+        from ...paths import get_learn_dir, ensure_dir
+        base = get_learn_dir() / self.scope / self.user_id
+        ensure_dir(base)
         return str(base / f"{self.store_name}.json")
     
     def _load(self) -> None:

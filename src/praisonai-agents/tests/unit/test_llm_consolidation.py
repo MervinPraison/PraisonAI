@@ -45,16 +45,17 @@ class TestLLMConsolidation:
         
         assert agent1.llm == agent2.llm
     
-    def test_llm_takes_precedence_over_model(self):
-        """If both llm= and model= are provided, llm= takes precedence."""
+    def test_model_takes_precedence_over_llm(self):
+        """If both llm= and model= are provided, model= takes precedence (new canonical name)."""
         from praisonaiagents import Agent
         
+        # model= is the new canonical name, so it takes precedence over llm=
         agent = Agent(
             instructions="Test",
             llm="gpt-4o",
-            model="gpt-3.5-turbo"  # Should be ignored
+            model="gpt-3.5-turbo"  # model= takes precedence (new canonical name)
         )
-        assert agent.llm == "gpt-4o"
+        assert agent.llm == "gpt-3.5-turbo"
     
     def test_llm_config_removed_in_v4(self):
         """llm_config= is removed in v4 - should raise TypeError."""

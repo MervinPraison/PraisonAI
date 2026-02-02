@@ -86,7 +86,8 @@ class RateLimiter:
         else:
             self._tokens = float('inf')
         self._last_update = time.monotonic()
-        self._lock = asyncio.Lock()
+        # Lazily create asyncio.Lock() to avoid Python 3.9 event loop issues
+        self._lock = None
 
         # Token-based limiting
         if self.tokens_per_minute is not None:
@@ -95,7 +96,8 @@ class RateLimiter:
         else:
             self._api_tokens = float('inf')
         self._api_tokens_last_update = time.monotonic()
-        self._api_tokens_lock = asyncio.Lock()
+        # Lazily create asyncio.Lock() to avoid Python 3.9 event loop issues
+        self._api_tokens_lock = None
 
         # Default implementations (can be overridden for testing)
         if self._get_time is None:
@@ -104,6 +106,18 @@ class RateLimiter:
             self._sleep = time.sleep
         if self._async_sleep is None:
             self._async_sleep = asyncio.sleep
+
+    def _get_lock(self) -> asyncio.Lock:
+        """Get or create the request lock lazily (Python 3.9 compatible)."""
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
+
+    def _get_api_tokens_lock(self) -> asyncio.Lock:
+        """Get or create the API tokens lock lazily (Python 3.9 compatible)."""
+        if self._api_tokens_lock is None:
+            self._api_tokens_lock = asyncio.Lock()
+        return self._api_tokens_lock
 
     @property
     def _rate(self) -> float:
@@ -203,7 +217,7 @@ class RateLimiter:
         if self.requests_per_minute is None:
             return
 
-        async with self._lock:
+        async with self._get_lock():
             self._refill()
 
             wait = self._wait_time()
@@ -228,7 +242,7 @@ class RateLimiter:
         if self.tokens_per_minute is None:
             return
 
-        async with self._api_tokens_lock:
+        async with self._get_api_tokens_lock():
             self._refill_api_tokens()
 
             wait = self._wait_time_for_tokens(num_tokens)

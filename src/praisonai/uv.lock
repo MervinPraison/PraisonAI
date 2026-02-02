@@ -3977,6 +3977,12 @@ dev = [
 gradio = [
     { name = "gradio" },
 ]
+os = [
+    { name = "fastapi" },
+    { name = "pyjwt" },
+    { name = "sse-starlette" },
+    { name = "uvicorn" },
+]
 realtime = [
     { name = "aiosqlite" },
     { name = "chainlit" },
@@ -4026,6 +4032,7 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'all'", specifier = ">=0.115.0" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115.0" },
     { name = "fastapi", marker = "extra == 'call'", specifier = ">=0.95.0" },
+    { name = "fastapi", marker = "extra == 'os'", specifier = ">=0.115.0" },
     { name = "flaml", extras = ["automl"], marker = "extra == 'call'", specifier = ">=2.3.1" },
     { name = "flask", marker = "extra == 'all'", specifier = ">=3.0.0" },
     { name = "flask", marker = "extra == 'api'", specifier = ">=3.0.0" },
@@ -4047,8 +4054,9 @@ requires-dist = [
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen-v4'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.1.0" },
-    { name = "praisonaiagents", specifier = ">=1.2.4" },
+    { name = "praisonaiagents", specifier = ">=1.3.0" },
     { name = "pyautogen", marker = "extra == 'autogen'", specifier = "==0.2.29" },
+    { name = "pyjwt", marker = "extra == 'os'", specifier = ">=2.8.0" },
     { name = "pyngrok", marker = "extra == 'call'", specifier = ">=1.4.0" },
     { name = "pyparsing", specifier = ">=3.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
@@ -4067,6 +4075,7 @@ requires-dist = [
     { name = "sqlalchemy", marker = "extra == 'ui'", specifier = ">=2.0.36" },
     { name = "sse-starlette", marker = "extra == 'all'", specifier = ">=1.6.0" },
     { name = "sse-starlette", marker = "extra == 'api'", specifier = ">=1.6.0" },
+    { name = "sse-starlette", marker = "extra == 'os'", specifier = ">=1.6.0" },
     { name = "tavily-python", marker = "extra == 'all'", specifier = "==0.5.0" },
     { name = "tavily-python", marker = "extra == 'chat'", specifier = "==0.5.0" },
     { name = "tavily-python", marker = "extra == 'code'", specifier = "==0.5.0" },
@@ -4078,13 +4087,14 @@ requires-dist = [
     { name = "uvicorn", marker = "extra == 'all'", specifier = ">=0.34.0" },
     { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.34.0" },
     { name = "uvicorn", marker = "extra == 'call'", specifier = ">=0.20.0" },
+    { name = "uvicorn", marker = "extra == 'os'", specifier = ">=0.34.0" },
     { name = "websockets", marker = "extra == 'all'", specifier = ">=12.0" },
     { name = "websockets", marker = "extra == 'call'", specifier = ">=12.0" },
     { name = "websockets", marker = "extra == 'realtime'", specifier = ">=12.0" },
     { name = "yfinance", marker = "extra == 'all'", specifier = ">=0.2.44" },
     { name = "yfinance", marker = "extra == 'realtime'", specifier = ">=0.2.44" },
 ]
-provides-extras = ["ui", "gradio", "api", "agentops", "chat", "code", "realtime", "call", "train", "crewai", "autogen", "autogen-v4", "acp", "lite", "all", "bot", "dev"]
+provides-extras = ["ui", "gradio", "api", "os", "agentops", "chat", "code", "realtime", "call", "train", "crewai", "autogen", "autogen-v4", "acp", "lite", "all", "bot", "dev"]
 
 [[package]]
 name = "praisonai-tools"
@@ -4100,7 +4110,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.2.4"
+version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -4109,9 +4119,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f4/59/1a78c3e96abdad3c6cffaf90e5ce2f2a0aaa61ef03a4d6cd3f7708225d33/praisonaiagents-1.2.4.tar.gz", hash = "sha256:5f9a673b28f66a54bde1b2f88497197265adbbf79edee2377f06e39425085ebd", size = 1163266, upload-time = "2026-02-01T06:24:14.499Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3b/32/01d10458a43e1a1bcef34fabdd21da110b865b50ec0ae8519bb7581231a1/praisonaiagents-1.3.0.tar.gz", hash = "sha256:c0f9d19da5996918ee5e04e5faedffbf434603b2779d7bc5c9fd3ae7b6f68a56", size = 1170867, upload-time = "2026-02-02T10:01:28.817Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a9/12/98ed5fdc0235377e2a602f5265073e8c7a53264bd5fa4ff5173cc4de19cf/praisonaiagents-1.2.4-py3-none-any.whl", hash = "sha256:56d912018941c201577bd63e312acf1f39543a51e06f42cf576588b1ccdf29de", size = 1156085, upload-time = "2026-02-01T06:24:12.167Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/fa/671163138e78d76af6f6e4c13f4ac3e6c422af250e917055761d85d91c53/praisonaiagents-1.3.0-py3-none-any.whl", hash = "sha256:86bfa0a24f3e69ea297fc8146291cddf1171a649e4dd83b7f8c52315701c0d91", size = 1164709, upload-time = "2026-02-02T10:01:21.644Z" },
 ]
 
 [[package]]

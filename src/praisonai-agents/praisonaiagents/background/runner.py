@@ -51,9 +51,16 @@ class BackgroundRunner:
         """
         self.config = config or BackgroundConfig()
         self._tasks: Dict[str, BackgroundTask] = {}
-        self._semaphore = asyncio.Semaphore(self.config.max_concurrent_tasks)
+        # Lazily create asyncio.Semaphore() to avoid Python 3.9 event loop issues
+        self._semaphore: Optional[asyncio.Semaphore] = None
         self._running = False
         self._cleanup_task: Optional[asyncio.Task] = None
+    
+    def _get_semaphore(self) -> asyncio.Semaphore:
+        """Get or create the semaphore lazily (Python 3.9 compatible)."""
+        if self._semaphore is None:
+            self._semaphore = asyncio.Semaphore(self.config.max_concurrent_tasks)
+        return self._semaphore
     
     @property
     def tasks(self) -> List[BackgroundTask]:
@@ -109,7 +116,7 @@ class BackgroundRunner:
         
         # Create the execution coroutine
         async def execute():
-            async with self._semaphore:
+            async with self._get_semaphore():
                 task.start()
                 logger.info(f"Background task started: {task.name} ({task.id})")
                 

@@ -2,18 +2,19 @@
 Tests for Gap Closure - LLM Consolidation + Parity
 
 TDD: These tests define the expected behavior for:
-1. GAP A: No deprecation warnings for model/llm alias
+1. GAP A: model= is preferred, llm= shows deprecation warning
 2. GAP B: YAML parser supports consolidated params
 3. GAP C: Wrapper agents use output= (not verbose/markdown)
 4. GAP D: AutoAgents uses consolidated llm= (not function_calling_llm)
-5. GAP E: model= and llm= are aliases with NO warnings
+5. GAP E: model= and llm= both work (backward compatible)
 """
+import os
 import pytest
 import warnings
 
 
 class TestNoDeprecationWarnings:
-    """GAP A + E: No deprecation warnings for model/llm or legacy params."""
+    """GAP A + E: model= preferred (no warning), llm= deprecated (shows warning)."""
     
     def test_no_warning_for_model_alias(self):
         """model= should work without any deprecation warning."""
@@ -27,16 +28,18 @@ class TestNoDeprecationWarnings:
             deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
             assert len(deprecation_warnings) == 0, f"Unexpected warnings: {[str(x.message) for x in deprecation_warnings]}"
     
-    def test_no_warning_for_llm_param(self):
-        """llm= should work without any deprecation warning."""
+    def test_llm_param_shows_deprecation_warning(self):
+        """llm= should work but show deprecation warning (model= is preferred)."""
         from praisonaiagents import Agent
         
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             agent = Agent(instructions="Test", llm="gpt-4o-mini")
             
+            # llm= is deprecated in favor of model=
             deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
-            assert len(deprecation_warnings) == 0, f"Unexpected warnings: {[str(x.message) for x in deprecation_warnings]}"
+            assert len(deprecation_warnings) >= 1, "llm= should produce deprecation warning"
+            assert 'model' in str(deprecation_warnings[0].message).lower(), "Warning should suggest using 'model'"
     
     def test_llm_config_removed(self):
         """llm_config= is removed in v4 - should raise TypeError."""
@@ -82,6 +85,10 @@ class TestAutoAgentsConsolidation:
         assert "function_calling_llm=self.function_calling_llm" not in source, \
             "AutoAgents._create_agents_and_tasks still passes function_calling_llm= to Agent()"
     
+    @pytest.mark.skipif(
+        not os.environ.get("OPENAI_API_KEY"),
+        reason="OPENAI_API_KEY not set"
+    )
     def test_autoagents_accepts_llm_param(self):
         """AutoAgents should accept llm= parameter."""
         from praisonaiagents.agents.autoagents import AutoAgents

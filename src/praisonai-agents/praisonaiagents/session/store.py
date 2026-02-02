@@ -17,10 +17,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from ..paths import get_sessions_dir
+
 logger = logging.getLogger(__name__)
 
-# Default session directory
-DEFAULT_SESSION_DIR = os.path.expanduser("~/.praison/sessions")
+# Default session directory (uses centralized paths - DRY)
+DEFAULT_SESSION_DIR = str(get_sessions_dir())
 
 # Default limits
 DEFAULT_MAX_MESSAGES = 100

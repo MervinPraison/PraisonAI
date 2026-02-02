@@ -14,10 +14,12 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from ..paths import get_snapshots_dir
+
 logger = logging.getLogger(__name__)
 
-# Default snapshot directory
-DEFAULT_SNAPSHOT_DIR = os.path.expanduser("~/.praison/snapshots")
+# Default snapshot directory (uses centralized paths - DRY)
+DEFAULT_SNAPSHOT_DIR = str(get_snapshots_dir())
 
 
 @dataclass

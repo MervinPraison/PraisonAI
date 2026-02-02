@@ -3,10 +3,19 @@ Tests for Agent context trace emission.
 
 TDD tests to verify that Agent emits context events when a global emitter is set.
 These tests use mocking to avoid actual LLM calls.
+
+NOTE: These tests require OPENAI_API_KEY to be set for Agent initialization.
 """
 
+import os
 import pytest
 from unittest.mock import MagicMock, patch
+
+# Skip tests if OPENAI_API_KEY is not set
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("OPENAI_API_KEY"),
+    reason="OPENAI_API_KEY not set"
+)
 
 
 class TestAgentTraceEmission:

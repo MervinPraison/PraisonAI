@@ -19,7 +19,12 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..paths import get_storage_dir
+
 logger = logging.getLogger(__name__)
+
+# Default storage directory (uses centralized paths - DRY)
+DEFAULT_STORAGE_DIR = str(get_storage_dir())
 
 
 class FileBackend:
@@ -31,7 +36,7 @@ class FileBackend:
     
     Example:
         ```python
-        backend = FileBackend(storage_dir="~/.praison/data")
+        backend = FileBackend(storage_dir="~/.praisonai/storage")
         backend.save("session_123", {"messages": []})
         data = backend.load("session_123")
         ```
@@ -39,7 +44,7 @@ class FileBackend:
     
     def __init__(
         self,
-        storage_dir: str = "~/.praison/storage",
+        storage_dir: str = None,
         suffix: str = ".json",
         pretty: bool = True,
     ):
@@ -51,7 +56,7 @@ class FileBackend:
             suffix: File suffix (default: .json)
             pretty: Use pretty-printed JSON
         """
-        self.storage_dir = Path(os.path.expanduser(storage_dir))
+        self.storage_dir = Path(os.path.expanduser(storage_dir or DEFAULT_STORAGE_DIR))
         self.suffix = suffix
         self.pretty = pretty
         self._lock = threading.Lock()

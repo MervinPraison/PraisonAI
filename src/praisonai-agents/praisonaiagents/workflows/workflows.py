@@ -2696,6 +2696,9 @@ CONCISE SUMMARY:"""
     ) -> bool:
         """Evaluate a condition expression with variable substitution.
         
+        This method delegates to the shared evaluate_condition() function
+        from praisonaiagents.conditions for DRY condition handling.
+        
         Supported formats:
             - Numeric comparison: "{{var}} > 80", "{{var}} >= 50", "{{var}} < 10"
             - String equality: "{{var}} == approved", "{{var}} != rejected"
@@ -2711,115 +2714,8 @@ CONCISE SUMMARY:"""
         Returns:
             Boolean result of condition evaluation
         """
-        import re
-        
-        # Substitute variables in condition
-        substituted = condition
-        
-        # Handle nested property access like {{item.score}}
-        def get_nested_value(var_path: str, vars_dict: Dict[str, Any]) -> Any:
-            parts = var_path.split('.')
-            value = vars_dict
-            for part in parts:
-                if isinstance(value, dict):
-                    value = value.get(part)
-                else:
-                    return None
-            return value
-        
-        # Find all {{var}} patterns and substitute
-        pattern = r'\{\{([^}]+)\}\}'
-        matches = re.findall(pattern, condition)
-        
-        for var_name in matches:
-            if '.' in var_name:
-                # Nested property access
-                value = get_nested_value(var_name, variables)
-            else:
-                value = variables.get(var_name)
-            
-            if value is None:
-                value = ""
-            
-            # Replace the placeholder with the value
-            placeholder = f"{{{{{var_name}}}}}"
-            if isinstance(value, (int, float)):
-                substituted = substituted.replace(placeholder, str(value))
-            elif isinstance(value, bool):
-                substituted = substituted.replace(placeholder, str(value).lower())
-            else:
-                substituted = substituted.replace(placeholder, str(value))
-        
-        # Also substitute {{previous_output}}
-        if previous_output:
-            substituted = substituted.replace("{{previous_output}}", str(previous_output))
-        
-        # Now evaluate the substituted condition
-        try:
-            # Handle different condition formats
-            
-            # Numeric comparisons: "90 > 80", "50 >= 50", "10 < 20", etc.
-            numeric_pattern = r'^(-?\d+(?:\.\d+)?)\s*(>|>=|<|<=|==|!=)\s*(-?\d+(?:\.\d+)?)$'
-            numeric_match = re.match(numeric_pattern, substituted.strip())
-            if numeric_match:
-                left = float(numeric_match.group(1))
-                op = numeric_match.group(2)
-                right = float(numeric_match.group(3))
-                
-                if op == '>':
-                    return left > right
-                if op == '>=':
-                    return left >= right
-                if op == '<':
-                    return left < right
-                if op == '<=':
-                    return left <= right
-                if op == '==':
-                    return left == right
-                if op == '!=':
-                    return left != right
-            
-            # String equality: "approved == approved", "status != rejected"
-            string_eq_pattern = r'^(.+?)\s*(==|!=)\s*(.+)$'
-            string_match = re.match(string_eq_pattern, substituted.strip())
-            if string_match:
-                left = string_match.group(1).strip()
-                op = string_match.group(2)
-                right = string_match.group(3).strip()
-                
-                if op == '==':
-                    return left == right
-                if op == '!=':
-                    return left != right
-            
-            # Contains check: "error in some message", "status contains success"
-            if ' in ' in substituted:
-                parts = substituted.split(' in ', 1)
-                if len(parts) == 2:
-                    needle = parts[0].strip()
-                    haystack = parts[1].strip()
-                    return needle.lower() in haystack.lower()
-            
-            if ' contains ' in substituted:
-                parts = substituted.split(' contains ', 1)
-                if len(parts) == 2:
-                    haystack = parts[0].strip()
-                    needle = parts[1].strip()
-                    return needle.lower() in haystack.lower()
-            
-            # Boolean check: truthy evaluation
-            # Handle "true", "false", "True", "False"
-            if substituted.strip().lower() == 'true':
-                return True
-            if substituted.strip().lower() == 'false':
-                return False
-            
-            # Non-empty string is truthy
-            return bool(substituted.strip())
-            
-        except Exception as e:
-            logger.warning(f"Condition evaluation failed for '{condition}': {e}")
-            return False
+        from praisonaiagents.conditions.evaluator import evaluate_condition
+        return evaluate_condition(condition, variables, previous_output)
     
     def _execute_include(
         self,
@@ -3502,13 +3398,17 @@ class WorkflowManager:
         
         context_parts = []
         
-        if step.context_from:
+        # Use getattr with defaults for workflow-specific attributes that may not exist on Task
+        context_from = getattr(step, 'context_from', None)
+        retain_full_context = getattr(step, 'retain_full_context', False)
+        
+        if context_from:
             # Include only specified steps
-            for step_name in step.context_from:
+            for step_name in context_from:
                 for prev_result in results:
                     if prev_result["step"] == step_name and prev_result.get("output"):
                         context_parts.append(f"## {step_name} Output:\n{prev_result['output']}")
-        elif step.retain_full_context:
+        elif retain_full_context:
             # Include all previous outputs
             for prev_result in results:
                 if prev_result.get("output") and prev_result.get("status") == "success":
@@ -3867,18 +3767,21 @@ class WorkflowManager:
             
             # Handle branching
             next_step_idx = None
-            if step.branch_condition and step_result["output"]:
+            # Use getattr with defaults for workflow-specific attributes that may not exist on Task
+            branch_condition = getattr(step, 'branch_condition', None)
+            next_steps = getattr(step, 'next_steps', None)
+            if branch_condition and step_result["output"]:
                 # Evaluate branch condition based on output
                 output_lower = str(step_result["output"]).lower()
-                for branch_key, branch_targets in step.branch_condition.items():
+                for branch_key, branch_targets in branch_condition.items():
                     if branch_key.lower() in output_lower or output_lower.startswith(branch_key.lower()):
                         if branch_targets and branch_targets[0] in step_lookup:
                             next_step_idx, _ = step_lookup[branch_targets[0]]
                             break
-            elif step.next_steps:
+            elif next_steps:
                 # Use explicit next_steps
-                if step.next_steps[0] in step_lookup:
-                    next_step_idx, _ = step_lookup[step.next_steps[0]]
+                if next_steps[0] in step_lookup:
+                    next_step_idx, _ = step_lookup[next_steps[0]]
             
             # Move to next step
             if next_step_idx is not None:

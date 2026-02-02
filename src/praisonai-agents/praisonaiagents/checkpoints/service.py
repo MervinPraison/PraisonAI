@@ -19,6 +19,14 @@ from .types import (
 
 logger = logging.getLogger(__name__)
 
+
+def _parse_iso_timestamp(timestamp: str) -> datetime:
+    """Parse ISO format timestamp, handling 'Z' suffix for Python 3.9 compatibility."""
+    # Python 3.9's fromisoformat() doesn't support 'Z' suffix
+    if timestamp.endswith('Z'):
+        timestamp = timestamp[:-1] + '+00:00'
+    return datetime.fromisoformat(timestamp)
+
 # Protected paths that should never be checkpointed
 PROTECTED_PATHS = [
     os.path.expanduser("~"),
@@ -275,7 +283,7 @@ class CheckpointService:
                 id=commit_hash,
                 short_id=commit_hash[:8],
                 message=message,
-                timestamp=datetime.fromisoformat(timestamp)
+                timestamp=_parse_iso_timestamp(timestamp)
             )
             
             self._checkpoints.append(checkpoint)
@@ -321,7 +329,7 @@ class CheckpointService:
                 id=checkpoint_id,
                 short_id=checkpoint_id[:8],
                 message=message,
-                timestamp=datetime.fromisoformat(timestamp)
+                timestamp=_parse_iso_timestamp(timestamp)
             )
             
             self._emit(CheckpointEvent.CHECKPOINT_RESTORED, checkpoint)
@@ -450,7 +458,7 @@ class CheckpointService:
                         id=parts[0],
                         short_id=parts[0][:8],
                         message=parts[1],
-                        timestamp=datetime.fromisoformat(parts[2])
+                        timestamp=_parse_iso_timestamp(parts[2])
                     ))
             
             return checkpoints

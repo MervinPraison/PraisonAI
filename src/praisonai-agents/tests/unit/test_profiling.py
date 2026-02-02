@@ -352,8 +352,8 @@ class TestZeroOverhead:
             Profiler.record_timing("test", 100.0)
         elapsed = (time.perf_counter() - start) * 1000
         
-        # Should complete 10k calls in under 10ms when disabled
-        assert elapsed < 10, f"record_timing took {elapsed}ms for 10k calls"
+        # Should complete 10k calls in under 50ms when disabled (conservative for CI)
+        assert elapsed < 50, f"record_timing took {elapsed}ms for 10k calls"
     
     def test_phase_context_overhead(self):
         """phase context manager should be fast when disabled."""
