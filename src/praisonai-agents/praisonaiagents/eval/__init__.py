@@ -76,6 +76,13 @@ __all__ = [
     "count_tokens",
     "needs_chunking",
     "get_recommended_chunk_size",
+    # EvaluationLoop (iterative improvement)
+    "EvaluationLoop",
+    "EvaluationLoopConfig",
+    "IterationResult",
+    "EvaluationLoopResult",
+    "EvaluationLoopProtocol",
+    "EvaluationLoopResultProtocol",
 ]
 
 _LAZY_IMPORTS = {
@@ -134,6 +141,13 @@ _LAZY_IMPORTS = {
     "count_tokens": ("tokens", "count_tokens"),
     "needs_chunking": ("tokens", "needs_chunking"),
     "get_recommended_chunk_size": ("tokens", "get_recommended_chunk_size"),
+    # EvaluationLoop (iterative improvement)
+    "EvaluationLoop": ("loop", "EvaluationLoop"),
+    "EvaluationLoopConfig": ("loop", "EvaluationLoopConfig"),
+    "IterationResult": ("results", "IterationResult"),
+    "EvaluationLoopResult": ("results", "EvaluationLoopResult"),
+    "EvaluationLoopProtocol": ("protocols", "EvaluationLoopProtocol"),
+    "EvaluationLoopResultProtocol": ("protocols", "EvaluationLoopResultProtocol"),
 }
 
 

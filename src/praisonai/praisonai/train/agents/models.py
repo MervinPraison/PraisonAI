@@ -12,6 +12,86 @@ import statistics
 
 
 @dataclass
+class TrainingProfile:
+    """
+    Consolidated training profile for runtime application.
+    
+    Contains the actionable suggestions from a training session that can be
+    injected into an agent's prompt at runtime via hooks.
+    
+    Attributes:
+        agent_name: Name of the agent this profile is for
+        suggestions: List of improvement suggestions
+        quality_score: Score from the training iteration
+        summary: Summary of the training feedback
+        iteration_num: Which iteration this came from
+        session_id: The training session ID
+        created_at: When this profile was created
+    
+    Example:
+        profile = TrainingProfile(
+            agent_name="assistant",
+            suggestions=["Be concise", "Use examples"],
+            quality_score=8.5,
+            summary="Focus on clarity and examples",
+            iteration_num=2,
+            session_id="train-abc123"
+        )
+    """
+    agent_name: str
+    suggestions: List[str]
+    quality_score: float
+    summary: str
+    iteration_num: int
+    session_id: str
+    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return asdict(self)
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "TrainingProfile":
+        """Create from dictionary."""
+        return cls(
+            agent_name=data["agent_name"],
+            suggestions=data.get("suggestions", []),
+            quality_score=data.get("quality_score", 0.0),
+            summary=data.get("summary", ""),
+            iteration_num=data.get("iteration_num", 0),
+            session_id=data.get("session_id", ""),
+            created_at=data.get("created_at", datetime.utcnow().isoformat()),
+        )
+    
+    @classmethod
+    def from_iteration(
+        cls,
+        iteration: "TrainingIteration",
+        agent_name: str,
+        session_id: str,
+    ) -> "TrainingProfile":
+        """
+        Create a TrainingProfile from a TrainingIteration.
+        
+        Args:
+            iteration: The training iteration to use
+            agent_name: Name of the agent
+            session_id: The training session ID
+            
+        Returns:
+            TrainingProfile with data from the iteration
+        """
+        return cls(
+            agent_name=agent_name,
+            suggestions=iteration.suggestions,
+            quality_score=iteration.score,
+            summary=iteration.feedback,
+            iteration_num=iteration.iteration_num,
+            session_id=session_id,
+        )
+
+
+@dataclass
 class TrainingScenario:
     """
     A scenario for agent training.
@@ -189,6 +269,32 @@ class TrainingReport:
             completed_at=data.get("completed_at"),
             metadata=data.get("metadata", {})
         )
+    
+    def get_best_iteration(self) -> Optional[TrainingIteration]:
+        """
+        Get the iteration with the highest score.
+        
+        Returns:
+            TrainingIteration with highest score, or None if no iterations
+        """
+        if not self.iterations:
+            return None
+        return max(self.iterations, key=lambda it: it.score)
+    
+    def get_iteration(self, iteration_num: int) -> Optional[TrainingIteration]:
+        """
+        Get a specific iteration by number.
+        
+        Args:
+            iteration_num: The iteration number (1-based)
+            
+        Returns:
+            TrainingIteration or None if not found
+        """
+        for it in self.iterations:
+            if it.iteration_num == iteration_num:
+                return it
+        return None
     
     def print_summary(self) -> None:
         """Print a summary of the training results."""

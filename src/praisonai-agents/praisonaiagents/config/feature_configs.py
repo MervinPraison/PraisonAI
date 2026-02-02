@@ -165,6 +165,10 @@ class MemoryConfig:
     # Continuous learning configuration
     learn: Optional[Union[bool, LearnConfig]] = None
     
+    # History injection (auto-inject session history into context)
+    history: bool = False
+    history_limit: int = 10
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         learn_dict = None
@@ -181,6 +185,8 @@ class MemoryConfig:
             "claude_memory": self.claude_memory,
             "config": self.config,
             "learn": learn_dict,
+            "history": self.history,
+            "history_limit": self.history_limit,
         }
 
 

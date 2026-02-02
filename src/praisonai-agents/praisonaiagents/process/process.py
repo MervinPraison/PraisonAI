@@ -18,21 +18,42 @@ class Process:
     DEFAULT_RETRY_LIMIT = 3  # Predefined retry limit in a common place
     VALIDATION_FAILURE_DECISIONS = ["invalid", "retry", "failed", "error", "unsuccessful", "fail", "errors", "reject", "rejected", "incomplete"]  # Decision strings that trigger validation feedback
 
-    def __init__(self, tasks: Dict[str, Task], agents: List[Agent], manager_llm: Optional[str] = None, verbose: bool = False, max_iter: int = 10):
+    def __init__(
+        self,
+        tasks: Dict[str, Task],
+        agents: List[Agent],
+        manager_llm: Optional[str] = None,
+        verbose: bool = False,
+        max_iter: int = 10,
+        output: Optional[str] = None,
+    ):
         logging.debug(f"=== Initializing Process ===")
         logging.debug(f"Number of tasks: {len(tasks)}")
         logging.debug(f"Number of agents: {len(agents)}")
         logging.debug(f"Manager LLM: {manager_llm}")
-        logging.debug(f"Verbose mode: {verbose}")
         logging.debug(f"Max iterations: {max_iter}")
 
         self.tasks = tasks
         self.agents = agents
         self.manager_llm = manager_llm
-        self.verbose = verbose
         self.max_iter = max_iter
         self.task_retry_counter: Dict[str, int] = {} # Initialize retry counter
         self.workflow_finished = False # ADDED: Workflow finished flag
+        
+        # Resolve verbose from output= param (takes precedence) or legacy verbose= param
+        if output is not None:
+            # output= takes precedence over verbose=
+            from ..config.presets import OUTPUT_PRESETS
+            preset = OUTPUT_PRESETS.get(output, {})
+            self._verbose = preset.get("verbose", False)
+        else:
+            # Backward compat: use legacy verbose= param
+            self._verbose = verbose
+        
+        # Keep self.verbose as alias for backward compat
+        self.verbose = self._verbose
+        
+        logging.debug(f"Verbose mode: {self._verbose}")
 
     def _create_llm_instance(self):
         """Create and return a configured LLM instance for manager tasks."""

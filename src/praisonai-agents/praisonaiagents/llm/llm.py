@@ -1681,6 +1681,23 @@ Now provide your final answer using this result. Summarize the information natur
                         response_text = resp["choices"][0]["message"]["content"]
                         final_response = resp
                         
+                        # Emit StreamEvent for reasoning content if callback provided
+                        if _emit and reasoning_content:
+                            stream_callback(StreamEvent(
+                                type=StreamEventType.DELTA_TEXT,
+                                timestamp=time.perf_counter(),
+                                content=reasoning_content,
+                                is_reasoning=True
+                            ))
+                        # Emit StreamEvent for response content if callback provided
+                        if _emit and response_text:
+                            stream_callback(StreamEvent(
+                                type=StreamEventType.DELTA_TEXT,
+                                timestamp=time.perf_counter(),
+                                content=response_text,
+                                is_reasoning=False
+                            ))
+                        
                         # Track token usage
                         if self.metrics:
                             self._track_token_usage(final_response, self.model)

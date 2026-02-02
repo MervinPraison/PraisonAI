@@ -35,8 +35,13 @@ __all__ = [
     "TrainingScenario",
     "TrainingIteration",
     "TrainingReport",
+    "TrainingProfile",
     "TrainingGrader",
     "TrainingStorage",
+    "TrainingHook",
+    "apply_training",
+    "remove_training",
+    "get_training_profile",
 ]
 
 
@@ -58,6 +63,10 @@ def __getattr__(name: str):
         from .models import TrainingReport
         return TrainingReport
     
+    if name == "TrainingProfile":
+        from .models import TrainingProfile
+        return TrainingProfile
+    
     if name == "TrainingGrader":
         from .grader import TrainingGrader
         return TrainingGrader
@@ -65,5 +74,21 @@ def __getattr__(name: str):
     if name == "TrainingStorage":
         from .storage import TrainingStorage
         return TrainingStorage
+    
+    if name == "TrainingHook":
+        from .hook import TrainingHook
+        return TrainingHook
+    
+    if name == "apply_training":
+        from .hook import apply_training
+        return apply_training
+    
+    if name == "remove_training":
+        from .hook import remove_training
+        return remove_training
+    
+    if name == "get_training_profile":
+        from .hook import get_training_profile
+        return get_training_profile
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

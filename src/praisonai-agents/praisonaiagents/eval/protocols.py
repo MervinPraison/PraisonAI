@@ -243,4 +243,58 @@ __all__ = [
     'OptimizationRuleProtocol',
     'JudgeProtocol',
     'JudgeResultProtocol',
+    'EvaluationLoopProtocol',
+    'EvaluationLoopResultProtocol',
 ]
+
+
+class EvaluationLoopResultProtocol(Protocol):
+    """Protocol for evaluation loop results."""
+    
+    @property
+    def success(self) -> bool:
+        """Whether the loop achieved the threshold."""
+        ...
+    
+    @property
+    def final_score(self) -> float:
+        """Get the final iteration's score."""
+        ...
+    
+    @property
+    def score_history(self) -> List[float]:
+        """Get list of all scores across iterations."""
+        ...
+    
+    @property
+    def final_output(self) -> str:
+        """Get the final iteration's output."""
+        ...
+
+
+class EvaluationLoopProtocol(Protocol):
+    """Protocol for evaluation loops that iteratively improve agent outputs."""
+    
+    def run(self, prompt: str) -> EvaluationLoopResultProtocol:
+        """
+        Run the evaluation loop synchronously.
+        
+        Args:
+            prompt: The prompt to send to the agent
+            
+        Returns:
+            EvaluationLoopResultProtocol with iteration results
+        """
+        ...
+    
+    async def run_async(self, prompt: str) -> EvaluationLoopResultProtocol:
+        """
+        Run the evaluation loop asynchronously.
+        
+        Args:
+            prompt: The prompt to send to the agent
+            
+        Returns:
+            EvaluationLoopResultProtocol with iteration results
+        """
+        ...
