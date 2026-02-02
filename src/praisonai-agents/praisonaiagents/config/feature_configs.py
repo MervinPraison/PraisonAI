@@ -176,6 +176,9 @@ class MemoryConfig:
             learn_dict = LearnConfig().to_dict()
         elif isinstance(self.learn, LearnConfig):
             learn_dict = self.learn.to_dict()
+        elif isinstance(self.learn, dict):
+            # Pass through dict directly (user provided learn config as dict)
+            learn_dict = self.learn
         
         return {
             "backend": self.backend.value if isinstance(self.backend, MemoryBackend) else self.backend,

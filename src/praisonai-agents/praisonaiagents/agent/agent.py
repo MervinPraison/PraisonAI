@@ -840,7 +840,10 @@ class Agent:
                 backend = _memory_config.backend
                 if hasattr(backend, 'value'):
                     backend = backend.value
-                if backend == "file":
+                # If learn is enabled, pass as dict to trigger full Memory class
+                if _memory_config.learn:
+                    memory = _memory_config.to_dict()
+                elif backend == "file":
                     memory = True
                 elif _memory_config.config:
                     memory = _memory_config.config
@@ -2712,8 +2715,19 @@ Summary:"""
                 self._memory_instance = FileMemory(user_id=mem_user_id)
         elif isinstance(memory, dict):
             # Configuration dict
-            provider = memory.get("provider", "file")
-            if provider == "file":
+            provider = memory.get("provider", memory.get("backend", "file"))
+            learn_enabled = memory.get("learn", False)
+            
+            # Use full Memory class if learn is enabled (requires LearnManager)
+            if learn_enabled:
+                try:
+                    from ..memory.memory import Memory
+                    self._memory_instance = Memory(memory)
+                except ImportError:
+                    logging.warning("Memory with learn requires additional dependencies. Falling back to FileMemory (learn disabled).")
+                    from ..memory.file_memory import FileMemory
+                    self._memory_instance = FileMemory(user_id=memory.get("user_id", mem_user_id))
+            elif provider == "file":
                 from ..memory.file_memory import FileMemory
                 self._memory_instance = FileMemory(
                     user_id=memory.get("user_id", mem_user_id),
@@ -2746,6 +2760,24 @@ Summary:"""
         
         if hasattr(self._memory_instance, 'get_context'):
             return self._memory_instance.get_context(query=query)
+        
+        return ""
+    
+    def get_learn_context(self) -> str:
+        """
+        Get learning context for injection into system prompt.
+        
+        Returns learned preferences, insights, and patterns when memory="learn"
+        is enabled. Returns empty string when learn is not enabled (zero overhead).
+        
+        Returns:
+            Formatted learning context string, or empty string if learn not enabled
+        """
+        if not self._memory_instance:
+            return ""
+        
+        if hasattr(self._memory_instance, 'get_learn_context'):
+            return self._memory_instance.get_learn_context()
         
         return ""
     
@@ -3389,6 +3421,11 @@ Your Goal: {self.goal}"""
                 # Display memory info to user if verbose
                 if self.verbose:
                     self._display_memory_info()
+            
+            # Add learn context if learn is enabled (auto-inject when memory="learn")
+            learn_context = self.get_learn_context()
+            if learn_context:
+                system_prompt += f"\n\n## Learned Context (Patterns and insights from past interactions)\n{learn_context}"
         
         # Add skills prompt if skills are configured
         if self._skills or self._skills_dirs:
