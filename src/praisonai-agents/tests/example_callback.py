@@ -1,6 +1,7 @@
 from praisonaiagents import (
     Agent, 
     Task, 
+    AgentTeam,
     Agents, 
     error_logs, 
     register_display_callback,
@@ -147,7 +148,7 @@ def main():
         markdown=True
     )
 
-    # Create tasks with callbacks
+    # Create tasks with on_task_complete callbacks
     task1 = Task(
         name="research_task",
         description="""Analyze 2024's AI advancements. 
@@ -155,7 +156,7 @@ def main():
         expected_output="""A detailed report on 2024 AI advancements""",
         agent=researcher,
         tools=[internet_search_tool],
-        callback=task_callback
+        on_task_complete=task_callback
     )
 
     task2 = Task(
@@ -166,7 +167,7 @@ def main():
         expected_output="A blog post of at least 4 paragraphs",
         agent=writer,
         context=[task1],
-        callback=task_callback,
+        on_task_complete=task_callback,
         tools=[]
     )
 
@@ -175,7 +176,7 @@ def main():
         description="""Create a json object with a title of "My Task" and content of "My content".""",
         expected_output="""JSON output with title and content""",
         agent=researcher,
-        callback=task_callback
+        on_task_complete=task_callback
     )
 
     task4 = Task(
@@ -186,7 +187,7 @@ def main():
         context=[task2],
         output_file='test.txt',
         create_directory=True,
-        callback=task_callback
+        on_task_complete=task_callback
     )
 
     # Create and run agents manager

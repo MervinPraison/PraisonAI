@@ -213,8 +213,8 @@ class ToolRegistry:
         """Discover and load tools from single-file plugins.
         
         Scans default plugin directories for WordPress-style plugins:
-        - ./.praison/plugins/ (project-level)
-        - ~/.praison/plugins/ (user-level)
+        - ./.praisonai/plugins/ (project-level)
+        - ~/.praisonai/plugins/ (user-level)
         
         Returns:
             Number of plugins loaded
@@ -333,8 +333,8 @@ def discover_plugins() -> int:
     """Discover and load tools from single-file plugins.
     
     Scans default plugin directories for WordPress-style plugins:
-    - ./.praison/plugins/ (project-level)
-    - ~/.praison/plugins/ (user-level)
+    - ./.praisonai/plugins/ (project-level)
+    - ~/.praisonai/plugins/ (user-level)
     
     Returns:
         Number of plugins loaded

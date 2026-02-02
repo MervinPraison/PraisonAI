@@ -19,7 +19,7 @@ class SkillManager:
         manager = SkillManager()
 
         # Discover skills from directories
-        manager.discover(["./skills", "~/.praison/skills"])
+        manager.discover(["./skills", "~/.praisonai/skills"])
 
         # Get XML for system prompt
         prompt_xml = manager.to_prompt()

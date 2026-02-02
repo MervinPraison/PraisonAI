@@ -41,6 +41,7 @@ __all__ = [
     "PluginManager",
     "Plugin",
     "PluginHook",
+    "PluginType",
     "PluginInfo",
     "FunctionPlugin",
     "get_plugin_manager",
@@ -90,6 +91,10 @@ def __getattr__(name: str):
     if name == "FunctionPlugin":
         from .plugin import FunctionPlugin
         return FunctionPlugin
+    
+    if name == "PluginType":
+        from .plugin import PluginType
+        return PluginType
     
     # Protocols
     if name == "PluginProtocol":

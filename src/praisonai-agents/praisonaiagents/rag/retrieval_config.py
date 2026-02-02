@@ -92,7 +92,7 @@ class RetrievalConfig:
     vector_store_provider: str = "chroma"
     vector_store_config: Dict[str, Any] = field(default_factory=dict)
     collection_name: Optional[str] = None
-    persist_path: str = ".praison"
+    persist_path: str = ".praisonai"
     
     # Embedding configuration
     embedder_provider: Optional[str] = None
@@ -233,7 +233,7 @@ class RetrievalConfig:
             vector_store_provider=data.get("vector_store_provider", "chroma"),
             vector_store_config=data.get("vector_store_config", {}),
             collection_name=data.get("collection_name"),
-            persist_path=data.get("persist_path", ".praison"),
+            persist_path=data.get("persist_path", ".praisonai"),
             embedder_provider=data.get("embedder_provider"),
             embedder_model=data.get("embedder_model"),
             auto_keywords=auto_keywords,

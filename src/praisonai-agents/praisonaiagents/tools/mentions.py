@@ -4,7 +4,7 @@ Mentions Parser for PraisonAI Agents.
 Provides @mention syntax support similar to Cursor IDE:
 - @file:path/to/file.py - Include file content
 - @web:query - Search the web
-- @doc:name - Include doc from .praison/docs/
+- @doc:name - Include doc from .praisonai/docs/
 - @rule:name - Include specific rule
 
 Usage:
@@ -30,7 +30,7 @@ class MentionsParser:
     Supports:
     - @file:path - Include file content
     - @web:query - Web search (requires web search tool)
-    - @doc:name - Include doc from .praison/docs/
+    - @doc:name - Include doc from .praisonai/docs/
     - @rule:name - Include specific rule
     - @url:https://... - Fetch URL content
     """

@@ -54,6 +54,7 @@ class Task:
         output_json: Optional[Type[BaseModel]] = None,
         output_pydantic: Optional[Type[BaseModel]] = None,
         callback: Optional[Union[Callable[[TaskOutput], Any], Callable[[TaskOutput], Coroutine[Any, Any, Any]]]] = None,
+        on_task_complete: Optional[Union[Callable[[TaskOutput], Any], Callable[[TaskOutput], Coroutine[Any, Any, Any]]]] = None,
         status: str = "not started",
         result: Optional[TaskOutput] = None,
         create_directory: Optional[bool] = False,
@@ -158,7 +159,24 @@ class Task:
         self.output_file = output_file
         self.output_json = output_json
         self.output_pydantic = output_pydantic
-        self.callback = callback
+        # Handle callback/on_task_complete: on_task_complete is canonical, callback is deprecated
+        if callback is not None and on_task_complete is None:
+            import warnings
+            warnings.warn(
+                "Parameter 'callback' is deprecated, use 'on_task_complete' instead. "
+                "Example: Task(on_task_complete=my_fn) instead of Task(callback=my_fn)",
+                DeprecationWarning,
+                stacklevel=2
+            )
+            self.callback = callback
+        elif callback is not None and on_task_complete is not None:
+            raise ValueError(
+                "Cannot specify both 'callback' and 'on_task_complete'. "
+                "Use 'on_task_complete' only (callback is deprecated)."
+            )
+        else:
+            # on_task_complete takes precedence (or both are None)
+            self.callback = on_task_complete
         self.status = status
         self.result = result
         self.create_directory = create_directory

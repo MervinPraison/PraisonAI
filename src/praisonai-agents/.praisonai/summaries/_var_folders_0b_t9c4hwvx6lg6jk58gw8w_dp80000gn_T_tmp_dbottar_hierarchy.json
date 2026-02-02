@@ -1,0 +1,35 @@
+{
+  "root_path": "/var/folders/0b/t9c4hwvx6lg6jk58gw8w_dp80000gn/T/tmp_dbottar",
+  "total_files": 1,
+  "total_tokens": 16,
+  "levels": 2,
+  "built_at": "2026-02-02T17:49:37.077857",
+  "nodes": {
+    "/var/folders/0b/t9c4hwvx6lg6jk58gw8w_dp80000gn/T/tmp_dbottar/src/app.py": {
+      "path": "/var/folders/0b/t9c4hwvx6lg6jk58gw8w_dp80000gn/T/tmp_dbottar/src/app.py",
+      "level": 1,
+      "summary": "# Application code",
+      "children": [],
+      "token_count": 5,
+      "created_at": "2026-02-02T17:49:37.077985",
+      "metadata": {
+        "filename": "app.py",
+        "relative_path": "src/app.py"
+      }
+    },
+    "/var/folders/0b/t9c4hwvx6lg6jk58gw8w_dp80000gn/T/tmp_dbottar/src": {
+      "path": "/var/folders/0b/t9c4hwvx6lg6jk58gw8w_dp80000gn/T/tmp_dbottar/src",
+      "level": 2,
+      "summary": "Folder contains 1 files: # Application code",
+      "children": [
+        "/var/folders/0b/t9c4hwvx6lg6jk58gw8w_dp80000gn/T/tmp_dbottar/src/app.py"
+      ],
+      "token_count": 11,
+      "created_at": "2026-02-02T17:49:37.078011",
+      "metadata": {
+        "folder_name": "src",
+        "file_count": 1
+      }
+    }
+  }
+}

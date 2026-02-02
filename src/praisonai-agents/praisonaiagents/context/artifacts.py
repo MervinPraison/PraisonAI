@@ -181,7 +181,7 @@ class ArtifactStoreProtocol(Protocol):
     Example implementation in wrapper:
         class FileSystemArtifactStore:
             def store(self, content, metadata):
-                # Write to ~/.praison/runs/{run_id}/artifacts/
+                # Write to ~/.praisonai/runs/{run_id}/artifacts/
                 ...
     """
     

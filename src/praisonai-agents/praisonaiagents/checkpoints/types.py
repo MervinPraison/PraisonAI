@@ -39,7 +39,7 @@ class CheckpointConfig:
     max_checkpoints: int = 100  # Maximum checkpoints to keep
     exclude_patterns: List[str] = field(default_factory=lambda: [
         ".git",
-        ".praison",
+        ".praisonai",
         "__pycache__",
         "*.pyc",
         ".env",

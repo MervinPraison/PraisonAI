@@ -162,7 +162,7 @@ class ContextAgent(Agent):
         
         # Enhanced logging and output management
         self.debug_mode = os.getenv('LOGLEVEL', '').lower() == 'debug'
-        self.output_dir = Path(".praison/prp")  # Save in .praison/prp folder
+        self.output_dir = Path(".praisonai/prp")  # Save in .praisonai/prp folder
         self.setup_output_directories()  # Create directories first
         self.setup_logging()              # Then setup logging
         
@@ -1136,7 +1136,7 @@ detailed, actionable implementation steps."""
             filtered = []
             exclude_patterns = [
                 '__pycache__', '.pytest_cache', '.git', 'node_modules', 
-                '.venv', 'venv', 'dist', 'build', '.praison', '.chroma_db',
+                '.venv', 'venv', 'dist', 'build', '.praisonai', '.chroma_db',
                 '.ruff_cache', '.mypy_cache', 'context_engineering_output'
             ]
             
@@ -2263,7 +2263,7 @@ This PRP provides:
             )
             print(f"🐛 Debug mode: Comprehensive session report + individual files + final PRP saved")
         else:
-            # Non-debug mode: Save ONLY the final comprehensive PRP directly in .praison/prp
+            # Non-debug mode: Save ONLY the final comprehensive PRP directly in .praisonai/prp
             # Use clean filename: goal name + timestamp
             final_output_file = self.output_dir / f"{safe_goal}_prp_{timestamp}.md"
             final_output_file.parent.mkdir(parents=True, exist_ok=True)

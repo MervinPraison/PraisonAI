@@ -1,0 +1,21 @@
+{
+  "root_path": "/var/folders/0b/t9c4hwvx6lg6jk58gw8w_dp80000gn/T/tmp8qwfp4zl",
+  "total_files": 0,
+  "total_tokens": 11,
+  "levels": 3,
+  "built_at": "2026-02-02T17:49:37.074095",
+  "nodes": {
+    "/var/folders/0b/t9c4hwvx6lg6jk58gw8w_dp80000gn/T/tmp8qwfp4zl": {
+      "path": "/var/folders/0b/t9c4hwvx6lg6jk58gw8w_dp80000gn/T/tmp8qwfp4zl",
+      "level": 3,
+      "summary": "Project with 0 folders and 0 root files: ",
+      "children": [],
+      "token_count": 11,
+      "created_at": "2026-02-02T17:49:37.074201",
+      "metadata": {
+        "folder_count": 0,
+        "root_file_count": 0
+      }
+    }
+  }
+}

@@ -7,14 +7,14 @@ Provides reusable documentation context support similar to:
 - Project documentation for AI context
 
 Features:
-- Auto-discovery of docs from .praison/docs/
+- Auto-discovery of docs from .praisonai/docs/
 - Support for markdown, text, and code files
 - @doc mentions for including specific docs
 - Priority ordering for docs
 - Character limits for context window management
 
 Storage Structure:
-    .praison/docs/
+    .praisonai/docs/
     ├── project-overview.md      # Project overview
     ├── architecture.md          # Architecture decisions
     ├── api-reference.md         # API documentation
@@ -74,13 +74,13 @@ class DocsManager:
     Manages documentation context for AI agents.
     
     Provides:
-    - Auto-discovery of docs from .praison/docs/
-    - Global docs from ~/.praison/docs/
+    - Auto-discovery of docs from .praisonai/docs/
+    - Global docs from ~/.praisonai/docs/
     - @doc mentions for including specific docs
     - Priority-based ordering
     """
     
-    DOCS_DIR_NAME = ".praison/docs"
+    DOCS_DIR_NAME = ".praisonai/docs"
     SUPPORTED_EXTENSIONS = [".md", ".txt", ".rst"]
     
     # Maximum characters per doc (context window management)
@@ -97,11 +97,11 @@ class DocsManager:
         
         Args:
             workspace_path: Path to workspace/project root
-            global_docs_path: Path to global docs (default: ~/.praison/docs)
+            global_docs_path: Path to global docs (default: ~/.praisonai/docs)
             verbose: Verbosity level
         """
         self.workspace_path = Path(workspace_path) if workspace_path else Path.cwd()
-        self.global_docs_path = Path(global_docs_path) if global_docs_path else Path.home() / ".praison" / "docs"
+        self.global_docs_path = Path(global_docs_path) if global_docs_path else Path.home() / ".praisonai" / "docs"
         self.verbose = verbose
         
         self._docs: Dict[str, Doc] = {}

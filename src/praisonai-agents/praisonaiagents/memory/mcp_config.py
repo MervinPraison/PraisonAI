@@ -6,13 +6,13 @@ Provides JSON-based MCP server configuration support similar to:
 - Windsurf MCP configuration
 
 Features:
-- Auto-discovery of MCP configs from .praison/mcp/
+- Auto-discovery of MCP configs from .praisonai/mcp/
 - JSON config files for MCP servers
 - Environment variable support
 - Easy server management
 
 Storage Structure:
-    .praison/mcp/
+    .praisonai/mcp/
     ├── filesystem.json      # Filesystem MCP server
     ├── brave-search.json    # Brave search MCP server
     └── postgres.json        # PostgreSQL MCP server
@@ -108,12 +108,12 @@ class MCPConfigManager:
     Manages MCP server configurations for AI agents.
     
     Provides:
-    - Auto-discovery of MCP configs from .praison/mcp/
-    - Global configs from ~/.praison/mcp/
+    - Auto-discovery of MCP configs from .praisonai/mcp/
+    - Global configs from ~/.praisonai/mcp/
     - Easy server management
     """
     
-    MCP_DIR_NAME = ".praison/mcp"
+    MCP_DIR_NAME = ".praisonai/mcp"
     SUPPORTED_EXTENSIONS = [".json", ".mcpjson"]
     
     def __init__(
@@ -127,11 +127,11 @@ class MCPConfigManager:
         
         Args:
             workspace_path: Path to workspace/project root
-            global_mcp_path: Path to global MCP configs (default: ~/.praison/mcp)
+            global_mcp_path: Path to global MCP configs (default: ~/.praisonai/mcp)
             verbose: Verbosity level
         """
         self.workspace_path = Path(workspace_path) if workspace_path else Path.cwd()
-        self.global_mcp_path = Path(global_mcp_path) if global_mcp_path else Path.home() / ".praison" / "mcp"
+        self.global_mcp_path = Path(global_mcp_path) if global_mcp_path else Path.home() / ".praisonai" / "mcp"
         self.verbose = verbose
         
         self._configs: Dict[str, MCPConfig] = {}

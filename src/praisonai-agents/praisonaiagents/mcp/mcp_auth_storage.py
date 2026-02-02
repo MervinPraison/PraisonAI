@@ -63,7 +63,7 @@ class MCPAuthStorage:
         Initialize auth storage.
         
         Args:
-            filepath: Path to auth storage file. Defaults to ~/.praison/mcp-auth.json
+            filepath: Path to auth storage file. Defaults to ~/.praisonai/mcp-auth.json
         """
         self.filepath = filepath or get_default_auth_filepath()
         self._ensure_directory()

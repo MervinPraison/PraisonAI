@@ -2,6 +2,7 @@
 Plugin definitions for PraisonAI Agents.
 
 Provides base plugin class and hook definitions.
+PluginHook is now an alias for HookEvent (DRY compliance).
 """
 
 import logging
@@ -10,68 +11,26 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
+# Import HookEvent at module level for alias (DRY)
+from ..hooks.types import HookEvent
+
 logger = logging.getLogger(__name__)
 
+# PluginHook is now an alias for HookEvent - single source of truth
+PluginHook = HookEvent
 
-class PluginHook(str, Enum):
-    """Available plugin hooks."""
+
+class PluginType(str, Enum):
+    """Types of plugins that can be registered.
     
-    # Lifecycle hooks
-    ON_INIT = "on_init"
-    ON_SHUTDOWN = "on_shutdown"
-    
-    # Agent hooks
-    BEFORE_AGENT = "before_agent"
-    AFTER_AGENT = "after_agent"
-    
-    # Tool hooks
-    BEFORE_TOOL = "before_tool"
-    AFTER_TOOL = "after_tool"
-    
-    # Message hooks (for bot/channel integrations)
-    BEFORE_MESSAGE = "before_message"
-    AFTER_MESSAGE = "after_message"
-    MESSAGE_RECEIVED = "message_received"
-    MESSAGE_SENDING = "message_sending"
-    MESSAGE_SENT = "message_sent"
-    
-    # LLM hooks
-    BEFORE_LLM = "before_llm"
-    AFTER_LLM = "after_llm"
-    
-    # Session hooks
-    SESSION_START = "session_start"
-    SESSION_END = "session_end"
-    
-    # Gateway hooks
-    GATEWAY_START = "gateway_start"
-    GATEWAY_STOP = "gateway_stop"
-    
-    # Compaction hooks (memory management)
-    BEFORE_COMPACTION = "before_compaction"
-    AFTER_COMPACTION = "after_compaction"
-    
-    # Tool result persistence (for modifying tool results before storage)
-    TOOL_RESULT_PERSIST = "tool_result_persist"
-    
-    # Permission hooks
-    ON_PERMISSION_ASK = "on_permission_ask"
-    
-    # Config hooks
-    ON_CONFIG = "on_config"
-    
-    # Auth hooks
-    ON_AUTH = "on_auth"
-    
-    # Error hooks
-    ON_ERROR = "on_error"
-    ON_RETRY = "on_retry"
-    
-    # Claude Code parity hooks
-    USER_PROMPT_SUBMIT = "user_prompt_submit"  # When user submits a prompt
-    NOTIFICATION = "notification"              # When notification is sent
-    SUBAGENT_STOP = "subagent_stop"           # When subagent completes
-    SETUP = "setup"                           # On initialization/maintenance
+    Used to categorize plugins and enable type-specific discovery.
+    """
+    TOOL = "tool"           # Provides tools for agents
+    HOOK = "hook"           # Intercepts lifecycle events
+    SKILL = "skill"         # Provides agent capabilities (SKILL.md)
+    POLICY = "policy"       # Provides execution rules
+    GUARDRAIL = "guardrail" # Provides validation rules
+    INTEGRATION = "integration"  # External tool integrations
 
 
 @dataclass

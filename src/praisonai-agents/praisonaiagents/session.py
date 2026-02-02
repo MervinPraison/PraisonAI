@@ -83,7 +83,7 @@ class Session:
             default_memory_config = {
                 "provider": "rag",
                 "use_embedding": False,  # Disable embeddings to avoid OpenAI API key requirement
-                "rag_db_path": f".praison/sessions/{self.session_id}/chroma_db"
+                "rag_db_path": f".praisonai/sessions/{self.session_id}/chroma_db"
             }
             if memory_config:
                 default_memory_config.update(memory_config)
@@ -94,7 +94,7 @@ class Session:
             self.knowledge_config = default_knowledge_config
 
             # Create session directory
-            os.makedirs(f".praison/sessions/{self.session_id}", exist_ok=True)
+            os.makedirs(f".praisonai/sessions/{self.session_id}", exist_ok=True)
 
             # Initialize components lazily
             self._memory = None

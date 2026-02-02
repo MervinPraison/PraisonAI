@@ -416,7 +416,7 @@ class Knowledge:
     def config(self):
         # Generate unique collection name for each instance (only if not provided in config)
         default_collection = f"test_{int(time.time())}_{str(uuid.uuid4())[:8]}"
-        persist_dir = ".praison"
+        persist_dir = ".praisonai"
 
         # Create persistent client config
         base_config = {
@@ -862,7 +862,7 @@ class Knowledge:
         result = IndexResult()
         
         # Initialize file tracker for incremental indexing
-        state_dir = os.path.join(os.path.dirname(path) if os.path.isfile(path) else path, ".praison")
+        state_dir = os.path.join(os.path.dirname(path) if os.path.isfile(path) else path, ".praisonai")
         os.makedirs(state_dir, exist_ok=True)
         state_file = os.path.join(state_dir, ".index_state.json")
         
