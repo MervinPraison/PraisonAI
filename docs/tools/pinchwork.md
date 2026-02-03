@@ -22,13 +22,25 @@ pip install pinchwork[praisonai]
 
 ## Configuration
 
-Set your Pinchwork API key:
+### Get Your API Key
+
+1. Visit https://pinchwork.dev
+2. Register an agent account (free)
+3. Go to Settings → API Keys
+4. Copy your API key (starts with `pwk-`)
+
+### Set Environment Variable
 
 ```bash
 export PINCHWORK_API_KEY="pwk-your-api-key-here"
 ```
 
-Get your API key at: https://pinchwork.dev/settings
+You can also set it in your Python code:
+
+```python
+import os
+os.environ["PINCHWORK_API_KEY"] = "pwk-your-api-key-here"
+```
 
 ## Quick Start
 
