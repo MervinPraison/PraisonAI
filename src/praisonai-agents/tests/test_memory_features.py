@@ -252,7 +252,7 @@ class TestAiDecisionActivation(unittest.TestCase):
     def test_ai_decision_rule_loaded(self):
         """Test that ai_decision rules are loaded."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            rules_dir = Path(tmpdir) / ".praison" / "rules"
+            rules_dir = Path(tmpdir) / ".praisonai" / "rules"
             rules_dir.mkdir(parents=True)
             
             rule_content = """---
@@ -273,7 +273,7 @@ activation: ai_decision
     def test_evaluate_ai_decision_without_llm(self):
         """Test ai_decision evaluation without LLM (defaults to True)."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            rules_dir = Path(tmpdir) / ".praison" / "rules"
+            rules_dir = Path(tmpdir) / ".praisonai" / "rules"
             rules_dir.mkdir(parents=True)
             
             rule_content = """---
@@ -365,7 +365,7 @@ class TestWorkflows(unittest.TestCase):
         from praisonaiagents.memory import WorkflowManager
         
         with tempfile.TemporaryDirectory() as tmpdir:
-            workflows_dir = Path(tmpdir) / ".praison" / "workflows"
+            workflows_dir = Path(tmpdir) / ".praisonai" / "workflows"
             workflows_dir.mkdir(parents=True)
             
             workflow_content = """---
@@ -401,7 +401,7 @@ Build application
         from praisonaiagents.memory import WorkflowManager
         
         with tempfile.TemporaryDirectory() as tmpdir:
-            workflows_dir = Path(tmpdir) / ".praison" / "workflows"
+            workflows_dir = Path(tmpdir) / ".praisonai" / "workflows"
             workflows_dir.mkdir(parents=True)
             
             workflow_content = """---
@@ -462,7 +462,7 @@ class TestHooks(unittest.TestCase):
         from praisonaiagents.memory import HooksManager
         
         with tempfile.TemporaryDirectory() as tmpdir:
-            config_dir = Path(tmpdir) / ".praison"
+            config_dir = Path(tmpdir) / ".praisonai"
             config_dir.mkdir()
             
             config = {
@@ -526,7 +526,7 @@ class TestHooks(unittest.TestCase):
                 timeout=60
             )
             
-            config_path = Path(tmpdir) / ".praison" / "hooks.json"
+            config_path = Path(tmpdir) / ".praisonai" / "hooks.json"
             self.assertTrue(config_path.exists())
             
             config = json.loads(config_path.read_text())

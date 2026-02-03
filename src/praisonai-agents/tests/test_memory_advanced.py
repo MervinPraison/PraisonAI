@@ -339,7 +339,7 @@ class TestRulesManager:
     @pytest.fixture
     def rules_dir(self, tmp_path):
         """Create a temp rules directory."""
-        rules_path = tmp_path / ".praison" / "rules"
+        rules_path = tmp_path / ".praisonai" / "rules"
         rules_path.mkdir(parents=True)
         return rules_path
     
@@ -363,7 +363,7 @@ class TestRulesManager:
         assert "**/*.py" in rule.globs
         
         # Verify file was created
-        rule_file = tmp_path / ".praison" / "rules" / "python_style.md"
+        rule_file = tmp_path / ".praisonai" / "rules" / "python_style.md"
         assert rule_file.exists()
     
     def test_load_rule_with_frontmatter(self, rules_dir, tmp_path):
@@ -378,10 +378,10 @@ priority: 10
 # Test Rule
 - Rule content here
 """
-        (rules_dir / "test_rule.md").write_text(rule_content)
+        (rules_dir / "unique_frontmatter_test.md").write_text(rule_content)
         
         manager = RulesManager(workspace_path=str(tmp_path))
-        rule = manager.get_rule_by_name("test_rule")
+        rule = manager.get_rule_by_name("unique_frontmatter_test")
         
         assert rule is not None
         assert rule.description == "Test rule"

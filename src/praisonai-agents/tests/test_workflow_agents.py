@@ -49,10 +49,10 @@ class TestTaskAgentFields:
         step = Task(name="test_step", action="do something")
         assert step.agent_config is None
     
-    def test_workflow_step_tools_default_none(self):
-        """tools should default to None."""
+    def test_workflow_step_tools_default_empty_list(self):
+        """tools should default to empty list."""
         step = Task(name="test_step", action="do something")
-        assert step.tools is None
+        assert step.tools == []
     
     def test_workflow_step_to_dict_includes_agent_fields(self):
         """to_dict() should include agent-related fields."""
@@ -82,25 +82,25 @@ class TestWorkflowDefaultAgentConfig:
         assert hasattr(workflow, 'default_agent_config')
         assert workflow.default_agent_config["role"] == "Assistant"
     
-    def test_workflow_has_default_llm(self):
-        """Workflow should have default_llm field."""
+    def test_workflow_has_llm(self):
+        """Workflow should have llm field (for default LLM)."""
         workflow = Workflow(
             name="test_workflow",
-            default_llm="gpt-4o-mini"
+            llm="gpt-4o-mini"
         )
-        assert hasattr(workflow, 'default_llm')
-        assert workflow.default_llm == "gpt-4o-mini"
+        assert hasattr(workflow, 'llm')
+        assert workflow.llm == "gpt-4o-mini"
     
     def test_workflow_to_dict_includes_defaults(self):
         """to_dict() should include default agent config fields."""
         workflow = Workflow(
             name="test_workflow",
             default_agent_config={"role": "Helper"},
-            default_llm="gpt-4o"
+            llm="gpt-4o"
         )
         d = workflow.to_dict()
         assert "default_agent_config" in d
-        assert "default_llm" in d
+        assert "default_llm" in d  # to_dict still uses default_llm key for serialization
 
 
 class TestCreateStepAgent:
@@ -341,7 +341,7 @@ class TestWorkflowLevelDefaults:
         
         workflow = Workflow(
             name="test_workflow",
-            default_llm="gpt-4o",
+            llm="gpt-4o",
             steps=[
                 Task(
                     name="step1",
@@ -368,7 +368,7 @@ class TestWorkflowLevelDefaults:
         
         workflow = Workflow(
             name="test_workflow",
-            default_llm="gpt-3.5-turbo",
+            llm="gpt-3.5-turbo",
             steps=[
                 Task(
                     name="step1",
