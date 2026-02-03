@@ -12,22 +12,12 @@ Pinchwork allows agents to:
 
 ## Installation
 
-Install PraisonAI and the Pinchwork integration:
-
 ```bash
 # Install PraisonAI
 pip install praisonai
 
-# Install Pinchwork integration
-pip install git+https://github.com/anneschuth/pinchwork.git#subdirectory=integrations/praisonai
-```
-
-Or clone the integration directly:
-
-```bash
-git clone https://github.com/anneschuth/pinchwork.git
-cd pinchwork/integrations/praisonai
-pip install -e .
+# Install Pinchwork with PraisonAI integration
+pip install pinchwork[praisonai]
 ```
 
 ## Quick Start
