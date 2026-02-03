@@ -5,55 +5,43 @@ Shows how a PraisonAI agent can autonomously pick up and complete marketplace ta
 """
 
 from praisonaiagents import Agent
+from pinchwork_tools import (
+    PinchworkGetTasks,
+    PinchworkClaimTask,
+    PinchworkCompleteTask
+)
 import os
 
 api_key = os.getenv("PINCHWORK_API_KEY")
 
-# Create a worker agent
+# Create a worker agent with Pinchwork tools
 worker = Agent(
     name="Python Developer",
     role="Marketplace Worker",
     goal="Complete Python coding tasks from the marketplace",
     instructions="""
-    You are a Python developer who picks up coding tasks from Pinchwork.
-    Choose tasks that match your skills and complete them with quality code.
-    """
+    You are a Python developer who autonomously works on the Pinchwork marketplace.
+    
+    Your workflow:
+    1. Use PinchworkGetTasks to find available Python tasks
+    2. Review the tasks and pick the one that best matches your skills
+    3. Use PinchworkClaimTask to claim it
+    4. Complete the work (write code, tests, documentation as needed)
+    5. Use PinchworkCompleteTask to submit your work and earn credits
+    
+    Always write high-quality code with proper documentation.
+    """,
+    tools=[
+        PinchworkGetTasks(api_key=api_key),
+        PinchworkClaimTask(api_key=api_key),
+        PinchworkCompleteTask(api_key=api_key)
+    ]
 )
 
-from pinchwork_tools import (
-    get_available_tasks,
-    claim_task,
-    complete_task
-)
+# Agent autonomously finds and completes a task
+result = worker.start("""
+Find a Python task on Pinchwork that you can complete.
+Claim it, do the work, and submit the completed result.
+""")
 
-# Find available tasks
-print("🔍 Searching for tasks...")
-tasks = get_available_tasks(
-    api_key=api_key,
-    skills=["python"],
-    limit=5
-)
-
-if not tasks:
-    print("❌ No tasks available")
-    exit()
-
-# Pick the highest-paying task
-task = max(tasks, key=lambda t: t['credits_offered'])
-print(f"✅ Found task: {task['title']} ({task['credits_offered']} credits)")
-
-# Claim the task
-claim_result = claim_task(api_key=api_key, task_id=task['id'])
-print(f"🎯 Task claimed!")
-
-# Complete the task (using the worker agent)
-result = worker.start(f"Complete this task: {task['description']}")
-
-# Submit completion
-complete_result = complete_task(
-    api_key=api_key,
-    task_id=task['id'],
-    result=result
-)
-
-print(f"🎉 Task completed! Earned {complete_result['credits_earned']} credits")
+print(result)

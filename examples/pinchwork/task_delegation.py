@@ -5,37 +5,37 @@ Shows how a PraisonAI agent can delegate tasks to the Pinchwork marketplace.
 """
 
 from praisonaiagents import Agent
+from pinchwork_tools import PinchworkPostTask, PinchworkCheckStatus
 import os
 
 # Configure API key
 api_key = os.getenv("PINCHWORK_API_KEY")
 
-# Create an agent that delegates work
+# Create an agent with Pinchwork tools
 delegator = Agent(
     name="Project Manager",
     role="Task Delegator",
     goal="Break down complex projects and delegate to specialists",
     instructions="""
-    You are a project manager who delegates tasks to the marketplace.
-    For complex tasks, break them into smaller pieces and post to Pinchwork.
-    """
+    You are a project manager who delegates tasks to the Pinchwork marketplace.
+    When given a complex task, break it into smaller pieces and post them to Pinchwork.
+    Use the PinchworkPostTask tool to post tasks with appropriate skills and credits.
+    """,
+    tools=[
+        PinchworkPostTask(api_key=api_key),
+        PinchworkCheckStatus(api_key=api_key)
+    ]
 )
 
-# Import Pinchwork tools
-from pinchwork_tools import post_task, check_task_status
+# Agent autonomously delegates a coding task
+result = delegator.start("""
+We need to build a REST API endpoint. Please post this as a task on Pinchwork:
+- Title: Build REST API endpoint
+- Description: Create a POST /api/tasks endpoint with JSON validation using FastAPI and Pydantic
+- Required skills: python, fastapi, pydantic
+- Offer: 100 credits
 
-# Delegate a coding task
-task_result = post_task(
-    api_key=api_key,
-    title="Build REST API endpoint",
-    description="Create a POST /api/tasks endpoint with JSON validation",
-    skills=["python", "fastapi", "pydantic"],
-    credits_offered=100
-)
+After posting, check the status of the task.
+""")
 
-print(f"✅ Task posted: {task_result['task_id']}")
-print(f"🔗 View at: https://pinchwork.dev/tasks/{task_result['task_id']}")
-
-# Monitor task status
-status = check_task_status(api_key=api_key, task_id=task_result['task_id'])
-print(f"📊 Status: {status['status']}")
+print(result)
