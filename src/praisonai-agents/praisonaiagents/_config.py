@@ -9,6 +9,10 @@ Environment Variables:
     PRAISONAI_TELEMETRY_ENABLED: Enable telemetry (default: false, opt-in)
     PRAISONAI_TELEMETRY_DISABLED: Disable telemetry (takes precedence)
     DO_NOT_TRACK: Standard opt-out flag (takes precedence)
+    PRAISONAI_PLUGINS: Enable plugins (default: false)
+        - "true" or "1": Enable all discovered plugins
+        - "logging,metrics": Enable specific plugins (comma-separated)
+        - "false" or "0": Disable plugins
 """
 import os
 from typing import Optional
@@ -75,6 +79,38 @@ AUTO_INSTRUMENT = _str_to_bool(
     os.environ.get('PRAISONAI_AUTO_INSTRUMENT'),
     default=False
 )
+
+
+# Plugins: Enable background plugins (hooks, metrics, logging)
+# Note: Tools and guardrails work WITHOUT this flag - they are explicit
+def _get_plugins_enabled() -> bool:
+    """Determine if plugins should be auto-enabled based on env var."""
+    env_value = os.environ.get('PRAISONAI_PLUGINS', '').lower()
+    if not env_value:
+        return False
+    if env_value in ('true', '1', 'yes', 'on'):
+        return True
+    if env_value in ('false', '0', 'no', 'off'):
+        return False
+    # Treat as comma-separated list of plugin names (implies enabled)
+    return True
+
+
+def _get_plugins_list() -> list:
+    """Get list of specific plugins to enable from env var.
+    
+    Returns:
+        List of plugin names, or empty list if all plugins enabled.
+    """
+    env_value = os.environ.get('PRAISONAI_PLUGINS', '').lower()
+    if not env_value or env_value in ('true', '1', 'yes', 'on', 'false', '0', 'no', 'off'):
+        return []
+    # Parse comma-separated list
+    return [p.strip() for p in env_value.split(',') if p.strip()]
+
+
+PLUGINS_ENABLED = _get_plugins_enabled()
+PLUGINS_LIST = _get_plugins_list()
 
 
 def missing_dependency_error(

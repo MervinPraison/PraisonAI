@@ -542,6 +542,49 @@ class Agent:
             Agent._logging_configured = True
 
         # ============================================================
+        # CONFIG-DRIVEN DEFAULTS (apply before parameter resolution)
+        # Precedence: Explicit params > Config file > Built-in defaults
+        # Only applies when param is None (not explicitly set)
+        # ============================================================
+        from ..config.loader import apply_config_defaults, get_default
+        
+        # Apply config defaults for LLM if not explicitly set
+        if llm is None and model is None:
+            config_model = get_default("model")
+            if config_model:
+                llm = config_model
+        
+        # Apply config defaults for base_url if not explicitly set
+        if base_url is None:
+            config_base_url = get_default("base_url")
+            if config_base_url:
+                base_url = config_base_url
+        
+        # Apply config defaults for feature params (memory, knowledge, etc.)
+        # These use apply_config_defaults which handles enabled=True/False logic
+        if memory is None:
+            memory = apply_config_defaults("memory", memory, MemoryConfig)
+        if knowledge is None:
+            knowledge = apply_config_defaults("knowledge", knowledge, KnowledgeConfig)
+        if planning is False:  # Only override if explicitly False (default)
+            config_planning = apply_config_defaults("planning", None, PlanningConfig)
+            if config_planning:
+                planning = config_planning
+        if reflection is None:
+            reflection = apply_config_defaults("reflection", reflection, ReflectionConfig)
+        if web is None:
+            web = apply_config_defaults("web", web, WebConfig)
+        if output is None:
+            output = apply_config_defaults("output", output, OutputConfig)
+        if execution is None:
+            execution = apply_config_defaults("execution", execution, ExecutionConfig)
+        if caching is None:
+            caching = apply_config_defaults("caching", caching, CachingConfig)
+        if autonomy is None:
+            # AutonomyConfig is in agent/autonomy.py - use dict for config defaults
+            autonomy = apply_config_defaults("autonomy", autonomy, None)
+
+        # ============================================================
         # CONSOLIDATED PARAMS EXTRACTION (agent-centric API)
         # Uses unified resolver: Instance > Config > Array > String > Bool > Default
         # Note: Imports moved to module level for performance

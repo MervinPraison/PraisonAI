@@ -457,6 +457,19 @@ _LAZY_IMPORTS = {
     'get_default_plugin_dirs': ('praisonaiagents.plugins', 'get_default_plugin_dirs'),
     'get_plugin_template': ('praisonaiagents.plugins', 'get_plugin_template'),
     'ensure_plugin_dir': ('praisonaiagents.plugins', 'ensure_plugin_dir'),
+    
+    # Config loader - for config-driven defaults
+    'get_config': ('praisonaiagents.config.loader', 'get_config'),
+    'get_default': ('praisonaiagents.config.loader', 'get_default'),
+    'get_plugins_config': ('praisonaiagents.config.loader', 'get_plugins_config'),
+    'get_defaults_config': ('praisonaiagents.config.loader', 'get_defaults_config'),
+    'apply_config_defaults': ('praisonaiagents.config.loader', 'apply_config_defaults'),
+    'validate_config': ('praisonaiagents.config.loader', 'validate_config'),
+    'get_config_path': ('praisonaiagents.config.loader', 'get_config_path'),
+    'ConfigValidationError': ('praisonaiagents.config.loader', 'ConfigValidationError'),
+    'PraisonConfig': ('praisonaiagents.config.loader', 'PraisonConfig'),
+    'PluginsConfig': ('praisonaiagents.config.loader', 'PluginsConfig'),
+    'DefaultsConfig': ('praisonaiagents.config.loader', 'DefaultsConfig'),
 }
 
 
