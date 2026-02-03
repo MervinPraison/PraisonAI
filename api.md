@@ -576,7 +576,7 @@ Methods:
 
 Types:
 ```python
-from praisonaiagents import ContextManager, ManagerConfig
+from praisonaiagents import ContextManager
 ```
 
 Methods:
@@ -594,20 +594,16 @@ Methods:
 * <code title="class ContextManager">ContextManager.<a href="./src/praisonai-agents/praisonaiagents/context/manager.py">reset</a>() -> None</code>
 * <code title="class ContextManager">ContextManager.<a href="./src/praisonai-agents/praisonaiagents/context/manager.py">set_tool_budget</a>(tool_name: str, max_tokens: int, protected: bool = False) -> None</code>
 * <code title="class ContextManager">ContextManager.<a href="./src/praisonai-agents/praisonaiagents/context/manager.py">truncate_tool_output</a>(tool_name: str, output: str) -> str</code>
-* <code title="class ManagerConfig">ManagerConfig.<a href="./src/praisonai-agents/praisonaiagents/context/manager.py">from_env</a>() -> 'ManagerConfig'</code>
-* <code title="class ManagerConfig">ManagerConfig.<a href="./src/praisonai-agents/praisonaiagents/context/manager.py">merge</a>(**overrides) -> 'ManagerConfig'</code>
-* <code title="class ManagerConfig">ManagerConfig.<a href="./src/praisonai-agents/praisonaiagents/context/manager.py">to_dict</a>() -> Dict[str, Any]</code>
 
 # Config
 
 Types:
 ```python
-from praisonaiagents import AutonomyConfig, AutonomyLevel, CachingConfig, ExecutionConfig, ExecutionPreset, GuardrailConfig, HooksConfig, KnowledgeConfig, MemoryConfig, MultiAgentExecutionConfig, MultiAgentHooksConfig, MultiAgentMemoryConfig, MultiAgentOutputConfig, MultiAgentPlanningConfig, OutputConfig, OutputPreset, PlanningConfig, ReflectionConfig, SkillsConfig, TemplateConfig, WebConfig, WebSearchProvider
+from praisonaiagents import AutonomyLevel, CachingConfig, ExecutionConfig, ExecutionPreset, GuardrailConfig, HooksConfig, KnowledgeConfig, MemoryConfig, MultiAgentExecutionConfig, MultiAgentHooksConfig, MultiAgentMemoryConfig, MultiAgentOutputConfig, MultiAgentPlanningConfig, OutputConfig, OutputPreset, PlanningConfig, ReflectionConfig, SkillsConfig, TemplateConfig, WebConfig, WebSearchProvider
 ```
 
 Methods:
 
-* <code title="class AutonomyConfig">AutonomyConfig.<a href="./src/praisonai-agents/praisonaiagents/config/feature_configs.py">to_dict</a>() -> Dict[str, Any]</code>
 * <code title="class CachingConfig">CachingConfig.<a href="./src/praisonai-agents/praisonaiagents/config/feature_configs.py">to_dict</a>() -> Dict[str, Any]</code>
 * <code title="class ExecutionConfig">ExecutionConfig.<a href="./src/praisonai-agents/praisonaiagents/config/feature_configs.py">to_dict</a>() -> Dict[str, Any]</code>
 * <code title="class GuardrailConfig">GuardrailConfig.<a href="./src/praisonai-agents/praisonaiagents/config/feature_configs.py">to_dict</a>() -> Dict[str, Any]</code>
