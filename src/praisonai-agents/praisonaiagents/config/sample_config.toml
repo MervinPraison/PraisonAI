@@ -1,0 +1,156 @@
+# PraisonAI Agents Configuration File
+# Copy this file to .praisonai/config.toml in your project directory
+# or to ~/.praisonai/config.toml for global settings
+
+# ============================================================================
+# PLUGINS CONFIGURATION
+# ============================================================================
+# Enable background plugins (hooks, metrics, logging)
+# Note: Tools and guardrails work WITHOUT enabling plugins
+
+[plugins]
+# Enable all plugins: true
+# Enable specific plugins: ["logging", "metrics"]
+# Disable: false
+enabled = false
+
+# Auto-discover plugins from default directories
+auto_discover = true
+
+# Plugin directories to scan
+directories = [
+    "./.praisonai/plugins/",
+    "~/.praisonai/plugins/"
+]
+
+# ============================================================================
+# DEFAULT SETTINGS
+# ============================================================================
+# These defaults are used when you pass True to a feature parameter
+# Example: Agent(memory=True) will use [defaults.memory] settings
+
+[defaults]
+# Default LLM model
+model = "gpt-4o-mini"
+
+# Custom LLM endpoint (optional)
+# base_url = "http://localhost:11434/v1"
+
+# Feature flags
+allow_delegation = false
+allow_code_execution = false
+code_execution_mode = "safe"
+
+# ============================================================================
+# MEMORY DEFAULTS
+# ============================================================================
+# Used when: Agent(memory=True)
+
+[defaults.memory]
+enabled = false
+backend = "file"  # file, sqlite, redis, postgres, mongodb
+# user_id = ""    # Auto-generated if empty
+auto_memory = false
+history = false
+history_limit = 10
+
+# Learning configuration
+[defaults.memory.learn]
+enabled = false
+persona = true
+insights = true
+patterns = false
+
+# ============================================================================
+# KNOWLEDGE DEFAULTS
+# ============================================================================
+# Used when: Agent(knowledge=True)
+
+[defaults.knowledge]
+enabled = false
+embedder = "openai"
+chunking_strategy = "semantic"
+chunk_size = 1000
+chunk_overlap = 200
+retrieval_k = 5
+retrieval_threshold = 0.0
+rerank = false
+
+# ============================================================================
+# PLANNING DEFAULTS
+# ============================================================================
+# Used when: Agent(planning=True)
+
+[defaults.planning]
+enabled = false
+reasoning = false
+auto_approve = false
+read_only = false
+
+# ============================================================================
+# REFLECTION DEFAULTS
+# ============================================================================
+# Used when: Agent(reflection=True)
+
+[defaults.reflection]
+enabled = false
+min_iterations = 1
+max_iterations = 3
+
+# ============================================================================
+# WEB DEFAULTS
+# ============================================================================
+# Used when: Agent(web=True)
+
+[defaults.web]
+enabled = false
+search = true
+fetch = true
+search_provider = "duckduckgo"
+max_results = 5
+
+# ============================================================================
+# OUTPUT DEFAULTS
+# ============================================================================
+# Used when: Agent(output=True) or default output mode
+
+[defaults.output]
+preset = "silent"  # silent, actions, verbose, json, stream, status
+verbose = false
+markdown = false
+stream = false
+metrics = false
+
+# ============================================================================
+# EXECUTION DEFAULTS
+# ============================================================================
+# Used when: Agent(execution=True) or default execution limits
+
+[defaults.execution]
+max_iter = 20
+max_retry_limit = 2
+# max_rpm = null
+# max_execution_time = null
+
+# ============================================================================
+# CACHING DEFAULTS
+# ============================================================================
+# Used when: Agent(caching=True)
+
+[defaults.caching]
+enabled = true
+prompt_caching = false
+
+# ============================================================================
+# AUTONOMY DEFAULTS
+# ============================================================================
+# Used when: Agent(autonomy=True)
+
+[defaults.autonomy]
+level = "suggest"  # suggest, auto_edit, full_auto
+escalation_enabled = true
+escalation_threshold = 3
+doom_loop_detection = true
+max_consecutive_failures = 3
+require_approval_for_writes = true
+require_approval_for_shell = true

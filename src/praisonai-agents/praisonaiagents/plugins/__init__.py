@@ -37,6 +37,11 @@ Usage:
 """
 
 __all__ = [
+    # Easy enable API
+    "enable",
+    "disable",
+    "list_plugins",
+    "is_enabled",
     # Core
     "PluginManager",
     "Plugin",
@@ -63,6 +68,170 @@ __all__ = [
     "get_plugin_template",
     "ensure_plugin_dir",
 ]
+
+
+# ============================================================================
+# EASY ENABLE API
+# ============================================================================
+# These functions provide a simple way to enable/disable plugins globally.
+# Zero performance impact when not called - plugins only load on enable().
+# ============================================================================
+
+# Global state for plugin system (lazy initialized)
+_plugins_enabled: bool = False
+_enabled_plugin_names: list = None  # None = all, list = specific
+
+
+def enable(plugins: list = None) -> None:
+    """Enable the plugin system.
+    
+    Discovers and enables plugins from default directories.
+    This is the main entry point for using plugins.
+    
+    Args:
+        plugins: Optional list of plugin names to enable.
+                 If None, enables all discovered plugins.
+    
+    Examples:
+        # Enable all discovered plugins
+        from praisonaiagents import plugins
+        plugins.enable()
+        
+        # Enable specific plugins only
+        plugins.enable(["logging", "metrics"])
+    
+    Note:
+        - Tools and guardrails work WITHOUT calling enable()
+        - Only background plugins (hooks, metrics, logging) need enable()
+        - Can also be enabled via PRAISONAI_PLUGINS env var
+        - Can also be enabled via .praisonai/config.toml
+    """
+    global _plugins_enabled, _enabled_plugin_names
+    
+    _plugins_enabled = True
+    _enabled_plugin_names = plugins  # None = all, list = specific
+    
+    # Get plugin manager and auto-discover
+    from .manager import get_plugin_manager
+    manager = get_plugin_manager()
+    
+    # Auto-discover plugins from default directories
+    manager.auto_discover_plugins()
+    
+    # Enable specific plugins or all
+    if plugins is not None:
+        # Enable only specified plugins
+        for name in plugins:
+            manager.enable(name)
+    else:
+        # Enable all discovered plugins
+        for plugin_info in manager.list_plugins():
+            manager.enable(plugin_info.get("name", ""))
+    
+    import logging
+    logging.debug(f"Plugins enabled: {plugins if plugins else 'all'}")
+
+
+def disable(plugins: list = None) -> None:
+    """Disable plugins.
+    
+    Args:
+        plugins: Optional list of plugin names to disable.
+                 If None, disables all plugins.
+    
+    Examples:
+        # Disable all plugins
+        plugins.disable()
+        
+        # Disable specific plugins
+        plugins.disable(["logging"])
+    """
+    global _plugins_enabled, _enabled_plugin_names
+    
+    from .manager import get_plugin_manager
+    manager = get_plugin_manager()
+    
+    if plugins is not None:
+        # Disable specific plugins
+        for name in plugins:
+            manager.disable(name)
+    else:
+        # Disable all plugins
+        _plugins_enabled = False
+        _enabled_plugin_names = None
+        for plugin_info in manager.list_plugins():
+            manager.disable(plugin_info.get("name", ""))
+
+
+def list_plugins() -> list:
+    """List all discovered plugins.
+    
+    Returns:
+        List of plugin info dicts with name, version, enabled status.
+    
+    Example:
+        from praisonaiagents import plugins
+        all_plugins = plugins.list_plugins()
+        for p in all_plugins:
+            print(f"{p['name']} v{p['version']} - {'enabled' if p['enabled'] else 'disabled'}")
+    """
+    from .manager import get_plugin_manager
+    manager = get_plugin_manager()
+    
+    # Auto-discover if not already done
+    if not manager._plugins and not manager._single_file_plugins:
+        manager.auto_discover_plugins()
+    
+    # Combine registered plugins and single-file plugins
+    result = []
+    
+    # Add registered plugins (Plugin class instances)
+    for info in manager.list_plugins():
+        if hasattr(info, 'name'):
+            # PluginInfo object
+            result.append({
+                "name": info.name,
+                "version": getattr(info, 'version', '1.0.0'),
+                "description": getattr(info, 'description', ''),
+                "enabled": manager.is_enabled(info.name),
+                "type": "registered",
+            })
+        elif isinstance(info, dict):
+            # Already a dict
+            info["enabled"] = manager.is_enabled(info.get("name", ""))
+            info["type"] = "registered"
+            result.append(info)
+    
+    # Add single-file plugins
+    for name, meta in manager._single_file_plugins.items():
+        result.append({
+            "name": name,
+            "version": meta.get("version", "1.0.0"),
+            "description": meta.get("description", ""),
+            "enabled": manager.is_enabled(name),
+            "type": "single_file",
+        })
+    
+    return result
+
+
+def is_enabled(name: str = None) -> bool:
+    """Check if plugins are enabled.
+    
+    Args:
+        name: Optional plugin name to check. If None, checks if system is enabled.
+    
+    Returns:
+        True if enabled, False otherwise.
+    """
+    global _plugins_enabled
+    
+    if name is None:
+        return _plugins_enabled
+    
+    from .manager import get_plugin_manager
+    manager = get_plugin_manager()
+    return manager.is_enabled(name)
 
 
 def __getattr__(name: str):
