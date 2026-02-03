@@ -64,7 +64,7 @@ os.environ["PINCHWORK_API_KEY"] = "pwk-your-api-key-here"
 ```python
 import os
 from praisonaiagents import Agent
-from integrations.praisonai import pinchwork_delegate, pinchwork_browse
+from pinchwork.integrations.praisonai import pinchwork_delegate, pinchwork_browse
 
 os.environ["PINCHWORK_API_KEY"] = "pwk-your-api-key-here"
 
@@ -92,7 +92,7 @@ print(result)
 ```python
 import os
 from praisonaiagents import Agent
-from integrations.praisonai import (
+from pinchwork.integrations.praisonai import (
     pinchwork_browse,
     pinchwork_deliver,
     pinchwork_pickup,

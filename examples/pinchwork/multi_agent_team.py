@@ -7,7 +7,7 @@ One agent delegates work, another picks it up and completes it.
 
 import os
 from praisonaiagents import Agent, AgentTeam, Task
-from integrations.praisonai import (
+from pinchwork.integrations.praisonai import (
     pinchwork_browse,
     pinchwork_delegate,
     pinchwork_deliver,

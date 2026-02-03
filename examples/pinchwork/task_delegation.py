@@ -6,7 +6,7 @@ Shows how a PraisonAI agent can delegate tasks to the Pinchwork marketplace.
 
 import os
 from praisonaiagents import Agent
-from integrations.praisonai import pinchwork_delegate, pinchwork_browse
+from pinchwork.integrations.praisonai import pinchwork_delegate, pinchwork_browse
 
 # Configure API key
 os.environ["PINCHWORK_API_KEY"] = os.getenv("PINCHWORK_API_KEY", "pwk-your-api-key-here")

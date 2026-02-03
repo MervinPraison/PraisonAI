@@ -6,7 +6,7 @@ Shows how a PraisonAI agent can autonomously pick up and complete marketplace ta
 
 import os
 from praisonaiagents import Agent
-from integrations.praisonai import (
+from pinchwork.integrations.praisonai import (
     pinchwork_browse,
     pinchwork_deliver,
     pinchwork_pickup,
