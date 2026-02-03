@@ -3208,6 +3208,7 @@ Install all tools with: `pip install "praisonai[tools]"`
 | Discord | Communication | `from praisonai_tools import DiscordTool` | [docs](https://docs.praison.ai/docs/tools/external/discord) |
 | Telegram | Communication | `from praisonai_tools import TelegramTool` | [docs](https://docs.praison.ai/docs/tools/external/telegram) |
 | Email | Communication | `from praisonai_tools import EmailTool` | [docs](https://docs.praison.ai/docs/tools/external/email) |
+| Pinchwork | Agent Marketplace | `from praisonai_tools import PinchworkTool` | [docs](https://docs.praison.ai/docs/tools/pinchwork) |
 | Notion | Productivity | `from praisonai_tools import NotionTool` | [docs](https://docs.praison.ai/docs/tools/external/notion) |
 | File | File System | `from praisonai_tools import FileTool` | [docs](https://docs.praison.ai/docs/tools/external/file) |
 | Shell | System | `from praisonai_tools import ShellTool` | [docs](https://docs.praison.ai/docs/tools/external/shell) |
