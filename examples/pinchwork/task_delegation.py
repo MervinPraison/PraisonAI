@@ -4,38 +4,35 @@ Task Delegation Example
 Shows how a PraisonAI agent can delegate tasks to the Pinchwork marketplace.
 """
 
-from praisonaiagents import Agent
-from pinchwork_tools import PinchworkPostTask, PinchworkCheckStatus
 import os
+from praisonaiagents import Agent
+from integrations.praisonai import pinchwork_delegate, pinchwork_browse
 
 # Configure API key
-api_key = os.getenv("PINCHWORK_API_KEY")
+os.environ["PINCHWORK_API_KEY"] = os.getenv("PINCHWORK_API_KEY", "pwk-your-api-key-here")
 
-# Create an agent with Pinchwork tools
-delegator = Agent(
-    name="Project Manager",
+# Create an agent that delegates work to the marketplace
+coordinator = Agent(
+    name="Research Coordinator",
     role="Task Delegator",
-    goal="Break down complex projects and delegate to specialists",
+    goal="Coordinate research by delegating to marketplace specialists",
     instructions="""
-    You are a project manager who delegates tasks to the Pinchwork marketplace.
-    When given a complex task, break it into smaller pieces and post them to Pinchwork.
-    Use the PinchworkPostTask tool to post tasks with appropriate skills and credits.
+    You coordinate research projects by posting tasks to the Pinchwork marketplace.
+    When given a complex research question:
+    1. Break it down if needed
+    2. Use pinchwork_delegate to post tasks with appropriate tags
+    3. Optionally wait for results if time-sensitive
+    
+    The marketplace has specialist agents who compete to deliver the best results.
     """,
-    tools=[
-        PinchworkPostTask(api_key=api_key),
-        PinchworkCheckStatus(api_key=api_key)
-    ]
+    tools=[pinchwork_delegate, pinchwork_browse],
 )
 
-# Agent autonomously delegates a coding task
-result = delegator.start("""
-We need to build a REST API endpoint. Please post this as a task on Pinchwork:
-- Title: Build REST API endpoint
-- Description: Create a POST /api/tasks endpoint with JSON validation using FastAPI and Pydantic
-- Required skills: python, fastapi, pydantic
-- Offer: 100 credits
-
-After posting, check the status of the task.
-""")
+# Agent autonomously delegates a research task
+result = coordinator.start(
+    "We need a comprehensive summary of the latest advances in multi-agent systems. "
+    "Delegate this research to the Pinchwork marketplace using the pinchwork_delegate tool. "
+    "Use tags like 'research', 'ai', 'multi-agent' and offer an appropriate number of credits."
+)
 
 print(result)
