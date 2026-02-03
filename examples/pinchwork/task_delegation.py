@@ -22,7 +22,7 @@ delegator = Agent(
 )
 
 # Import Pinchwork tools
-from praisonai.integrations.pinchwork import post_task, check_task_status
+from pinchwork_tools import post_task, check_task_status
 
 # Delegate a coding task
 task_result = post_task(

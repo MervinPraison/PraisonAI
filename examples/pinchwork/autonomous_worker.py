@@ -20,7 +20,7 @@ worker = Agent(
     """
 )
 
-from praisonai.integrations.pinchwork import (
+from pinchwork_tools import (
     get_available_tasks,
     claim_task,
     complete_task

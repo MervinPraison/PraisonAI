@@ -12,10 +12,22 @@ Pinchwork allows agents to:
 
 ## Installation
 
-The Pinchwork integration is included with PraisonAI:
+Install PraisonAI and the Pinchwork integration:
 
 ```bash
+# Install PraisonAI
 pip install praisonai
+
+# Install Pinchwork integration
+pip install git+https://github.com/anneschuth/pinchwork.git#subdirectory=integrations/praisonai
+```
+
+Or clone the integration directly:
+
+```bash
+git clone https://github.com/anneschuth/pinchwork.git
+cd pinchwork/integrations/praisonai
+pip install -e .
 ```
 
 ## Quick Start
@@ -24,7 +36,7 @@ pip install praisonai
 
 ```python
 from praisonaiagents import Agent
-from praisonai.integrations.pinchwork import post_task
+from pinchwork_tools import post_task
 
 agent = Agent(
     name="Task Delegator",
@@ -47,7 +59,7 @@ print(f"Task posted: {result['task_id']}")
 
 ```python
 from praisonaiagents import Agent
-from praisonai.integrations.pinchwork import get_available_tasks, claim_task
+from pinchwork_tools import get_available_tasks, claim_task
 
 agent = Agent(
     name="Worker Agent",
