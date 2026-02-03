@@ -33,6 +33,9 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional, Callable, Tuple, Union
 from enum import Enum
 
+# Import AutonomyConfig from canonical location (no circular dep)
+from ..agent.autonomy import AutonomyConfig
+
 
 class MemoryBackend(str, Enum):
     """Memory storage backends."""
@@ -953,54 +956,6 @@ class AutonomyLevel(str, Enum):
     AUTO_EDIT = "auto_edit"
     FULL_AUTO = "full_auto"
 
-
-@dataclass
-class AutonomyConfig:
-    """
-    Configuration for agent autonomy behavior.
-    
-    Controls escalation, doom-loop detection, and approval policies.
-    
-    Usage:
-        # Simple enable
-        Agent(autonomy=True)
-        
-        # With config
-        Agent(autonomy=AutonomyConfig(
-            level="auto_edit",
-            escalation_enabled=True,
-            doom_loop_detection=True,
-            max_consecutive_failures=3,
-        ))
-    """
-    # Autonomy level
-    level: Union[str, AutonomyLevel] = AutonomyLevel.SUGGEST
-    
-    # Escalation pipeline
-    escalation_enabled: bool = True
-    escalation_threshold: int = 3
-    
-    # Doom loop detection
-    doom_loop_detection: bool = True
-    max_consecutive_failures: int = 3
-    
-    # Approval policies
-    require_approval_for_writes: bool = True
-    require_approval_for_shell: bool = True
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "level": self.level.value if isinstance(self.level, AutonomyLevel) else self.level,
-            "escalation_enabled": self.escalation_enabled,
-            "escalation_threshold": self.escalation_threshold,
-            "doom_loop_detection": self.doom_loop_detection,
-            "max_consecutive_failures": self.max_consecutive_failures,
-            "require_approval_for_writes": self.require_approval_for_writes,
-            "require_approval_for_shell": self.require_approval_for_shell,
-        }
-
-
 # Type aliases for Union types used in Agent.__init__
 MemoryParam = Union[bool, MemoryConfig, Any]  # Any = MemoryManager instance
 KnowledgeParam = Union[bool, List[str], KnowledgeConfig, Any]  # Any = KnowledgeBase instance
@@ -1014,7 +969,7 @@ TemplateParam = TemplateConfig
 CachingParam = Union[bool, CachingConfig]
 HooksParam = Union[List[Any], HooksConfig]
 SkillsParam = Union[List[str], SkillsConfig]
-AutonomyParam = Union[bool, Dict[str, Any], AutonomyConfig]
+AutonomyParam = Union[bool, Dict[str, Any], "AutonomyConfig"]
 
 
 # =============================================================================

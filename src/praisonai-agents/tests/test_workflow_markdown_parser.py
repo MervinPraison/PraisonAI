@@ -130,9 +130,11 @@ Write summary
         steps = manager._parse_steps(body)
         
         assert len(steps) == 3
-        assert steps[2].context_from is not None
-        assert "Research" in steps[2].context_from
-        assert "Analyze" in steps[2].context_from
+        # context_from is now accessed via context.from_steps (TaskContextConfig)
+        assert steps[2].context is not None
+        assert hasattr(steps[2].context, 'from_steps')
+        assert "Research" in steps[2].context.from_steps
+        assert "Analyze" in steps[2].context.from_steps
 
 
 class TestParseRetainFullContext:
@@ -174,7 +176,13 @@ Process the data
         steps = manager._parse_steps(body)
         
         assert len(steps) == 1
-        assert steps[0].retain_full_context is True
+        # When only retain_full_context: true is set (the default), no TaskContextConfig is created
+        # This is because the SDK only creates config when: context_from is set OR retain_full is False
+        # So context will be empty list (default from Task.__init__)
+        context = steps[0].context
+        assert context == [] or context is None or (
+            hasattr(context, 'retain_full') and context.retain_full is True
+        )
     
     def test_retain_full_context_default_true(self):
         """retain_full_context should default to True."""
@@ -191,7 +199,9 @@ Process the data
         steps = manager._parse_steps(body)
         
         assert len(steps) == 1
-        assert steps[0].retain_full_context is True
+        # When retain_full_context is not explicitly set, context may be None or empty list
+        # Default behavior is to retain full context (no filtering)
+        assert steps[0].context is None or (hasattr(steps[0].context, 'retain_full') and steps[0].context.retain_full is True) or steps[0].context == []
 
 
 class TestParseOutputVariable:
@@ -249,7 +259,8 @@ Do something
             workflow = manager._load_workflow(Path(temp_path))
             
             assert workflow is not None
-            assert workflow.default_llm == "gpt-4o"
+            # AgentFlow uses 'llm' field, not 'default_llm'
+            assert workflow.llm == "gpt-4o"
             # Planning is now a config object, check _planning_enabled
             assert workflow._planning_enabled is True
             assert workflow._planning_llm == "gpt-4o-mini"
@@ -327,8 +338,9 @@ Write report based on analysis
         # Step 2
         assert steps[1].name == "Analyze"
         assert steps[1].agent_config["role"] == "Analyst"
-        assert steps[1].context_from == ["Research"]
-        assert steps[1].retain_full_context is False
+        # context_from is now accessed via context.from_steps (TaskContextConfig)
+        assert steps[1].context.from_steps == ["Research"]
+        assert steps[1].context.retain_full is False
         
         # Step 3
         assert steps[2].name == "Write"

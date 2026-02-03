@@ -272,6 +272,7 @@ class ContextConfig:
     output_reserve: int = 8000
     history_ratio: float = 0.6  # 60% of usable for history
     tool_output_max: int = 10000  # Max tokens per tool output
+    default_tool_output_max: int = 10000  # Alias for tool_output_max (ManagerConfig compat)
     
     # Pruning
     prune_after_tokens: int = 40000
@@ -308,6 +309,38 @@ class ContextConfig:
     ])
     aggregate_max_tokens: int = 4000   # Max tokens for aggregated context
     
+    # -------------------------------------------------------------------------
+    # Internal fields (from ManagerConfig consolidation)
+    # These are typically set by the system, not users directly
+    # -------------------------------------------------------------------------
+    
+    # Compression benefit check
+    compression_min_gain_pct: float = 5.0
+    compression_max_attempts: int = 3
+    
+    # Per-tool budgets (advanced)
+    tool_budgets: Dict[str, Any] = field(default_factory=dict)  # tool_name -> PerToolBudget
+    tool_summarize_limits: Dict[str, int] = field(default_factory=dict)  # Per-tool min_chars
+    
+    # Estimation modes
+    estimation_mode: str = "heuristic"  # heuristic, accurate, validated
+    log_estimation_mismatch: bool = False
+    mismatch_threshold_pct: float = 15.0
+    
+    # Extended monitoring options
+    monitor_enabled: bool = False  # Enable monitoring
+    monitor_path: str = "./context.txt"  # Path for monitoring output
+    monitor_format: str = "human"  # human, json
+    monitor_frequency: str = "turn"  # turn, tool_call, manual, overflow
+    monitor_write_mode: str = "sync"  # sync, async
+    redact_sensitive: bool = True
+    snapshot_timing: str = "post_optimization"  # pre_optimization, post_optimization, both
+    allow_absolute_paths: bool = False
+    
+    # Source tracking
+    source: str = "defaults"  # defaults, env, config_file, cli
+
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         result = asdict(self)
@@ -338,6 +371,73 @@ class ContextConfig:
             output_reserve=8000,
             history_ratio=0.6,
         )
+    
+    @classmethod
+    def from_env(cls) -> "ContextConfig":
+        """Load config from environment variables.
+        
+        Reads PRAISONAI_CONTEXT_* environment variables.
+        """
+        import os
+        
+        def get_bool(key: str, default: bool) -> bool:
+            val = os.getenv(key, str(default)).lower()
+            return val in ("true", "1", "yes", "on")
+        
+        def get_float(key: str, default: float) -> float:
+            try:
+                return float(os.getenv(key, str(default)))
+            except ValueError:
+                return default
+        
+        def get_int(key: str, default: int) -> int:
+            try:
+                return int(os.getenv(key, str(default)))
+            except ValueError:
+                return default
+        
+        strategy_str = os.getenv("PRAISONAI_CONTEXT_STRATEGY", "smart")
+        try:
+            strategy = OptimizerStrategy(strategy_str)
+        except ValueError:
+            strategy = OptimizerStrategy.SMART
+        
+        return cls(
+            auto_compact=get_bool("PRAISONAI_CONTEXT_AUTO_COMPACT", True),
+            compact_threshold=get_float("PRAISONAI_CONTEXT_THRESHOLD", 0.8),
+            strategy=strategy,
+            compression_min_gain_pct=get_float("PRAISONAI_CONTEXT_COMPRESSION_MIN_GAIN", 5.0),
+            compression_max_attempts=get_int("PRAISONAI_CONTEXT_COMPRESSION_MAX_ATTEMPTS", 3),
+            output_reserve=get_int("PRAISONAI_CONTEXT_OUTPUT_RESERVE", 8000),
+            tool_output_max=get_int("PRAISONAI_CONTEXT_TOOL_OUTPUT_MAX", 10000),
+            default_tool_output_max=get_int("PRAISONAI_CONTEXT_TOOL_OUTPUT_MAX", 10000),
+            log_estimation_mismatch=get_bool("PRAISONAI_CONTEXT_LOG_MISMATCH", False),
+            monitor_enabled=get_bool("PRAISONAI_CONTEXT_MONITOR", False),
+            monitor_path=os.getenv("PRAISONAI_CONTEXT_MONITOR_PATH", "./context.txt"),
+            monitor_format=os.getenv("PRAISONAI_CONTEXT_MONITOR_FORMAT", "human"),
+            monitor_frequency=os.getenv("PRAISONAI_CONTEXT_MONITOR_FREQUENCY", "turn"),
+            monitor_write_mode=os.getenv("PRAISONAI_CONTEXT_MONITOR_WRITE_MODE", "sync"),
+            redact_sensitive=get_bool("PRAISONAI_CONTEXT_REDACT", True),
+            source="env",
+        )
+    
+    def merge(self, **overrides) -> "ContextConfig":
+        """Create new config with overrides applied."""
+        current = self.to_dict()
+        
+        for key, value in overrides.items():
+            if value is not None and key in current:
+                current[key] = value
+        
+        # Handle enum conversions
+        if isinstance(current.get("strategy"), str):
+            try:
+                current["strategy"] = OptimizerStrategy(current["strategy"])
+            except ValueError:
+                current["strategy"] = OptimizerStrategy.SMART
+        
+        return ContextConfig(**{k: v for k, v in current.items() 
+                               if k in ContextConfig.__dataclass_fields__})
 
 
 @runtime_checkable

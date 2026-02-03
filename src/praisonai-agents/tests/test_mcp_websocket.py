@@ -262,6 +262,14 @@ class TestWebSocketKeepalive:
     
     def test_ping_interval_configurable(self):
         """Test that ping interval is configurable."""
+        import asyncio
+        # Create event loop for asyncio.Queue() used in __init__
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
         from praisonaiagents.mcp.mcp_websocket import WebSocketTransport
         
         transport = WebSocketTransport(

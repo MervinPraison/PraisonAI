@@ -98,6 +98,7 @@ class TestStructuredOutputWiring:
         agent._yaml_action = "Test action"
         agent._yaml_output_variable = "result"
         agent._yaml_output_json = {"type": "array", "items": {"type": "string"}}
+        agent._yaml_output_pydantic = None  # Explicitly None to avoid conflict
         agent._yaml_step_name = "test_step"
         
         # Mock the chat method
@@ -109,7 +110,7 @@ class TestStructuredOutputWiring:
         
         # Verify Task has output_json
         assert isinstance(normalized, Task)
-        assert normalized._output_json == {"type": "array", "items": {"type": "string"}}
+        assert normalized.output_json == {"type": "array", "items": {"type": "string"}}
         
     def test_normalize_step_includes_output_pydantic(self):
         """Test that _normalize_single_step transfers output_pydantic to Task."""
@@ -121,6 +122,7 @@ class TestStructuredOutputWiring:
         agent.tools = None
         agent._yaml_action = "Test action"
         agent._yaml_output_variable = "result"
+        agent._yaml_output_json = None  # Explicitly None to avoid conflict
         agent._yaml_output_pydantic = "TopicList"
         agent._yaml_step_name = "test_step"
         agent.chat = Mock(return_value="test output")
@@ -129,7 +131,7 @@ class TestStructuredOutputWiring:
         normalized = workflow._normalize_single_step(agent, 0)
         
         assert isinstance(normalized, Task)
-        assert normalized._output_pydantic == "TopicList"
+        assert normalized.output_pydantic == "TopicList"
 
 
 class TestStructuredOutputExecution:
@@ -144,12 +146,12 @@ class TestStructuredOutputExecution:
         mock_agent.name = "test_agent"
         mock_agent.chat = Mock(return_value='["topic1", "topic2"]')
         
-        # Create step with output_json
+        # Create step with output_json (the actual SDK parameter)
         step = Task(
             name="test_step",
             agent=mock_agent,
             action="Find topics",
-            output={"json_model": {"type": "array", "items": {"type": "string"}}}
+            output_json={"type": "array", "items": {"type": "string"}}
         )
         
         # Create and run workflow

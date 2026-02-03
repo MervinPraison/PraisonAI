@@ -81,6 +81,7 @@ class Task:
         # ============================================================
         skip_on_failure: bool = False,  # Allow workflow to continue if this task fails
         retry_delay: float = 0.0,  # Seconds between retries (supports exponential backoff)
+        on_error: str = "stop",  # Flow control: "stop", "continue", or "retry"
         # ============================================================
         # NEW PARAMS FROM WORKFLOWSTEP (Phase 4 Consolidation)
         # ============================================================
@@ -97,6 +98,11 @@ class Task:
         execution: Optional[Any] = None,
         routing: Optional[Dict[str, List[str]]] = None,  # Renamed from condition for clarity
         output_config: Optional[Any] = None,
+        # ============================================================
+        # UNIFIED OUTPUT PARAMETER (consolidates all output configs)
+        # ============================================================
+        # Single output param that handles: file path (str), Pydantic model, TaskOutputConfig
+        output: Optional[Any] = None,
         # ============================================================
         # UNIFIED CONDITION SYNTAX (same as AgentFlow)
         # ============================================================
@@ -226,11 +232,56 @@ class Task:
         self.loop_var = loop_var
         # Consolidated config objects (from Task)
         self.execution = execution
+        # Resolve on_error from execution config or direct param
+        # execution config takes precedence if it has on_error set
+        if execution is not None and hasattr(execution, 'on_error'):
+            self.on_error = execution.on_error
+        else:
+            self.on_error = on_error
         # Handle routing parameter - use routing if provided, else fall back to condition
         if routing is not None:
             self.condition = routing
         self.routing = self.condition  # Alias for backward compat
         self.output_config = output_config
+        # ============================================================
+        # UNIFIED OUTPUT PARAMETER RESOLUTION
+        # ============================================================
+        # Resolve unified 'output' param (consolidates output_file, output_json, output_pydantic, output_config)
+        # Priority: unified 'output' param > individual params (for backward compat)
+        if output is not None:
+            if isinstance(output, str):
+                # String = file path
+                self.output_file = output
+            elif hasattr(output, 'model_fields') or hasattr(output, '__fields__'):
+                # Pydantic model class (v2 or v1)
+                if isinstance(output, type):
+                    # It's a class, use for output_json
+                    self.output_json = output
+                else:
+                    # It's an instance, use for output_pydantic
+                    self.output_pydantic = type(output)
+            elif hasattr(output, 'file') or hasattr(output, 'variable'):
+                # TaskOutputConfig or similar config object
+                if hasattr(output, 'file') and output.file:
+                    self.output_file = output.file
+                if hasattr(output, 'json_model') and output.json_model:
+                    self.output_json = output.json_model
+                if hasattr(output, 'pydantic_model') and output.pydantic_model:
+                    self.output_pydantic = output.pydantic_model
+                if hasattr(output, 'variable') and output.variable:
+                    self.output_variable = output.variable
+            elif isinstance(output, dict):
+                # Dict config
+                if 'file' in output:
+                    self.output_file = output['file']
+                if 'json_model' in output or 'json' in output:
+                    self.output_json = output.get('json_model') or output.get('json')
+                if 'pydantic_model' in output or 'pydantic' in output:
+                    self.output_pydantic = output.get('pydantic_model') or output.get('pydantic')
+                if 'variable' in output:
+                    self.output_variable = output.get('variable')
+        # Store the original output param for reference
+        self.output = output
         # ============================================================
         # UNIFIED CONDITION SYNTAX (same as AgentFlow)
         # ============================================================
@@ -246,7 +297,11 @@ class Task:
         self.hooks = hooks
         self.caching = caching
         # Output variable name - for storing output in workflow variables
-        self.output_variable = output_variable
+        # Only set from param if explicitly provided (unified output may have set it)
+        if output_variable is not None:
+            self.output_variable = output_variable
+        elif not hasattr(self, 'output_variable'):
+            self.output_variable = None
 
         # Set logger level based on config verbose level
         verbose = self.config.get("verbose", 0)

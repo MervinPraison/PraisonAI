@@ -85,3 +85,4 @@ issue_details.json
 
 *.log
 .internal
+.praisonai
