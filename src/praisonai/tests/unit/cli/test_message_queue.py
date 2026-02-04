@@ -11,6 +11,8 @@ Tests for:
 import time
 import threading
 
+import pytest
+
 
 # ============================================================================
 # 1. MessageQueue Tests - FIFO operations
@@ -525,8 +527,13 @@ class TestAsyncProcessor:
         assert not processor.is_running
         assert "done" in results
     
+    @pytest.mark.allow_sleep
     def test_is_running_property(self):
-        """Should track running state."""
+        """Should track running state.
+        
+        Note: This test requires real time.sleep for timing assertions,
+        so we mark it to skip the fast_sleep fixture.
+        """
         from praisonai.cli.features.message_queue import AsyncProcessor
         import time
         

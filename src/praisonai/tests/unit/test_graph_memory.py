@@ -35,6 +35,8 @@ def test_memory_config():
     Note: The memory module uses lazy loading with cache dictionaries,
     not module-level constants. We patch the cache directly.
     """
+    pytest.importorskip("chromadb", reason="chromadb not installed")
+    
     try:
         from praisonaiagents.memory import Memory
         import praisonaiagents.memory.memory as memory_module
@@ -80,9 +82,14 @@ def test_memory_config():
         print(f"❌ Memory configuration test failed: {e}")
         assert False, f"Memory configuration test failed: {e}"
 
-@patch('praisonaiagents.knowledge.knowledge.Knowledge')
-def test_knowledge_config(mock_knowledge_class):
+def test_knowledge_config():
     """Test knowledge configuration with graph support"""
+    # Skip if knowledge dependencies not installed
+    try:
+        from praisonaiagents.knowledge.knowledge import Knowledge
+    except ImportError:
+        pytest.skip("praisonaiagents[knowledge] not installed")
+    
     try:
         # Mock the Knowledge class to avoid real API calls
         mock_knowledge_instance = MagicMock()
@@ -103,54 +110,52 @@ def test_knowledge_config(mock_knowledge_class):
                 }
             }
         }
-        mock_knowledge_class.return_value = mock_knowledge_instance
         
-        from praisonaiagents.knowledge import Knowledge
-        
-        # Test basic knowledge config
-        basic_config = {
-            "vector_store": {
-                "provider": "chroma",
-                "config": {
-                    "collection_name": "test_collection",
-                    "path": ".test_knowledge"
+        with patch.object(Knowledge, '__new__', return_value=mock_knowledge_instance):
+            # Test basic knowledge config
+            basic_config = {
+                "vector_store": {
+                    "provider": "chroma",
+                    "config": {
+                        "collection_name": "test_collection",
+                        "path": ".test_knowledge"
+                    }
                 }
             }
-        }
-        
-        knowledge = Knowledge(config=basic_config, verbose=0)
-        print("✅ Basic knowledge configuration works")
-        
-        # Test knowledge with graph config
-        graph_config = {
-            "vector_store": {
-                "provider": "chroma",
-                "config": {
-                    "collection_name": "test_graph_collection",
-                    "path": ".test_graph_knowledge"
-                }
-            },
-            "graph_store": {
-                "provider": "memgraph",
-                "config": {
-                    "url": "bolt://localhost:7687",
-                    "username": "memgraph",
-                    "password": ""
-                }
-            }
-        }
-        
-        knowledge_graph = Knowledge(config=graph_config, verbose=0)
-        print("✅ Graph knowledge configuration created")
-        
-        # Check if config contains graph_store
-        final_config = knowledge_graph.config
-        if "graph_store" in final_config:
-            print("✅ Graph store configuration preserved in knowledge config")
-        else:
-            print("❌ Graph store configuration not found in knowledge config")
-            assert False, "Graph store configuration not found in knowledge config"
             
+            knowledge = Knowledge(config=basic_config, verbose=0)
+            print("✅ Basic knowledge configuration works")
+            
+            # Test knowledge with graph config
+            graph_config = {
+                "vector_store": {
+                    "provider": "chroma",
+                    "config": {
+                        "collection_name": "test_graph_collection",
+                        "path": ".test_graph_knowledge"
+                    }
+                },
+                "graph_store": {
+                    "provider": "memgraph",
+                    "config": {
+                        "url": "bolt://localhost:7687",
+                        "username": "memgraph",
+                        "password": ""
+                    }
+                }
+            }
+            
+            knowledge_graph = Knowledge(config=graph_config, verbose=0)
+            print("✅ Graph knowledge configuration created")
+            
+            # Check if config contains graph_store
+            final_config = knowledge_graph.config
+            if "graph_store" in final_config:
+                print("✅ Graph store configuration preserved in knowledge config")
+            else:
+                print("❌ Graph store configuration not found in knowledge config")
+                assert False, "Graph store configuration not found in knowledge config"
+                
     except Exception as e:
         print(f"❌ Knowledge configuration test failed: {e}")
         assert False, f"Knowledge configuration test failed: {e}"

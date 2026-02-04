@@ -88,7 +88,8 @@ class A2UEventBus:
         )
         
         self._subscriptions[subscription_id] = subscription
-        self._queues[subscription_id] = asyncio.Queue()
+        # Queue is created lazily via _get_queue() for Python 3.9 compatibility
+        # where asyncio.Queue() requires an event loop at creation time.
         
         if stream_name not in self._streams:
             self._streams[stream_name] = set()
@@ -96,6 +97,15 @@ class A2UEventBus:
         
         logger.debug(f"Created subscription {subscription_id} for stream {stream_name}")
         return subscription
+    
+    def _get_queue(self, subscription_id: str) -> asyncio.Queue:
+        """Get or create the queue for a subscription.
+        
+        Deferred creation for Python 3.9 compatibility.
+        """
+        if subscription_id not in self._queues:
+            self._queues[subscription_id] = asyncio.Queue()
+        return self._queues[subscription_id]
     
     def unsubscribe(self, subscription_id: str) -> bool:
         """
@@ -118,7 +128,7 @@ class A2UEventBus:
         
         # Clean up
         del self._subscriptions[subscription_id]
-        del self._queues[subscription_id]
+        self._queues.pop(subscription_id, None)  # May not exist due to lazy creation
         
         logger.debug(f"Removed subscription {subscription_id}")
         return True
@@ -141,7 +151,7 @@ class A2UEventBus:
         for sub_id in self._streams[stream_name]:
             subscription = self._subscriptions.get(sub_id)
             if subscription and subscription.matches_event(event):
-                await self._queues[sub_id].put(event)
+                await self._get_queue(sub_id).put(event)
                 count += 1
         
         logger.debug(f"Published event {event.event_type} to {count} subscribers")
@@ -185,10 +195,10 @@ class A2UEventBus:
         Yields:
             A2UEvent objects
         """
-        if subscription_id not in self._queues:
+        if subscription_id not in self._subscriptions:
             return
         
-        queue = self._queues[subscription_id]
+        queue = self._get_queue(subscription_id)
         
         while True:
             try:

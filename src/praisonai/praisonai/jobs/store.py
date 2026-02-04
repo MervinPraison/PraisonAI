@@ -76,11 +76,23 @@ class InMemoryJobStore(JobStore):
         self._jobs: Dict[str, Job] = {}
         self._idempotency_keys: Dict[str, str] = {}  # key -> job_id
         self._max_jobs = max_jobs
-        self._lock = asyncio.Lock()
+        # Note: asyncio.Lock() is created lazily via _get_lock() to support
+        # Python 3.9 where Lock() requires an event loop at creation time.
+        self.__lock: Optional[asyncio.Lock] = None
+    
+    def _get_lock(self) -> asyncio.Lock:
+        """Get the asyncio lock, creating it lazily if needed.
+        
+        This deferred creation is required for Python 3.9 compatibility
+        where asyncio.Lock() calls get_event_loop() at creation time.
+        """
+        if self.__lock is None:
+            self.__lock = asyncio.Lock()
+        return self.__lock
     
     async def save(self, job: Job) -> None:
         """Save or update a job."""
-        async with self._lock:
+        async with self._get_lock():
             self._jobs[job.id] = job
             
             # Track idempotency key
@@ -161,7 +173,7 @@ class InMemoryJobStore(JobStore):
     
     async def delete(self, job_id: str) -> bool:
         """Delete a job by ID."""
-        async with self._lock:
+        async with self._get_lock():
             job = self._jobs.pop(job_id, None)
             if job:
                 if job.idempotency_key:
@@ -171,7 +183,7 @@ class InMemoryJobStore(JobStore):
     
     async def cleanup_old_jobs(self, max_age_seconds: int = 86400) -> int:
         """Remove jobs older than max_age_seconds."""
-        async with self._lock:
+        async with self._get_lock():
             cutoff = datetime.utcnow() - timedelta(seconds=max_age_seconds)
             to_remove = []
             

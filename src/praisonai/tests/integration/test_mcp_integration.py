@@ -4,6 +4,9 @@ import sys
 import os
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
 
+# Skip if mcp module is not installed
+mcp = pytest.importorskip("mcp", reason="MCP module not installed. Install with: pip install mcp")
+
 # Add the source path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'praisonai-agents'))
 

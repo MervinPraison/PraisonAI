@@ -323,6 +323,7 @@ class SmartBackend:
         # Check if ripgrep is available
         rg = self._get_ripgrep()
         if not rg.is_available():
+            self._use_ripgrep = False
             return False
         
         # Count files if not already counted for this path

@@ -54,14 +54,25 @@ class QueueScheduler:
         # All runs by ID for quick lookup
         self._all_runs: Dict[str, QueuedRun] = {}
         
-        # Lock for thread safety
-        self._lock = asyncio.Lock()
+        # Note: asyncio.Lock() is created lazily via _get_lock() to support
+        # Python 3.9 where Lock() requires an event loop at creation time.
+        self.__lock: Optional[asyncio.Lock] = None
         
         # Event callbacks
         self._event_callbacks: List[Callable[[QueueEvent], None]] = []
         
         # Cancellation tokens
         self._cancel_tokens: Set[str] = set()
+    
+    def _get_lock(self) -> asyncio.Lock:
+        """Get the asyncio lock, creating it lazily if needed.
+        
+        This deferred creation is required for Python 3.9 compatibility
+        where asyncio.Lock() calls get_event_loop() at creation time.
+        """
+        if self.__lock is None:
+            self.__lock = asyncio.Lock()
+        return self.__lock
     
     def add_event_callback(self, callback: Callable[[QueueEvent], None]) -> None:
         """Add a callback for queue events."""
@@ -99,7 +110,7 @@ class QueueScheduler:
             QueueFullError: If queue is at capacity.
             ValueError: If run_id already exists (when check_duplicate=True).
         """
-        async with self._lock:
+        async with self._get_lock():
             # Check for duplicates
             if check_duplicate and run.run_id in self._all_runs:
                 raise ValueError(f"Run {run.run_id} already exists")
@@ -135,7 +146,7 @@ class QueueScheduler:
         Returns:
             The next run, or None if no run is available.
         """
-        async with self._lock:
+        async with self._get_lock():
             if not self._can_start_new():
                 return None
             
@@ -184,7 +195,7 @@ class QueueScheduler:
         Returns:
             The completed run, or None if not found.
         """
-        async with self._lock:
+        async with self._get_lock():
             run = self._running.pop(run_id, None)
             if run is None:
                 logger.warning(f"Run {run_id} not found in running")
@@ -223,7 +234,7 @@ class QueueScheduler:
         Returns:
             The failed run, or None if not found.
         """
-        async with self._lock:
+        async with self._get_lock():
             run = self._running.pop(run_id, None)
             if run is None:
                 logger.warning(f"Run {run_id} not found in running")
@@ -255,7 +266,7 @@ class QueueScheduler:
         Returns:
             True if cancelled, False if not found.
         """
-        async with self._lock:
+        async with self._get_lock():
             # Check if running
             if run_id in self._running:
                 run = self._running.pop(run_id)
@@ -315,7 +326,7 @@ class QueueScheduler:
         Returns:
             True if updated, False if not found or not editable.
         """
-        async with self._lock:
+        async with self._get_lock():
             run = self._all_runs.get(run_id)
             if run is None:
                 return False
@@ -348,7 +359,7 @@ class QueueScheduler:
         Returns:
             The new run_id, or None if retry not allowed.
         """
-        async with self._lock:
+        async with self._get_lock():
             # Find the original run
             original = self._all_runs.get(run_id)
             if original is None:
@@ -398,7 +409,7 @@ class QueueScheduler:
         
         Note: The worker must check for pause state and handle accordingly.
         """
-        async with self._lock:
+        async with self._get_lock():
             if run_id not in self._running:
                 return False
             
@@ -414,7 +425,7 @@ class QueueScheduler:
     
     async def resume(self, run_id: str) -> bool:
         """Resume a paused run."""
-        async with self._lock:
+        async with self._get_lock():
             if run_id not in self._running:
                 return False
             
@@ -487,7 +498,7 @@ class QueueScheduler:
     
     async def clear_queue(self) -> int:
         """Clear all queued (not running) runs."""
-        async with self._lock:
+        async with self._get_lock():
             count = 0
             for priority in RunPriority:
                 count += len(self._queues[priority])

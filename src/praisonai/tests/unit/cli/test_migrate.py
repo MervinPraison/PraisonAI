@@ -314,14 +314,19 @@ class TestCLIIntegration:
     def test_migrate_help_is_generic(self):
         """CLI help should use generic terminology."""
         import subprocess
+        import sys
         result = subprocess.run(
-            ["python", "-m", "praisonai", "migrate", "--help"],
+            [sys.executable, "-m", "praisonai", "migrate", "--help"],
             capture_output=True,
             text=True,
             timeout=30
         )
         # Help text should be generic, not mention specific competitor frameworks
         help_text = result.stdout + result.stderr
+        # Skip if run failed due to missing praisonaiagents (integration env issue, not test issue)
+        if "praisonaiagents" in help_text.lower() and "not installed" in help_text.lower():
+            import pytest
+            pytest.skip("praisonaiagents not installed - cannot test migrate CLI")
         # Should have help content
         assert "migrate" in help_text.lower() or "usage" in help_text.lower() or result.returncode == 0
     

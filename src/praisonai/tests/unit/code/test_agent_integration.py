@@ -3,6 +3,7 @@ Integration tests for praisonai.code agent tools.
 """
 
 import os
+import sys
 import tempfile
 
 
@@ -231,5 +232,5 @@ def multiply(a, b):
             assert "def multiply(a, b):" in content
             
             # Run the file to verify it's valid Python
-            result = code_execute_command("python calculator.py")
+            result = code_execute_command(f"{sys.executable} calculator.py")
             assert "5" in result  # add(2, 3) = 5

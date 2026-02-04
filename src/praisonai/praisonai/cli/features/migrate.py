@@ -214,11 +214,22 @@ class PatternDetector:
         
         # Check for agent pattern
         agent_match = class_attrs & self.AGENT_ATTRS
-        if self.AGENT_REQUIRED <= class_attrs or len(agent_match) >= 2:
-            confidence = len(agent_match) / len(self.AGENT_ATTRS)
+        has_core_attrs = self.AGENT_REQUIRED <= class_attrs
+        if has_core_attrs or len(agent_match) >= 2:
+            # Weighted confidence: core attrs (role, goal, backstory) count more
+            core_attrs = {"role", "goal", "backstory"}
+            core_match = class_attrs & core_attrs
+            # Give high confidence if all core attrs present, lower for partial matches
+            if len(core_match) >= 3:
+                confidence = 0.9  # All core CrewAI-style attrs
+            elif len(core_match) >= 2:
+                confidence = 0.7  # Most core attrs
+            else:
+                confidence = 0.3 + (len(agent_match) / len(self.AGENT_ATTRS))
+            
             # Boost confidence for Pydantic models
             if "BaseModel" in base_names:
-                confidence = min(1.0, confidence + 0.2)
+                confidence = min(1.0, confidence + 0.1)
             
             return PatternInfo(
                 pattern_type=PatternType.AGENT,

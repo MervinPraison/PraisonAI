@@ -6,10 +6,9 @@ TDD tests for subagent delegation framework.
 
 import pytest
 from unittest.mock import Mock, AsyncMock
-import sys
-import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'praisonai-agents'))
+# Note: sys.path is configured in conftest.py to include praisonai-agents
+
 
 from praisonaiagents.agents.delegator import (
     SubagentDelegator,

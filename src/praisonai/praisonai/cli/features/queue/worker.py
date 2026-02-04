@@ -28,10 +28,18 @@ class StreamBuffer:
             drop_strategy: "oldest" to drop oldest, "newest" to reject new.
         """
         self._buffer: deque = deque(maxlen=max_size)
-        self._lock = asyncio.Lock()
+        # Note: asyncio.Lock() is created lazily via _get_lock() to support
+        # Python 3.9 where Lock() requires an event loop at creation time.
+        self.__lock: Optional[asyncio.Lock] = None
         self._drop_strategy = drop_strategy
         self._dropped_count = 0
         self._max_size = max_size
+    
+    def _get_lock(self) -> asyncio.Lock:
+        """Get the asyncio lock, creating it lazily if needed."""
+        if self.__lock is None:
+            self.__lock = asyncio.Lock()
+        return self.__lock
     
     async def push(self, chunk: StreamChunk) -> bool:
         """
@@ -40,7 +48,7 @@ class StreamBuffer:
         Returns:
             True if added, False if dropped.
         """
-        async with self._lock:
+        async with self._get_lock():
             if len(self._buffer) >= self._max_size:
                 if self._drop_strategy == "oldest":
                     self._buffer.popleft()
@@ -53,7 +61,7 @@ class StreamBuffer:
     
     async def drain(self, batch_size: int = 50) -> List[StreamChunk]:
         """Drain up to batch_size chunks."""
-        async with self._lock:
+        async with self._get_lock():
             result = []
             for _ in range(min(batch_size, len(self._buffer))):
                 result.append(self._buffer.popleft())
@@ -61,7 +69,7 @@ class StreamBuffer:
     
     async def drain_all(self) -> List[StreamChunk]:
         """Drain all chunks."""
-        async with self._lock:
+        async with self._get_lock():
             result = list(self._buffer)
             self._buffer.clear()
             return result

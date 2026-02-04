@@ -17,27 +17,32 @@ pytest_plugins = (
 warnings.filterwarnings("ignore", message="Unclosed client session")
 warnings.filterwarnings("ignore", message="Unclosed connector")
 
-@pytest.fixture(scope="session")
-def event_loop_policy():
-    """Use default event loop policy."""
-    return asyncio.DefaultEventLoopPolicy()
+@pytest.fixture(scope="function")
+def event_loop():
+    """Create a function-scoped event loop for async tests.
+    
+    This matches pytest.ini's asyncio_default_fixture_loop_scope=function.
+    Required for fixtures that use async operations.
+    """
+    policy = asyncio.DefaultEventLoopPolicy()
+    loop = policy.new_event_loop()
+    asyncio.set_event_loop(loop)
+    yield loop
+    loop.close()
+
+
 
 @pytest.fixture(autouse=True)
 def cleanup_async_resources():
-    """Clean up async resources after each test to prevent unclosed session warnings."""
+    """Clean up async resources after each test to prevent unclosed session warnings.
+    
+    Note: We only do garbage collection here. Event loop management is handled
+    by pytest-asyncio's event_loop fixture. Calling run_until_complete here
+    can corrupt the event loop state and cause subsequent tests to fail.
+    """
     yield
     # Force garbage collection to clean up any lingering async resources
     gc.collect()
-    # Give the event loop a chance to clean up
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            pass  # Can't run cleanup if loop is running
-        elif not loop.is_closed():
-            # Run any pending callbacks
-            loop.run_until_complete(asyncio.sleep(0))
-    except RuntimeError:
-        pass  # No event loop, nothing to clean up
 
 # Add the source paths to sys.path for imports
 # praisonai-agents package (core SDK)
@@ -94,6 +99,11 @@ def mock_vector_store():
 @pytest.fixture
 def mock_duckduckgo():
     """Mock DuckDuckGo search for testing."""
+    try:
+        import duckduckgo_search  # noqa: F401 - Check if available
+    except ImportError:
+        pytest.skip("duckduckgo_search not installed")
+    
     with patch('duckduckgo_search.DDGS') as mock_ddgs:
         mock_instance = mock_ddgs.return_value
         mock_instance.text.return_value = [

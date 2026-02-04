@@ -15,15 +15,18 @@ import time
 
 # Skip entire module if MCP package is not installed
 try:
+    import mcp
     from praisonaiagents.mcp import MCP
     from praisonaiagents import Agent
     MCP_AVAILABLE = True
 except ImportError:
     MCP_AVAILABLE = False
+    MCP = None
+    Agent = None
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(not MCP_AVAILABLE, reason="MCP package not installed")
+@pytest.mark.skipif(not MCP_AVAILABLE, reason="MCP package not installed. Install with: pip install praisonaiagents[mcp]")
 class TestMultiAgentMCP:
     """Integration tests for multiple agents with MCP."""
     
