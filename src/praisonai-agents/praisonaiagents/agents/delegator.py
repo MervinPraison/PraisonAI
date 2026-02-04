@@ -141,8 +141,19 @@ class SubagentDelegator:
         self._total_count: int = 0
         self._task_counter: int = 0
         
-        # Semaphore for concurrency control
-        self._semaphore = asyncio.Semaphore(self.config.max_concurrent_subagents)
+        # Note: asyncio.Semaphore() is created lazily via _get_semaphore() to support
+        # Python 3.9 where Semaphore() requires an event loop at creation time.
+        self.__semaphore: Optional[asyncio.Semaphore] = None
+    
+    def _get_semaphore(self) -> asyncio.Semaphore:
+        """Get the semaphore, creating it lazily if needed.
+        
+        This deferred creation is required for Python 3.9 compatibility
+        where asyncio.Semaphore() calls get_event_loop() at creation time.
+        """
+        if self.__semaphore is None:
+            self.__semaphore = asyncio.Semaphore(self.config.max_concurrent_subagents)
+        return self.__semaphore
     
     def get_available_agents(self) -> List[str]:
         """Get list of available agent names for delegation."""
@@ -204,7 +215,7 @@ class SubagentDelegator:
         self._total_count += 1
         
         # Execute with concurrency control
-        async with self._semaphore:
+        async with self._get_semaphore():
             return await self._execute_task(task)
     
     async def delegate_parallel(

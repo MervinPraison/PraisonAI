@@ -6,6 +6,9 @@ These tests define the expected behavior of ToolsMCPServer class.
 import pytest
 from unittest.mock import patch
 
+# Skip all tests in this module if MCP is not installed
+pytest.importorskip("mcp", reason="MCP module not installed. Install with: pip install praisonaiagents[mcp]")
+
 
 class TestToolsMCPServerInit:
     """Test ToolsMCPServer initialization."""

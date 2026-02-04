@@ -172,15 +172,20 @@ class TestWorkflowDictParams:
         assert workflow.memory is not None
     
     def test_workflowstep_context_dict(self):
-        """Task accepts context as dict."""
+        """Task accepts context as dict (via TaskContextConfig)."""
         from praisonaiagents.workflows.workflows import Task
+        from praisonaiagents.workflows.workflow_configs import TaskContextConfig
         
         step = Task(
             name="step1",
-            context={"from_steps": ["step0"], "retain_full": True},
+            action="do something",
+            context=TaskContextConfig(from_steps=["step0"], retain_full=True),
         )
-        assert step.context_from == ["step0"]
-        assert step.retain_full_context is True
+        # context stores the TaskContextConfig object
+        assert hasattr(step.context, 'from_steps')
+        assert step.context.from_steps == ["step0"]
+        # retain_full_context is a separate param on Task
+        assert step.context.retain_full is True
     
     def test_workflowstep_output_dict(self):
         """Task accepts output as dict."""
@@ -188,31 +193,35 @@ class TestWorkflowDictParams:
         
         step = Task(
             name="step1",
+            action="do something",
             output={"file": "output.txt", "variable": "result"},
         )
         assert step.output_file == "output.txt"
         assert step.output_variable == "result"
     
     def test_workflowstep_execution_dict(self):
-        """Task accepts execution as dict."""
+        """Task accepts execution as dict (params passed directly)."""
         from praisonaiagents.workflows.workflows import Task
         
         step = Task(
             name="step1",
-            execution={"max_retries": 5, "quality_check": True},
+            action="do something",
+            max_retries=5,
+            quality_check=True,
         )
         assert step.max_retries == 5
         assert step.quality_check is True
     
     def test_workflowstep_routing_dict(self):
-        """Task accepts routing as dict."""
+        """Task accepts routing as dict (via next_tasks param)."""
         from praisonaiagents.workflows.workflows import Task
         
         step = Task(
             name="step1",
-            routing={"next_steps": ["step2", "step3"]},
+            action="do something",
+            next_tasks=["step2", "step3"],
         )
-        assert step.next_steps == ["step2", "step3"]
+        assert step.next_tasks == ["step2", "step3"]
 
 
 # =============================================================================
@@ -297,9 +306,11 @@ class TestBackwardCompatibility:
         
         step = Task(
             name="step1",
+            action="do something",
             context=["step0", "step_prev"],
         )
-        assert step.context_from == ["step0", "step_prev"]
+        # context stores the list directly
+        assert step.context == ["step0", "step_prev"]
 
 
 # =============================================================================

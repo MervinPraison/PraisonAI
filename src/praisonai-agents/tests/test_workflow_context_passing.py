@@ -21,20 +21,23 @@ class TestTaskContextFields:
     """Test Task dataclass context-related fields."""
     
     def test_workflow_step_has_context_from_field(self):
-        """Task should have context_from via consolidated context param."""
+        """Task should have context field that stores TaskContextConfig."""
         step = Task(
             name="test_step",
             action="do something",
             context=TaskContextConfig(from_steps=["step1", "step2"])
         )
-        assert hasattr(step, 'context_from')
-        assert step.context_from == ["step1", "step2"]
+        # context stores the TaskContextConfig object directly
+        assert hasattr(step, 'context')
+        assert hasattr(step.context, 'from_steps')
+        assert step.context.from_steps == ["step1", "step2"]
     
     def test_workflow_step_has_retain_full_context_field(self):
-        """Task should have retain_full_context field with default True."""
+        """Task should have retain_full_context field with default False."""
         step = Task(name="test_step", action="do something")
         assert hasattr(step, 'retain_full_context')
-        assert step.retain_full_context == True
+        # Default is False (opt-in for full context retention)
+        assert step.retain_full_context == False
     
     def test_workflow_step_has_output_variable_field(self):
         """Task should have output_variable via consolidated output param."""
@@ -48,16 +51,18 @@ class TestTaskContextFields:
     
     def test_workflow_step_to_dict_includes_new_fields(self):
         """to_dict() should include context-related fields."""
+        # Use list-based context (the standard format for to_dict)
         step = Task(
             name="test_step",
             action="do something",
-            context=TaskContextConfig(from_steps=["step1"], retain_full=False),
+            context=["step1"],
             output=TaskOutputConfig(variable="result")
         )
         d = step.to_dict()
-        # Check that consolidated params are in dict
-        assert "context" in d or "context_from" in d
-        assert "output" in d or "output_variable" in d
+        # Check that context and output_variable are in dict
+        assert "context" in d
+        assert "output_variable" in d
+        assert d["output_variable"] == "result"
 
 
 class TestContextPassing:

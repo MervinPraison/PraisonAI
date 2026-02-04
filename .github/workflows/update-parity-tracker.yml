@@ -1,0 +1,57 @@
+name: Update Feature Parity Tracker
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'src/praisonai-agents/praisonaiagents/**/*.py'
+      - 'src/praisonai-ts/src/**/*.ts'
+      - 'src/praisonai-rust/src/**/*.rs'
+      - '.github/workflows/update-parity-tracker.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  update-parity-tracker:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: main
+        persist-credentials: true
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Generate parity trackers
+      run: |
+        cd $GITHUB_WORKSPACE
+        python3 src/praisonai/scripts/generate_parity_tracker.py
+        
+    - name: Check for changes
+      id: check_changes
+      run: |
+        if git diff --quiet src/praisonai-ts/FEATURE_PARITY_TRACKER.json src/praisonai-rust/FEATURE_PARITY_TRACKER.json 2>/dev/null; then
+          echo "changes=false" >> $GITHUB_OUTPUT
+          echo "No changes to parity trackers"
+        else
+          echo "changes=true" >> $GITHUB_OUTPUT
+          echo "Parity trackers have been updated"
+          git diff src/praisonai-ts/FEATURE_PARITY_TRACKER.json | head -50
+        fi
+
+    - name: Commit and push changes
+      if: steps.check_changes.outputs.changes == 'true'
+      uses: stefanzweifel/git-auto-commit-action@v5
+      with:
+        commit_message: "docs: auto-update feature parity trackers [skip ci]"
+        file_pattern: 'src/praisonai-ts/FEATURE_PARITY_TRACKER.json src/praisonai-rust/FEATURE_PARITY_TRACKER.json'
+        commit_user_name: "github-actions[bot]"
+        commit_user_email: "41898282+github-actions[bot]@users.noreply.github.com"
+        commit_author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"

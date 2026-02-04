@@ -334,7 +334,7 @@ class TestCLIShowEnhanced:
         runner = CliRunner()
         
         # Mock storage
-        with patch('praisonai.cli.commands.train.TrainingStorage') as MockStorage:
+        with patch('praisonai.train.agents.storage.TrainingStorage') as MockStorage:
             mock_storage = Mock()
             mock_storage.storage_path.exists.return_value = True
             

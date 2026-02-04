@@ -6,6 +6,7 @@ Uses subprocess to start servers and curl/requests to verify.
 """
 
 import subprocess
+import sys
 import time
 import socket
 
@@ -61,7 +62,7 @@ roles:
     def test_serve_agents_help(self):
         """Test serve agents --help works."""
         result = subprocess.run(
-            ["python", "-m", "praisonai.cli.commands.serve", "agents", "--help"],
+            [sys.executable, "-m", "praisonai.cli.commands.serve", "agents", "--help"],
             capture_output=True,
             text=True,
             cwd="/Users/praison/praisonai-package/src/praisonai"
@@ -76,7 +77,7 @@ class TestServeA2AIntegration:
     def test_serve_a2a_help(self):
         """Test serve a2a --help works."""
         result = subprocess.run(
-            ["python", "-m", "praisonai.cli.commands.serve", "a2a", "--help"],
+            [sys.executable, "-m", "praisonai.cli.commands.serve", "a2a", "--help"],
             capture_output=True,
             text=True,
             cwd="/Users/praison/praisonai-package/src/praisonai"
@@ -90,7 +91,7 @@ class TestServeUnifiedIntegration:
     def test_serve_unified_help(self):
         """Test serve unified --help works."""
         result = subprocess.run(
-            ["python", "-m", "praisonai.cli.commands.serve", "unified", "--help"],
+            [sys.executable, "-m", "praisonai.cli.commands.serve", "unified", "--help"],
             capture_output=True,
             text=True,
             cwd="/Users/praison/praisonai-package/src/praisonai"
@@ -104,7 +105,7 @@ class TestServeGatewayIntegration:
     def test_serve_gateway_help(self):
         """Test serve gateway --help works."""
         result = subprocess.run(
-            ["python", "-m", "praisonai.cli.commands.serve", "gateway", "--help"],
+            [sys.executable, "-m", "praisonai.cli.commands.serve", "gateway", "--help"],
             capture_output=True,
             text=True,
             cwd="/Users/praison/praisonai-package/src/praisonai"
@@ -118,7 +119,7 @@ class TestServeMCPIntegration:
     def test_serve_mcp_help(self):
         """Test serve mcp --help works."""
         result = subprocess.run(
-            ["python", "-m", "praisonai.cli.commands.serve", "mcp", "--help"],
+            [sys.executable, "-m", "praisonai.cli.commands.serve", "mcp", "--help"],
             capture_output=True,
             text=True,
             cwd="/Users/praison/praisonai-package/src/praisonai"
@@ -132,7 +133,7 @@ class TestServeRecipeIntegration:
     def test_serve_recipe_help(self):
         """Test serve recipe --help works."""
         result = subprocess.run(
-            ["python", "-m", "praisonai.cli.commands.serve", "recipe", "--help"],
+            [sys.executable, "-m", "praisonai.cli.commands.serve", "recipe", "--help"],
             capture_output=True,
             text=True,
             cwd="/Users/praison/praisonai-package/src/praisonai"

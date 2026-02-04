@@ -232,10 +232,38 @@ class Task:
         self.loop_var = loop_var
         # Consolidated config objects (from Task)
         self.execution = execution
-        # Resolve on_error from execution config or direct param
-        # execution config takes precedence if it has on_error set
-        if execution is not None and hasattr(execution, 'on_error'):
-            self.on_error = execution.on_error
+        # ============================================================
+        # RESOLVE EXECUTION CONFIG FIELDS TO TASK PROPERTIES
+        # Precedence: Direct params (if non-default) > Config object > Defaults
+        # We check if direct param equals its default to determine if user set it
+        # ============================================================
+        if execution is not None:
+            # Resolve async_exec -> async_execution
+            # Only apply config if direct param was NOT explicitly set (is default False)
+            if hasattr(execution, 'async_exec'):
+                # async_execution default is False, so if it's False, use config value
+                if not async_execution:  # direct param is False (default)
+                    self.async_execution = execution.async_exec
+            # Resolve quality_check
+            # quality_check default is True, so if it's True, use config value
+            if hasattr(execution, 'quality_check'):
+                if quality_check:  # direct param is True (default)
+                    self.quality_check = execution.quality_check
+            # Resolve max_retries
+            # max_retries default is 3, so if it's 3, use config value
+            if hasattr(execution, 'max_retries'):
+                if max_retries == 3:  # direct param is 3 (default)
+                    self.max_retries = execution.max_retries
+            # Resolve rerun
+            # rerun default is False, so if it's False, use config value
+            if hasattr(execution, 'rerun'):
+                if not rerun:  # direct param is False (default)
+                    self.rerun = execution.rerun
+            # Resolve on_error (config takes precedence for backward compat)
+            if hasattr(execution, 'on_error'):
+                self.on_error = execution.on_error
+            else:
+                self.on_error = on_error
         else:
             self.on_error = on_error
         # Handle routing parameter - use routing if provided, else fall back to condition

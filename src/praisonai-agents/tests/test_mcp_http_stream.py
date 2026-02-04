@@ -11,6 +11,9 @@ Tests the HTTPStreamTransport implementation including:
 
 import pytest
 
+# Skip all tests in this module if MCP is not installed
+pytest.importorskip("mcp", reason="MCP module not installed. Install with: pip install praisonaiagents[mcp]")
+
 
 class TestHTTPStreamTransportInit:
     """Test HTTPStreamTransport initialization."""
