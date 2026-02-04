@@ -148,82 +148,112 @@ uuid = { version = "1", features = ["v4"] }       # Session IDs
 
 ## 4. API Design
 
-### 4.1 Simple API (User-Facing)
+> **Philosophy**: Match Python SDK's simplicity — the simplest use case should be the shortest code.
+
+### 4.1 One-Liner (Simplest)
 
 ```rust
-// Basic usage - 5 lines
 use praisonai::Agent;
 
-let agent = Agent::new()
-    .instructions("Be helpful")
-    .build()?;
-
+// Equivalent to Python: Agent(instructions="Be helpful")
+let agent = Agent::simple("Be helpful")?;
 let response = agent.chat("Hello!").await?;
 ```
 
-### 4.2 With Tools
+### 4.2 Builder Pattern (More Control)
+
+```rust
+use praisonai::Agent;
+
+let agent = Agent::new()
+    .name("assistant")
+    .instructions("You are a helpful AI assistant")
+    .build()?;
+
+let response = agent.chat("What is 2+2?").await?;
+// Also available: agent.start() and agent.run() as aliases
+```
+
+### 4.3 With Tools
 
 ```rust
 use praisonai::{Agent, tool};
 
-#[tool(description = "Search the web for information")]
+#[tool(description = "Search the web")]
 async fn search(query: String) -> String {
     format!("Results for: {}", query)
 }
 
 let agent = Agent::new()
-    .name("researcher")
-    .instructions("Use tools to help users")
+    .instructions("Use search to help users")
     .tool(search)
     .build()?;
+
+let response = agent.chat("Find info about Rust").await?;
 ```
 
-### 4.3 Multi-Agent Workflows
+### 4.4 Multi-Agent Team
 
 ```rust
 use praisonai::{Agent, AgentTeam, Process};
 
-let researcher = Agent::new().name("researcher").build()?;
-let writer = Agent::new().name("writer").build()?;
-let editor = Agent::new().name("editor").build()?;
+// Build team with builder pattern
+let team = AgentTeam::new()
+    .agent(Agent::simple("Research topics thoroughly")?)
+    .agent(Agent::simple("Write engaging content")?)
+    .agent(Agent::simple("Edit for clarity")?)
+    .process(Process::Sequential)  // or Parallel, Hierarchical
+    .build();
 
-let team = AgentTeam::builder()
-    .agents(vec![researcher, writer, editor])
-    .process(Process::Sequential)
-    .build()?;
-
-let result = team.start("Write an article about AI").await?;
+let result = team.start("Write about AI safety").await?;
 ```
 
-### 4.4 Workflow Patterns (AgentFlow)
+### 4.5 Workflow Patterns (AgentFlow)
 
 ```rust
-use praisonai::{AgentFlow, Pattern};
+use praisonai::{Agent, AgentFlow, FlowStep, Route, Parallel, Repeat};
+use std::sync::Arc;
 
-// Route to different agents based on input
-let flow = AgentFlow::builder()
-    .pattern(Pattern::Route {
-        router: my_router_fn,
-        routes: vec![research_agent, write_agent],
-    })
-    .build()?;
+let agent = Arc::new(Agent::simple("Be helpful")?);
+
+// Simple agent step
+let flow = AgentFlow::new()
+    .agent(Agent::simple("Process the input")?)
+    .run("Hello").await?;
+
+// Route based on condition
+let flow = AgentFlow::new()
+    .step(FlowStep::Route(Route {
+        condition: Box::new(|input| input.contains("urgent")),
+        if_true: Arc::clone(&agent),
+        if_false: None,
+    }));
 
 // Parallel execution
-let flow = AgentFlow::builder()
-    .pattern(Pattern::Parallel {
+let flow = AgentFlow::new()
+    .step(FlowStep::Parallel(Parallel {
         agents: vec![agent1, agent2, agent3],
-    })
-    .build()?;
+    }));
 
-// Loop until condition
-let flow = AgentFlow::builder()
-    .pattern(Pattern::Loop {
-        agent: refiner_agent,
-        condition: |result| result.score < 0.9,
-        max_iterations: 5,
-    })
-    .build()?;
+// Repeat N times
+let flow = AgentFlow::new()
+    .step(FlowStep::Repeat(Repeat {
+        agent: Arc::clone(&agent),
+        times: 3,
+    }));
+
+let result = flow.run("Input prompt").await?;
 ```
+
+### 4.6 Progressive Disclosure Summary
+
+| Level | Code | Use Case |
+|-------|------|----------|
+| **Simplest** | `Agent::simple("instructions")?` | Quick prototyping |
+| **Basic** | `Agent::new().instructions(...).build()?` | Most apps |
+| **With Tools** | `Agent::new()...tool(fn).build()?` | Tool-using agents |
+| **Team** | `AgentTeam::new().agent(...).build()` | Multi-agent |
+| **Flows** | `AgentFlow::new().step(...)` | Complex patterns |
 
 ---
 
