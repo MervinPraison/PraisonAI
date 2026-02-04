@@ -1,0 +1,74 @@
+[workspace]
+resolver = "2"
+members = [
+    "praisonai",
+    "praisonai-derive",
+    "praisonai-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["MervinPraison"]
+repository = "https://github.com/MervinPraison/PraisonAI"
+homepage = "https://docs.praison.ai"
+description = "High-performance, agentic AI framework for Rust"
+keywords = ["ai", "agents", "llm", "openai", "anthropic"]
+categories = ["api-bindings", "asynchronous"]
+
+[workspace.dependencies]
+# Core async runtime
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+futures = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# LLM providers (via rig-core for multi-provider support)
+rig-core = "0.9"
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# UUID for session/agent IDs
+uuid = { version = "1", features = ["v4"] }
+
+# Optional: TUI
+ratatui = "0.29"
+crossterm = "0.28"
+
+# Optional: MCP support
+# rmcp = { version = "0.12", optional = true }
+
+# Testing
+tokio-test = "0.4"
+
+# Proc macro dependencies
+syn = { version = "2", features = ["full", "parsing", "extra-traits"] }
+quote = "1"
+proc-macro2 = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+debug = true

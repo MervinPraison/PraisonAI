@@ -86,3 +86,9 @@ issue_details.json
 *.log
 .internal
 .praisonai
+
+# Rust / Cargo
+target/
+Cargo.lock
+**/*.rs.bk
+*.pdb

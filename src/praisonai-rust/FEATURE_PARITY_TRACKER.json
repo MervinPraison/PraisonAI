@@ -1,13 +1,40 @@
 {
-  "version": "1.5.5",
+  "version": "0.1.0",
   "lastUpdated": "2026-02-04",
-  "generatedBy": "praisonai._dev.parity.generator",
+  "generatedBy": "manual",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
-  "status": "NOT_STARTED",
+  "status": "IN_PROGRESS",
   "summary": {
     "pythonCoreFeatures": 282,
-    "rustFeatures": 0,
-    "gapCount": 282
+    "rustFeatures": 25,
+    "gapCount": 257,
+    "implementedFeatures": [
+      "Agent",
+      "AgentBuilder",
+      "AgentConfig",
+      "AgentTeam",
+      "AgentFlow",
+      "Tool",
+      "ToolResult",
+      "ToolRegistry",
+      "#[tool] macro",
+      "LlmProvider",
+      "LlmConfig",
+      "Message",
+      "Role",
+      "Memory",
+      "MemoryAdapter",
+      "ConversationHistory",
+      "MemoryConfig",
+      "HooksConfig",
+      "OutputConfig",
+      "ExecutionConfig",
+      "Process (Sequential/Parallel/Hierarchical)",
+      "Route",
+      "Parallel",
+      "Loop",
+      "Repeat"
+    ]
   },
   "pythonCoreSDK": {
     "exports": [
@@ -296,8 +323,39 @@
     ]
   },
   "rustSDK": {
-    "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-rust",
-    "exports": [],
-    "modules": {}
+    "path": "/Users/praison/praisonai-package/src/praisonai-rust",
+    "crates": {
+      "praisonai": {
+        "modules": ["agent", "tools", "llm", "memory", "workflows", "config", "error"],
+        "exports": [
+          "Agent", "AgentBuilder", "AgentConfig",
+          "Tool", "ToolResult", "ToolRegistry", "ToolDefinition",
+          "LlmProvider", "LlmConfig", "Message", "Role", "ToolCall", "LlmResponse", "Usage", "OpenAiProvider",
+          "Memory", "MemoryAdapter", "ConversationHistory", "InMemoryAdapter",
+          "AgentTeam", "AgentFlow", "Process", "StepResult", "WorkflowContext", "Route", "Parallel", "Loop", "Repeat",
+          "MemoryConfig", "HooksConfig", "OutputConfig", "ExecutionConfig",
+          "Error", "Result"
+        ]
+      },
+      "praisonai-derive": {
+        "exports": ["tool"]
+      },
+      "praisonai-cli": {
+        "binary": "praisonai-rust",
+        "commands": ["chat", "run", "prompt"]
+      }
+    },
+    "examples": [
+      "basic_agent",
+      "with_tools", 
+      "multi_agent",
+      "memory_example",
+      "config_example",
+      "workflow_patterns"
+    ],
+    "tests": {
+      "unit_tests": 20,
+      "status": "all_passing"
+    }
   }
 }

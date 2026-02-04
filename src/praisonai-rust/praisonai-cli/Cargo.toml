@@ -1,0 +1,52 @@
+[package]
+name = "praisonai-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "CLI for PraisonAI - chat, run, prompt commands"
+keywords = ["ai", "agents", "cli", "terminal"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "praisonai-rust"
+path = "src/main.rs"
+
+[dependencies]
+# Core library
+praisonai = { path = "../praisonai", version = "0.1.0" }
+
+# Async runtime
+tokio = { workspace = true }
+futures = { workspace = true }
+
+# CLI parsing
+clap = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+
+[features]
+default = []
+tui = ["ratatui", "crossterm", "praisonai/tui"]
+
+[dependencies.ratatui]
+version = "0.29"
+optional = true
+
+[dependencies.crossterm]
+version = "0.28"
+optional = true

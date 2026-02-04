@@ -1,0 +1,45 @@
+# Example workflow YAML file
+# Run with: praisonai run workflow.yaml
+
+name: Research and Write Workflow
+process: sequential
+
+agents:
+  - name: researcher
+    role: Research Specialist
+    instructions: |
+      You are a research specialist. Your job is to:
+      1. Search for relevant information on the given topic
+      2. Summarize key findings
+      3. Provide citations where possible
+    model: gpt-4o-mini
+    tools:
+      - search_web
+
+  - name: writer
+    role: Content Writer
+    instructions: |
+      You are a skilled content writer. Your job is to:
+      1. Take the research provided
+      2. Create engaging, well-structured content
+      3. Use clear and accessible language
+    model: gpt-4o-mini
+
+  - name: editor
+    role: Editor
+    instructions: |
+      You are an editor. Your job is to:
+      1. Review the content for clarity and accuracy
+      2. Fix any grammatical or stylistic issues
+      3. Ensure the content flows well
+    model: gpt-4o-mini
+
+steps:
+  - agent: researcher
+    action: Research the topic and provide key findings
+  
+  - agent: writer
+    action: Write a blog post based on the research
+  
+  - agent: editor
+    action: Review and polish the final content
