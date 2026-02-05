@@ -12,12 +12,12 @@ async fn main() -> anyhow::Result<()> {
         .instructions("You are a helpful AI assistant. Be concise and friendly.")
         .model("gpt-4o-mini")
         .build()?;
-    
+
     println!("Agent created: {}", agent.name());
     println!("Model: {}", agent.model());
-    
+
     let response = agent.chat("What is 2 + 2?").await?;
     println!("Response: {}", response);
-    
+
     Ok(())
 }

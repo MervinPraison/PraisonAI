@@ -10,6 +10,27 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 
+# Rust reserved keywords and module conflicts that cannot be directly exported
+# These are marked as N/A in parity tracking
+RUST_LANGUAGE_EXCLUDED = {
+    'loop',      # Reserved keyword - use loop_step instead
+    'config',    # Already exists as pub mod
+    'memory',    # Already exists as pub mod
+    'tools',     # Already exists as pub mod
+    'workflows', # Already exists as pub mod
+    'db',        # Module placeholder - use parity_db
+    'obs',       # Module placeholder - use parity_obs
+}
+
+# Mapping of Python names to Rust equivalent aliases
+RUST_ALIAS_MAPPING = {
+    'loop': 'loop_step',
+    'config': 'parity_config',
+    'db': 'parity_db',
+    'obs': 'parity_obs',
+}
+
+
 @dataclass
 class RustExport:
     """Information about a Rust export."""
@@ -250,16 +271,36 @@ class RustFeatureExtractor:
             features.modules[module_name].exports.append(name)
     
     def _parse_items(self, items_str: str) -> List[str]:
-        """Parse items from a comma-separated string in braces."""
+        """Parse items from a comma-separated string in braces.
+        
+        Handles Rust comments and newlines in the items list.
+        """
         items = []
+        
+        # First, strip comments (// style)
+        # Remove lines that are just comments
+        lines = items_str.split('\n')
+        cleaned_parts = []
+        for line in lines:
+            # Remove inline comments
+            if '//' in line:
+                line = line.split('//')[0]
+            cleaned_parts.append(line)
+        items_str = ' '.join(cleaned_parts)
+        
         for part in items_str.split(','):
             part = part.strip()
             if not part:
                 continue
+            
             # Handle 'Name as Alias' syntax
             if ' as ' in part:
                 part = part.split(' as ')[1].strip()
-            items.append(part)
+            
+            # Validate it's a proper Rust identifier (alphanumeric + underscore)
+            if re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', part):
+                items.append(part)
+        
         return items
     
     def _categorize(self, source_path: str) -> str:

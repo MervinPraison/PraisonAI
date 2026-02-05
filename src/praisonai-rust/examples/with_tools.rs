@@ -2,7 +2,7 @@
 //!
 //! Run with: cargo run --example with_tools
 
-use praisonai::{Agent, tool, Tool};
+use praisonai::{tool, Agent, Tool};
 
 // Define a tool using the #[tool] macro
 #[tool(description = "Get the current weather for a location")]
@@ -22,10 +22,14 @@ async fn main() -> anyhow::Result<()> {
     // Create tools
     let weather_tool = GetWeatherTool::new();
     let add_tool = AddNumbersTool::new();
-    
-    println!("Tool: {} - {}", weather_tool.name(), weather_tool.description());
+
+    println!(
+        "Tool: {} - {}",
+        weather_tool.name(),
+        weather_tool.description()
+    );
     println!("Tool: {} - {}", add_tool.name(), add_tool.description());
-    
+
     // Create an agent with tools
     let agent = Agent::new()
         .name("tool-agent")
@@ -34,17 +38,17 @@ async fn main() -> anyhow::Result<()> {
         .tool(weather_tool)
         .tool(add_tool)
         .build()?;
-    
+
     println!("\nAgent created with {} tools", agent.tool_count().await);
-    
+
     // Test tool execution directly
     let result = get_weather("San Francisco".to_string()).await;
     println!("Direct tool call: {}", result);
-    
+
     let sum = add_numbers(5, 3).await;
     println!("Direct add call: {}", sum);
-    
+
     println!("\nTo test with LLM, set OPENAI_API_KEY and call agent.chat()");
-    
+
     Ok(())
 }

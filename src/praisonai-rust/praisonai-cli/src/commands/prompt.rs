@@ -11,7 +11,7 @@ pub async fn run(text: String, model: String) -> Result<()> {
         .model(&model)
         .memory(false) // No memory needed for single-shot
         .build()?;
-    
+
     match agent.chat(&text).await {
         Ok(response) => {
             println!("{}", response);

@@ -9,12 +9,21 @@
 |--------|-------|
 | Python Core Features | 282 |
 | Python Wrapper Features | 94 |
+<<<<<<< Updated upstream
 | TypeScript Features | 1118 |
 | **Gap Count** | **97** |
 | P0 (Critical) | 21 |
 | P1 (High) | 8 |
 | P2 (Medium) | 19 |
 | P3 (Low) | 49 |
+=======
+| TypeScript Features | 1183 |
+| **Gap Count** | **0** |
+| P0 (Critical) | 0 |
+| P1 (High) | 0 |
+| P2 (Medium) | 0 |
+| P3 (Low) | 0 |
+>>>>>>> Stashed changes
 
 ## Gap Matrix
 
@@ -22,6 +31,7 @@
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
+<<<<<<< Updated upstream
 | `AudioConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `CodeAgent` | ✅ | ❌ | high | ⏳ TODO |
 | `CodeConfig` | ✅ | ❌ | low | ⏳ TODO |
@@ -51,6 +61,23 @@
 | `EmbeddingConfig` | ✅ | ✅ | low | ✅ DONE |
 | `ExpandResult` | ✅ | ✅ | low | ✅ DONE |
 | `ExpandStrategy` | ✅ | ✅ | high | ✅ DONE |
+=======
+| `Agent` | ✅ | ✅ | high | ✅ DONE |
+| `AudioAgent` | ✅ | ✅ | high | ✅ DONE |
+| `AudioConfig` | ✅ | ✅ | low | ✅ DONE |
+| `CodeAgent` | ✅ | ✅ | high | ✅ DONE |
+| `CodeConfig` | ✅ | ✅ | low | ✅ DONE |
+| `CodeExecutionStep` | ✅ | ✅ | high | ✅ DONE |
+| `ContextAgent` | ✅ | ✅ | high | ✅ DONE |
+| `ContextPolicy` | ✅ | ✅ | high | ✅ DONE |
+| `DeepResearchAgent` | ✅ | ✅ | high | ✅ DONE |
+| `DeepResearchResponse` | ✅ | ✅ | high | ✅ DONE |
+| `EmbeddingAgent` | ✅ | ✅ | high | ✅ DONE |
+| `EmbeddingConfig` | ✅ | ✅ | low | ✅ DONE |
+| `ExpandResult` | ✅ | ✅ | low | ✅ DONE |
+| `ExpandStrategy` | ✅ | ✅ | high | ✅ DONE |
+| `FileSearchCall` | ✅ | ✅ | high | ✅ DONE |
+>>>>>>> Stashed changes
 | `Handoff` | ✅ | ✅ | high | ✅ DONE |
 | `HandoffConfig` | ✅ | ✅ | low | ✅ DONE |
 | `HandoffCycleError` | ✅ | ✅ | low | ✅ DONE |
@@ -60,18 +87,42 @@
 | `HandoffResult` | ✅ | ✅ | low | ✅ DONE |
 | `HandoffTimeoutError` | ✅ | ✅ | low | ✅ DONE |
 | `ImageAgent` | ✅ | ✅ | high | ✅ DONE |
+<<<<<<< Updated upstream
 | `PromptExpanderAgent` | ✅ | ✅ | high | ✅ DONE |
 | `QueryRewriterAgent` | ✅ | ✅ | high | ✅ DONE |
 | `RECOMMENDED\_PROMPT\_PREFIX` | ✅ | ✅ | low | ✅ DONE |
 | `ReasoningStep` | ✅ | ✅ | high | ✅ DONE |
 | `RewriteResult` | ✅ | ✅ | low | ✅ DONE |
 | `RewriteStrategy` | ✅ | ✅ | high | ✅ DONE |
+=======
+| `MCPCall` | ✅ | ✅ | high | ✅ DONE |
+| `OCRAgent` | ✅ | ✅ | high | ✅ DONE |
+| `OCRConfig` | ✅ | ✅ | low | ✅ DONE |
+| `PromptExpanderAgent` | ✅ | ✅ | high | ✅ DONE |
+| `Provider` | ✅ | ✅ | high | ✅ DONE |
+| `QueryRewriterAgent` | ✅ | ✅ | high | ✅ DONE |
+| `RECOMMENDED\_PROMPT\_PREFIX` | ✅ | ✅ | low | ✅ DONE |
+| `RealtimeAgent` | ✅ | ✅ | high | ✅ DONE |
+| `RealtimeConfig` | ✅ | ✅ | low | ✅ DONE |
+| `ReasoningStep` | ✅ | ✅ | high | ✅ DONE |
+| `RewriteResult` | ✅ | ✅ | low | ✅ DONE |
+| `RewriteStrategy` | ✅ | ✅ | high | ✅ DONE |
+| `VideoAgent` | ✅ | ✅ | high | ✅ DONE |
+| `VideoConfig` | ✅ | ✅ | low | ✅ DONE |
+| `VisionAgent` | ✅ | ✅ | high | ✅ DONE |
+| `VisionConfig` | ✅ | ✅ | low | ✅ DONE |
+| `WebSearchCall` | ✅ | ✅ | high | ✅ DONE |
+| `create\_context\_agent` | ✅ | ✅ | low | ✅ DONE |
+>>>>>>> Stashed changes
 | `handoff` | ✅ | ✅ | low | ✅ DONE |
+| `handoff\_filters` | ✅ | ✅ | low | ✅ DONE |
+| `prompt\_with\_handoff\_instructions` | ✅ | ✅ | low | ✅ DONE |
 
 ### P1_Persistence (12 done, 8 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
+<<<<<<< Updated upstream
 | `Chunking` | ✅ | ❌ | high | ⏳ TODO |
 | `If` | ✅ | ❌ | high | ⏳ TODO |
 | `Knowledge` | ✅ | ❌ | high | ⏳ TODO |
@@ -81,9 +132,19 @@
 | `Session` | ✅ | ❌ | high | ⏳ TODO |
 | `when` | ✅ | ❌ | low | ⏳ TODO |
 | `AgentFlow` | ✅ | ✅ | high | ✅ DONE |
+=======
+| `AgentFlow` | ✅ | ✅ | high | ✅ DONE |
+| `Chunking` | ✅ | ✅ | high | ✅ DONE |
+| `If` | ✅ | ✅ | high | ✅ DONE |
+| `Knowledge` | ✅ | ✅ | high | ✅ DONE |
+| `Loop` | ✅ | ✅ | high | ✅ DONE |
+>>>>>>> Stashed changes
 | `Memory` | ✅ | ✅ | high | ✅ DONE |
+| `Parallel` | ✅ | ✅ | high | ✅ DONE |
 | `Pipeline` | ✅ | ✅ | high | ✅ DONE |
 | `Repeat` | ✅ | ✅ | high | ✅ DONE |
+| `Route` | ✅ | ✅ | high | ✅ DONE |
+| `Session` | ✅ | ✅ | high | ✅ DONE |
 | `StepResult` | ✅ | ✅ | low | ✅ DONE |
 | `Workflow` | ✅ | ✅ | high | ✅ DONE |
 | `WorkflowContext` | ✅ | ✅ | high | ✅ DONE |
@@ -92,11 +153,13 @@
 | `parallel` | ✅ | ✅ | low | ✅ DONE |
 | `repeat` | ✅ | ✅ | low | ✅ DONE |
 | `route` | ✅ | ✅ | low | ✅ DONE |
+| `when` | ✅ | ✅ | low | ✅ DONE |
 
 ### P2_CLI (22 done, 19 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
+<<<<<<< Updated upstream
 | `ApprovalCallback` | ✅ | ❌ | high | ⏳ TODO |
 | `ContextConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `ContextManager` | ✅ | ❌ | high | ⏳ TODO |
@@ -121,6 +184,25 @@
 | `FastContextResult` | ✅ | ✅ | low | ✅ DONE |
 | `FileMatch` | ✅ | ✅ | high | ✅ DONE |
 | `LLMGuardrail` | ✅ | ✅ | high | ✅ DONE |
+=======
+| `ApprovalCallback` | ✅ | ✅ | high | ✅ DONE |
+| `Citation` | ✅ | ✅ | high | ✅ DONE |
+| `CitationsMode` | ✅ | ✅ | high | ✅ DONE |
+| `ContextConfig` | ✅ | ✅ | low | ✅ DONE |
+| `ContextManager` | ✅ | ✅ | high | ✅ DONE |
+| `ContextPack` | ✅ | ✅ | high | ✅ DONE |
+| `FastContext` | ✅ | ✅ | high | ✅ DONE |
+| `FastContextResult` | ✅ | ✅ | low | ✅ DONE |
+| `FileMatch` | ✅ | ✅ | high | ✅ DONE |
+| `GuardrailResult` | ✅ | ✅ | low | ✅ DONE |
+| `LLMGuardrail` | ✅ | ✅ | high | ✅ DONE |
+| `LineRange` | ✅ | ✅ | high | ✅ DONE |
+| `MCP` | ✅ | ✅ | low | ✅ DONE |
+| `ManagerConfig` | ✅ | ✅ | low | ✅ DONE |
+| `MinimalTelemetry` | ✅ | ✅ | high | ✅ DONE |
+| `OptimizerStrategy` | ✅ | ✅ | high | ✅ DONE |
+| `Plan` | ✅ | ✅ | high | ✅ DONE |
+>>>>>>> Stashed changes
 | `PlanStep` | ✅ | ✅ | high | ✅ DONE |
 | `PlanStorage` | ✅ | ✅ | high | ✅ DONE |
 | `PlanningAgent` | ✅ | ✅ | high | ✅ DONE |
@@ -132,14 +214,29 @@
 | `RESTRICTED\_TOOLS` | ✅ | ✅ | low | ✅ DONE |
 | `RetrievalConfig` | ✅ | ✅ | low | ✅ DONE |
 | `RetrievalPolicy` | ✅ | ✅ | high | ✅ DONE |
+<<<<<<< Updated upstream
+=======
+| `SkillLoader` | ✅ | ✅ | high | ✅ DONE |
+>>>>>>> Stashed changes
 | `SkillManager` | ✅ | ✅ | high | ✅ DONE |
 | `SkillMetadata` | ✅ | ✅ | high | ✅ DONE |
 | `SkillProperties` | ✅ | ✅ | high | ✅ DONE |
 | `TelemetryCollector` | ✅ | ✅ | high | ✅ DONE |
 | `TodoItem` | ✅ | ✅ | high | ✅ DONE |
 | `TodoList` | ✅ | ✅ | high | ✅ DONE |
+<<<<<<< Updated upstream
 
 ### P3_Advanced (127 done, 49 todo)
+=======
+| `cleanup\_telemetry\_resources` | ✅ | ✅ | low | ✅ DONE |
+| `disable\_performance\_mode` | ✅ | ✅ | low | ✅ DONE |
+| `disable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
+| `enable\_performance\_mode` | ✅ | ✅ | low | ✅ DONE |
+| `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
+| `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
+
+### P3_Advanced (176 done, 0 todo)
+>>>>>>> Stashed changes
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -196,6 +293,10 @@
 | `AUTONOMY\_PRESETS` | ✅ | ✅ | low | ✅ DONE |
 | `AgentAppConfig` | ✅ | ✅ | low | ✅ DONE |
 | `AgentAppProtocol` | ✅ | ✅ | medium | ✅ DONE |
+<<<<<<< Updated upstream
+=======
+| `AgentManager` | ✅ | ✅ | high | ✅ DONE |
+>>>>>>> Stashed changes
 | `AgentOSConfig` | ✅ | ✅ | low | ✅ DONE |
 | `AgentOSProtocol` | ✅ | ✅ | medium | ✅ DONE |
 | `AgentPluginProtocol` | ✅ | ✅ | medium | ✅ DONE |
@@ -245,6 +346,10 @@
 | `MEMORY\_URL\_SCHEMES` | ✅ | ✅ | low | ✅ DONE |
 | `MULTI\_AGENT\_EXECUTION\_PRESETS` | ✅ | ✅ | low | ✅ DONE |
 | `MULTI\_AGENT\_OUTPUT\_PRESETS` | ✅ | ✅ | low | ✅ DONE |
+<<<<<<< Updated upstream
+=======
+| `MemoryBackend` | ✅ | ✅ | high | ✅ DONE |
+>>>>>>> Stashed changes
 | `MemoryConfig` | ✅ | ✅ | low | ✅ DONE |
 | `MessageType` | ✅ | ✅ | high | ✅ DONE |
 | `MultiAgentExecutionConfig` | ✅ | ✅ | low | ✅ DONE |
@@ -272,6 +377,10 @@
 | `SandboxConfig` | ✅ | ✅ | low | ✅ DONE |
 | `SandboxProtocol` | ✅ | ✅ | medium | ✅ DONE |
 | `SandboxResult` | ✅ | ✅ | low | ✅ DONE |
+<<<<<<< Updated upstream
+=======
+| `SandboxStatus` | ✅ | ✅ | high | ✅ DONE |
+>>>>>>> Stashed changes
 | `SecurityPolicy` | ✅ | ✅ | high | ✅ DONE |
 | `SessionConfig` | ✅ | ✅ | low | ✅ DONE |
 | `SkillsConfig` | ✅ | ✅ | low | ✅ DONE |
@@ -315,8 +424,16 @@
 | `resolve\_skills` | ✅ | ✅ | low | ✅ DONE |
 | `resolve\_web` | ✅ | ✅ | low | ✅ DONE |
 | `suggest\_similar` | ✅ | ✅ | low | ✅ DONE |
+<<<<<<< Updated upstream
 | `tool` | ✅ | ✅ | low | ✅ DONE |
 | `tools` | ✅ | ✅ | low | ✅ DONE |
+=======
+| `sync\_display\_callbacks` | ✅ | ✅ | low | ✅ DONE |
+| `tool` | ✅ | ✅ | low | ✅ DONE |
+| `tools` | ✅ | ✅ | low | ✅ DONE |
+| `trace\_context` | ✅ | ✅ | low | ✅ DONE |
+| `track\_workflow` | ✅ | ✅ | low | ✅ DONE |
+>>>>>>> Stashed changes
 | `validate\_config` | ✅ | ✅ | low | ✅ DONE |
 | `workflows` | ✅ | ✅ | low | ✅ DONE |
 
@@ -611,17 +728,7 @@ import { Agent, AgentTeam, AgentTeamConfig, Agents, AudioAgent, AudioAgentConfig
 <summary><strong>ai</strong> (166 exports)</summary>
 
 ```typescript
-import { // Agent loop
-  createAgentLoop, // DevTools
-  enableDevTools, // MCP
-  createMCP, // Middleware (renamed to avoid conflicts)
-  createCachingMiddleware, // Models
-  createModel, // Multimodal
-  createImagePart, // Next.js
-  createRouteHandler, // OAuth for MCP
-  OAuthClientProvider, // Server adapters
-  createHttpHandler, // Speech & Transcription
-  generateSpeech... } from 'praisonai';
+import { AIAgentStep, AIEmbedManyResult, AIEmbedOptions, AIEmbedResult, AIFilePart, AIGenerateImageOptions, AIGenerateImageResult, AIGenerateObjectOptions, AIGenerateObjectResult, AIGenerateTextOptions... } from 'praisonai';
 ```
 
 </details>
@@ -648,6 +755,7 @@ import { BaseCache, CacheConfig, CacheEntry, FileCache, MemoryCache, createFileC
 <summary><strong>cli</strong> (130 exports)</summary>
 
 ```typescript
+<<<<<<< Updated upstream
 import { // Autonomy Mode
   AutonomyManager, // Background Jobs
   JobQueue, // Checkpoints
@@ -659,6 +767,9 @@ import { // Autonomy Mode
   GitManager, // Interactive TUI
   InteractiveTUI, // N8N Integration
   N8NIntegration... } from 'praisonai';
+=======
+import { ActionDecision, ActionRequest, ActionType, AiderAgent, ApprovalPolicy, AutonomyConfig, AutonomyManager, AutonomyMode, BaseExternalAgent, CLI_SPEC_VERSION... } from 'praisonai';
+>>>>>>> Stashed changes
 ```
 
 </details>
@@ -676,8 +787,7 @@ import { DbAdapter, DbConfig, DbMessage, DbRun, DbTrace, MemoryPostgresAdapter, 
 <summary><strong>eval</strong> (40 exports)</summary>
 
 ```typescript
-import { // LLM-as-Judge
-  Judge, AccuracyEvalConfig, AccuracyJudge, AggregatedResults, CriteriaJudge, EvalCriteria, EvalResult, EvalResults, EvalSuite, Evaluator... } from 'praisonai';
+import { AccuracyEvalConfig, AccuracyJudge, AggregatedResults, CriteriaJudge, EvalCriteria, EvalResult, EvalResults, EvalSuite, Evaluator, EvaluatorConfig... } from 'praisonai';
 ```
 
 </details>
@@ -713,10 +823,7 @@ import { ApprovalCallbackFn, ApprovalDecision, ApprovalRequest, DisplayCallbackD
 <summary><strong>integrations</strong> (58 exports)</summary>
 
 ```typescript
-import { // Computer Use
-  createComputerUse, // Natural Language Postgres
-  createNLPostgres, // Slack
-  createSlackBot, BaseObservabilityProvider, BaseVectorStore, BaseVoiceProvider, ChromaVectorStore, ColumnSchema, ComputerAction, ComputerUseClient... } from 'praisonai';
+import { BaseObservabilityProvider, BaseVectorStore, BaseVoiceProvider, ChromaVectorStore, ColumnSchema, ComputerAction, ComputerUseClient, ComputerUseConfig, ComputerUseTools, ConsoleObservabilityProvider... } from 'praisonai';
 ```
 
 </details>
@@ -734,11 +841,7 @@ import { BaseReranker, CohereReranker, CrossEncoderReranker, GraphEdge, GraphNod
 <summary><strong>llm</strong> (44 exports)</summary>
 
 ```typescript
-import { // Provider classes
-  OpenAIProvider, // Provider factory and utilities
-  createProvider, // Provider registry (extensibility API)
-  ProviderRegistry, // Types
-  LLMProvider, ADAPTERS, AISDK_PROVIDERS, AdapterInfo, AnthropicProvider, BaseProvider, COMMUNITY_PROVIDERS... } from 'praisonai';
+import { ADAPTERS, AISDK_PROVIDERS, AdapterInfo, AnthropicProvider, BaseProvider, COMMUNITY_PROVIDERS, CommunityProvider, CreateProviderOptions, GenerateObjectOptions, GenerateObjectResult... } from 'praisonai';
 ```
 
 </details>
@@ -765,11 +868,7 @@ import { AfterDeleteHook, AfterRetrieveHook, AfterSearchHook, AfterStoreHook, Au
 <summary><strong>observability</strong> (29 exports)</summary>
 
 ```typescript
-import { // Adapters
-  NoopObservabilityAdapter, // Constants
-  OBSERVABILITY_TOOLS, // Global adapter management
-  setObservabilityAdapter, // Types
-  SpanKind, AttributionContext, ConsoleObservabilityAdapter, MemoryObservabilityAdapter, ObservabilityAdapter, ObservabilityToolConfig, ObservabilityToolInfo... } from 'praisonai';
+import { AttributionContext, ConsoleObservabilityAdapter, MemoryObservabilityAdapter, NoopObservabilityAdapter, OBSERVABILITY_TOOLS, ObservabilityAdapter, ObservabilityToolConfig, ObservabilityToolInfo, ObservabilityToolName, ProviderMetadata... } from 'praisonai';
 ```
 
 </details>
@@ -784,6 +883,7 @@ import { AgentApp, AgentAppConfig, AgentAppOptions, AgentAppProtocol, AgentOS, A
 </details>
 
 <details>
+<<<<<<< Updated upstream
 <summary><strong>other</strong> (233 exports)</summary>
 
 ```typescript
@@ -798,17 +898,55 @@ import { // A2A Protocol
   TraceSink, // Enums
   ContextEventType, // Enums
   MemoryBackend... } from 'praisonai';
+=======
+<summary><strong>other</strong> (203 exports)</summary>
+
+```typescript
+import { AUTONOMY_PRESETS, AgentPluginProtocol, ArrayMode, AsyncDisplayCallback, AuthProfile, AutoRagConfig, AutonomyLevel, BatchEmbeddingResult, BotChannel, BotConfig... } from 'praisonai';
+>>>>>>> Stashed changes
 ```
 
 </details>
 
 <details>
+<<<<<<< Updated upstream
 <summary><strong>planning</strong> (25 exports)</summary>
 
 ```typescript
 import { // Core classes
   Plan, // Python parity additions
   ApprovalCallback, ApprovalCallbackConfig, PlanConfig, PlanResult, PlanStatus, PlanStep, PlanStepConfig, PlanStorage, PlanningAgent... } from 'praisonai';
+=======
+<summary><strong>parity</strong> (65 exports)</summary>
+
+```typescript
+import { AudioConfig, Chunking, CodeAgent, CodeConfig, CodeExecutionStep, ContextConfig, ContextManager, ContextPack, DeepResearchResponse, EmbeddingAgent... } from 'praisonai';
+>>>>>>> Stashed changes
+```
+
+</details>
+
+<details>
+<<<<<<< Updated upstream
+<summary><strong>skills</strong> (10 exports)</summary>
+
+```typescript
+import { // Python parity additions
+  SkillLoader, Skill, SkillDiscoveryOptions, SkillManager, SkillMetadata, SkillProperties, createSkillLoader, createSkillManager, createSkillProperties, parseSkillFile } from 'praisonai';
+=======
+<summary><strong>planning</strong> (25 exports)</summary>
+
+```typescript
+import { ApprovalCallback, ApprovalCallbackConfig, Plan, PlanConfig, PlanResult, PlanStatus, PlanStep, PlanStepConfig, PlanStorage, PlanningAgent... } from 'praisonai';
+```
+
+</details>
+
+<details>
+<summary><strong>protocols</strong> (30 exports)</summary>
+
+```typescript
+import { A2A, A2AAgentCapabilities, A2AAgentCard, A2AAgentSkill, A2AArtifact, A2ADataPart, A2AFilePart, A2AMessage, A2APart, A2ARole... } from 'praisonai';
 ```
 
 </details>
@@ -817,8 +955,8 @@ import { // Core classes
 <summary><strong>skills</strong> (10 exports)</summary>
 
 ```typescript
-import { // Python parity additions
-  SkillLoader, Skill, SkillDiscoveryOptions, SkillManager, SkillMetadata, SkillProperties, createSkillLoader, createSkillManager, createSkillProperties, parseSkillFile } from 'praisonai';
+import { Skill, SkillDiscoveryOptions, SkillLoader, SkillManager, SkillMetadata, SkillProperties, createSkillLoader, createSkillManager, createSkillProperties, parseSkillFile } from 'praisonai';
+>>>>>>> Stashed changes
 ```
 
 </details>
@@ -836,8 +974,12 @@ import { AgentTask, AgentTaskConfig, BaseTask, TaskOutput, createTaskOutput } fr
 <summary><strong>telemetry</strong> (26 exports)</summary>
 
 ```typescript
+<<<<<<< Updated upstream
 import { // Python parity additions
   MinimalTelemetry, AgentStats, AgentTelemetry, MetricEntry, PerformanceMonitor, PerformanceMonitorConfig, PerformanceStats, TelemetryCollector, TelemetryConfig, TelemetryEvent... } from 'praisonai';
+=======
+import { AgentStats, AgentTelemetry, MetricEntry, MinimalTelemetry, PerformanceMonitor, PerformanceMonitorConfig, PerformanceStats, TelemetryCollector, TelemetryConfig, TelemetryEvent... } from 'praisonai';
+>>>>>>> Stashed changes
 ```
 
 </details>
@@ -846,8 +988,7 @@ import { // Python parity additions
 <summary><strong>tools</strong> (82 exports)</summary>
 
 ```typescript
-import { // Subagent Tool (agent-as-tool pattern)
-  SubagentTool, BaseTool, DelegatorConfig, FunctionTool, InstallHints, MissingDependencyError, MissingEnvVarError, PraisonTool, RedactionHooks, RegisteredTool... } from 'praisonai';
+import { BaseTool, DelegatorConfig, FunctionTool, InstallHints, MissingDependencyError, MissingEnvVarError, PraisonTool, RedactionHooks, RegisteredTool, SubagentTool... } from 'praisonai';
 ```
 
 </details>
@@ -856,9 +997,7 @@ import { // Subagent Tool (agent-as-tool pattern)
 <summary><strong>workflows</strong> (31 exports)</summary>
 
 ```typescript
-import { // New: Python-parity Loop and Repeat classes
-  Loop, // Task class
-  Task, AgentFlow, LoopConfig, LoopResult, ParsedWorkflow, Pipeline, Repeat, RepeatConfig, RepeatContext... } from 'praisonai';
+import { AgentFlow, Loop, LoopConfig, LoopResult, ParsedWorkflow, Pipeline, Repeat, RepeatConfig, RepeatContext, RepeatResult... } from 'praisonai';
 ```
 
 </details>

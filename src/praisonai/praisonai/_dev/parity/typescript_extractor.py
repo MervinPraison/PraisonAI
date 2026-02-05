@@ -88,6 +88,8 @@ class TypeScriptFeatureExtractor:
         'process': ['./process'],
         'cli': ['./cli'],
         'utils': ['./utils'],
+        'parity': ['./parity'],  # Parity module for Python SDK feature parity
+        'protocols': ['./protocols'],  # Protocol definitions
     }
     
     def __init__(self, repo_root: Optional[Path] = None):
@@ -176,11 +178,20 @@ class TypeScriptFeatureExtractor:
     def _parse_export_names(self, names_str: str) -> List[str]:
         """Parse export names from a comma-separated string."""
         names = []
+        # Remove comments from the string first
+        # Handle both // and /* */ style comments
+        names_str = re.sub(r'//[^\n]*', '', names_str)
+        names_str = re.sub(r'/\*.*?\*/', '', names_str, flags=re.DOTALL)
+        
         for part in names_str.split(','):
             part = part.strip()
             if not part:
                 continue
-            # Handle 'Name as Alias' syntax
+            # Skip if it looks like a comment remnant
+            if part.startswith('//') or part.startswith('/*'):
+                continue
+            # Handle 'Name as Alias' syntax - take the ALIAS (right side)
+            # This is correct because we want to match what Python exports
             if ' as ' in part:
                 part = part.split(' as ')[1].strip()
             names.append(part)

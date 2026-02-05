@@ -45,7 +45,7 @@ impl ToolResult {
             error: None,
         }
     }
-    
+
     /// Create a failed result
     pub fn failure(name: impl Into<String>, error: impl Into<String>) -> Self {
         Self {
@@ -65,16 +65,16 @@ impl ToolResult {
 pub trait Tool: Send + Sync {
     /// Get the tool name
     fn name(&self) -> &str;
-    
+
     /// Get the tool description
     fn description(&self) -> &str;
-    
+
     /// Get the parameter schema as JSON Schema
     fn parameters_schema(&self) -> Value;
-    
+
     /// Execute the tool with the given arguments
     async fn execute(&self, args: Value) -> Result<Value>;
-    
+
     /// Get the tool definition for LLM function calling
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
@@ -107,51 +107,49 @@ impl ToolRegistry {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Register a tool
     pub fn register(&mut self, tool: impl Tool + 'static) {
         let name = tool.name().to_string();
         self.tools.insert(name, Arc::new(tool));
     }
-    
+
     /// Get a tool by name
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
         self.tools.get(name).cloned()
     }
-    
+
     /// Check if a tool exists
     pub fn has(&self, name: &str) -> bool {
         self.tools.contains_key(name)
     }
-    
+
     /// List all tool names
     pub fn list(&self) -> Vec<&str> {
         self.tools.keys().map(|s| s.as_str()).collect()
     }
-    
+
     /// Get all tool definitions
     pub fn definitions(&self) -> Vec<ToolDefinition> {
         self.tools.values().map(|t| t.definition()).collect()
     }
-    
+
     /// Execute a tool by name
     pub async fn execute(&self, name: &str, args: Value) -> Result<ToolResult> {
         match self.get(name) {
-            Some(tool) => {
-                match tool.execute(args).await {
-                    Ok(value) => Ok(ToolResult::success(name, value)),
-                    Err(e) => Ok(ToolResult::failure(name, e.to_string())),
-                }
-            }
+            Some(tool) => match tool.execute(args).await {
+                Ok(value) => Ok(ToolResult::success(name, value)),
+                Err(e) => Ok(ToolResult::failure(name, e.to_string())),
+            },
             None => Err(Error::tool(format!("Tool not found: {}", name))),
         }
     }
-    
+
     /// Get the number of registered tools
     pub fn len(&self) -> usize {
         self.tools.len()
     }
-    
+
     /// Check if the registry is empty
     pub fn is_empty(&self) -> bool {
         self.tools.is_empty()
@@ -208,15 +206,15 @@ where
     fn name(&self) -> &str {
         &self.name
     }
-    
+
     fn description(&self) -> &str {
         &self.description
     }
-    
+
     fn parameters_schema(&self) -> Value {
         self.parameters.clone()
     }
-    
+
     async fn execute(&self, args: Value) -> Result<Value> {
         (self.func)(args).await
     }
@@ -225,7 +223,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_tool_result_success() {
         let result = ToolResult::success("test", serde_json::json!("hello"));
@@ -233,14 +231,14 @@ mod tests {
         assert_eq!(result.name, "test");
         assert!(result.error.is_none());
     }
-    
+
     #[test]
     fn test_tool_result_failure() {
         let result = ToolResult::failure("test", "something went wrong");
         assert!(!result.success);
         assert_eq!(result.error, Some("something went wrong".to_string()));
     }
-    
+
     #[test]
     fn test_tool_registry() {
         let registry = ToolRegistry::new();

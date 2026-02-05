@@ -6,12 +6,21 @@
   "summary": {
     "pythonCoreFeatures": 282,
     "pythonWrapperFeatures": 94,
+<<<<<<< Updated upstream
     "typescriptFeatures": 1118,
     "gapCount": 97,
     "priorityP0": 21,
     "priorityP1": 8,
     "priorityP2": 19,
     "priorityP3": 49
+=======
+    "typescriptFeatures": 1183,
+    "gapCount": 0,
+    "priorityP0": 0,
+    "priorityP1": 0,
+    "priorityP2": 0,
+    "priorityP3": 0
+>>>>>>> Stashed changes
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -746,6 +755,7 @@
   "typescriptSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-ts/src",
     "exports": [
+<<<<<<< Updated upstream
       "// A2A Protocol\n  A2ATaskState",
       "// AGUI Protocol\n  AGUI",
       "// Adapters\n  NoopObservabilityAdapter",
@@ -826,7 +836,13 @@
       "// UI Message (AI SDK v6 parity)\n  convertToModelMessages",
       "A2A",
       "A2ARole",
+=======
+      "A2A",
+      "A2ARole",
+      "A2ATaskState",
+>>>>>>> Stashed changes
       "ADAPTERS",
+      "AGUI",
       "AIAgentStep",
       "AIEmbedManyResult",
       "AIEmbedOptions",
@@ -876,6 +892,11 @@
       "Agents",
       "AiderAgent",
       "AnthropicProvider",
+<<<<<<< Updated upstream
+=======
+      "ApprovalCallback",
+      "ApprovalManager",
+>>>>>>> Stashed changes
       "ArrayMode",
       "AudioAgent",
       "AutoAgents",
@@ -886,7 +907,12 @@
       "AutoRetrievalPolicy",
       "AutoTaskConfig",
       "AutonomyLevel",
+<<<<<<< Updated upstream
+=======
+      "AutonomyManager",
+>>>>>>> Stashed changes
       "BaseCache",
+      "BaseExternalAgent",
       "BaseObservabilityProvider",
       "BaseProvider",
       "BaseReranker",
@@ -898,23 +924,38 @@
       "CLI_SPEC_VERSION",
       "COMMUNITY_PROVIDERS",
       "CONTEXT_PRESETS",
+<<<<<<< Updated upstream
       "ChromaVectorStore",
+=======
+      "CheckpointManager",
+      "ChromaVectorStore",
+      "Chunking",
+>>>>>>> Stashed changes
       "ChunkingStrategy",
       "CitationsMode",
       "ClaudeCodeAgent",
+      "CodeAgent",
       "CodexCliAgent",
       "CohereReranker",
       "CommandValidator",
       "ComputerUseClient",
+      "ConfigValidationError",
       "ConsoleObservabilityAdapter",
       "ConsoleObservabilityProvider",
       "ContextAgent",
+<<<<<<< Updated upstream
       "ContextListSink",
+=======
+      "ContextEventType",
+      "ContextListSink",
+      "ContextManager",
+>>>>>>> Stashed changes
       "ContextNoOpSink",
       "ContextPolicy",
       "ContextTraceEmitter",
       "ContextTraceSink",
       "CostTokenUsage",
+      "CostTracker",
       "CriteriaJudge",
       "CrossEncoderReranker",
       "DANGEROUS_PATTERNS",
@@ -926,6 +967,7 @@
       "DEFAULT_POLICIES",
       "DEFAULT_RAG_TEMPLATE",
       "DeepResearchAgent",
+      "DictCondition",
       "DiffViewer",
       "DisplayFlow",
       "DisplayFlowConfig",
@@ -933,6 +975,7 @@
       "DocsManager",
       "EXECUTION_PRESETS",
       "ElevenLabsVoiceProvider",
+      "EmbeddingAgent",
       "EvalResults",
       "EvalSuite",
       "Evaluator",
@@ -940,11 +983,20 @@
       "EventType",
       "ExecutionPreset",
       "ExpressionCondition",
+<<<<<<< Updated upstream
+=======
+      "FailoverManager",
+      "FastContext",
+>>>>>>> Stashed changes
       "FeatureMemoryConfig",
       "FileCache",
       "FileCheckpointStorage",
       "FileJobStorage",
       "FileMemory",
+<<<<<<< Updated upstream
+=======
+      "FlowDisplay",
+>>>>>>> Stashed changes
       "FunctionCondition",
       "FunctionPlugin",
       "FunctionTool",
@@ -952,6 +1004,7 @@
       "GUARDRAIL_PRESETS",
       "GeminiCliAgent",
       "GenericExternalAgent",
+      "GitManager",
       "GoogleProvider",
       "GraphRAG",
       "GraphStore",
@@ -963,16 +1016,31 @@
       "HandoffTimeoutError",
       "HistoryManager",
       "HooksManager",
+      "If",
       "ImageAgent",
+<<<<<<< Updated upstream
       "KNOWLEDGE_PRESETS",
+=======
+      "InteractiveTUI",
+      "JobQueue",
+      "Judge",
+      "KNOWLEDGE_PRESETS",
+      "Knowledge",
+>>>>>>> Stashed changes
       "LLMGuardrail",
       "LLMReranker",
       "LangfuseObservabilityProvider",
+      "Loop",
+      "MCP",
       "MCPClient",
       "MCPClientType",
       "MCPSecurity",
       "MCPServer",
       "MCPSessionManager",
+<<<<<<< Updated upstream
+=======
+      "MEMORY_PRESETS",
+>>>>>>> Stashed changes
       "MEMORY_URL_SCHEMES",
       "MODEL_ALIASES",
       "MODEL_PRICING",
@@ -980,6 +1048,7 @@
       "MULTI_AGENT_EXECUTION_PRESETS",
       "MULTI_AGENT_OUTPUT_PRESETS",
       "Memory",
+      "MemoryBackend",
       "MemoryCache",
       "MemoryCheckpointStorage",
       "MemoryHooks",
@@ -990,23 +1059,41 @@
       "MemoryRedisAdapter",
       "MemoryVectorStore",
       "MessageType",
+<<<<<<< Updated upstream
+=======
+      "MinimalTelemetry",
+>>>>>>> Stashed changes
       "MissingDependencyError",
       "MissingEnvVarError",
+      "N8NIntegration",
       "NLPostgresClient",
       "NLPostgresConfig",
       "NeonPostgresAdapter",
+<<<<<<< Updated upstream
+=======
+      "NoopObservabilityAdapter",
+      "OBSERVABILITY_TOOLS",
+      "OCRAgent",
+>>>>>>> Stashed changes
       "OUTPUT_PRESETS",
       "ObservabilityTraceContext",
+      "OpenAIProvider",
       "OpenAIVoiceProvider",
       "OutputPreset",
       "PLANNING_PRESETS",
       "PROVIDER_ALIASES",
+      "Parallel",
       "PerformanceMonitor",
       "PineconeVectorStore",
       "Pipeline",
       "PlanStep",
       "PlanStorage",
       "PlanningAgent",
+<<<<<<< Updated upstream
+=======
+      "Plugin",
+      "PluginHook",
+>>>>>>> Stashed changes
       "PluginManager",
       "PluginParseError",
       "PluginType",
@@ -1014,6 +1101,7 @@
       "PraisonAIAgents",
       "PromptExpanderAgent",
       "ProviderMessage",
+      "ProviderRegistry",
       "ProviderToolDefinition",
       "PubSub",
       "QdrantVectorStore",
@@ -1027,19 +1115,37 @@
       "RESEARCH_TOOLS",
       "RESTRICTED_TOOLS",
       "RagRetrievalPolicy",
+<<<<<<< Updated upstream
       "RecipeJudge",
       "Repeat",
       "RetrievalPolicy",
       "RetrievalStrategy",
+=======
+      "RealtimeAgent",
+      "RecipeJudge",
+      "Repeat",
+      "RepoMap",
+      "RetrievalPolicy",
+      "RetrievalStrategy",
+      "Route",
+>>>>>>> Stashed changes
       "Router",
       "RouterAgent",
       "RulesManager",
       "SPEECH_MODELS",
       "SQLiteAdapter",
+      "SandboxExecutor",
+      "SandboxStatus",
+      "Scheduler",
+      "Session",
+      "SkillLoader",
       "SkillManager",
       "SlackBot",
+      "SlashCommandHandler",
       "StatusDisplay",
+      "SubagentTool",
       "TRANSCRIPTION_MODELS",
+      "Task",
       "TaskAgent",
       "TelemetryCollector",
       "TelemetryIntegration",
@@ -1053,8 +1159,16 @@
       "Tools",
       "ToolsRegistry",
       "TraceCtx",
+<<<<<<< Updated upstream
       "UpstashRedisAdapter",
       "VectorQueryResult",
+=======
+      "TraceSink",
+      "UpstashRedisAdapter",
+      "VectorQueryResult",
+      "VideoAgent",
+      "VisionAgent",
+>>>>>>> Stashed changes
       "WEB_PRESETS",
       "WeaviateVectorStore",
       "WebSearchProvider",
@@ -1079,6 +1193,10 @@
       "applyMiddleware",
       "apply_config_defaults",
       "asyncDisplayCallbacks",
+<<<<<<< Updated upstream
+=======
+      "async_display_callbacks",
+>>>>>>> Stashed changes
       "autoEnableDevTools",
       "base64ToUint8Array",
       "bedrockBrowserClick",
@@ -1088,6 +1206,10 @@
       "clean_triple_backticks",
       "cleanupTelemetry",
       "cleanupTelemetryResources",
+<<<<<<< Updated upstream
+=======
+      "cleanup_telemetry_resources",
+>>>>>>> Stashed changes
       "clearAICache",
       "clearAdapterCache",
       "clearAllCallbacks",
@@ -1101,11 +1223,15 @@
       "codeExecution",
       "codeMode",
       "composeMiddleware",
+      "config",
+      "configureTelemetry",
       "containsKeywordsCriterion",
+      "convertToModelMessages",
       "convertToUIMessages",
       "cosineSimilarity",
       "createAILoggingMiddleware",
       "createAISpan",
+      "createAgentLoop",
       "createAgentTelemetry",
       "createApiKeyPolicy",
       "createApprovalCallback",
@@ -1115,16 +1241,22 @@
       "createAutoMemory",
       "createAutonomyManager",
       "createCLIApprovalPrompt",
+      "createCachingMiddleware",
       "createCheckpointManager",
       "createChromaStore",
       "createCitation",
       "createCohereReranker",
+      "createComputerUse",
       "createComputerUseAgent",
       "createCondition",
       "createConsoleAdapter",
       "createConsoleObservability",
       "createConsoleSink",
       "createContextAgent",
+<<<<<<< Updated upstream
+=======
+      "createContextEvent",
+>>>>>>> Stashed changes
       "createContextPack",
       "createCostTracker",
       "createCrossEncoderReranker",
@@ -1159,7 +1291,9 @@
       "createHistoryManager",
       "createHonoHandler",
       "createHooksManager",
+      "createHttpHandler",
       "createImageAgent",
+      "createImagePart",
       "createInteractiveTUI",
       "createJobQueue",
       "createLLMGuardrail",
@@ -1171,6 +1305,7 @@
       "createLoggingMiddleware",
       "createLoggingOperationHooks",
       "createLoggingWorkflowHooks",
+      "createMCP",
       "createMCPClient",
       "createMCPSecurity",
       "createMCPServer",
@@ -1183,8 +1318,10 @@
       "createMemoryPostgres",
       "createMemoryRedis",
       "createMemoryVectorStore",
+      "createModel",
       "createMultimodalMessage",
       "createN8NIntegration",
+      "createNLPostgres",
       "createNeonPostgres",
       "createNestHandler",
       "createObservabilityAdapter",
@@ -1199,6 +1336,7 @@
       "createPostgresSessionStorage",
       "createPostgresTool",
       "createPromptExpanderAgent",
+      "createProvider",
       "createProviderRegistry",
       "createPubSub",
       "createQdrantStore",
@@ -1212,6 +1350,7 @@
       "createRepoMap",
       "createRetrievalConfig",
       "createRetryMiddleware",
+      "createRouteHandler",
       "createRouter",
       "createRulesManager",
       "createSQLiteAdapter",
@@ -1222,6 +1361,10 @@
       "createSkillLoader",
       "createSkillManager",
       "createSkillProperties",
+<<<<<<< Updated upstream
+=======
+      "createSlackBot",
+>>>>>>> Stashed changes
       "createSlashCommandHandler",
       "createSmartRetrievalConfig",
       "createStatusDisplay",
@@ -1249,21 +1392,34 @@
       "createWeaviateStore",
       "createWorkflowFromYAML",
       "createWorkflowHooks",
+      "create_context_agent",
       "cronExpressions",
       "db",
+      "defineTool",
+      "detect_url_scheme",
       "disableAITelemetry",
       "disableDevTools",
       "disablePerformanceMode",
       "disablePlugins",
       "disableTelemetry",
+<<<<<<< Updated upstream
       "discoverAndLoadPlugins",
       "discoverPlugins",
+=======
+      "disable_performance_mode",
+      "disable_telemetry",
+      "discoverAndLoadPlugins",
+      "discoverPlugins",
+      "discover_and_load_plugins",
+      "discover_plugins",
+>>>>>>> Stashed changes
       "displayError",
       "displayGenerating",
       "displayInstruction",
       "displayInteraction",
       "displaySelfReflection",
       "displayToolCall",
+<<<<<<< Updated upstream
       "embedding",
       "embeddings",
       "enableAITelemetry",
@@ -1274,6 +1430,32 @@
       "errorLogs",
       "estimateTokens",
       "euclideanDistance",
+=======
+      "display_error",
+      "display_generating",
+      "display_instruction",
+      "display_interaction",
+      "display_self_reflection",
+      "display_tool_call",
+      "embed",
+      "embedding",
+      "embeddings",
+      "enableAITelemetry",
+      "enableDevTools",
+      "enablePerformanceMode",
+      "enablePlugins",
+      "enableTelemetry",
+      "enable_performance_mode",
+      "enable_telemetry",
+      "ensurePluginDir",
+      "ensure_plugin_dir",
+      "errorLogs",
+      "error_logs",
+      "estimateTokens",
+      "euclideanDistance",
+      "evaluateCondition",
+      "evaluate_condition",
+>>>>>>> Stashed changes
       "exaSearch",
       "executeCallback",
       "executeCommand",
@@ -1287,6 +1469,7 @@
       "formatContextPackForPrompt",
       "formatCost",
       "functionToTool",
+      "generateSpeech",
       "getAICacheStats",
       "getApprovalManager",
       "getAvailableProviders",
@@ -1308,6 +1491,10 @@
       "getObservabilityAdapter",
       "getObservabilityToolInfo",
       "getOptimizationRule",
+<<<<<<< Updated upstream
+=======
+      "getPluginManager",
+>>>>>>> Stashed changes
       "getPluginTemplate",
       "getQuickContext",
       "getRegisteredDisplayTypes",
@@ -1323,10 +1510,21 @@
       "get_config",
       "get_config_path",
       "get_default",
+<<<<<<< Updated upstream
       "get_defaults_config",
       "get_plugins_config",
+=======
+      "get_default_plugin_dirs",
+      "get_defaults_config",
+      "get_dimensions",
+      "get_plugin_manager",
+      "get_plugin_template",
+      "get_plugins_config",
+      "get_telemetry",
+>>>>>>> Stashed changes
       "handoff",
       "handoffFilters",
+      "handoff_filters",
       "hasApprovalCallback",
       "hasCitations",
       "hasModelAlias",
@@ -1353,6 +1551,10 @@
       "listProviders",
       "loadPlugin",
       "loadWorkflowFromFile",
+<<<<<<< Updated upstream
+=======
+      "load_plugin",
+>>>>>>> Stashed changes
       "logError",
       "loop",
       "loopPattern",
@@ -1378,11 +1580,20 @@
       "parseSlackMessage",
       "parseSlashCommand",
       "parseYAMLWorkflow",
+<<<<<<< Updated upstream
+=======
+      "parse_plugin_header",
+      "parse_plugin_header_from_file",
+>>>>>>> Stashed changes
       "parse_policy_string",
       "performanceEval",
       "perplexitySearch",
       "pipeUIMessageStreamToResponse",
       "promptWithHandoffInstructions",
+<<<<<<< Updated upstream
+=======
+      "prompt_with_handoff_instructions",
+>>>>>>> Stashed changes
       "rangesOverlap",
       "recordEvent",
       "registerApprovalCallback",
@@ -1396,6 +1607,7 @@
       "registerNpmTool",
       "registerProvider",
       "registerTool",
+      "register_display_callback",
       "relevanceCriterion",
       "reliabilityEval",
       "removeJudge",
@@ -1406,12 +1618,20 @@
       "requestApproval",
       "resetObservabilityAdapter",
       "resetToolsRegistry",
+<<<<<<< Updated upstream
+=======
+      "resolve",
+>>>>>>> Stashed changes
       "resolveGuardrailPolicies",
       "resolveModelAlias",
       "resolve_autonomy",
       "resolve_caching",
       "resolve_context",
       "resolve_execution",
+<<<<<<< Updated upstream
+=======
+      "resolve_guardrail_policies",
+>>>>>>> Stashed changes
       "resolve_guardrails",
       "resolve_hooks",
       "resolve_knowledge",
@@ -1429,6 +1649,10 @@
       "setApprovalManager",
       "setDefaultDbAdapter",
       "setEmbeddingConfig",
+<<<<<<< Updated upstream
+=======
+      "setObservabilityAdapter",
+>>>>>>> Stashed changes
       "stopAfterSteps",
       "stopWhen",
       "stopWhenNoToolCalls",
@@ -1437,6 +1661,10 @@
       "superagentRedact",
       "superagentVerify",
       "syncDisplayCallbacks",
+<<<<<<< Updated upstream
+=======
+      "sync_display_callbacks",
+>>>>>>> Stashed changes
       "tavilyCrawl",
       "tavilyExtract",
       "tavilySearch",
@@ -1446,7 +1674,13 @@
       "tools",
       "trace",
       "traceContext",
+<<<<<<< Updated upstream
       "trackWorkflow",
+=======
+      "trace_context",
+      "trackWorkflow",
+      "track_workflow",
+>>>>>>> Stashed changes
       "transcribe",
       "triggerN8NWebhook",
       "uint8ArrayToBase64",
@@ -1465,6 +1699,7 @@
       "valyuSecSearch",
       "valyuWebSearch",
       "verifySlackSignature",
+      "when",
       "withApproval",
       "withSpan",
       "workflows",
@@ -1538,20 +1773,6 @@
         "routeConditions"
       ],
       "ai": [
-        "// Agent loop\n  createAgentLoop",
-        "// DevTools\n  enableDevTools",
-        "// MCP\n  createMCP",
-        "// Middleware (renamed to avoid conflicts)\n  createCachingMiddleware",
-        "// Models\n  createModel",
-        "// Multimodal\n  createImagePart",
-        "// Next.js\n  createRouteHandler",
-        "// OAuth for MCP\n  OAuthClientProvider",
-        "// Server adapters\n  createHttpHandler",
-        "// Speech & Transcription\n  generateSpeech",
-        "// Telemetry (AI SDK v6 parity)\n  configureTelemetry",
-        "// Tool Approval (AI SDK v6 parity)\n  ApprovalManager",
-        "// Tools\n  defineTool",
-        "// UI Message (AI SDK v6 parity)\n  convertToModelMessages",
         "AIAgentStep",
         "AIEmbedManyResult",
         "AIEmbedOptions",
@@ -1584,6 +1805,7 @@
         "AgentLoopConfig",
         "AgentLoopResult",
         "ApprovalHandler",
+        "ApprovalManager",
         "ApprovalState",
         "DANGEROUS_PATTERNS",
         "DataUIPart",
@@ -1603,6 +1825,7 @@
         "MiddlewareResponse",
         "ModelConfig",
         "ModelId",
+        "OAuthClientProvider",
         "PdfPart",
         "ReasoningUIPart",
         "RouteHandlerConfig",
@@ -1643,30 +1866,42 @@
         "clearEvents",
         "closeAllMCPClients",
         "closeMCPClient",
+        "configureTelemetry",
+        "convertToModelMessages",
         "convertToUIMessages",
         "createAILoggingMiddleware",
         "createAISpan",
+        "createAgentLoop",
         "createApprovalResponse",
+        "createCachingMiddleware",
         "createDangerousPatternChecker",
         "createDevToolsMiddleware",
         "createExpressHandler",
         "createFastifyHandler",
         "createFilePart",
         "createHonoHandler",
+        "createHttpHandler",
+        "createImagePart",
+        "createMCP",
+        "createModel",
         "createMultimodalMessage",
         "createNestHandler",
         "createPagesHandler",
         "createPdfPart",
+        "createRouteHandler",
         "createSystemMessage",
         "createTelemetryMiddleware",
         "createTelemetrySettings",
         "createTextMessage",
         "createTextPart",
         "createToolSet",
+        "defineTool",
         "disableAITelemetry",
         "disableDevTools",
         "enableAITelemetry",
+        "enableDevTools",
         "functionToTool",
+        "generateSpeech",
         "getAICacheStats",
         "getApprovalManager",
         "getDevToolsState",
@@ -1723,6 +1958,7 @@
         "createMemoryCache"
       ],
       "cli": [
+<<<<<<< Updated upstream
         "// Autonomy Mode\n  AutonomyManager",
         "// Background Jobs\n  JobQueue",
         "// Checkpoints\n  CheckpointManager",
@@ -1738,22 +1974,28 @@
         "// Sandbox Executor\n  SandboxExecutor",
         "// Scheduler\n  Scheduler",
         "// Slash Commands\n  SlashCommandHandler",
+=======
+>>>>>>> Stashed changes
         "ActionDecision",
         "ActionRequest",
         "ActionType",
         "AiderAgent",
         "ApprovalPolicy",
         "AutonomyConfig",
+        "AutonomyManager",
         "AutonomyMode",
+        "BaseExternalAgent",
         "CLI_SPEC_VERSION",
         "CheckpointConfig",
         "CheckpointData",
+        "CheckpointManager",
         "CheckpointStorage",
         "ClaudeCodeAgent",
         "CodexCliAgent",
         "CommandValidator",
         "ContextSource",
         "CostTokenUsage",
+        "CostTracker",
         "DEFAULT_BLOCKED_COMMANDS",
         "DEFAULT_BLOCKED_PATHS",
         "DEFAULT_IGNORE_PATTERNS",
@@ -1761,12 +2003,17 @@
         "ExecutionResult",
         "ExternalAgentConfig",
         "ExternalAgentResult",
+        "FastContext",
         "FastContextConfig",
         "FastContextResult",
         "FileCheckpointStorage",
         "FileInfo",
         "FileJobStorage",
         "FileMatch",
+<<<<<<< Updated upstream
+=======
+        "FlowDisplay",
+>>>>>>> Stashed changes
         "FlowDisplayConfig",
         "FlowGraph",
         "FlowNode",
@@ -1776,35 +2023,44 @@
         "GitConfig",
         "GitDiff",
         "GitDiffFile",
+        "GitManager",
         "GitStatus",
         "HistoryManager",
+        "InteractiveTUI",
         "Job",
         "JobContext",
         "JobHandler",
         "JobPriority",
+        "JobQueue",
         "JobQueueConfig",
         "JobStatus",
         "JobStorageAdapter",
+        "LineRange",
         "MODEL_PRICING",
         "MODE_POLICIES",
         "MemoryCheckpointStorage",
         "MemoryJobStorage",
         "ModelPricing",
         "N8NConfig",
+        "N8NIntegration",
         "N8NWebhookPayload",
         "N8NWorkflow",
         "N8NWorkflowNode",
+        "RepoMap",
         "RepoMapConfig",
         "RepoMapResult",
         "RequestStats",
         "SandboxConfig",
+        "SandboxExecutor",
         "SandboxMode",
         "ScheduleConfig",
         "ScheduledTask",
+        "Scheduler",
         "SchedulerStats",
         "SessionStats",
         "SlashCommand",
         "SlashCommandContext",
+        "SlashCommandHandler",
         "SlashCommandResult",
         "StatusDisplay",
         "SymbolInfo",
@@ -1883,7 +2139,6 @@
         "setDefaultDbAdapter"
       ],
       "eval": [
-        "// LLM-as-Judge\n  Judge",
         "AccuracyEvalConfig",
         "AccuracyJudge",
         "AggregatedResults",
@@ -1894,6 +2149,7 @@
         "EvalSuite",
         "Evaluator",
         "EvaluatorConfig",
+        "Judge",
         "JudgeConfig",
         "JudgeCriteriaConfig",
         "JudgeOptions",
@@ -1976,9 +2232,6 @@
         "unregisterDisplayCallback"
       ],
       "integrations": [
-        "// Computer Use\n  createComputerUse",
-        "// Natural Language Postgres\n  createNLPostgres",
-        "// Slack\n  createSlackBot",
         "BaseObservabilityProvider",
         "BaseVectorStore",
         "BaseVoiceProvider",
@@ -2021,16 +2274,19 @@
         "WeaviateVectorStore",
         "createCLIApprovalPrompt",
         "createChromaStore",
+        "createComputerUse",
         "createComputerUseAgent",
         "createConsoleObservability",
         "createElevenLabsVoice",
         "createLangfuseObservability",
         "createMemoryObservability",
         "createMemoryVectorStore",
+        "createNLPostgres",
         "createOpenAIVoice",
         "createPineconeStore",
         "createPostgresTool",
         "createQdrantStore",
+        "createSlackBot",
         "createWeaviateStore",
         "parseSlackMessage",
         "verifySlackSignature"
@@ -2054,10 +2310,6 @@
         "createLLMReranker"
       ],
       "llm": [
-        "// Provider classes\n  OpenAIProvider",
-        "// Provider factory and utilities\n  createProvider",
-        "// Provider registry (extensibility API)\n  ProviderRegistry",
-        "// Types\n  LLMProvider",
         "ADAPTERS",
         "AISDK_PROVIDERS",
         "AdapterInfo",
@@ -2072,6 +2324,8 @@
         "GenerateTextResult",
         "GoogleProvider",
         "IProviderRegistry",
+        "LLMProvider",
+        "OpenAIProvider",
         "PROVIDER_ALIASES",
         "ProviderConfig",
         "ProviderConstructor",
@@ -2081,12 +2335,14 @@
         "ProviderLoader",
         "ProviderMessage",
         "ProviderModalities",
+        "ProviderRegistry",
         "ProviderToolDefinition",
         "RegisterOptions",
         "StreamChunk",
         "StreamTextOptions",
         "TokenUsage",
         "ToolCall",
+        "createProvider",
         "createProviderRegistry",
         "getAvailableProviders",
         "getDefaultProvider",
@@ -2169,13 +2425,11 @@
         "createValidationHooks"
       ],
       "observability": [
-        "// Adapters\n  NoopObservabilityAdapter",
-        "// Constants\n  OBSERVABILITY_TOOLS",
-        "// Global adapter management\n  setObservabilityAdapter",
-        "// Types\n  SpanKind",
         "AttributionContext",
         "ConsoleObservabilityAdapter",
         "MemoryObservabilityAdapter",
+        "NoopObservabilityAdapter",
+        "OBSERVABILITY_TOOLS",
         "ObservabilityAdapter",
         "ObservabilityToolConfig",
         "ObservabilityToolInfo",
@@ -2184,6 +2438,7 @@
         "SpanContext",
         "SpanData",
         "SpanEvent",
+        "SpanKind",
         "SpanStatus",
         "TraceContext",
         "TraceData",
@@ -2197,6 +2452,7 @@
         "listObservabilityTools",
         "noopAdapter",
         "resetObservabilityAdapter",
+        "setObservabilityAdapter",
         "trace"
       ],
       "os": [
@@ -2212,6 +2468,7 @@
         "mergeConfig"
       ],
       "other": [
+<<<<<<< Updated upstream
         "// A2A Protocol\n  A2ATaskState",
         "// AGUI Protocol\n  AGUI",
         "// AgentManager alias type\n  AgentManager",
@@ -2256,11 +2513,14 @@
         "A2ATask",
         "A2ATaskStatus",
         "A2ATextPart",
+=======
+>>>>>>> Stashed changes
         "AUTONOMY_PRESETS",
         "AgentPluginProtocol",
         "ArrayMode",
         "AsyncDisplayCallback",
         "AuthProfile",
+<<<<<<< Updated upstream
         "AutoRagAgent",
         "AutoRagAgentConfig",
         "AutoRagConfig",
@@ -2268,6 +2528,13 @@
         "AutonomyLevel",
         "BatchEmbeddingResult",
         "BotChannel",
+=======
+        "AutoRagConfig",
+        "AutonomyLevel",
+        "BatchEmbeddingResult",
+        "BotChannel",
+        "BotConfig",
+>>>>>>> Stashed changes
         "BotMessage",
         "BotProtocol",
         "BotUser",
@@ -2277,30 +2544,58 @@
         "ChunkingStrategy",
         "CitationsMode",
         "CitationsModeType",
+<<<<<<< Updated upstream
+=======
+        "ConditionProtocol",
+        "ConfigValidationError",
+        "ContextEvent",
+        "ContextEventType",
+>>>>>>> Stashed changes
         "ContextListSink",
         "ContextNoOpSink",
         "ContextTraceEmitter",
         "ContextTraceSink",
         "ContextTraceSinkProtocol",
+<<<<<<< Updated upstream
         "DEFAULT_AUTO_KEYWORDS",
         "DEFAULT_RAG_TEMPLATE",
         "DefaultsConfig",
+=======
+        "DEFAULT_RAG_TEMPLATE",
+        "DefaultsConfig",
+        "DictCondition",
+        "DisplayCallback",
+>>>>>>> Stashed changes
         "DisplayContext",
         "DisplayFlow",
         "DisplayFlowConfig",
         "EXECUTION_PRESETS",
         "EmbeddingConfig",
+<<<<<<< Updated upstream
+=======
+        "EmbeddingResult",
+>>>>>>> Stashed changes
         "EventType",
         "ExecutionConfig",
         "ExecutionPreset",
         "ExpressionCondition",
         "FailoverConfig",
+<<<<<<< Updated upstream
         "FeatureMemoryConfig",
         "FunctionCondition",
         "FunctionPlugin",
         "GUARDRAIL_POLICY_PRESETS",
         "GUARDRAIL_PRESETS",
         "GatewayClientProtocol",
+=======
+        "FailoverManager",
+        "FeatureMemoryConfig",
+        "FunctionCondition",
+        "FunctionPlugin",
+        "GUARDRAIL_PRESETS",
+        "GatewayClientProtocol",
+        "GatewayConfig",
+>>>>>>> Stashed changes
         "GatewayEvent",
         "GatewayMessage",
         "GatewayProtocol",
@@ -2313,9 +2608,17 @@
         "KnowledgeConfig",
         "LLMPluginProtocol",
         "LearnConfig",
+<<<<<<< Updated upstream
         "MEMORY_URL_SCHEMES",
         "MULTI_AGENT_EXECUTION_PRESETS",
         "MULTI_AGENT_OUTPUT_PRESETS",
+=======
+        "MEMORY_PRESETS",
+        "MEMORY_URL_SCHEMES",
+        "MULTI_AGENT_EXECUTION_PRESETS",
+        "MULTI_AGENT_OUTPUT_PRESETS",
+        "MemoryBackend",
+>>>>>>> Stashed changes
         "MessageType",
         "MultiAgentExecutionConfig",
         "MultiAgentHooksConfig",
@@ -2327,13 +2630,25 @@
         "OutputPreset",
         "PLANNING_PRESETS",
         "PlanningConfig",
+<<<<<<< Updated upstream
         "PluginInfo",
         "PluginManager",
+=======
+        "Plugin",
+        "PluginHook",
+        "PluginInfo",
+        "PluginManager",
+        "PluginMetadata",
+>>>>>>> Stashed changes
         "PluginParseError",
         "PluginProtocol",
         "PluginType",
         "PluginsConfig",
         "PraisonConfig",
+<<<<<<< Updated upstream
+=======
+        "ProviderStatus",
+>>>>>>> Stashed changes
         "RAG",
         "RAGCitation",
         "RAGConfig",
@@ -2352,12 +2667,21 @@
         "RoutingConditionProtocol",
         "SandboxProtocol",
         "SandboxResult",
+<<<<<<< Updated upstream
+=======
+        "SandboxStatus",
+>>>>>>> Stashed changes
         "SessionConfig",
         "SkillsConfig",
         "TemplateConfig",
         "ToolPluginProtocol",
+<<<<<<< Updated upstream
         "Tools",
         "TraceCtx",
+=======
+        "TraceCtx",
+        "TraceSink",
+>>>>>>> Stashed changes
         "TraceSinkProtocol",
         "WEB_PRESETS",
         "WebConfig",
@@ -2374,6 +2698,10 @@
         "cosineSimilarity",
         "createCitation",
         "createCondition",
+<<<<<<< Updated upstream
+=======
+        "createContextEvent",
+>>>>>>> Stashed changes
         "createContextPack",
         "createRAG",
         "createRAGConfig",
@@ -2381,6 +2709,10 @@
         "createRetrievalConfig",
         "createSimpleRetrievalConfig",
         "createSmartRetrievalConfig",
+<<<<<<< Updated upstream
+=======
+        "detect_url_scheme",
+>>>>>>> Stashed changes
         "disablePlugins",
         "discoverAndLoadPlugins",
         "discoverPlugins",
@@ -2390,17 +2722,29 @@
         "displayInteraction",
         "displaySelfReflection",
         "displayToolCall",
+<<<<<<< Updated upstream
+=======
+        "embed",
+>>>>>>> Stashed changes
         "embedding",
         "embeddings",
         "enablePlugins",
         "ensurePluginDir",
         "errorLogs",
         "euclideanDistance",
+<<<<<<< Updated upstream
+=======
+        "evaluateCondition",
+>>>>>>> Stashed changes
         "formatAnswerWithCitations",
         "formatCitation",
         "formatContextPackForPrompt",
         "getDefaultPluginDirs",
         "getDimensions",
+<<<<<<< Updated upstream
+=======
+        "getPluginManager",
+>>>>>>> Stashed changes
         "getPluginTemplate",
         "get_config",
         "get_config_path",
@@ -2414,16 +2758,25 @@
         "listPlugins",
         "loadPlugin",
         "logError",
+<<<<<<< Updated upstream
         "memory",
         "normalizeEmbedding",
         "notCondition",
         "obs",
+=======
+        "normalizeEmbedding",
+        "notCondition",
+>>>>>>> Stashed changes
         "orConditions",
         "parsePluginHeader",
         "parsePluginHeaderFromFile",
         "parse_policy_string",
         "registerDisplay",
+<<<<<<< Updated upstream
         "resolveGuardrailPolicies",
+=======
+        "resolve",
+>>>>>>> Stashed changes
         "resolve_autonomy",
         "resolve_caching",
         "resolve_context",
@@ -2443,6 +2796,7 @@
         "syncDisplayCallbacks",
         "traceContext",
         "trackWorkflow",
+<<<<<<< Updated upstream
         "validate_config",
         "workflows"
       ],
@@ -2450,6 +2804,81 @@
         "// Core classes\n  Plan",
         "// Python parity additions\n  ApprovalCallback",
         "ApprovalCallbackConfig",
+=======
+        "validate_config"
+      ],
+      "parity": [
+        "AudioConfig",
+        "Chunking",
+        "CodeAgent",
+        "CodeConfig",
+        "CodeExecutionStep",
+        "ContextConfig",
+        "ContextManager",
+        "ContextPack",
+        "DeepResearchResponse",
+        "EmbeddingAgent",
+        "FileSearchCall",
+        "GuardrailResult",
+        "If",
+        "Knowledge",
+        "MCP",
+        "MCPCall",
+        "ManagerConfig",
+        "OCRAgent",
+        "OCRConfig",
+        "OptimizerStrategy",
+        "Parallel",
+        "Provider",
+        "RealtimeAgent",
+        "RealtimeConfig",
+        "Route",
+        "Session",
+        "VideoAgent",
+        "VideoConfig",
+        "VisionAgent",
+        "VisionConfig",
+        "WebSearchCall",
+        "async_display_callbacks",
+        "cleanup_telemetry_resources",
+        "create_context_agent",
+        "disable_performance_mode",
+        "disable_telemetry",
+        "discover_and_load_plugins",
+        "discover_plugins",
+        "display_error",
+        "display_generating",
+        "display_instruction",
+        "display_interaction",
+        "display_self_reflection",
+        "display_tool_call",
+        "enable_performance_mode",
+        "enable_telemetry",
+        "ensure_plugin_dir",
+        "error_logs",
+        "evaluate_condition",
+        "get_default_plugin_dirs",
+        "get_dimensions",
+        "get_plugin_manager",
+        "get_plugin_template",
+        "get_telemetry",
+        "handoff_filters",
+        "load_plugin",
+        "parse_plugin_header",
+        "parse_plugin_header_from_file",
+        "prompt_with_handoff_instructions",
+        "register_display_callback",
+        "resolve_guardrail_policies",
+        "sync_display_callbacks",
+        "trace_context",
+        "track_workflow",
+        "when"
+      ],
+      "planning": [
+        "ApprovalCallback",
+        "ApprovalCallbackConfig",
+        "Plan",
+>>>>>>> Stashed changes
         "PlanConfig",
         "PlanResult",
         "PlanStatus",
@@ -2473,10 +2902,43 @@
         "createTaskAgent",
         "createTodoList"
       ],
+      "protocols": [
+        "A2A",
+        "A2AAgentCapabilities",
+        "A2AAgentCard",
+        "A2AAgentSkill",
+        "A2AArtifact",
+        "A2ADataPart",
+        "A2AFilePart",
+        "A2AMessage",
+        "A2APart",
+        "A2ARole",
+        "A2ASendMessageRequest",
+        "A2ATask",
+        "A2ATaskState",
+        "A2ATaskStatus",
+        "A2ATextPart",
+        "AGUI",
+        "AgentManager",
+        "AutoRagAgent",
+        "AutoRagAgentConfig",
+        "AutoRetrievalPolicy",
+        "DEFAULT_AUTO_KEYWORDS",
+        "GUARDRAIL_POLICY_PRESETS",
+        "GuardrailPolicy",
+        "ToolDefinition",
+        "Tools",
+        "config",
+        "memory",
+        "obs",
+        "resolveGuardrailPolicies",
+        "workflows"
+      ],
       "skills": [
         "// Python parity additions\n  SkillLoader",
         "Skill",
         "SkillDiscoveryOptions",
+        "SkillLoader",
         "SkillManager",
         "SkillMetadata",
         "SkillProperties",
@@ -2497,6 +2959,7 @@
         "AgentStats",
         "AgentTelemetry",
         "MetricEntry",
+        "MinimalTelemetry",
         "PerformanceMonitor",
         "PerformanceMonitorConfig",
         "PerformanceStats",
@@ -2521,7 +2984,6 @@
         "getTelemetry"
       ],
       "tools": [
-        "// Subagent Tool (agent-as-tool pattern)\n  SubagentTool",
         "BaseTool",
         "DelegatorConfig",
         "FunctionTool",
@@ -2531,6 +2993,7 @@
         "PraisonTool",
         "RedactionHooks",
         "RegisteredTool",
+        "SubagentTool",
         "SubagentToolConfig",
         "ToolCapabilities",
         "ToolConfig",
@@ -2605,9 +3068,8 @@
         "valyuWebSearch"
       ],
       "workflows": [
-        "// New: Python-parity Loop and Repeat classes\n  Loop",
-        "// Task class\n  Task",
         "AgentFlow",
+        "Loop",
         "LoopConfig",
         "LoopResult",
         "ParsedWorkflow",
@@ -2621,6 +3083,7 @@
         "StepOutputConfig",
         "StepResult",
         "StepRoutingConfig",
+        "Task",
         "TaskConfig",
         "Workflow",
         "WorkflowContext",
@@ -2662,37 +3125,37 @@
       {
         "feature": "AudioConfig",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P0",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agent"
       },
       {
         "feature": "CodeAgent",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agent"
       },
       {
         "feature": "CodeConfig",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P0",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agent"
       },
       {
         "feature": "CodeExecutionStep",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agent"
       },
       {
@@ -2725,19 +3188,19 @@
       {
         "feature": "DeepResearchResponse",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agent"
       },
       {
         "feature": "EmbeddingAgent",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agent"
       },
       {
@@ -2770,10 +3233,10 @@
       {
         "feature": "FileSearchCall",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agent"
       },
       {
@@ -2860,28 +3323,28 @@
       {
         "feature": "MCPCall",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agent"
       },
       {
         "feature": "OCRAgent",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agent"
       },
       {
         "feature": "OCRConfig",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P0",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agent"
       },
       {
@@ -2896,10 +3359,10 @@
       {
         "feature": "Provider",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agent"
       },
       {
@@ -2923,19 +3386,19 @@
       {
         "feature": "RealtimeAgent",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agent"
       },
       {
         "feature": "RealtimeConfig",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P0",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agent"
       },
       {
@@ -2968,55 +3431,55 @@
       {
         "feature": "VideoAgent",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agent"
       },
       {
         "feature": "VideoConfig",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P0",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agent"
       },
       {
         "feature": "VisionAgent",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agent"
       },
       {
         "feature": "VisionConfig",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P0",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agent"
       },
       {
         "feature": "WebSearchCall",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agent"
       },
       {
         "feature": "create_context_agent",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P0",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agent"
       },
       {
@@ -3031,19 +3494,19 @@
       {
         "feature": "handoff_filters",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P0",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agent"
       },
       {
         "feature": "prompt_with_handoff_instructions",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P0",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agent"
       }
     ],
@@ -3060,37 +3523,37 @@
       {
         "feature": "Chunking",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P1",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "knowledge"
       },
       {
         "feature": "If",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P1",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "workflows"
       },
       {
         "feature": "Knowledge",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P1",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "knowledge"
       },
       {
         "feature": "Loop",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P1",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "workflows"
       },
       {
@@ -3105,10 +3568,10 @@
       {
         "feature": "Parallel",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P1",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "workflows"
       },
       {
@@ -3132,19 +3595,19 @@
       {
         "feature": "Route",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P1",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "workflows"
       },
       {
         "feature": "Session",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P1",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "session"
       },
       {
@@ -3222,10 +3685,10 @@
       {
         "feature": "when",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P1",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "workflows"
       }
     ],
@@ -3233,10 +3696,10 @@
       {
         "feature": "ApprovalCallback",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P2",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "planning"
       },
       {
@@ -3260,37 +3723,37 @@
       {
         "feature": "ContextConfig",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P2",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "context"
       },
       {
         "feature": "ContextManager",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P2",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "context"
       },
       {
         "feature": "ContextPack",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P2",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "rag"
       },
       {
         "feature": "FastContext",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P2",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "context"
       },
       {
@@ -3314,10 +3777,10 @@
       {
         "feature": "GuardrailResult",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P2",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "guardrails"
       },
       {
@@ -3332,46 +3795,46 @@
       {
         "feature": "LineRange",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P2",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "context"
       },
       {
         "feature": "MCP",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P2",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "mcp"
       },
       {
         "feature": "ManagerConfig",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P2",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "context"
       },
       {
         "feature": "MinimalTelemetry",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P2",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "telemetry"
       },
       {
         "feature": "OptimizerStrategy",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P2",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "context"
       },
       {
@@ -3485,10 +3948,10 @@
       {
         "feature": "SkillLoader",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P2",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "skills"
       },
       {
@@ -3548,55 +4011,55 @@
       {
         "feature": "cleanup_telemetry_resources",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P2",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "telemetry"
       },
       {
         "feature": "disable_performance_mode",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P2",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "telemetry"
       },
       {
         "feature": "disable_telemetry",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P2",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "telemetry"
       },
       {
         "feature": "enable_performance_mode",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P2",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "telemetry"
       },
       {
         "feature": "enable_telemetry",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P2",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "telemetry"
       },
       {
         "feature": "get_telemetry",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P2",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "telemetry"
       }
     ],
@@ -3613,10 +4076,10 @@
       {
         "feature": "AGUI",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "ui"
       },
       {
@@ -3649,10 +4112,10 @@
       {
         "feature": "AgentManager",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "agents"
       },
       {
@@ -3775,10 +4238,10 @@
       {
         "feature": "BotConfig",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "bots"
       },
       {
@@ -3847,37 +4310,37 @@
       {
         "feature": "ConditionProtocol",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "medium",
-        "status": "TODO",
+        "status": "DONE",
         "category": "conditions"
       },
       {
         "feature": "ConfigValidationError",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "config"
       },
       {
         "feature": "ContextEvent",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "trace"
       },
       {
         "feature": "ContextEventType",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "trace"
       },
       {
@@ -3937,10 +4400,10 @@
       {
         "feature": "DictCondition",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "conditions"
       },
       {
@@ -3955,10 +4418,10 @@
       {
         "feature": "EmbeddingResult",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "embedding"
       },
       {
@@ -4009,19 +4472,19 @@
       {
         "feature": "FailoverManager",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "llm"
       },
       {
         "feature": "FlowDisplay",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "flow_display"
       },
       {
@@ -4054,10 +4517,10 @@
       {
         "feature": "GatewayConfig",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "gateway"
       },
       {
@@ -4162,10 +4625,10 @@
       {
         "feature": "MEMORY_PRESETS",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "config"
       },
       {
@@ -4198,10 +4661,10 @@
       {
         "feature": "MemoryBackend",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "config"
       },
       {
@@ -4315,19 +4778,19 @@
       {
         "feature": "Plugin",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "plugins"
       },
       {
         "feature": "PluginHook",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "plugins"
       },
       {
@@ -4351,10 +4814,10 @@
       {
         "feature": "PluginMetadata",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "plugins"
       },
       {
@@ -4396,10 +4859,10 @@
       {
         "feature": "ProviderStatus",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "llm"
       },
       {
@@ -4486,10 +4949,10 @@
       {
         "feature": "SandboxStatus",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "sandbox"
       },
       {
@@ -4522,10 +4985,10 @@
       {
         "feature": "Task",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "task"
       },
       {
@@ -4567,10 +5030,10 @@
       {
         "feature": "TraceSink",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "trace"
       },
       {
@@ -4648,10 +5111,10 @@
       {
         "feature": "async_display_callbacks",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "main"
       },
       {
@@ -4666,100 +5129,100 @@
       {
         "feature": "config",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "other"
       },
       {
         "feature": "detect_url_scheme",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "config"
       },
       {
         "feature": "discover_and_load_plugins",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "plugins"
       },
       {
         "feature": "discover_plugins",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "plugins"
       },
       {
         "feature": "display_error",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "main"
       },
       {
         "feature": "display_generating",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "main"
       },
       {
         "feature": "display_instruction",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "main"
       },
       {
         "feature": "display_interaction",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "main"
       },
       {
         "feature": "display_self_reflection",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "main"
       },
       {
         "feature": "display_tool_call",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "main"
       },
       {
         "feature": "embed",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "embedding"
       },
       {
@@ -4783,28 +5246,28 @@
       {
         "feature": "ensure_plugin_dir",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "plugins"
       },
       {
         "feature": "error_logs",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "main"
       },
       {
         "feature": "evaluate_condition",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "conditions"
       },
       {
@@ -4837,10 +5300,10 @@
       {
         "feature": "get_default_plugin_dirs",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "plugins"
       },
       {
@@ -4855,28 +5318,28 @@
       {
         "feature": "get_dimensions",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "embedding"
       },
       {
         "feature": "get_plugin_manager",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "plugins"
       },
       {
         "feature": "get_plugin_template",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "plugins"
       },
       {
@@ -4909,10 +5372,10 @@
       {
         "feature": "load_plugin",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "plugins"
       },
       {
@@ -4936,19 +5399,19 @@
       {
         "feature": "parse_plugin_header",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "plugins"
       },
       {
         "feature": "parse_plugin_header_from_file",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "plugins"
       },
       {
@@ -4963,19 +5426,19 @@
       {
         "feature": "register_display_callback",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "main"
       },
       {
         "feature": "resolve",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "config"
       },
       {
@@ -5017,10 +5480,10 @@
       {
         "feature": "resolve_guardrail_policies",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "config"
       },
       {
@@ -5125,10 +5588,10 @@
       {
         "feature": "sync_display_callbacks",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "main"
       },
       {
@@ -5152,19 +5615,19 @@
       {
         "feature": "trace_context",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "trace"
       },
       {
         "feature": "track_workflow",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "flow_display"
       },
       {

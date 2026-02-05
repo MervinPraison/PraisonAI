@@ -9,8 +9,8 @@
 
 mod commands;
 
-use clap::{Parser, Subcommand};
 use anyhow::Result;
+use clap::{Parser, Subcommand};
 
 /// PraisonAI - High-performance agentic AI framework
 #[derive(Parser)]
@@ -22,15 +22,15 @@ use anyhow::Result;
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
-    
+
     /// Single-shot prompt (when no subcommand is given)
     #[arg(trailing_var_arg = true)]
     prompt: Vec<String>,
-    
+
     /// Model to use (e.g., gpt-4o-mini, claude-3-sonnet)
     #[arg(short, long, default_value = "gpt-4o-mini")]
     model: String,
-    
+
     /// Enable verbose output
     #[arg(short, long)]
     verbose: bool,
@@ -43,27 +43,27 @@ enum Commands {
         /// Model to use
         #[arg(short, long, default_value = "gpt-4o-mini")]
         model: String,
-        
+
         /// System instructions
         #[arg(short, long)]
         instructions: Option<String>,
     },
-    
+
     /// Run a workflow from YAML file
     Run {
         /// Path to the YAML workflow file
         file: String,
-        
+
         /// Enable verbose output
         #[arg(short, long)]
         verbose: bool,
     },
-    
+
     /// Execute a single prompt
     Prompt {
         /// The prompt to execute
         text: String,
-        
+
         /// Model to use
         #[arg(short, long, default_value = "gpt-4o-mini")]
         model: String,
@@ -76,22 +76,19 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::INFO.into())
+                .add_directive(tracing::Level::INFO.into()),
         )
         .init();
-    
+
     let cli = Cli::parse();
-    
+
     match cli.command {
-        Some(Commands::Chat { model, instructions }) => {
-            commands::chat::run(model, instructions).await
-        }
-        Some(Commands::Run { file, verbose }) => {
-            commands::run::run(file, verbose).await
-        }
-        Some(Commands::Prompt { text, model }) => {
-            commands::prompt::run(text, model).await
-        }
+        Some(Commands::Chat {
+            model,
+            instructions,
+        }) => commands::chat::run(model, instructions).await,
+        Some(Commands::Run { file, verbose }) => commands::run::run(file, verbose).await,
+        Some(Commands::Prompt { text, model }) => commands::prompt::run(text, model).await,
         None => {
             // If no subcommand but prompt provided, run single-shot
             if !cli.prompt.is_empty() {

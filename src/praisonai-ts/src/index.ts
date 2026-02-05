@@ -936,3 +936,83 @@ export {
   // AgentManager alias type
   type AgentManager,
 } from './protocols';
+
+// Export Parity Module (All remaining P0-P3 gaps for full Python SDK parity)
+// Only export items that don't conflict with existing exports from other modules
+export {
+  // P0: Specialized Agent Configs (new)
+  type AudioConfig,
+  type CodeConfig,
+  type OCRConfig,
+  type VisionConfig,
+  type VideoConfig,
+  type RealtimeConfig,
+  // P0: Specialized Agents (new)
+  CodeAgent,
+  OCRAgent,
+  VisionAgent,
+  VideoAgent,
+  RealtimeAgent,
+  EmbeddingAgent,
+  // P0: Call Types (new)
+  type MCPCall,
+  type WebSearchCall,
+  type FileSearchCall,
+  type CodeExecutionStep,
+  type DeepResearchResponse,
+  type Provider,
+  // P0: Handoff Functions (new)
+  createContextAgent as create_context_agent,
+  handoffFilters as handoff_filters,
+  promptWithHandoffInstructions as prompt_with_handoff_instructions,
+  // P1: Workflow Patterns (new)
+  Chunking,
+  If,
+  when,
+  Knowledge,
+  Parallel,
+  Route,
+  Session,
+  // P2: Context Types (new - only items not already exported)
+  ContextManager,
+  MCP,
+  type ManagerConfig,
+  type OptimizerStrategy,
+  type ContextPack,
+  type GuardrailResult,
+  type ContextConfig,
+  // P2: Telemetry Functions (new)
+  enableTelemetry as enable_telemetry,
+  disableTelemetry as disable_telemetry,
+  getTelemetry as get_telemetry,
+  enablePerformanceMode as enable_performance_mode,
+  disablePerformanceMode as disable_performance_mode,
+  cleanupTelemetryResources as cleanup_telemetry_resources,
+  // P3: Display callbacks (snake_case for Python parity)
+  register_display_callback,
+  sync_display_callbacks,
+  async_display_callbacks,
+  display_error,
+  display_generating,
+  display_instruction,
+  display_interaction,
+  display_self_reflection,
+  display_tool_call,
+  error_logs,
+  // P3: Plugin functions
+  get_plugin_manager,
+  get_default_plugin_dirs,
+  ensure_plugin_dir,
+  get_plugin_template,
+  load_plugin,
+  parse_plugin_header,
+  parse_plugin_header_from_file,
+  discover_plugins,
+  discover_and_load_plugins,
+  // P3: Trace & condition functions
+  evaluate_condition,
+  get_dimensions,
+  track_workflow,
+  resolve_guardrail_policies,
+  trace_context,
+} from './parity';

@@ -13,43 +13,47 @@ pub enum Error {
     /// Agent-related errors
     #[error("Agent error: {0}")]
     Agent(String),
-    
+
     /// Tool execution errors
     #[error("Tool error: {0}")]
     Tool(String),
-    
+
     /// LLM provider errors
     #[error("LLM error: {0}")]
     Llm(String),
-    
+
     /// Memory errors
     #[error("Memory error: {0}")]
     Memory(String),
-    
+
     /// Workflow errors
     #[error("Workflow error: {0}")]
     Workflow(String),
-    
+
     /// Configuration errors
     #[error("Config error: {0}")]
     Config(String),
-    
+
+    /// Embedding errors
+    #[error("Embedding error: {0}")]
+    Embedding(String),
+
     /// Serialization/deserialization errors
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
-    
+
     /// YAML parsing errors
     #[error("YAML error: {0}")]
     Yaml(#[from] serde_yaml::Error),
-    
+
     /// HTTP request errors
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
-    
+
     /// IO errors
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-    
+
     /// Generic error with context
     #[error("{context}: {source}")]
     WithContext {
@@ -64,32 +68,42 @@ impl Error {
     pub fn agent(msg: impl Into<String>) -> Self {
         Self::Agent(msg.into())
     }
-    
+
     /// Create a tool error
     pub fn tool(msg: impl Into<String>) -> Self {
         Self::Tool(msg.into())
     }
-    
+
     /// Create an LLM error
     pub fn llm(msg: impl Into<String>) -> Self {
         Self::Llm(msg.into())
     }
-    
+
     /// Create a memory error
     pub fn memory(msg: impl Into<String>) -> Self {
         Self::Memory(msg.into())
     }
-    
+
     /// Create a workflow error
     pub fn workflow(msg: impl Into<String>) -> Self {
         Self::Workflow(msg.into())
     }
-    
+
     /// Create a config error
     pub fn config(msg: impl Into<String>) -> Self {
         Self::Config(msg.into())
     }
-    
+
+    /// Create an IO error from a string message
+    pub fn io(msg: impl Into<String>) -> Self {
+        Self::Io(std::io::Error::other(msg.into()))
+    }
+
+    /// Create a handoff error
+    pub fn handoff(msg: impl Into<String>) -> Self {
+        Self::Workflow(format!("Handoff error: {}", msg.into()))
+    }
+
     /// Add context to an error
     pub fn with_context(self, context: impl Into<String>) -> Self {
         Self::WithContext {
@@ -114,13 +128,13 @@ impl<T> ResultExt<T> for Result<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_error_display() {
         let err = Error::agent("test error");
         assert_eq!(err.to_string(), "Agent error: test error");
     }
-    
+
     #[test]
     fn test_error_with_context() {
         let err = Error::tool("failed to execute").with_context("search_web");

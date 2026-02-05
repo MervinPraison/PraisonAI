@@ -47,7 +47,7 @@ impl StepResult {
             error: None,
         }
     }
-    
+
     /// Create a failed step result
     pub fn failure(agent: impl Into<String>, error: impl Into<String>) -> Self {
         Self {
@@ -73,17 +73,17 @@ impl WorkflowContext {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Set a variable
     pub fn set(&mut self, key: impl Into<String>, value: impl Into<String>) {
         self.variables.insert(key.into(), value.into());
     }
-    
+
     /// Get a variable
     pub fn get(&self, key: &str) -> Option<&String> {
         self.variables.get(key)
     }
-    
+
     /// Add a step result
     pub fn add_result(&mut self, result: StepResult) {
         // Also store as variable for next agent
@@ -91,7 +91,7 @@ impl WorkflowContext {
         self.variables.insert(var_name, result.output.clone());
         self.results.push(result);
     }
-    
+
     /// Get the last result
     pub fn last_result(&self) -> Option<&StepResult> {
         self.results.last()
@@ -132,7 +132,7 @@ impl AgentTeam {
     pub fn new() -> AgentTeamBuilder {
         AgentTeamBuilder::new()
     }
-    
+
     /// Run the team with a task
     pub async fn start(&self, task: &str) -> Result<String> {
         match self.process {
@@ -141,29 +141,30 @@ impl AgentTeam {
             Process::Hierarchical => self.run_hierarchical(task).await,
         }
     }
-    
+
     /// Alias for start
     pub async fn run(&self, task: &str) -> Result<String> {
         self.start(task).await
     }
-    
+
     async fn run_sequential(&self, task: &str) -> Result<String> {
         let mut context = WorkflowContext::new();
         context.set("task", task);
-        
+
         let mut current_input = task.to_string();
-        
+
         for agent in &self.agents {
             // Build prompt with context
             let prompt = if context.results.is_empty() {
                 current_input.clone()
             } else {
-                let prev_output = context.last_result()
+                let prev_output = context
+                    .last_result()
                     .map(|r| r.output.as_str())
                     .unwrap_or("");
                 format!("{}\n\nPrevious output:\n{}", current_input, prev_output)
             };
-            
+
             match agent.chat(&prompt).await {
                 Ok(output) => {
                     context.add_result(StepResult::success(agent.name(), &output));
@@ -172,59 +173,67 @@ impl AgentTeam {
                 Err(e) => {
                     context.add_result(StepResult::failure(agent.name(), e.to_string()));
                     return Err(Error::workflow(format!(
-                        "Agent {} failed: {}", agent.name(), e
+                        "Agent {} failed: {}",
+                        agent.name(),
+                        e
                     )));
                 }
             }
         }
-        
+
         // Return the last output
-        context.last_result()
+        context
+            .last_result()
             .map(|r| r.output.clone())
             .ok_or_else(|| Error::workflow("No results from workflow"))
     }
-    
+
     async fn run_parallel(&self, task: &str) -> Result<String> {
         use futures::future::join_all;
-        
-        let futures: Vec<_> = self.agents.iter()
+
+        let futures: Vec<_> = self
+            .agents
+            .iter()
             .map(|agent| {
                 let agent = Arc::clone(agent);
                 let task = task.to_string();
                 async move {
-                    agent.chat(&task).await
+                    agent
+                        .chat(&task)
+                        .await
                         .map(|output| StepResult::success(agent.name(), output))
                         .unwrap_or_else(|e| StepResult::failure(agent.name(), e.to_string()))
                 }
             })
             .collect();
-        
+
         let results = join_all(futures).await;
-        
+
         // Combine results
-        let combined: Vec<String> = results.iter()
+        let combined: Vec<String> = results
+            .iter()
             .filter(|r| r.success)
             .map(|r| format!("## {}\n{}", r.agent, r.output))
             .collect();
-        
+
         if combined.is_empty() {
             Err(Error::workflow("All agents failed"))
         } else {
             Ok(combined.join("\n\n"))
         }
     }
-    
+
     async fn run_hierarchical(&self, task: &str) -> Result<String> {
         // For now, hierarchical is similar to sequential with validation
         // A manager agent would validate each step
         self.run_sequential(task).await
     }
-    
+
     /// Get the number of agents
     pub fn len(&self) -> usize {
         self.agents.len()
     }
-    
+
     /// Check if empty
     pub fn is_empty(&self) -> bool {
         self.agents.is_empty()
@@ -257,31 +266,31 @@ impl AgentTeamBuilder {
             verbose: false,
         }
     }
-    
+
     /// Add an agent
     pub fn agent(mut self, agent: Agent) -> Self {
         self.agents.push(Arc::new(agent));
         self
     }
-    
+
     /// Add an agent (Arc version)
     pub fn agent_arc(mut self, agent: Arc<Agent>) -> Self {
         self.agents.push(agent);
         self
     }
-    
+
     /// Set the process type
     pub fn process(mut self, process: Process) -> Self {
         self.process = process;
         self
     }
-    
+
     /// Enable verbose output
     pub fn verbose(mut self, enabled: bool) -> Self {
         self.verbose = enabled;
         self
     }
-    
+
     /// Build the team
     pub fn build(self) -> AgentTeam {
         AgentTeam {
@@ -356,27 +365,25 @@ impl AgentFlow {
     pub fn new() -> Self {
         Self { steps: Vec::new() }
     }
-    
+
     /// Add a step
     pub fn step(mut self, step: FlowStep) -> Self {
         self.steps.push(step);
         self
     }
-    
+
     /// Add an agent step
     pub fn agent(self, agent: Agent) -> Self {
         self.step(FlowStep::Agent(Arc::new(agent)))
     }
-    
+
     /// Execute the workflow
     pub async fn run(&self, input: &str) -> Result<String> {
         let mut current = input.to_string();
-        
+
         for step in &self.steps {
             current = match step {
-                FlowStep::Agent(agent) => {
-                    agent.chat(&current).await?
-                }
+                FlowStep::Agent(agent) => agent.chat(&current).await?,
                 FlowStep::Route(route) => {
                     if (route.condition)(&current) {
                         route.if_true.chat(&current).await?
@@ -388,16 +395,13 @@ impl AgentFlow {
                 }
                 FlowStep::Parallel(parallel) => {
                     use futures::future::join_all;
-                    
-                    let futures: Vec<_> = parallel.agents.iter()
-                        .map(|a| a.chat(&current))
-                        .collect();
-                    
+
+                    let futures: Vec<_> =
+                        parallel.agents.iter().map(|a| a.chat(&current)).collect();
+
                     let results = join_all(futures).await;
-                    let outputs: Vec<String> = results.into_iter()
-                        .filter_map(|r| r.ok())
-                        .collect();
-                    
+                    let outputs: Vec<String> = results.into_iter().filter_map(|r| r.ok()).collect();
+
                     outputs.join("\n\n")
                 }
                 FlowStep::Loop(loop_step) => {
@@ -417,7 +421,7 @@ impl AgentFlow {
                 }
             };
         }
-        
+
         Ok(current)
     }
 }
@@ -431,30 +435,30 @@ impl Default for AgentFlow {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_workflow_context() {
         let mut ctx = WorkflowContext::new();
         ctx.set("key", "value");
         assert_eq!(ctx.get("key"), Some(&"value".to_string()));
     }
-    
+
     #[test]
     fn test_step_result() {
         let success = StepResult::success("agent1", "output");
         assert!(success.success);
-        
+
         let failure = StepResult::failure("agent1", "error");
         assert!(!failure.success);
     }
-    
+
     #[test]
     fn test_agent_team_builder() {
         let team = AgentTeam::new()
             .process(Process::Parallel)
             .verbose(true)
             .build();
-        
+
         assert!(team.is_empty());
     }
 }
