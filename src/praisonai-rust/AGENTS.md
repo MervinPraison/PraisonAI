@@ -1,10 +1,10 @@
-# AGENTS.md - PraisonAI Rust SDK Guide
+# AGENTS.md - PraisonAI Rust SDK Comprehensive Guide
 
 > **For AI Agents and Developers**: Complete context for working with the PraisonAI Rust SDK, including architecture, crate structure, and development guidelines.
 
 ---
 
-## 1. Overview
+## 1. What is PraisonAI Rust?
 
 PraisonAI Rust SDK is a **high-performance, agentic AI framework** for Rust. It mirrors the Python SDK's design philosophy while leveraging Rust's performance and safety guarantees.
 
@@ -20,7 +20,10 @@ Simpler than competitors • Type-safe • Zero-cost abstractions • Blazing fa
 | **Trait-Driven** | Core SDK uses Rust traits for all extension points |
 | **Minimal API** | Builder patterns, sensible defaults, explicit overrides |
 | **Zero-Cost** | No runtime overhead for abstractions |
-| **Production-Ready** | Async-first, error handling with `Result`, observability |
+| **Async-First** | All I/O operations are async with tokio |
+| **Multi-Agent Safe** | Thread-safe, concurrent agent execution |
+| **TDD Mandatory** | Tests first; failing tests prove gaps; passing tests prove fixes |
+| **Production-Ready** | Error handling with `Result`, observability, type safety |
 
 ---
 
@@ -57,8 +60,8 @@ Simpler than competitors • Type-safe • Zero-cost abstractions • Blazing fa
 │       │       ├── main.rs
 │       │       └── commands/     # chat, run, prompt commands
 │       │
-│       └── target/               # Build output (gitignored)
-
+│       └── examples/             # Example code
+│
 /Users/praison/praisonai-package/examples/rust/    # Main examples directory
 /Users/praison/PraisonAIDocs/docs/rust/            # Documentation (Mintlify)
 ```
@@ -92,15 +95,15 @@ Simpler than competitors • Type-safe • Zero-cost abstractions • Blazing fa
 
 ### 3.1 Key Modules (praisonai crate)
 
-| Module | Purpose |
-|--------|---------|
-| `agent/` | Agent struct, AgentBuilder, execution |
-| `tools/` | Tool trait, ToolRegistry, ToolResult |
-| `llm/` | LlmProvider trait, OpenAI implementation |
-| `memory/` | Memory trait, InMemoryAdapter, conversation history |
-| `workflows/` | AgentTeam, AgentFlow, Step patterns |
-| `config.rs` | MemoryConfig, OutputConfig, LlmConfig |
-| `error.rs` | Error enum with thiserror |
+| Module | Lines | Purpose |
+|--------|-------|---------|
+| `agent/` | ~280 | Agent struct, AgentBuilder, execution loop |
+| `tools/` | ~251 | Tool trait, ToolRegistry, ToolResult, FunctionTool |
+| `llm/` | ~361 | LlmProvider trait, OpenAiProvider, Message, Role |
+| `memory/` | ~150 | Memory trait, InMemoryAdapter, conversation history |
+| `workflows/` | ~461 | AgentTeam, AgentFlow, Route, Parallel, Loop, Repeat |
+| `config.rs` | ~228 | MemoryConfig, HooksConfig, OutputConfig, ExecutionConfig |
+| `error.rs` | ~100 | Error enum with thiserror |
 
 ### 3.2 Trait-Driven Design
 
@@ -108,22 +111,32 @@ Core SDK uses Rust traits for all extension points:
 
 ```rust
 // Pattern: Traits define WHAT, implementations provide HOW
+
+/// Tool trait for agent capabilities
+#[async_trait]
 pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
-    fn parameters(&self) -> serde_json::Value;
-    async fn execute(&self, args: serde_json::Value) -> Result<String>;
+    fn parameters_schema(&self) -> serde_json::Value;
+    async fn execute(&self, args: serde_json::Value) -> Result<Value>;
 }
 
+/// LLM provider trait for model abstraction
+#[async_trait]
 pub trait LlmProvider: Send + Sync {
-    async fn complete(&self, messages: &[Message]) -> Result<String>;
-    async fn complete_with_tools(&self, messages: &[Message], tools: &[&dyn Tool]) -> Result<LlmResponse>;
+    fn model(&self) -> &str;
+    async fn chat(
+        &self,
+        messages: &[Message],
+        tools: Option<&[ToolDefinition]>,
+    ) -> Result<LlmResponse>;
 }
 
+/// Memory adapter trait for persistence
 pub trait MemoryAdapter: Send + Sync {
-    fn store(&mut self, message: Message);
-    fn retrieve(&self, limit: usize) -> Vec<Message>;
-    fn clear(&mut self);
+    async fn store(&mut self, message: Message) -> Result<()>;
+    async fn history(&self) -> Result<Vec<Message>>;
+    async fn clear(&mut self) -> Result<()>;
 }
 ```
 
@@ -136,21 +149,333 @@ tokio = { version = "1", features = ["full"] }    # Async runtime
 async-trait = "0.1"                                # Async trait support
 serde = { version = "1", features = ["derive"] }  # Serialization
 serde_json = "1"                                   # JSON
+serde_yaml = "0.9"                                 # YAML config
 thiserror = "2"                                    # Error handling
 anyhow = "1"                                       # Error context
 rig-core = "0.9"                                   # LLM providers
 clap = { version = "4", features = ["derive"] }   # CLI parsing
 tracing = "0.1"                                    # Logging
 uuid = { version = "1", features = ["v4"] }       # Session IDs
+reqwest = { version = "0.12", features = ["json"] } # HTTP client
 ```
 
 ---
 
-## 4. API Design
+## 4. Core Types & API
 
-> **Philosophy**: Match Python SDK's simplicity — the simplest use case should be the shortest code.
+### 4.1 Agent
 
-### 4.1 One-Liner (Simplest)
+The primary struct for creating AI agents:
+
+```rust
+use praisonai::{Agent, AgentBuilder, AgentConfig};
+
+// Agent fields (internal)
+pub struct Agent {
+    id: String,              // Unique agent ID (UUID)
+    name: String,            // Agent name
+    instructions: String,    // System prompt
+    llm: Arc<dyn LlmProvider>, // LLM backend
+    tools: Arc<RwLock<ToolRegistry>>, // Registered tools
+    memory: Arc<RwLock<Memory>>,      // Conversation memory
+    config: AgentConfig,     // Configuration
+}
+
+impl Agent {
+    // Create a builder
+    pub fn new() -> AgentBuilder;
+    
+    // One-liner creation
+    pub fn simple(instructions: impl Into<String>) -> Result<Self>;
+    
+    // Chat (main entry point)
+    pub async fn chat(&self, prompt: &str) -> Result<String>;
+    
+    // Aliases for chat
+    pub async fn start(&self, prompt: &str) -> Result<String>;
+    pub async fn run(&self, task: &str) -> Result<String>;
+    
+    // Tool management
+    pub async fn add_tool(&self, tool: impl Tool + 'static);
+    pub async fn tool_count(&self) -> usize;
+    
+    // Memory management
+    pub async fn clear_memory(&self) -> Result<()>;
+    pub async fn history(&self) -> Result<Vec<Message>>;
+    
+    // Getters
+    pub fn id(&self) -> &str;
+    pub fn name(&self) -> &str;
+    pub fn instructions(&self) -> &str;
+    pub fn model(&self) -> &str;
+}
+```
+
+### 4.2 AgentBuilder
+
+Builder pattern for Agent configuration:
+
+```rust
+pub struct AgentBuilder {
+    name: String,
+    instructions: String,
+    model: String,
+    tools: ToolRegistry,
+    memory_config: MemoryConfig,
+    config: AgentConfig,
+}
+
+impl AgentBuilder {
+    pub fn new() -> Self;
+    pub fn name(self, name: impl Into<String>) -> Self;
+    pub fn instructions(self, instructions: impl Into<String>) -> Self;
+    pub fn model(self, model: impl Into<String>) -> Self;
+    pub fn tool(self, tool: impl Tool + 'static) -> Self;
+    pub fn memory(self, config: MemoryConfig) -> Self;
+    pub fn build(self) -> Result<Agent>;
+}
+```
+
+### 4.3 AgentTeam
+
+Multi-agent orchestration:
+
+```rust
+use praisonai::{AgentTeam, Process};
+
+pub struct AgentTeam {
+    agents: Vec<Arc<Agent>>,
+    process: Process,
+    verbose: bool,
+    context: WorkflowContext,
+}
+
+#[derive(Default)]
+pub enum Process {
+    #[default]
+    Sequential,  // Execute agents one after another
+    Parallel,    // Execute agents concurrently
+    Hierarchical, // Manager-based execution
+}
+
+impl AgentTeam {
+    pub fn new() -> AgentTeamBuilder;
+    pub async fn start(&self, task: &str) -> Result<String>;
+    pub async fn run(&self, task: &str) -> Result<String>;  // Alias
+    pub fn len(&self) -> usize;
+    pub fn is_empty(&self) -> bool;
+}
+```
+
+### 4.4 AgentFlow (Workflow Patterns)
+
+Advanced workflow patterns:
+
+```rust
+use praisonai::{AgentFlow, Route, Parallel, Loop, Repeat, FlowStep};
+
+// Route: Conditional branching
+pub struct Route {
+    pub condition: Box<dyn Fn(&str) -> bool + Send + Sync>,
+    pub if_true: Arc<Agent>,
+    pub if_false: Option<Arc<Agent>>,
+}
+
+// Parallel: Concurrent execution
+pub struct Parallel {
+    pub agents: Vec<Arc<Agent>>,
+}
+
+// Loop: Conditional iteration
+pub struct Loop {
+    pub condition: Box<dyn Fn(&str) -> bool + Send + Sync>,
+    pub agent: Arc<Agent>,
+    pub max_iterations: usize,
+}
+
+// Repeat: Fixed iteration
+pub struct Repeat {
+    pub agent: Arc<Agent>,
+    pub times: usize,
+}
+
+pub enum FlowStep {
+    Agent(Arc<Agent>),
+    Route(Route),
+    Parallel(Parallel),
+    Loop(Loop),
+    Repeat(Repeat),
+}
+
+impl AgentFlow {
+    pub fn new() -> Self;
+    pub fn step(self, step: FlowStep) -> Self;
+    pub fn agent(self, agent: Agent) -> Self;
+    pub async fn run(&self, input: &str) -> Result<String>;
+}
+```
+
+### 4.5 Tool & ToolRegistry
+
+Tool abstraction and management:
+
+```rust
+use praisonai::{Tool, ToolRegistry, ToolResult, ToolDefinition};
+
+#[async_trait]
+pub trait Tool: Send + Sync {
+    fn name(&self) -> &str;
+    fn description(&self) -> &str;
+    fn parameters_schema(&self) -> Value;
+    async fn execute(&self, args: Value) -> Result<Value>;
+    fn definition(&self) -> ToolDefinition;  // Has default impl
+}
+
+pub struct ToolResult {
+    pub name: String,
+    pub value: Value,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+pub struct ToolRegistry {
+    tools: HashMap<String, Arc<dyn Tool>>,
+}
+
+impl ToolRegistry {
+    pub fn new() -> Self;
+    pub fn register(&mut self, tool: impl Tool + 'static);
+    pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>>;
+    pub fn has(&self, name: &str) -> bool;
+    pub fn list(&self) -> Vec<&str>;
+    pub fn definitions(&self) -> Vec<ToolDefinition>;
+    pub async fn execute(&self, name: &str, args: Value) -> Result<ToolResult>;
+    pub fn len(&self) -> usize;
+    pub fn is_empty(&self) -> bool;
+}
+```
+
+### 4.6 Message & LlmProvider
+
+LLM abstraction:
+
+```rust
+use praisonai::{Message, Role, LlmProvider, LlmResponse, LlmConfig};
+
+#[derive(Clone, Serialize, Deserialize)]
+pub enum Role {
+    System,
+    User,
+    Assistant,
+    Tool,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Message {
+    pub role: Role,
+    pub content: String,
+    pub tool_call_id: Option<String>,
+    pub tool_calls: Option<Vec<ToolCall>>,
+}
+
+impl Message {
+    pub fn system(content: impl Into<String>) -> Self;
+    pub fn user(content: impl Into<String>) -> Self;
+    pub fn assistant(content: impl Into<String>) -> Self;
+    pub fn tool(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self;
+}
+
+pub struct LlmConfig {
+    pub model: String,
+    pub api_key: Option<String>,
+    pub base_url: Option<String>,
+    pub temperature: f32,
+    pub max_tokens: Option<u32>,
+}
+```
+
+---
+
+## 5. Configuration Types
+
+### 5.1 MemoryConfig
+
+```rust
+use praisonai::config::MemoryConfig;
+
+pub struct MemoryConfig {
+    pub use_short_term: bool,  // Default: true
+    pub use_long_term: bool,   // Default: false
+    pub provider: String,      // Default: "memory"
+    pub max_messages: usize,   // Default: 100
+}
+
+impl MemoryConfig {
+    pub fn new() -> Self;
+    pub fn with_long_term(self) -> Self;
+    pub fn provider(self, provider: impl Into<String>) -> Self;
+    pub fn max_messages(self, max: usize) -> Self;
+}
+```
+
+### 5.2 ExecutionConfig
+
+```rust
+use praisonai::config::ExecutionConfig;
+
+pub struct ExecutionConfig {
+    pub max_iterations: usize, // Default: 10
+    pub timeout_secs: u64,     // Default: 300
+    pub stream: bool,          // Default: true
+}
+
+impl ExecutionConfig {
+    pub fn new() -> Self;
+    pub fn max_iterations(self, max: usize) -> Self;
+    pub fn timeout(self, secs: u64) -> Self;
+    pub fn no_stream(self) -> Self;
+}
+```
+
+### 5.3 OutputConfig
+
+```rust
+use praisonai::config::OutputConfig;
+
+pub struct OutputConfig {
+    pub mode: String,          // "silent", "verbose", "json"
+    pub file: Option<String>,  // Output file path
+}
+
+impl OutputConfig {
+    pub fn new() -> Self;
+    pub fn silent(self) -> Self;
+    pub fn verbose(self) -> Self;
+    pub fn json(self) -> Self;
+    pub fn file(self, path: impl Into<String>) -> Self;
+}
+```
+
+### 5.4 HooksConfig
+
+```rust
+use praisonai::config::HooksConfig;
+
+pub struct HooksConfig {
+    pub enabled: bool,
+}
+
+impl HooksConfig {
+    pub fn new() -> Self;
+    pub fn enabled(self) -> Self;
+}
+```
+
+---
+
+## 6. API Usage Examples
+
+### 6.1 One-Liner (Simplest)
 
 ```rust
 use praisonai::Agent;
@@ -160,7 +485,7 @@ let agent = Agent::simple("Be helpful")?;
 let response = agent.chat("Hello!").await?;
 ```
 
-### 4.2 Builder Pattern (More Control)
+### 6.2 Builder Pattern (More Control)
 
 ```rust
 use praisonai::Agent;
@@ -168,31 +493,32 @@ use praisonai::Agent;
 let agent = Agent::new()
     .name("assistant")
     .instructions("You are a helpful AI assistant")
+    .model("gpt-4o-mini")
     .build()?;
 
 let response = agent.chat("What is 2+2?").await?;
 // Also available: agent.start() and agent.run() as aliases
 ```
 
-### 4.3 With Tools
+### 6.3 With Tools
 
 ```rust
 use praisonai::{Agent, tool};
 
-#[tool(description = "Search the web")]
+#[tool(description = "Search the web for information")]
 async fn search(query: String) -> String {
     format!("Results for: {}", query)
 }
 
 let agent = Agent::new()
-    .instructions("Use search to help users")
+    .instructions("Use search to help users find information")
     .tool(search)
     .build()?;
 
 let response = agent.chat("Find info about Rust").await?;
 ```
 
-### 4.4 Multi-Agent Team
+### 6.4 Multi-Agent Team
 
 ```rust
 use praisonai::{Agent, AgentTeam, Process};
@@ -208,7 +534,7 @@ let team = AgentTeam::new()
 let result = team.start("Write about AI safety").await?;
 ```
 
-### 4.5 Workflow Patterns (AgentFlow)
+### 6.5 Workflow Patterns (AgentFlow)
 
 ```rust
 use praisonai::{Agent, AgentFlow, FlowStep, Route, Parallel, Repeat};
@@ -217,7 +543,7 @@ use std::sync::Arc;
 let agent = Arc::new(Agent::simple("Be helpful")?);
 
 // Simple agent step
-let flow = AgentFlow::new()
+let result = AgentFlow::new()
     .agent(Agent::simple("Process the input")?)
     .run("Hello").await?;
 
@@ -245,7 +571,7 @@ let flow = AgentFlow::new()
 let result = flow.run("Input prompt").await?;
 ```
 
-### 4.6 Progressive Disclosure Summary
+### 6.6 Progressive Disclosure Summary
 
 | Level | Code | Use Case |
 |-------|------|----------|
@@ -257,11 +583,14 @@ let result = flow.run("Input prompt").await?;
 
 ---
 
-## 5. CLI Usage
+## 7. CLI Usage
 
-### 5.1 Commands
+### 7.1 Commands
 
 ```bash
+# Install CLI
+cargo install praisonai-cli
+
 # Interactive chat
 praisonai-rust chat
 
@@ -275,7 +604,15 @@ praisonai-rust "What is 2+2?"
 praisonai-rust --model gpt-4o "Explain quantum computing"
 ```
 
-### 5.2 YAML Workflow Format
+### 7.2 CLI Commands Structure
+
+| Command | File | Purpose |
+|---------|------|---------|
+| `chat` | `commands/chat.rs` | Interactive chat session |
+| `run` | `commands/run.rs` | Run workflow from YAML |
+| `prompt` | `commands/prompt.rs` | Single prompt execution |
+
+### 7.3 YAML Workflow Format
 
 ```yaml
 # agents.yaml
@@ -300,89 +637,104 @@ workflow:
 
 ---
 
-## 6. Extension Points
+## 8. Extension Points
 
-### 6.1 Custom Tools
+### 8.1 Custom Tools
 
 ```rust
 // Using #[tool] macro (recommended)
+use praisonai::tool;
+
 #[tool(description = "Calculate mathematical expressions")]
 async fn calculate(expression: String) -> String {
     // Implementation
+    format!("Result: {}", expression)
 }
 
 // Manual implementation
+use praisonai::tools::{Tool, ToolResult};
+use async_trait::async_trait;
+
 struct MyTool;
 
+#[async_trait]
 impl Tool for MyTool {
     fn name(&self) -> &str { "my_tool" }
     fn description(&self) -> &str { "Does something useful" }
-    fn parameters(&self) -> serde_json::Value {
-        json!({
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({
             "type": "object",
             "properties": {
                 "input": { "type": "string" }
             }
         })
     }
-    async fn execute(&self, args: serde_json::Value) -> Result<String> {
-        Ok("Result".to_string())
+    async fn execute(&self, args: serde_json::Value) -> Result<Value> {
+        Ok(serde_json::json!("Result"))
     }
 }
 ```
 
-### 6.2 Custom LLM Providers
+### 8.2 Custom LLM Providers
 
 ```rust
-use praisonai::llm::{LlmProvider, Message, LlmResponse};
+use praisonai::llm::{LlmProvider, Message, LlmResponse, ToolDefinition};
+use async_trait::async_trait;
 
 struct MyProvider {
     api_key: String,
+    model: String,
 }
 
 #[async_trait]
 impl LlmProvider for MyProvider {
-    async fn complete(&self, messages: &[Message]) -> Result<String> {
-        // Call your LLM API
+    fn model(&self) -> &str {
+        &self.model
     }
     
-    async fn complete_with_tools(
+    async fn chat(
         &self,
         messages: &[Message],
-        tools: &[&dyn Tool],
+        tools: Option<&[ToolDefinition]>,
     ) -> Result<LlmResponse> {
-        // Handle tool calls
+        // Call your LLM API
+        todo!()
     }
 }
 ```
 
-### 6.3 Custom Memory Adapters
+### 8.3 Custom Memory Adapters
 
 ```rust
 use praisonai::memory::{MemoryAdapter, Message};
+use async_trait::async_trait;
 
 struct RedisMemory {
     client: redis::Client,
 }
 
+#[async_trait]
 impl MemoryAdapter for RedisMemory {
-    fn store(&mut self, message: Message) {
+    async fn store(&mut self, message: Message) -> Result<()> {
         // Store in Redis
+        todo!()
     }
-    fn retrieve(&self, limit: usize) -> Vec<Message> {
+    async fn history(&self) -> Result<Vec<Message>> {
         // Retrieve from Redis
+        todo!()
     }
-    fn clear(&mut self) {
+    async fn clear(&mut self) -> Result<()> {
         // Clear Redis keys
+        todo!()
     }
 }
 ```
 
 ---
 
-## 7. Development Guidelines
+## 9. Development Guidelines
 
-### 7.1 Core Principles (MUST)
+### 9.1 Core Principles (MUST)
 
 | Principle | Description |
 |-----------|-------------|
@@ -391,21 +743,31 @@ impl MemoryAdapter for RedisMemory {
 | **Async-first** | All I/O is async with tokio |
 | **Builder pattern** | Complex structs use builders |
 | **Zero unsafe** | No unsafe code without explicit justification |
+| **Send + Sync** | All shared types must be thread-safe |
 
-### 7.2 Error Handling
+### 9.2 Error Handling
 
 ```rust
-// Use thiserror for error types
+// Use thiserror for library error types
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Agent error: {0}")]
+    Agent(String),
+    
     #[error("LLM error: {0}")]
     Llm(String),
     
-    #[error("Tool execution failed: {0}")]
+    #[error("Tool error: {0}")]
     Tool(String),
     
     #[error("Configuration error: {0}")]
     Config(String),
+    
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 // Use anyhow for application code
@@ -418,7 +780,7 @@ fn load_config() -> Result<Config> {
 }
 ```
 
-### 7.3 Naming Conventions
+### 9.3 Naming Conventions
 
 ```rust
 // Structs: PascalCase
@@ -436,19 +798,24 @@ impl Agent {
     pub async fn start(&self, task: &str) -> Result<String> { }
 }
 
-// Builder methods: snake_case, return Self
+// Builder methods: snake_case, consume self, return Self
 impl AgentBuilder {
     pub fn name(mut self, name: &str) -> Self { }
     pub fn instructions(mut self, inst: &str) -> Self { }
     pub fn build(self) -> Result<Agent> { }
 }
+
+// Config structs: Suffix with Config
+pub struct MemoryConfig { }
+pub struct ExecutionConfig { }
+pub struct OutputConfig { }
 ```
 
 ---
 
-## 8. Testing
+## 10. Testing
 
-### 8.1 Run Tests
+### 10.1 Run Tests
 
 ```bash
 # All tests
@@ -466,18 +833,19 @@ cargo test -- --nocapture
 cargo test test_agent_builder
 ```
 
-### 8.2 Test Structure
+### 10.2 Test Structure
 
 ```
 praisonai/src/
 ├── agent/
 │   ├── mod.rs
-│   ├── builder.rs
-│   └── tests.rs      # Unit tests in separate file
-│                     # OR #[cfg(test)] mod tests { } inline
+│   └── builder.rs
+├── config.rs       # Inline tests with #[cfg(test)]
+└── tools/
+    └── mod.rs      # Inline tests
 ```
 
-### 8.3 Example Test
+### 10.3 Example Test
 
 ```rust
 #[cfg(test)]
@@ -499,14 +867,26 @@ mod tests {
             .unwrap();
         // Mock the LLM provider for testing
     }
+    
+    #[test]
+    fn test_memory_config_builder() {
+        let config = MemoryConfig::new()
+            .with_long_term()
+            .provider("chroma")
+            .max_messages(50);
+        
+        assert!(config.use_long_term);
+        assert_eq!(config.provider, "chroma");
+        assert_eq!(config.max_messages, 50);
+    }
 }
 ```
 
 ---
 
-## 9. Building & Publishing
+## 11. Building & Publishing
 
-### 9.1 Build Commands
+### 11.1 Build Commands
 
 ```bash
 # Development build
@@ -525,7 +905,7 @@ cargo fmt
 cargo clippy
 ```
 
-### 9.2 Publishing to crates.io
+### 11.2 Publishing to crates.io
 
 ```bash
 # Login (one-time)
@@ -539,7 +919,7 @@ cargo publish -p praisonai
 cargo publish -p praisonai-cli
 ```
 
-### 9.3 Version Bumping
+### 11.3 Version Bumping
 
 When releasing, update version in ALL crate Cargo.toml files and their cross-references:
 - `Cargo.toml` (workspace)
@@ -549,106 +929,184 @@ When releasing, update version in ALL crate Cargo.toml files and their cross-ref
 
 ---
 
-## 10. Documentation
+## 12. CLI Parity Requirement
 
-### 10.1 Locations
-
-| Type | Location |
-|------|----------|
-| **API Docs** | `cargo doc --open` (generated) |
-| **User Docs** | `/Users/praison/PraisonAIDocs/docs/rust/` (Mintlify) |
-| **Examples** | `/Users/praison/praisonai-package/examples/rust/` |
-| **This Guide** | `src/praisonai-rust/AGENTS.md` |
-
-### 10.2 Doc Comments
+Every feature implemented must have a corresponding CLI representation:
 
 ```rust
-/// Creates a new Agent with the given configuration.
+// Pattern: If you add an API, add a CLI command
+// Feature: Agent memory
+// API: agent.clear_memory().await?
+// CLI: praisonai-rust memory clear --session <id>
+```
+
+| Feature | API | CLI Equivalent |
+|---------|-----|----------------|
+| Chat | `agent.chat(prompt)` | `praisonai-rust chat` |
+| Run workflow | `team.start(task)` | `praisonai-rust run workflow.yaml` |
+| Single prompt | `agent.run(task)` | `praisonai-rust "prompt"` |
+
+---
+
+## 13. Verification Checklist
+
+For every feature/change, verify:
+
+- [ ] **Tests pass**: `cargo test`
+- [ ] **Clippy clean**: `cargo clippy -- -D warnings`
+- [ ] **Formatted**: `cargo fmt --check`
+- [ ] **No heavy imports in core**: Check `praisonai/src/lib.rs`
+- [ ] **Async-safe**: No blocking operations in async code
+- [ ] **Multi-agent safe**: Thread-safe with `Send + Sync` bounds
+- [ ] **CLI works**: `praisonai-rust --help` shows command
+- [ ] **Docs updated**: Doc comments with examples
+
+---
+
+## 14. Documentation Standards
+
+### 14.1 Doc Comments
+
+All public APIs must have doc comments with:
+- Description
+- Example (runnable with `cargo test --doc`)
+- Errors section if fallible
+
+```rust
+/// Creates an agent with the given instructions.
 ///
-/// # Examples
+/// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// use praisonai::Agent;
 ///
-/// let agent = Agent::new()
-///     .name("assistant")
-///     .instructions("Be helpful")
-///     .build()?;
+/// let agent = Agent::simple("Be helpful")?;
+/// let response = agent.chat("Hello").await?;
 /// ```
 ///
 /// # Errors
 ///
-/// Returns an error if the configuration is invalid.
-pub fn build(self) -> Result<Agent> {
-    // ...
-}
+/// Returns error if LLM provider is unavailable.
+pub fn simple(instructions: impl Into<String>) -> Result<Self>
+```
+
+### 14.2 Mermaid Diagrams
+
+Use two-color scheme for architecture diagrams:
+- **Dark Red (#8B0000)**: Agents, inputs, outputs
+- **Teal (#189AB4)**: Tools, utilities
+
+```mermaid
+graph LR
+    A[Agent]:::agent --> B[Tool]:::tool
+    B --> C[Result]:::agent
+    classDef agent fill:#8B0000,color:#fff
+    classDef tool fill:#189AB4,color:#fff
+```
+
+### 14.3 Beginner-Friendly
+
+Documentation should make users feel: *"With just a few lines of code, I can do this!"*
+
+```rust
+// 3 lines to chat with AI
+let agent = Agent::simple("Be helpful")?;
+let response = agent.chat("Hello").await?;
+println!("{}", response);
 ```
 
 ---
 
-## 11. Quick Reference
+## 15. Free Core / Paid Upgrade Path
 
-### 11.1 Core Imports
+Design features so that:
+
+| Aspect | Guideline |
+|--------|------------|
+| **Core remains free** | Essential agent functionality always open source |
+| **Clear upgrade path** | Support, cloud, managed services as paid options |
+| **Reduces friction** | Features reduce production risk, not just add functionality |
+| **Safe by default** | Simple to adopt, hard to misuse |
+
+---
+
+## 16. Quick Reference
+
+### 12.1 Core Imports
 
 ```rust
 // Most common
 use praisonai::{Agent, AgentTeam, tool};
 
 // Configuration
-use praisonai::config::{MemoryConfig, OutputConfig, LlmConfig};
+use praisonai::config::{MemoryConfig, OutputConfig, ExecutionConfig, HooksConfig};
 
 // Workflows
-use praisonai::workflows::{AgentFlow, Pattern, Process, Step};
+use praisonai::workflows::{AgentFlow, Route, Parallel, Loop, Repeat, Process, StepResult, WorkflowContext};
 
 // Tools
-use praisonai::tools::{Tool, ToolRegistry, ToolResult};
+use praisonai::tools::{Tool, ToolRegistry, ToolResult, ToolDefinition};
 
 // LLM
-use praisonai::llm::{LlmProvider, Message, OpenAiProvider};
+use praisonai::llm::{LlmProvider, LlmConfig, Message, Role, LlmResponse};
 
 // Memory
-use praisonai::memory::{MemoryAdapter, InMemoryAdapter};
+use praisonai::memory::{Memory, MemoryAdapter, ConversationHistory};
 
 // Errors
 use praisonai::error::{Error, Result};
+
+// Prelude (all common types)
+use praisonai::prelude::*;
 ```
 
-### 11.2 File Locations
+### 12.2 File Locations
 
 | What | Where |
 |------|-------|
 | Agent struct | `praisonai/src/agent/mod.rs` |
 | AgentBuilder | `praisonai/src/agent/builder.rs` |
 | Tool trait | `praisonai/src/tools/mod.rs` |
+| ToolRegistry | `praisonai/src/tools/mod.rs` |
 | #[tool] macro | `praisonai-derive/src/lib.rs` |
 | LlmProvider | `praisonai/src/llm/mod.rs` |
+| OpenAiProvider | `praisonai/src/llm/mod.rs` |
 | AgentTeam | `praisonai/src/workflows/mod.rs` |
+| AgentFlow | `praisonai/src/workflows/mod.rs` |
+| MemoryConfig | `praisonai/src/config.rs` |
+| Error types | `praisonai/src/error.rs` |
 | CLI main | `praisonai-cli/src/main.rs` |
 | CLI commands | `praisonai-cli/src/commands/` |
 
 ---
 
-## 12. Feature Parity with Python SDK
+## 17. Feature Parity with Python SDK
 
 Current implementation status tracked in `FEATURE_PARITY_TRACKER.json`.
 
-| Feature | Status |
-|---------|--------|
-| Agent (basic) | ✅ Complete |
-| Agent.chat() | ✅ Complete |
-| Agent.start() | ✅ Complete |
-| #[tool] macro | ✅ Complete |
-| AgentTeam | ✅ Complete |
-| AgentFlow | ✅ Complete |
-| Memory | ✅ Basic |
-| CLI | ✅ Complete |
-| MCP Support | 🔲 Planned |
-| RAG/Knowledge | 🔲 Planned |
-| Specialized Agents | 🔲 Planned |
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Agent (basic) | ✅ Complete | `Agent::new()`, `Agent::simple()` |
+| Agent.chat() | ✅ Complete | With tool call loop |
+| Agent.start() | ✅ Complete | Alias for chat |
+| Agent.run() | ✅ Complete | Alias for chat |
+| #[tool] macro | ✅ Complete | Proc-macro in derive crate |
+| ToolRegistry | ✅ Complete | Register, execute, list |
+| AgentTeam | ✅ Complete | Sequential, Parallel, Hierarchical |
+| AgentFlow | ✅ Complete | Route, Parallel, Loop, Repeat |
+| WorkflowContext | ✅ Complete | Variables, results |
+| Memory | ✅ Basic | In-memory adapter |
+| MemoryConfig | ✅ Complete | Short-term, long-term, provider |
+| ExecutionConfig | ✅ Complete | Max iterations, timeout, stream |
+| OutputConfig | ✅ Complete | Silent, verbose, json, file |
+| CLI | ✅ Complete | chat, run, prompt commands |
+| MCP Support | 🔲 Planned | |
+| RAG/Knowledge | 🔲 Planned | |
+| Specialized Agents | 🔲 Planned | Audio, Video, Vision |
 
 ---
 
-## 13. Environment Variables
+## 18. Environment Variables
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
@@ -656,6 +1114,21 @@ Current implementation status tracked in `FEATURE_PARITY_TRACKER.json`.
 | `PRAISONAI_MODEL` | Default model | `gpt-4o-mini` |
 | `PRAISONAI_LOG` | Log level | `info` |
 | `RUST_LOG` | Tracing log filter | - |
+
+---
+
+## 19. Performance Optimizations
+
+The Rust SDK includes several performance optimizations:
+
+```toml
+# Cargo.toml release profile
+[profile.release]
+lto = true           # Link-time optimization
+codegen-units = 1    # Single codegen unit for better optimization
+strip = true         # Strip debug symbols
+panic = "abort"      # Abort on panic (smaller binary)
+```
 
 ---
 

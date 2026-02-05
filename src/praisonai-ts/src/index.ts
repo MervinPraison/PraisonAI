@@ -128,6 +128,19 @@ export * from './session';
 // ============================================================================
 export * from './knowledge';
 
+// RAG Module (Python parity with praisonaiagents/rag)
+export {
+  RAG, createRAG,
+  RetrievalStrategy, type RetrievalStrategyType,
+  type Citation as RAGCitation, createCitation, formatCitation,
+  type ContextPack as RAGContextPack, createContextPack, hasCitations, formatContextPackForPrompt,
+  type RAGResult, createRAGResult, formatAnswerWithCitations,
+  type RAGConfig, DEFAULT_RAG_TEMPLATE, createRAGConfig,
+  RetrievalPolicy, type RetrievalPolicyType,
+  CitationsMode, type CitationsModeType,
+  type RetrievalConfig, createRetrievalConfig, createSimpleRetrievalConfig, createSmartRetrievalConfig,
+} from './rag';
+
 // ============================================================================
 // CONTEXT MANAGEMENT
 // ============================================================================
@@ -159,8 +172,15 @@ export * from './process';
 // Export guardrails
 export * from './guardrails';
 
-// Export handoff
-export { Handoff, handoff, handoffFilters, type HandoffConfig, type HandoffContext, type HandoffResult } from './agent/handoff';
+// Export handoff (Python parity)
+export {
+  Handoff, handoff, handoffFilters,
+  RECOMMENDED_PROMPT_PREFIX, promptWithHandoffInstructions,
+  HandoffError, HandoffCycleError, HandoffDepthError, HandoffTimeoutError,
+  ContextPolicy,
+  type HandoffConfig, type HandoffContext, type HandoffResult,
+  type HandoffInputData, type ContextPolicyType
+} from './agent/handoff';
 
 // Export router agent
 export { RouterAgent, createRouter, routeConditions, type RouterConfig, type RouteConfig, type RouteContext } from './agent/router';
@@ -188,8 +208,14 @@ export {
 
 // Note: Observability exports are at the bottom of this file with the full 14+ integrations
 
-// Export skills
-export { SkillManager, createSkillManager, parseSkillFile, type Skill, type SkillMetadata, type SkillDiscoveryOptions } from './skills';
+// Export skills (Python parity with praisonaiagents/skills)
+export {
+  SkillManager, createSkillManager, parseSkillFile,
+  // Python parity additions
+  SkillLoader, createSkillLoader,
+  type Skill, type SkillMetadata, type SkillDiscoveryOptions,
+  type SkillProperties, createSkillProperties,
+} from './skills';
 
 // Export CLI
 export { parseArgs, executeCommand, CLI_SPEC_VERSION } from './cli';
@@ -261,13 +287,16 @@ export {
   type WorkflowHooksConfig, type WorkflowRef, type StepContext
 } from './hooks';
 
-// Export Telemetry (Agent-focused)
+// Export Telemetry (Agent-focused) - Python parity with praisonaiagents/telemetry
 
 export {
   TelemetryCollector, AgentTelemetry,
   getTelemetry, enableTelemetry, disableTelemetry, cleanupTelemetry, createAgentTelemetry,
   PerformanceMonitor, createPerformanceMonitor,
   TelemetryIntegration, createTelemetryIntegration, createConsoleSink, createHTTPSink,
+  // Python parity additions
+  MinimalTelemetry, getMinimalTelemetry,
+  enablePerformanceMode, disablePerformanceMode, cleanupTelemetryResources,
   type TelemetryEvent, type TelemetryConfig, type AgentStats,
   type MetricEntry, type PerformanceStats, type PerformanceMonitorConfig,
   type TelemetryRecord, type TelemetrySink
@@ -303,10 +332,14 @@ export { PromptExpanderAgent, createPromptExpanderAgent, type PromptExpanderConf
 // Export LLMGuardrail
 export { LLMGuardrail, createLLMGuardrail, type LLMGuardrailConfig, type LLMGuardrailResult } from './guardrails/llm-guardrail';
 
-// Export Planning (simplified API)
+// Export Planning (simplified API) - Python parity with praisonaiagents/planning
 export {
+  // Core classes
   Plan, PlanStep, TodoList, TodoItem, PlanStorage,
   PlanningAgent, TaskAgent,
+  // Python parity additions
+  ApprovalCallback, createApprovalCallback, type ApprovalCallbackConfig,
+  READ_ONLY_TOOLS, RESTRICTED_TOOLS, RESEARCH_TOOLS,
   createPlan, createTodoList, createPlanStorage, createPlanningAgent, createTaskAgent,
   type PlanConfig, type PlanStepConfig, type TodoItemConfig, type PlanStatus, type TodoStatus,
   type PlanningAgentConfig, type PlanResult
@@ -314,6 +347,38 @@ export {
 
 // Export Cache
 export { BaseCache, MemoryCache, FileCache, createMemoryCache, createFileCache, type CacheConfig, type CacheEntry } from './cache';
+
+// Export Config Module (Python parity with praisonaiagents/config)
+export {
+  // Enums
+  MemoryBackend, ChunkingStrategy, GuardrailAction, WebSearchProvider,
+  OutputPreset, ExecutionPreset, ArrayMode,
+  // Config interfaces (aliased to avoid conflicts with existing exports)
+  type MemoryConfig as FeatureMemoryConfig,
+  type LearnConfig, type KnowledgeConfig, type PlanningConfig,
+  type MultiAgentPlanningConfig, type ReflectionConfig, type GuardrailConfig,
+  type WebConfig, type OutputConfig, type ExecutionConfig, type TemplateConfig,
+  type CachingConfig, type HooksConfig, type SkillsConfig, type SessionConfig,
+  type DefaultsConfig, type PluginsConfig, type PraisonConfig,
+  type MultiAgentExecutionConfig, type MultiAgentHooksConfig,
+  type MultiAgentMemoryConfig, type MultiAgentOutputConfig,
+  // Presets
+  MEMORY_PRESETS, MEMORY_URL_SCHEMES, OUTPUT_PRESETS, EXECUTION_PRESETS,
+  WEB_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS, GUARDRAIL_PRESETS,
+  CONTEXT_PRESETS, AUTONOMY_PRESETS, CACHING_PRESETS,
+  MULTI_AGENT_OUTPUT_PRESETS, MULTI_AGENT_EXECUTION_PRESETS, KNOWLEDGE_PRESETS,
+  // Resolver functions
+  resolve, resolve_memory, resolve_output, resolve_execution, resolve_web,
+  resolve_planning, resolve_reflection, resolve_knowledge, resolve_context,
+  resolve_autonomy, resolve_caching, resolve_hooks, resolve_skills,
+  resolve_routing, resolve_guardrails,
+  // Parse utilities
+  detect_url_scheme, is_path_like, suggest_similar, clean_triple_backticks,
+  is_policy_string, parse_policy_string, validate_config, apply_config_defaults,
+  get_config, get_config_path, get_default, get_defaults_config, get_plugins_config,
+  // Errors
+  ConfigValidationError,
+} from './config';
 
 // Export Events
 export { PubSub, EventEmitterPubSub, AgentEventBus, AgentEvents, createEventBus, createPubSub, type Event, type EventHandler } from './events';
@@ -517,9 +582,12 @@ export {
   // N8N Integration
   N8NIntegration, createN8NIntegration, triggerN8NWebhook,
   type N8NConfig, type N8NWebhookPayload, type N8NWorkflow, type N8NWorkflowNode,
-  // Fast Context
+  // Fast Context (Python parity with praisonaiagents/context/fast)
   FastContext, createFastContext, getQuickContext,
-  type FastContextConfig, type ContextSource, type FastContextResult
+  type FastContextConfig, type ContextSource, type FastContextResult,
+  // Python parity additions
+  type LineRange, createLineRange, getLineCount, rangesOverlap, mergeRanges,
+  type FileMatch, createFileMatch, addLineRangeToFileMatch, getTotalLines
 } from './cli/features';
 
 // ============================================================================
@@ -750,3 +818,121 @@ export {
   type ComputerAction,
   type ScreenshotResult,
 } from './integrations/computer-use';
+
+// Export Plugin Module (Python parity with praisonaiagents/plugins)
+export {
+  // Enums
+  PluginHook, PluginType,
+  // Interfaces
+  type PluginMetadata, type PluginInfo, type PluginProtocol,
+  type ToolPluginProtocol, type HookPluginProtocol,
+  type AgentPluginProtocol, type LLMPluginProtocol,
+  // Classes
+  Plugin, FunctionPlugin, PluginManager, PluginParseError,
+  // Functions
+  getPluginManager, getDefaultPluginDirs, ensurePluginDir,
+  discoverPlugins, loadPlugin, discoverAndLoadPlugins, getPluginTemplate,
+  parsePluginHeader, parsePluginHeaderFromFile,
+  enable as enablePlugins, disable as disablePlugins,
+  listPlugins, isEnabled as isPluginEnabled,
+} from './plugins';
+
+// Export Display Module (Python parity with praisonaiagents/display)
+export {
+  // Types
+  type DisplayCallback, type AsyncDisplayCallback, type DisplayContext,
+  type FlowDisplayConfig as DisplayFlowConfig,
+  // Functions
+  registerDisplayCallback as registerDisplay, syncDisplayCallbacks, asyncDisplayCallbacks,
+  clearDisplayCallbacks, displayError, displayGenerating, displayInstruction,
+  displayInteraction, displaySelfReflection, displayToolCall,
+  errorLogs, logError, clearErrorLogs,
+  // Classes
+  FlowDisplay as DisplayFlow,
+} from './display';
+
+// Export Embeddings Module (Python parity with praisonaiagents/knowledge)
+export {
+  // Types
+  type EmbeddingResult, type BatchEmbeddingResult, type EmbeddingConfig,
+  // Functions
+  embed, embedding, embeddings, aembed, aembedding, aembeddings,
+  getDimensions, setEmbeddingConfig,
+  cosineSimilarity, euclideanDistance, normalizeEmbedding,
+} from './embeddings';
+
+// Export Trace Module (Python parity with praisonaiagents/trace)
+export {
+  // Enums
+  ContextEventType, EventType, MessageType,
+  // Types
+  type ContextEvent, type TraceSinkProtocol, type ContextTraceSinkProtocol,
+  type TraceContext as TraceCtx,
+  // Classes
+  TraceSink, ContextTraceSink, ContextListSink, ContextNoOpSink,
+  ContextTraceEmitter,
+  // Functions
+  createContextEvent, traceContext, trackWorkflow,
+} from './trace';
+
+// Export Conditions Module (Python parity with praisonaiagents/conditions)
+export {
+  // Types
+  type ConditionProtocol, type RoutingConditionProtocol,
+  // Classes
+  DictCondition, ExpressionCondition, FunctionCondition,
+  // Functions
+  evaluateCondition, createCondition, andConditions, orConditions, notCondition,
+} from './conditions';
+
+// Export Gateway/Bot Module (Python parity with praisonaiagents/gateway)
+export {
+  // Bot types
+  type BotConfig, type BotUser, type BotChannel, type BotMessage, type BotProtocol,
+  // Gateway types
+  type GatewayConfig, type GatewayEvent, type GatewayMessage,
+  type GatewayProtocol, type GatewayClientProtocol, type GatewaySessionProtocol,
+  // Other types
+  type ProviderStatus, type FailoverConfig, type AuthProfile,
+  type ResourceLimits, type SandboxResult, type SandboxProtocol,
+  type ReflectionOutput, type AutoRagConfig,
+  // Enums
+  SandboxStatus, AutonomyLevel, RagRetrievalPolicy,
+  // Classes
+  FailoverManager,
+} from './gateway';
+
+// Export Task Module (Python parity with praisonaiagents/task)
+export {
+  type TaskConfig as AgentTaskConfig, type TaskOutput, type Task as AgentTask,
+  BaseTask, createTaskOutput,
+} from './task';
+
+// Export Protocols Module (Python parity with remaining P3 gaps)
+export {
+  // A2A Protocol
+  A2ATaskState, A2ARole,
+  type A2ATextPart, type A2AFilePart, type A2ADataPart, type A2APart,
+  type A2AMessage, type A2ATaskStatus, type A2ATask, type A2AArtifact,
+  type A2AAgentSkill, type A2AAgentCapabilities, type A2AAgentCard,
+  type A2ASendMessageRequest,
+  A2A,
+  // AGUI Protocol
+  AGUI,
+  // AutoRagAgent
+  RetrievalPolicy as AutoRetrievalPolicy,
+  type AutoRagAgentConfig,
+  DEFAULT_AUTO_KEYWORDS,
+  AutoRagAgent,
+  // Tools class
+  type ToolDefinition,
+  Tools,
+  // Global singletons
+  config, memory, obs, workflows,
+  // Guardrail policies
+  type GuardrailPolicy,
+  resolveGuardrailPolicies,
+  GUARDRAIL_POLICY_PRESETS,
+  // AgentManager alias type
+  type AgentManager,
+} from './protocols';

@@ -552,3 +552,166 @@ export async function repeat<T>(
   }
   return results;
 }
+
+// ============================================================================
+// Python Parity: If/when Conditionals
+// ============================================================================
+
+/**
+ * If - Conditional execution (Python parity)
+ * 
+ * @example
+ * ```typescript
+ * import { If } from 'praisonai';
+ * 
+ * const result = await If(
+ *   () => userType === 'premium',
+ *   async () => premiumAgent.chat(query),
+ *   async () => basicAgent.chat(query)
+ * );
+ * ```
+ */
+export async function If<T>(
+  condition: boolean | (() => boolean) | (() => Promise<boolean>),
+  thenExecute: () => Promise<T> | T,
+  elseExecute?: () => Promise<T> | T
+): Promise<T | undefined> {
+  const conditionResult = typeof condition === 'function' 
+    ? await condition() 
+    : condition;
+  
+  if (conditionResult) {
+    return thenExecute();
+  } else if (elseExecute) {
+    return elseExecute();
+  }
+  return undefined;
+}
+
+/**
+ * IfConfig for declarative conditional workflows
+ */
+export interface IfConfig<T = any> {
+  /** Condition to evaluate */
+  condition: boolean | (() => boolean) | (() => Promise<boolean>);
+  /** Execute if condition is true */
+  then: () => Promise<T> | T;
+  /** Execute if condition is false */
+  else?: () => Promise<T> | T;
+}
+
+/**
+ * when - Pattern matching style conditional (Python parity)
+ * 
+ * @example
+ * ```typescript
+ * import { when } from 'praisonai';
+ * 
+ * const result = await when(userIntent, {
+ *   'search': async () => searchAgent.chat(query),
+ *   'create': async () => createAgent.chat(query),
+ *   'delete': async () => deleteAgent.chat(query),
+ * }, async () => defaultAgent.chat(query));
+ * ```
+ */
+export async function when<TValue, TResult>(
+  value: TValue,
+  cases: Record<string, () => Promise<TResult> | TResult>,
+  defaultCase?: () => Promise<TResult> | TResult
+): Promise<TResult | undefined> {
+  const key = String(value);
+  
+  if (key in cases) {
+    return cases[key]();
+  } else if (defaultCase) {
+    return defaultCase();
+  }
+  return undefined;
+}
+
+/**
+ * WhenConfig for declarative pattern matching
+ */
+export interface WhenConfig<TValue = any, TResult = any> {
+  /** Value to match against */
+  value: TValue;
+  /** Cases to match */
+  cases: Record<string, () => Promise<TResult> | TResult>;
+  /** Default case if no match */
+  default?: () => Promise<TResult> | TResult;
+}
+
+/**
+ * Switch - Multi-condition branching (Python parity)
+ * 
+ * @example
+ * ```typescript
+ * import { Switch } from 'praisonai';
+ * 
+ * const result = await Switch([
+ *   { when: () => score > 90, then: () => 'A' },
+ *   { when: () => score > 80, then: () => 'B' },
+ *   { when: () => score > 70, then: () => 'C' },
+ * ], () => 'F');
+ * ```
+ */
+export async function Switch<T>(
+  cases: Array<{
+    when: boolean | (() => boolean) | (() => Promise<boolean>);
+    then: () => Promise<T> | T;
+  }>,
+  defaultCase?: () => Promise<T> | T
+): Promise<T | undefined> {
+  for (const { when: condition, then: execute } of cases) {
+    const conditionResult = typeof condition === 'function'
+      ? await condition()
+      : condition;
+    
+    if (conditionResult) {
+      return execute();
+    }
+  }
+  
+  if (defaultCase) {
+    return defaultCase();
+  }
+  return undefined;
+}
+
+/**
+ * Guard - Execute only if all guards pass (Python parity)
+ * 
+ * @example
+ * ```typescript
+ * import { Guard } from 'praisonai';
+ * 
+ * const result = await Guard(
+ *   [
+ *     () => user.isAuthenticated,
+ *     () => user.hasPermission('write'),
+ *     () => !rateLimiter.isLimited(user.id),
+ *   ],
+ *   async () => agent.chat(query),
+ *   async (failedGuardIndex) => `Guard ${failedGuardIndex} failed`
+ * );
+ * ```
+ */
+export async function Guard<T>(
+  guards: Array<boolean | (() => boolean) | (() => Promise<boolean>)>,
+  execute: () => Promise<T> | T,
+  onFail?: (failedGuardIndex: number) => Promise<T> | T
+): Promise<T | undefined> {
+  for (let i = 0; i < guards.length; i++) {
+    const guard = guards[i];
+    const result = typeof guard === 'function' ? await guard() : guard;
+    
+    if (!result) {
+      if (onFail) {
+        return onFail(i);
+      }
+      return undefined;
+    }
+  }
+  
+  return execute();
+}

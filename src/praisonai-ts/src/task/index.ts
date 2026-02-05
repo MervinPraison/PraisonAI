@@ -1,8 +1,44 @@
+/**
+ * Task Module for PraisonAI TypeScript SDK
+ * 
+ * Python parity with praisonaiagents task types
+ */
+
 export interface TaskConfig {
   priority?: number;
   deadline?: Date;
   dependencies?: string[];
   metadata?: Record<string, any>;
+}
+
+/**
+ * Task output result.
+ * Python parity: praisonaiagents/task
+ */
+export interface TaskOutput {
+  taskId: string;
+  status: 'success' | 'failure' | 'partial';
+  result?: any;
+  error?: string;
+  duration?: number;
+  metadata?: Record<string, any>;
+}
+
+/**
+ * Create a task output.
+ */
+export function createTaskOutput(
+  taskId: string,
+  status: 'success' | 'failure' | 'partial',
+  result?: any,
+  error?: string
+): TaskOutput {
+  return {
+    taskId,
+    status,
+    result,
+    error,
+  };
 }
 
 export interface Task {

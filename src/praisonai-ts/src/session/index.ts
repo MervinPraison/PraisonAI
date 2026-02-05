@@ -328,6 +328,15 @@ export {
   type SessionScope,
 } from './hierarchy';
 
+// Re-export enhanced Session with Python parity (aliased to avoid conflict)
+export {
+  Session as EnhancedSession,
+  createSession,
+  type SessionConfig as EnhancedSessionConfig,
+  type SessionState,
+  type SessionMessage,
+} from './session';
+
 // Re-export SessionStore for Phase 6 features  
 export {
   MemorySessionStore, FileSessionStore, createSessionStore, createStoredSession,

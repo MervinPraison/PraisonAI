@@ -29,6 +29,126 @@ export interface FastContextResult {
   latencyMs: number;
 }
 
+// ============================================================================
+// LineRange & FileMatch (Python parity with praisonaiagents/context/fast/result.py)
+// ============================================================================
+
+/**
+ * Represents a range of lines in a file.
+ * 
+ * Python parity: praisonaiagents/context/fast/result.py:13-52
+ */
+export interface LineRange {
+  /** Starting line number (1-indexed) */
+  start: number;
+  /** Ending line number (1-indexed, inclusive) */
+  end: number;
+  /** Optional content of the lines */
+  content?: string;
+  /** Score indicating relevance (0.0-1.0) */
+  relevanceScore: number;
+}
+
+/**
+ * Create a LineRange with defaults.
+ */
+export function createLineRange(config: Partial<LineRange> & { start: number; end: number }): LineRange {
+  return {
+    start: Math.max(1, config.start),
+    end: Math.max(config.start, config.end),
+    content: config.content,
+    relevanceScore: config.relevanceScore ?? 1.0,
+  };
+}
+
+/**
+ * Get the number of lines in a range.
+ */
+export function getLineCount(range: LineRange): number {
+  return range.end - range.start + 1;
+}
+
+/**
+ * Check if two line ranges overlap.
+ */
+export function rangesOverlap(a: LineRange, b: LineRange): boolean {
+  return !(a.end < b.start || a.start > b.end);
+}
+
+/**
+ * Merge two overlapping line ranges.
+ */
+export function mergeRanges(a: LineRange, b: LineRange): LineRange {
+  if (!rangesOverlap(a, b)) {
+    throw new Error('Cannot merge non-overlapping ranges');
+  }
+  return {
+    start: Math.min(a.start, b.start),
+    end: Math.max(a.end, b.end),
+    content: undefined, // Content needs to be re-fetched
+    relevanceScore: Math.max(a.relevanceScore, b.relevanceScore),
+  };
+}
+
+/**
+ * Represents a file match from Fast Context search.
+ * 
+ * Python parity: praisonaiagents/context/fast/result.py:55-92
+ */
+export interface FileMatch {
+  /** Absolute or relative path to the file */
+  path: string;
+  /** List of relevant line ranges in the file */
+  lineRanges: LineRange[];
+  /** Overall relevance score (0.0-1.0) */
+  relevanceScore: number;
+  /** Number of pattern matches found */
+  matchCount: number;
+}
+
+/**
+ * Create a FileMatch with defaults.
+ */
+export function createFileMatch(config: Partial<FileMatch> & { path: string }): FileMatch {
+  return {
+    path: config.path,
+    lineRanges: config.lineRanges ?? [],
+    relevanceScore: config.relevanceScore ?? 1.0,
+    matchCount: config.matchCount ?? 0,
+  };
+}
+
+/**
+ * Add a line range to a file match, merging with existing overlapping ranges.
+ */
+export function addLineRangeToFileMatch(fileMatch: FileMatch, lineRange: LineRange): void {
+  const overlapping: LineRange[] = [];
+  const nonOverlapping: LineRange[] = [];
+  
+  for (const existing of fileMatch.lineRanges) {
+    if (rangesOverlap(existing, lineRange)) {
+      overlapping.push(existing);
+    } else {
+      nonOverlapping.push(existing);
+    }
+  }
+  
+  // Merge all overlapping ranges
+  let merged = lineRange;
+  for (const overlap of overlapping) {
+    merged = mergeRanges(merged, overlap);
+  }
+  
+  fileMatch.lineRanges = [...nonOverlapping, merged].sort((a, b) => a.start - b.start);
+}
+
+/**
+ * Get total number of lines across all ranges in a file match.
+ */
+export function getTotalLines(fileMatch: FileMatch): number {
+  return fileMatch.lineRanges.reduce((sum, r) => sum + getLineCount(r), 0);
+}
+
 export interface CacheEntry {
   result: FastContextResult;
   timestamp: number;

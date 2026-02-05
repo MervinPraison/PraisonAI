@@ -1,5 +1,7 @@
 /**
  * Guardrails - Input/output validation and safety checks
+ * 
+ * Python parity with praisonaiagents/guardrails module
  */
 
 export type GuardrailStatus = 'passed' | 'failed' | 'warning';
@@ -9,6 +11,64 @@ export interface GuardrailResult {
   message?: string;
   details?: Record<string, any>;
   modifiedContent?: string;
+}
+
+// ============================================================================
+// GuardrailValidationResult (Python parity)
+// ============================================================================
+
+/**
+ * Result of a guardrail validation.
+ * 
+ * Python parity: praisonaiagents/guardrails/guardrail_result.py:13-43
+ * 
+ * This is the Pydantic-style result that matches the Python SDK.
+ */
+export interface GuardrailValidationResult {
+  /** Whether the guardrail check passed */
+  success: boolean;
+  /** The result if modified, or null if unchanged */
+  result: string | null;
+  /** Error message if validation failed */
+  error: string;
+}
+
+/**
+ * Create a GuardrailValidationResult with defaults.
+ */
+export function createGuardrailValidationResult(
+  config: Partial<GuardrailValidationResult> = {}
+): GuardrailValidationResult {
+  return {
+    success: config.success ?? false,
+    result: config.result ?? null,
+    error: config.error ?? '',
+  };
+}
+
+/**
+ * Create a GuardrailValidationResult from a tuple.
+ * 
+ * Python parity: praisonaiagents/guardrails/guardrail_result.py:20-43
+ */
+export function guardrailResultFromTuple(
+  tuple: [boolean, string | null]
+): GuardrailValidationResult {
+  const [success, data] = tuple;
+  
+  if (success) {
+    return {
+      success: true,
+      result: data,
+      error: '',
+    };
+  } else {
+    return {
+      success: false,
+      result: null,
+      error: data ?? 'Guardrail validation failed',
+    };
+  }
 }
 
 export type GuardrailFunction = (

@@ -244,3 +244,128 @@ export class SkillManager {
 export function createSkillManager(options?: SkillDiscoveryOptions): SkillManager {
   return new SkillManager(options);
 }
+
+// ============================================================================
+// Python Parity: SkillProperties and SkillLoader
+// ============================================================================
+
+/**
+ * Skill properties from SKILL.md frontmatter.
+ * Python parity with praisonaiagents/skills/models.py SkillProperties.
+ */
+export interface SkillProperties {
+  name: string;
+  description: string;
+  license?: string;
+  compatibility?: string;
+  allowedTools?: string;
+  metadata: Record<string, string>;
+  path?: string;
+}
+
+/**
+ * Create SkillProperties with defaults.
+ */
+export function createSkillProperties(partial: Partial<SkillProperties> & { name: string; description: string }): SkillProperties {
+  return {
+    metadata: {},
+    ...partial,
+  };
+}
+
+/**
+ * SkillLoader - Progressive skill loading.
+ * Python parity with praisonaiagents/skills/loader.py SkillLoader.
+ */
+export class SkillLoader {
+  private cache: Map<string, Skill> = new Map();
+
+  /**
+   * Load skill metadata only (Level 1 - ~100 tokens).
+   */
+  async loadMetadata(skillPath: string): Promise<SkillProperties> {
+    const skillMdPath = path.join(skillPath, 'SKILL.md');
+    if (!fs.existsSync(skillMdPath)) {
+      throw new Error(`SKILL.md not found at ${skillPath}`);
+    }
+
+    const content = fs.readFileSync(skillMdPath, 'utf-8');
+    const skill = parseSkillFile(content);
+
+    return {
+      name: skill.metadata.name,
+      description: skill.metadata.description,
+      license: skill.metadata.license,
+      compatibility: skill.metadata.compatibility,
+      allowedTools: skill.metadata.allowedTools?.join(' '),
+      metadata: skill.metadata.metadata || {},
+      path: skillPath,
+    };
+  }
+
+  /**
+   * Load full skill with instructions (Level 2 - <5000 tokens).
+   */
+  async loadFull(skillPath: string): Promise<Skill> {
+    if (this.cache.has(skillPath)) {
+      return this.cache.get(skillPath)!;
+    }
+
+    const skillMdPath = path.join(skillPath, 'SKILL.md');
+    if (!fs.existsSync(skillMdPath)) {
+      throw new Error(`SKILL.md not found at ${skillPath}`);
+    }
+
+    const content = fs.readFileSync(skillMdPath, 'utf-8');
+    const skill = parseSkillFile(content);
+    skill.path = skillPath;
+
+    this.cache.set(skillPath, skill);
+    return skill;
+  }
+
+  /**
+   * Load skill resources (Level 3 - as needed).
+   */
+  async loadResources(skillPath: string): Promise<{
+    scripts: string[];
+    references: string[];
+    assets: string[];
+  }> {
+    const result = {
+      scripts: [] as string[],
+      references: [] as string[],
+      assets: [] as string[],
+    };
+
+    const scriptsPath = path.join(skillPath, 'scripts');
+    const referencesPath = path.join(skillPath, 'references');
+    const assetsPath = path.join(skillPath, 'assets');
+
+    if (fs.existsSync(scriptsPath)) {
+      result.scripts = fs.readdirSync(scriptsPath);
+    }
+    if (fs.existsSync(referencesPath)) {
+      result.references = fs.readdirSync(referencesPath);
+    }
+    if (fs.existsSync(assetsPath)) {
+      result.assets = fs.readdirSync(assetsPath);
+    }
+
+    return result;
+  }
+
+  /**
+   * Clear the cache.
+   */
+  clearCache(): void {
+    this.cache.clear();
+  }
+}
+
+/**
+ * Create a skill loader.
+ */
+export function createSkillLoader(): SkillLoader {
+  return new SkillLoader();
+}

@@ -377,6 +377,147 @@ export function createAgentTelemetry(agentName: string, config?: TelemetryConfig
   return new AgentTelemetry(agentName, config);
 }
 
+// ============================================================================
+// Python Parity: MinimalTelemetry and Performance Mode
+// ============================================================================
+
+/**
+ * MinimalTelemetry - Lightweight telemetry with minimal overhead.
+ * Python parity with praisonaiagents/telemetry/telemetry.py MinimalTelemetry.
+ */
+export class MinimalTelemetry {
+  private _enabled: boolean;
+  private _performanceMode: boolean = false;
+
+  constructor(enabled: boolean = true) {
+    this._enabled = enabled && this.checkEnabled();
+  }
+
+  private checkEnabled(): boolean {
+    const disabled = process.env.PRAISONAI_TELEMETRY_DISABLED === 'true' ||
+      process.env.PRAISONAI_DISABLE_TELEMETRY === 'true' ||
+      process.env.DO_NOT_TRACK === 'true';
+    return !disabled;
+  }
+
+  get enabled(): boolean {
+    return this._enabled;
+  }
+
+  /**
+   * Track feature usage.
+   */
+  trackFeatureUsage(feature: string, metadata?: Record<string, any>): void {
+    if (!this._enabled || this._performanceMode) return;
+    getTelemetry().trackFeatureUsage(feature, metadata);
+  }
+
+  /**
+   * Track agent execution.
+   */
+  trackAgentExecution(agentName: string, duration: number, success: boolean): void {
+    if (!this._enabled) return;
+    getTelemetry().trackAgentExecution(agentName, duration, success);
+  }
+
+  /**
+   * Track tool call.
+   */
+  trackToolCall(toolName: string, duration: number, success: boolean): void {
+    if (!this._enabled) return;
+    getTelemetry().trackToolCall(toolName, duration, success);
+  }
+
+  /**
+   * Track LLM call.
+   */
+  trackLLMCall(provider: string, model: string, tokens: number, duration: number): void {
+    if (!this._enabled) return;
+    getTelemetry().trackLLMCall(provider, model, tokens, duration);
+  }
+
+  /**
+   * Track error.
+   */
+  trackError(error: string, context?: Record<string, any>): void {
+    if (!this._enabled) return;
+    getTelemetry().trackError(error, context);
+  }
+
+  /**
+   * Enable telemetry.
+   */
+  enable(): void {
+    this._enabled = true;
+  }
+
+  /**
+   * Disable telemetry.
+   */
+  disable(): void {
+    this._enabled = false;
+  }
+
+  /**
+   * Enable performance mode (minimal tracking).
+   */
+  enablePerformanceMode(): void {
+    this._performanceMode = true;
+  }
+
+  /**
+   * Disable performance mode.
+   */
+  disablePerformanceMode(): void {
+    this._performanceMode = false;
+  }
+
+  /**
+   * Shutdown telemetry.
+   */
+  shutdown(): void {
+    this._enabled = false;
+    cleanupTelemetry();
+  }
+}
+
+// Global minimal telemetry instance
+let globalMinimalTelemetry: MinimalTelemetry | null = null;
+
+/**
+ * Get global minimal telemetry instance.
+ */
+export function getMinimalTelemetry(): MinimalTelemetry {
+  if (!globalMinimalTelemetry) {
+    globalMinimalTelemetry = new MinimalTelemetry();
+  }
+  return globalMinimalTelemetry;
+}
+
+/**
+ * Enable performance mode for minimal telemetry overhead.
+ * Python parity with praisonaiagents/telemetry enable_performance_mode.
+ */
+export function enablePerformanceMode(): void {
+  getMinimalTelemetry().enablePerformanceMode();
+}
+
+/**
+ * Disable performance mode to resume full telemetry tracking.
+ * Python parity with praisonaiagents/telemetry disable_performance_mode.
+ */
+export function disablePerformanceMode(): void {
+  getMinimalTelemetry().disablePerformanceMode();
+}
+
+/**
+ * Clean up telemetry resources including thread pools and queues.
+ * Python parity with praisonaiagents/telemetry cleanup_telemetry_resources.
+ */
+export function cleanupTelemetryResources(): void {
+  cleanupTelemetry();
+}
+
 // Re-export PerformanceMonitor
 export {
   PerformanceMonitor,

@@ -25,6 +25,94 @@ export interface ResearchResponse {
   confidence: number;
 }
 
+/**
+ * Python parity: DeepResearchResponse with additional fields
+ */
+export interface DeepResearchResponse extends ResearchResponse {
+  /** Query that was researched */
+  query: string;
+  /** Total iterations performed */
+  iterations: number;
+  /** Time taken in seconds */
+  duration?: number;
+  /** Model used */
+  model?: string;
+}
+
+/**
+ * Python parity: Code execution step in research
+ */
+export interface CodeExecutionStep {
+  /** Code that was executed */
+  code: string;
+  /** Language of the code */
+  language: string;
+  /** Output from execution */
+  output?: string;
+  /** Error if execution failed */
+  error?: string;
+  /** Whether execution succeeded */
+  success: boolean;
+}
+
+/**
+ * Python parity: File search call during research
+ */
+export interface FileSearchCall {
+  /** Query used for file search */
+  query: string;
+  /** Files that matched */
+  files: string[];
+  /** Snippets from matched files */
+  snippets?: Array<{ file: string; content: string; line?: number }>;
+}
+
+/**
+ * Python parity: MCP (Model Context Protocol) call during research
+ */
+export interface MCPCall {
+  /** Server name */
+  server: string;
+  /** Tool name */
+  tool: string;
+  /** Arguments passed */
+  arguments: Record<string, any>;
+  /** Result from the call */
+  result?: any;
+  /** Error if call failed */
+  error?: string;
+}
+
+/**
+ * Python parity: Web search call during research
+ */
+export interface WebSearchCall {
+  /** Search query */
+  query: string;
+  /** Search engine used */
+  engine?: string;
+  /** Results returned */
+  results: Citation[];
+  /** Number of results */
+  count: number;
+}
+
+/**
+ * Python parity: Provider configuration for research
+ */
+export interface Provider {
+  /** Provider name (openai, anthropic, etc.) */
+  name: string;
+  /** Model to use */
+  model: string;
+  /** API key (optional, uses env var if not provided) */
+  apiKey?: string;
+  /** Base URL for API */
+  baseUrl?: string;
+  /** Additional options */
+  options?: Record<string, any>;
+}
+
 export interface DeepResearchConfig {
   name?: string;
   llm?: string;

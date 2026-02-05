@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from .python_extractor import PythonFeatureExtractor, PythonFeatures
+from .rust_extractor import RustFeatureExtractor, RustFeatures
 from .typescript_extractor import TypeScriptFeatureExtractor, TypeScriptFeatures
 
 
@@ -96,11 +97,13 @@ class ParityTrackerGenerator:
         
         self.python_extractor = PythonFeatureExtractor(repo_root)
         self.ts_extractor = TypeScriptFeatureExtractor(repo_root)
+        self.rust_extractor = RustFeatureExtractor(repo_root)
         
         # Output paths
         self.ts_output = self.repo_root / "src" / "praisonai-ts" / "FEATURE_PARITY_TRACKER.json"
+        self.ts_md_output = self.repo_root / "src" / "praisonai-ts" / "PARITY.md"
         self.rust_output = self.repo_root / "src" / "praisonai-rust" / "FEATURE_PARITY_TRACKER.json"
-        self.md_output = self.repo_root / "parity.md"
+        self.rust_md_output = self.repo_root / "src" / "praisonai-rust" / "PARITY.md"
     
     def _find_repo_root(self) -> Path:
         """Find repository root by looking for .git directory."""
@@ -301,7 +304,7 @@ class ParityTrackerGenerator:
     
     def write_rust(self, check: bool = False) -> int:
         """
-        Write Rust parity tracker (placeholder).
+        Write Rust parity tracker.
         
         Args:
             check: If True, only check if file is up to date
@@ -309,28 +312,53 @@ class ParityTrackerGenerator:
         Returns:
             0 for success, 1 for check failure
         """
-        # For Rust, we generate a minimal tracker since there's no implementation yet
         python_features = self.python_extractor.extract()
+        rust_features = self.rust_extractor.extract()
+        
+        # Calculate gap (Python features not in Rust)
+        python_exports = {e.name for e in python_features.exports}
+        rust_exports = rust_features.get_export_names()
+        gap_count = len(python_exports - rust_exports)
+        
+        # Determine status based on implementation progress
+        rust_count = len(rust_exports)
+        python_count = len(python_exports)
+        if rust_count == 0:
+            status = 'NOT_STARTED'
+        elif rust_count < python_count * 0.25:
+            status = 'EARLY_DEVELOPMENT'
+        elif rust_count < python_count * 0.75:
+            status = 'IN_PROGRESS'
+        elif rust_count < python_count:
+            status = 'NEAR_PARITY'
+        else:
+            status = 'PARITY_ACHIEVED'
         
         tracker = {
             'version': self._get_current_version(),
             'lastUpdated': date.today().isoformat(),
             'generatedBy': 'praisonai._dev.parity.generator',
             'sourceOfTruth': 'Python SDK (praisonaiagents)',
-            'status': 'NOT_STARTED',
+            'status': status,
             'summary': {
-                'pythonCoreFeatures': len(python_features.exports),
-                'rustFeatures': 0,
-                'gapCount': len(python_features.exports),
+                'pythonCoreFeatures': python_count,
+                'rustFeatures': rust_count,
+                'gapCount': gap_count,
+                'parityPercentage': round((rust_count / python_count * 100) if python_count > 0 else 0, 1),
             },
             'pythonCoreSDK': {
                 'exports': sorted([e.name for e in python_features.exports]),
             },
             'rustSDK': {
                 'path': str(self.repo_root / "src" / "praisonai-rust"),
-                'exports': [],
-                'modules': {},
+                'exports': sorted(list(rust_exports)),
+                'modules': {
+                    name: sorted(mod.exports)
+                    for name, mod in sorted(rust_features.modules.items())
+                },
+                'cargoFeatures': rust_features.cargo_features,
             },
+            'gapMatrix': self._build_rust_gap_matrix(python_features, rust_features),
         }
         
         content = json.dumps(tracker, indent=2, ensure_ascii=False) + '\n'
@@ -361,6 +389,48 @@ class ParityTrackerGenerator:
         
         print(f"✓ Generated {self.rust_output}")
         return 0
+    
+    def _build_rust_gap_matrix(self, python: PythonFeatures, rust: RustFeatures) -> dict:
+        """Build the gap matrix for Rust showing feature-by-feature comparison."""
+        python_exports = {e.name: e for e in python.exports}
+        rust_export_names = rust.get_export_names()
+        
+        # Group by priority
+        gaps_by_priority: Dict[str, List[dict]] = {
+            'P0_CoreParity': [],
+            'P1_Persistence': [],
+            'P2_CLI': [],
+            'P3_Advanced': [],
+        }
+        
+        # Priority to key mapping
+        priority_to_key = {
+            'P0': 'P0_CoreParity',
+            'P1': 'P1_Persistence',
+            'P2': 'P2_CLI',
+            'P3': 'P3_Advanced',
+        }
+        
+        for name, export in sorted(python_exports.items()):
+            in_rust = name in rust_export_names
+            priority = self.PRIORITY_MAPPING.get(export.category, 'P3')
+            effort = self.EFFORT_MAPPING.get(export.kind, 'medium')
+            status = 'DONE' if in_rust else 'TODO'
+            
+            gap_entry = {
+                'feature': name,
+                'python': True,
+                'rust': in_rust,
+                'priority': priority,
+                'effort': effort,
+                'status': status,
+                'category': export.category,
+            }
+            
+            key = priority_to_key.get(priority, 'P3_Advanced')
+            gaps_by_priority[key].append(gap_entry)
+        
+        return gaps_by_priority
     
     def generate_markdown(self) -> str:
         """
@@ -466,9 +536,9 @@ class ParityTrackerGenerator:
         
         return '\n'.join(lines)
     
-    def write_markdown(self, check: bool = False) -> int:
+    def write_typescript_markdown(self, check: bool = False) -> int:
         """
-        Write markdown parity report.
+        Write TypeScript markdown parity report.
         
         Args:
             check: If True, only check if file is up to date
@@ -479,26 +549,103 @@ class ParityTrackerGenerator:
         content = self.generate_markdown()
         
         if check:
-            if self.md_output.exists():
-                with open(self.md_output, 'r', encoding='utf-8') as f:
+            if self.ts_md_output.exists():
+                with open(self.ts_md_output, 'r', encoding='utf-8') as f:
                     existing = f.read()
                 # Compare ignoring date line
                 existing_lines = [line for line in existing.split('\n') if not line.startswith('> **Version:**')]
                 content_lines = [line for line in content.split('\n') if not line.startswith('> **Version:**')]
                 if existing_lines == content_lines:
-                    print(f"✓ {self.md_output} is up to date")
+                    print(f"✓ {self.ts_md_output} is up to date")
                     return 0
                 else:
-                    print(f"✗ {self.md_output} is out of date")
+                    print(f"✗ {self.ts_md_output} is out of date")
                     return 1
             else:
-                print(f"✗ {self.md_output} does not exist")
+                print(f"✗ {self.ts_md_output} does not exist")
                 return 1
         
-        with open(self.md_output, 'w', encoding='utf-8') as f:
+        with open(self.ts_md_output, 'w', encoding='utf-8') as f:
             f.write(content)
         
-        print(f"✓ Generated {self.md_output}")
+        print(f"✓ Generated {self.ts_md_output}")
+        return 0
+    
+    def write_rust_markdown(self, check: bool = False) -> int:
+        """
+        Write Rust markdown parity report.
+        
+        Args:
+            check: If True, only check if file is up to date
+            
+        Returns:
+            0 for success, 1 for check failure
+        """
+        # Generate Rust-specific markdown
+        python_features = self.python_extractor.extract()
+        rust_features = self.rust_extractor.extract()
+        
+        python_exports = {e.name for e in python_features.exports}
+        rust_exports = rust_features.get_export_names()
+        rust_count = len(rust_exports)
+        python_count = len(python_exports)
+        gap_count = len(python_exports - rust_exports)
+        parity_pct = round((rust_count / python_count * 100) if python_count > 0 else 0, 1)
+        
+        lines = []
+        lines.append("# Rust Feature Parity Tracker")
+        lines.append("")
+        lines.append(f"> **Python Features:** {python_count} | **Rust Features:** {rust_count} | **Parity:** {parity_pct}%")
+        lines.append("")
+        lines.append("## Summary")
+        lines.append("")
+        lines.append("| Metric | Count |")
+        lines.append("|--------|-------|")
+        lines.append(f"| Python Core Features | {python_count} |")
+        lines.append(f"| Rust Features | {rust_count} |")
+        lines.append(f"| **Gap Count** | **{gap_count}** |")
+        lines.append(f"| **Parity** | **{parity_pct}%** |")
+        lines.append("")
+        lines.append("## Implemented Features")
+        lines.append("")
+        for name in sorted(rust_exports):
+            lines.append(f"- ✅ `{name}`")
+        lines.append("")
+        lines.append("## Missing Features (Top Priority)")
+        lines.append("")
+        missing = sorted(python_exports - rust_exports)[:50]
+        for name in missing:
+            lines.append(f"- ❌ `{name}`")
+        if len(python_exports - rust_exports) > 50:
+            lines.append(f"- ... and {len(python_exports - rust_exports) - 50} more")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+        lines.append("*Generated by `praisonai._dev.parity.generator`*")
+        lines.append("")
+        
+        content = '\n'.join(lines)
+        
+        if check:
+            if self.rust_md_output.exists():
+                with open(self.rust_md_output, 'r', encoding='utf-8') as f:
+                    existing = f.read()
+                existing_lines = [line for line in existing.split('\n') if not line.startswith('>')]
+                content_lines = [line for line in content.split('\n') if not line.startswith('>')]
+                if existing_lines == content_lines:
+                    print(f"✓ {self.rust_md_output} is up to date")
+                    return 0
+                else:
+                    print(f"✗ {self.rust_md_output} is out of date")
+                    return 1
+            else:
+                print(f"✗ {self.rust_md_output} does not exist")
+                return 1
+        
+        with open(self.rust_md_output, 'w', encoding='utf-8') as f:
+            f.write(content)
+        
+        print(f"✓ Generated {self.rust_md_output}")
         return 0
 
 
@@ -514,7 +661,7 @@ def generate_parity_tracker(
     
     Args:
         repo_root: Repository root path (auto-detected if None)
-        target: 'typescript', 'rust', 'md', or 'all'
+        target: 'typescript', 'rust', or 'all'
         check: If True, check if files are up to date (exit 1 if not)
         stdout: If True, print to stdout instead of writing files
         output_format: Output format for --stdout ('json' or 'md')
@@ -538,14 +685,15 @@ def generate_parity_tracker(
         result = generator.write_typescript(check=check)
         if result != 0:
             exit_code = result
+        result = generator.write_typescript_markdown(check=check)
+        if result != 0:
+            exit_code = result
     
     if target in ('rust', 'rs', 'all'):
         result = generator.write_rust(check=check)
         if result != 0:
             exit_code = result
-    
-    if target in ('md', 'markdown', 'all'):
-        result = generator.write_markdown(check=check)
+        result = generator.write_rust_markdown(check=check)
         if result != 0:
             exit_code = result
     

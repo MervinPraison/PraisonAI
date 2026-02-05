@@ -1,12 +1,106 @@
 /**
  * Agent Handoff Tests - TDD for agent handoff support
  * These tests define the expected behavior for agent-to-agent handoff
+ * Python parity: handoff.py error types and ContextPolicy
  */
 
 import { describe, it, expect, beforeEach, jest } from '@jest/globals';
+import {
+  HandoffError,
+  HandoffCycleError,
+  HandoffDepthError,
+  HandoffTimeoutError,
+  ContextPolicy,
+  HandoffInputData,
+  Handoff,
+  handoff,
+  handoffFilters,
+} from '../../../src/agent/handoff';
 
 // These imports will fail initially - TDD approach
 // import { Agent, handoff, Handoff } from '../../../src/agent';
+
+describe('Handoff Error Types (Python Parity)', () => {
+  describe('HandoffError', () => {
+    it('should be a base error class', () => {
+      const error = new HandoffError('Test error');
+      expect(error).toBeInstanceOf(Error);
+      expect(error).toBeInstanceOf(HandoffError);
+      expect(error.message).toBe('Test error');
+      expect(error.name).toBe('HandoffError');
+    });
+  });
+
+  describe('HandoffCycleError', () => {
+    it('should capture the handoff chain', () => {
+      const chain = ['agent1', 'agent2', 'agent1'];
+      const error = new HandoffCycleError(chain);
+      expect(error).toBeInstanceOf(HandoffError);
+      expect(error.chain).toEqual(chain);
+      expect(error.message).toContain('Handoff cycle detected');
+      expect(error.message).toContain('agent1 -> agent2 -> agent1');
+    });
+  });
+
+  describe('HandoffDepthError', () => {
+    it('should capture depth and max_depth', () => {
+      const error = new HandoffDepthError(11, 10);
+      expect(error).toBeInstanceOf(HandoffError);
+      expect(error.depth).toBe(11);
+      expect(error.maxDepth).toBe(10);
+      expect(error.message).toContain('Max handoff depth exceeded');
+      expect(error.message).toContain('11 > 10');
+    });
+  });
+
+  describe('HandoffTimeoutError', () => {
+    it('should capture timeout and agent name', () => {
+      const error = new HandoffTimeoutError(30, 'specialist');
+      expect(error).toBeInstanceOf(HandoffError);
+      expect(error.timeout).toBe(30);
+      expect(error.agentName).toBe('specialist');
+      expect(error.message).toContain('timed out');
+      expect(error.message).toContain('specialist');
+      expect(error.message).toContain('30');
+    });
+  });
+});
+
+describe('ContextPolicy (Python Parity)', () => {
+  it('should have FULL, SUMMARY, NONE, LAST_N values', () => {
+    expect(ContextPolicy.FULL).toBe('full');
+    expect(ContextPolicy.SUMMARY).toBe('summary');
+    expect(ContextPolicy.NONE).toBe('none');
+    expect(ContextPolicy.LAST_N).toBe('last_n');
+  });
+});
+
+describe('HandoffInputData (Python Parity)', () => {
+  it('should have all required fields', () => {
+    const inputData: HandoffInputData = {
+      messages: [{ role: 'user', content: 'Hello' }],
+      context: { key: 'value' },
+      sourceAgent: 'main',
+      handoffDepth: 2,
+      handoffChain: ['main', 'specialist'],
+    };
+    expect(inputData.messages).toHaveLength(1);
+    expect(inputData.context).toEqual({ key: 'value' });
+    expect(inputData.sourceAgent).toBe('main');
+    expect(inputData.handoffDepth).toBe(2);
+    expect(inputData.handoffChain).toEqual(['main', 'specialist']);
+  });
+
+  it('should have sensible defaults', () => {
+    const inputData: HandoffInputData = {
+      messages: [],
+      context: {},
+    };
+    expect(inputData.sourceAgent).toBeUndefined();
+    expect(inputData.handoffDepth).toBeUndefined();
+    expect(inputData.handoffChain).toBeUndefined();
+  });
+});
 
 describe('Agent Handoff', () => {
   describe('Handoff Creation', () => {

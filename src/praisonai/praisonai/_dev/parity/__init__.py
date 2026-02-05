@@ -10,11 +10,13 @@ Usage:
 """
 
 from .python_extractor import PythonFeatureExtractor
+from .rust_extractor import RustFeatureExtractor
 from .typescript_extractor import TypeScriptFeatureExtractor
 from .generator import ParityTrackerGenerator, generate_parity_tracker
 
 __all__ = [
     'PythonFeatureExtractor',
+    'RustFeatureExtractor',
     'TypeScriptFeatureExtractor',
     'ParityTrackerGenerator',
     'generate_parity_tracker',

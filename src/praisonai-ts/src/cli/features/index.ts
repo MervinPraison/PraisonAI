@@ -168,12 +168,22 @@ export {
   type N8NWorkflowNode
 } from './n8n-integration';
 
-// Fast Context
+// Fast Context (Python parity with praisonaiagents/context/fast)
 export {
   FastContext,
   createFastContext,
   getQuickContext,
   type FastContextConfig,
   type ContextSource,
-  type FastContextResult
+  type FastContextResult,
+  // Python parity additions
+  type LineRange,
+  createLineRange,
+  getLineCount,
+  rangesOverlap,
+  mergeRanges,
+  type FileMatch,
+  createFileMatch,
+  addLineRangeToFileMatch,
+  getTotalLines,
 } from './fast-context';

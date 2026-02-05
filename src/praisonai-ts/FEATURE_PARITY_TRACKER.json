@@ -1,6 +1,6 @@
 {
   "version": "1.5.5",
-  "lastUpdated": "2026-02-04",
+  "lastUpdated": "2026-02-05",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
@@ -14,7 +14,7 @@
     "priorityP3": 163
   },
   "pythonCoreSDK": {
-    "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
+    "path": "/Users/praison/praisonai-package/src/praisonai-agents/praisonaiagents",
     "exports": [
       "A2A",
       "AGUI",
@@ -645,7 +645,7 @@
     }
   },
   "pythonWrapper": {
-    "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai/praisonai",
+    "path": "/Users/praison/praisonai-package/src/praisonai/praisonai",
     "cliFeatures": [
       "acp",
       "action_orchestrator",
@@ -744,7 +744,7 @@
     ]
   },
   "typescriptSDK": {
-    "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-ts/src",
+    "path": "/Users/praison/praisonai-package/src/praisonai-ts/src",
     "exports": [
       "// Adapters\n  NoopObservabilityAdapter",
       "// Agent loop\n  createAgentLoop",

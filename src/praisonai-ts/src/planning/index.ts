@@ -1,6 +1,224 @@
 /**
  * Planning System - Plans, Steps, and TodoLists
+ * 
+ * Python parity with praisonaiagents/planning module
  */
+
+// ============================================================================
+// READ_ONLY_TOOLS & RESTRICTED_TOOLS (Python parity)
+// ============================================================================
+
+/**
+ * Read-only tools that are allowed in plan mode.
+ * These tools only read data and don't modify anything.
+ * 
+ * Python parity: praisonaiagents/planning/__init__.py:38-52
+ */
+export const READ_ONLY_TOOLS: readonly string[] = [
+  'read_file',
+  'list_directory',
+  'search_codebase',
+  'search_files',
+  'grep_search',
+  'find_files',
+  'web_search',
+  'get_file_content',
+  'list_files',
+  'read_document',
+  'search_web',
+  'fetch_url',
+  'get_context',
+] as const;
+
+/**
+ * Restricted tools that are blocked in plan mode.
+ * These tools can modify files, execute commands, or have side effects.
+ * 
+ * Python parity: praisonaiagents/planning/__init__.py:55-73
+ */
+export const RESTRICTED_TOOLS: readonly string[] = [
+  'write_file',
+  'create_file',
+  'delete_file',
+  'execute_command',
+  'run_command',
+  'shell_command',
+  'modify_file',
+  'edit_file',
+  'remove_file',
+  'move_file',
+  'copy_file',
+  'mkdir',
+  'rmdir',
+  'git_commit',
+  'git_push',
+  'npm_install',
+  'pip_install',
+] as const;
+
+/**
+ * Research tools that are safe for planning research.
+ * 
+ * Python parity: praisonaiagents/planning/__init__.py:76-90
+ */
+export const RESEARCH_TOOLS: readonly string[] = [
+  'web_search',
+  'search_web',
+  'duckduckgo_search',
+  'tavily_search',
+  'brave_search',
+  'google_search',
+  'read_url',
+  'fetch_url',
+  'read_file',
+  'list_directory',
+  'search_codebase',
+  'grep_search',
+  'find_files',
+] as const;
+
+// ============================================================================
+// ApprovalCallback (Python parity)
+// ============================================================================
+
+/**
+ * Configuration for ApprovalCallback.
+ * 
+ * Python parity: praisonaiagents/planning/approval.py:27-58
+ */
+export interface ApprovalCallbackConfig {
+  /** Whether to automatically approve all plans */
+  autoApprove?: boolean;
+  /** Custom approval function (sync or async) */
+  approveFn?: (plan: Plan) => boolean | Promise<boolean>;
+  /** Callback when plan is rejected */
+  onReject?: (plan: Plan) => void;
+}
+
+/**
+ * Callback for plan approval flow.
+ * 
+ * Handles the approval process for plans before execution.
+ * Can be configured for auto-approval or custom approval logic.
+ * 
+ * Python parity: praisonaiagents/planning/approval.py:27-131
+ * 
+ * @example
+ * ```typescript
+ * // Auto-approve all plans
+ * const callback = new ApprovalCallback({ autoApprove: true });
+ * 
+ * // Custom approval function
+ * const callback = new ApprovalCallback({
+ *   approveFn: (plan) => plan.steps.length <= 5
+ * });
+ * ```
+ */
+export class ApprovalCallback {
+  private autoApprove: boolean;
+  private approveFn?: (plan: Plan) => boolean | Promise<boolean>;
+  private onReject?: (plan: Plan) => void;
+
+  constructor(config: ApprovalCallbackConfig = {}) {
+    this.autoApprove = config.autoApprove ?? false;
+    this.approveFn = config.approveFn;
+    this.onReject = config.onReject;
+  }
+
+  /**
+   * Synchronously check if plan is approved.
+   */
+  call(plan: Plan): boolean {
+    if (this.autoApprove) {
+      return true;
+    }
+
+    if (this.approveFn) {
+      const result = this.approveFn(plan);
+      if (result instanceof Promise) {
+        // For sync call, we can't await - return false and suggest async
+        console.warn('ApprovalCallback: approveFn is async, use asyncCall instead');
+        return false;
+      }
+      if (!result && this.onReject) {
+        this.onReject(plan);
+      }
+      return result;
+    }
+
+    // Default: require explicit approval
+    return false;
+  }
+
+  /**
+   * Asynchronously check if plan is approved.
+   */
+  async asyncCall(plan: Plan): Promise<boolean> {
+    if (this.autoApprove) {
+      return true;
+    }
+
+    if (this.approveFn) {
+      const result = await this.approveFn(plan);
+      if (!result && this.onReject) {
+        this.onReject(plan);
+      }
+      return result;
+    }
+
+    // Default: require explicit approval
+    return false;
+  }
+
+  /**
+   * Always approve plans.
+   */
+  static alwaysApprove(_plan: Plan): boolean {
+    return true;
+  }
+
+  /**
+   * Always reject plans.
+   */
+  static alwaysReject(_plan: Plan): boolean {
+    return false;
+  }
+
+  /**
+   * Approve plans with few steps automatically.
+   */
+  static approveIfSmall(maxSteps: number = 5): (plan: Plan) => boolean {
+    return (plan: Plan) => plan.steps.length <= maxSteps;
+  }
+
+  /**
+   * Approve plans that don't use dangerous tools.
+   */
+  static approveIfNoDangerousTools(plan: Plan): boolean {
+    for (const step of plan.steps) {
+      const tools = step.metadata?.tools as string[] | undefined;
+      if (tools) {
+        for (const tool of tools) {
+          if (RESTRICTED_TOOLS.includes(tool)) {
+            return false;
+          }
+        }
+      }
+    }
+    return true;
+  }
+}
+
+/**
+ * Create an ApprovalCallback.
+ */
+export function createApprovalCallback(config?: ApprovalCallbackConfig): ApprovalCallback {
+  return new ApprovalCallback(config);
+}
+
+// ============================================================================
+// Core Types
+// ============================================================================
 
 export type PlanStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled';
 export type TodoStatus = 'pending' | 'in_progress' | 'completed';
