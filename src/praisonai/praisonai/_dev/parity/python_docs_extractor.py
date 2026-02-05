@@ -56,6 +56,7 @@ PYTHON_DOC_DIRECTORIES = [
     'storage',
     'integrations',
     'recipes',
+    'ocr',  # OCR agent documentation
 ]
 
 # Patterns to exclude from topic extraction (method-level docs)

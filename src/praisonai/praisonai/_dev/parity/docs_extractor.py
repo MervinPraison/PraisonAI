@@ -20,6 +20,7 @@ class DocsTopic:
     category: str       # Category: concepts, features, guides, cli, etc.
     sidebar_title: Optional[str] = None  # Optional sidebar title
     description: Optional[str] = None    # Optional description
+    line_count: int = 0  # Number of lines in the documentation file
 
 
 @dataclass
@@ -140,6 +141,14 @@ class BaseDocsExtractor:
         raw_name = file_path.stem
         normalized_name = self._normalize_topic_name(raw_name)
         
+        # Count lines in the file
+        line_count = 0
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                line_count = sum(1 for _ in f)
+        except (IOError, UnicodeDecodeError):
+            pass
+        
         return DocsTopic(
             name=normalized_name,
             title=title,
@@ -147,6 +156,7 @@ class BaseDocsExtractor:
             category=category,
             sidebar_title=frontmatter.get('sidebarTitle'),
             description=frontmatter.get('description'),
+            line_count=line_count,
         )
     
     def _scan_directory(self, directory: Path, base_path: Path) -> List[DocsTopic]:

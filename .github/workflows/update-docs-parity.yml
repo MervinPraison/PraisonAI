@@ -1,0 +1,80 @@
+name: Update Documentation Parity Tracker
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'src/praisonai-agents/praisonaiagents/**/*.py'
+      - 'src/praisonai-ts/src/**/*.ts'
+      - 'src/praisonai-rust/src/**/*.rs'
+      - 'src/praisonai/praisonai/_dev/parity/**/*.py'
+      - '.github/workflows/update-docs-parity.yml'
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: write
+
+jobs:
+  update-docs-parity:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: main
+        persist-credentials: true
+        fetch-depth: 0
+
+    - name: Checkout PraisonAIDocs
+      uses: actions/checkout@v4
+      with:
+        repository: MervinPraison/PraisonAIDocs
+        path: PraisonAIDocs
+        token: ${{ secrets.DOCS_PAT }}
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        pip install pyyaml
+
+    - name: Generate docs parity trackers
+      run: |
+        cd $GITHUB_WORKSPACE
+        python3 src/praisonai/scripts/generate_docs_parity.py --docs-root PraisonAIDocs/docs --copy-docs
+        
+    - name: Check for changes
+      id: check_changes
+      run: |
+        if git diff --quiet src/praisonai-agents/DOCS_PARITY.md src/praisonai-ts/DOCS_PARITY.md src/praisonai-rust/DOCS_PARITY.md 2>/dev/null; then
+          echo "changes=false" >> $GITHUB_OUTPUT
+          echo "No changes to docs parity trackers"
+        else
+          echo "changes=true" >> $GITHUB_OUTPUT
+          echo "Docs parity trackers have been updated"
+          git diff --stat src/praisonai-agents/DOCS_PARITY.md src/praisonai-ts/DOCS_PARITY.md src/praisonai-rust/DOCS_PARITY.md
+        fi
+
+    - name: Commit and push changes to praisonai-package
+      if: steps.check_changes.outputs.changes == 'true'
+      uses: stefanzweifel/git-auto-commit-action@v5
+      with:
+        commit_message: "docs: auto-update documentation parity trackers [skip ci]"
+        file_pattern: 'src/praisonai-agents/DOCS_PARITY.md src/praisonai-ts/DOCS_PARITY.md src/praisonai-rust/DOCS_PARITY.md'
+        commit_user_name: "github-actions[bot]"
+        commit_user_email: "41898282+github-actions[bot]@users.noreply.github.com"
+        commit_author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+
+    - name: Commit and push changes to PraisonAIDocs
+      if: steps.check_changes.outputs.changes == 'true'
+      run: |
+        cd PraisonAIDocs
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add docs/features/DOCS_PARITY.md docs/js/DOCS_PARITY.md docs/rust/DOCS_PARITY.md
+        git diff --staged --quiet || git commit -m "docs: auto-update documentation parity trackers [skip ci]"
+        git push
