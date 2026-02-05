@@ -297,7 +297,7 @@
     ]
   },
   "rustSDK": {
-    "path": "/Users/praison/praisonai-package/src/praisonai-rust",
+    "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-rust",
     "exports": [
       "Agent",
       "AgentBuilder",
