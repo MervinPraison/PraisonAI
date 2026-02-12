@@ -890,8 +890,7 @@ Methods:
 * <code title="cli">praisonai memory search <a href="./src/praisonai/praisonai/cli/commands/memory.py">--help</a></code>
 * <code title="cli">praisonai memory show <a href="./src/praisonai/praisonai/cli/commands/memory.py">--help</a></code>
 * <code title="cli">praisonai memory status <a href="./src/praisonai/praisonai/cli/commands/memory.py">--help</a></code>
-* <code title="cli">praisonai obs doctor <a href="./src/praisonai/praisonai/cli/commands/obs.py">--help</a></code>
-* <code title="cli">praisonai obs obs-callback <a href="./src/praisonai/praisonai/cli/commands/obs.py">--help</a></code>
+* <code title="cli">praisonai obs obs-fallback <a href="./src/praisonai/praisonai/cli/commands/obs.py">--help</a></code>
 * <code title="cli">praisonai package install <a href="./src/praisonai/praisonai/cli/commands/package.py">--help</a></code>
 * <code title="cli">praisonai package list <a href="./src/praisonai/praisonai/cli/commands/package.py">--help</a></code>
 * <code title="cli">praisonai package uninstall <a href="./src/praisonai/praisonai/cli/commands/package.py">--help</a></code>
