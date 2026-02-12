@@ -854,6 +854,9 @@ Methods:
 * <code title="cli">praisonai examples run <a href="./src/praisonai/praisonai/cli/commands/examples.py">--help</a></code>
 * <code title="cli">praisonai examples run-all <a href="./src/praisonai/praisonai/cli/commands/examples.py">--help</a></code>
 * <code title="cli">praisonai examples stats <a href="./src/praisonai/praisonai/cli/commands/examples.py">--help</a></code>
+* <code title="cli">praisonai gateway gateway-callback <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
+* <code title="cli">praisonai gateway start <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
+* <code title="cli">praisonai gateway status <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai hooks add <a href="./src/praisonai/praisonai/cli/commands/hooks.py">--help</a></code>
 * <code title="cli">praisonai hooks list <a href="./src/praisonai/praisonai/cli/commands/hooks.py">--help</a></code>
 * <code title="cli">praisonai hooks remove <a href="./src/praisonai/praisonai/cli/commands/hooks.py">--help</a></code>
