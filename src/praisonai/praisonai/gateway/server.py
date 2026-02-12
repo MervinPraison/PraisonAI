@@ -533,7 +533,7 @@ class WebSocketGateway:
         elif not isinstance(raw["channels"], dict) or not raw["channels"]:
             errors.append("'channels' must be a non-empty dictionary")
         else:
-            valid_platforms = {"telegram", "discord", "slack"}
+            valid_platforms = {"telegram", "discord", "slack", "whatsapp"}
             for cname, cdef in raw["channels"].items():
                 if not isinstance(cdef, dict):
                     errors.append(f"Channel '{cname}' must be a dictionary")
@@ -639,7 +639,7 @@ class WebSocketGateway:
                 logger.warning(f"No token for channel '{channel_name}', skipping")
                 continue
 
-            routes = ch_cfg.get("routes", {"default": "default"})
+            routes = ch_cfg.get("routing") or ch_cfg.get("routes") or {"default": "default"}
             self._routing_rules[channel_name] = routes
 
             # Resolve default agent for this channel (used as the bot's primary agent)
@@ -687,6 +687,16 @@ class WebSocketGateway:
             from praisonai.bots import SlackBot
             app_token = ch_cfg.get("app_token", os.environ.get("SLACK_APP_TOKEN", ""))
             return SlackBot(token=token, agent=agent, config=config, app_token=app_token)
+        elif channel_type == "whatsapp":
+            from praisonai.bots import WhatsAppBot
+            return WhatsAppBot(
+                token=token,
+                phone_number_id=ch_cfg.get("phone_number_id", ""),
+                agent=agent,
+                config=config,
+                verify_token=ch_cfg.get("verify_token", ""),
+                webhook_port=int(ch_cfg.get("webhook_port", 8080)),
+            )
         else:
             logger.warning(f"Unknown channel type: {channel_type}")
             return None
@@ -699,22 +709,37 @@ class WebSocketGateway:
         For Discord/Slack, injects a routing-aware message handler before
         starting so the gateway's routing rules are respected.
         """
-        try:
-            logger.info(f"Starting bot for channel '{name}'...")
+        max_retries = 5
+        base_delay = 5  # seconds
+        for attempt in range(max_retries + 1):
+            try:
+                logger.info(f"Starting bot for channel '{name}'..." + (f" (retry {attempt})" if attempt else ""))
 
-            # TelegramBot special handling: run_polling() tries to manage
-            # its own event loop which conflicts with our gateway loop.
-            # Use the lower-level API instead.
-            if self._is_telegram_bot(bot):
-                await self._start_telegram_bot_polling(name, bot)
-            else:
-                # Inject routing-aware handler for Discord/Slack
-                self._inject_routing_handler(name, bot)
-                await bot.start()
-        except asyncio.CancelledError:
-            logger.info(f"Bot '{name}' cancelled")
-        except Exception as e:
-            logger.error(f"Bot '{name}' crashed: {e}")
+                # TelegramBot special handling: run_polling() tries to manage
+                # its own event loop which conflicts with our gateway loop.
+                # Use the lower-level API instead.
+                if self._is_telegram_bot(bot):
+                    await self._start_telegram_bot_polling(name, bot)
+                elif type(bot).__name__ == "WhatsAppBot":
+                    # WhatsApp runs its own aiohttp webhook server
+                    self._inject_routing_handler(name, bot)
+                    await bot.start()
+                else:
+                    # Inject routing-aware handler for Discord/Slack
+                    self._inject_routing_handler(name, bot)
+                    await bot.start()
+                break  # clean exit
+            except asyncio.CancelledError:
+                logger.info(f"Bot '{name}' cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Bot '{name}' crashed: {e}")
+                if attempt < max_retries:
+                    delay = base_delay * (2 ** attempt)
+                    logger.info(f"Reconnecting '{name}' in {delay}s...")
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"Bot '{name}' failed after {max_retries} retries, giving up")
 
     @staticmethod
     def _is_telegram_bot(bot: Any) -> bool:

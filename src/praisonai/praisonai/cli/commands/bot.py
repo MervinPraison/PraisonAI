@@ -252,6 +252,90 @@ def bot_slack(
     handler.start_slack(token=token, app_token=app_token, agent_file=agent, capabilities=capabilities)
 
 
+@app.command("whatsapp")
+def bot_whatsapp(
+    token: Optional[str] = typer.Option(None, "--token", "-t", help="WhatsApp access token", envvar="WHATSAPP_ACCESS_TOKEN"),
+    phone_id: Optional[str] = typer.Option(None, "--phone-id", help="WhatsApp phone number ID", envvar="WHATSAPP_PHONE_NUMBER_ID"),
+    verify_token: Optional[str] = typer.Option(None, "--verify-token", help="Webhook verification token", envvar="WHATSAPP_VERIFY_TOKEN"),
+    port: int = typer.Option(8080, "--port", "-p", help="Webhook server port"),
+    agent: Optional[str] = typer.Option(None, "--agent", "-a", help="Agent YAML configuration file"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model to use"),
+    browser: bool = typer.Option(False, "--browser", help="Enable browser control"),
+    browser_profile: str = typer.Option("default", "--browser-profile", help="Browser profile name"),
+    browser_headless: bool = typer.Option(False, "--browser-headless", help="Run browser headless"),
+    tools: Optional[List[str]] = typer.Option(None, "--tools", help="Tools to enable"),
+    skills: Optional[List[str]] = typer.Option(None, "--skills", help="Skills to enable"),
+    skills_dir: Optional[str] = typer.Option(None, "--skills-dir", help="Custom skills directory"),
+    memory: bool = typer.Option(False, "--memory", help="Enable memory"),
+    memory_provider: str = typer.Option("default", "--memory-provider", help="Memory provider"),
+    knowledge: bool = typer.Option(False, "--knowledge", help="Enable knowledge/RAG"),
+    knowledge_sources: Optional[List[str]] = typer.Option(None, "--knowledge-sources", help="Knowledge sources"),
+    web_search: bool = typer.Option(False, "--web", "--web-search", help="Enable web search"),
+    web_provider: str = typer.Option("duckduckgo", "--web-provider", help="Web search provider"),
+    sandbox: bool = typer.Option(False, "--sandbox", help="Enable sandbox mode"),
+    exec_enabled: bool = typer.Option(False, "--exec", help="Enable exec tool"),
+    auto_approve: bool = typer.Option(False, "--auto-approve", help="Auto-approve all tool executions"),
+    session_id: Optional[str] = typer.Option(None, "--session-id", help="Session ID"),
+    user_id: Optional[str] = typer.Option(None, "--user-id", help="User ID for memory isolation"),
+    thinking: Optional[str] = typer.Option(None, "--thinking", help="Thinking mode (off, minimal, low, medium, high)"),
+    tts: bool = typer.Option(False, "--tts", help="Enable TTS tool for text-to-speech"),
+    tts_voice: str = typer.Option("alloy", "--tts-voice", help="TTS voice (alloy, echo, fable, onyx, nova, shimmer)"),
+    tts_model: Optional[str] = typer.Option(None, "--tts-model", help="TTS model (default: openai/tts-1)"),
+    auto_tts: bool = typer.Option(False, "--auto-tts", help="Auto-convert all responses to speech"),
+    stt: bool = typer.Option(False, "--stt", help="Enable STT tool for speech-to-text"),
+    stt_model: Optional[str] = typer.Option(None, "--stt-model", help="STT model (default: openai/whisper-1)"),
+):
+    """Start a WhatsApp bot with full agent capabilities.
+    
+    Runs a webhook server that receives messages from WhatsApp Cloud API.
+    Requires a publicly accessible HTTPS URL (use ngrok for local dev).
+    
+    Examples:
+        praisonai bot whatsapp --token $WHATSAPP_ACCESS_TOKEN --phone-id $WHATSAPP_PHONE_NUMBER_ID
+        praisonai bot whatsapp --agent agents.yaml --memory --web
+        praisonai bot whatsapp --port 8080 --verify-token my-secret
+    """
+    from ..features.bots_cli import BotHandler, BotCapabilities
+    
+    capabilities = BotCapabilities(
+        browser=browser,
+        browser_profile=browser_profile,
+        browser_headless=browser_headless,
+        tools=tools or [],
+        skills=skills or [],
+        skills_dir=skills_dir,
+        memory=memory,
+        memory_provider=memory_provider,
+        knowledge=knowledge,
+        knowledge_sources=knowledge_sources or [],
+        web_search=web_search,
+        web_search_provider=web_provider,
+        sandbox=sandbox,
+        exec_enabled=exec_enabled,
+        auto_approve=auto_approve,
+        model=model,
+        thinking=thinking,
+        tts=tts,
+        tts_voice=tts_voice,
+        tts_model=tts_model,
+        auto_tts=auto_tts,
+        stt=stt,
+        stt_model=stt_model,
+        session_id=session_id,
+        user_id=user_id,
+    )
+    
+    handler = BotHandler()
+    handler.start_whatsapp(
+        token=token,
+        phone_number_id=phone_id,
+        verify_token=verify_token,
+        webhook_port=port,
+        agent_file=agent,
+        capabilities=capabilities,
+    )
+
+
 @app.callback(invoke_without_command=True)
 def bot_callback(ctx: typer.Context):
     """Show bot help if no subcommand provided."""
@@ -265,6 +349,7 @@ Start a bot on any platform with: praisonai bot <platform>
   [green]telegram[/green]    Telegram Bot API
   [green]discord[/green]     Discord Bot API  
   [green]slack[/green]       Slack Socket Mode
+  [green]whatsapp[/green]    WhatsApp Cloud API (webhook)
 
 [bold]Capability Options (all platforms):[/bold]
   [yellow]--agent FILE[/yellow]          Agent YAML configuration
@@ -286,6 +371,7 @@ Start a bot on any platform with: praisonai bot <platform>
   praisonai bot telegram --token $TELEGRAM_BOT_TOKEN
   praisonai bot slack --agent agents.yaml --browser --web
   praisonai bot discord --tools DuckDuckGoTool --memory --model gpt-4o
+  praisonai bot whatsapp --token $WHATSAPP_ACCESS_TOKEN --phone-id $WHATSAPP_PHONE_NUMBER_ID
 """
         try:
             from rich import print as rprint

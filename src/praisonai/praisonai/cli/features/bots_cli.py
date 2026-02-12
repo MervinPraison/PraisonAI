@@ -194,8 +194,8 @@ class BotHandler:
             return
         
         platform = platform.lower().strip()
-        if platform not in ("telegram", "discord", "slack"):
-            print(f"Error: Unknown platform '{platform}'. Use: telegram, discord, slack")
+        if platform not in ("telegram", "discord", "slack", "whatsapp"):
+            print(f"Error: Unknown platform '{platform}'. Use: telegram, discord, slack, whatsapp")
             return
         
         token = resolve_env_vars(config.get("token", ""))
@@ -234,6 +234,19 @@ class BotHandler:
             self.start_slack(
                 token=token or None,
                 app_token=app_token or None,
+                agent_file=None,
+                capabilities=capabilities,
+                agent_config_dict=agent_config,
+            )
+        elif platform == "whatsapp":
+            phone_number_id = resolve_env_vars(config.get("phone_number_id", ""))
+            verify_token_val = resolve_env_vars(config.get("verify_token", ""))
+            webhook_port = config.get("webhook_port", 8080)
+            self.start_whatsapp(
+                token=token or None,
+                phone_number_id=phone_number_id or None,
+                verify_token=verify_token_val or None,
+                webhook_port=int(webhook_port),
                 agent_file=None,
                 capabilities=capabilities,
                 agent_config_dict=agent_config,
@@ -377,6 +390,72 @@ class BotHandler:
             print("\nStopping bot...")
             asyncio.run(bot.stop())
     
+    def start_whatsapp(
+        self,
+        token: Optional[str] = None,
+        phone_number_id: Optional[str] = None,
+        verify_token: Optional[str] = None,
+        webhook_port: int = 8080,
+        agent_file: Optional[str] = None,
+        capabilities: Optional[BotCapabilities] = None,
+        agent_config_dict: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Start a WhatsApp bot.
+        
+        Args:
+            token: WhatsApp access token (or use WHATSAPP_ACCESS_TOKEN env var)
+            phone_number_id: Phone number ID (or use WHATSAPP_PHONE_NUMBER_ID env var)
+            verify_token: Webhook verify token (or use WHATSAPP_VERIFY_TOKEN env var)
+            webhook_port: Port for webhook server (default 8080)
+            agent_file: Optional path to agent configuration file
+            capabilities: Optional capabilities configuration
+            agent_config_dict: Optional agent config dict from bot YAML
+        """
+        self._load_dotenv()
+        token = token or os.environ.get("WHATSAPP_ACCESS_TOKEN")
+        phone_number_id = phone_number_id or os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
+        verify_token = verify_token or os.environ.get("WHATSAPP_VERIFY_TOKEN", "")
+        
+        if not token:
+            print("Error: WhatsApp access token required")
+            print("Provide via --token or WHATSAPP_ACCESS_TOKEN environment variable")
+            return
+        
+        if not phone_number_id:
+            print("Error: WhatsApp phone number ID required")
+            print("Provide via --phone-id or WHATSAPP_PHONE_NUMBER_ID environment variable")
+            return
+        
+        # Set auto-approve if enabled
+        if capabilities and capabilities.auto_approve:
+            os.environ["PRAISONAI_AUTO_APPROVE"] = "true"
+            logger.info("Auto-approve enabled for all tool executions")
+        
+        try:
+            from praisonai.bots import WhatsAppBot
+        except ImportError as e:
+            print(f"Error: WhatsAppBot requires aiohttp. {e}")
+            print("Install with: pip install aiohttp")
+            return
+        
+        agent = self._load_agent(agent_file, capabilities, agent_config_dict=agent_config_dict)
+        bot = WhatsAppBot(
+            token=token,
+            phone_number_id=phone_number_id,
+            agent=agent,
+            verify_token=verify_token,
+            webhook_port=webhook_port,
+        )
+        
+        self._print_startup_info("WhatsApp", capabilities)
+        print(f"Webhook server on port {webhook_port}")
+        
+        try:
+            asyncio.run(bot.start())
+        except KeyboardInterrupt:
+            print("\nStopping bot...")
+            asyncio.run(bot.stop())
+
     def _get_agent_kwargs(self, capabilities: Optional[BotCapabilities]) -> Dict[str, Any]:
         """Extract Agent constructor kwargs from BotCapabilities (DRY).
         
@@ -844,8 +923,18 @@ Examples:
             capabilities=capabilities,
         )
         return 0
+    elif platform == "whatsapp":
+        handler.start_whatsapp(
+            token=getattr(args, "token", None),
+            phone_number_id=getattr(args, "phone_id", None),
+            verify_token=getattr(args, "verify_token", None),
+            webhook_port=getattr(args, "port", 8080),
+            agent_file=getattr(args, "agent", None),
+            capabilities=capabilities,
+        )
+        return 0
     else:
-        print("Available platforms: telegram, discord, slack")
+        print("Available platforms: telegram, discord, slack, whatsapp")
         print("")
         print("Usage: praisonai bot <platform> [options]")
         print("")
@@ -915,5 +1004,32 @@ def add_bot_parser(subparsers) -> None:
         help="Slack app token for Socket Mode (or use SLACK_APP_TOKEN env var)",
     )
     _add_capability_args(slack_parser)
+    
+    # WhatsApp
+    whatsapp_parser = bot_subparsers.add_parser(
+        "whatsapp",
+        help="Start a WhatsApp bot",
+    )
+    whatsapp_parser.add_argument(
+        "--token",
+        help="WhatsApp access token (or use WHATSAPP_ACCESS_TOKEN env var)",
+    )
+    whatsapp_parser.add_argument(
+        "--phone-id",
+        dest="phone_id",
+        help="WhatsApp phone number ID (or use WHATSAPP_PHONE_NUMBER_ID env var)",
+    )
+    whatsapp_parser.add_argument(
+        "--verify-token",
+        dest="verify_token",
+        help="Webhook verification token (or use WHATSAPP_VERIFY_TOKEN env var)",
+    )
+    whatsapp_parser.add_argument(
+        "--port",
+        type=int,
+        default=8080,
+        help="Webhook server port (default: 8080)",
+    )
+    _add_capability_args(whatsapp_parser)
     
     bot_parser.set_defaults(func=handle_bot_command)

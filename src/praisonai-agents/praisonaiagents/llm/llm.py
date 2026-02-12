@@ -185,9 +185,18 @@ Respond with ONLY a valid JSON tool call in this format:
             
             # Set litellm options globally
             litellm.set_verbose = False
-            litellm.success_callback = []
+            # Preserve externally-set callbacks (e.g., from observability providers)
+            _existing_callbacks = getattr(litellm, 'callbacks', []) or []
+            _existing_success = getattr(litellm, 'success_callback', []) or []
+            _obs_callbacks = [c for c in _existing_callbacks if isinstance(c, str) and c in (
+                'langsmith', 'langfuse', 'datadog', 'opik', 'braintrust', 'mlflow', 'langwatch',
+            )]
+            _obs_success = [c for c in _existing_success if isinstance(c, str) and c in (
+                'langsmith', 'langfuse', 'datadog', 'opik', 'braintrust', 'mlflow', 'langwatch',
+            )]
+            litellm.success_callback = _obs_success
             litellm._async_success_callback = []
-            litellm.callbacks = []
+            litellm.callbacks = _obs_callbacks
             
             # Suppress all litellm debug info
             litellm.suppress_debug_info = True

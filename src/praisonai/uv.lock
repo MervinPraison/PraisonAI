@@ -3933,8 +3933,11 @@ autogen-v4 = [
     { name = "praisonai-tools" },
 ]
 bot = [
+    { name = "aiohttp" },
+    { name = "brotlicffi" },
     { name = "discord-py" },
     { name = "python-telegram-bot" },
+    { name = "slack-bolt" },
     { name = "slack-sdk" },
 ]
 call = [
@@ -4006,6 +4009,7 @@ ui = [
 requires-dist = [
     { name = "agent-client-protocol", marker = "extra == 'acp'", specifier = ">=0.7.0" },
     { name = "agentops", marker = "extra == 'agentops'", specifier = ">=0.3.12" },
+    { name = "aiohttp", marker = "extra == 'bot'", specifier = ">=3.8.0" },
     { name = "aiosqlite", marker = "extra == 'all'", specifier = ">=0.20.0" },
     { name = "aiosqlite", marker = "extra == 'chat'", specifier = ">=0.20.0" },
     { name = "aiosqlite", marker = "extra == 'code'", specifier = ">=0.20.0" },
@@ -4014,6 +4018,7 @@ requires-dist = [
     { name = "autogen-agentchat", marker = "extra == 'autogen-v4'", specifier = ">=0.4.0" },
     { name = "autogen-core", marker = "extra == 'autogen-v4'", specifier = ">=0.4.0" },
     { name = "autogen-ext", extras = ["openai"], marker = "extra == 'autogen-v4'", specifier = ">=0.4.0" },
+    { name = "brotlicffi", marker = "extra == 'bot'", specifier = ">=1.0.0" },
     { name = "chainlit", marker = "extra == 'all'", specifier = ">=2.8.5,<=2.9.4" },
     { name = "chainlit", marker = "extra == 'chat'", specifier = ">=2.8.5,<=2.9.4" },
     { name = "chainlit", marker = "extra == 'code'", specifier = ">=2.8.5,<=2.9.4" },
@@ -4054,7 +4059,7 @@ requires-dist = [
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen-v4'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.1.0" },
-    { name = "praisonaiagents", specifier = ">=1.4.5" },
+    { name = "praisonaiagents", specifier = ">=1.4.6" },
     { name = "pyautogen", marker = "extra == 'autogen'", specifier = "==0.2.29" },
     { name = "pyjwt", marker = "extra == 'os'", specifier = ">=2.8.0" },
     { name = "pyngrok", marker = "extra == 'call'", specifier = ">=1.4.0" },
@@ -4067,6 +4072,7 @@ requires-dist = [
     { name = "rich", specifier = ">=13.7" },
     { name = "rich", marker = "extra == 'call'" },
     { name = "rich", marker = "extra == 'chat'" },
+    { name = "slack-bolt", marker = "extra == 'bot'", specifier = ">=1.18.0" },
     { name = "slack-sdk", marker = "extra == 'bot'", specifier = ">=3.0.0" },
     { name = "sqlalchemy", marker = "extra == 'all'", specifier = ">=2.0.36" },
     { name = "sqlalchemy", marker = "extra == 'chat'", specifier = ">=2.0.36" },
@@ -4110,7 +4116,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.4.5"
+version = "1.4.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -4119,9 +4125,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/cc/94/27966bdfa1b20cd0705f85929306da9e7aa23309244f867a4248871e4c1b/praisonaiagents-1.4.5.tar.gz", hash = "sha256:03ea3bfc8967aadf9a7bd22816d2726cb4b6d294d1e53329ef2c9081eb0bc053", size = 1187433, upload-time = "2026-02-12T05:44:48.111Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6f/ce/9ea4b37bd5febe2e1ffde3b99a9232209c2119bc3fa9c6c733f5305d32a1/praisonaiagents-1.4.6.tar.gz", hash = "sha256:172eeda6d7e6fac9d027935d84a76b2afc3ce4cb3d3d7bafd8159ea6693b9b88", size = 1187616, upload-time = "2026-02-12T07:38:34.076Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/41/2e/3a936218e7e6e9f9d2ce2c861c3543a943ecfc4a458d4ebc795a6d5d78f5/praisonaiagents-1.4.5-py3-none-any.whl", hash = "sha256:62bea63e7fdd24ec620b834e8a5241cdf8ca034f92665bdd746017be6dba51fa", size = 1181512, upload-time = "2026-02-12T05:44:45.882Z" },
+    { url = "https://files.pythonhosted.org/packages/ae/74/11ed6089fb4c1599d856a8b50145c34073b146ed7e63d2b5021740d7ce55/praisonaiagents-1.4.6-py3-none-any.whl", hash = "sha256:0fb4c446ac7929208ca810d5b93c79243d484d9c1cda831d34de34e1aa99ced8", size = 1181687, upload-time = "2026-02-12T07:38:32.173Z" },
 ]
 
 [[package]]
@@ -5467,6 +5473,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
+]
+
+[[package]]
+name = "slack-bolt"
+version = "1.27.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "slack-sdk" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4c/28/50ed0b86e48b48e6ddcc71de93b91c8ac14a55d1249e4bff0586494a2f90/slack_bolt-1.27.0.tar.gz", hash = "sha256:3db91d64e277e176a565c574ae82748aa8554f19e41a4fceadca4d65374ce1e0", size = 129101, upload-time = "2025-11-13T20:17:46.878Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/01/a8/1acb355759747ba4da5f45c1a33d641994b9e04b914908c9434f18bd97e8/slack_bolt-1.27.0-py2.py3-none-any.whl", hash = "sha256:c43c94bf34740f2adeb9b55566c83f1e73fed6ba2878bd346cdfd6fd8ad22360", size = 230428, upload-time = "2025-11-13T20:17:45.465Z" },
 ]
 
 [[package]]

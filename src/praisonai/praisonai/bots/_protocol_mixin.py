@@ -66,6 +66,7 @@ class ChatCommandMixin:
             platform: If provided, only return commands available on
                 this platform.  Builtins are always returned.
         """
+        builtin_names = {"status", "new", "help"}
         builtins = [
             ChatCommandInfo(name="status", description="Show bot status and info"),
             ChatCommandInfo(name="new", description="Reset conversation session"),
@@ -77,10 +78,13 @@ class ChatCommandMixin:
             plat = platform.lower()
             custom = [
                 info for name, info in custom_all.items()
-                if name not in channels_map or plat in channels_map[name]
+                if name not in builtin_names and (name not in channels_map or plat in channels_map[name])
             ]
         else:
-            custom = list(custom_all.values())
+            custom = [
+                info for name, info in custom_all.items()
+                if name not in builtin_names
+            ]
         return builtins + custom
 
     def is_command_allowed(self, name: str, platform: Optional[str] = None) -> bool:

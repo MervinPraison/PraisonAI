@@ -38,3 +38,12 @@ channels:
       dm: "personal"
       channel: "support"
       default: "support"
+
+  whatsapp:
+    token: "${WHATSAPP_ACCESS_TOKEN}"
+    phone_number_id: "${WHATSAPP_PHONE_NUMBER_ID}"
+    verify_token: "${WHATSAPP_VERIFY_TOKEN}"
+    webhook_port: 8080
+    routing:
+      dm: "personal"
+      default: "personal"
