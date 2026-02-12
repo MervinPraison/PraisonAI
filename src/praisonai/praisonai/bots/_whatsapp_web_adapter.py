@@ -91,7 +91,7 @@ class WhatsAppWebAdapter:
         """
         try:
             from neonize.aioze.client import NewAClient
-            from neonize.aioze.events import ConnectedEv, MessageEv, QREv
+            from neonize.aioze.events import ConnectedEv, MessageEv
         except ImportError:
             raise ImportError(
                 "neonize is required for WhatsApp Web mode. "
@@ -104,30 +104,35 @@ class WhatsAppWebAdapter:
 
         logger.info(f"WhatsApp Web: connecting (creds: {db_path})")
 
-        self._client = NewAClient(self._bot_name, database=db_path)
+        # neonize uses `name` as the DB file path directly
+        self._client = NewAClient(db_path)
 
-        # Register neonize event handlers
-        @self._client.event
+        # Register event handlers via neonize's Event system
+        # client.event is an Event instance; calling it with an event type
+        # returns a decorator that registers the handler.
+        @self._client.event(ConnectedEv)
         async def on_connected(client: Any, event: ConnectedEv) -> None:
             self._is_connected = True
             self._started_at = time.time()
-            # Extract self JID from client if available
+            # Extract self JID from client.me (set by neonize on Device event)
             try:
-                self._self_jid = str(getattr(client, 'get_me', lambda: None)())
+                if client.me is not None:
+                    self._self_jid = str(client.me)
             except Exception:
                 self._self_jid = None
             logger.info("WhatsApp Web: connected")
             if self._on_connected:
                 await self._safe_callback(self._on_connected)
 
-        @self._client.event
+        @self._client.event(MessageEv)
         async def on_message(client: Any, event: MessageEv) -> None:
             if self._on_message:
                 await self._safe_callback(self._on_message, event)
 
-        @self._client.event
-        async def on_qr(client: Any, event: QREv) -> None:
-            qr_data = str(event)
+        # QR handler uses the dedicated event.qr() registration
+        @self._client.event.qr
+        async def on_qr(client: Any, qr_bytes: bytes) -> None:
+            qr_data = qr_bytes.decode() if isinstance(qr_bytes, bytes) else str(qr_bytes)
             logger.info("WhatsApp Web: QR code received — scan with your phone")
             if self._on_qr:
                 await self._safe_callback(self._on_qr, qr_data)
@@ -170,24 +175,19 @@ class WhatsAppWebAdapter:
             return None
 
         try:
-            # Normalize phone number to JID if needed
-            jid = self._normalize_jid(to)
+            # Normalize phone number to JID string
+            jid_str = self._normalize_jid(to)
 
             from neonize.utils import build_jid
-            target_jid = build_jid(jid)
+            # build_jid expects (phone_number, server) — split JID string
+            parts = jid_str.split("@", 1)
+            user = parts[0]
+            server = parts[1] if len(parts) > 1 else "s.whatsapp.net"
+            target_jid = build_jid(user, server)
 
             resp = await self._client.send_message(target_jid, text)
             msg_id = getattr(resp, 'ID', None) or str(resp)
             return str(msg_id)
-        except ImportError:
-            # build_jid may not exist in all neonize versions
-            logger.warning("neonize build_jid not available, sending with raw JID")
-            try:
-                resp = await self._client.send_message(to, text)
-                return str(getattr(resp, 'ID', None) or resp)
-            except Exception as e:
-                logger.error(f"WhatsApp Web send error: {e}")
-                return None
         except Exception as e:
             logger.error(f"WhatsApp Web send error: {e}")
             return None
