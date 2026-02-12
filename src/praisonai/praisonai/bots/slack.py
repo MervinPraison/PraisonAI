@@ -11,6 +11,7 @@ import asyncio
 import logging
 import os
 import tempfile
+import time
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
@@ -22,9 +23,12 @@ from praisonaiagents.bots import (
     BotUser,
     BotChannel,
     MessageType,
+    ChatCommandInfo,
 )
 
 from .media import split_media_from_output, is_audio_file
+from ._commands import format_status, format_help
+from ._session import BotSessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +89,8 @@ class SlackBot:
         
         self._message_handlers: List[Callable] = []
         self._command_handlers: Dict[str, Callable] = {}
+        self._started_at: Optional[float] = None
+        self._session: BotSessionManager = BotSessionManager()
         
         # Audio capabilities
         self._stt_enabled: bool = False
@@ -126,6 +132,7 @@ class SlackBot:
             signing_secret=self._signing_secret,
         )
         self._client = AsyncWebClient(token=self._token)
+        self._started_at = time.time()
         
         auth_response = await self._client.auth_test()
         self._bot_user = BotUser(
@@ -145,6 +152,19 @@ class SlackBot:
             if not self.config.is_user_allowed(bot_message.sender.user_id if bot_message.sender else ""):
                 return
             if not self.config.is_channel_allowed(bot_message.channel.channel_id if bot_message.channel else ""):
+                return
+            
+            text = event.get("text", "").strip()
+            if text == "/status":
+                await say(text=self._format_status(), thread_ts=event.get("ts"))
+                return
+            elif text == "/new":
+                user_id = event.get("user", "unknown")
+                self._session.reset(user_id)
+                await say(text="Session reset. Starting fresh conversation.", thread_ts=event.get("ts"))
+                return
+            elif text == "/help":
+                await say(text=self._format_help(), thread_ts=event.get("ts"))
                 return
             
             for handler in self._message_handlers:
@@ -170,10 +190,9 @@ class SlackBot:
             
             if should_respond and self._agent:
                 try:
+                    user_id = event.get("user", "unknown")
                     logger.info(f"Message received: {text[:100]}...")
-                    # Run sync agent.chat() in executor to avoid asyncio.run() conflicts
-                    loop = asyncio.get_event_loop()
-                    response = await loop.run_in_executor(None, self._agent.chat, text)
+                    response = await self._session.chat(self._agent, user_id, text)
                     logger.info(f"Response sent: {response[:100]}...")
                     
                     # Determine if we should reply in thread
@@ -204,10 +223,9 @@ class SlackBot:
             
             if self._agent:
                 try:
+                    user_id = event.get("user", "unknown")
                     logger.info(f"@mention received: {text[:100]}...")
-                    # Run sync agent.chat() in executor to avoid asyncio.run() conflicts
-                    loop = asyncio.get_event_loop()
-                    response = await loop.run_in_executor(None, self._agent.chat, text)
+                    response = await self._session.chat(self._agent, user_id, text)
                     logger.info(f"Response sent: {response[:100]}...")
                     
                     # Determine if we should reply in thread
@@ -404,6 +422,31 @@ class SlackBot:
         self._message_handlers.append(handler)
         return handler
     
+    def register_command(
+        self,
+        name: str,
+        handler: Callable,
+        description: str = "",
+        usage: Optional[str] = None,
+    ) -> None:
+        """Register a chat command handler (ChatCommandProtocol)."""
+        self._command_handlers[name] = handler
+        if not hasattr(self, '_command_info'):
+            self._command_info: Dict[str, ChatCommandInfo] = {}
+        self._command_info[name] = ChatCommandInfo(
+            name=name, description=description, usage=usage
+        )
+
+    def list_commands(self) -> list:
+        """List all registered chat commands (ChatCommandProtocol)."""
+        builtins = [
+            ChatCommandInfo(name="status", description="Show bot status and info"),
+            ChatCommandInfo(name="new", description="Reset conversation session"),
+            ChatCommandInfo(name="help", description="Show this help message"),
+        ]
+        custom = list(getattr(self, '_command_info', {}).values())
+        return builtins + custom
+
     def on_command(self, command: str) -> Callable:
         """Decorator to register a command handler."""
         def decorator(func: Callable) -> Callable:
@@ -448,6 +491,15 @@ class SlackBot:
             )
         except Exception:
             return None
+    
+    def _format_status(self) -> str:
+        """Format /status response."""
+        return format_status(self._agent, self.platform, self._started_at, self._is_running)
+    
+    def _format_help(self) -> str:
+        """Format /help response."""
+        extra = {cmd: "Custom command" for cmd in self._command_handlers}
+        return format_help(self._agent, self.platform, extra)
     
     def _convert_event_to_message(self, event: Dict[str, Any]) -> BotMessage:
         """Convert Slack event to BotMessage."""

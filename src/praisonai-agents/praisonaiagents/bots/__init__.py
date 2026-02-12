@@ -17,6 +17,8 @@ from .protocols import (
     BotUser,
     BotChannel,
     MessageType,
+    ChatCommandInfo,
+    ChatCommandProtocol,
 )
 from .config import BotConfig
 
@@ -30,4 +32,6 @@ __all__ = [
     "BotChannel",
     "BotConfig",
     "MessageType",
+    "ChatCommandInfo",
+    "ChatCommandProtocol",
 ]

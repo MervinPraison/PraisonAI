@@ -24,6 +24,7 @@ class GatewayHandler:
         host: str = "127.0.0.1",
         port: int = 8765,
         agent_file: Optional[str] = None,
+        config_file: Optional[str] = None,
     ) -> None:
         """Start the gateway server.
         
@@ -31,6 +32,7 @@ class GatewayHandler:
             host: Host to bind to
             port: Port to listen on
             agent_file: Optional path to agent configuration file
+            config_file: Optional path to gateway.yaml for multi-bot mode
         """
         try:
             from praisonai.gateway import WebSocketGateway
@@ -40,6 +42,24 @@ class GatewayHandler:
             print("Install with: pip install praisonai[api]")
             return
         
+        # Multi-bot mode: load from gateway.yaml
+        if config_file:
+            config = GatewayConfig(host=host, port=port)
+            self._gateway = WebSocketGateway(config=config)
+            print(f"Loading gateway config from {config_file}")
+            try:
+                asyncio.run(self._gateway.start_with_config(config_file))
+            except KeyboardInterrupt:
+                print("\nStopping gateway...")
+                asyncio.run(self._gateway.stop_channels())
+                asyncio.run(self._gateway.stop())
+            except FileNotFoundError as e:
+                print(f"Error: {e}")
+            except Exception as e:
+                print(f"Error starting gateway: {e}")
+            return
+        
+        # Standard WebSocket-only mode
         config = GatewayConfig(host=host, port=port)
         self._gateway = WebSocketGateway(config=config)
         
@@ -107,17 +127,37 @@ class GatewayHandler:
             print(f"Error: {e}")
 
 
-def handle_gateway_command(args) -> None:
+def handle_gateway_command(args) -> int:
     """Handle gateway CLI command.
     
-    DEPRECATED: Use `praisonai serve gateway` instead.
+    Args:
+        args: List of CLI arguments (from main.py unknown_args) or argparse Namespace.
     """
-    import sys
+    import argparse
     
-    # Print deprecation warning
-    print("\n\033[93m⚠ DEPRECATION WARNING:\033[0m", file=sys.stderr)
-    print("\033[93m'praisonai gateway' is deprecated and will be removed in a future version.\033[0m", file=sys.stderr)
-    print("\033[93mPlease use 'praisonai serve gateway' instead.\033[0m\n", file=sys.stderr)
+    if isinstance(args, list):
+        parser = argparse.ArgumentParser(
+            prog="praisonai gateway",
+            description="Manage the PraisonAI Gateway server",
+        )
+        subparsers = parser.add_subparsers(dest="gateway_command", help="Gateway commands")
+        
+        # start subcommand
+        start_parser = subparsers.add_parser("start", help="Start the gateway server")
+        start_parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
+        start_parser.add_argument("--port", type=int, default=8765, help="Port to listen on (default: 8765)")
+        start_parser.add_argument("--agents", help="Path to agent configuration file")
+        start_parser.add_argument("--config", dest="config_file", help="Path to gateway.yaml for multi-bot mode")
+        
+        # status subcommand
+        status_parser = subparsers.add_parser("status", help="Check gateway status")
+        status_parser.add_argument("--host", default="127.0.0.1", help="Gateway host (default: 127.0.0.1)")
+        status_parser.add_argument("--port", type=int, default=8765, help="Gateway port (default: 8765)")
+        
+        try:
+            args = parser.parse_args(args)
+        except SystemExit:
+            return 1
     
     handler = GatewayHandler()
     
@@ -128,6 +168,7 @@ def handle_gateway_command(args) -> None:
             host=getattr(args, "host", "127.0.0.1"),
             port=getattr(args, "port", 8765),
             agent_file=getattr(args, "agents", None),
+            config_file=getattr(args, "config_file", None),
         )
     elif subcommand == "status":
         handler.status(
@@ -137,6 +178,8 @@ def handle_gateway_command(args) -> None:
     else:
         print(f"Unknown gateway command: {subcommand}")
         print("Available commands: start, status")
+        return 1
+    return 0
 
 
 def add_gateway_parser(subparsers) -> None:
@@ -169,6 +212,11 @@ def add_gateway_parser(subparsers) -> None:
     start_parser.add_argument(
         "--agents",
         help="Path to agent configuration file",
+    )
+    start_parser.add_argument(
+        "--config",
+        dest="config_file",
+        help="Path to gateway.yaml for multi-bot mode",
     )
     
     status_parser = gateway_subparsers.add_parser(

@@ -221,6 +221,7 @@ def register_commands():
     
     # Import new moltbot-inspired commands
     from .commands.bot import app as bot_app
+    from .commands.gateway import app as gateway_app
     from .commands.browser import app as browser_app
     from .commands.plugins import app as plugins_app
     from .commands.sandbox import app as sandbox_app
@@ -393,6 +394,7 @@ def register_commands():
     
     # Register moltbot-inspired commands
     app.add_typer(bot_app, name="bot", help="Messaging bots with full agent capabilities")
+    app.add_typer(gateway_app, name="gateway", help="Multi-bot WebSocket gateway server")
     app.add_typer(browser_app, name="browser", help="Browser control for agent automation")
     app.add_typer(plugins_app, name="plugins", help="Plugin management and inspection")
     app.add_typer(sandbox_app, name="sandbox", help="Sandbox container management")

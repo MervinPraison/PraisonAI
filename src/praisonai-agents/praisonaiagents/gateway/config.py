@@ -98,3 +98,148 @@ class GatewayConfig:
         """HTTP URL for this gateway."""
         protocol = "https" if self.is_secure else "http"
         return f"{protocol}://{self.host}:{self.port}"
+
+
+@dataclass
+class ChannelRouteConfig:
+    """Configuration for routing channel messages to agents.
+    
+    Attributes:
+        channel_type: Platform name (telegram, discord, slack, etc.)
+        token_env: Environment variable name for the channel token
+        app_token_env: Optional env var for app token (Slack Socket Mode)
+        routes: Mapping of context → agent_id
+                Keys: "dm", "group", "channel", "default"
+                Values: agent ID strings
+        enabled: Whether this channel is enabled
+        metadata: Additional channel-specific configuration
+    """
+    
+    channel_type: str
+    token_env: str = ""
+    app_token_env: Optional[str] = None
+    routes: Dict[str, str] = field(default_factory=lambda: {"default": "default"})
+    enabled: bool = True
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def get_agent_id(self, context: str = "default") -> str:
+        """Resolve agent ID for a given message context.
+        
+        Args:
+            context: Message context (dm, group, channel, default)
+            
+        Returns:
+            The agent ID for the given context, falling back to "default" route.
+        """
+        return self.routes.get(context, self.routes.get("default", "default"))
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "channel_type": self.channel_type,
+            "token_env": self.token_env,
+            "app_token_env": self.app_token_env,
+            "routes": dict(self.routes),
+            "enabled": self.enabled,
+            "metadata": dict(self.metadata),
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ChannelRouteConfig":
+        """Create from dictionary."""
+        return cls(
+            channel_type=data.get("channel_type", ""),
+            token_env=data.get("token_env", ""),
+            app_token_env=data.get("app_token_env"),
+            routes=data.get("routes", {"default": "default"}),
+            enabled=data.get("enabled", True),
+            metadata=data.get("metadata", {}),
+        )
+
+
+@dataclass
+class MultiChannelGatewayConfig:
+    """Configuration for multi-channel gateway mode.
+    
+    Loaded from gateway.yaml. Defines agents, channels, and routing.
+    
+    Attributes:
+        gateway: Base gateway configuration
+        agents: Agent configurations by ID (name → config dict)
+        channels: Channel routing configurations by name
+    """
+    
+    gateway: GatewayConfig = field(default_factory=GatewayConfig)
+    agents: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    channels: Dict[str, ChannelRouteConfig] = field(default_factory=dict)
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "MultiChannelGatewayConfig":
+        """Create from parsed YAML dictionary.
+        
+        Expected format::
+        
+            gateway:
+              host: "127.0.0.1"
+              port: 8765
+            agents:
+              personal:
+                instructions: "You are a helpful assistant"
+                model: gpt-4o-mini
+            channels:
+              telegram:
+                token: ${TELEGRAM_BOT_TOKEN}
+                routes:
+                  dm: personal
+                  default: personal
+        
+        Args:
+            data: Parsed YAML dictionary
+            
+        Returns:
+            Configured MultiChannelGatewayConfig instance
+        """
+        # Parse gateway section
+        gw_data = data.get("gateway", {})
+        gateway_config = GatewayConfig(
+            host=gw_data.get("host", "127.0.0.1"),
+            port=gw_data.get("port", 8765),
+            cors_origins=gw_data.get("cors_origins", ["*"]),
+            auth_token=gw_data.get("auth_token"),
+            max_connections=gw_data.get("max_connections", 1000),
+        )
+        
+        # Parse agents section (pass through as dicts)
+        agents = data.get("agents", {})
+        
+        # Parse channels section
+        channels: Dict[str, ChannelRouteConfig] = {}
+        for name, ch_data in data.get("channels", {}).items():
+            if isinstance(ch_data, dict):
+                channels[name] = ChannelRouteConfig(
+                    channel_type=name,
+                    token_env=ch_data.get("token", ""),
+                    app_token_env=ch_data.get("app_token"),
+                    routes=ch_data.get("routes", {"default": "default"}),
+                    enabled=ch_data.get("enabled", True),
+                    metadata={
+                        k: v for k, v in ch_data.items()
+                        if k not in ("token", "app_token", "routes", "enabled")
+                    },
+                )
+        
+        return cls(
+            gateway=gateway_config,
+            agents=agents,
+            channels=channels,
+        )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "gateway": self.gateway.to_dict(),
+            "agents": dict(self.agents),
+            "channels": {
+                name: ch.to_dict() for name, ch in self.channels.items()
+            },
+        }

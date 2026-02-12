@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
@@ -20,7 +21,11 @@ from praisonaiagents.bots import (
     BotUser,
     BotChannel,
     MessageType,
+    ChatCommandInfo,
 )
+
+from ._commands import format_status, format_help
+from ._session import BotSessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +75,8 @@ class DiscordBot:
         
         self._message_handlers: List[Callable] = []
         self._command_handlers: Dict[str, Callable] = {}
+        self._started_at: Optional[float] = None
+        self._session: BotSessionManager = BotSessionManager()
     
     @property
     def is_running(self) -> bool:
@@ -106,6 +113,7 @@ class DiscordBot:
             command_prefix=self.config.command_prefix,
             intents=intents,
         )
+        self._started_at = time.time()
         
         @self._client.event
         async def on_ready():
@@ -132,7 +140,18 @@ class DiscordBot:
             
             if bot_message.is_command:
                 command = bot_message.command
-                if command and command in self._command_handlers:
+                if command == "status":
+                    await message.reply(self._format_status())
+                    return
+                elif command == "new":
+                    user_id = str(message.author.id)
+                    self._session.reset(user_id)
+                    await message.reply("Session reset. Starting fresh conversation.")
+                    return
+                elif command == "help":
+                    await message.reply(self._format_help())
+                    return
+                elif command and command in self._command_handlers:
                     handler = self._command_handlers[command]
                     try:
                         if asyncio.iscoroutinefunction(handler):
@@ -160,17 +179,18 @@ class DiscordBot:
                         logger.error(f"Message handler error: {e}")
                 
                 if self._agent:
+                    user_id = str(message.author.id)
                     if self.config.typing_indicator:
                         async with message.channel.typing():
                             try:
-                                response = self._agent.chat(bot_message.text)
+                                response = await self._session.chat(self._agent, user_id, bot_message.text)
                                 await self._send_long_message(message.channel, response, reference=message)
                             except Exception as e:
                                 logger.error(f"Agent error: {e}")
                                 await message.reply(f"Error: {str(e)}")
                     else:
                         try:
-                            response = self._agent.chat(bot_message.text)
+                            response = await self._session.chat(self._agent, user_id, bot_message.text)
                             await self._send_long_message(message.channel, response, reference=message)
                         except Exception as e:
                             logger.error(f"Agent error: {e}")
@@ -296,6 +316,31 @@ class DiscordBot:
         self._message_handlers.append(handler)
         return handler
     
+    def register_command(
+        self,
+        name: str,
+        handler: Callable,
+        description: str = "",
+        usage: Optional[str] = None,
+    ) -> None:
+        """Register a chat command handler (ChatCommandProtocol)."""
+        self._command_handlers[name] = handler
+        if not hasattr(self, '_command_info'):
+            self._command_info: Dict[str, ChatCommandInfo] = {}
+        self._command_info[name] = ChatCommandInfo(
+            name=name, description=description, usage=usage
+        )
+
+    def list_commands(self) -> list:
+        """List all registered chat commands (ChatCommandProtocol)."""
+        builtins = [
+            ChatCommandInfo(name="status", description="Show bot status and info"),
+            ChatCommandInfo(name="new", description="Reset conversation session"),
+            ChatCommandInfo(name="help", description="Show this help message"),
+        ]
+        custom = list(getattr(self, '_command_info', {}).values())
+        return builtins + custom
+
     def on_command(self, command: str) -> Callable:
         """Decorator to register a command handler."""
         def decorator(func: Callable) -> Callable:
@@ -343,6 +388,15 @@ class DiscordBot:
         except Exception:
             pass
         return None
+    
+    def _format_status(self) -> str:
+        """Format /status response."""
+        return format_status(self._agent, self.platform, self._started_at, self._is_running)
+    
+    def _format_help(self) -> str:
+        """Format /help response."""
+        extra = {cmd: "Custom command" for cmd in self._command_handlers}
+        return format_help(self._agent, self.platform, extra)
     
     def _convert_message(self, message) -> BotMessage:
         """Convert Discord Message to BotMessage."""

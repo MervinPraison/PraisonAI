@@ -16,7 +16,7 @@ from .protocols import (
     GatewayMessage,
     EventType,
 )
-from .config import GatewayConfig, SessionConfig
+from .config import GatewayConfig, SessionConfig, ChannelRouteConfig, MultiChannelGatewayConfig
 
 __all__ = [
     "GatewayProtocol",
@@ -27,4 +27,6 @@ __all__ = [
     "EventType",
     "GatewayConfig",
     "SessionConfig",
+    "ChannelRouteConfig",
+    "MultiChannelGatewayConfig",
 ]

@@ -11,6 +11,7 @@ import asyncio
 import logging
 import os
 import tempfile
+import time
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
@@ -22,9 +23,12 @@ from praisonaiagents.bots import (
     BotUser,
     BotChannel,
     MessageType,
+    ChatCommandInfo,
 )
 
 from .media import split_media_from_output, is_audio_file
+from ._commands import format_status, format_help
+from ._session import BotSessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +78,8 @@ class TelegramBot:
         
         self._message_handlers: List[Callable] = []
         self._command_handlers: Dict[str, Callable] = {}
+        self._started_at: Optional[float] = None
+        self._session: BotSessionManager = BotSessionManager()
         
         # Audio capabilities (set by BotCapabilities)
         self._stt_enabled: bool = False
@@ -121,6 +127,7 @@ class TelegramBot:
             )
         
         self._application = Application.builder().token(self._token).build()
+        self._started_at = time.time()
         
         bot_info = await self._application.bot.get_me()
         self._bot_user = BotUser(
@@ -164,8 +171,9 @@ class TelegramBot:
                 if self.config.typing_indicator:
                     await update.message.chat.send_action("typing")
                 
+                user_id = str(update.message.from_user.id) if update.message.from_user else "unknown"
                 try:
-                    response = self._agent.chat(message_text)
+                    response = await self._session.chat(self._agent, user_id, message_text)
                     await self._send_response_with_media(
                         update.message.chat_id,
                         response,
@@ -195,6 +203,27 @@ class TelegramBot:
                         handler(message)
                 except Exception as e:
                     logger.error(f"Command handler error: {e}")
+        
+        async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message:
+                return
+            await update.message.reply_text(self._format_status())
+        
+        async def handle_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message:
+                return
+            user_id = str(update.message.from_user.id) if update.message.from_user else "unknown"
+            self._session.reset(user_id)
+            await update.message.reply_text("Session reset. Starting fresh conversation.")
+        
+        async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message:
+                return
+            await update.message.reply_text(self._format_help())
+        
+        self._application.add_handler(CommandHandler("status", handle_status))
+        self._application.add_handler(CommandHandler("new", handle_new))
+        self._application.add_handler(CommandHandler("help", handle_help))
         
         for command in self._command_handlers:
             self._application.add_handler(CommandHandler(command, handle_command))
@@ -419,6 +448,31 @@ class TelegramBot:
         self._message_handlers.append(handler)
         return handler
     
+    def register_command(
+        self,
+        name: str,
+        handler: Callable,
+        description: str = "",
+        usage: Optional[str] = None,
+    ) -> None:
+        """Register a chat command handler (ChatCommandProtocol)."""
+        self._command_handlers[name] = handler
+        if not hasattr(self, '_command_info'):
+            self._command_info: Dict[str, ChatCommandInfo] = {}
+        self._command_info[name] = ChatCommandInfo(
+            name=name, description=description, usage=usage
+        )
+
+    def list_commands(self) -> list:
+        """List all registered chat commands (ChatCommandProtocol)."""
+        builtins = [
+            ChatCommandInfo(name="status", description="Show bot status and info"),
+            ChatCommandInfo(name="new", description="Reset conversation session"),
+            ChatCommandInfo(name="help", description="Show this help message"),
+        ]
+        custom = list(getattr(self, '_command_info', {}).values())
+        return builtins + custom
+
     def on_command(self, command: str) -> Callable:
         """Decorator to register a command handler."""
         def decorator(func: Callable) -> Callable:
@@ -465,6 +519,15 @@ class TelegramBot:
             )
         except Exception:
             return None
+    
+    def _format_status(self) -> str:
+        """Format /status response."""
+        return format_status(self._agent, self.platform, self._started_at, self._is_running)
+    
+    def _format_help(self) -> str:
+        """Format /help response."""
+        extra = {cmd: "Custom command" for cmd in self._command_handlers}
+        return format_help(self._agent, self.platform, extra)
     
     def _convert_update_to_message(self, update, override_text: Optional[str] = None) -> BotMessage:
         """Convert Telegram Update to BotMessage."""

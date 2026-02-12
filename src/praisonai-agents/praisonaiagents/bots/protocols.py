@@ -451,3 +451,74 @@ class BotProtocol(Protocol):
             Channel information or None if not found
         """
         ...
+
+
+@dataclass
+class ChatCommandInfo:
+    """Metadata for a registered chat command.
+    
+    Attributes:
+        name: Command name (without /)
+        description: Human-readable description
+        usage: Usage example (e.g., "/status")
+        hidden: Whether to hide from /help listing
+    """
+    
+    name: str
+    description: str = ""
+    usage: Optional[str] = None
+    hidden: bool = False
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "name": self.name,
+            "description": self.description,
+            "usage": self.usage,
+            "hidden": self.hidden,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ChatCommandInfo":
+        """Create from dictionary."""
+        return cls(
+            name=data.get("name", ""),
+            description=data.get("description", ""),
+            usage=data.get("usage"),
+            hidden=data.get("hidden", False),
+        )
+
+
+@runtime_checkable
+class ChatCommandProtocol(Protocol):
+    """Protocol for bots that support standardized chat commands.
+    
+    Extends BotProtocol with chat command registration and listing.
+    Implementations should track registered commands and expose them
+    for /help listings and command dispatching.
+    """
+    
+    def register_command(
+        self,
+        name: str,
+        handler: Callable,
+        description: str = "",
+        usage: Optional[str] = None,
+    ) -> None:
+        """Register a chat command handler.
+        
+        Args:
+            name: Command name (without /)
+            handler: Async callable to handle the command
+            description: Human-readable description
+            usage: Usage example string
+        """
+        ...
+    
+    def list_commands(self) -> List[ChatCommandInfo]:
+        """List all registered chat commands.
+        
+        Returns:
+            List of ChatCommandInfo for all registered commands
+        """
+        ...

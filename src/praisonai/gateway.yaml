@@ -1,0 +1,20 @@
+gateway:
+  host: "127.0.0.1"
+  port: 8765
+
+agents:
+  personal:
+    instructions: "You are a helpful personal assistant"
+    model: gpt-4o-mini
+    memory: false
+  support:
+    instructions: "You are a customer support agent"
+    model: gpt-4o-mini
+
+channels:
+  telegram:
+    token: ${TELEGRAM_BOT_TOKEN}
+    routes:
+      dm: personal
+      group: support
+      default: personal
