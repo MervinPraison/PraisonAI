@@ -777,6 +777,7 @@ Methods:
 * <code title="cli">praisonai bot slack <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
 * <code title="cli">praisonai bot start <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
 * <code title="cli">praisonai bot telegram <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
+* <code title="cli">praisonai bot whatsapp <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
 * <code title="cli">praisonai browser browser-callback <a href="./src/praisonai/praisonai/cli/commands/browser.py">--help</a></code>
 * <code title="cli">praisonai browser click <a href="./src/praisonai/praisonai/cli/commands/browser.py">--help</a></code>
 * <code title="cli">praisonai browser navigate <a href="./src/praisonai/praisonai/cli/commands/browser.py">--help</a></code>
