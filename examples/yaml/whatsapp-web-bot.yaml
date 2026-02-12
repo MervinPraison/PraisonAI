@@ -1,0 +1,13 @@
+# WhatsApp Web Mode Bot (Experimental)
+# Token-free: connect via QR code scan
+# ⚠️ Uses reverse-engineered protocol — your number may be banned
+
+platform: whatsapp
+mode: web
+# creds_dir: "~/.praisonai/whatsapp"  # optional, default shown
+
+agent:
+  name: "WhatsApp Web Assistant"
+  instructions: "You are a helpful AI assistant on WhatsApp."
+  llm: "gpt-4o-mini"
+  memory: true

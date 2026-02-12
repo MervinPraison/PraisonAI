@@ -47,3 +47,11 @@ channels:
     routing:
       dm: "personal"
       default: "personal"
+
+  # WhatsApp Web mode (experimental, no tokens needed):
+  # whatsapp:
+  #   mode: web
+  #   creds_dir: "~/.praisonai/whatsapp"
+  #   routing:
+  #     dm: "personal"
+  #     default: "personal"

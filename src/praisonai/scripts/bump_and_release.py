@@ -182,17 +182,19 @@ def bump_version(new_version: str, agents_version: Optional[str] = None):
     print("\n✨ Version bump complete!")
 
 
-def validate_dependencies(max_retries: int = 3, retry_interval: int = 60) -> bool:
+def validate_dependencies(max_retries: int = 3, retry_interval: int = 60, use_frozen: bool = False) -> bool:
     """Validate that uv lock will succeed, with retry logic for PyPI propagation."""
     praisonai_dir = get_praisonai_dir()
+    
+    lock_cmd = ["uv", "lock", "--frozen"] if use_frozen else ["uv", "lock", "--dry-run"]
     
     for attempt in range(max_retries):
         print(f"\n🔍 Validating dependencies (attempt {attempt + 1}/{max_retries})...")
         
-        # Clear cache before validation
-        run(["uv", "cache", "clean"], cwd=praisonai_dir, silent=True)
+        if not use_frozen:
+            run(["uv", "cache", "clean"], cwd=praisonai_dir, silent=True)
         
-        result = run(["uv", "lock", "--dry-run"], cwd=praisonai_dir, check=False)
+        result = run(lock_cmd, cwd=praisonai_dir, check=False)
         if result.returncode == 0:
             print("  ✅ Dependencies validated successfully")
             return True
@@ -205,7 +207,7 @@ def validate_dependencies(max_retries: int = 3, retry_interval: int = 60) -> boo
     return False
 
 
-def release(version: str):
+def release(version: str, use_frozen_lock: bool = False):
     """Run the release process."""
     root = get_project_root()
     praisonai_dir = get_praisonai_dir()
@@ -222,11 +224,12 @@ def release(version: str):
         print(f"  ✅ Copied {root_readme} -> {pkg_readme}")
     
     # 2. Clear uv cache and run uv lock
-    print("\n🧹 Clearing uv cache...")
-    run(["uv", "cache", "clean"], cwd=praisonai_dir)
+    if not use_frozen_lock:
+        print("\n🧹 Clearing uv cache...")
+        run(["uv", "cache", "clean"], cwd=praisonai_dir)
     
     print("\n📦 Running uv lock...")
-    run(["uv", "lock"], cwd=praisonai_dir)
+    run(["uv", "lock", "--frozen"] if use_frozen_lock else ["uv", "lock"], cwd=praisonai_dir)
     
     # 3. uv build
     print("\n🔨 Running uv build...")
@@ -367,13 +370,14 @@ Examples:
     bump_version(args.version, args.agents)
     
     # Validate dependencies after version bump (with retries)
-    if not validate_dependencies(max_retries=args.retries):
+    use_frozen = args.agents is None
+    if not validate_dependencies(max_retries=args.retries, use_frozen=use_frozen):
         print("\n💡 Tip: Revert changes with 'git checkout .' if needed")
         print("💡 Tip: The package may need more time to propagate to PyPI")
         sys.exit(1)
     
     # Run release
-    release(args.version)
+    release(args.version, use_frozen_lock=use_frozen)
 
 
 if __name__ == "__main__":

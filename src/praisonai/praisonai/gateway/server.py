@@ -543,7 +543,10 @@ class WebSocketGateway:
                         f"Channel '{cname}' is not a known platform "
                         f"({', '.join(valid_platforms)})"
                     )
-                if not cdef.get("token"):
+                # WhatsApp web mode doesn't require a token
+                is_wa_web = (cname.lower() == "whatsapp" and
+                             cdef.get("mode", "cloud").lower().strip() == "web")
+                if not cdef.get("token") and not is_wa_web:
                     errors.append(
                         f"Channel '{cname}' missing 'token' "
                         "(use ${{ENV_VAR}} syntax for env vars)"
@@ -635,7 +638,10 @@ class WebSocketGateway:
         for channel_name, ch_cfg in channels_cfg.items():
             channel_type = channel_name.lower()
             token = ch_cfg.get("token", "")
-            if not token:
+            # WhatsApp web mode doesn't require a token
+            wa_web_mode = (channel_type == "whatsapp" and
+                           ch_cfg.get("mode", "cloud").lower().strip() == "web")
+            if not token and not wa_web_mode:
                 logger.warning(f"No token for channel '{channel_name}', skipping")
                 continue
 
@@ -689,6 +695,7 @@ class WebSocketGateway:
             return SlackBot(token=token, agent=agent, config=config, app_token=app_token)
         elif channel_type == "whatsapp":
             from praisonai.bots import WhatsAppBot
+            wa_mode = ch_cfg.get("mode", "cloud").lower().strip()
             return WhatsAppBot(
                 token=token,
                 phone_number_id=ch_cfg.get("phone_number_id", ""),
@@ -696,6 +703,8 @@ class WebSocketGateway:
                 config=config,
                 verify_token=ch_cfg.get("verify_token", ""),
                 webhook_port=int(ch_cfg.get("webhook_port", 8080)),
+                mode=wa_mode,
+                creds_dir=ch_cfg.get("creds_dir"),
             )
         else:
             logger.warning(f"Unknown channel type: {channel_type}")

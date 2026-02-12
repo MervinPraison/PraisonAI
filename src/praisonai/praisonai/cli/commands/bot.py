@@ -254,10 +254,12 @@ def bot_slack(
 
 @app.command("whatsapp")
 def bot_whatsapp(
-    token: Optional[str] = typer.Option(None, "--token", "-t", help="WhatsApp access token", envvar="WHATSAPP_ACCESS_TOKEN"),
-    phone_id: Optional[str] = typer.Option(None, "--phone-id", help="WhatsApp phone number ID", envvar="WHATSAPP_PHONE_NUMBER_ID"),
-    verify_token: Optional[str] = typer.Option(None, "--verify-token", help="Webhook verification token", envvar="WHATSAPP_VERIFY_TOKEN"),
-    port: int = typer.Option(8080, "--port", "-p", help="Webhook server port"),
+    token: Optional[str] = typer.Option(None, "--token", "-t", help="WhatsApp access token (Cloud mode)", envvar="WHATSAPP_ACCESS_TOKEN"),
+    phone_id: Optional[str] = typer.Option(None, "--phone-id", help="WhatsApp phone number ID (Cloud mode)", envvar="WHATSAPP_PHONE_NUMBER_ID"),
+    verify_token: Optional[str] = typer.Option(None, "--verify-token", help="Webhook verification token (Cloud mode)", envvar="WHATSAPP_VERIFY_TOKEN"),
+    port: int = typer.Option(8080, "--port", "-p", help="Webhook server port (Cloud mode)"),
+    mode: str = typer.Option("cloud", "--mode", help="Connection mode: 'cloud' (Meta API) or 'web' (QR scan, experimental)"),
+    creds_dir: Optional[str] = typer.Option(None, "--creds-dir", help="Credentials directory for Web mode"),
     agent: Optional[str] = typer.Option(None, "--agent", "-a", help="Agent YAML configuration file"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model to use"),
     browser: bool = typer.Option(False, "--browser", help="Enable browser control"),
@@ -287,13 +289,14 @@ def bot_whatsapp(
 ):
     """Start a WhatsApp bot with full agent capabilities.
     
-    Runs a webhook server that receives messages from WhatsApp Cloud API.
-    Requires a publicly accessible HTTPS URL (use ngrok for local dev).
+    Cloud mode (default): Webhook server for Meta Cloud API.
+    Web mode (experimental): QR code scan, no tokens needed.
     
     Examples:
         praisonai bot whatsapp --token $WHATSAPP_ACCESS_TOKEN --phone-id $WHATSAPP_PHONE_NUMBER_ID
+        praisonai bot whatsapp --mode web
+        praisonai bot whatsapp --mode web --creds-dir ~/.myapp/wa-creds
         praisonai bot whatsapp --agent agents.yaml --memory --web
-        praisonai bot whatsapp --port 8080 --verify-token my-secret
     """
     from ..features.bots_cli import BotHandler, BotCapabilities
     
@@ -333,6 +336,8 @@ def bot_whatsapp(
         webhook_port=port,
         agent_file=agent,
         capabilities=capabilities,
+        mode=mode,
+        creds_dir=creds_dir,
     )
 
 
@@ -349,7 +354,7 @@ Start a bot on any platform with: praisonai bot <platform>
   [green]telegram[/green]    Telegram Bot API
   [green]discord[/green]     Discord Bot API  
   [green]slack[/green]       Slack Socket Mode
-  [green]whatsapp[/green]    WhatsApp Cloud API (webhook)
+  [green]whatsapp[/green]    WhatsApp Cloud API or Web mode (QR scan)
 
 [bold]Capability Options (all platforms):[/bold]
   [yellow]--agent FILE[/yellow]          Agent YAML configuration
@@ -372,6 +377,7 @@ Start a bot on any platform with: praisonai bot <platform>
   praisonai bot slack --agent agents.yaml --browser --web
   praisonai bot discord --tools DuckDuckGoTool --memory --model gpt-4o
   praisonai bot whatsapp --token $WHATSAPP_ACCESS_TOKEN --phone-id $WHATSAPP_PHONE_NUMBER_ID
+  praisonai bot whatsapp --mode web
 """
         try:
             from rich import print as rprint

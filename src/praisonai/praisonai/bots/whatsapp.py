@@ -1,14 +1,23 @@
 """
 WhatsApp Bot implementation for PraisonAI.
 
-Provides a full WhatsApp bot runtime using the WhatsApp Cloud API (Meta Graph API).
-Receives messages via an aiohttp webhook server and replies via REST API.
+Supports two connection modes:
 
-Requirements:
-    - aiohttp (already a core dependency)
-    - WHATSAPP_ACCESS_TOKEN: Meta Cloud API access token
-    - WHATSAPP_PHONE_NUMBER_ID: Phone number ID from Meta
-    - WHATSAPP_VERIFY_TOKEN: Custom string for webhook verification
+**Cloud API mode** (default, stable, recommended):
+    - Uses Meta Graph API with webhook server
+    - Requires: WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_VERIFY_TOKEN
+
+**Web mode** (experimental, token-free):
+    - Uses neonize (whatsmeow) for WhatsApp Web protocol
+    - QR code scan via Linked Devices — no Meta developer account needed
+    - ⚠️ Uses reverse-engineered protocol; your number may be banned
+
+Usage:
+    # Cloud API (default)
+    bot = WhatsAppBot(token="EAAx...", phone_number_id="123", agent=agent)
+
+    # Web mode (no tokens needed)
+    bot = WhatsAppBot(mode="web", agent=agent)
 """
 
 from __future__ import annotations
@@ -67,7 +76,7 @@ class WhatsAppBot(ChatCommandMixin):
 
     def __init__(
         self,
-        token: str,
+        token: str = "",
         phone_number_id: str = "",
         agent: Optional["Agent"] = None,
         config: Optional[BotConfig] = None,
@@ -75,15 +84,23 @@ class WhatsAppBot(ChatCommandMixin):
         app_secret: str = "",
         webhook_port: int = 8080,
         webhook_path: str = "/webhook",
+        mode: str = "cloud",
+        creds_dir: Optional[str] = None,
     ):
-        self._token = token
+        # Mode: "cloud" (default, Meta Cloud API) or "web" (neonize, experimental)
+        self._mode = mode.lower().strip()
+        if self._mode not in ("cloud", "web"):
+            raise ValueError(f"Invalid mode '{self._mode}'. Use 'cloud' or 'web'.")
+
+        self._token = token or os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
         self._phone_number_id = phone_number_id or os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "")
         self._agent = agent
-        self.config = config or BotConfig(token=token)
+        self.config = config or BotConfig(token=self._token)
         self._verify_token = verify_token or os.environ.get("WHATSAPP_VERIFY_TOKEN", "")
         self._app_secret = app_secret or os.environ.get("WHATSAPP_APP_SECRET", "")
         self._webhook_port = webhook_port
         self._webhook_path = webhook_path
+        self._creds_dir = creds_dir
 
         self._is_running = False
         self._started_at: Optional[float] = None
@@ -92,6 +109,9 @@ class WhatsAppBot(ChatCommandMixin):
         self._message_handlers: List[Callable] = []
         self._runner: Any = None
         self._site: Any = None
+
+        # Web mode adapter (lazy initialized)
+        self._web_adapter: Any = None
 
         # ChatCommandMixin setup
         self._command_handlers: Dict[str, Callable] = {}
@@ -134,6 +154,11 @@ class WhatsAppBot(ChatCommandMixin):
         return "whatsapp"
 
     @property
+    def mode(self) -> str:
+        """Connection mode: 'cloud' (Meta Cloud API) or 'web' (neonize)."""
+        return self._mode
+
+    @property
     def bot_user(self) -> Optional[BotUser]:
         return self._bot_user
 
@@ -162,7 +187,14 @@ class WhatsAppBot(ChatCommandMixin):
     # ── Lifecycle ───────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """Start the webhook server to receive WhatsApp messages."""
+        """Start the bot in the configured mode (cloud or web)."""
+        if self._mode == "web":
+            await self._start_web_mode()
+        else:
+            await self._start_cloud_mode()
+
+    async def _start_cloud_mode(self) -> None:
+        """Start the Cloud API webhook server."""
         try:
             from aiohttp import web
         except ImportError:
@@ -200,13 +232,161 @@ class WhatsAppBot(ChatCommandMixin):
         finally:
             await self.stop()
 
+    async def _start_web_mode(self) -> None:
+        """Start in Web mode using neonize (WhatsApp Web protocol).
+
+        ⚠️ EXPERIMENTAL: Uses reverse-engineered protocol.
+        """
+        from ._whatsapp_web_adapter import WhatsAppWebAdapter
+
+        async def _on_web_message(event: Any) -> None:
+            """Bridge neonize message events to bot message handling."""
+            try:
+                # Extract message info from neonize event
+                info = getattr(event, 'Info', None) or getattr(event, 'info', None)
+                msg = getattr(event, 'Message', None) or getattr(event, 'message', None)
+                if not info or not msg:
+                    return
+
+                sender_jid = str(getattr(info, 'Sender', '') or getattr(info, 'sender', ''))
+                chat_jid = str(getattr(info, 'Chat', '') or getattr(info, 'chat', ''))
+                msg_id = str(getattr(info, 'ID', '') or getattr(info, 'id', ''))
+                timestamp = getattr(info, 'Timestamp', None) or time.time()
+                if hasattr(timestamp, 'timestamp'):
+                    timestamp = timestamp.timestamp()
+
+                # Extract text content
+                content = ""
+                conversation = getattr(msg, 'conversation', None)
+                ext_text = getattr(msg, 'extendedTextMessage', None)
+                if conversation:
+                    content = str(conversation)
+                elif ext_text:
+                    content = str(getattr(ext_text, 'text', ''))
+                else:
+                    content = "[Non-text message received]"
+
+                if not content:
+                    return
+
+                # Determine if group
+                is_group = "@g.us" in chat_jid
+                sender_name = sender_jid.split("@")[0] if sender_jid else "unknown"
+
+                sender = BotUser(
+                    user_id=sender_jid,
+                    username=sender_name,
+                    display_name=sender_name,
+                    is_bot=False,
+                )
+                channel = BotChannel(
+                    channel_id=chat_jid,
+                    name=f"whatsapp:{chat_jid}",
+                    channel_type="group" if is_group else "dm",
+                )
+
+                bot_message = BotMessage(
+                    message_id=msg_id,
+                    content=content,
+                    message_type=MessageType.TEXT,
+                    sender=sender,
+                    channel=channel,
+                    timestamp=float(timestamp) if timestamp else time.time(),
+                )
+
+                # Fire registered message handlers
+                for handler in self._message_handlers:
+                    try:
+                        await handler(bot_message)
+                    except Exception as e:
+                        logger.error(f"Message handler error: {e}")
+
+                # Check for commands
+                text = content.strip()
+                if text.startswith("/"):
+                    cmd_name = text.split()[0][1:].lower()
+                    cmd_handler = self._command_handlers.get(cmd_name)
+                    if cmd_handler:
+                        try:
+                            response = await cmd_handler(bot_message)
+                            if response:
+                                await self._web_send(chat_jid, response)
+                        except Exception as e:
+                            logger.error(f"Command '{cmd_name}' error: {e}")
+                            await self._web_send(chat_jid, f"Error: {e}")
+                        return
+
+                # Route to agent
+                if self._agent and content:
+                    try:
+                        response = await self._session_mgr.chat(
+                            self._agent, sender_jid, content
+                        )
+                        if response:
+                            await self._web_send(chat_jid, str(response))
+                    except Exception as e:
+                        logger.error(f"Agent chat error: {e}")
+                        await self._web_send(chat_jid, "Sorry, I encountered an error.")
+
+            except Exception as e:
+                logger.error(f"Web mode message processing error: {e}")
+
+        async def _on_connected() -> None:
+            logger.info("WhatsApp Web: connected and ready")
+
+        self._web_adapter = WhatsAppWebAdapter(
+            creds_dir=self._creds_dir,
+            on_message=_on_web_message,
+            on_connected=_on_connected,
+        )
+
+        self._is_running = True
+        self._started_at = time.time()
+        self._bot_user = BotUser(
+            user_id="web_user",
+            username="whatsapp_web_bot",
+            display_name="WhatsApp Web Bot",
+            is_bot=True,
+        )
+
+        has_session = self._web_adapter.has_saved_session()
+        if has_session:
+            logger.info("WhatsApp Web: using saved session")
+        else:
+            logger.info("WhatsApp Web: no saved session — QR code will be displayed")
+
+        try:
+            await self._web_adapter.connect()
+            # Keep running
+            while self._is_running:
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"WhatsApp Web mode error: {e}")
+            raise
+        finally:
+            await self.stop()
+
+    async def _web_send(self, to: str, text: str) -> None:
+        """Send message via Web mode adapter."""
+        if self._web_adapter and self._web_adapter.is_connected:
+            await self._web_adapter.send_message(to, text)
+
     async def stop(self) -> None:
-        """Stop the webhook server."""
+        """Stop the bot (both Cloud and Web modes)."""
         self._is_running = False
+        # Cloud mode cleanup
         if self._site:
             await self._site.stop()
         if self._runner:
             await self._runner.cleanup()
+        # Web mode cleanup
+        if self._web_adapter:
+            try:
+                await self._web_adapter.disconnect()
+            except Exception as e:
+                logger.warning(f"Web adapter disconnect error: {e}")
         logger.info("WhatsApp bot stopped")
 
     # ── Webhook handlers ────────────────────────────────────────────

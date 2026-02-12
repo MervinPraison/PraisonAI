@@ -132,6 +132,11 @@ bot = [
     "brotlicffi>=1.0.0",
     "aiohttp>=3.8.0",
 ]
+bot-whatsapp-web = [
+    # WhatsApp Web mode (experimental, token-free via QR scan)
+    "neonize>=0.3.14",
+    "qrcode>=7.0",
+]
 dev = [
     "textual-dev>=1.0.0",
     "pytest>=7.0.0",

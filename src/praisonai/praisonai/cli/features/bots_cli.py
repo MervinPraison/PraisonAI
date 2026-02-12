@@ -242,6 +242,8 @@ class BotHandler:
             phone_number_id = resolve_env_vars(config.get("phone_number_id", ""))
             verify_token_val = resolve_env_vars(config.get("verify_token", ""))
             webhook_port = config.get("webhook_port", 8080)
+            wa_mode = config.get("mode", "cloud")
+            wa_creds_dir = config.get("creds_dir")
             self.start_whatsapp(
                 token=token or None,
                 phone_number_id=phone_number_id or None,
@@ -250,6 +252,8 @@ class BotHandler:
                 agent_file=None,
                 capabilities=capabilities,
                 agent_config_dict=agent_config,
+                mode=wa_mode,
+                creds_dir=wa_creds_dir,
             )
     
     def start_telegram(
@@ -399,32 +403,46 @@ class BotHandler:
         agent_file: Optional[str] = None,
         capabilities: Optional[BotCapabilities] = None,
         agent_config_dict: Optional[Dict[str, Any]] = None,
+        mode: str = "cloud",
+        creds_dir: Optional[str] = None,
     ) -> None:
         """Start a WhatsApp bot.
         
         Args:
-            token: WhatsApp access token (or use WHATSAPP_ACCESS_TOKEN env var)
-            phone_number_id: Phone number ID (or use WHATSAPP_PHONE_NUMBER_ID env var)
-            verify_token: Webhook verify token (or use WHATSAPP_VERIFY_TOKEN env var)
-            webhook_port: Port for webhook server (default 8080)
+            token: WhatsApp access token (Cloud mode, or WHATSAPP_ACCESS_TOKEN env var)
+            phone_number_id: Phone number ID (Cloud mode, or WHATSAPP_PHONE_NUMBER_ID env var)
+            verify_token: Webhook verify token (Cloud mode, or WHATSAPP_VERIFY_TOKEN env var)
+            webhook_port: Port for webhook server (Cloud mode, default 8080)
             agent_file: Optional path to agent configuration file
             capabilities: Optional capabilities configuration
             agent_config_dict: Optional agent config dict from bot YAML
+            mode: Connection mode — 'cloud' (default) or 'web' (experimental)
+            creds_dir: Credentials directory for Web mode
         """
         self._load_dotenv()
-        token = token or os.environ.get("WHATSAPP_ACCESS_TOKEN")
-        phone_number_id = phone_number_id or os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
-        verify_token = verify_token or os.environ.get("WHATSAPP_VERIFY_TOKEN", "")
+        mode = (mode or "cloud").lower().strip()
         
-        if not token:
-            print("Error: WhatsApp access token required")
-            print("Provide via --token or WHATSAPP_ACCESS_TOKEN environment variable")
-            return
-        
-        if not phone_number_id:
-            print("Error: WhatsApp phone number ID required")
-            print("Provide via --phone-id or WHATSAPP_PHONE_NUMBER_ID environment variable")
-            return
+        if mode == "web":
+            # Web mode: no tokens needed
+            print("⚠️  WhatsApp Web mode is EXPERIMENTAL.")
+            print("   Uses reverse-engineered protocol. Your number may be banned.")
+        else:
+            # Cloud mode: tokens required
+            token = token or os.environ.get("WHATSAPP_ACCESS_TOKEN")
+            phone_number_id = phone_number_id or os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
+            verify_token = verify_token or os.environ.get("WHATSAPP_VERIFY_TOKEN", "")
+            
+            if not token:
+                print("Error: WhatsApp access token required (Cloud mode)")
+                print("Provide via --token or WHATSAPP_ACCESS_TOKEN environment variable")
+                print("Or use --mode web for token-free QR scan mode")
+                return
+            
+            if not phone_number_id:
+                print("Error: WhatsApp phone number ID required (Cloud mode)")
+                print("Provide via --phone-id or WHATSAPP_PHONE_NUMBER_ID environment variable")
+                print("Or use --mode web for token-free QR scan mode")
+                return
         
         # Set auto-approve if enabled
         if capabilities and capabilities.auto_approve:
@@ -434,21 +452,29 @@ class BotHandler:
         try:
             from praisonai.bots import WhatsAppBot
         except ImportError as e:
-            print(f"Error: WhatsAppBot requires aiohttp. {e}")
-            print("Install with: pip install aiohttp")
+            print(f"Error: WhatsAppBot import failed. {e}")
+            if mode == "web":
+                print("Install with: pip install 'praisonai[bot-whatsapp-web]'")
+            else:
+                print("Install with: pip install aiohttp")
             return
         
         agent = self._load_agent(agent_file, capabilities, agent_config_dict=agent_config_dict)
         bot = WhatsAppBot(
-            token=token,
-            phone_number_id=phone_number_id,
+            token=token or "",
+            phone_number_id=phone_number_id or "",
             agent=agent,
-            verify_token=verify_token,
+            verify_token=verify_token or "",
             webhook_port=webhook_port,
+            mode=mode,
+            creds_dir=creds_dir,
         )
         
-        self._print_startup_info("WhatsApp", capabilities)
-        print(f"Webhook server on port {webhook_port}")
+        if mode == "web":
+            self._print_startup_info("WhatsApp (Web mode)", capabilities)
+        else:
+            self._print_startup_info("WhatsApp", capabilities)
+            print(f"Webhook server on port {webhook_port}")
         
         try:
             asyncio.run(bot.start())
