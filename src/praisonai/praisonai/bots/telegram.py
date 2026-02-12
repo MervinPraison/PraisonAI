@@ -17,13 +17,13 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 if TYPE_CHECKING:
     from praisonaiagents import Agent
 
+from praisonai.bots._protocol_mixin import ChatCommandMixin
 from praisonaiagents.bots import (
     BotConfig,
     BotMessage,
     BotUser,
     BotChannel,
     MessageType,
-    ChatCommandInfo,
 )
 
 from .media import split_media_from_output, is_audio_file
@@ -33,7 +33,7 @@ from ._session import BotSessionManager
 logger = logging.getLogger(__name__)
 
 
-class TelegramBot:
+class TelegramBot(ChatCommandMixin):
     """Telegram bot runtime for PraisonAI agents.
     
     Connects an agent to Telegram, handling messages, commands,
@@ -248,20 +248,44 @@ class TelegramBot:
                 webhook_url=f"{self.config.webhook_url}{self.config.webhook_path}",
             )
         else:
-            await self._application.run_polling(
+            # Use low-level API to avoid event-loop conflicts with run_polling().
+            # run_polling() tries to manage its own event loop lifecycle which
+            # conflicts with asyncio.run() or any shared event loop (e.g. gateway).
+            await self._application.initialize()
+            await self._application.start()
+            await self._application.updater.start_polling(
                 poll_interval=self.config.polling_interval,
             )
+            
+            # Block until stop() is called
+            self._stop_event = asyncio.Event()
+            try:
+                await self._stop_event.wait()
+            except asyncio.CancelledError:
+                pass
+            finally:
+                await self._application.updater.stop()
+                await self._application.stop()
+                await self._application.shutdown()
+                self._is_running = False
     
     async def stop(self) -> None:
         """Stop the Telegram bot."""
         if not self._is_running:
             return
         
-        self._is_running = False
-        
-        if self._application:
-            await self._application.stop()
-            await self._application.shutdown()
+        # Signal the stop event so the start() loop exits cleanly
+        if hasattr(self, '_stop_event') and self._stop_event:
+            self._stop_event.set()
+        else:
+            # Fallback for webhook mode or direct stop
+            self._is_running = False
+            if self._application:
+                try:
+                    await self._application.stop()
+                    await self._application.shutdown()
+                except Exception as e:
+                    logger.warning(f"Error during stop: {e}")
         
         logger.info("Telegram bot stopped")
     
@@ -448,31 +472,6 @@ class TelegramBot:
         self._message_handlers.append(handler)
         return handler
     
-    def register_command(
-        self,
-        name: str,
-        handler: Callable,
-        description: str = "",
-        usage: Optional[str] = None,
-    ) -> None:
-        """Register a chat command handler (ChatCommandProtocol)."""
-        self._command_handlers[name] = handler
-        if not hasattr(self, '_command_info'):
-            self._command_info: Dict[str, ChatCommandInfo] = {}
-        self._command_info[name] = ChatCommandInfo(
-            name=name, description=description, usage=usage
-        )
-
-    def list_commands(self) -> list:
-        """List all registered chat commands (ChatCommandProtocol)."""
-        builtins = [
-            ChatCommandInfo(name="status", description="Show bot status and info"),
-            ChatCommandInfo(name="new", description="Reset conversation session"),
-            ChatCommandInfo(name="help", description="Show this help message"),
-        ]
-        custom = list(getattr(self, '_command_info', {}).values())
-        return builtins + custom
-
     def on_command(self, command: str) -> Callable:
         """Decorator to register a command handler."""
         def decorator(func: Callable) -> Callable:

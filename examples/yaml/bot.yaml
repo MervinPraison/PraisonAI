@@ -1,0 +1,31 @@
+# Example: Single-bot YAML configuration for PraisonAI
+#
+# Usage:
+#   praisonai bot start --config bot.yaml
+#
+# This is the simplest way to run a bot — no programming needed.
+# Just configure platform, token, and agent settings below.
+
+# Platform: telegram, discord, or slack
+platform: telegram
+
+# Bot token — use ${ENV_VAR} syntax to reference environment variables
+# (requires .env file in the current directory or exported env vars)
+token: "${TELEGRAM_BOT_TOKEN}"
+
+# For Slack only — uncomment and set:
+# app_token: "${SLACK_APP_TOKEN}"
+
+# Agent configuration
+agent:
+  name: "My Assistant"
+  instructions: "You are a helpful AI assistant. Answer questions clearly and concisely."
+  llm: "gpt-4o-mini"
+
+  # Optional capabilities (uncomment to enable):
+  # memory: true
+  # web_search: true
+  # web_search_provider: "duckduckgo"
+  # tools: [search_web, execute_command]
+  # knowledge: true
+  # auto_approve: false

@@ -37,11 +37,16 @@ class BotSessionManager:
     5. Restores the agent's original history.
 
     ``/new`` command → call ``session_mgr.reset(user_id)``.
+
+    Multi-agent safety: Uses a per-Agent lock to serialise history
+    swaps when the same Agent instance is shared across multiple bots
+    (e.g. gateway multi-bot mode).
     """
 
     def __init__(self, max_history: int = 100) -> None:
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
         self._locks: Dict[str, asyncio.Lock] = {}
+        self._agent_locks: Dict[int, asyncio.Lock] = {}
         self._max_history = max_history
 
     def _get_lock(self, user_id: str) -> asyncio.Lock:
@@ -49,6 +54,13 @@ class BotSessionManager:
         if user_id not in self._locks:
             self._locks[user_id] = asyncio.Lock()
         return self._locks[user_id]
+
+    def _get_agent_lock(self, agent: "Agent") -> asyncio.Lock:
+        """Get or create a lock for the *agent* instance (by id)."""
+        agent_id = id(agent)
+        if agent_id not in self._agent_locks:
+            self._agent_locks[agent_id] = asyncio.Lock()
+        return self._agent_locks[agent_id]
 
     async def chat(
         self,
@@ -60,23 +72,29 @@ class BotSessionManager:
 
         The call is wrapped in ``run_in_executor`` so the sync LLM
         round-trip never blocks the event loop.
+
+        Uses both a per-user lock (serialise same user) and a per-agent
+        lock (prevent concurrent history swaps on a shared Agent).
         """
-        lock = self._get_lock(user_id)
-        async with lock:
-            # Swap histories
-            saved_history = agent.chat_history
-            agent.chat_history = list(self._histories.get(user_id, []))
+        user_lock = self._get_lock(user_id)
+        agent_lock = self._get_agent_lock(agent)
+        async with user_lock:
+            async with agent_lock:
+                # Swap histories
+                saved_history = agent.chat_history
+                agent.chat_history = list(self._histories.get(user_id, []))
 
             try:
                 loop = asyncio.get_event_loop()
                 response = await loop.run_in_executor(None, agent.chat, prompt)
             finally:
-                # Persist user history and restore agent's original
-                user_history = agent.chat_history
-                if self._max_history > 0 and len(user_history) > self._max_history:
-                    user_history = user_history[-self._max_history:]
-                self._histories[user_id] = user_history
-                agent.chat_history = saved_history
+                async with agent_lock:
+                    # Persist user history and restore agent's original
+                    user_history = agent.chat_history
+                    if self._max_history > 0 and len(user_history) > self._max_history:
+                        user_history = user_history[-self._max_history:]
+                    self._histories[user_id] = user_history
+                    agent.chat_history = saved_history
 
             return response
 

@@ -20,6 +20,24 @@ def _common_options():
     pass
 
 
+@app.command("start")
+def bot_start(
+    config: str = typer.Option(..., "--config", "-c", help="Path to bot YAML config file"),
+):
+    """Start a bot from a single YAML config file (zero-code).
+    
+    The config file contains platform, token, and agent settings all in one place.
+    
+    Examples:
+        praisonai bot start --config bot.yaml
+        praisonai bot start -c my-telegram-bot.yaml
+    """
+    from ..features.bots_cli import BotHandler
+    
+    handler = BotHandler()
+    handler.start_from_config(config)
+
+
 @app.command("telegram")
 def bot_telegram(
     token: Optional[str] = typer.Option(None, "--token", "-t", help="Telegram bot token", envvar="TELEGRAM_BOT_TOKEN"),
@@ -260,6 +278,9 @@ Start a bot on any platform with: praisonai bot <platform>
   [yellow]--tts[/yellow]                 Enable TTS tool
   [yellow]--stt[/yellow]                 Enable STT tool
   [yellow]--auto-tts[/yellow]            Auto-convert responses to speech
+
+[bold]Zero-Code Mode (YAML config):[/bold]
+  praisonai bot start --config bot.yaml
 
 [bold]Examples:[/bold]
   praisonai bot telegram --token $TELEGRAM_BOT_TOKEN

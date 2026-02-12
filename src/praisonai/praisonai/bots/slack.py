@@ -10,20 +10,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import tempfile
 import time
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     from praisonaiagents import Agent
 
+from praisonai.bots._protocol_mixin import ChatCommandMixin
 from praisonaiagents.bots import (
     BotConfig,
     BotMessage,
     BotUser,
     BotChannel,
     MessageType,
-    ChatCommandInfo,
 )
 
 from .media import split_media_from_output, is_audio_file
@@ -33,7 +32,7 @@ from ._session import BotSessionManager
 logger = logging.getLogger(__name__)
 
 
-class SlackBot:
+class SlackBot(ChatCommandMixin):
     """Slack bot runtime for PraisonAI agents.
     
     Connects an agent to Slack, handling messages, slash commands,
@@ -422,31 +421,6 @@ class SlackBot:
         self._message_handlers.append(handler)
         return handler
     
-    def register_command(
-        self,
-        name: str,
-        handler: Callable,
-        description: str = "",
-        usage: Optional[str] = None,
-    ) -> None:
-        """Register a chat command handler (ChatCommandProtocol)."""
-        self._command_handlers[name] = handler
-        if not hasattr(self, '_command_info'):
-            self._command_info: Dict[str, ChatCommandInfo] = {}
-        self._command_info[name] = ChatCommandInfo(
-            name=name, description=description, usage=usage
-        )
-
-    def list_commands(self) -> list:
-        """List all registered chat commands (ChatCommandProtocol)."""
-        builtins = [
-            ChatCommandInfo(name="status", description="Show bot status and info"),
-            ChatCommandInfo(name="new", description="Reset conversation session"),
-            ChatCommandInfo(name="help", description="Show this help message"),
-        ]
-        custom = list(getattr(self, '_command_info', {}).values())
-        return builtins + custom
-
     def on_command(self, command: str) -> Callable:
         """Decorator to register a command handler."""
         def decorator(func: Callable) -> Callable:

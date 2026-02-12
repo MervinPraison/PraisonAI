@@ -517,6 +517,45 @@ class WebSocketGateway:
         if not raw or not isinstance(raw, dict):
             raise ValueError(f"Invalid gateway config: {config_path}")
 
+        # ── Schema validation ──────────────────────────────────────
+        errors = []
+        if "agents" not in raw:
+            errors.append("Missing required 'agents' section")
+        elif not isinstance(raw["agents"], dict) or not raw["agents"]:
+            errors.append("'agents' must be a non-empty dictionary")
+        else:
+            for aid, adef in raw["agents"].items():
+                if not isinstance(adef, dict):
+                    errors.append(f"Agent '{aid}' must be a dictionary")
+
+        if "channels" not in raw:
+            errors.append("Missing required 'channels' section")
+        elif not isinstance(raw["channels"], dict) or not raw["channels"]:
+            errors.append("'channels' must be a non-empty dictionary")
+        else:
+            valid_platforms = {"telegram", "discord", "slack"}
+            for cname, cdef in raw["channels"].items():
+                if not isinstance(cdef, dict):
+                    errors.append(f"Channel '{cname}' must be a dictionary")
+                    continue
+                if cname.lower() not in valid_platforms:
+                    logger.warning(
+                        f"Channel '{cname}' is not a known platform "
+                        f"({', '.join(valid_platforms)})"
+                    )
+                if not cdef.get("token"):
+                    errors.append(
+                        f"Channel '{cname}' missing 'token' "
+                        "(use ${{ENV_VAR}} syntax for env vars)"
+                    )
+
+        if errors:
+            msg = (
+                f"Gateway config validation failed ({config_path}):\n"
+                + "\n".join(f"  - {e}" for e in errors)
+            )
+            raise ValueError(msg)
+
         def _resolve(obj):
             if isinstance(obj, str):
                 return cls._substitute_env_vars(obj)
@@ -833,6 +872,55 @@ class WebSocketGateway:
         self._channel_bots.clear()
         self._routing_rules.clear()
 
+    async def reload_config(self, config_path: str) -> None:
+        """Hot-reload gateway.yaml — restarts channels with updated config.
+
+        Agents are recreated and channels are restarted.  The WebSocket
+        server itself is **not** restarted (existing connections kept alive).
+        """
+        logger.info(f"Hot-reloading gateway config from {config_path}...")
+        try:
+            cfg = self.load_gateway_config(config_path)
+        except (FileNotFoundError, ValueError) as e:
+            logger.error(f"Reload failed — config invalid: {e}")
+            return
+
+        # Stop existing channels
+        await self.stop_channels()
+
+        # Recreate agents
+        agents_cfg = cfg.get("agents", {})
+        if agents_cfg:
+            self._agents.clear()
+            self._create_agents_from_config(agents_cfg)
+
+        # Restart channels
+        channels_cfg = cfg.get("channels", {})
+        if channels_cfg:
+            await self.start_channels(channels_cfg)
+
+        logger.info("Hot-reload complete")
+
+    async def _watch_config(self, config_path: str, poll_interval: float = 5.0) -> None:
+        """Poll the config file for changes and trigger hot-reload."""
+        last_mtime: float = 0.0
+        try:
+            last_mtime = os.path.getmtime(config_path)
+        except OSError:
+            pass
+
+        while True:
+            await asyncio.sleep(poll_interval)
+            try:
+                mtime = os.path.getmtime(config_path)
+                if mtime > last_mtime:
+                    last_mtime = mtime
+                    await self.reload_config(config_path)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(f"Config watch error: {e}")
+
     async def start_with_config(self, config_path: str) -> None:
         """Start the gateway with a gateway.yaml configuration.
 
@@ -859,26 +947,41 @@ class WebSocketGateway:
         # Start channels + WebSocket server concurrently
         channels_cfg = cfg.get("channels", {})
 
+        # Start config file watcher for hot-reload
+        self._config_watch_task: Optional[asyncio.Task] = None
+
         async def _run_all():
             if channels_cfg:
                 await self.start_channels(channels_cfg)
+            # Launch config watcher in background
+            self._config_watch_task = asyncio.create_task(
+                self._watch_config(config_path)
+            )
             await self.start()
 
-        # Register signal handlers for graceful shutdown
+        # Register signal handlers for graceful shutdown using
+        # loop.add_signal_handler (async-safe) with signal.signal fallback.
         import signal
 
-        def _request_shutdown(sig, frame):
-            logger.info(f"Received signal {sig}, shutting down gateway...")
+        def _request_shutdown():
+            logger.info("Received shutdown signal, stopping gateway...")
             if self._server:
                 self._server.should_exit = True
 
+        loop = asyncio.get_event_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
-                signal.signal(sig, _request_shutdown)
-            except (OSError, ValueError):
-                pass  # Not all signals available on all platforms
+                loop.add_signal_handler(sig, _request_shutdown)
+            except (NotImplementedError, OSError, ValueError):
+                # Fallback for platforms where add_signal_handler is unavailable
+                try:
+                    signal.signal(sig, lambda s, f: _request_shutdown())
+                except (OSError, ValueError):
+                    pass
 
         try:
             await _run_all()
         finally:
+            if self._config_watch_task:
+                self._config_watch_task.cancel()
             await self.stop_channels()
