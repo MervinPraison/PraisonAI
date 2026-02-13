@@ -325,15 +325,38 @@ class WebSocketGateway:
         session: GatewaySession,
         message: GatewayMessage,
     ) -> str:
-        """Process a message through the agent."""
+        """Process a message through the agent.
+        
+        If the agent has a stream_emitter, registers a callback that relays
+        token deltas to the connected WebSocket client in real-time via
+        TOKEN_STREAM / TOOL_CALL_STREAM / STREAM_END events.
+        """
         agent = self._agents.get(session.agent_id)
         if not agent:
             return "Agent not available"
         
+        client_id = session.client_id
+        
         try:
             content = message.content if isinstance(message.content, str) else str(message.content)
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(None, agent.chat, content)
+            
+            # Wire streaming relay if agent has a stream_emitter
+            relay_callback = None
+            emitter = getattr(agent, 'stream_emitter', None)
+            if emitter is not None and client_id:
+                relay_callback = self._make_stream_relay(client_id, session)
+                emitter.add_callback(relay_callback)
+            
+            try:
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(None, agent.chat, content)
+            finally:
+                # Always clean up the relay callback
+                if relay_callback and emitter is not None:
+                    try:
+                        emitter.remove_callback(relay_callback)
+                    except (ValueError, AttributeError):
+                        pass
             
             response_message = GatewayMessage(
                 content=response,
@@ -347,6 +370,63 @@ class WebSocketGateway:
         except Exception as e:
             logger.error(f"Agent error: {e}")
             return f"Error: {str(e)}"
+
+    def _make_stream_relay(
+        self, client_id: str, session: "GatewaySession"
+    ) -> Callable:
+        """Create a StreamCallback that relays events to a WS client.
+        
+        The callback is synchronous (called from the LLM streaming thread)
+        and uses asyncio.run_coroutine_threadsafe to push events into the
+        gateway's event loop for WS delivery.
+        """
+        gateway = self
+
+        def _relay(event) -> None:
+            try:
+                from praisonaiagents.streaming.events import StreamEventType
+                
+                event_type = getattr(event, 'type', None)
+                if event_type is None:
+                    return
+                
+                # Map StreamEventType -> gateway EventType
+                if event_type == StreamEventType.DELTA_TEXT:
+                    gw_type = EventType.TOKEN_STREAM
+                    data = {
+                        "content": getattr(event, 'content', ''),
+                        "session_id": session.session_id,
+                    }
+                elif event_type == StreamEventType.DELTA_TOOL_CALL:
+                    gw_type = EventType.TOOL_CALL_STREAM
+                    data = {
+                        "tool_call": getattr(event, 'tool_call', {}),
+                        "session_id": session.session_id,
+                    }
+                elif event_type == StreamEventType.STREAM_END:
+                    gw_type = EventType.STREAM_END
+                    data = {"session_id": session.session_id}
+                else:
+                    return  # Skip non-essential events
+                
+                gw_event = GatewayEvent(
+                    type=gw_type,
+                    data=data,
+                    source=session.agent_id,
+                    target=client_id,
+                )
+                
+                # Thread-safe async send
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        gateway._send_to_client(client_id, gw_event.to_dict()),
+                        loop,
+                    )
+            except Exception as e:
+                logger.debug(f"Stream relay error (non-fatal): {e}")
+
+        return _relay
     
     async def _send_to_client(self, client_id: str, data: Dict[str, Any]) -> None:
         """Send data to a specific client."""

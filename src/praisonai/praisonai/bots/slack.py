@@ -16,7 +16,7 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 if TYPE_CHECKING:
     from praisonaiagents import Agent
 
-from praisonai.bots._protocol_mixin import ChatCommandMixin
+from praisonai.bots._protocol_mixin import ChatCommandMixin, MessageHookMixin
 from praisonaiagents.bots import (
     BotConfig,
     BotMessage,
@@ -32,7 +32,7 @@ from ._session import BotSessionManager
 logger = logging.getLogger(__name__)
 
 
-class SlackBot(ChatCommandMixin):
+class SlackBot(ChatCommandMixin, MessageHookMixin):
     """Slack bot runtime for PraisonAI agents.
     
     Connects an agent to Slack, handling messages, slash commands,
@@ -148,6 +148,8 @@ class SlackBot(ChatCommandMixin):
             
             bot_message = self._convert_event_to_message(event)
             
+            self.fire_message_received(bot_message)
+            
             if not self.config.is_user_allowed(bot_message.sender.user_id if bot_message.sender else ""):
                 return
             if not self.config.is_channel_allowed(bot_message.channel.channel_id if bot_message.channel else ""):
@@ -194,6 +196,12 @@ class SlackBot(ChatCommandMixin):
                     response = await self._session.chat(self._agent, user_id, text)
                     logger.info(f"Response sent: {response[:100]}...")
                     
+                    channel_id = event.get("channel", "")
+                    send_result = self.fire_message_sending(channel_id, str(response))
+                    if send_result["cancel"]:
+                        return
+                    response = send_result["content"]
+                    
                     # Determine if we should reply in thread
                     thread_ts = None
                     if self.config.reply_in_thread:
@@ -203,8 +211,9 @@ class SlackBot(ChatCommandMixin):
                         thread_ts = event.get("thread_ts") or event.get("ts")
                     
                     await self._send_response_with_media(
-                        event.get("channel"), say, response, thread_ts=thread_ts
+                        channel_id, say, response, thread_ts=thread_ts
                     )
+                    self.fire_message_sent(channel_id, response)
                 except Exception as e:
                     logger.error(f"Agent error: {e}")
                     error_msg = str(e)

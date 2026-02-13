@@ -104,8 +104,22 @@ class WhatsAppWebAdapter:
 
         logger.info(f"WhatsApp Web: connecting (creds: {db_path})")
 
+        # ── Critical: bridge neonize's event loop to ours ──────────
+        # neonize creates event_global_loop = asyncio.new_event_loop()
+        # at import time but NEVER starts it. Go-thread callbacks
+        # (QR, messages, connected) are posted to that dead loop via
+        # asyncio.run_coroutine_threadsafe(..., event_global_loop).
+        # Fix: replace it with the currently running loop so callbacks
+        # actually execute.
+        import neonize.aioze.events as _nz_events
+        import neonize.aioze.client as _nz_client
+        _nz_events.event_global_loop = self._loop
+        _nz_client.event_global_loop = self._loop
+
         # neonize uses `name` as the DB file path directly
         self._client = NewAClient(db_path)
+        # Also patch the client instance's loop reference
+        self._client.loop = self._loop
 
         # Register event handlers via neonize's Event system
         # client.event is an Event instance; calling it with an event type
@@ -244,19 +258,31 @@ class WhatsAppWebAdapter:
 
     @staticmethod
     def _print_qr_terminal(qr_data: str) -> None:
-        """Print QR code to terminal using qrcode library or fallback."""
+        """Print QR code to terminal. Uses segno (neonize dep) or qrcode."""
+        try:
+            import segno  # type: ignore  — installed with neonize
+            print("\n" + "=" * 50)
+            print("Scan this QR code in WhatsApp → Linked Devices:")
+            print("=" * 50)
+            segno.make_qr(qr_data).terminal(compact=True)
+            print("=" * 50 + "\n")
+            return
+        except Exception:
+            pass
         try:
             import qrcode  # type: ignore
             qr = qrcode.QRCode(border=1)
             qr.add_data(qr_data)
             qr.print_ascii(tty=True)
+            return
         except ImportError:
-            # Fallback: just print the raw data
-            print(f"\n{'='*50}")
-            print("Scan this QR code in WhatsApp → Linked Devices:")
-            print(f"QR Data: {qr_data[:80]}...")
-            print(f"{'='*50}")
-            print("(Install 'qrcode' package for visual QR: pip install qrcode)")
+            pass
+        # Final fallback: raw data
+        print(f"\n{'='*50}")
+        print("Scan this QR code in WhatsApp → Linked Devices:")
+        print(f"QR Data: {qr_data[:80]}...")
+        print(f"{'='*50}")
+        print("(Install 'segno' or 'qrcode' for visual QR display)")
 
     async def _safe_callback(self, callback: Callable, *args: Any) -> None:
         """Safely invoke a callback, handling both sync and async."""

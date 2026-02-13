@@ -12,7 +12,6 @@ NO mocks for neonize or CLI — tests verify actual behavior.
 """
 
 import asyncio
-import json
 import os
 import signal
 import subprocess
@@ -154,13 +153,17 @@ class TestCLIWebModeLaunch:
                 proc.kill()
                 stdout, stderr = proc.communicate()
             combined = stdout + stderr
-            # The warning is printed by the CLI before start
+            # The warning is printed by the CLI before start.
+            # Once the event loop fix landed, neonize actually connects
+            # to WhatsApp servers, so we may also see websocket messages.
             assert (
                 "experimental" in combined.lower()
                 or "EXPERIMENTAL" in combined
                 or "web mode" in combined.lower()
                 or "Starting WhatsApp" in combined
-            ), f"Expected experimental warning in output, got: {combined[:500]}"
+                or "websocket" in combined.lower()
+                or "whatsapp" in combined.lower()
+            ), f"Expected WhatsApp output, got: {combined[:500]}"
         except Exception:
             proc.kill()
             proc.wait()
@@ -429,6 +432,48 @@ class TestRealAdapter:
             assert 17 in adapter._client.event.list_func   # MessageEv
         finally:
             NewAClient.connect = original_connect
+
+    @pytest.mark.asyncio
+    async def test_adapter_connect_bridges_event_loop(self):
+        """connect() patches neonize's event_global_loop with the running loop.
+
+        Root cause fix: neonize creates event_global_loop = asyncio.new_event_loop()
+        at import time but never starts it. Go-thread callbacks (QR, messages)
+        are posted to that dead loop. Our adapter must replace it with the
+        currently running loop so callbacks actually execute.
+        """
+        sys.path.insert(0, PRAISONAI_SRC)
+        from praisonai.bots._whatsapp_web_adapter import WhatsAppWebAdapter
+        from neonize.aioze.client import NewAClient
+        import neonize.aioze.events as nz_events
+        import neonize.aioze.client as nz_client
+
+        tmpdir = tempfile.mkdtemp()
+        adapter = WhatsAppWebAdapter(creds_dir=tmpdir)
+
+        running_loop = asyncio.get_running_loop()
+
+        # Before connect: neonize's loop is NOT our running loop
+        original_nz_loop = nz_events.event_global_loop
+
+        original_connect = NewAClient.connect
+        async def patched_connect(self_client):
+            raise ConnectionError("test: skip real connection")
+
+        NewAClient.connect = patched_connect
+        try:
+            with pytest.raises(ConnectionError):
+                await adapter.connect()
+
+            # After connect: neonize's event loops must be bridged to ours
+            assert nz_events.event_global_loop is running_loop
+            assert nz_client.event_global_loop is running_loop
+            assert adapter._client.loop is running_loop
+        finally:
+            NewAClient.connect = original_connect
+            # Restore original loop to avoid test pollution
+            nz_events.event_global_loop = original_nz_loop
+            nz_client.event_global_loop = original_nz_loop
 
     def test_adapter_logout_cleans_db(self):
         """logout() removes the DB file."""

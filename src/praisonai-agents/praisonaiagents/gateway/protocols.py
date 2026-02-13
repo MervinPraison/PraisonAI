@@ -53,6 +53,11 @@ class EventType(str, Enum):
     MESSAGE_ACK = "message_ack"
     TYPING = "typing"
     
+    # Streaming events (relayed from agent's StreamEventEmitter)
+    TOKEN_STREAM = "token_stream"
+    TOOL_CALL_STREAM = "tool_call_stream"
+    STREAM_END = "stream_end"
+    
     # System events
     HEALTH = "health"
     ERROR = "error"

@@ -70,7 +70,7 @@ class HookRunner:
             default_timeout: Default timeout for hooks
             cwd: Working directory for command hooks
         """
-        self._registry = registry or HookRegistry()
+        self._registry = registry if registry is not None else HookRegistry()
         self._default_timeout = default_timeout
         self._cwd = cwd or os.getcwd()
     

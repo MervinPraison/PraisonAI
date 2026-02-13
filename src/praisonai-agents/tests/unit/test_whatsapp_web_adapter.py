@@ -232,35 +232,54 @@ class TestSendMessage:
 # ── QR code display ───────────────────────────────────────────────
 
 class TestQRCodeDisplay:
-    """Test QR code terminal display."""
+    """Test QR code terminal display (fallback chain: segno → qrcode → raw)."""
 
-    def test_print_qr_with_qrcode_lib(self):
-        """Uses qrcode library when available."""
+    def test_print_qr_with_segno(self, capsys):
+        """Uses segno (neonize dep) when available — first in chain."""
+        from praisonai.bots._whatsapp_web_adapter import WhatsAppWebAdapter
+        mock_segno = MagicMock()
+        mock_qr_obj = MagicMock()
+        mock_segno.make_qr.return_value = mock_qr_obj
+
+        with patch.dict(sys.modules, {"segno": mock_segno}):
+            WhatsAppWebAdapter._print_qr_terminal("test-qr-data")
+            mock_segno.make_qr.assert_called_once_with("test-qr-data")
+            mock_qr_obj.terminal.assert_called_once_with(compact=True)
+
+    def test_print_qr_falls_back_to_qrcode(self):
+        """Falls back to qrcode when segno fails."""
         from praisonai.bots._whatsapp_web_adapter import WhatsAppWebAdapter
         mock_qr = MagicMock()
         mock_qr_module = MagicMock()
         mock_qr_module.QRCode.return_value = mock_qr
 
-        with patch.dict(sys.modules, {"qrcode": mock_qr_module}):
+        # segno raises, qrcode works
+        mock_segno = MagicMock()
+        mock_segno.make_qr.side_effect = Exception("segno fail")
+
+        with patch.dict(sys.modules, {"segno": mock_segno, "qrcode": mock_qr_module}):
             WhatsAppWebAdapter._print_qr_terminal("test-qr-data")
             mock_qr_module.QRCode.assert_called_once()
             mock_qr.add_data.assert_called_once_with("test-qr-data")
 
-    def test_print_qr_fallback_without_lib(self, capsys):
-        """Falls back to text output when qrcode not installed."""
+    def test_print_qr_fallback_raw_text(self, capsys):
+        """Falls back to raw text when both segno and qrcode fail."""
         from praisonai.bots._whatsapp_web_adapter import WhatsAppWebAdapter
-        with patch.dict(sys.modules, {"qrcode": None}):
-            # Force ImportError
-            original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
-            def mock_import(name, *args, **kwargs):
-                if name == "qrcode":
-                    raise ImportError("No module named 'qrcode'")
-                return original_import(name, *args, **kwargs)
-            
+
+        mock_segno = MagicMock()
+        mock_segno.make_qr.side_effect = Exception("segno fail")
+
+        original_import = __import__
+        def mock_import(name, *args, **kwargs):
+            if name == "qrcode":
+                raise ImportError("No module named 'qrcode'")
+            return original_import(name, *args, **kwargs)
+
+        with patch.dict(sys.modules, {"segno": mock_segno}):
             with patch("builtins.__import__", side_effect=mock_import):
                 WhatsAppWebAdapter._print_qr_terminal("test-qr-data-fallback")
                 captured = capsys.readouterr()
-                assert "QR" in captured.out or "qrcode" in captured.out.lower()
+                assert "QR" in captured.out or "segno" in captured.out.lower()
 
 
 # ── Safe callback ─────────────────────────────────────────────────

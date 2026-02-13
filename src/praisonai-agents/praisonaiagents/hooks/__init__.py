@@ -71,6 +71,10 @@ __all__ = [
     "SessionEndInput",
     "OnErrorInput",
     "OnRetryInput",
+    # Message lifecycle event inputs
+    "MessageReceivedInput",
+    "MessageSendingInput",
+    "MessageSentInput",
     # Middleware types
     "InvocationContext",
     "ModelRequest",
@@ -130,6 +134,9 @@ _LAZY_GROUPS = {
         'SessionEndInput': ('praisonaiagents.hooks.events', 'SessionEndInput'),
         'OnErrorInput': ('praisonaiagents.hooks.events', 'OnErrorInput'),
         'OnRetryInput': ('praisonaiagents.hooks.events', 'OnRetryInput'),
+        'MessageReceivedInput': ('praisonaiagents.hooks.events', 'MessageReceivedInput'),
+        'MessageSendingInput': ('praisonaiagents.hooks.events', 'MessageSendingInput'),
+        'MessageSentInput': ('praisonaiagents.hooks.events', 'MessageSentInput'),
     },
     'middleware_types': {
         'InvocationContext': ('praisonaiagents.hooks.middleware', 'InvocationContext'),

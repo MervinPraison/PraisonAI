@@ -34,7 +34,7 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 if TYPE_CHECKING:
     from praisonaiagents import Agent
 
-from praisonai.bots._protocol_mixin import ChatCommandMixin
+from praisonai.bots._protocol_mixin import ChatCommandMixin, MessageHookMixin
 from praisonaiagents.bots import (
     BotConfig,
     BotMessage,
@@ -53,7 +53,7 @@ GRAPH_API_VERSION = "v21.0"
 GRAPH_API_BASE = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
 
 
-class WhatsAppBot(ChatCommandMixin):
+class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
     """WhatsApp bot runtime for PraisonAI agents.
 
     Connects an agent to WhatsApp via the Cloud API, handling messages,
@@ -294,6 +294,8 @@ class WhatsAppBot(ChatCommandMixin):
                     timestamp=float(timestamp) if timestamp else time.time(),
                 )
 
+                self.fire_message_received(bot_message)
+
                 # Fire registered message handlers
                 for handler in self._message_handlers:
                     try:
@@ -323,7 +325,10 @@ class WhatsAppBot(ChatCommandMixin):
                             self._agent, sender_jid, content
                         )
                         if response:
-                            await self._web_send(chat_jid, str(response))
+                            send_result = self.fire_message_sending(chat_jid, str(response))
+                            if not send_result["cancel"]:
+                                await self._web_send(chat_jid, send_result["content"])
+                                self.fire_message_sent(chat_jid, send_result["content"])
                     except Exception as e:
                         logger.error(f"Agent chat error: {e}")
                         await self._web_send(chat_jid, "Sorry, I encountered an error.")
@@ -535,6 +540,8 @@ class WhatsAppBot(ChatCommandMixin):
             timestamp=float(timestamp) if timestamp else time.time(),
         )
 
+        self.fire_message_received(bot_message)
+
         # Fire registered message handlers (e.g., gateway routing)
         for handler in self._message_handlers:
             try:
@@ -564,7 +571,10 @@ class WhatsAppBot(ChatCommandMixin):
                     self._agent, sender_id, content
                 )
                 if response:
-                    await self.send_message(sender_id, str(response))
+                    send_result = self.fire_message_sending(sender_id, str(response))
+                    if not send_result["cancel"]:
+                        await self.send_message(sender_id, send_result["content"])
+                        self.fire_message_sent(sender_id, send_result["content"])
             except Exception as e:
                 logger.error(f"Agent chat error: {e}")
                 await self.send_message(sender_id, "Sorry, I encountered an error processing your message.")

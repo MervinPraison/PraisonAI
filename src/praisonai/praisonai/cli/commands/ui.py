@@ -101,6 +101,49 @@ def ui_realtime(
     _launch_chainlit_ui("realtime", port, host, public)
 
 
+@app.command("bot")
+def ui_bot(
+    port: int = typer.Option(8090, "--port", "-p", help="Port to run UI on"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
+    public: bool = typer.Option(False, "--public", help="Make UI publicly accessible"),
+    agent: str = typer.Option(None, "--agent", "-a", help="Agent YAML configuration file"),
+    model: str = typer.Option("gpt-4o-mini", "--model", "-m", help="LLM model to use"),
+    memory: bool = typer.Option(False, "--memory", help="Enable memory"),
+    web_search: bool = typer.Option(False, "--web", "--web-search", help="Enable web search"),
+    web_provider: str = typer.Option("duckduckgo", "--web-provider", help="Web search provider"),
+    tools: str = typer.Option(None, "--tools", help="Comma-separated tool names"),
+    auto_approve: bool = typer.Option(False, "--auto-approve", help="Auto-approve tool executions"),
+):
+    """
+    Start the bot chat UI with real-time streaming and tool visualization.
+    
+    This provides a Chainlit-based chat interface backed by a PraisonAI Agent
+    with real streaming (via StreamEventEmitter), tool call Steps, and hook firing.
+    
+    Examples:
+        praisonai ui bot
+        praisonai ui bot --model gpt-4o --memory --web
+        praisonai ui bot --agent agents.yaml --tools DuckDuckGoTool,WikipediaTool
+    """
+    import os
+    
+    # Pass config to bot.py via environment variables
+    os.environ["PRAISONAI_BOT_MODEL"] = model
+    if agent:
+        os.environ["PRAISONAI_BOT_AGENT_FILE"] = agent
+    if memory:
+        os.environ["PRAISONAI_BOT_MEMORY"] = "true"
+    if web_search:
+        os.environ["PRAISONAI_BOT_WEB_SEARCH"] = "true"
+    os.environ["PRAISONAI_BOT_WEB_PROVIDER"] = web_provider
+    if tools:
+        os.environ["PRAISONAI_BOT_TOOLS"] = tools
+    if auto_approve:
+        os.environ["PRAISONAI_BOT_AUTO_APPROVE"] = "true"
+    
+    _launch_chainlit_ui("bot", port, host, public)
+
+
 @app.command("gradio")
 def ui_gradio(
     port: int = typer.Option(8080, "--port", "-p", help="Port to run UI on"),
@@ -155,6 +198,7 @@ def _launch_chainlit_ui(ui_type: str, port: int, host: str, public: bool):
         "chat": os.path.join("ui", "chat.py"),
         "code": os.path.join("ui", "code.py"),
         "realtime": os.path.join("ui", "realtime.py"),
+        "bot": os.path.join("ui", "bot.py"),
     }
     
     ui_script = ui_scripts.get(ui_type, "chainlit_ui.py")

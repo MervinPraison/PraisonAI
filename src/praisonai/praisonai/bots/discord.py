@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 if TYPE_CHECKING:
     from praisonaiagents import Agent
 
-from praisonai.bots._protocol_mixin import ChatCommandMixin
+from praisonai.bots._protocol_mixin import ChatCommandMixin, MessageHookMixin
 from praisonaiagents.bots import (
     BotConfig,
     BotMessage,
@@ -30,7 +30,7 @@ from ._session import BotSessionManager
 logger = logging.getLogger(__name__)
 
 
-class DiscordBot(ChatCommandMixin):
+class DiscordBot(ChatCommandMixin, MessageHookMixin):
     """Discord bot runtime for PraisonAI agents.
     
     Connects an agent to Discord, handling messages, slash commands,
@@ -133,6 +133,8 @@ class DiscordBot(ChatCommandMixin):
             
             bot_message = self._convert_message(message)
             
+            self.fire_message_received(bot_message)
+            
             if not self.config.is_user_allowed(bot_message.sender.user_id if bot_message.sender else ""):
                 return
             if not self.config.is_channel_allowed(bot_message.channel.channel_id if bot_message.channel else ""):
@@ -180,18 +182,26 @@ class DiscordBot(ChatCommandMixin):
                 
                 if self._agent:
                     user_id = str(message.author.id)
+                    async def _send_agent_response():
+                        response = await self._session.chat(self._agent, user_id, bot_message.text)
+                        send_result = self.fire_message_sending(
+                            str(message.channel.id), str(response),
+                        )
+                        if send_result["cancel"]:
+                            return
+                        await self._send_long_message(message.channel, send_result["content"], reference=message)
+                        self.fire_message_sent(str(message.channel.id), send_result["content"])
+
                     if self.config.typing_indicator:
                         async with message.channel.typing():
                             try:
-                                response = await self._session.chat(self._agent, user_id, bot_message.text)
-                                await self._send_long_message(message.channel, response, reference=message)
+                                await _send_agent_response()
                             except Exception as e:
                                 logger.error(f"Agent error: {e}")
                                 await message.reply(f"Error: {str(e)}")
                     else:
                         try:
-                            response = await self._session.chat(self._agent, user_id, bot_message.text)
-                            await self._send_long_message(message.channel, response, reference=message)
+                            await _send_agent_response()
                         except Exception as e:
                             logger.error(f"Agent error: {e}")
                             await message.reply(f"Error: {str(e)}")

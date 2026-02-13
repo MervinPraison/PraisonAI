@@ -193,3 +193,68 @@ class OnRetryInput(HookInput):
             "operation": self.operation
         })
         return base
+
+
+@dataclass
+class MessageReceivedInput(HookInput):
+    """Input for MESSAGE_RECEIVED hooks (bot received an incoming message)."""
+    platform: str = ""
+    content: str = ""
+    sender_id: str = ""
+    channel_id: str = ""
+    channel_type: str = ""
+    message_id: str = ""
+    
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({
+            "platform": self.platform,
+            "content": self.content[:500] if self.content else "",
+            "sender_id": self.sender_id,
+            "channel_id": self.channel_id,
+            "channel_type": self.channel_type,
+            "message_id": self.message_id,
+        })
+        return base
+
+
+@dataclass
+class MessageSendingInput(HookInput):
+    """Input for MESSAGE_SENDING hooks (bot about to send a message).
+    
+    Hooks can modify content or cancel the send by returning
+    HookResult with decision=DENY.
+    """
+    platform: str = ""
+    content: str = ""
+    channel_id: str = ""
+    reply_to: Optional[str] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({
+            "platform": self.platform,
+            "content": self.content[:500] if self.content else "",
+            "channel_id": self.channel_id,
+            "reply_to": self.reply_to,
+        })
+        return base
+
+
+@dataclass
+class MessageSentInput(HookInput):
+    """Input for MESSAGE_SENT hooks (bot successfully sent a message)."""
+    platform: str = ""
+    content: str = ""
+    channel_id: str = ""
+    message_id: str = ""
+    
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({
+            "platform": self.platform,
+            "content": self.content[:500] if self.content else "",
+            "channel_id": self.channel_id,
+            "message_id": self.message_id,
+        })
+        return base

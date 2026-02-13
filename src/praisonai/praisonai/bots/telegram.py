@@ -17,7 +17,7 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 if TYPE_CHECKING:
     from praisonaiagents import Agent
 
-from praisonai.bots._protocol_mixin import ChatCommandMixin
+from praisonai.bots._protocol_mixin import ChatCommandMixin, MessageHookMixin
 from praisonaiagents.bots import (
     BotConfig,
     BotMessage,
@@ -33,7 +33,7 @@ from ._session import BotSessionManager
 logger = logging.getLogger(__name__)
 
 
-class TelegramBot(ChatCommandMixin):
+class TelegramBot(ChatCommandMixin, MessageHookMixin):
     """Telegram bot runtime for PraisonAI agents.
     
     Connects an agent to Telegram, handling messages, commands,
@@ -153,6 +153,8 @@ class TelegramBot(ChatCommandMixin):
             
             message = self._convert_update_to_message(update, override_text=message_text)
             
+            self.fire_message_received(message)
+            
             if not self.config.is_user_allowed(message.sender.user_id if message.sender else ""):
                 return
             if not self.config.is_channel_allowed(message.channel.channel_id if message.channel else ""):
@@ -174,10 +176,19 @@ class TelegramBot(ChatCommandMixin):
                 user_id = str(update.message.from_user.id) if update.message.from_user else "unknown"
                 try:
                     response = await self._session.chat(self._agent, user_id, message_text)
+                    send_result = self.fire_message_sending(
+                        str(update.message.chat_id), str(response),
+                        reply_to=str(update.message.message_id),
+                    )
+                    if send_result["cancel"]:
+                        return
                     await self._send_response_with_media(
                         update.message.chat_id,
-                        response,
+                        send_result["content"],
                         reply_to=update.message.message_id,
+                    )
+                    self.fire_message_sent(
+                        str(update.message.chat_id), send_result["content"],
                     )
                 except Exception as e:
                     logger.error(f"Agent error: {e}")
