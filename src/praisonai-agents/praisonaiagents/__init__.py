@@ -193,6 +193,10 @@ _LAZY_IMPORTS = {
     'GuardrailResult': ('praisonaiagents.guardrails', 'GuardrailResult'),
     'LLMGuardrail': ('praisonaiagents.guardrails', 'LLMGuardrail'),
     
+    # Approval (agent-centric approval backends)
+    'AutoApproveBackend': ('praisonaiagents.approval.backends', 'AutoApproveBackend'),
+    'ConsoleBackend': ('praisonaiagents.approval.backends', 'ConsoleBackend'),
+    
     # Flow display
     'FlowDisplay': ('praisonaiagents.flow_display', 'FlowDisplay'),
     'track_workflow': ('praisonaiagents.flow_display', 'track_workflow'),
@@ -416,6 +420,8 @@ _LAZY_IMPORTS = {
     'BotChannel': ('praisonaiagents.bots.protocols', 'BotChannel'),
     'MessageType': ('praisonaiagents.bots.protocols', 'MessageType'),
     'BotConfig': ('praisonaiagents.bots.config', 'BotConfig'),
+    'BotOSProtocol': ('praisonaiagents.bots.protocols', 'BotOSProtocol'),
+    'BotOSConfig': ('praisonaiagents.bots.config', 'BotOSConfig'),
     
     # Sandbox protocols and config (implementations in praisonai wrapper)
     'SandboxProtocol': ('praisonaiagents.sandbox.protocols', 'SandboxProtocol'),
@@ -645,6 +651,9 @@ __all__ = [
     # Tool essentials
     'tool',
     'Tools',
+    
+    # Approval (agent-centric approval backends)
+    'AutoApproveBackend',
     
     # Embedding API - simplified imports
     # Usage: from praisonaiagents import embedding, EmbeddingResult

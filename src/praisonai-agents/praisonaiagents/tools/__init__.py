@@ -149,6 +149,12 @@ TOOL_MAPPINGS = {
     'create_skill_tools': ('.skill_tools', None),
     'SkillTools': ('.skill_tools', 'SkillTools'),
     'skill_tools': ('.skill_tools', None),
+    
+    # Schedule Tools (agent-centric scheduling)
+    'schedule_add': ('.schedule_tools', None),
+    'schedule_list': ('.schedule_tools', None),
+    'schedule_remove': ('.schedule_tools', None),
+    'schedule_tools': ('.schedule_tools', None),
 }
 
 _instances = {}  # Cache for class instances
@@ -181,10 +187,11 @@ def __getattr__(name: str) -> Any:
             'crawl4ai_sync', 'crawl4ai_extract_sync',
             'search_web', 'web_search', 'get_available_providers',
             'web_crawl', 'crawl_web', 'get_available_crawl_providers',
-            'run_skill_script', 'read_skill_file', 'list_skill_scripts', 'create_skill_tools'
+            'run_skill_script', 'read_skill_file', 'list_skill_scripts', 'create_skill_tools',
+            'schedule_add', 'schedule_list', 'schedule_remove'
         ]:
             return getattr(module, name)
-        if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools']:
+        if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools', 'schedule_tools']:
             return module  # Returns the callable module
         return getattr(module, name)
     else:

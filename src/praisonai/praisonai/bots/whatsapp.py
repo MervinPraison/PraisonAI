@@ -86,6 +86,9 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
         webhook_path: str = "/webhook",
         mode: str = "cloud",
         creds_dir: Optional[str] = None,
+        allowed_numbers: Optional[List[str]] = None,
+        allowed_groups: Optional[List[str]] = None,
+        respond_to_all: bool = False,
     ):
         # Mode: "cloud" (default, Meta Cloud API) or "web" (neonize, experimental)
         self._mode = mode.lower().strip()
@@ -101,6 +104,23 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
         self._webhook_port = webhook_port
         self._webhook_path = webhook_path
         self._creds_dir = creds_dir
+
+        # Message filtering (Web mode).
+        # Default: respond only to self-messages (IsFromMe).
+        # --respond-to-all opens to everyone.
+        # --respond-to / --respond-to-groups whitelist specific senders.
+        self._respond_to_all = respond_to_all
+        self._allowed_numbers: set[str] = set()
+        self._allowed_groups: set[str] = set()
+        if allowed_numbers:
+            for n in allowed_numbers:
+                # Normalise: strip +, keep digits only
+                digits = "".join(c for c in n if c.isdigit())
+                if digits:
+                    self._allowed_numbers.add(digits)
+        if allowed_groups:
+            for g in allowed_groups:
+                self._allowed_groups.add(g.strip())
 
         self._is_running = False
         self._started_at: Optional[float] = None
@@ -248,12 +268,41 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
                 if not info or not msg:
                     return
 
-                sender_jid = str(getattr(info, 'Sender', '') or getattr(info, 'sender', ''))
-                chat_jid = str(getattr(info, 'Chat', '') or getattr(info, 'chat', ''))
+                # Extract message source fields
+                msg_source = getattr(info, 'MessageSource', None) or info
+                sender_jid = str(getattr(msg_source, 'Sender', '') or getattr(info, 'sender', ''))
+                # Keep the original neonize JID protobuf for Chat — this
+                # preserves LID routing info needed by send_message.
+                chat_jid_obj = getattr(msg_source, 'Chat', None) or getattr(info, 'chat', None)
+                chat_jid = str(chat_jid_obj) if chat_jid_obj else ''
                 msg_id = str(getattr(info, 'ID', '') or getattr(info, 'id', ''))
                 timestamp = getattr(info, 'Timestamp', None) or time.time()
                 if hasattr(timestamp, 'timestamp'):
                     timestamp = timestamp.timestamp()
+
+                # ── Message filtering ────────────────────────────────
+                # Default: self-only. Expand via allowed_numbers / groups.
+                is_from_me = bool(getattr(msg_source, 'IsFromMe', False))
+                is_group = bool(getattr(msg_source, 'IsGroup', False)) or "@g.us" in chat_jid
+
+                if not self._respond_to_all:
+                    if is_from_me:
+                        pass  # always allow self-messages
+                    elif is_group and self._allowed_groups:
+                        # Check if group JID is in the allowlist
+                        chat_jid_str = chat_jid.split("@")[0] if "@" in chat_jid else chat_jid
+                        if not (chat_jid in self._allowed_groups
+                                or chat_jid_str in self._allowed_groups):
+                            return
+                    elif not is_group and self._allowed_numbers:
+                        # Check if sender number is in the allowlist
+                        sender_num = sender_jid.split("@")[0].split(":")[0] if sender_jid else ""
+                        if sender_num not in self._allowed_numbers:
+                            return
+                    else:
+                        # Not self, not in any allowlist → ignore
+                        if not is_from_me:
+                            return
 
                 # Extract text content
                 content = ""
@@ -312,7 +361,7 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
                         try:
                             response = await cmd_handler(bot_message)
                             if response:
-                                await self._web_send(chat_jid, response)
+                                await self._web_send(chat_jid_obj or chat_jid, response)
                         except Exception as e:
                             logger.error(f"Command '{cmd_name}' error: {e}")
                             await self._web_send(chat_jid, f"Error: {e}")
@@ -327,7 +376,7 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
                         if response:
                             send_result = self.fire_message_sending(chat_jid, str(response))
                             if not send_result["cancel"]:
-                                await self._web_send(chat_jid, send_result["content"])
+                                await self._web_send(chat_jid_obj or chat_jid, send_result["content"])
                                 self.fire_message_sent(chat_jid, send_result["content"])
                     except Exception as e:
                         logger.error(f"Agent chat error: {e}")
@@ -373,8 +422,14 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
         finally:
             await self.stop()
 
-    async def _web_send(self, to: str, text: str) -> None:
-        """Send message via Web mode adapter."""
+    async def _web_send(self, to: Any, text: str) -> None:
+        """Send message via Web mode adapter.
+
+        Args:
+            to: Recipient — a native neonize JID protobuf (preferred) or
+                a JID string as fallback.
+            text: Message text.
+        """
         if self._web_adapter and self._web_adapter.is_connected:
             await self._web_adapter.send_message(to, text)
 

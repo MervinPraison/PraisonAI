@@ -1,13 +1,26 @@
 """
-Bot Protocols for PraisonAI Agents.
+Bot Protocols and Configuration for PraisonAI Agents.
 
-Provides protocols and base classes for building messaging bot implementations
-(Telegram, Discord, Slack, etc.) that connect agents to messaging platforms.
-
-This module contains only protocols and lightweight utilities.
-Heavy implementations live in the praisonai wrapper package.
+Defines the interfaces and configuration for messaging bot implementations.
+All implementations live in the praisonai wrapper package.
 """
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .protocols import (
+        BotOSProtocol,  # noqa: F401
+        BotProtocol,
+        BotMessageProtocol,
+        BotUserProtocol,
+        BotChannelProtocol,
+        BotMessage,
+        BotUser,
+        BotChannel,
+        MessageType,
+        ChatCommandInfo,
+        ChatCommandProtocol,
+    )
 from .protocols import (
     BotProtocol,
     BotMessageProtocol,
@@ -19,8 +32,9 @@ from .protocols import (
     MessageType,
     ChatCommandInfo,
     ChatCommandProtocol,
+    BotOSProtocol,
 )
-from .config import BotConfig
+from .config import BotConfig, BotOSConfig
 
 __all__ = [
     "BotProtocol",
@@ -34,4 +48,6 @@ __all__ = [
     "MessageType",
     "ChatCommandInfo",
     "ChatCommandProtocol",
+    "BotOSProtocol",
+    "BotOSConfig",
 ]

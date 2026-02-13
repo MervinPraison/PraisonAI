@@ -34,6 +34,7 @@ class TestBotCapabilities:
         assert caps.sandbox is False
         assert caps.exec_enabled is False
         assert caps.model is None
+        assert caps.auto_approve is False
     
     def test_bot_capabilities_custom_values(self):
         """Test custom values for BotCapabilities."""
@@ -144,8 +145,7 @@ class TestBotHandler:
         assert "Capabilities:" in captured.out
         assert "browser" in captured.out
         assert "memory" in captured.out
-
-
+    
 class TestHandleBotCommand:
     """Tests for handle_bot_command function."""
     
@@ -279,3 +279,4 @@ class TestAddCapabilityArgs:
         assert args.web_search is True
         assert args.model == "gpt-4o"
         assert args.tools == ["DuckDuckGoTool", "WikipediaTool"]
+    

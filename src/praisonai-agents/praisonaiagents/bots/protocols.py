@@ -522,3 +522,77 @@ class ChatCommandProtocol(Protocol):
             List of ChatCommandInfo for all registered commands
         """
         ...
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# BotOS Protocol — multi-platform bot orchestration
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+@runtime_checkable
+class BotOSProtocol(Protocol):
+    """Protocol for BotOS — multi-platform bot orchestrator.
+
+    BotOS manages multiple Bot instances across different messaging
+    platforms (Telegram, Discord, Slack, WhatsApp, etc.) with a single
+    unified lifecycle.
+
+    Hierarchy::
+
+        BotOS  (multi-platform orchestrator)
+        └── Bot  (single platform)
+            └── Agent / AgentTeam / AgentFlow  (AI brain)
+
+    Implementations live in the ``praisonai`` wrapper package.
+    """
+
+    @property
+    def is_running(self) -> bool:
+        """Whether the orchestrator is currently running."""
+        ...
+
+    async def start(self) -> None:
+        """Start all registered bots concurrently."""
+        ...
+
+    async def stop(self) -> None:
+        """Gracefully stop all running bots."""
+        ...
+
+    def add_bot(self, bot: Any) -> None:
+        """Register a Bot instance for orchestration.
+
+        Args:
+            bot: A Bot instance (satisfies BotProtocol).
+        """
+        ...
+
+    def list_bots(self) -> List[str]:
+        """List platform names of all registered bots.
+
+        Returns:
+            List of platform name strings.
+        """
+        ...
+
+    def remove_bot(self, platform: str) -> bool:
+        """Remove a registered bot by platform name.
+
+        Args:
+            platform: Platform identifier to remove.
+
+        Returns:
+            True if removed, False if not found.
+        """
+        ...
+
+    def get_bot(self, platform: str) -> Optional[Any]:
+        """Get a registered bot by platform name.
+
+        Args:
+            platform: Platform identifier (e.g. "telegram").
+
+        Returns:
+            The Bot instance, or None if not found.
+        """
+        ...

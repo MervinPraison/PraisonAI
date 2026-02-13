@@ -437,6 +437,7 @@ class Agent:
         caching: Optional[Union[bool, Any]] = None,  # Union[bool, CachingConfig]
         hooks: Optional[Union[List[Any], Any]] = None,  # Union[list, HooksConfig]
         skills: Optional[Union[List[str], Any]] = None,  # Union[list, SkillsConfig]
+        approval: Optional[Union[bool, Any]] = None,  # Union[bool, ApprovalProtocol backend]
     ):
         """Initialize an Agent instance.
 
@@ -1356,6 +1357,16 @@ Your Goal: {self.goal}
         self.max_guardrail_retries = max_guardrail_retries
         self._guardrail_fn = None
         self._setup_guardrail()
+        
+        # Initialize approval backend (agent-centric approval)
+        # True = AutoApproveBackend, False/None = registry fallback, object = custom backend
+        if approval is True:
+            from ..approval.backends import AutoApproveBackend
+            self._approval_backend = AutoApproveBackend()
+        elif approval is False or approval is None:
+            self._approval_backend = None
+        else:
+            self._approval_backend = approval
         
         # Cache for system prompts and formatted tools with lazy thread-safe lock
         self._system_prompt_cache = {}
@@ -4041,39 +4052,46 @@ Your Goal: {self.goal}"""
     def _execute_tool_impl(self, function_name, arguments):
         """Internal tool execution implementation."""
 
-        # Check if approval is required for this tool
-        from ..approval import is_approval_required, console_approval_callback, get_risk_level, mark_approved, get_approval_callback, is_env_auto_approve, is_yaml_approved
-        if is_approval_required(function_name):
-            # Skip approval if auto-approve env var is set or tool is YAML-approved
-            if is_env_auto_approve() or is_yaml_approved(function_name):
-                logging.debug(f"Tool {function_name} auto-approved (env={is_env_auto_approve()}, yaml={is_yaml_approved(function_name)})")
-                mark_approved(function_name)
+        # Check if approval is required for this tool (protocol-driven)
+        # Priority: self._approval_backend (agent param) > registry (global/per-agent)
+        from ..approval import get_approval_registry
+        try:
+            backend = getattr(self, '_approval_backend', None)
+            if backend is not None:
+                # Agent-level approval backend — bypass registry, call directly
+                from ..approval.protocols import ApprovalRequest
+                from ..approval.registry import DEFAULT_DANGEROUS_TOOLS
+                if function_name in DEFAULT_DANGEROUS_TOOLS:
+                    request = ApprovalRequest(
+                        tool_name=function_name,
+                        arguments=arguments,
+                        risk_level=DEFAULT_DANGEROUS_TOOLS.get(function_name, "medium"),
+                        agent_name=getattr(self, 'name', None),
+                    )
+                    if hasattr(backend, 'request_approval_sync'):
+                        decision = backend.request_approval_sync(request)
+                    else:
+                        import asyncio
+                        decision = asyncio.run(backend.request_approval(request))
+                else:
+                    from ..approval.protocols import ApprovalDecision
+                    decision = ApprovalDecision(approved=True, reason="No approval required")
             else:
-                risk_level = get_risk_level(function_name)
-                logging.debug(f"Tool {function_name} requires approval (risk level: {risk_level})")
-                
-                # Use global approval callback or default console callback
-                callback = get_approval_callback() or console_approval_callback
-                
-                try:
-                    decision = callback(function_name, arguments, risk_level)
-                    if not decision.approved:
-                        error_msg = f"Tool execution denied: {decision.reason}"
-                        logging.warning(error_msg)
-                        return {"error": error_msg, "approval_denied": True}
-                    
-                    # Mark as approved in context to prevent double approval in decorator
-                    mark_approved(function_name)
-                    
-                    # Use modified arguments if provided
-                    if decision.modified_args:
-                        arguments = decision.modified_args
-                        logging.info(f"Using modified arguments: {arguments}")
-                        
-                except Exception as e:
-                    error_msg = f"Error during approval process: {str(e)}"
-                    logging.error(error_msg)
-                    return {"error": error_msg, "approval_error": True}
+                # Fallback to global registry
+                decision = get_approval_registry().approve_sync(
+                    getattr(self, 'name', None), function_name, arguments,
+                )
+            if not decision.approved:
+                error_msg = f"Tool execution denied: {decision.reason}"
+                logging.warning(error_msg)
+                return {"error": error_msg, "approval_denied": True}
+            if decision.modified_args:
+                arguments = decision.modified_args
+                logging.info(f"Using modified arguments: {arguments}")
+        except Exception as e:
+            error_msg = f"Error during approval process: {str(e)}"
+            logging.error(error_msg)
+            return {"error": error_msg, "approval_error": True}
 
         # Special handling for MCP tools
         # Check if tools is an MCP instance with the requested function name
@@ -6765,24 +6783,40 @@ Write the complete compiled report:"""
         try:
             logging.info(f"Executing async tool: {function_name} with arguments: {arguments}")
             
-            # Check if approval is required for this tool
-            from ..approval import is_approval_required, request_approval, is_env_auto_approve, is_yaml_approved, mark_approved
-            if is_approval_required(function_name):
-                # Skip approval if auto-approve env var is set or tool is YAML-approved
-                if is_env_auto_approve() or is_yaml_approved(function_name):
-                    logging.debug(f"Tool {function_name} auto-approved (env={is_env_auto_approve()}, yaml={is_yaml_approved(function_name)})")
-                    mark_approved(function_name)
+            # Check if approval is required for this tool (protocol-driven)
+            # Priority: self._approval_backend (agent param) > registry (global/per-agent)
+            from ..approval import get_approval_registry
+            try:
+                backend = getattr(self, '_approval_backend', None)
+                if backend is not None:
+                    from ..approval.protocols import ApprovalRequest
+                    from ..approval.registry import DEFAULT_DANGEROUS_TOOLS
+                    if function_name in DEFAULT_DANGEROUS_TOOLS:
+                        request = ApprovalRequest(
+                            tool_name=function_name,
+                            arguments=arguments,
+                            risk_level=DEFAULT_DANGEROUS_TOOLS.get(function_name, "medium"),
+                            agent_name=getattr(self, 'name', None),
+                        )
+                        decision = await backend.request_approval(request)
+                    else:
+                        from ..approval.protocols import ApprovalDecision
+                        decision = ApprovalDecision(approved=True, reason="No approval required")
                 else:
-                    decision = await request_approval(function_name, arguments)
-                    if not decision.approved:
-                        error_msg = f"Tool execution denied: {decision.reason}"
-                        logging.warning(error_msg)
-                        return {"error": error_msg, "approval_denied": True}
-                    
-                    # Use modified arguments if provided
-                    if decision.modified_args:
-                        arguments = decision.modified_args
-                        logging.info(f"Using modified arguments: {arguments}")
+                    decision = await get_approval_registry().approve_async(
+                        getattr(self, 'name', None), function_name, arguments,
+                    )
+                if not decision.approved:
+                    error_msg = f"Tool execution denied: {decision.reason}"
+                    logging.warning(error_msg)
+                    return {"error": error_msg, "approval_denied": True}
+                if decision.modified_args:
+                    arguments = decision.modified_args
+                    logging.info(f"Using modified arguments: {arguments}")
+            except Exception as e:
+                error_msg = f"Error during approval process: {str(e)}"
+                logging.error(error_msg)
+                return {"error": error_msg, "approval_error": True}
             
             # Try to find the function in the agent's tools list first
             func = None

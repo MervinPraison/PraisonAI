@@ -57,7 +57,7 @@ class BotCapabilities:
     # Execution
     sandbox: bool = False
     exec_enabled: bool = False
-    auto_approve: bool = False  # Auto-approve CLI tool execution
+    auto_approve: bool = False
     
     # Model settings
     model: Optional[str] = None
@@ -244,6 +244,20 @@ class BotHandler:
             webhook_port = config.get("webhook_port", 8080)
             wa_mode = config.get("mode", "cloud")
             wa_creds_dir = config.get("creds_dir")
+            # Message filtering from YAML config
+            wa_respond_to = config.get("respond_to")
+            wa_respond_to_groups = config.get("respond_to_groups")
+            wa_respond_to_all = config.get("respond_to_all", False)
+            wa_allowed_numbers = None
+            wa_allowed_groups = None
+            if isinstance(wa_respond_to, list):
+                wa_allowed_numbers = wa_respond_to
+            elif isinstance(wa_respond_to, str) and wa_respond_to:
+                wa_allowed_numbers = [n.strip() for n in wa_respond_to.split(",") if n.strip()]
+            if isinstance(wa_respond_to_groups, list):
+                wa_allowed_groups = wa_respond_to_groups
+            elif isinstance(wa_respond_to_groups, str) and wa_respond_to_groups:
+                wa_allowed_groups = [g.strip() for g in wa_respond_to_groups.split(",") if g.strip()]
             self.start_whatsapp(
                 token=token or None,
                 phone_number_id=phone_number_id or None,
@@ -254,6 +268,9 @@ class BotHandler:
                 agent_config_dict=agent_config,
                 mode=wa_mode,
                 creds_dir=wa_creds_dir,
+                allowed_numbers=wa_allowed_numbers,
+                allowed_groups=wa_allowed_groups,
+                respond_to_all=bool(wa_respond_to_all),
             )
     
     def start_telegram(
@@ -405,6 +422,9 @@ class BotHandler:
         agent_config_dict: Optional[Dict[str, Any]] = None,
         mode: str = "cloud",
         creds_dir: Optional[str] = None,
+        allowed_numbers: Optional[List[str]] = None,
+        allowed_groups: Optional[List[str]] = None,
+        respond_to_all: bool = False,
     ) -> None:
         """Start a WhatsApp bot.
         
@@ -418,6 +438,9 @@ class BotHandler:
             agent_config_dict: Optional agent config dict from bot YAML
             mode: Connection mode — 'cloud' (default) or 'web' (experimental)
             creds_dir: Credentials directory for Web mode
+            allowed_numbers: Phone numbers the bot may respond to (besides self)
+            allowed_groups: Group JIDs the bot may respond in
+            respond_to_all: If True, respond to every message (no filtering)
         """
         self._load_dotenv()
         mode = (mode or "cloud").lower().strip()
@@ -468,10 +491,24 @@ class BotHandler:
             webhook_port=webhook_port,
             mode=mode,
             creds_dir=creds_dir,
+            allowed_numbers=allowed_numbers,
+            allowed_groups=allowed_groups,
+            respond_to_all=respond_to_all,
         )
         
         if mode == "web":
             self._print_startup_info("WhatsApp (Web mode)", capabilities)
+            if respond_to_all:
+                print("Filtering: responding to ALL messages")
+            elif allowed_numbers or allowed_groups:
+                parts = []
+                if allowed_numbers:
+                    parts.append(f"numbers: {', '.join(allowed_numbers)}")
+                if allowed_groups:
+                    parts.append(f"groups: {', '.join(allowed_groups)}")
+                print(f"Filtering: self + {' + '.join(parts)}")
+            else:
+                print("Filtering: self-only (message yourself to interact)")
         else:
             self._print_startup_info("WhatsApp", capabilities)
             print(f"Webhook server on port {webhook_port}")
@@ -480,7 +517,10 @@ class BotHandler:
             asyncio.run(bot.start())
         except KeyboardInterrupt:
             print("\nStopping bot...")
-            asyncio.run(bot.stop())
+            try:
+                asyncio.run(bot.stop())
+            except Exception:
+                pass  # neonize Go threads may already be gone
 
     def _get_agent_kwargs(self, capabilities: Optional[BotCapabilities]) -> Dict[str, Any]:
         """Extract Agent constructor kwargs from BotCapabilities (DRY).
@@ -683,7 +723,7 @@ class BotHandler:
             os.environ["WEB_SEARCH_PROVIDER"] = capabilities.web_search_provider
             logger.info(f"Web search provider set to: {capabilities.web_search_provider}")
         
-        # Default tools: execute_command and search_web (always enabled)
+        # Default tools: execute_command, search_web, schedule tools (always enabled)
         try:
             from praisonaiagents.tools import execute_command, search_web
             tools.append(execute_command)
@@ -691,6 +731,13 @@ class BotHandler:
             logger.info("Default tools enabled: execute_command, search_web")
         except ImportError:
             logger.warning("Default tools not available from praisonaiagents.tools")
+        
+        try:
+            from praisonaiagents.tools import schedule_add, schedule_list, schedule_remove
+            tools.extend([schedule_add, schedule_list, schedule_remove])
+            logger.info("Default schedule tools enabled: schedule_add, schedule_list, schedule_remove")
+        except ImportError:
+            logger.warning("Schedule tools not available from praisonaiagents.tools")
         
         # Browser tool
         if capabilities.browser:
@@ -950,6 +997,11 @@ Examples:
         )
         return 0
     elif platform == "whatsapp":
+        # Parse respond-to flags
+        respond_to_raw = getattr(args, "respond_to", None)
+        respond_to_groups_raw = getattr(args, "respond_to_groups", None)
+        allowed_numbers = [n.strip() for n in respond_to_raw.split(",") if n.strip()] if respond_to_raw else None
+        allowed_groups = [g.strip() for g in respond_to_groups_raw.split(",") if g.strip()] if respond_to_groups_raw else None
         handler.start_whatsapp(
             token=getattr(args, "token", None),
             phone_number_id=getattr(args, "phone_id", None),
@@ -957,6 +1009,9 @@ Examples:
             webhook_port=getattr(args, "port", 8080),
             agent_file=getattr(args, "agent", None),
             capabilities=capabilities,
+            allowed_numbers=allowed_numbers,
+            allowed_groups=allowed_groups,
+            respond_to_all=getattr(args, "respond_to_all", False),
         )
         return 0
     else:
@@ -1055,6 +1110,23 @@ def add_bot_parser(subparsers) -> None:
         type=int,
         default=8080,
         help="Webhook server port (default: 8080)",
+    )
+    # WhatsApp message filtering
+    whatsapp_parser.add_argument(
+        "--respond-to",
+        dest="respond_to",
+        help="Comma-separated phone numbers the bot responds to (besides self)",
+    )
+    whatsapp_parser.add_argument(
+        "--respond-to-groups",
+        dest="respond_to_groups",
+        help="Comma-separated group JIDs the bot responds in",
+    )
+    whatsapp_parser.add_argument(
+        "--respond-to-all",
+        dest="respond_to_all",
+        action="store_true",
+        help="Respond to ALL messages (default: self-only)",
     )
     _add_capability_args(whatsapp_parser)
     

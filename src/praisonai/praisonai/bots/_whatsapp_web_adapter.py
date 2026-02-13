@@ -104,6 +104,27 @@ class WhatsAppWebAdapter:
 
         logger.info(f"WhatsApp Web: connecting (creds: {db_path})")
 
+        # ── Suppress noisy Go-backend warnings ─────────────────────
+        # whatsmeow emits non-actionable warnings (websocket EOF on
+        # close, LTHash mismatches during state sync, duplicate
+        # contacts, missing MAC values). These are protocol-level
+        # quirks, not bugs in our code — suppress to reduce noise.
+        _known_noise = (
+            "failed to close WebSocket",
+            "duplicate contacts found",
+            "mismatching LTHash",
+            "missing value MAC",
+        )
+
+        class _WhatsmeowNoiseFilter(logging.Filter):
+            def filter(self, record: logging.LogRecord) -> bool:
+                msg = record.getMessage()
+                return not any(pat in msg for pat in _known_noise)
+
+        for _logger_name in ("whatsmeow.Client", "whatsmeow.Database", "whatsmeow"):
+            _wm_logger = logging.getLogger(_logger_name)
+            _wm_logger.addFilter(_WhatsmeowNoiseFilter())
+
         # ── Critical: bridge neonize's event loop to ours ──────────
         # neonize creates event_global_loop = asyncio.new_event_loop()
         # at import time but NEVER starts it. Go-thread callbacks
@@ -174,11 +195,13 @@ class WhatsAppWebAdapter:
         if self._on_disconnected:
             await self._safe_callback(self._on_disconnected)
 
-    async def send_message(self, to: str, text: str) -> Optional[str]:
+    async def send_message(self, to: Any, text: str) -> Optional[str]:
         """Send a text message via WhatsApp Web.
 
         Args:
-            to: Recipient JID or phone number (e.g., "1234567890@s.whatsapp.net")
+            to: Recipient — a native neonize JID protobuf object (preferred,
+                preserves LID routing info) OR a JID string / phone number
+                (e.g., "1234567890@s.whatsapp.net") as fallback.
             text: Message text
 
         Returns:
@@ -189,15 +212,16 @@ class WhatsAppWebAdapter:
             return None
 
         try:
-            # Normalize phone number to JID string
-            jid_str = self._normalize_jid(to)
-
-            from neonize.utils import build_jid
-            # build_jid expects (phone_number, server) — split JID string
-            parts = jid_str.split("@", 1)
-            user = parts[0]
-            server = parts[1] if len(parts) > 1 else "s.whatsapp.net"
-            target_jid = build_jid(user, server)
+            # If *to* is already a neonize JID protobuf, use it directly.
+            # This preserves LID routing info and avoids "no LID found" errors.
+            target_jid = to
+            if isinstance(to, str):
+                jid_str = self._normalize_jid(to)
+                from neonize.utils import build_jid
+                parts = jid_str.split("@", 1)
+                user = parts[0]
+                server = parts[1] if len(parts) > 1 else "s.whatsapp.net"
+                target_jid = build_jid(user, server)
 
             resp = await self._client.send_message(target_jid, text)
             msg_id = getattr(resp, 'ID', None) or str(resp)

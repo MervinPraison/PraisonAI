@@ -305,6 +305,14 @@ class AsyncTUI:
         except ImportError as e:
             logger.debug(f"internet_search import failed: {e}")
         
+        # Try to add schedule tools (default for all agents)
+        try:
+            from praisonaiagents.tools import schedule_add, schedule_list, schedule_remove
+            tools.extend([schedule_add, schedule_list, schedule_remove])
+            logger.debug("Added schedule tools: schedule_add, schedule_list, schedule_remove")
+        except ImportError as e:
+            logger.debug(f"Schedule tools import failed: {e}")
+        
         logger.debug(f"Final tools loaded: {len(tools)}")
         return tools
     

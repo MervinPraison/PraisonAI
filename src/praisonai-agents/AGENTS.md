@@ -111,6 +111,7 @@ Easy and user friendly
 | `bus/` | 48K | Event bus |
 | `streaming/` | 56K | Streaming events, callbacks |
 | `trace/` | 152K | Trace protocols, context events |
+| `scheduler/` | 48K | Schedule models, store, parser, runner |
 
 ### 3.2 Protocol-First Design
 
@@ -406,7 +407,37 @@ class MyMemoryAdapter:  # Implements MemoryProtocol
         ...
 ```
 
-### 6.4 Database Adapters
+### 6.4 Schedule Tools
+
+Agent-centric scheduling via standalone `@tool` functions (no Agent class bloat):
+
+```python
+from praisonaiagents import Agent
+from praisonaiagents.tools import schedule_add, schedule_list, schedule_remove
+
+agent = Agent(
+    name="assistant",
+    tools=[schedule_add, schedule_list, schedule_remove],
+)
+```
+
+**Schedule expression formats:**
+- Keywords: `"hourly"`, `"daily"`, `"weekly"`
+- Intervals: `"*/30m"`, `"*/6h"`, `"*/10s"`
+- Cron: `"cron:0 7 * * *"` (requires optional `croniter`)
+- One-shot: `"at:2026-03-01T09:00:00"`
+- Relative: `"in 20 minutes"`
+
+**Core components:**
+- `scheduler/models.py` — `Schedule` and `ScheduleJob` dataclasses
+- `scheduler/store.py` — `FileScheduleStore` (thread-safe JSON persistence at `~/.praisonai/schedules/jobs.json`)
+- `scheduler/parser.py` — `parse_schedule()` for human-friendly expressions
+- `scheduler/runner.py` — `ScheduleRunner` (stateless due-job checker)
+- `tools/schedule_tools.py` — `schedule_add`, `schedule_list`, `schedule_remove`
+
+**Hook events:** `SCHEDULE_ADD`, `SCHEDULE_REMOVE`, `SCHEDULE_TRIGGER` (in `hooks/types.py`)
+
+### 6.5 Database Adapters
 
 ```python
 # Base files in praisonaiagents/db/
@@ -602,10 +633,153 @@ from praisonaiagents import Workflow, Route, Parallel, Loop
 | Event bus | `praisonaiagents/bus/bus.py` |
 | Workflow engine | `praisonaiagents/workflows/workflows.py` |
 | Policy engine | `praisonaiagents/policy/engine.py` |
+| Scheduler module | `praisonaiagents/scheduler/` |
+| Schedule tools | `praisonaiagents/tools/schedule_tools.py` |
 
 ---
 
-## 12. Design Goals
+## 12. BotOS — Multi-Platform Bot Orchestration
+
+### 12.1 Architecture
+
+BotOS is the multi-platform bot orchestration layer for PraisonAI. It follows the same protocol-driven, agent-centric philosophy as the rest of the SDK.
+
+```
+┌──────────────────────────────────────────────────┐
+│                    BotOS                          │
+│   Multi-platform orchestrator (runs all bots)    │
+├──────────┬──────────┬──────────┬─────────────────┤
+│ Bot      │ Bot      │ Bot      │ Bot             │
+│ telegram │ discord  │ slack    │ custom_platform │
+├──────────┴──────────┴──────────┴─────────────────┤
+│       Agent / AgentTeam / AgentFlow              │
+│              (AI brain)                           │
+└──────────────────────────────────────────────────┘
+```
+
+### 12.2 Layer Separation
+
+| Layer | Package | Purpose |
+|-------|---------|---------|
+| `BotOSProtocol` | `praisonaiagents` (Core SDK) | Interface contract — lightweight |
+| `BotOSConfig` | `praisonaiagents` (Core SDK) | Configuration dataclass |
+| `Bot` | `praisonai` (Wrapper) | Single-platform bot wrapper |
+| `BotOS` | `praisonai` (Wrapper) | Multi-platform orchestrator |
+| `_registry` | `praisonai` (Wrapper) | Platform adapter registry |
+
+### 12.3 Usage Patterns
+
+```python
+# === Level 1: Single bot, 3 lines ===
+from praisonai.bots import Bot
+from praisonaiagents import Agent
+
+bot = Bot("telegram", agent=Agent(name="assistant", instructions="Be helpful"))
+bot.run()
+
+# === Level 2: Multi-platform, shared agent ===
+from praisonai.bots import BotOS
+from praisonaiagents import Agent
+
+agent = Agent(name="assistant", instructions="Be helpful")
+botos = BotOS(agent=agent, platforms=["telegram", "discord"])
+botos.run()
+
+# === Level 3: AgentTeam in BotOS ===
+from praisonai.bots import BotOS, Bot
+from praisonaiagents import Agent, AgentTeam, Task
+
+researcher = Agent(name="researcher", instructions="Research topics")
+writer = Agent(name="writer", instructions="Write content")
+t1 = Task(name="research", description="Research AI", agent=researcher)
+t2 = Task(name="write", description="Write about AI", agent=writer)
+team = AgentTeam(agents=[researcher, writer], tasks=[t1, t2])
+
+botos = BotOS(bots=[Bot("telegram", agent=team)])
+botos.run()
+
+# === Level 4: YAML config ===
+botos = BotOS.from_config("botos.yaml")
+botos.run()
+
+# === Level 5: Custom platform extension ===
+from praisonai.bots._registry import register_platform
+
+class MyCustomBot:
+    def __init__(self, **kwargs): ...
+    async def start(self): ...
+    async def stop(self): ...
+
+register_platform("mychat", MyCustomBot)
+bot = Bot("mychat", agent=agent, token="my-token")
+bot.run()
+```
+
+### 12.4 Token Resolution
+
+Tokens are resolved in order: `explicit token=` > env var > empty string.
+
+| Platform | Env Var |
+|----------|---------|
+| Telegram | `TELEGRAM_BOT_TOKEN` |
+| Discord | `DISCORD_BOT_TOKEN` |
+| Slack | `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN` |
+| WhatsApp | `WHATSAPP_ACCESS_TOKEN` + `WHATSAPP_PHONE_NUMBER_ID` |
+| Custom | `{PLATFORM}_BOT_TOKEN` |
+
+### 12.5 File Locations
+
+| What | Where |
+|------|-------|
+| BotOSProtocol | `praisonaiagents/bots/protocols.py` |
+| BotOSConfig | `praisonaiagents/bots/config.py` |
+| Bot class | `praisonai/bots/bot.py` |
+| BotOS class | `praisonai/bots/botos.py` |
+| Platform registry | `praisonai/bots/_registry.py` |
+| Unit tests | `tests/unit/test_botos_protocol.py` |
+| Integration tests | `tests/unit/test_botos_integration.py` |
+
+### 12.6 Extending Platforms
+
+Third-party platforms can be registered at runtime:
+
+```python
+from praisonai.bots._registry import register_platform, list_platforms
+
+# Register
+register_platform("line", LineBot)
+register_platform("viber", ViberBot)
+
+# Verify
+print(list_platforms())  # [..., "line", "viber", ...]
+
+# Use
+bot = Bot("line", agent=agent, token="my-line-token")
+```
+
+**Adapter contract**: Custom adapters must implement `async start()` and `async stop()`. Optional: `send_message()`, `on_message()`, `on_command()`, `is_running` property.
+
+### 12.7 YAML Config Format
+
+```yaml
+# botos.yaml
+agent:
+  name: assistant
+  instructions: You are a helpful assistant.
+  llm: gpt-4o-mini
+platforms:
+  telegram:
+    token: ${TELEGRAM_BOT_TOKEN}
+  discord:
+    token: ${DISCORD_BOT_TOKEN}
+  slack:
+    token: ${SLACK_BOT_TOKEN}
+    app_token: ${SLACK_APP_TOKEN}
+```
+
+---
+
+## 13. Design Goals
 
 > Make PraisonAI the **best agent framework in the world**
 

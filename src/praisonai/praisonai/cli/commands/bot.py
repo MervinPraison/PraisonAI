@@ -365,6 +365,7 @@ Start a bot on any platform with: praisonai bot <platform>
   [yellow]--knowledge[/yellow]           Enable knowledge/RAG
   [yellow]--tools TOOL...[/yellow]       Enable specific tools
   [yellow]--sandbox[/yellow]             Enable sandbox mode
+  [yellow]--auto-approve[/yellow]        Auto-approve all tool executions
   [yellow]--tts[/yellow]                 Enable TTS tool
   [yellow]--stt[/yellow]                 Enable STT tool
   [yellow]--auto-tts[/yellow]            Auto-convert responses to speech

@@ -44,7 +44,7 @@ class BotConfig:
     thread_threshold: int = 500  # Auto-thread responses longer than this (0 = disabled)
     
     # Default tools enabled for all bots
-    default_tools: List[str] = field(default_factory=lambda: ["execute_command", "search_web"])
+    default_tools: List[str] = field(default_factory=lambda: ["execute_command", "search_web", "schedule_add", "schedule_list", "schedule_remove"])
     
     # Auto-approve tool calls (useful for trusted environments)
     auto_approve_tools: bool = False  # If True, skip confirmation for tool execution
@@ -89,3 +89,30 @@ class BotConfig:
         if not self.allowed_channels:
             return True
         return channel_id in self.allowed_channels
+
+
+@dataclass
+class BotOSConfig:
+    """Configuration for BotOS — multi-platform bot orchestrator.
+
+    Attributes:
+        name: Human-readable name for this BotOS instance.
+        platforms: Per-platform config dicts keyed by platform name.
+            Example: ``{"telegram": {"token": "..."}, "discord": {"token": "..."}}``
+    """
+
+    name: str = "PraisonAI BotOS"
+    platforms: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to dict (hides tokens)."""
+        sanitized_platforms = {}
+        for plat, cfg in self.platforms.items():
+            sanitized = dict(cfg)
+            if "token" in sanitized:
+                sanitized["token"] = "***"
+            sanitized_platforms[plat] = sanitized
+        return {
+            "name": self.name,
+            "platforms": sanitized_platforms,
+        }

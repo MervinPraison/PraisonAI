@@ -63,6 +63,11 @@ class HookEvent(str, Enum):
     ON_CONFIG = "on_config"
     ON_AUTH = "on_auth"
     
+    # Schedule lifecycle
+    SCHEDULE_ADD = "schedule_add"
+    SCHEDULE_REMOVE = "schedule_remove"
+    SCHEDULE_TRIGGER = "schedule_trigger"
+
     # Claude Code parity events
     USER_PROMPT_SUBMIT = "user_prompt_submit"  # When user submits a prompt
     NOTIFICATION = "notification"              # When notification is sent
