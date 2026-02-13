@@ -462,17 +462,23 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
             # Use consolidated knowledge if provided, else fall back to legacy knowledge_sources
             effective_knowledge = self._knowledge if self._knowledge is not None else self.knowledge_sources
             
+            # Build execution config merging legacy code_execution params
+            _effective_execution = self._execution
+            if _effective_execution is None and (self.allow_code_execution or self.code_execution_mode != "safe"):
+                from ..config.feature_configs import ExecutionConfig
+                _effective_execution = ExecutionConfig(
+                    code_execution=bool(self.allow_code_execution),
+                    code_mode=self.code_execution_mode,
+                )
+            
             agent = Agent(
                 name=agent_config.name,
                 role=agent_config.role,
                 goal=agent_config.goal,
                 backstory=agent_config.backstory,
                 tools=agent_tools,  # Use assigned tools
-                allow_code_execution=self.allow_code_execution,
                 memory=self.memory,
                 llm=self.llm,  # Consolidated LLM param
-                code_execution_mode=self.code_execution_mode,
-                allow_delegation=self.allow_delegation,
                 base_url=self.base_url,
                 api_key=self.api_key,
                 # Consolidated params (new SDK contract)
@@ -480,7 +486,7 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
                 reflection=self._reflection,  # Overrides self_reflect/max_reflect/min_reflect/reflect_llm
                 caching=self._caching,  # Overrides cache
                 knowledge=effective_knowledge,  # Overrides knowledge_sources/embedder_config
-                execution=self._execution,  # Overrides max_iter
+                execution=_effective_execution,  # Overrides max_iter + code execution
                 guardrails=self._guardrails,
                 web=self._web,
                 hooks=self._hooks,

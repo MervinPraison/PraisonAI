@@ -411,13 +411,13 @@ class Agent:
         api_key: Optional[str] = None,  # Kept separate (connection/auth)
         # Tools
         tools: Optional[List[Any]] = None,
-        allow_delegation: bool = False,
-        allow_code_execution: Optional[bool] = False,
-        code_execution_mode: Literal["safe", "unsafe"] = "safe",
+        allow_delegation: bool = False,  # Deprecated: use handoffs= instead
+        allow_code_execution: Optional[bool] = False,  # Deprecated: use execution=ExecutionConfig(code_execution=True)
+        code_execution_mode: Literal["safe", "unsafe"] = "safe",  # Deprecated: use execution=ExecutionConfig(code_mode="safe")
         handoffs: Optional[List[Union['Agent', 'Handoff']]] = None,
-        # Session management
-        auto_save: Optional[str] = None,
-        rate_limiter: Optional[Any] = None,
+        # Session management (deprecated standalone params - use config objects)
+        auto_save: Optional[str] = None,  # Deprecated: use memory=MemoryConfig(auto_save="name")
+        rate_limiter: Optional[Any] = None,  # Deprecated: use execution=ExecutionConfig(rate_limiter=obj)
         # ============================================================
         # CONSOLIDATED FEATURE PARAMS (agent-centric API)
         # Each follows: False=disabled, True=defaults, Config=custom
@@ -430,7 +430,7 @@ class Agent:
         web: Optional[Union[bool, Any]] = None,  # Union[bool, WebConfig]
         context: Optional[Union[bool, Any]] = None,  # Union[bool, ManagerConfig, ContextManager] - None=smart default
         autonomy: Optional[Union[bool, Dict[str, Any], Any]] = None,  # Union[bool, dict, AutonomyConfig]
-        verification_hooks: Optional[List[Any]] = None,  # List of VerificationHook instances
+        verification_hooks: Optional[List[Any]] = None,  # Deprecated: use autonomy=AutonomyConfig(verification_hooks=[...])
         output: Optional[Union[str, Any]] = None,  # Union[str preset, OutputConfig]
         execution: Optional[Union[str, Any]] = None,  # Union[str preset, ExecutionConfig]
         templates: Optional[Any] = None,  # TemplateConfig
@@ -453,12 +453,12 @@ class Agent:
             base_url: Custom LLM endpoint URL (e.g., for Ollama). Kept separate for auth.
             api_key: API key for LLM provider. Kept separate for auth.
             tools: List of tools, functions, callables, or MCP instances.
-            allow_delegation: Allow task delegation to other agents. Defaults to False.
-            allow_code_execution: Enable code execution during tasks. Defaults to False.
-            code_execution_mode: "safe" (restricted) or "unsafe" (full access). Defaults to "safe".
+            allow_delegation: **Deprecated** — use ``handoffs=`` instead.
+            allow_code_execution: **Deprecated** — use ``execution=ExecutionConfig(code_execution=True)``.
+            code_execution_mode: **Deprecated** — use ``execution=ExecutionConfig(code_mode="safe")``.
             handoffs: List of Agent or Handoff objects for agent-to-agent collaboration.
-            auto_save: Session name for automatic session saving.
-            rate_limiter: Rate limiter instance for API call throttling.
+            auto_save: **Deprecated** — use ``memory=MemoryConfig(auto_save="name")``.
+            rate_limiter: **Deprecated** — use ``execution=ExecutionConfig(rate_limiter=obj)``.
             memory: Memory system configuration. Accepts:
                 - bool: True enables defaults, False disables
                 - MemoryConfig: Custom configuration
@@ -487,7 +487,8 @@ class Agent:
                 - bool: True enables with defaults
                 - Dict: Configuration dict
                 - AutonomyConfig: Custom configuration
-            verification_hooks: List of VerificationHook instances for output verification.
+            verification_hooks: **Deprecated** — use ``autonomy=AutonomyConfig(verification_hooks=[...])``.
+                Still works for backward compatibility.
             output: Output configuration. Accepts:
                 - str: Preset name ("silent", "actions", "verbose", "json", "stream")
                 - OutputConfig: Custom configuration
@@ -521,6 +522,11 @@ class Agent:
             - system_template, prompt_template, response_template → templates=
             - cache, prompt_caching → caching=
             - web_search, web_fetch → web=
+            - allow_delegation → handoffs=
+            - allow_code_execution, code_execution_mode → execution=
+            - auto_save → memory=MemoryConfig(auto_save=)
+            - rate_limiter → execution=ExecutionConfig(rate_limiter=)
+            - verification_hooks → autonomy=AutonomyConfig(verification_hooks=)
         """
         # Add check at start if memory is requested
         if memory is not None:
@@ -584,6 +590,48 @@ class Agent:
         if autonomy is None:
             # AutonomyConfig is in agent/autonomy.py - use dict for config defaults
             autonomy = apply_config_defaults("autonomy", autonomy, None)
+
+        # ============================================================
+        # DEPRECATION WARNINGS for params consolidated into configs
+        # Old params still work but emit warnings pointing to new API
+        # ============================================================
+        import warnings as _warnings
+        
+        if allow_delegation:
+            _warnings.warn(
+                "Parameter 'allow_delegation' is deprecated. Use 'handoffs=[other_agent]' instead.",
+                DeprecationWarning, stacklevel=2,
+            )
+        if allow_code_execution:
+            _warnings.warn(
+                "Parameter 'allow_code_execution' is deprecated. "
+                "Use 'execution=ExecutionConfig(code_execution=True)' instead.",
+                DeprecationWarning, stacklevel=2,
+            )
+        if code_execution_mode != "safe":
+            _warnings.warn(
+                "Parameter 'code_execution_mode' is deprecated. "
+                "Use 'execution=ExecutionConfig(code_mode=\"unsafe\")' instead.",
+                DeprecationWarning, stacklevel=2,
+            )
+        if auto_save is not None:
+            _warnings.warn(
+                "Parameter 'auto_save' is deprecated. "
+                "Use 'memory=MemoryConfig(auto_save=\"name\")' instead.",
+                DeprecationWarning, stacklevel=2,
+            )
+        if rate_limiter is not None:
+            _warnings.warn(
+                "Parameter 'rate_limiter' is deprecated. "
+                "Use 'execution=ExecutionConfig(rate_limiter=obj)' instead.",
+                DeprecationWarning, stacklevel=2,
+            )
+        if verification_hooks is not None:
+            _warnings.warn(
+                "Parameter 'verification_hooks' is deprecated. "
+                "Use 'autonomy=AutonomyConfig(verification_hooks=[...])' instead.",
+                DeprecationWarning, stacklevel=2,
+            )
 
         # ============================================================
         # CONSOLIDATED PARAMS EXTRACTION (agent-centric API)
@@ -731,6 +779,13 @@ class Agent:
             max_rpm = _exec_config.max_rpm
             max_execution_time = _exec_config.max_execution_time
             max_retry_limit = _exec_config.max_retry_limit
+            # Extract consolidated fields (config takes precedence over deprecated standalone params)
+            if _exec_config.rate_limiter is not None:
+                rate_limiter = _exec_config.rate_limiter
+            if _exec_config.code_execution:
+                allow_code_execution = True
+            if _exec_config.code_mode != "safe":
+                code_execution_mode = _exec_config.code_mode
         else:
             max_iter, max_rpm, max_execution_time, max_retry_limit = 20, None, None, 2
         
@@ -880,6 +935,9 @@ class Agent:
                 db = _memory_config.db
                 auto_memory = _memory_config.auto_memory
                 claude_memory = _memory_config.claude_memory
+                # Extract auto_save from MemoryConfig (takes precedence over standalone param)
+                if _memory_config.auto_save is not None:
+                    auto_save = _memory_config.auto_save
                 # Convert to internal format
                 backend = _memory_config.backend
                 if hasattr(backend, 'value'):
@@ -1846,6 +1904,9 @@ Summary:"""
                 "auto_escalate": autonomy.auto_escalate,
             }
             config = autonomy
+            # Extract verification_hooks from AutonomyConfig if provided
+            if autonomy.verification_hooks and not verification_hooks:
+                self._verification_hooks = autonomy.verification_hooks
         else:
             self.autonomy_enabled = False
             self.autonomy_config = {}

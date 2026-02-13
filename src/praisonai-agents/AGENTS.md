@@ -344,6 +344,56 @@ agent = Agent(
 )
 ```
 
+### 5.3 Parameter Consolidation
+
+Agent parameters are consolidated into Config objects following the pattern:
+`False=disabled, True=defaults, Config=custom`
+
+**Consolidated Parameters (use these):**
+
+| Config Object | Replaces (Deprecated) |
+|--------------|----------------------|
+| `execution=ExecutionConfig(code_execution=True, code_mode="safe", rate_limiter=obj)` | `allow_code_execution`, `code_execution_mode`, `rate_limiter` |
+| `memory=MemoryConfig(auto_save="session_name")` | `auto_save` |
+| `autonomy=AutonomyConfig(verification_hooks=[...])` | `verification_hooks` |
+| `handoffs=[other_agent]` | `allow_delegation` |
+| `output=OutputConfig(...)` | `verbose`, `markdown`, `stream`, `metrics` |
+| `reflection=ReflectionConfig(...)` | `self_reflect`, `max_reflect`, `min_reflect` |
+| `templates=TemplateConfig(...)` | `system_template`, `prompt_template`, `response_template` |
+| `caching=CachingConfig(...)` | `cache`, `prompt_caching` |
+| `web=WebConfig(...)` | `web_search`, `web_fetch` |
+
+**Deprecated standalone params still work** (backward compatible) but emit `DeprecationWarning`.
+
+```python
+# ❌ Old way (deprecated)
+agent = Agent(
+    name="coder",
+    allow_code_execution=True,
+    code_execution_mode="safe",
+    auto_save="my_session",
+    rate_limiter=my_limiter,
+    allow_delegation=True,
+    verification_hooks=[my_hook],
+)
+
+# ✅ New way (consolidated)
+from praisonaiagents import Agent, ExecutionConfig, MemoryConfig
+from praisonaiagents.agent.autonomy import AutonomyConfig
+
+agent = Agent(
+    name="coder",
+    handoffs=[reviewer_agent],
+    execution=ExecutionConfig(
+        code_execution=True,
+        code_mode="safe",
+        rate_limiter=my_limiter,
+    ),
+    memory=MemoryConfig(auto_save="my_session"),
+    autonomy=AutonomyConfig(verification_hooks=[my_hook]),
+)
+```
+
 ---
 
 ## 6. Extension Points

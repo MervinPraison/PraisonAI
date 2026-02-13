@@ -172,6 +172,10 @@ class MemoryConfig:
     history: bool = False
     history_limit: int = 10
     
+    # Auto-save session name (consolidated from standalone auto_save param)
+    # When set, automatically saves session to memory with this name
+    auto_save: Optional[str] = None
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         learn_dict = None
@@ -193,6 +197,7 @@ class MemoryConfig:
             "learn": learn_dict,
             "history": self.history,
             "history_limit": self.history_limit,
+            "auto_save": self.auto_save,
         }
 
 
@@ -609,7 +614,8 @@ class ExecutionConfig:
     """
     Configuration for agent execution limits.
     
-    Consolidates: max_iter, max_rpm, max_execution_time, max_retry_limit
+    Consolidates: max_iter, max_rpm, max_execution_time, max_retry_limit,
+                  allow_code_execution, code_execution_mode, rate_limiter
     
     Usage:
         # Simple preset
@@ -621,6 +627,13 @@ class ExecutionConfig:
             max_rpm=100,
             max_execution_time=300,
             max_retry_limit=5,
+        ))
+        
+        # With code execution and rate limiter
+        Agent(execution=ExecutionConfig(
+            code_execution=True,
+            code_mode="safe",
+            rate_limiter=my_limiter,
         ))
     """
     # Iteration limits
@@ -635,6 +648,13 @@ class ExecutionConfig:
     # Retry settings
     max_retry_limit: int = 2
     
+    # Code execution (consolidated from allow_code_execution + code_execution_mode)
+    code_execution: bool = False
+    code_mode: str = "safe"  # "safe" or "unsafe"
+    
+    # Rate limiter instance (consolidated from standalone rate_limiter param)
+    rate_limiter: Optional[Any] = None
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -642,6 +662,8 @@ class ExecutionConfig:
             "max_rpm": self.max_rpm,
             "max_execution_time": self.max_execution_time,
             "max_retry_limit": self.max_retry_limit,
+            "code_execution": self.code_execution,
+            "code_mode": self.code_mode,
         }
 
 

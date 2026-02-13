@@ -55,6 +55,7 @@ class AutonomyConfig:
         observe: Whether to emit observability events
         completion_promise: Optional string that signals completion when wrapped in <promise>TEXT</promise>
         clear_context: Whether to clear chat history between iterations
+        verification_hooks: List of VerificationHook instances for output verification
     """
     enabled: bool = True
     max_iterations: int = 20
@@ -63,6 +64,7 @@ class AutonomyConfig:
     observe: bool = False
     completion_promise: Optional[str] = None
     clear_context: bool = False
+    verification_hooks: Optional[List[Any]] = None
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AutonomyConfig":
@@ -75,6 +77,7 @@ class AutonomyConfig:
             observe=data.get("observe", False),
             completion_promise=data.get("completion_promise"),
             clear_context=data.get("clear_context", False),
+            verification_hooks=data.get("verification_hooks"),
         )
 
 
