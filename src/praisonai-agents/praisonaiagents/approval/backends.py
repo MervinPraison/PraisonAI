@@ -1,16 +1,18 @@
 """
 Built-in approval backends for PraisonAI Agents.
 
-Provides two lightweight backends that ship with the core SDK:
+Provides lightweight backends that ship with the core SDK:
 
 - **AutoApproveBackend** — always approves (bots, trusted envs).
 - **ConsoleBackend** — interactive Rich terminal prompt (CLI default).
+- **AgentApproval** — delegates approval decision to another AI agent.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 from .protocols import ApprovalDecision, ApprovalRequest
 
@@ -116,6 +118,137 @@ class ConsoleBackend:
         """Async wrapper — runs the sync prompt in an executor."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self.request_approval_sync, request)
+
+
+class AgentApproval:
+    """Delegates approval decisions to another AI agent.
+
+    The approver agent receives a structured prompt describing the tool call
+    and responds with ``APPROVE`` or ``DENY``.  This enables autonomous
+    multi-agent approval workflows without human intervention.
+
+    Lives in the core SDK because it only depends on the Agent class which
+    is already in core — no external dependencies.
+
+    Args:
+        approver_agent: An Agent instance that will evaluate approval requests.
+            If ``None``, a default approver agent is created with sensible
+            instructions.
+        llm: LLM model to use for the default approver agent (default ``gpt-4o-mini``).
+
+    Example::
+
+        from praisonaiagents import Agent
+        from praisonaiagents.approval import AgentApproval
+
+        approver = Agent(
+            name="security-reviewer",
+            instructions="Only approve low-risk read operations. Deny anything destructive.",
+        )
+        worker = Agent(
+            name="worker",
+            tools=[execute_command],
+            approval=AgentApproval(approver_agent=approver),
+        )
+    """
+
+    def __init__(
+        self,
+        approver_agent: Any = None,
+        llm: str = "gpt-4o-mini",
+    ):
+        self._approver_agent = approver_agent
+        self._llm = llm
+
+    def __repr__(self) -> str:
+        name = getattr(self._approver_agent, "name", None) or "default"
+        return f"AgentApproval(approver={name!r})"
+
+    def _get_approver(self) -> Any:
+        """Lazily create or return the approver agent."""
+        if self._approver_agent is not None:
+            return self._approver_agent
+
+        # Lazy import to avoid circular dependency at module level
+        from praisonaiagents.agent.agent import Agent
+
+        self._approver_agent = Agent(
+            name="approval-reviewer",
+            instructions=(
+                "You are a security reviewer for tool execution requests. "
+                "Evaluate each request and respond with exactly one word: "
+                "APPROVE or DENY. Consider the tool name, arguments, and risk level. "
+                "Deny anything that looks destructive, dangerous, or unauthorized. "
+                "Approve safe read-only operations."
+            ),
+            llm=self._llm,
+        )
+        return self._approver_agent
+
+    def _build_prompt(self, request: ApprovalRequest) -> str:
+        """Build the evaluation prompt for the approver agent."""
+        args_str = "\n".join(
+            f"  {k}: {v}" for k, v in request.arguments.items()
+        ) or "  (none)"
+
+        return (
+            f"Tool Approval Request:\n"
+            f"  Tool: {request.tool_name}\n"
+            f"  Risk Level: {request.risk_level.upper()}\n"
+            f"  Agent: {request.agent_name or 'unknown'}\n"
+            f"  Arguments:\n{args_str}\n\n"
+            f"Respond with exactly one word: APPROVE or DENY"
+        )
+
+    async def request_approval(self, request: ApprovalRequest) -> ApprovalDecision:
+        """Ask the approver agent to evaluate the request."""
+        try:
+            approver = self._get_approver()
+            prompt = self._build_prompt(request)
+
+            # Use the agent's chat method
+            if hasattr(approver, "achat"):
+                response = await approver.achat(prompt)
+            elif hasattr(approver, "chat"):
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(None, approver.chat, prompt)
+            else:
+                return ApprovalDecision(
+                    approved=False,
+                    reason="Approver agent has no chat method",
+                )
+
+            response_text = str(response).strip().upper()
+            approved = "APPROVE" in response_text and "DENY" not in response_text
+
+            return ApprovalDecision(
+                approved=approved,
+                reason=f"Agent {'approved' if approved else 'denied'}: {str(response).strip()[:200]}",
+                approver=getattr(approver, "name", "agent"),
+                metadata={"platform": "agent", "response": str(response).strip()[:500]},
+            )
+
+        except Exception as e:
+            logger.error(f"AgentApproval error: {e}")
+            return ApprovalDecision(
+                approved=False,
+                reason=f"Agent approval error: {e}",
+            )
+
+    def request_approval_sync(self, request: ApprovalRequest) -> ApprovalDecision:
+        """Synchronous wrapper."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(asyncio.run, self.request_approval(request))
+                return future.result(timeout=60)
+        else:
+            return asyncio.run(self.request_approval(request))
 
 
 class CallbackBackend:

@@ -29,6 +29,8 @@ from praisonaiagents.bots import (
 from .media import split_media_from_output, is_audio_file
 from ._commands import format_status, format_help
 from ._session import BotSessionManager
+from ._debounce import InboundDebouncer
+from ._ack import AckReactor
 
 logger = logging.getLogger(__name__)
 
@@ -80,10 +82,21 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._command_handlers: Dict[str, Callable] = {}
         self._started_at: Optional[float] = None
         self._session: BotSessionManager = BotSessionManager()
+        self._debouncer: InboundDebouncer = InboundDebouncer(
+            debounce_ms=self.config.debounce_ms,
+        )
+        self._ack: AckReactor = AckReactor(
+            ack_emoji=self.config.ack_emoji,
+            done_emoji=self.config.done_emoji,
+        )
         
         # Audio capabilities (set by BotCapabilities)
         self._stt_enabled: bool = False
         self._auto_tts: bool = False
+        
+        # Resilience
+        self._monitor = None  # Lazy: ConnectionMonitor
+        self._stop_event: Optional[asyncio.Event] = None
     
     def enable_stt(self, enabled: bool = True) -> None:
         """Enable STT for voice message transcription."""
@@ -173,8 +186,33 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 if self.config.typing_indicator:
                     await update.message.chat.send_action("typing")
                 
+                # Ack reaction
+                ack_ctx = None
+                if self._ack.enabled:
+                    async def _tg_react(emoji, **kw):
+                        try:
+                            from telegram import ReactionTypeEmoji
+                            await self._application.bot.set_message_reaction(
+                                chat_id=update.message.chat_id,
+                                message_id=update.message.message_id,
+                                reaction=[ReactionTypeEmoji(emoji=emoji)],
+                            )
+                        except Exception:
+                            pass  # Reactions may not be supported in all chats
+                    async def _tg_unreact(emoji, **kw):
+                        try:
+                            await self._application.bot.set_message_reaction(
+                                chat_id=update.message.chat_id,
+                                message_id=update.message.message_id,
+                                reaction=[],
+                            )
+                        except Exception:
+                            pass
+                    ack_ctx = await self._ack.ack(react_fn=_tg_react)
+                
                 user_id = str(update.message.from_user.id) if update.message.from_user else "unknown"
                 try:
+                    message_text = await self._debouncer.debounce(user_id, message_text)
                     response = await self._session.chat(self._agent, user_id, message_text)
                     send_result = self.fire_message_sending(
                         str(update.message.chat_id), str(response),
@@ -190,6 +228,9 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     self.fire_message_sent(
                         str(update.message.chat_id), send_result["content"],
                     )
+                    # Done reaction
+                    if ack_ctx:
+                        await self._ack.done(ack_ctx, react_fn=_tg_react, unreact_fn=_tg_unreact)
                 except Exception as e:
                     logger.error(f"Agent error: {e}")
                     await update.message.reply_text(f"Error: {str(e)}")
@@ -251,6 +292,10 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._is_running = True
         logger.info(f"Telegram bot started: @{self._bot_user.username}")
         
+        # Initialize connection monitor for resilience
+        from ._resilience import ConnectionMonitor, TELEGRAM_BACKOFF, is_recoverable_error, is_conflict_error, sleep_with_abort
+        self._monitor = ConnectionMonitor(platform="telegram", policy=TELEGRAM_BACKOFF)
+        
         if self.config.is_webhook_mode:
             await self._application.run_webhook(
                 listen="0.0.0.0",
@@ -259,31 +304,65 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 webhook_url=f"{self.config.webhook_url}{self.config.webhook_path}",
             )
         else:
-            # Use low-level API to avoid event-loop conflicts with run_polling().
-            # run_polling() tries to manage its own event loop lifecycle which
-            # conflicts with asyncio.run() or any shared event loop (e.g. gateway).
-            await self._application.initialize()
-            await self._application.start()
-            await self._application.updater.start_polling(
-                poll_interval=self.config.polling_interval,
-            )
-            
-            # Block until stop() is called
+            # Resilient polling loop with exponential backoff
             self._stop_event = asyncio.Event()
-            try:
-                await self._stop_event.wait()
-            except asyncio.CancelledError:
-                pass
-            finally:
-                await self._application.updater.stop()
-                await self._application.stop()
-                await self._application.shutdown()
-                self._is_running = False
+            while not self._stop_event.is_set():
+                try:
+                    await self._application.initialize()
+                    await self._application.start()
+                    await self._application.updater.start_polling(
+                        poll_interval=self.config.polling_interval,
+                    )
+                    self._monitor.record_success()
+                    
+                    # Block until stop() is called
+                    await self._stop_event.wait()
+                    
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    if is_conflict_error(e):
+                        logger.error(
+                            "[telegram] Another bot instance is running with this token. "
+                            "Stop the other instance first."
+                        )
+                        break  # Don't retry conflicts
+                    
+                    if is_recoverable_error(e, "telegram") and self._monitor.should_retry():
+                        delay = self._monitor.record_error(e)
+                        completed = await sleep_with_abort(delay, self._stop_event)
+                        if not completed:
+                            break  # Abort signaled during sleep
+                        # Attempt reconnect
+                        try:
+                            await self._application.updater.stop()
+                            await self._application.stop()
+                            await self._application.shutdown()
+                        except Exception:
+                            pass
+                        # Rebuild application for clean reconnect
+                        from telegram.ext import Application
+                        self._application = Application.builder().token(self._token).build()
+                        continue
+                    else:
+                        logger.error(f"[telegram] Unrecoverable error: {e}")
+                        break
+                finally:
+                    try:
+                        await self._application.updater.stop()
+                        await self._application.stop()
+                        await self._application.shutdown()
+                    except Exception:
+                        pass
+                    self._is_running = False
     
     async def stop(self) -> None:
         """Stop the Telegram bot."""
         if not self._is_running:
             return
+        
+        # Cancel pending debounce timers
+        self._debouncer.cancel_all()
         
         # Signal the stop event so the start() loop exits cleanly
         if hasattr(self, '_stop_event') and self._stop_event:
@@ -342,16 +421,18 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         text: str,
         reply_to: Optional[int] = None,
     ) -> None:
-        """Send a long message, splitting if necessary."""
+        """Send a long message, splitting with markdown-aware chunking."""
+        from ._chunk import chunk_message
+
         max_len = self.config.max_message_length
-        
+
         if len(text) <= max_len:
             kwargs = {"chat_id": chat_id, "text": text}
             if reply_to:
                 kwargs["reply_to_message_id"] = reply_to
             await self._application.bot.send_message(**kwargs)
         else:
-            chunks = [text[i:i+max_len] for i in range(0, len(text), max_len)]
+            chunks = chunk_message(text, max_length=max_len, preserve_fences=True)
             for i, chunk in enumerate(chunks):
                 kwargs = {"chat_id": chat_id, "text": chunk}
                 if i == 0 and reply_to:
@@ -530,6 +611,63 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         except Exception:
             return None
     
+    async def probe(self):
+        """Test Telegram API connectivity without starting the bot."""
+        from praisonaiagents.bots import ProbeResult
+        started = time.time()
+        try:
+            import aiohttp
+            url = f"https://api.telegram.org/bot{self._token}/getMe"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    data = await resp.json()
+                    elapsed = (time.time() - started) * 1000
+                    if resp.status == 200 and data.get("ok"):
+                        result = data.get("result", {})
+                        return ProbeResult(
+                            ok=True,
+                            platform="telegram",
+                            elapsed_ms=elapsed,
+                            bot_username=result.get("username"),
+                            details={
+                                "bot_id": result.get("id"),
+                                "can_join_groups": result.get("can_join_groups"),
+                                "can_read_all_group_messages": result.get("can_read_all_group_messages"),
+                                "supports_inline_queries": result.get("supports_inline_queries"),
+                            },
+                        )
+                    else:
+                        return ProbeResult(
+                            ok=False,
+                            platform="telegram",
+                            elapsed_ms=elapsed,
+                            error=data.get("description", f"HTTP {resp.status}"),
+                        )
+        except Exception as e:
+            elapsed = (time.time() - started) * 1000
+            return ProbeResult(
+                ok=False,
+                platform="telegram",
+                elapsed_ms=elapsed,
+                error=str(e),
+            )
+
+    async def health(self):
+        """Get detailed health status of the Telegram bot."""
+        from praisonaiagents.bots import HealthResult
+        probe_result = await self.probe()
+        uptime = (time.time() - self._started_at) if self._started_at else None
+        session_count = len(self._session._histories) if hasattr(self._session, '_histories') else 0
+        return HealthResult(
+            ok=self._is_running and probe_result.ok,
+            platform="telegram",
+            is_running=self._is_running,
+            uptime_seconds=uptime,
+            probe=probe_result,
+            sessions=session_count,
+            error=probe_result.error if not probe_result.ok else None,
+        )
+
     def _format_status(self) -> str:
         """Format /status response."""
         return format_status(self._agent, self.platform, self._started_at, self._is_running)

@@ -28,6 +28,7 @@ from praisonaiagents.bots import (
 from .media import split_media_from_output, is_audio_file
 from ._commands import format_status, format_help
 from ._session import BotSessionManager
+from ._debounce import InboundDebouncer
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,9 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
         self._command_handlers: Dict[str, Callable] = {}
         self._started_at: Optional[float] = None
         self._session: BotSessionManager = BotSessionManager()
+        self._debouncer: InboundDebouncer = InboundDebouncer(
+            debounce_ms=self.config.debounce_ms,
+        )
         
         # Audio capabilities
         self._stt_enabled: bool = False
@@ -193,6 +197,7 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                 try:
                     user_id = event.get("user", "unknown")
                     logger.info(f"Message received: {text[:100]}...")
+                    text = await self._debouncer.debounce(user_id, text)
                     response = await self._session.chat(self._agent, user_id, text)
                     logger.info(f"Response sent: {response[:100]}...")
                     
@@ -294,6 +299,7 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
             return
         
         self._is_running = False
+        self._debouncer.cancel_all()
         logger.info("Slack bot stopped")
     
     def set_agent(self, agent: "Agent") -> None:
@@ -331,7 +337,9 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
         )
     
     async def _send_long_message(self, say, text: str, thread_ts: Optional[str] = None) -> None:
-        """Send a long message, splitting if necessary."""
+        """Send a long message, splitting with markdown-aware chunking."""
+        from ._chunk import chunk_message
+
         max_len = min(self.config.max_message_length, 4000)
         
         if not text or not text.strip():
@@ -341,7 +349,7 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
         if len(text) <= max_len:
             await say(text=text.strip(), thread_ts=thread_ts)
         else:
-            chunks = [text[i:i+max_len] for i in range(0, len(text), max_len)]
+            chunks = chunk_message(text, max_length=max_len, preserve_fences=True)
             for chunk in chunks:
                 if chunk and chunk.strip():
                     await say(text=chunk.strip(), thread_ts=thread_ts)
@@ -475,6 +483,42 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
         except Exception:
             return None
     
+    async def probe(self):
+        """Test Slack API connectivity without starting the bot."""
+        from praisonaiagents.bots import ProbeResult
+        started = time.time()
+        try:
+            import aiohttp
+            url = "https://slack.com/api/auth.test"
+            headers = {"Authorization": f"Bearer {self._token}"}
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    data = await resp.json()
+                    elapsed = (time.time() - started) * 1000
+                    if data.get("ok"):
+                        return ProbeResult(
+                            ok=True, platform="slack", elapsed_ms=elapsed,
+                            bot_username=data.get("user"),
+                            details={"team": data.get("team"), "team_id": data.get("team_id"), "user_id": data.get("user_id")},
+                        )
+                    else:
+                        return ProbeResult(ok=False, platform="slack", elapsed_ms=elapsed, error=data.get("error", "Unknown error"))
+        except Exception as e:
+            return ProbeResult(ok=False, platform="slack", elapsed_ms=(time.time() - started) * 1000, error=str(e))
+
+    async def health(self):
+        """Get detailed health status of the Slack bot."""
+        from praisonaiagents.bots import HealthResult
+        probe_result = await self.probe()
+        uptime = (time.time() - self._started_at) if self._started_at else None
+        session_count = len(self._session._histories) if hasattr(self._session, '_histories') else 0
+        return HealthResult(
+            ok=self._is_running and probe_result.ok, platform="slack",
+            is_running=self._is_running, uptime_seconds=uptime,
+            probe=probe_result, sessions=session_count,
+            error=probe_result.error if not probe_result.ok else None,
+        )
+
     def _format_status(self) -> str:
         """Format /status response."""
         return format_status(self._agent, self.platform, self._started_at, self._is_running)

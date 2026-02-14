@@ -255,11 +255,52 @@ class BotOS:
         agent_cfg = raw.get("agent")
         if agent_cfg and isinstance(agent_cfg, dict):
             from praisonaiagents import Agent
-            agent = Agent(
-                name=agent_cfg.get("name", "assistant"),
-                instructions=agent_cfg.get("instructions", "You are a helpful assistant."),
-                llm=agent_cfg.get("llm"),
-            )
+
+            # Core params always supported
+            agent_kwargs: Dict[str, Any] = {
+                "name": agent_cfg.get("name", "assistant"),
+                "instructions": agent_cfg.get("instructions", "You are a helpful assistant."),
+            }
+            if agent_cfg.get("llm"):
+                agent_kwargs["llm"] = agent_cfg["llm"]
+
+            # Extended params — memory, tools, verbose, knowledge, guardrails
+            if "memory" in agent_cfg:
+                agent_kwargs["memory"] = agent_cfg["memory"]
+
+            # Pass through known Agent params
+            for key in ("role", "goal", "backstory", "planning", "reflection"):
+                if key in agent_cfg:
+                    agent_kwargs[key] = agent_cfg[key]
+
+            # Resolve tool names to real functions
+            tool_names = agent_cfg.get("tools")
+            if tool_names and isinstance(tool_names, list):
+                resolved_tools = []
+                for tname in tool_names:
+                    if isinstance(tname, str):
+                        try:
+                            import importlib
+                            mod = importlib.import_module("praisonaiagents.tools")
+                            fn = getattr(mod, tname, None)
+                            if fn:
+                                resolved_tools.append(fn)
+                            else:
+                                logger.warning(f"BotOS: tool '{tname}' not found in praisonaiagents.tools")
+                        except ImportError:
+                            logger.warning(f"BotOS: could not import tools module for '{tname}'")
+                    else:
+                        resolved_tools.append(tname)  # Already a callable
+                if resolved_tools:
+                    agent_kwargs["tools"] = resolved_tools
+
+            if "knowledge" in agent_cfg:
+                agent_kwargs["knowledge"] = agent_cfg["knowledge"]
+
+            if "guardrail" in agent_cfg:
+                agent_kwargs["guardrail"] = agent_cfg["guardrail"]
+
+            agent = Agent(**agent_kwargs)
 
         # Build bots per platform
         bots = []

@@ -45,6 +45,7 @@ from .protocols import (
     DeletableMemoryProtocol,
     AsyncDeletableMemoryProtocol,
     EntityMemoryProtocol,
+    AgentMemoryProtocol,
 )
 
 

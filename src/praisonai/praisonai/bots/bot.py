@@ -122,18 +122,80 @@ class Bot:
 
     # ── Lifecycle ───────────────────────────────────────────────────
 
+    def _apply_smart_defaults(self, agent: Any) -> Any:
+        """Enhance agent with sensible bot defaults if not already configured.
+        
+        Smart defaults are applied automatically:
+        - Safe tools (search_web, schedule_add/list/remove) if agent has no tools
+        - Memory enabled if not already set
+        
+        These defaults make Bot() immediately useful without extra configuration.
+        Users who want full control can pre-configure their agent.
+        """
+        if agent is None:
+            return agent
+        
+        # Only enhance Agent instances (not AgentTeam/AgentFlow)
+        agent_cls_name = type(agent).__name__
+        if agent_cls_name not in ("Agent",):
+            return agent
+        
+        # Wire BotConfig.auto_approve_tools → Agent(approval=True)
+        if self._config and getattr(self._config, 'auto_approve_tools', False):
+            if getattr(agent, '_approval_backend', None) is None:
+                from praisonaiagents.approval.backends import AutoApproveBackend
+                agent._approval_backend = AutoApproveBackend()
+                logger.debug(f"Bot: auto_approve_tools enabled for agent '{getattr(agent, 'name', '?')}'")
+        
+        # Inject session history if agent has no memory configured (zero-dep).
+        # NOTE: No session_id here — BotSessionManager handles per-user
+        # isolation by swapping chat_history before/after each agent.chat().
+        current_memory = getattr(agent, 'memory', None)
+        if current_memory is None:
+            agent.memory = {
+                "history": True,
+                "history_limit": 20,
+            }
+            logger.debug(f"Bot: injected session history for agent '{getattr(agent, 'name', '?')}'")
+        
+        # Add default tools if agent has none
+        current_tools = getattr(agent, 'tools', None) or []
+        if not current_tools:
+            try:
+                from praisonaiagents.tools import (
+                    schedule_add, schedule_list, schedule_remove,
+                )
+                default_tools = [schedule_add, schedule_list, schedule_remove]
+                
+                # Try to add search_web if available
+                try:
+                    from praisonaiagents.tools import search_web
+                    default_tools.insert(0, search_web)
+                except (ImportError, AttributeError):
+                    pass
+                
+                agent.tools = default_tools
+                logger.debug(f"Bot: applied default tools to agent '{getattr(agent, 'name', '?')}'")
+            except ImportError:
+                pass  # Tools not available, skip
+        
+        return agent
+
     def _build_adapter(self) -> Any:
         """Lazy-resolve and instantiate the platform adapter."""
         from ._registry import resolve_adapter
 
         adapter_cls = resolve_adapter(self._platform)
 
+        # Apply smart defaults to agent before passing to adapter
+        agent = self._apply_smart_defaults(self._agent)
+
         # Build init kwargs for the adapter
         init_kwargs: Dict[str, Any] = {}
         init_kwargs["token"] = self.token
 
-        if self._agent is not None:
-            init_kwargs["agent"] = self._agent
+        if agent is not None:
+            init_kwargs["agent"] = agent
         if self._config is not None:
             init_kwargs["config"] = self._config
 
@@ -219,6 +281,24 @@ class Bot:
             self._pending_command_handlers[command] = func
             return func
         return decorator
+
+    async def probe(self) -> Any:
+        """Test channel connectivity (builds adapter lazily if needed)."""
+        if not self._adapter:
+            self._adapter = self._build_adapter()
+        if hasattr(self._adapter, 'probe'):
+            return await self._adapter.probe()
+        from praisonaiagents.bots import ProbeResult
+        return ProbeResult(ok=False, platform=self._platform, error="Adapter does not support probe()")
+
+    async def health(self) -> Any:
+        """Get detailed health status."""
+        if not self._adapter:
+            self._adapter = self._build_adapter()
+        if hasattr(self._adapter, 'health'):
+            return await self._adapter.health()
+        from praisonaiagents.bots import HealthResult
+        return HealthResult(ok=False, platform=self._platform, error="Adapter does not support health()")
 
     def __repr__(self) -> str:
         agent_name = getattr(self._agent, 'name', None) if self._agent else None

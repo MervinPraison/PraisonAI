@@ -29,6 +29,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .store import DefaultSessionStore, SessionMessage, SessionData
+    from .protocols import SessionStoreProtocol
+    from .hierarchy import HierarchicalSessionStore, SessionSnapshot, ExtendedSessionData
 
 # Lazy loading for zero import overhead
 _module_cache = {}
@@ -64,6 +66,31 @@ def __getattr__(name: str):
         _module_cache[name] = get_default_session_store
         return get_default_session_store
     
+    if name == "SessionStoreProtocol":
+        from .protocols import SessionStoreProtocol
+        _module_cache[name] = SessionStoreProtocol
+        return SessionStoreProtocol
+    
+    if name == "HierarchicalSessionStore":
+        from .hierarchy import HierarchicalSessionStore
+        _module_cache[name] = HierarchicalSessionStore
+        return HierarchicalSessionStore
+    
+    if name == "get_hierarchical_session_store":
+        from .hierarchy import get_hierarchical_session_store
+        _module_cache[name] = get_hierarchical_session_store
+        return get_hierarchical_session_store
+    
+    if name == "SessionSnapshot":
+        from .hierarchy import SessionSnapshot
+        _module_cache[name] = SessionSnapshot
+        return SessionSnapshot
+    
+    if name == "ExtendedSessionData":
+        from .hierarchy import ExtendedSessionData
+        _module_cache[name] = ExtendedSessionData
+        return ExtendedSessionData
+    
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -73,4 +100,9 @@ __all__ = [
     "SessionMessage", 
     "SessionData",
     "get_default_session_store",
+    "SessionStoreProtocol",
+    "HierarchicalSessionStore",
+    "get_hierarchical_session_store",
+    "SessionSnapshot",
+    "ExtendedSessionData",
 ]

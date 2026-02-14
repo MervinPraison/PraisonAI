@@ -275,6 +275,47 @@ class EntityMemoryProtocol(Protocol):
         ...
 
 
+@runtime_checkable
+class AgentMemoryProtocol(Protocol):
+    """
+    Protocol for memory implementations used by the Agent class.
+    
+    This defines the interface that Agent expects from its _memory_instance.
+    Both FileMemory and Memory satisfy this protocol, enabling consistent
+    usage across backends.
+    
+    Example:
+        ```python
+        class CustomMemory:
+            def get_context(self, query=None):
+                return "remembered facts here"
+            
+            def save_session(self, name, conversation_history=None, metadata=None):
+                pass  # persist session
+        
+        agent = Agent(memory=CustomMemory())
+        ```
+    """
+    
+    def get_context(
+        self,
+        query: Optional[str] = None,
+        **kwargs
+    ) -> str:
+        """Get memory context for injection into system prompt."""
+        ...
+    
+    def save_session(
+        self,
+        name: str,
+        conversation_history: Optional[List[Dict[str, Any]]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        **kwargs
+    ) -> None:
+        """Save a conversation session to memory."""
+        ...
+
+
 __all__ = [
     'MemoryProtocol',
     'ResettableMemoryProtocol',
@@ -282,5 +323,6 @@ __all__ = [
     'AsyncDeletableMemoryProtocol',
     'AsyncMemoryProtocol',
     'EntityMemoryProtocol',
+    'AgentMemoryProtocol',
 ]
 

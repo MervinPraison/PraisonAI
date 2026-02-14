@@ -970,10 +970,23 @@ class Agent:
             if _memory_config.history:
                 _history_enabled = True
                 _history_limit = _memory_config.history_limit
+                # Use explicit session_id from MemoryConfig if provided
+                if _memory_config.session_id:
+                    _history_session_id = _memory_config.session_id
         
         # Use auto_save session if no explicit session and history is enabled
         if _history_enabled and _history_session_id is None and auto_save:
             _history_session_id = auto_save
+        
+        # Auto-generate session_id when history=True but no session_id set
+        # This ensures _init_session_store() can create the store
+        if _history_enabled and session_id is None and _history_session_id is not None:
+            session_id = _history_session_id
+        elif _history_enabled and session_id is None and _history_session_id is None:
+            import hashlib as _hl
+            _agent_hash = _hl.md5(name.encode()).hexdigest()[:8]
+            session_id = f"history_{_agent_hash}"
+            _history_session_id = session_id
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve KNOWLEDGE param - FAST PATH
@@ -2818,7 +2831,7 @@ Summary:"""
                 user_id=mem_user_id,
                 verbose=1 if getattr(self, 'verbose', False) else 0
             )
-        elif isinstance(memory, str) and memory in ("sqlite", "chromadb", "mem0", "mongodb"):
+        elif isinstance(memory, str) and memory in ("sqlite", "chromadb", "mem0", "mongodb", "redis", "postgres"):
             # Use full Memory class with specific provider
             try:
                 from ..memory.memory import Memory
@@ -2856,6 +2869,11 @@ Summary:"""
                     logging.warning("Full Memory class requires additional dependencies. Falling back to FileMemory.")
                     from ..memory.file_memory import FileMemory
                     self._memory_instance = FileMemory(user_id=mem_user_id)
+        elif isinstance(memory, str):
+            # Unknown string backend - fall back to FileMemory with warning
+            logging.warning(f"Unknown memory backend '{memory}'. Falling back to FileMemory.")
+            from ..memory.file_memory import FileMemory
+            self._memory_instance = FileMemory(user_id=mem_user_id)
         else:
             # Assume it's already a memory instance
             self._memory_instance = memory
@@ -4046,6 +4064,12 @@ Your Goal: {self.goal}"""
             execution_time_ms=(time.time() - start_time) * 1000
         )
         self._hook_runner.execute_sync(HookEvent.AFTER_AGENT, after_agent_input)
+        
+        # Auto-memory extraction (opt-in via MemoryConfig(auto_memory=True))
+        if response:
+            prompt_str = prompt if isinstance(prompt, str) else str(prompt)
+            self._process_auto_memory(prompt_str, str(response))
+        
         return response
 
     
@@ -6495,6 +6519,36 @@ Write the complete compiled report:"""
         """
         pass
     
+    def _process_auto_memory(self, user_message: str, assistant_response: str):
+        """Process auto-memory extraction after agent response.
+        
+        Called after each agent response when auto_memory=True in MemoryConfig.
+        Uses AutoMemory to extract and store memorable content (names, preferences,
+        facts) from the conversation. No-op when auto_memory is disabled.
+        
+        Args:
+            user_message: The user's input message
+            assistant_response: The agent's response
+        """
+        if not self._auto_memory or not self._memory_instance:
+            return
+        
+        try:
+            from ..memory.auto_memory import AutoMemory
+            # Lazy-create AutoMemory wrapper on first use
+            if not hasattr(self, '_auto_memory_instance') or self._auto_memory_instance is None:
+                self._auto_memory_instance = AutoMemory(
+                    self._memory_instance,
+                    enabled=True,
+                    verbose=1 if getattr(self, 'verbose', False) else 0
+                )
+            self._auto_memory_instance.process_interaction(
+                user_message=str(user_message),
+                assistant_response=str(assistant_response),
+            )
+        except Exception as e:
+            logging.debug(f"Auto-memory extraction failed: {e}")
+
     def _auto_save_session(self):
         """Auto-save session if auto_save is enabled."""
         if not self.auto_save or not self._memory_instance:

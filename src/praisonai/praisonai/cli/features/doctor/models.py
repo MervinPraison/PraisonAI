@@ -33,6 +33,7 @@ class CheckCategory(Enum):
     NETWORK = "network"
     PERFORMANCE = "performance"
     SELFTEST = "selftest"
+    BOTS = "bots"
 
 
 class CheckSeverity(Enum):

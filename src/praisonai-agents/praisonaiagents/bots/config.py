@@ -43,11 +43,28 @@ class BotConfig:
     reply_in_thread: bool = False  # Default to inline, set True for thread replies
     thread_threshold: int = 500  # Auto-thread responses longer than this (0 = disabled)
     
+    # Group message policy
+    group_policy: str = "mention_only"  # respond_all, mention_only, command_only
+    
     # Default tools enabled for all bots
     default_tools: List[str] = field(default_factory=lambda: ["execute_command", "search_web", "schedule_add", "schedule_list", "schedule_remove"])
     
     # Auto-approve tool calls (useful for trusted environments)
     auto_approve_tools: bool = False  # If True, skip confirmation for tool execution
+    
+    # Inbound message debounce (ms). Coalesces rapid messages from same user.
+    # 0 = disabled (default). Recommended: 1000-2000 for chat bots.
+    debounce_ms: int = 0
+    
+    # Ack emoji reaction on inbound messages. Empty string = disabled.
+    # When set, bot reacts with this emoji on receive (e.g. "⏳") and
+    # replaces it with done_emoji on completion (e.g. "✅").
+    ack_emoji: str = ""
+    done_emoji: str = "✅"
+    
+    # Session TTL in seconds. 0 = disabled (sessions never expire).
+    # When set, stale sessions older than this are auto-reaped.
+    session_ttl: int = 0
     
     metadata: Dict[str, Any] = field(default_factory=dict)
     
@@ -70,6 +87,10 @@ class BotConfig:
             "thread_threshold": self.thread_threshold,
             "default_tools": self.default_tools,
             "auto_approve_tools": self.auto_approve_tools,
+            "debounce_ms": self.debounce_ms,
+            "ack_emoji": self.ack_emoji,
+            "done_emoji": self.done_emoji,
+            "session_ttl": self.session_ttl,
             "metadata": self.metadata,
         }
     

@@ -67,6 +67,11 @@ class WhatsAppWebAdapter:
         return self._is_connected
 
     @property
+    def connected_at(self) -> Optional[float]:
+        """Epoch seconds when the adapter received ConnectedEv."""
+        return self._started_at
+
+    @property
     def self_jid(self) -> Optional[str]:
         return self._self_jid
 

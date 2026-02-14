@@ -276,33 +276,74 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
                 chat_jid_obj = getattr(msg_source, 'Chat', None) or getattr(info, 'chat', None)
                 chat_jid = str(chat_jid_obj) if chat_jid_obj else ''
                 msg_id = str(getattr(info, 'ID', '') or getattr(info, 'id', ''))
-                timestamp = getattr(info, 'Timestamp', None) or time.time()
-                if hasattr(timestamp, 'timestamp'):
-                    timestamp = timestamp.timestamp()
+                raw_ts = getattr(info, 'Timestamp', None)
+                if hasattr(raw_ts, 'timestamp'):
+                    timestamp = raw_ts.timestamp()
+                elif isinstance(raw_ts, (int, float)) and raw_ts > 0:
+                    # neonize/Go encodes timestamps as milliseconds (UnixMilli).
+                    # Detect: any value > 1e12 is milliseconds, convert to seconds.
+                    timestamp = raw_ts / 1000.0 if raw_ts > 1e12 else float(raw_ts)
+                else:
+                    timestamp = time.time()
+
+                # ── Stale-message guard ────────────────────────────────
+                # whatsmeow delivers offline/historical messages as regular
+                # MessageEv upon reconnection.  Drop anything older than
+                # the moment the adapter actually connected so the bot
+                # never replies to old messages.
+                connected_at = (
+                    self._web_adapter.connected_at
+                    if self._web_adapter else self._started_at
+                ) or self._started_at or 0
+                if timestamp and connected_at and timestamp < connected_at:
+                    logger.debug(
+                        "Skipping stale message %s (ts=%.1f < connected=%.1f)",
+                        msg_id, timestamp, connected_at,
+                    )
+                    return
 
                 # ── Message filtering ────────────────────────────────
-                # Default: self-only. Expand via allowed_numbers / groups.
+                # Default: self-chat only (user messaging their own number).
+                # Expand via allowed_numbers / groups / respond_to_all.
                 is_from_me = bool(getattr(msg_source, 'IsFromMe', False))
                 is_group = bool(getattr(msg_source, 'IsGroup', False)) or "@g.us" in chat_jid
 
+                # Determine if this is a true self-chat (user→own number).
+                # IsFromMe is True for ANY message the user sent in any chat,
+                # but self-messaging means sender and chat are the same JID.
+                def _jid_user(jid_str: str) -> str:
+                    """Extract bare user part from a JID string."""
+                    return jid_str.split("@")[0].split(":")[0] if jid_str else ""
+
+                is_self_chat = (
+                    is_from_me
+                    and not is_group
+                    and _jid_user(sender_jid) == _jid_user(chat_jid)
+                )
+
                 if not self._respond_to_all:
-                    if is_from_me:
-                        pass  # always allow self-messages
+                    if is_self_chat:
+                        pass  # true self-chat — always allow
                     elif is_group and self._allowed_groups:
                         # Check if group JID is in the allowlist
                         chat_jid_str = chat_jid.split("@")[0] if "@" in chat_jid else chat_jid
                         if not (chat_jid in self._allowed_groups
                                 or chat_jid_str in self._allowed_groups):
+                            logger.debug("Filtered: group %s not in allowlist", chat_jid)
                             return
                     elif not is_group and self._allowed_numbers:
                         # Check if sender number is in the allowlist
-                        sender_num = sender_jid.split("@")[0].split(":")[0] if sender_jid else ""
+                        sender_num = _jid_user(sender_jid)
                         if sender_num not in self._allowed_numbers:
+                            logger.debug("Filtered: sender %s not in allowlist", sender_num)
                             return
                     else:
-                        # Not self, not in any allowlist → ignore
-                        if not is_from_me:
-                            return
+                        # Not self-chat, not in any allowlist → ignore
+                        logger.debug(
+                            "Filtered: msg %s (from_me=%s, self_chat=%s, group=%s)",
+                            msg_id, is_from_me, is_self_chat, is_group,
+                        )
+                        return
 
                 # Extract text content
                 content = ""
@@ -812,3 +853,42 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
     async def get_channel(self, channel_id: str) -> Optional[BotChannel]:
         """Get channel info (WhatsApp is DM-only)."""
         return BotChannel(channel_id=channel_id, channel_type="dm")
+
+    async def probe(self):
+        """Test WhatsApp Cloud API connectivity."""
+        from praisonaiagents.bots import ProbeResult
+        started = time.time()
+        if self._mode == "web":
+            return ProbeResult(ok=True, platform="whatsapp", elapsed_ms=0.0, details={"mode": "web"})
+        try:
+            import aiohttp
+            url = f"{GRAPH_API_BASE}/{self._phone_number_id}"
+            headers = {"Authorization": f"Bearer {self._token}"}
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    elapsed = (time.time() - started) * 1000
+                    if resp.status == 200:
+                        data = await resp.json()
+                        return ProbeResult(
+                            ok=True, platform="whatsapp", elapsed_ms=elapsed,
+                            bot_username=data.get("display_phone_number", self._phone_number_id),
+                            details={"phone_number_id": self._phone_number_id, "verified_name": data.get("verified_name")},
+                        )
+                    else:
+                        text = await resp.text()
+                        return ProbeResult(ok=False, platform="whatsapp", elapsed_ms=elapsed, error=f"HTTP {resp.status}: {text[:200]}")
+        except Exception as e:
+            return ProbeResult(ok=False, platform="whatsapp", elapsed_ms=(time.time() - started) * 1000, error=str(e))
+
+    async def health(self):
+        """Get detailed health status of the WhatsApp bot."""
+        from praisonaiagents.bots import HealthResult
+        probe_result = await self.probe()
+        uptime = (time.time() - self._started_at) if self._started_at else None
+        session_count = len(self._session._histories) if hasattr(self._session, '_histories') else 0
+        return HealthResult(
+            ok=self._is_running and probe_result.ok, platform="whatsapp",
+            is_running=self._is_running, uptime_seconds=uptime,
+            probe=probe_result, sessions=session_count,
+            error=probe_result.error if not probe_result.ok else None,
+        )

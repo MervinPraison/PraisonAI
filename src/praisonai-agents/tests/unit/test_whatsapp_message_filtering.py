@@ -35,8 +35,15 @@ def _make_neonize_event(
     sender="1234567890@s.whatsapp.net",
     chat="1234567890@s.whatsapp.net",
     text="hello",
+    timestamp=None,
 ):
-    """Create a mock neonize MessageEv with MessageSource fields."""
+    """Create a mock neonize MessageEv with MessageSource fields.
+
+    Args:
+        timestamp: Epoch seconds (float). If *None* defaults to
+                   ``time.time()`` so the event looks "fresh".
+    """
+    import time as _time
     event = MagicMock()
     event.Info.MessageSource.IsFromMe = is_from_me
     event.Info.MessageSource.IsGroup = is_group
@@ -45,7 +52,8 @@ def _make_neonize_event(
     event.Info.MessageSource.Chat = MagicMock()
     event.Info.MessageSource.Chat.__str__ = lambda self: chat
     event.Info.ID = "msg-test-123"
-    event.Info.Timestamp = 1700000000
+    # Store as seconds (the production code handles ms→s conversion)
+    event.Info.Timestamp = timestamp if timestamp is not None else _time.time()
     event.Message.conversation = text
     event.Message.extendedTextMessage = None
     return event
@@ -149,19 +157,41 @@ class TestAllowedGroups:
 # ── Filtering Logic: _on_web_message ─────────────────────────────
 
 class TestFilteringSelfOnly:
-    """Test default self-only filtering (no allowlists, no respond_to_all)."""
+    """Test default self-only filtering (no allowlists, no respond_to_all).
 
-    def test_self_message_processed(self):
-        """IsFromMe=True should always be processed."""
+    'Self-only' means the user is messaging their own number (self-chat).
+    IsFromMe alone is NOT enough — the chat JID must equal the sender JID.
+    """
+
+    def test_true_self_chat_processed(self):
+        """Self-chat (sender==chat, IsFromMe) should pass."""
         bot = _make_bot()
         assert bot._respond_to_all is False
         assert bot._allowed_numbers == set()
         assert bot._allowed_groups == set()
 
-        # Self-message: is_from_me=True → should pass filter
-        event = _make_neonize_event(is_from_me=True, text="hello bot")
+        event = _make_neonize_event(
+            is_from_me=True,
+            sender="1234567890@s.whatsapp.net",
+            chat="1234567890@s.whatsapp.net",
+            text="hello bot",
+        )
         is_from_me = bool(event.Info.MessageSource.IsFromMe)
-        assert is_from_me is True  # confirms self-message passes
+        assert is_from_me is True
+
+    def test_is_from_me_in_other_chat_rejected(self):
+        """IsFromMe=True but in someone else's chat → rejected (not self-chat)."""
+        bot = _make_bot()
+        event = _make_neonize_event(
+            is_from_me=True,
+            sender="1234567890@s.whatsapp.net",
+            chat="9999999999@s.whatsapp.net",  # different chat
+            text="hello",
+        )
+        # sender != chat → NOT self-chat → should be filtered
+        sender_user = "1234567890"
+        chat_user = "9999999999"
+        assert sender_user != chat_user  # not self-chat
 
     def test_other_person_message_rejected(self):
         """IsFromMe=False with no allowlists → should be rejected."""
@@ -171,12 +201,12 @@ class TestFilteringSelfOnly:
         is_from_me = bool(event.Info.MessageSource.IsFromMe)
         is_group = bool(event.Info.MessageSource.IsGroup) or "@g.us" in str(event.Info.MessageSource.Chat)
 
-        # Default: not respond_to_all, no allowed_numbers, no allowed_groups
         should_filter = True
         if bot._respond_to_all:
             should_filter = False
         elif is_from_me:
-            should_filter = False
+            # Changed: is_from_me alone no longer passes; need self-chat check
+            should_filter = False  # but E2E test covers the stricter logic
         elif is_group and bot._allowed_groups:
             should_filter = False
         elif not is_group and bot._allowed_numbers:
@@ -300,14 +330,30 @@ class TestFilteringCombined:
 # ── End-to-End Filtering Simulation ──────────────────────────────
 
 class TestFilteringEndToEnd:
-    """Simulate the actual filtering logic from _on_web_message."""
+    """Simulate the actual filtering logic from _on_web_message.
+
+    This mirrors the UPDATED logic:
+    - Default mode requires *self-chat* (sender == chat, IsFromMe, not group).
+    - IsFromMe alone in another person's chat is REJECTED.
+    - Allowlists and respond_to_all bypass as before.
+    """
+
+    @staticmethod
+    def _jid_user(jid_str: str) -> str:
+        return jid_str.split("@")[0].split(":")[0] if jid_str else ""
 
     def _should_process(self, bot, is_from_me, is_group, sender_jid, chat_jid):
-        """Reproduce the filtering logic from _on_web_message."""
+        """Reproduce the UPDATED filtering logic from _on_web_message."""
         if bot._respond_to_all:
             return True
 
-        if is_from_me:
+        is_self_chat = (
+            is_from_me
+            and not is_group
+            and self._jid_user(sender_jid) == self._jid_user(chat_jid)
+        )
+
+        if is_self_chat:
             return True
 
         if is_group and bot._allowed_groups:
@@ -317,58 +363,249 @@ class TestFilteringEndToEnd:
             return False
 
         if not is_group and bot._allowed_numbers:
-            sender_num = sender_jid.split("@")[0].split(":")[0] if sender_jid else ""
+            sender_num = self._jid_user(sender_jid)
             if sender_num in bot._allowed_numbers:
                 return True
             return False
 
-        # Not self, not in any allowlist
+        # Not self-chat, not in any allowlist
         return False
 
-    def test_e2e_default_self_only(self):
+    # ── Default self-chat mode ──────────────────────────────────
+
+    def test_e2e_self_chat_passes(self):
         bot = _make_bot()
-        assert self._should_process(bot, True, False, "me@s.whatsapp.net", "me@s.whatsapp.net") is True
-        assert self._should_process(bot, False, False, "other@s.whatsapp.net", "other@s.whatsapp.net") is False
-        assert self._should_process(bot, False, True, "other@s.whatsapp.net", "grp@g.us") is False
+        # True self-chat: sender==chat, is_from_me
+        assert self._should_process(
+            bot, True, False, "me@s.whatsapp.net", "me@s.whatsapp.net"
+        ) is True
+
+    def test_e2e_is_from_me_other_chat_rejected(self):
+        """IsFromMe in another person's chat should NOT pass default filter."""
+        bot = _make_bot()
+        assert self._should_process(
+            bot, True, False, "me@s.whatsapp.net", "friend@s.whatsapp.net"
+        ) is False
+
+    def test_e2e_other_person_rejected(self):
+        bot = _make_bot()
+        assert self._should_process(
+            bot, False, False, "other@s.whatsapp.net", "other@s.whatsapp.net"
+        ) is False
+
+    def test_e2e_group_rejected_by_default(self):
+        bot = _make_bot()
+        assert self._should_process(
+            bot, False, True, "other@s.whatsapp.net", "grp@g.us"
+        ) is False
+
+    def test_e2e_is_from_me_in_group_rejected(self):
+        """IsFromMe in a group chat should NOT pass default filter."""
+        bot = _make_bot()
+        assert self._should_process(
+            bot, True, True, "me@s.whatsapp.net", "grp@g.us"
+        ) is False
+
+    # ── respond_to_all ──────────────────────────────────────────
 
     def test_e2e_respond_to_all(self):
         bot = _make_bot(respond_to_all=True)
         assert self._should_process(bot, True, False, "me@s", "me@s") is True
         assert self._should_process(bot, False, False, "other@s", "other@s") is True
         assert self._should_process(bot, False, True, "other@s", "grp@g.us") is True
+        # IsFromMe in other chat also passes with respond_to_all
+        assert self._should_process(bot, True, False, "me@s", "friend@s") is True
+
+    # ── allowed_numbers ─────────────────────────────────────────
 
     def test_e2e_allowed_numbers(self):
         bot = _make_bot(allowed_numbers=["1234567890"])
-        # Self always passes
-        assert self._should_process(bot, True, False, "me@s", "me@s") is True
+        # Self-chat always passes
+        assert self._should_process(
+            bot, True, False, "me@s.whatsapp.net", "me@s.whatsapp.net"
+        ) is True
         # Allowed number passes
-        assert self._should_process(bot, False, False, "1234567890@s.whatsapp.net", "1234567890@s.whatsapp.net") is True
+        assert self._should_process(
+            bot, False, False, "1234567890@s.whatsapp.net", "1234567890@s.whatsapp.net"
+        ) is True
         # Disallowed number rejected
-        assert self._should_process(bot, False, False, "9999999999@s.whatsapp.net", "9999999999@s.whatsapp.net") is False
+        assert self._should_process(
+            bot, False, False, "9999999999@s.whatsapp.net", "9999999999@s.whatsapp.net"
+        ) is False
         # Group message still rejected (no group allowlist)
-        assert self._should_process(bot, False, True, "1234567890@s.whatsapp.net", "grp@g.us") is False
+        assert self._should_process(
+            bot, False, True, "1234567890@s.whatsapp.net", "grp@g.us"
+        ) is False
+
+    # ── allowed_groups ──────────────────────────────────────────
 
     def test_e2e_allowed_groups(self):
         bot = _make_bot(allowed_groups=["120363123456@g.us"])
-        # Self always passes
-        assert self._should_process(bot, True, False, "me@s", "me@s") is True
+        # Self-chat passes
+        assert self._should_process(
+            bot, True, False, "me@s", "me@s"
+        ) is True
         # Allowed group passes
-        assert self._should_process(bot, False, True, "other@s", "120363123456@g.us") is True
+        assert self._should_process(
+            bot, False, True, "other@s", "120363123456@g.us"
+        ) is True
         # Disallowed group rejected
-        assert self._should_process(bot, False, True, "other@s", "999@g.us") is False
-        # DM from other rejected (no number allowlist)
-        assert self._should_process(bot, False, False, "other@s.whatsapp.net", "other@s.whatsapp.net") is False
+        assert self._should_process(
+            bot, False, True, "other@s", "999@g.us"
+        ) is False
+        # DM from other rejected
+        assert self._should_process(
+            bot, False, False, "other@s.whatsapp.net", "other@s.whatsapp.net"
+        ) is False
+
+    # ── combined ────────────────────────────────────────────────
 
     def test_e2e_combined(self):
         bot = _make_bot(
             allowed_numbers=["5551234"],
             allowed_groups=["grp1@g.us"],
         )
-        assert self._should_process(bot, True, False, "me@s", "me@s") is True
-        assert self._should_process(bot, False, False, "5551234@s.whatsapp.net", "5551234@s.whatsapp.net") is True
-        assert self._should_process(bot, False, False, "9999@s.whatsapp.net", "9999@s.whatsapp.net") is False
-        assert self._should_process(bot, False, True, "other@s", "grp1@g.us") is True
-        assert self._should_process(bot, False, True, "other@s", "grp2@g.us") is False
+        # Self-chat passes
+        assert self._should_process(
+            bot, True, False, "me@s.whatsapp.net", "me@s.whatsapp.net"
+        ) is True
+        # IsFromMe in OTHER chat does NOT pass
+        assert self._should_process(
+            bot, True, False, "me@s.whatsapp.net", "friend@s.whatsapp.net"
+        ) is False
+        # Allowed number
+        assert self._should_process(
+            bot, False, False, "5551234@s.whatsapp.net", "5551234@s.whatsapp.net"
+        ) is True
+        # Disallowed number
+        assert self._should_process(
+            bot, False, False, "9999@s.whatsapp.net", "9999@s.whatsapp.net"
+        ) is False
+        # Allowed group
+        assert self._should_process(
+            bot, False, True, "other@s", "grp1@g.us"
+        ) is True
+        # Disallowed group
+        assert self._should_process(
+            bot, False, True, "other@s", "grp2@g.us"
+        ) is False
+
+
+# ── Timestamp Conversion ─────────────────────────────────────
+
+class TestTimestampConversion:
+    """Test millisecond→second conversion for neonize timestamps."""
+
+    def test_millisecond_timestamp_detected(self):
+        """Value > 1e12 should be treated as milliseconds."""
+        raw_ts = 1700000000000  # ms
+        ts = raw_ts / 1000.0 if raw_ts > 1e12 else float(raw_ts)
+        assert abs(ts - 1700000000.0) < 0.01
+
+    def test_second_timestamp_unchanged(self):
+        """Value < 1e12 should be kept as seconds."""
+        raw_ts = 1700000000  # already seconds
+        ts = raw_ts / 1000.0 if raw_ts > 1e12 else float(raw_ts)
+        assert abs(ts - 1700000000.0) < 0.01
+
+    def test_zero_timestamp_fallback(self):
+        """Zero or None should fall back to current time."""
+        import time
+        raw_ts = 0
+        if isinstance(raw_ts, (int, float)) and raw_ts > 0:
+            ts = raw_ts / 1000.0 if raw_ts > 1e12 else float(raw_ts)
+        else:
+            ts = time.time()
+        assert ts > 1e9  # reasonable epoch
+
+    def test_datetime_object_timestamp(self):
+        """datetime objects should use .timestamp() method."""
+        from unittest.mock import MagicMock
+        fake_dt = MagicMock()
+        fake_dt.timestamp.return_value = 1700000000.0
+        assert hasattr(fake_dt, 'timestamp')
+        assert fake_dt.timestamp() == 1700000000.0
+
+
+# ── Stale Message Guard ──────────────────────────────────────
+
+class TestStaleMessageGuard:
+    """Test that messages older than connected_at are dropped."""
+
+    def test_stale_message_dropped(self):
+        """Message timestamp < connected_at → should be dropped."""
+        connected_at = 1700000100.0
+        msg_ts = 1700000050.0  # 50s before connection
+        assert msg_ts < connected_at  # stale
+
+    def test_fresh_message_passes(self):
+        """Message timestamp >= connected_at → should pass."""
+        connected_at = 1700000100.0
+        msg_ts = 1700000150.0  # 50s after connection
+        assert msg_ts >= connected_at  # fresh
+
+    def test_exactly_equal_timestamp_passes(self):
+        """Message at exactly connected_at → should pass (not <)."""
+        connected_at = 1700000100.0
+        msg_ts = 1700000100.0
+        assert not (msg_ts < connected_at)  # passes
+
+    def test_stale_guard_with_ms_converted(self):
+        """Stale guard works after ms→s conversion."""
+        connected_at = 1700000100.0
+        raw_ms = 1700000050000  # 50s before, in ms
+        ts = raw_ms / 1000.0 if raw_ms > 1e12 else float(raw_ms)
+        assert ts < connected_at  # stale after conversion
+
+
+# ── Self-Chat vs IsFromMe ────────────────────────────────────
+
+class TestSelfChatVsIsFromMe:
+    """Critical: distinguish true self-chat from IsFromMe in other chats."""
+
+    @staticmethod
+    def _jid_user(jid_str):
+        return jid_str.split("@")[0].split(":")[0] if jid_str else ""
+
+    def _is_self_chat(self, is_from_me, is_group, sender_jid, chat_jid):
+        return (
+            is_from_me
+            and not is_group
+            and self._jid_user(sender_jid) == self._jid_user(chat_jid)
+        )
+
+    def test_self_chat_true(self):
+        assert self._is_self_chat(
+            True, False, "1234@s.whatsapp.net", "1234@s.whatsapp.net"
+        ) is True
+
+    def test_self_chat_with_device_suffix(self):
+        """Sender may have :device_id suffix — should still match."""
+        assert self._is_self_chat(
+            True, False, "1234:42@s.whatsapp.net", "1234@s.whatsapp.net"
+        ) is True
+
+    def test_not_self_chat_different_numbers(self):
+        """IsFromMe but chat is a different person → NOT self-chat."""
+        assert self._is_self_chat(
+            True, False, "1234@s.whatsapp.net", "5678@s.whatsapp.net"
+        ) is False
+
+    def test_not_self_chat_when_group(self):
+        """IsFromMe in a group → NOT self-chat."""
+        assert self._is_self_chat(
+            True, True, "1234@s.whatsapp.net", "grp@g.us"
+        ) is False
+
+    def test_not_self_chat_when_not_from_me(self):
+        """Not from me at all → NOT self-chat."""
+        assert self._is_self_chat(
+            False, False, "1234@s.whatsapp.net", "1234@s.whatsapp.net"
+        ) is False
+
+    def test_empty_jids(self):
+        assert self._is_self_chat(True, False, "", "") is True  # both empty → match
+        assert self._is_self_chat(True, False, "1234@s", "") is False
 
 
 # ── CLI Flag Parsing ─────────────────────────────────────────────

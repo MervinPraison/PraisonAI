@@ -42,7 +42,7 @@ from typing import Callable, Dict, List, Literal, Optional, Set
 
 from .protocols import ApprovalProtocol, ApprovalRequest  # noqa: F401
 from .protocols import ApprovalDecision  # noqa: F401
-from .backends import AutoApproveBackend, ConsoleBackend, CallbackBackend  # noqa: F401
+from .backends import AutoApproveBackend, ConsoleBackend, CallbackBackend, AgentApproval  # noqa: F401
 from .registry import ApprovalRegistry, DEFAULT_DANGEROUS_TOOLS  # noqa: F401
 
 logger = logging.getLogger(__name__)

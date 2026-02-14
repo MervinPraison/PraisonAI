@@ -26,6 +26,7 @@ from praisonaiagents.bots import (
 
 from ._commands import format_status, format_help
 from ._session import BotSessionManager
+from ._debounce import InboundDebouncer
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,9 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
         self._command_handlers: Dict[str, Callable] = {}
         self._started_at: Optional[float] = None
         self._session: BotSessionManager = BotSessionManager()
+        self._debouncer: InboundDebouncer = InboundDebouncer(
+            debounce_ms=self.config.debounce_ms,
+        )
     
     @property
     def is_running(self) -> bool:
@@ -183,7 +187,8 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                 if self._agent:
                     user_id = str(message.author.id)
                     async def _send_agent_response():
-                        response = await self._session.chat(self._agent, user_id, bot_message.text)
+                        text_to_send = await self._debouncer.debounce(user_id, bot_message.text)
+                        response = await self._session.chat(self._agent, user_id, text_to_send)
                         send_result = self.fire_message_sending(
                             str(message.channel.id), str(response),
                         )
@@ -214,6 +219,7 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
             return
         
         self._is_running = False
+        self._debouncer.cancel_all()
         
         if self._client:
             await self._client.close()
@@ -260,7 +266,9 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
         )
     
     async def _send_long_message(self, channel, text: str, reference=None) -> None:
-        """Send a long message, splitting if necessary."""
+        """Send a long message, splitting with markdown-aware chunking."""
+        from ._chunk import chunk_message
+
         max_len = min(self.config.max_message_length, 2000)
         
         if len(text) <= max_len:
@@ -269,7 +277,7 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
             else:
                 await channel.send(text)
         else:
-            chunks = [text[i:i+max_len] for i in range(0, len(text), max_len)]
+            chunks = chunk_message(text, max_length=max_len, preserve_fences=True)
             for i, chunk in enumerate(chunks):
                 if i == 0 and reference:
                     await channel.send(chunk, reference=reference)
@@ -374,6 +382,43 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
             pass
         return None
     
+    async def probe(self):
+        """Test Discord API connectivity without starting the bot."""
+        from praisonaiagents.bots import ProbeResult
+        started = time.time()
+        try:
+            import aiohttp
+            url = "https://discord.com/api/v10/users/@me"
+            headers = {"Authorization": f"Bot {self._token}"}
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    elapsed = (time.time() - started) * 1000
+                    if resp.status == 200:
+                        data = await resp.json()
+                        return ProbeResult(
+                            ok=True, platform="discord", elapsed_ms=elapsed,
+                            bot_username=data.get("username"),
+                            details={"bot_id": data.get("id"), "discriminator": data.get("discriminator")},
+                        )
+                    else:
+                        text = await resp.text()
+                        return ProbeResult(ok=False, platform="discord", elapsed_ms=elapsed, error=f"HTTP {resp.status}: {text[:200]}")
+        except Exception as e:
+            return ProbeResult(ok=False, platform="discord", elapsed_ms=(time.time() - started) * 1000, error=str(e))
+
+    async def health(self):
+        """Get detailed health status of the Discord bot."""
+        from praisonaiagents.bots import HealthResult
+        probe_result = await self.probe()
+        uptime = (time.time() - self._started_at) if self._started_at else None
+        session_count = len(self._session._histories) if hasattr(self._session, '_histories') else 0
+        return HealthResult(
+            ok=self._is_running and probe_result.ok, platform="discord",
+            is_running=self._is_running, uptime_seconds=uptime,
+            probe=probe_result, sessions=session_count,
+            error=probe_result.error if not probe_result.ok else None,
+        )
+
     def _format_status(self) -> str:
         """Format /status response."""
         return format_status(self._agent, self.platform, self._started_at, self._is_running)
