@@ -72,6 +72,11 @@ class ShellTools:
             if cwd:
                 cwd = os.path.expanduser(cwd)
                 cwd = os.path.expandvars(cwd)  # Also expand $HOME, $USER, etc.
+                if not os.path.isdir(cwd):
+                    # Fallback: try home directory, then current working directory
+                    fallback = os.path.expanduser("~") if os.path.isdir(os.path.expanduser("~")) else os.getcwd()
+                    logging.warning(f"Working directory '{cwd}' does not exist, using '{fallback}'")
+                    cwd = fallback
             
             # Set up process environment
             process_env = os.environ.copy()

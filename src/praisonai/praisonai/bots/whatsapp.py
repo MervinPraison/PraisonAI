@@ -457,10 +457,19 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
                 await asyncio.sleep(1)
         except asyncio.CancelledError:
             pass
+        except KeyboardInterrupt:
+            pass
         except Exception as e:
             logger.error(f"WhatsApp Web mode error: {e}")
             raise
         finally:
+            # Graceful shutdown: stop the neonize log worker thread to
+            # prevent "threading._shutdown" errors on Ctrl+C.
+            try:
+                from neonize.utils.log import shutdown_log_worker
+                shutdown_log_worker()
+            except Exception:
+                pass
             await self.stop()
 
     async def _web_send(self, to: Any, text: str) -> None:

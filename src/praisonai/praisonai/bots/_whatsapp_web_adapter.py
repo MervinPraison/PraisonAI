@@ -112,13 +112,19 @@ class WhatsAppWebAdapter:
         # ── Suppress noisy Go-backend warnings ─────────────────────
         # whatsmeow emits non-actionable warnings (websocket EOF on
         # close, LTHash mismatches during state sync, duplicate
-        # contacts, missing MAC values). These are protocol-level
-        # quirks, not bugs in our code — suppress to reduce noise.
+        # contacts, missing MAC values, decryption failures for old
+        # keys). These are protocol-level quirks, not bugs in our
+        # code — suppress to reduce noise.
         _known_noise = (
             "failed to close WebSocket",
+            "Error sending close to websocket",
             "duplicate contacts found",
             "mismatching LTHash",
             "missing value MAC",
+            "failed to decrypt prekey message",
+            "failed to decrypt group message",
+            "received message with old counter",
+            "failed to read frame header",
         )
 
         class _WhatsmeowNoiseFilter(logging.Filter):
@@ -126,9 +132,13 @@ class WhatsAppWebAdapter:
                 msg = record.getMessage()
                 return not any(pat in msg for pat in _known_noise)
 
-        for _logger_name in ("whatsmeow.Client", "whatsmeow.Database", "whatsmeow"):
+        # Apply to the root "whatsmeow" logger so ALL child loggers
+        # (whatsmeow.Client, whatsmeow.Database, etc.) inherit it.
+        # Also apply to neonize's own log module logger.
+        _noise_filter = _WhatsmeowNoiseFilter()
+        for _logger_name in ("whatsmeow", "neonize.utils.log"):
             _wm_logger = logging.getLogger(_logger_name)
-            _wm_logger.addFilter(_WhatsmeowNoiseFilter())
+            _wm_logger.addFilter(_noise_filter)
 
         # ── Critical: bridge neonize's event loop to ours ──────────
         # neonize creates event_global_loop = asyncio.new_event_loop()
