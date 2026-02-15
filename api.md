@@ -599,11 +599,12 @@ Methods:
 
 Types:
 ```python
-from praisonaiagents import AutonomyLevel, CachingConfig, ExecutionConfig, ExecutionPreset, GuardrailConfig, HooksConfig, KnowledgeConfig, MemoryConfig, MultiAgentExecutionConfig, MultiAgentHooksConfig, MultiAgentMemoryConfig, MultiAgentOutputConfig, MultiAgentPlanningConfig, OutputConfig, OutputPreset, PlanningConfig, ReflectionConfig, SkillsConfig, TemplateConfig, WebConfig, WebSearchProvider
+from praisonaiagents import AutonomyConfig, AutonomyLevel, CachingConfig, ExecutionConfig, ExecutionPreset, GuardrailConfig, HooksConfig, KnowledgeConfig, MemoryConfig, MultiAgentExecutionConfig, MultiAgentHooksConfig, MultiAgentMemoryConfig, MultiAgentOutputConfig, MultiAgentPlanningConfig, OutputConfig, OutputPreset, PlanningConfig, ReflectionConfig, SkillsConfig, TemplateConfig, WebConfig, WebSearchProvider
 ```
 
 Methods:
 
+* <code title="class AutonomyConfig">AutonomyConfig.<a href="./src/praisonai-agents/praisonaiagents/agent/autonomy.py">from_dict</a>(data: Dict[str, Any]) -> 'AutonomyConfig'</code>
 * <code title="class CachingConfig">CachingConfig.<a href="./src/praisonai-agents/praisonaiagents/config/feature_configs.py">to_dict</a>() -> Dict[str, Any]</code>
 * <code title="class ExecutionConfig">ExecutionConfig.<a href="./src/praisonai-agents/praisonaiagents/config/feature_configs.py">to_dict</a>() -> Dict[str, Any]</code>
 * <code title="class GuardrailConfig">GuardrailConfig.<a href="./src/praisonai-agents/praisonaiagents/config/feature_configs.py">to_dict</a>() -> Dict[str, Any]</code>
