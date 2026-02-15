@@ -5,6 +5,11 @@ Provides agent-centric autonomy configuration and helpers.
 This module integrates escalation, doom loop detection, and observability
 directly into the Agent class as first-class capabilities.
 
+Unified Architecture:
+    - AutonomyStage is an alias for EscalationStage (single source of truth)
+    - AutonomyTrigger delegates to EscalationTrigger (DRY)
+    - DoomLoopTracker adds recovery actions on top of basic detection
+
 Usage:
     from praisonaiagents import Agent
     
@@ -27,19 +32,45 @@ Usage:
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Set, Callable, Protocol, runtime_checkable
+from typing import Optional, Dict, Any, List, Set
 from enum import Enum
 import logging
 
 logger = logging.getLogger(__name__)
 
+# ============================================================================
+# Unified Stage Enum (G-DUP-1 fix: single source of truth)
+# ============================================================================
+# AutonomyStage is an alias for EscalationStage so both systems share
+# the same IntEnum. Backward-compatible: AutonomyStage.DIRECT == EscalationStage.DIRECT.
+from ..escalation.types import EscalationStage as AutonomyStage  # noqa: F401
 
-class AutonomyStage(str, Enum):
-    """Autonomy execution stages."""
-    DIRECT = "direct"
-    HEURISTIC = "heuristic"
-    PLANNED = "planned"
-    AUTONOMOUS = "autonomous"
+# Valid autonomy levels for AutonomyConfig.level
+VALID_AUTONOMY_LEVELS = {"suggest", "auto_edit", "full_auto"}
+
+# Signal name mapping: EscalationSignal.value → AutonomyTrigger string
+# Keeps backward compat for existing code that checks string signal names.
+_ESCALATION_TO_AUTONOMY_SIGNAL = {
+    "simple_question": "simple_question",
+    "file_references": "file_references",
+    "code_blocks": "code_blocks",
+    "edit_intent": "edit_intent",
+    "test_intent": "test_intent",
+    "refactor_intent": "refactor_intent",
+    "multi_step_intent": "multi_step",
+    "complex_keywords": "complex_keywords",
+    "long_prompt": "long_prompt",
+    "repo_context": "repo_context",
+    "build_intent": "build_intent",
+    "tool_failure": "tool_failure",
+    "ambiguous_result": "ambiguous_result",
+    "incomplete_task": "incomplete_task",
+    "clarification": "clarification",
+    "acknowledgment": "acknowledgment",
+}
+
+# Reverse map for converting autonomy signal strings back to EscalationSignal values
+_AUTONOMY_TO_ESCALATION_SIGNAL = {v: k for k, v in _ESCALATION_TO_AUTONOMY_SIGNAL.items()}
 
 
 @dataclass
@@ -48,6 +79,7 @@ class AutonomyConfig:
     
     Attributes:
         enabled: Whether autonomy is enabled
+        level: Autonomy level (suggest, auto_edit, full_auto)
         max_iterations: Maximum iterations before stopping
         doom_loop_threshold: Number of repeated actions to trigger doom loop
         auto_escalate: Whether to automatically escalate complexity
@@ -66,12 +98,25 @@ class AutonomyConfig:
     clear_context: bool = False
     verification_hooks: Optional[List[Any]] = None
     
+    def __post_init__(self):
+        if self.level not in VALID_AUTONOMY_LEVELS:
+            raise ValueError(
+                f"Invalid autonomy level: {self.level!r}. "
+                f"Must be one of {sorted(VALID_AUTONOMY_LEVELS)}"
+            )
+    
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AutonomyConfig":
         """Create config from dictionary."""
+        level = data.get("level", "suggest")
+        if level not in VALID_AUTONOMY_LEVELS:
+            raise ValueError(
+                f"Invalid autonomy level: {level!r}. "
+                f"Must be one of {sorted(VALID_AUTONOMY_LEVELS)}"
+            )
         return cls(
             enabled=data.get("enabled", True),
-            level=data.get("level", "suggest"),
+            level=level,
             max_iterations=data.get("max_iterations", 20),
             doom_loop_threshold=data.get("doom_loop_threshold", 3),
             auto_escalate=data.get("auto_escalate", True),
@@ -97,45 +142,13 @@ class AutonomySignal(str, Enum):
 class AutonomyTrigger:
     """Detects signals from prompts for autonomy decisions.
     
-    Uses fast heuristics (no LLM calls) to analyze prompts.
+    Delegates to EscalationTrigger (DRY, G-DUP-3 fix) and maps
+    signal names for backward compatibility.
     """
     
-    # Keywords that indicate simple questions
-    SIMPLE_KEYWORDS = {
-        "what is", "what's", "define", "explain", "describe",
-        "how does", "why is", "when was", "who is", "where is"
-    }
-    
-    # Keywords that indicate complex tasks
-    COMPLEX_KEYWORDS = {
-        "analyze", "refactor", "optimize", "implement", "design",
-        "architect", "debug", "fix", "modify", "update", "change",
-        "create", "build", "develop", "integrate", "migrate"
-    }
-    
-    # Keywords that indicate edit intent
-    EDIT_KEYWORDS = {
-        "edit", "modify", "change", "update", "fix", "add", "remove",
-        "delete", "replace", "insert", "write", "rewrite"
-    }
-    
-    # Keywords that indicate test intent
-    TEST_KEYWORDS = {
-        "test", "verify", "validate", "check", "assert", "ensure",
-        "unit test", "integration test", "e2e", "coverage"
-    }
-    
-    # Keywords that indicate refactor intent
-    REFACTOR_KEYWORDS = {
-        "refactor", "restructure", "reorganize", "clean up",
-        "simplify", "extract", "inline", "rename"
-    }
-    
-    # Multi-step indicators
-    MULTI_STEP_INDICATORS = {
-        "first", "then", "next", "after", "finally", "step",
-        "1.", "2.", "3.", "and then", "followed by"
-    }
+    def __init__(self):
+        from ..escalation.triggers import EscalationTrigger
+        self._delegate = EscalationTrigger()
     
     def analyze(self, prompt: str) -> Set[str]:
         """Analyze prompt and return detected signals.
@@ -146,46 +159,11 @@ class AutonomyTrigger:
         Returns:
             Set of signal names (lowercase strings)
         """
-        signals: Set[str] = set()
-        prompt_lower = prompt.lower()
-        
-        # Check for simple questions
-        if any(kw in prompt_lower for kw in self.SIMPLE_KEYWORDS):
-            word_count = len(prompt.split())
-            if word_count < 30:
-                signals.add("simple_question")
-        
-        # Check for file references
-        import re
-        file_pattern = r'[\w\-./]+\.(py|js|ts|tsx|jsx|java|go|rs|cpp|c|h|md|txt|json|yaml|yml|toml)'
-        if re.search(file_pattern, prompt):
-            signals.add("file_references")
-        
-        # Check for code blocks
-        if "```" in prompt:
-            signals.add("code_blocks")
-        
-        # Check for edit intent
-        if any(kw in prompt_lower for kw in self.EDIT_KEYWORDS):
-            signals.add("edit_intent")
-        
-        # Check for test intent
-        if any(kw in prompt_lower for kw in self.TEST_KEYWORDS):
-            signals.add("test_intent")
-        
-        # Check for refactor intent
-        if any(kw in prompt_lower for kw in self.REFACTOR_KEYWORDS):
-            signals.add("refactor_intent")
-        
-        # Check for multi-step
-        if any(ind in prompt_lower for ind in self.MULTI_STEP_INDICATORS):
-            signals.add("multi_step")
-        
-        # Check for complex keywords
-        if any(kw in prompt_lower for kw in self.COMPLEX_KEYWORDS):
-            signals.add("complex_keywords")
-        
-        return signals
+        escalation_signals = self._delegate.analyze(prompt)
+        return {
+            _ESCALATION_TO_AUTONOMY_SIGNAL.get(s.value, s.value)
+            for s in escalation_signals
+        }
     
     def recommend_stage(self, signals: Set[str]) -> AutonomyStage:
         """Recommend execution stage based on signals.
@@ -194,22 +172,17 @@ class AutonomyTrigger:
             signals: Set of detected signal names
             
         Returns:
-            Recommended AutonomyStage
+            Recommended AutonomyStage (alias for EscalationStage)
         """
-        # AUTONOMOUS: multi-step or refactor
-        if "multi_step" in signals or "refactor_intent" in signals:
-            return AutonomyStage.AUTONOMOUS
-        
-        # PLANNED: edit or test intent
-        if "edit_intent" in signals or "test_intent" in signals:
-            return AutonomyStage.PLANNED
-        
-        # HEURISTIC: file references or code blocks
-        if "file_references" in signals or "code_blocks" in signals:
-            return AutonomyStage.HEURISTIC
-        
-        # DIRECT: simple questions or no signals
-        return AutonomyStage.DIRECT
+        from ..escalation.types import EscalationSignal
+        esc_signals = set()
+        for s in signals:
+            signal_value = _AUTONOMY_TO_ESCALATION_SIGNAL.get(s, s)
+            try:
+                esc_signals.add(EscalationSignal(signal_value))
+            except ValueError:
+                pass
+        return self._delegate.recommend_stage(esc_signals)
 
 
 @dataclass
@@ -239,10 +212,13 @@ class AutonomyResult:
 
 
 class DoomLoopTracker:
-    """Tracks actions to detect doom loops.
+    """Tracks actions to detect doom loops with recovery actions.
     
     A doom loop occurs when the agent repeats the same action
     multiple times without making progress.
+    
+    Enhanced (G-DUP-2 fix): adds get_recovery_action() for
+    graduated recovery instead of immediate abort.
     """
     
     def __init__(self, threshold: int = 3):
@@ -254,6 +230,8 @@ class DoomLoopTracker:
         self.threshold = threshold
         self.actions: List[str] = []
         self.action_counts: Dict[str, int] = {}
+        self._consecutive_failures: int = 0
+        self._recovery_attempts: int = 0
     
     def record(self, action_type: str, args: Dict[str, Any], result: Any, success: bool) -> None:
         """Record an action.
@@ -268,6 +246,12 @@ class DoomLoopTracker:
         sig = f"{action_type}:{hash(str(sorted(args.items())))}"
         self.actions.append(sig)
         self.action_counts[sig] = self.action_counts.get(sig, 0) + 1
+        
+        # Track consecutive failures
+        if not success:
+            self._consecutive_failures += 1
+        else:
+            self._consecutive_failures = 0
     
     def is_doom_loop(self) -> bool:
         """Check if we're in a doom loop.
@@ -283,12 +267,42 @@ class DoomLoopTracker:
             if count >= self.threshold:
                 return True
         
+        # Check consecutive failures
+        if self._consecutive_failures >= self.threshold:
+            return True
+        
         return False
+    
+    def get_recovery_action(self) -> str:
+        """Get recommended recovery action when doom loop detected.
+        
+        Returns graduated recovery actions:
+        - "retry_different": Try a different approach (1st detection)
+        - "escalate_model": Escalate to stronger model (2nd detection)
+        - "request_help": Request human intervention (3rd detection)
+        - "abort": Stop execution (4th+ detection)
+        - "continue": No doom loop, continue normally
+        """
+        if not self.is_doom_loop():
+            return "continue"
+        
+        self._recovery_attempts += 1
+        
+        if self._recovery_attempts <= 1:
+            return "retry_different"
+        elif self._recovery_attempts <= 2:
+            return "escalate_model"
+        elif self._recovery_attempts <= 3:
+            return "request_help"
+        else:
+            return "abort"
     
     def reset(self) -> None:
         """Reset the tracker."""
         self.actions.clear()
         self.action_counts.clear()
+        self._consecutive_failures = 0
+        self._recovery_attempts = 0
 
 
 class AutonomyMixin:

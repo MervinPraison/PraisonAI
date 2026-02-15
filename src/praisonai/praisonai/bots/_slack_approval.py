@@ -24,7 +24,7 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
-from ._approval_base import classify_keyword, sync_wrapper
+from ._approval_base import classify_keyword, classify_with_llm, sync_wrapper
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ class SlackApproval:
             raise ValueError(
                 "Slack bot token is required. Pass token= or set SLACK_BOT_TOKEN env var."
             )
-        self._channel = channel or ""
+        self._channel = channel or os.environ.get("SLACK_CHANNEL", "")
         self._timeout = timeout
         self._poll_interval = poll_interval
 
@@ -158,7 +158,7 @@ class SlackApproval:
 
                 # 2. Poll for response (thread-scoped for multi-agent isolation)
                 decision = await self._poll_for_response(
-                    msg_channel, msg_ts, session=session,
+                    msg_channel, msg_ts, request=request, session=session,
                 )
 
                 # 3. Update original message with result
@@ -222,8 +222,10 @@ class SlackApproval:
                     {
                         "type": "mrkdwn",
                         "text": (
-                            f"Reply *yes* to approve or *no* to deny "
-                            f"(timeout: {int(self._timeout)}s)"
+                            f"Reply *yes* to approve or *no* to deny. "
+                            f"You can also reply with modifications "
+                            f"(e.g. _yes, but use ~/Downloads_) "
+                            f"(timeout: {int(self._timeout) if self._timeout is not None else '∞'}s)"
                         ),
                     }
                 ],
@@ -245,6 +247,7 @@ class SlackApproval:
         self,
         channel: str,
         message_ts: str,
+        request: Optional[Any] = None,
         session: Optional[Any] = None,
     ) -> Any:
         """Poll for replies scoped to the approval message thread.
@@ -252,12 +255,16 @@ class SlackApproval:
         Uses ``conversations.replies`` when available so concurrent approval
         requests on the same channel don't cross-talk.  Falls back to
         ``conversations.history`` if replies returns an error (e.g. DMs).
+
+        When a reply is not a simple yes/no keyword, the text is sent to an
+        LLM to classify intent and extract any modified arguments (e.g.
+        *"yes, but path is ~/Downloads"*).
         """
         from praisonaiagents.approval.protocols import ApprovalDecision
 
-        deadline = time.monotonic() + self._timeout
+        deadline = None if self._timeout is None else time.monotonic() + self._timeout
 
-        while time.monotonic() < deadline:
+        while deadline is None or time.monotonic() < deadline:
             await asyncio.sleep(self._poll_interval)
 
             try:
@@ -307,13 +314,38 @@ class SlackApproval:
                             metadata={"platform": "slack", "message_ts": msg.get("ts")},
                         )
 
+                    # Not a simple keyword — use LLM to classify free-text
+                    if kw is None and text and request is not None:
+                        try:
+                            llm_result = await classify_with_llm(
+                                text=text,
+                                tool_name=request.tool_name,
+                                arguments=request.arguments,
+                                risk_level=request.risk_level,
+                            )
+                            return ApprovalDecision(
+                                approved=llm_result["approved"],
+                                reason=llm_result["reason"],
+                                approver=user,
+                                modified_args=llm_result.get("modified_args", {}),
+                                metadata={
+                                    "platform": "slack",
+                                    "message_ts": msg.get("ts"),
+                                    "llm_classified": True,
+                                    "original_text": text,
+                                },
+                            )
+                        except Exception as llm_err:
+                            logger.warning(f"LLM classification failed: {llm_err}")
+
             except Exception as e:
                 logger.warning(f"Slack poll exception: {e}")
 
         # Timeout
+        timeout_str = "indefinite" if self._timeout is None else f"{int(self._timeout)}s"
         return ApprovalDecision(
             approved=False,
-            reason=f"Timed out waiting for Slack approval ({int(self._timeout)}s)",
+            reason=f"Timed out waiting for Slack approval ({timeout_str})",
             metadata={"platform": "slack", "timeout": True},
         )
 

@@ -92,3 +92,48 @@ def resolve_approval_backend(value: Optional[str]) -> Optional[Any]:
         f"Unknown approval backend: {value!r}. "
         f"Valid options: {', '.join(VALID_BACKENDS)}"
     )
+
+
+def resolve_approval_config(
+    backend_name: Optional[str] = None,
+    all_tools: bool = False,
+    timeout: Optional[str] = None,
+) -> Optional[Any]:
+    """Build an approval value for ``Agent(approval=...)``.
+
+    If only a backend name is given (no extra flags), returns the plain
+    backend object for backward compatibility.  When ``all_tools`` or
+    ``timeout`` are specified, returns an :class:`ApprovalConfig`.
+
+    Args:
+        backend_name: CLI ``--approval`` value (slack, console, …).
+        all_tools:    ``--approve-all-tools`` flag.
+        timeout:      ``--approval-timeout`` value.  ``"none"`` means
+                      indefinite; a numeric string is parsed as seconds.
+    """
+    backend = resolve_approval_backend(backend_name)
+    if backend is None:
+        return None
+
+    # Parse timeout
+    parsed_timeout: Optional[float] = 0  # 0 = use backend default
+    if timeout is not None:
+        if timeout.lower() == "none":
+            parsed_timeout = None  # indefinite
+        else:
+            try:
+                parsed_timeout = float(timeout)
+            except ValueError:
+                logger.warning(f"Invalid --approval-timeout value: {timeout!r}, using backend default")
+                parsed_timeout = 0
+
+    # If no extra config needed, return plain backend (backward compatible)
+    if not all_tools and parsed_timeout == 0:
+        return backend
+
+    from praisonaiagents.approval.protocols import ApprovalConfig
+    return ApprovalConfig(
+        backend=backend,
+        all_tools=all_tools,
+        timeout=parsed_timeout,
+    )

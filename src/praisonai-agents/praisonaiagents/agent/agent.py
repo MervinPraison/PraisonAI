@@ -1430,14 +1430,38 @@ Your Goal: {self.goal}
         self._setup_guardrail()
         
         # Initialize approval backend (agent-centric approval)
-        # True = AutoApproveBackend, False/None = registry fallback, object = custom backend
+        # True = AutoApproveBackend, False/None = registry fallback,
+        # object = custom backend (dangerous tools only),
+        # ApprovalConfig = full control (all_tools, timeout, etc.)
+        from ..approval.protocols import ApprovalConfig
         if approval is True:
             from ..approval.backends import AutoApproveBackend
             self._approval_backend = AutoApproveBackend()
+            self._approve_all_tools = False
+            self._approval_timeout = 0  # 0 = use backend default
         elif approval is False or approval is None:
             self._approval_backend = None
+            self._approve_all_tools = False
+            self._approval_timeout = 0
+        elif isinstance(approval, ApprovalConfig):
+            self._approval_backend = approval.backend
+            self._approve_all_tools = approval.all_tools
+            self._approval_timeout = approval.timeout  # None = indefinite, 0 = backend default
         else:
+            # Plain backend object — dangerous tools only, backend default timeout
             self._approval_backend = approval
+            self._approve_all_tools = False
+            self._approval_timeout = 0
+        
+        # Per-agent autonomy→approval bridge (G-BRIDGE-1 fix)
+        # If autonomy level is full_auto and no explicit approval was set,
+        # auto-approve all tools for this agent (no global env var).
+        autonomy_level = getattr(self, '_autonomy_level_for_approval', None)
+        if autonomy_level == "full_auto" and (approval is False or approval is None):
+            from ..approval.backends import AutoApproveBackend
+            self._approval_backend = AutoApproveBackend()
+        # Pending approvals for async (non-blocking) mode
+        self._pending_approvals = {}
         
         # Cache for system prompts and formatted tools with lazy thread-safe lock
         self._system_prompt_cache = {}
@@ -1943,6 +1967,13 @@ Summary:"""
         self._autonomy_trigger = AutonomyTrigger()
         self._doom_loop_tracker = DoomLoopTracker(threshold=config.doom_loop_threshold)
         
+        # Wire ObservabilityHooks when observe=True (G-UNUSED-2 fix)
+        if config.observe:
+            from ..escalation.observability import ObservabilityHooks
+            self._observability_hooks = ObservabilityHooks()
+        else:
+            self._observability_hooks = None
+        
         # Wire level → approval bridge (G3 fix)
         self._bridge_autonomy_level(config.level)
     
@@ -1973,7 +2004,7 @@ Summary:"""
         
         signals = self._autonomy_trigger.analyze(prompt)
         stage = self._autonomy_trigger.recommend_stage(signals)
-        return stage.value
+        return stage.name.lower()
     
     def _record_action(self, action_type: str, args: dict, result: Any, success: bool) -> None:
         """Record an action for doom loop tracking.
@@ -2003,20 +2034,19 @@ Summary:"""
             self._doom_loop_tracker.reset()
     
     def _bridge_autonomy_level(self, level: str) -> None:
-        """Bridge autonomy level to approval system (G3 fix).
+        """Bridge autonomy level to per-agent approval backend (G3/G-BRIDGE-1 fix).
         
-        When level is 'full_auto', sets PRAISONAI_AUTO_APPROVE env var
-        so the SDK approval registry auto-approves tool calls.
+        Sets a flag so the approval backend setup (later in __init__) can
+        configure per-agent approval based on autonomy level.
+        Does NOT use global env var — ensures multi-agent isolation.
         
         Args:
             level: Autonomy level string (suggest, auto_edit, full_auto)
         """
-        import os
-        if level == "full_auto":
-            os.environ["PRAISONAI_AUTO_APPROVE"] = "true"
-        else:
-            # Don't remove if already set by CLI or user
-            pass
+        # Store the requested autonomy level for the approval setup to use.
+        # The actual _approval_backend is configured later in __init__
+        # (after _init_autonomy), so we set a flag here.
+        self._autonomy_level_for_approval = level
     
     def run_autonomous(
         self,
@@ -2157,8 +2187,18 @@ Summary:"""
                     "response": response_str[:500],
                 })
                 
-                # Observability logging (G10 fix: wire observe field)
-                if self.autonomy_config.get("observe"):
+                # Observability logging via ObservabilityHooks (G-UNUSED-2 fix)
+                obs = getattr(self, '_observability_hooks', None)
+                if obs is not None:
+                    from ..escalation.observability import EventType as _EvtType
+                    obs.increment_step()
+                    obs.emit(_EvtType.STEP_END, {
+                        "iteration": iterations,
+                        "stage": stage,
+                        "response_len": len(response_str),
+                        "agent_name": getattr(self, 'name', None),
+                    })
+                elif self.autonomy_config.get("observe"):
                     logging.getLogger(__name__).info(
                         f"[autonomy] iteration={iterations} stage={stage} "
                         f"response_len={len(response_str)}"
@@ -2175,8 +2215,8 @@ Summary:"""
                     idx = stage_order.index(stage) if stage in stage_order else 0
                     if idx < len(stage_order) - 1:
                         stage = stage_order[idx + 1]
-                        if self.autonomy_config.get("observe"):
-                            logging.getLogger(__name__).info(f"[autonomy] auto-escalated to stage={stage}")
+                        if obs is not None:
+                            obs.emit(_EvtType.STAGE_ESCALATE, {"from": stage_order[idx], "to": stage})
                 
                 # Check for completion promise FIRST (structured signal)
                 if effective_promise:
@@ -2399,8 +2439,18 @@ Summary:"""
                     "response": response_str[:500],
                 })
                 
-                # Observability logging (G10 fix: wire observe field)
-                if self.autonomy_config.get("observe"):
+                # Observability logging via ObservabilityHooks (G-UNUSED-2 fix)
+                obs = getattr(self, '_observability_hooks', None)
+                if obs is not None:
+                    from ..escalation.observability import EventType as _EvtType
+                    obs.increment_step()
+                    obs.emit(_EvtType.STEP_END, {
+                        "iteration": iterations,
+                        "stage": stage,
+                        "response_len": len(response_str),
+                        "agent_name": getattr(self, 'name', None),
+                    })
+                elif self.autonomy_config.get("observe"):
                     logging.getLogger(__name__).info(
                         f"[autonomy-async] iteration={iterations} stage={stage} "
                         f"response_len={len(response_str)}"
@@ -2417,6 +2467,8 @@ Summary:"""
                     idx = stage_order.index(stage) if stage in stage_order else 0
                     if idx < len(stage_order) - 1:
                         stage = stage_order[idx + 1]
+                        if obs is not None:
+                            obs.emit(_EvtType.STAGE_ESCALATE, {"from": stage_order[idx], "to": stage})
                 
                 # Check for completion promise FIRST (structured signal)
                 if effective_promise:
@@ -4227,25 +4279,45 @@ Your Goal: {self.goal}"""
         from ..approval import get_approval_registry
         try:
             backend = getattr(self, '_approval_backend', None)
+            approve_all = getattr(self, '_approve_all_tools', False)
             if backend is not None:
-                # Agent-level approval backend — bypass registry, call directly
                 from ..approval.protocols import ApprovalRequest
                 from ..approval.registry import DEFAULT_DANGEROUS_TOOLS
-                if function_name in DEFAULT_DANGEROUS_TOOLS:
+                # Gate: only dangerous tools unless approve_all is True
+                needs_approval = approve_all or function_name in DEFAULT_DANGEROUS_TOOLS
+                if needs_approval:
                     request = ApprovalRequest(
                         tool_name=function_name,
                         arguments=arguments,
                         risk_level=DEFAULT_DANGEROUS_TOOLS.get(function_name, "medium"),
                         agent_name=getattr(self, 'name', None),
                     )
-                    if hasattr(backend, 'request_approval_sync'):
-                        decision = backend.request_approval_sync(request)
+                    # Apply timeout override from ApprovalConfig
+                    cfg_timeout = getattr(self, '_approval_timeout', 0)
+                    if cfg_timeout is None:
+                        # None = indefinite — set backend timeout temporarily
+                        orig_timeout = getattr(backend, '_timeout', None)
+                        if orig_timeout is not None:
+                            backend._timeout = 86400 * 365  # ~1 year as "indefinite"
+                    elif cfg_timeout > 0:
+                        orig_timeout = getattr(backend, '_timeout', None)
+                        if orig_timeout is not None:
+                            backend._timeout = cfg_timeout
                     else:
-                        import asyncio
-                        decision = asyncio.run(backend.request_approval(request))
+                        orig_timeout = None  # 0 = use backend default
+                    try:
+                        if hasattr(backend, 'request_approval_sync'):
+                            decision = backend.request_approval_sync(request)
+                        else:
+                            import asyncio
+                            decision = asyncio.run(backend.request_approval(request))
+                    finally:
+                        # Restore original timeout
+                        if orig_timeout is not None and hasattr(backend, '_timeout'):
+                            backend._timeout = orig_timeout
                 else:
                     from ..approval.protocols import ApprovalDecision
-                    decision = ApprovalDecision(approved=True, reason="No approval required")
+                    decision = ApprovalDecision(approved=True, reason="Not a dangerous tool")
             else:
                 # Fallback to global registry
                 decision = get_approval_registry().approve_sync(
@@ -6954,6 +7026,91 @@ Write the complete compiled report:"""
             if response:
                 yield response
 
+    # ── Async (non-blocking) approval helpers ───────────────────────────
+
+    async def submit_for_approval(self, function_name: str, arguments: Dict[str, Any]) -> str:
+        """Fire an approval request in the background without blocking.
+
+        Returns a tracking ID.  The agent can continue other work while the
+        approval is pending.  Call :meth:`check_pending_approvals` to poll
+        for results and auto-execute approved tools.
+        """
+        import uuid
+        backend = getattr(self, '_approval_backend', None)
+        if backend is None:
+            raise RuntimeError("No approval backend configured on this agent")
+
+        from ..approval.protocols import ApprovalRequest
+        from ..approval.registry import DEFAULT_DANGEROUS_TOOLS
+
+        request = ApprovalRequest(
+            tool_name=function_name,
+            arguments=arguments,
+            risk_level=DEFAULT_DANGEROUS_TOOLS.get(function_name, "medium"),
+            agent_name=getattr(self, 'name', None),
+        )
+
+        tracking_id = str(uuid.uuid4())[:8]
+        task = asyncio.ensure_future(backend.request_approval(request))
+        self._pending_approvals[tracking_id] = {
+            "task": task,
+            "function_name": function_name,
+            "arguments": arguments,
+            "request": request,
+        }
+        logging.info(f"Approval request submitted: {tracking_id} for {function_name}")
+        return tracking_id
+
+    async def check_pending_approvals(self) -> Dict[str, Any]:
+        """Check and process any completed approval requests.
+
+        Returns a dict of ``{tracking_id: result}`` for approvals that
+        completed since the last check.  Approved tools are auto-executed
+        and their results included.
+        """
+        results = {}
+        completed_ids = []
+
+        for tid, info in self._pending_approvals.items():
+            task = info["task"]
+            if task.done():
+                completed_ids.append(tid)
+                try:
+                    decision = task.result()
+                    if decision.approved:
+                        # Auto-execute the approved tool
+                        tool_result = await self.execute_tool_async(
+                            info["function_name"], info["arguments"],
+                        )
+                        results[tid] = {
+                            "status": "approved_and_executed",
+                            "tool_name": info["function_name"],
+                            "decision": decision,
+                            "result": tool_result,
+                        }
+                    else:
+                        results[tid] = {
+                            "status": "denied",
+                            "tool_name": info["function_name"],
+                            "decision": decision,
+                        }
+                except Exception as e:
+                    results[tid] = {
+                        "status": "error",
+                        "tool_name": info["function_name"],
+                        "error": str(e),
+                    }
+
+        for tid in completed_ids:
+            del self._pending_approvals[tid]
+
+        return results
+
+    @property
+    def pending_approval_count(self) -> int:
+        """Number of approval requests still waiting."""
+        return len(self._pending_approvals)
+
     def execute(self, task, context=None):
         """Execute a task synchronously - backward compatibility method"""
         if hasattr(task, 'description'):
@@ -6988,20 +7145,35 @@ Write the complete compiled report:"""
             from ..approval import get_approval_registry
             try:
                 backend = getattr(self, '_approval_backend', None)
+                approve_all = getattr(self, '_approve_all_tools', False)
                 if backend is not None:
                     from ..approval.protocols import ApprovalRequest
                     from ..approval.registry import DEFAULT_DANGEROUS_TOOLS
-                    if function_name in DEFAULT_DANGEROUS_TOOLS:
+                    # Gate: only dangerous tools unless approve_all is True
+                    needs_approval = approve_all or function_name in DEFAULT_DANGEROUS_TOOLS
+                    if needs_approval:
                         request = ApprovalRequest(
                             tool_name=function_name,
                             arguments=arguments,
                             risk_level=DEFAULT_DANGEROUS_TOOLS.get(function_name, "medium"),
                             agent_name=getattr(self, 'name', None),
                         )
-                        decision = await backend.request_approval(request)
+                        # Apply timeout override from ApprovalConfig
+                        cfg_timeout = getattr(self, '_approval_timeout', 0)
+                        if cfg_timeout is None:
+                            # None = indefinite wait
+                            decision = await backend.request_approval(request)
+                        elif cfg_timeout > 0:
+                            decision = await asyncio.wait_for(
+                                backend.request_approval(request),
+                                timeout=cfg_timeout,
+                            )
+                        else:
+                            # 0 = use backend default timeout
+                            decision = await backend.request_approval(request)
                     else:
                         from ..approval.protocols import ApprovalDecision
-                        decision = ApprovalDecision(approved=True, reason="No approval required")
+                        decision = ApprovalDecision(approved=True, reason="Not a dangerous tool")
                 else:
                     decision = await get_approval_registry().approve_async(
                         getattr(self, 'name', None), function_name, arguments,

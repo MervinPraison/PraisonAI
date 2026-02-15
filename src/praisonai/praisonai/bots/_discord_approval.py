@@ -27,7 +27,7 @@ import os
 import time
 from typing import Any, Dict, Optional
 
-from ._approval_base import classify_keyword, sync_wrapper
+from ._approval_base import classify_keyword, classify_with_llm, sync_wrapper
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +147,7 @@ class DiscordApproval:
 
                 # 2. Poll for text reply
                 decision = await self._poll_for_response(
-                    channel_id, msg_id, session=session,
+                    channel_id, msg_id, request=request, session=session,
                 )
 
                 # 3. Update original message with result
@@ -199,7 +199,7 @@ class DiscordApproval:
             "title": "🔒 Tool Approval Required",
             "color": risk_colors.get(request.risk_level, 0x808080),
             "fields": fields,
-            "footer": {"text": f"Reply yes to approve or no to deny (timeout: {int(self._timeout)}s)"},
+            "footer": {"text": f"Reply yes/no, or with modifications (e.g. 'yes, but use ~/Downloads') (timeout: {int(self._timeout)}s)"},
         }
 
     def _build_fallback_text(self, request) -> str:
@@ -215,6 +215,7 @@ class DiscordApproval:
         self,
         channel_id: str,
         message_id: str,
+        request: Optional[Any] = None,
         session: Optional[Any] = None,
     ) -> Any:
         """Poll channel messages for a reply after the approval message."""
@@ -263,6 +264,30 @@ class DiscordApproval:
                             approver=user_id,
                             metadata={"platform": "discord", "message_id": msg.get("id")},
                         )
+
+                    # Not a simple keyword — use LLM to classify
+                    if kw is None and text and request is not None:
+                        try:
+                            llm_result = await classify_with_llm(
+                                text=text,
+                                tool_name=request.tool_name,
+                                arguments=request.arguments,
+                                risk_level=request.risk_level,
+                            )
+                            return ApprovalDecision(
+                                approved=llm_result["approved"],
+                                reason=llm_result["reason"],
+                                approver=user_id,
+                                modified_args=llm_result.get("modified_args", {}),
+                                metadata={
+                                    "platform": "discord",
+                                    "message_id": msg.get("id"),
+                                    "llm_classified": True,
+                                    "original_text": text,
+                                },
+                            )
+                        except Exception as llm_err:
+                            logger.warning(f"LLM classification failed: {llm_err}")
 
             except Exception as e:
                 logger.warning(f"Discord poll exception: {e}")

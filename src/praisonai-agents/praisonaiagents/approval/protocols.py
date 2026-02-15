@@ -52,6 +52,35 @@ class ApprovalDecision:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class ApprovalConfig:
+    """Configuration for agent-level approval behaviour.
+
+    Follows PraisonAI's ``False/True/Config`` progressive-disclosure pattern:
+
+    - ``approval=False`` — disabled (no approval checks).
+    - ``approval=True``  — auto-approve all tools.
+    - ``approval=SlackApproval()`` — custom backend, dangerous tools only.
+    - ``approval=ApprovalConfig(...)`` — full control.
+
+    Attributes:
+        backend:    An :class:`ApprovalProtocol` backend (``SlackApproval``,
+                    ``ConsoleBackend``, etc.).  ``None`` falls back to the
+                    global :class:`ApprovalRegistry`.
+        all_tools:  When ``True`` every tool call goes through approval.
+                    When ``False`` (default) only tools in
+                    ``DEFAULT_DANGEROUS_TOOLS`` are checked.
+        timeout:    Seconds to wait for an approval response.
+                    - *positive float* — wait up to that many seconds.
+                    - ``None`` — wait **indefinitely** (no timeout).
+                    - *unset / 0* — use the backend's own default timeout.
+    """
+
+    backend: Any = None
+    all_tools: bool = False
+    timeout: Optional[float] = 0
+
+
 @runtime_checkable
 class ApprovalProtocol(Protocol):
     """Protocol for tool-execution approval backends.

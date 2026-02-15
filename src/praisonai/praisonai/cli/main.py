@@ -947,6 +947,10 @@ class PraisonAI:
                           help="Auto-approve tools up to this risk level (e.g., --approve-level high approves low/medium/high but prompts for critical)")
         parser.add_argument("--approval", type=str, 
                           help="Approval backend: console, slack, telegram, discord, webhook, http, agent, auto, none")
+        parser.add_argument("--approve-all-tools", action="store_true",
+                          help="Require approval for ALL tool calls, not just dangerous tools (default: dangerous only)")
+        parser.add_argument("--approval-timeout", type=str, default=None,
+                          help="Seconds to wait for approval response. Use 'none' for indefinite wait (default: backend default)")
         
         # Sandbox Execution - secure command execution
         parser.add_argument("--sandbox", type=str, choices=["off", "basic", "strict"], help="Enable sandboxed command execution")
@@ -3992,11 +3996,15 @@ Provide ONLY the commit message, no explanations."""
                 # Approval Backend - Set agent-level approval via --approval flag
                 approval_flag = getattr(self.args, 'approval', None)
                 if approval_flag:
-                    from .features.approval import resolve_approval_backend
+                    from .features.approval import resolve_approval_config
                     try:
-                        backend = resolve_approval_backend(approval_flag)
-                        if backend is not None:
-                            agent_config["approval"] = backend
+                        approval_val = resolve_approval_config(
+                            approval_flag,
+                            all_tools=getattr(self.args, 'approve_all_tools', False),
+                            timeout=getattr(self.args, 'approval_timeout', None),
+                        )
+                        if approval_val is not None:
+                            agent_config["approval"] = approval_val
                             print(f"[bold cyan]Approval backend: {approval_flag}[/bold cyan]")
                     except ValueError as e:
                         print(f"[red]ERROR: {e}[/red]")

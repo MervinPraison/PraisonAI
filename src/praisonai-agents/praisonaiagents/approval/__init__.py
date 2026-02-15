@@ -40,7 +40,7 @@ from typing import Callable, Dict, List, Literal, Optional, Set
 
 # ── New protocol-driven exports ──────────────────────────────────────────────
 
-from .protocols import ApprovalProtocol, ApprovalRequest  # noqa: F401
+from .protocols import ApprovalProtocol, ApprovalRequest, ApprovalConfig  # noqa: F401
 from .protocols import ApprovalDecision  # noqa: F401
 from .backends import AutoApproveBackend, ConsoleBackend, CallbackBackend, AgentApproval  # noqa: F401
 from .registry import ApprovalRegistry, DEFAULT_DANGEROUS_TOOLS  # noqa: F401
