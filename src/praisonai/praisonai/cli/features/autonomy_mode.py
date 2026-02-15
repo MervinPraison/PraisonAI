@@ -18,18 +18,31 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+# DRY: Reuse AutonomyLevel from core SDK as single source of truth
+try:
+    from praisonaiagents.config.feature_configs import AutonomyLevel as _AutonomyLevel
+except ImportError:
+    # Fallback if SDK not installed — define locally
+    class _AutonomyLevel(Enum):
+        SUGGEST = "suggest"
+        AUTO_EDIT = "auto_edit"
+        FULL_AUTO = "full_auto"
+
+
 class AutonomyMode(Enum):
     """
     Autonomy levels for agent execution.
     
-    Inspired by Codex CLI's approval modes:
+    Values are identical to praisonaiagents.config.feature_configs.AutonomyLevel.
+    This wrapper adds from_string() for CLI convenience.
+    
     - SUGGEST: Read-only, requires approval for all changes
     - AUTO_EDIT: Auto-approve file edits, require approval for commands
     - FULL_AUTO: Auto-approve everything (YOLO mode)
     """
-    SUGGEST = "suggest"          # Default: ask for approval on everything
-    AUTO_EDIT = "auto_edit"      # Auto-approve file edits only
-    FULL_AUTO = "full_auto"      # Auto-approve everything (dangerous)
+    SUGGEST = _AutonomyLevel.SUGGEST.value
+    AUTO_EDIT = _AutonomyLevel.AUTO_EDIT.value
+    FULL_AUTO = _AutonomyLevel.FULL_AUTO.value
     
     @classmethod
     def from_string(cls, value: str) -> "AutonomyMode":
@@ -39,6 +52,10 @@ class AutonomyMode(Enum):
             if mode.value == value:
                 return mode
         raise ValueError(f"Unknown autonomy mode: {value}")
+    
+    def to_sdk_level(self) -> "_AutonomyLevel":
+        """Convert to SDK AutonomyLevel for bridging."""
+        return _AutonomyLevel(self.value)
 
 
 class ActionType(Enum):
@@ -204,13 +221,30 @@ class AutonomyManager:
         self._remembered_approvals: Dict[str, bool] = {}
     
     def set_mode(self, mode: AutonomyMode) -> None:
-        """Change the autonomy mode."""
+        """Change the autonomy mode and bridge to SDK approval system."""
         old_mode = self.mode
         self.mode = mode
         self.policy = AutonomyPolicy.for_mode(mode)
         
+        # Bridge: sync CLI autonomy mode to SDK approval env var
+        self._bridge_to_sdk_approval(mode)
+        
         if self.verbose:
             logger.info(f"Autonomy mode changed: {old_mode.value} -> {mode.value}")
+    
+    @staticmethod
+    def _bridge_to_sdk_approval(mode: AutonomyMode) -> None:
+        """Bridge CLI autonomy mode to SDK ApprovalRegistry via env var.
+        
+        When FULL_AUTO, set PRAISONAI_AUTO_APPROVE=true so the SDK's
+        ApprovalRegistry.is_env_auto_approve() returns True.
+        Otherwise, remove the env var to restore normal approval flow.
+        """
+        import os
+        if mode == AutonomyMode.FULL_AUTO:
+            os.environ["PRAISONAI_AUTO_APPROVE"] = "true"
+        else:
+            os.environ.pop("PRAISONAI_AUTO_APPROVE", None)
     
     def request_approval(self, action: ActionRequest) -> ApprovalResult:
         """

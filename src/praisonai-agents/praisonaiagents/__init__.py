@@ -337,7 +337,7 @@ _LAZY_IMPORTS = {
     'CachingConfig': ('praisonaiagents.config.feature_configs', 'CachingConfig'),
     'HooksConfig': ('praisonaiagents.config.feature_configs', 'HooksConfig'),
     'SkillsConfig': ('praisonaiagents.config.feature_configs', 'SkillsConfig'),
-    'AutonomyConfig': ('praisonaiagents.config.feature_configs', 'AutonomyConfig'),
+    'AutonomyConfig': ('praisonaiagents.agent.autonomy', 'AutonomyConfig'),
     'MemoryBackend': ('praisonaiagents.config.feature_configs', 'MemoryBackend'),
     'ChunkingStrategy': ('praisonaiagents.config.feature_configs', 'ChunkingStrategy'),
     'GuardrailAction': ('praisonaiagents.config.feature_configs', 'GuardrailAction'),
@@ -663,6 +663,10 @@ __all__ = [
     'aembeddings',  # Plural alias for async
     'EmbeddingResult',
     'get_dimensions',
+    
+    # Autonomy
+    'AutonomyConfig',
+    'AutonomyLevel',
     
     # Sub-packages for organized imports
     # Usage: import praisonaiagents as pa; pa.config.MemoryConfig

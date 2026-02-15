@@ -147,6 +147,14 @@ class Bot:
                 agent._approval_backend = AutoApproveBackend()
                 logger.debug(f"Bot: auto_approve_tools enabled for agent '{getattr(agent, 'name', '?')}'")
         
+        # Wire BotConfig.autonomy → Agent autonomy (if not already enabled)
+        autonomy_val = None
+        if self._config:
+            autonomy_val = getattr(self._config, 'autonomy', None)
+        if autonomy_val and not getattr(agent, 'autonomy_enabled', False):
+            agent._init_autonomy(autonomy_val)
+            logger.debug(f"Bot: autonomy enabled for agent '{getattr(agent, 'name', '?')}'")
+        
         # Inject session history if agent has no memory configured (zero-dep).
         # NOTE: No session_id here — BotSessionManager handles per-user
         # isolation by swapping chat_history before/after each agent.chat().

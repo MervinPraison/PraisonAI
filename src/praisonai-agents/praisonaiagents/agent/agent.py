@@ -1902,20 +1902,13 @@ Summary:"""
         from .autonomy import AutonomyConfig, AutonomyTrigger, DoomLoopTracker
         
         if autonomy is True:
-            self.autonomy_config = {}
             config = AutonomyConfig()
         elif isinstance(autonomy, dict):
-            self.autonomy_config = autonomy.copy()
             config = AutonomyConfig.from_dict(autonomy)
             # Extract verification_hooks from dict if provided
             if "verification_hooks" in autonomy and not verification_hooks:
                 self._verification_hooks = autonomy.get("verification_hooks", [])
         elif isinstance(autonomy, AutonomyConfig):
-            self.autonomy_config = {
-                "max_iterations": autonomy.max_iterations,
-                "doom_loop_threshold": autonomy.doom_loop_threshold,
-                "auto_escalate": autonomy.auto_escalate,
-            }
             config = autonomy
             # Extract verification_hooks from AutonomyConfig if provided
             if autonomy.verification_hooks and not verification_hooks:
@@ -1927,8 +1920,31 @@ Summary:"""
             self._doom_loop_tracker = None
             return
         
+        # Preserve ALL AutonomyConfig fields in the dict (G14 fix: no lossy extraction)
+        self.autonomy_config = {
+            "enabled": config.enabled,
+            "level": config.level,
+            "max_iterations": config.max_iterations,
+            "doom_loop_threshold": config.doom_loop_threshold,
+            "auto_escalate": config.auto_escalate,
+            "observe": config.observe,
+            "completion_promise": config.completion_promise,
+            "clear_context": config.clear_context,
+        }
+        # Also preserve any extra user-provided keys from dict input
+        if isinstance(autonomy, dict):
+            for k, v in autonomy.items():
+                if k not in self.autonomy_config:
+                    self.autonomy_config[k] = v
+        
+        # Store the AutonomyConfig object for typed access
+        self._autonomy_config_obj = config
+        
         self._autonomy_trigger = AutonomyTrigger()
         self._doom_loop_tracker = DoomLoopTracker(threshold=config.doom_loop_threshold)
+        
+        # Wire level → approval bridge (G3 fix)
+        self._bridge_autonomy_level(config.level)
     
     def analyze_prompt(self, prompt: str) -> set:
         """Analyze prompt for autonomy signals.
@@ -1985,6 +2001,22 @@ Summary:"""
         """Reset doom loop tracking."""
         if self._doom_loop_tracker is not None:
             self._doom_loop_tracker.reset()
+    
+    def _bridge_autonomy_level(self, level: str) -> None:
+        """Bridge autonomy level to approval system (G3 fix).
+        
+        When level is 'full_auto', sets PRAISONAI_AUTO_APPROVE env var
+        so the SDK approval registry auto-approves tool calls.
+        
+        Args:
+            level: Autonomy level string (suggest, auto_edit, full_auto)
+        """
+        import os
+        if level == "full_auto":
+            os.environ["PRAISONAI_AUTO_APPROVE"] = "true"
+        else:
+            # Don't remove if already set by CLI or user
+            pass
     
     def run_autonomous(
         self,
@@ -2112,13 +2144,39 @@ Summary:"""
                         started_at=started_at,
                     )
                 
-                # Record the action
+                response_str = str(response)
+                
+                # Record the action for doom loop tracking (G1 fix: was missing)
+                self._record_action(
+                    "chat", {"prompt": prompt}, response_str[:200], True
+                )
+                
+                # Record for action history
                 actions_taken.append({
                     "iteration": iterations,
-                    "response": str(response)[:500],
+                    "response": response_str[:500],
                 })
                 
-                response_str = str(response)
+                # Observability logging (G10 fix: wire observe field)
+                if self.autonomy_config.get("observe"):
+                    logging.getLogger(__name__).info(
+                        f"[autonomy] iteration={iterations} stage={stage} "
+                        f"response_len={len(response_str)}"
+                    )
+                
+                # Auto-save session after each iteration (memory integration)
+                self._auto_save_session()
+                
+                # Auto-escalate stage if stuck (G11 fix: wire auto_escalate)
+                if (self.autonomy_config.get("auto_escalate")
+                        and iterations > 1
+                        and stage in ("direct", "heuristic")):
+                    stage_order = ["direct", "heuristic", "planned", "autonomous"]
+                    idx = stage_order.index(stage) if stage in stage_order else 0
+                    if idx < len(stage_order) - 1:
+                        stage = stage_order[idx + 1]
+                        if self.autonomy_config.get("observe"):
+                            logging.getLogger(__name__).info(f"[autonomy] auto-escalated to stage={stage}")
                 
                 # Check for completion promise FIRST (structured signal)
                 if effective_promise:
@@ -2328,13 +2386,37 @@ Summary:"""
                         started_at=started_at,
                     )
                 
-                # Record the action
+                response_str = str(response)
+                
+                # Record the action for doom loop tracking (G2 fix: was missing)
+                self._record_action(
+                    "chat", {"prompt": prompt}, response_str[:200], True
+                )
+                
+                # Record for action history
                 actions_taken.append({
                     "iteration": iterations,
-                    "response": str(response)[:500],
+                    "response": response_str[:500],
                 })
                 
-                response_str = str(response)
+                # Observability logging (G10 fix: wire observe field)
+                if self.autonomy_config.get("observe"):
+                    logging.getLogger(__name__).info(
+                        f"[autonomy-async] iteration={iterations} stage={stage} "
+                        f"response_len={len(response_str)}"
+                    )
+                
+                # Auto-save session after each async iteration (memory integration)
+                self._auto_save_session()
+                
+                # Auto-escalate stage if stuck (G11 fix: wire auto_escalate)
+                if (self.autonomy_config.get("auto_escalate")
+                        and iterations > 1
+                        and stage in ("direct", "heuristic")):
+                    stage_order = ["direct", "heuristic", "planned", "autonomous"]
+                    idx = stage_order.index(stage) if stage in stage_order else 0
+                    if idx < len(stage_order) - 1:
+                        stage = stage_order[idx + 1]
                 
                 # Check for completion promise FIRST (structured signal)
                 if effective_promise:
@@ -2389,6 +2471,9 @@ Summary:"""
                 
                 # Yield control to allow other async tasks to run
                 await asyncio.sleep(0)
+            
+            # Final auto-save before returning
+            self._auto_save_session()
             
             # Max iterations reached
             return AutonomyResult(

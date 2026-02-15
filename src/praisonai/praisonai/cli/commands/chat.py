@@ -125,6 +125,7 @@ def chat_main(
         is_flag=False,
         flag_value="true",
     ),
+    approval: Optional[str] = typer.Option(None, "--approval", help="Approval backend: console, slack, telegram, discord, webhook, http, agent, auto, none"),
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
     debug: bool = typer.Option(False, "--debug", help="Enable debug logging to ~/.praisonai/async_tui_debug.log"),
@@ -183,6 +184,19 @@ def chat_main(
     else:
         os.environ["PRAISON_APPROVAL_MODE"] = "auto"
     
+    # Wire --approval backend via global registry (TUI creates agents internally)
+    if approval:
+        from praisonai.cli.features.approval import resolve_approval_backend
+        try:
+            backend = resolve_approval_backend(approval)
+            if backend is not None:
+                from praisonaiagents.approval import get_approval_registry
+                get_approval_registry().set_backend(backend)
+                typer.echo(f"Approval backend: {approval}")
+        except ValueError as e:
+            typer.echo(f"Error: {e}", err=True)
+            raise typer.Exit(1)
+    
     # Use the async TUI (non-blocking, scrollable output)
     from praisonai.cli.interactive.async_tui import AsyncTUI, AsyncTUIConfig
     
@@ -193,6 +207,7 @@ def chat_main(
         session_id=session_id,
         workspace=workspace,
         debug=debug,
+        autonomy_mode=autonomy,
     )
     
     tui = AsyncTUI(config=tui_config)

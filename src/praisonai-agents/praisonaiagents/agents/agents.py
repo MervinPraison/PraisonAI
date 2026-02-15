@@ -414,9 +414,13 @@ class AgentTeam:
         self.user_id = _user_id
         self.max_iter = _max_iter
 
-        # Pass user_id to each agent
+        # Pass user_id and autonomy to each agent
         for agent in agents:
             agent.user_id = self.user_id
+            # Propagate autonomy config to agents that don't already have it
+            if self._autonomy is not None and self._autonomy is not False:
+                if not agent.autonomy_enabled:
+                    agent._init_autonomy(self._autonomy)
 
         self.agents: List[Agent] = agents
         self.tasks: Dict[int, Task] = {}

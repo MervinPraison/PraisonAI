@@ -30,6 +30,7 @@ def run_main(
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
     output_mode: Optional[str] = typer.Option(None, "--output", "-o", help="Output mode: silent (default), actions, verbose, json, stream"),
+    approval: Optional[str] = typer.Option(None, "--approval", help="Approval backend: console, slack, telegram, discord, webhook, http, agent, auto, none"),
 ):
     """
     Run agents from a file or prompt.
@@ -123,6 +124,7 @@ def run_main(
             tools=tools,
             max_tokens=max_tokens,
             output_mode=output_mode,
+            approval=approval,
         )
 
 
@@ -183,6 +185,7 @@ def _run_prompt(
     tools: Optional[str] = None,
     max_tokens: int = 16000,
     output_mode: Optional[str] = None,
+    approval: Optional[str] = None,
 ):
     """Run a direct prompt."""
     output = get_output_controller()
@@ -200,6 +203,11 @@ def _run_prompt(
             }
             if model:
                 agent_config["llm"] = model
+            
+            # Resolve approval backend if specified
+            if approval:
+                from praisonai.cli.features.approval import resolve_approval_backend
+                agent_config["approval"] = resolve_approval_backend(approval)
             
             agent = Agent(**agent_config)
             result = agent.start(prompt)
@@ -263,6 +271,7 @@ def _run_prompt(
         args.expand_prompt = False
         args.expand_tools = None
         args.no_tools = False
+        args.approval = approval
         
         praison.args = args
         result = praison.handle_direct_prompt(prompt)

@@ -945,6 +945,8 @@ class PraisonAI:
         parser.add_argument("--trust", action="store_true", help="Auto-approve all tool executions (skip approval prompts)")
         parser.add_argument("--approve-level", type=str, choices=["low", "medium", "high", "critical"], 
                           help="Auto-approve tools up to this risk level (e.g., --approve-level high approves low/medium/high but prompts for critical)")
+        parser.add_argument("--approval", type=str, 
+                          help="Approval backend: console, slack, telegram, discord, webhook, http, agent, auto, none")
         
         # Sandbox Execution - secure command execution
         parser.add_argument("--sandbox", type=str, choices=["off", "basic", "strict"], help="Enable sandboxed command execution")
@@ -3986,6 +3988,19 @@ Provide ONLY the commit message, no explanations."""
                         
                         set_approval_callback(level_based_approve)
                         print(f"[bold cyan]Auto-approve enabled for tools up to '{max_level}' risk level[/bold cyan]")
+                
+                # Approval Backend - Set agent-level approval via --approval flag
+                approval_flag = getattr(self.args, 'approval', None)
+                if approval_flag:
+                    from .features.approval import resolve_approval_backend
+                    try:
+                        backend = resolve_approval_backend(approval_flag)
+                        if backend is not None:
+                            agent_config["approval"] = backend
+                            print(f"[bold cyan]Approval backend: {approval_flag}[/bold cyan]")
+                    except ValueError as e:
+                        print(f"[red]ERROR: {e}[/red]")
+                        sys.exit(1)
                 
                 # Router - Smart model selection (must be before agent creation)
                 if getattr(self.args, 'router', False):

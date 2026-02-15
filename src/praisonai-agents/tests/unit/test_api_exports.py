@@ -195,12 +195,12 @@ class TestNamespaceStyle:
 class TestAllSizeLimited:
     """Test that __all__ is limited to core symbols."""
     
-    def test_all_size_under_27(self):
-        """__all__ should have fewer than 27 items (minimal for clean IDE)."""
+    def test_all_size_under_29(self):
+        """__all__ should have fewer than 29 items (minimal for clean IDE)."""
         import praisonaiagents
-        # Updated from 25 to 27 to accommodate AutoApproveBackend export
-        assert len(praisonaiagents.__all__) < 27, \
-            f"__all__ has {len(praisonaiagents.__all__)} items, expected < 27"
+        # Updated from 27 to 29 to accommodate AutonomyConfig, AutonomyLevel exports
+        assert len(praisonaiagents.__all__) < 29, \
+            f"__all__ has {len(praisonaiagents.__all__)} items, expected < 29"
     
     def test_all_contains_core(self):
         """__all__ contains core symbols."""

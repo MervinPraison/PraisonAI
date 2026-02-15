@@ -286,8 +286,8 @@ def bot_whatsapp(
     auto_tts: bool = typer.Option(False, "--auto-tts", help="Auto-convert all responses to speech"),
     stt: bool = typer.Option(False, "--stt", help="Enable STT tool for speech-to-text"),
     stt_model: Optional[str] = typer.Option(None, "--stt-model", help="STT model (default: openai/whisper-1)"),
-    respond_to: Optional[str] = typer.Option(None, "--respond-to", help="Comma-separated phone numbers the bot responds to (besides self)"),
-    respond_to_groups: Optional[str] = typer.Option(None, "--respond-to-groups", help="Comma-separated group JIDs the bot responds in"),
+    respond_to: Optional[List[str]] = typer.Option(None, "--respond-to", help="Phone numbers the bot responds to (besides self). Repeat or comma-separate."),
+    respond_to_groups: Optional[List[str]] = typer.Option(None, "--respond-to-groups", help="Group JIDs the bot responds in. Repeat or comma-separate."),
     respond_to_all: bool = typer.Option(False, "--respond-to-all", help="Respond to ALL messages (default: self-only)"),
 ):
     """Start a WhatsApp bot with full agent capabilities.
@@ -331,9 +331,13 @@ def bot_whatsapp(
         user_id=user_id,
     )
     
-    # Parse comma-separated filtering values
-    allowed_numbers = [n.strip() for n in respond_to.split(",") if n.strip()] if respond_to else None
-    allowed_groups = [g.strip() for g in respond_to_groups.split(",") if g.strip()] if respond_to_groups else None
+    # Parse filtering values — support both repeated flags and comma-separated
+    allowed_numbers = None
+    if respond_to:
+        allowed_numbers = [n.strip() for raw in respond_to for n in raw.split(",") if n.strip()]
+    allowed_groups = None
+    if respond_to_groups:
+        allowed_groups = [g.strip() for raw in respond_to_groups for g in raw.split(",") if g.strip()]
     
     handler = BotHandler()
     handler.start_whatsapp(

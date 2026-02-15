@@ -76,7 +76,7 @@ class AsyncTUIConfig:
     history_file: Optional[str] = None
     compact_mode: bool = False
     multiline_mode: bool = False
-    autonomy_mode: bool = False  # Enable autonomous task delegation
+    autonomy_mode: bool = True  # Enable autonomous task delegation (aligned with InteractiveConfig)
     debug: bool = False  # Enable debug logging to file (~/.praisonai/async_tui_debug.log)
 
 

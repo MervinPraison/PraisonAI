@@ -300,30 +300,33 @@ class InteractiveCore:
         session = self.session_store.load(session_id)
         history = session.get_chat_history(max_messages=50) if session else []
         
-        # Build agent config
-        agent_config = {
-            "name": "InteractiveAgent",
-            "role": "Assistant",
-            "goal": "Help the user with their request",
-            "backstory": "You are a helpful AI assistant",
-            "tools": self.get_tools(),
-        }
+        # Reuse agent instance across prompts to preserve autonomy state
+        # (doom loop tracker, action history) and avoid per-prompt overhead
+        if not hasattr(self, '_agent') or self._agent is None:
+            agent_config = {
+                "name": "InteractiveAgent",
+                "role": "Assistant",
+                "goal": "Help the user with their request",
+                "backstory": "You are a helpful AI assistant",
+                "tools": self.get_tools(),
+            }
+            
+            if self.config.model:
+                agent_config["llm"] = {"model": self.config.model}
+            
+            if self.config.memory:
+                agent_config["memory"] = True
+            
+            # Enable autonomy for intelligent task handling (agent-centric)
+            if self.config.autonomy:
+                if self.config.autonomy_config:
+                    agent_config["autonomy"] = self.config.autonomy_config
+                else:
+                    agent_config["autonomy"] = True
+            
+            self._agent = Agent(**agent_config)
         
-        if self.config.model:
-            agent_config["llm"] = {"model": self.config.model}
-        
-        if self.config.memory:
-            agent_config["memory"] = True
-        
-        # Enable autonomy for intelligent task handling (agent-centric)
-        if self.config.autonomy:
-            if self.config.autonomy_config:
-                agent_config["autonomy"] = self.config.autonomy_config
-            else:
-                agent_config["autonomy"] = True
-        
-        # Create agent and execute
-        agent = Agent(**agent_config)
+        agent = self._agent
         
         # Add history context if available
         context = ""
