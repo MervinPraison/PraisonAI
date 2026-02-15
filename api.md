@@ -40,6 +40,7 @@ Methods:
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">background</a>(value)</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">chat</a>(prompt, temperature = 1.0, tools = None, output_json = None, output_pydantic = None, reasoning_steps = False, stream = None, task_name = None, task_description = None, task_id = None, config = None, force_retrieval = False, skip_retrieval = False, attachments = None, tool_choice = None)</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">chat_with_context</a>(message: str, context: 'ContextPack', **kwargs) -> str</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">check_pending_approvals</a>() -> Dict[str, Any]</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">checkpoints</a>()</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">checkpoints</a>(value)</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">clean_json_output</a>(output: str) -> str</code>
@@ -70,6 +71,7 @@ Methods:
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">llm_model</a>()</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">output_style</a>()</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">output_style</a>(value)</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">pending_approval_count</a>() -> int</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">policy</a>()</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">policy</a>(value)</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">prune_history</a>(keep_last: int = 5) -> int</code>
@@ -90,6 +92,7 @@ Methods:
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">store_memory</a>(content: str, memory_type: str = 'short_term', **kwargs)</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">stream_emitter</a>()</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">stream_emitter</a>(value)</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">submit_for_approval</a>(function_name: str, arguments: Dict[str, Any]) -> str</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">switch_model</a>(new_model: str) -> None</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">thinking_budget</a>()</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">thinking_budget</a>(value)</code>
