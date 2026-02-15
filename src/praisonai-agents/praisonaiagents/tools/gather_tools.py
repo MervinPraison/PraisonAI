@@ -75,8 +75,8 @@ def _authenticate() -> Optional[str]:
         with open(private_key_path, "rb") as f_priv, open(public_key_path) as f_pub:
             private_key = load_pem_private_key(f_priv.read(), password=None)
             public_key_pem = f_pub.read().strip()
-    except FileNotFoundError:
-        logger.error("Key file not found", exc_info=True)
+    except OSError:
+        logger.error("Failed to read key file", exc_info=True)
         return None
 
     base_url = _get_base_url()
