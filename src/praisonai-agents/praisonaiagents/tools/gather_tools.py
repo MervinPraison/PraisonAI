@@ -22,7 +22,6 @@ Usage:
 """
 
 import os
-import json
 import base64
 import hashlib
 import logging
@@ -33,10 +32,21 @@ logger = logging.getLogger(__name__)
 
 GATHER_BASE_URL = "https://gather.is"
 MAX_POW_ITERATIONS = 50_000_000
+MAX_POW_DIFFICULTY = 32
 
 
 def _get_base_url() -> str:
     return os.getenv("GATHERIS_API_URL", GATHER_BASE_URL).rstrip("/")
+
+
+def _import_requests():
+    """Import requests with a helpful error if missing."""
+    if util.find_spec("requests") is None:
+        raise ImportError(
+            "requests package required for gather.is tools: pip install requests"
+        )
+    import requests
+    return requests
 
 
 def _authenticate() -> Optional[str]:
@@ -52,7 +62,7 @@ def _authenticate() -> Optional[str]:
         logger.error("cryptography package required for gather.is auth: pip install cryptography")
         return None
 
-    import requests
+    requests = _import_requests()
     from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
     private_key_path = os.getenv("GATHERIS_PRIVATE_KEY_PATH")
@@ -62,12 +72,11 @@ def _authenticate() -> Optional[str]:
         return None
 
     try:
-        with open(private_key_path, "rb") as f:
-            private_key = load_pem_private_key(f.read(), password=None)
-        with open(public_key_path) as f:
-            public_key_pem = f.read().strip()
-    except FileNotFoundError as e:
-        logger.error(f"Key file not found: {e}")
+        with open(private_key_path, "rb") as f_priv, open(public_key_path) as f_pub:
+            private_key = load_pem_private_key(f_priv.read(), password=None)
+            public_key_pem = f_pub.read().strip()
+    except FileNotFoundError:
+        logger.error("Key file not found", exc_info=True)
         return None
 
     base_url = _get_base_url()
@@ -98,14 +107,14 @@ def _authenticate() -> Optional[str]:
             logger.error("Auth response missing token")
             return None
         return token
-    except Exception as e:
-        logger.error(f"gather.is auth failed: {e}")
+    except Exception:
+        logger.error("gather.is auth failed", exc_info=True)
         return None
 
 
 def _solve_pow() -> Optional[Dict]:
     """Solve proof-of-work challenge for posting."""
-    import requests
+    requests = _import_requests()
 
     base_url = _get_base_url()
     try:
@@ -118,13 +127,22 @@ def _solve_pow() -> Optional[Dict]:
         data = resp.json()
         challenge, difficulty = data["challenge"], data["difficulty"]
 
+        # Cap difficulty to prevent negative bit-shift
+        if difficulty < 1 or difficulty > MAX_POW_DIFFICULTY:
+            logger.error("PoW difficulty %d out of valid range (1-%d)", difficulty, MAX_POW_DIFFICULTY)
+            return None
+
+        logger.info("Solving PoW (difficulty=%d), this may take a few seconds...", difficulty)
+
         for nonce in range(MAX_POW_ITERATIONS):
             hash_bytes = hashlib.sha256(f"{challenge}:{nonce}".encode()).digest()
             if int.from_bytes(hash_bytes[:4], "big") >> (32 - difficulty) == 0:
                 return {"pow_challenge": challenge, "pow_nonce": str(nonce)}
+
+        logger.error("PoW exhausted after %d iterations", MAX_POW_ITERATIONS)
         return None
-    except Exception as e:
-        logger.error(f"PoW failed: {e}")
+    except Exception:
+        logger.error("PoW failed", exc_info=True)
         return None
 
 
@@ -140,7 +158,7 @@ def gather_feed(sort: str = "newest", limit: int = 25) -> List[Dict]:
     Returns:
         List of post dicts with id, title, summary, author, score, tags, etc.
     """
-    import requests
+    requests = _import_requests()
 
     try:
         resp = requests.get(
@@ -150,9 +168,9 @@ def gather_feed(sort: str = "newest", limit: int = 25) -> List[Dict]:
         )
         resp.raise_for_status()
         return resp.json().get("posts", [])
-    except Exception as e:
-        logger.error(f"gather.is feed error: {e}")
-        return [{"error": str(e)}]
+    except Exception:
+        logger.error("gather.is feed error", exc_info=True)
+        return [{"error": "Failed to fetch gather.is feed"}]
 
 
 def gather_agents(limit: int = 20) -> List[Dict]:
@@ -166,7 +184,7 @@ def gather_agents(limit: int = 20) -> List[Dict]:
     Returns:
         List of agent dicts with agent_id, name, verified, post_count.
     """
-    import requests
+    requests = _import_requests()
 
     try:
         resp = requests.get(
@@ -176,9 +194,9 @@ def gather_agents(limit: int = 20) -> List[Dict]:
         )
         resp.raise_for_status()
         return resp.json().get("agents", [])
-    except Exception as e:
-        logger.error(f"gather.is agents error: {e}")
-        return [{"error": str(e)}]
+    except Exception:
+        logger.error("gather.is agents error", exc_info=True)
+        return [{"error": "Failed to fetch gather.is agents"}]
 
 
 def gather_post(
@@ -204,7 +222,7 @@ def gather_post(
     Returns:
         Dict with post id on success, or error message.
     """
-    import requests
+    requests = _import_requests()
 
     token = _authenticate()
     if not token:
@@ -230,9 +248,9 @@ def gather_post(
         resp.raise_for_status()
         data = resp.json()
         return {"success": True, "id": data.get("id"), "title": data.get("title")}
-    except Exception as e:
-        logger.error(f"gather.is post error: {e}")
-        return {"error": str(e)}
+    except Exception:
+        logger.error("gather.is post error", exc_info=True)
+        return {"error": "Failed to create gather.is post"}
 
 
 def gather_search(query: str, limit: int = 25) -> List[Dict]:
@@ -247,7 +265,7 @@ def gather_search(query: str, limit: int = 25) -> List[Dict]:
     Returns:
         List of matching post dicts.
     """
-    import requests
+    requests = _import_requests()
 
     try:
         resp = requests.get(
@@ -257,9 +275,9 @@ def gather_search(query: str, limit: int = 25) -> List[Dict]:
         )
         resp.raise_for_status()
         return resp.json().get("posts", [])
-    except Exception as e:
-        logger.error(f"gather.is search error: {e}")
-        return [{"error": str(e)}]
+    except Exception:
+        logger.error("gather.is search error", exc_info=True)
+        return [{"error": "Failed to search gather.is"}]
 
 
 if __name__ == "__main__":
