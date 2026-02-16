@@ -1017,6 +1017,8 @@ Methods:
 * <code title="cli">praisonai traces list <a href="./src/praisonai/praisonai/cli/commands/traces.py">--help</a></code>
 * <code title="cli">praisonai traces status <a href="./src/praisonai/praisonai/cli/commands/traces.py">--help</a></code>
 * <code title="cli">praisonai tracker batch <a href="./src/praisonai/praisonai/cli/commands/tracker.py">--help</a></code>
+* <code title="cli">praisonai tracker judge <a href="./src/praisonai/praisonai/cli/commands/tracker.py">--help</a></code>
+* <code title="cli">praisonai tracker run <a href="./src/praisonai/praisonai/cli/commands/tracker.py">--help</a></code>
 * <code title="cli">praisonai tracker tools <a href="./src/praisonai/praisonai/cli/commands/tracker.py">--help</a></code>
 * <code title="cli">praisonai tracker tracker-main <a href="./src/praisonai/praisonai/cli/commands/tracker.py">--help</a></code>
 * <code title="cli">praisonai train agents <a href="./src/praisonai/praisonai/cli/commands/train.py">--help</a></code>
