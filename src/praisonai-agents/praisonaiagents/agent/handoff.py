@@ -10,7 +10,7 @@ Unified Handoff System:
 - Replaces/absorbs Agent.delegate() and SubagentDelegator functionality
 """
 
-from typing import Optional, Any, Callable, Dict, List, TYPE_CHECKING
+from typing import Optional, Any, Callable, Dict, List, Union, TYPE_CHECKING
 from dataclasses import dataclass, field
 from enum import Enum
 import inspect
@@ -209,7 +209,7 @@ class Handoff:
         tool_description_override: Optional[str] = None,
         on_handoff: Optional[Callable] = None,
         input_type: Optional[type] = None,
-        input_filter: Optional[Callable[[HandoffInputData], HandoffInputData]] = None,
+        input_filter: Optional[Union[Callable[[HandoffInputData], HandoffInputData], List[Callable[[HandoffInputData], HandoffInputData]]]] = None,
         config: Optional[HandoffConfig] = None,
     ):
         """
@@ -221,7 +221,8 @@ class Handoff:
             tool_description_override: Custom tool description
             on_handoff: Callback function executed when handoff is invoked
             input_type: Type of input expected by the handoff (for structured data)
-            input_filter: Function to filter/transform input before passing to target agent
+            input_filter: Function or list of functions to filter/transform input.
+                When a list is provided, filters are applied in order (chaining).
             config: HandoffConfig for advanced settings (context policy, timeouts, etc.)
         """
         self.agent = agent
@@ -329,9 +330,14 @@ class Handoff:
             handoff_chain=_get_handoff_chain()[:],
         )
         
-        # Apply custom input filter if provided
+        # Apply custom input filter(s) if provided
+        # Supports both single filter and list of filters for chaining
         if self.input_filter:
-            handoff_data = self.input_filter(handoff_data)
+            if isinstance(self.input_filter, list):
+                for filter_fn in self.input_filter:
+                    handoff_data = filter_fn(handoff_data)
+            else:
+                handoff_data = self.input_filter(handoff_data)
         
         return handoff_data
     
@@ -789,6 +795,36 @@ class handoff_filters:
                 filtered_messages.append(msg)
         
         data.messages = filtered_messages
+        return data
+    
+    @staticmethod
+    def compress_history(data: HandoffInputData) -> HandoffInputData:
+        """Compress all messages into a single summary message.
+        
+        This filter concatenates all message contents into one user message,
+        reducing token usage while preserving context. Useful for handoffs
+        where the target agent needs context but not full conversation history.
+        
+        Example:
+            Handoff(agent=target, input_filter=handoff_filters.compress_history)
+        """
+        if not data.messages:
+            return data
+        
+        summary_parts = []
+        for msg in data.messages:
+            if isinstance(msg, dict):
+                role = msg.get('role', 'unknown')
+                content = msg.get('content', '')
+                if content:
+                    summary_parts.append(f"[{role}]: {content}")
+        
+        if summary_parts:
+            summary = "\n".join(summary_parts)
+            data.messages = [{"role": "user", "content": f"Previous conversation summary:\n{summary}"}]
+        else:
+            data.messages = []
+        
         return data
 
 

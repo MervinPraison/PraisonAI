@@ -5285,6 +5285,54 @@ Your Goal: {self.goal}"""
         """Get the current session ID."""
         return self._session_id
 
+    def as_tool(
+        self,
+        description: Optional[str] = None,
+        tool_name: Optional[str] = None,
+    ) -> 'Handoff':
+        """Convert this agent to a callable tool for use by other agents.
+        
+        Unlike handoffs which pass conversation context, as_tool() creates a tool
+        where the child agent receives only the generated input (no history).
+        The parent agent retains control and receives the result.
+        
+        This is useful for hierarchical agent composition where you want to
+        invoke a specialist agent as a subordinate tool.
+        
+        Args:
+            description: Tool description for the LLM (what this agent does)
+            tool_name: Custom tool name (default: invoke_<agent_name>)
+        
+        Returns:
+            Handoff configured as a tool with no context passed
+        
+        Example:
+            researcher = Agent(name="Researcher", instructions="Research topics")
+            coder = Agent(name="Coder", instructions="Write Python code")
+            
+            writer = Agent(
+                name="Writer",
+                tools=[
+                    researcher.as_tool("Research a topic and return findings"),
+                    coder.as_tool("Write Python code for a given task"),
+                ]
+            )
+            
+            result = writer.chat("Write an article about async Python")
+        """
+        from .handoff import Handoff, HandoffConfig, ContextPolicy
+        
+        # Generate default tool name
+        agent_name_snake = self.name.lower().replace(' ', '_').replace('-', '_')
+        default_tool_name = f"invoke_{agent_name_snake}"
+        
+        return Handoff(
+            agent=self,
+            tool_name_override=tool_name or default_tool_name,
+            tool_description_override=description or f"Invoke {self.name} to complete a subtask and return the result",
+            config=HandoffConfig(context_policy=ContextPolicy.NONE),
+        )
+
     def chat(self, prompt, temperature=1.0, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=None, task_name=None, task_description=None, task_id=None, config=None, force_retrieval=False, skip_retrieval=False, attachments=None, tool_choice=None):
         """
         Chat with the agent.
