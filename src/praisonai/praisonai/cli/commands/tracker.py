@@ -15,6 +15,7 @@ comprehensive tracking of autonomous agent execution.
 from typing import Optional, List
 from dataclasses import dataclass, field
 from datetime import datetime
+import os
 import time
 
 import typer
@@ -159,6 +160,16 @@ def _run_tracked_task(
         auto_approve: Auto-approve all tool calls (default: True)
     """
     from praisonaiagents import Agent
+    
+    # ========================================================================
+    # AUTO-APPROVE: Set env var so @require_approval decorators on tool
+    # functions (execute_code, execute_command, write_file, etc.) auto-approve.
+    # The decorator checks PRAISONAI_AUTO_APPROVE env var independently of
+    # the Agent's approval= parameter.
+    # ========================================================================
+    prev_auto_approve = os.environ.get("PRAISONAI_AUTO_APPROVE")
+    if auto_approve:
+        os.environ["PRAISONAI_AUTO_APPROVE"] = "true"
     
     steps: List[TrackedStep] = []
     tools_used: set = set()
@@ -351,6 +362,12 @@ When you have fully completed the task, say 'Task completed' or 'Done'.""",
             tools_used=list(tools_used),
             gaps_identified=[f"Error: {str(e)}"],
         )
+    finally:
+        # Restore original PRAISONAI_AUTO_APPROVE env var
+        if prev_auto_approve is None:
+            os.environ.pop("PRAISONAI_AUTO_APPROVE", None)
+        else:
+            os.environ["PRAISONAI_AUTO_APPROVE"] = prev_auto_approve
 
 
 def _print_step_table(steps: List[TrackedStep]) -> None:

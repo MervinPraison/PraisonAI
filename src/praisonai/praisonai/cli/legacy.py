@@ -41,7 +41,7 @@ TYPER_COMMANDS = {
     # Standardisation commands
     'standardise', 'standardize',
     # Moltbot-inspired commands (bots, browser, plugins, sandbox)
-    'bot', 'browser', 'plugins', 'sandbox', 'loop',
+    'bot', 'browser', 'plugins', 'sandbox', 'loop', 'tracker',
     # RAG commands
     'rag', 'index', 'query', 'search',
 }
