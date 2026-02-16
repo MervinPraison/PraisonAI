@@ -33,6 +33,7 @@ Methods:
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">agent_id</a>()</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">analyze_prompt</a>(prompt: str) -> set</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">arun</a>(prompt: str, **kwargs)</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">as_tool</a>(description: Optional[str] = None, tool_name: Optional[str] = None) -> 'Handoff'</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">astart</a>(prompt: str, **kwargs)</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">auto_memory</a>()</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">auto_memory</a>(value)</code>
@@ -361,6 +362,7 @@ Methods:
 * <code title="class Handoff">Handoff.<a href="./src/praisonai-agents/praisonaiagents/agent/handoff.py">tool_description</a>() -> str</code>
 * <code title="class Handoff">Handoff.<a href="./src/praisonai-agents/praisonaiagents/agent/handoff.py">tool_name</a>() -> str</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/agent/handoff.py">handoff</a>(agent: 'Agent', tool_name_override: Optional[str] = None, tool_description_override: Optional[str] = None, on_handoff: Optional[Callable] = None, input_type: Optional[type] = None, input_filter: Optional[Callable[[HandoffInputData], HandoffInputData]] = None, config: Optional[HandoffConfig] = None, context_policy: Optional[str] = None, timeout_seconds: Optional[float] = None, max_concurrent: Optional[int] = None, detect_cycles: Optional[bool] = None, max_depth: Optional[int] = None) -> Handoff</code>
+* <code title="class handoff_filters">handoff_filters.<a href="./src/praisonai-agents/praisonaiagents/agent/handoff.py">compress_history</a>(data: HandoffInputData) -> HandoffInputData</code>
 * <code title="class handoff_filters">handoff_filters.<a href="./src/praisonai-agents/praisonaiagents/agent/handoff.py">keep_last_n_messages</a>(n: int) -> Callable[[HandoffInputData], HandoffInputData]</code>
 * <code title="class handoff_filters">handoff_filters.<a href="./src/praisonai-agents/praisonaiagents/agent/handoff.py">remove_all_tools</a>(data: HandoffInputData) -> HandoffInputData</code>
 * <code title="class handoff_filters">handoff_filters.<a href="./src/praisonai-agents/praisonaiagents/agent/handoff.py">remove_system_messages</a>(data: HandoffInputData) -> HandoffInputData</code>
