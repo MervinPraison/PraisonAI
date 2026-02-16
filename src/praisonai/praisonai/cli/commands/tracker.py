@@ -209,8 +209,10 @@ When you have fully completed the task, say 'Task completed' or 'Done'.""",
     if model:
         agent_kwargs["llm"] = model
     
-    if not verbose:
-        agent_kwargs["output"] = "silent"
+    if verbose:
+        pass  # Use default full output
+    else:
+        agent_kwargs["output"] = "status"  # Real-time status like Agent(output="status")
     
     agent = Agent(**agent_kwargs)
     
@@ -419,10 +421,28 @@ def _print_summary(result: TrackerResult) -> None:
             console.print(f"  • {gap}")
 
 
-@app.callback(invoke_without_command=True)
-def tracker_main(
-    ctx: typer.Context,
-    task: Optional[str] = typer.Argument(None, help="Task for the agent to complete"),
+@app.callback()
+def tracker_main(ctx: typer.Context):
+    """Autonomous agent tracking with step-by-step analysis.
+    
+    Run tasks with full execution tracing and optional quality judging.
+    
+    Commands:
+    
+        praisonai tracker run "Search for Python best practices"
+        
+        praisonai tracker judge "What is 2+2?" --expected "4"
+        
+        praisonai tracker tools
+        
+        praisonai tracker batch tasks.json
+    """
+    pass
+
+
+@app.command(name="run")
+def tracker_run(
+    task: str = typer.Argument(..., help="Task for the agent to complete"),
     max_iterations: int = typer.Option(20, "--max-iterations", "-n", help="Maximum iterations (default: 20)"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model to use"),
     tools: Optional[str] = typer.Option(None, "--tools", "-t", help="Comma-separated tool names to use"),
@@ -432,31 +452,32 @@ def tracker_main(
 ):
     """Run an agent with step-by-step tracking.
     
-    The tracker runs an agent in autonomous mode and records every step,
-    tool call, and decision. At the end, it displays a summary table
-    showing all steps taken and any gaps identified.
-    
     Examples:
     
-        praisonai tracker "Search for Python best practices and summarize"
+        praisonai tracker run "Search for Python best practices and summarize"
         
-        praisonai tracker "Read config.yaml and explain its structure" -v
+        praisonai tracker run "Read config.yaml and explain its structure" -v
         
-        praisonai tracker "Find trending AI news" --tools search_web,web_crawl
+        praisonai tracker run "Find trending AI news" --tools search_web,web_crawl
     """
-    if ctx.invoked_subcommand is not None:
-        return
-    
-    if not task:
-        typer.echo(ctx.get_help())
-        return
-    
+    _run_and_display(task, max_iterations, model, tools, extended, verbose, live)
+
+
+def _run_and_display(
+    task: str,
+    max_iterations: int = 20,
+    model: Optional[str] = None,
+    tools: Optional[str] = None,
+    extended: bool = False,
+    verbose: bool = False,
+    live: bool = True,
+) -> TrackerResult:
+    """Shared logic: run a tracked task and display results."""
     # Resolve tools
     tool_names = AUTONOMY_DEFAULT_TOOLS.copy()
     if extended:
         tool_names.extend(EXTENDED_TOOLS)
     if tools:
-        # Override with user-specified tools
         tool_names = [t.strip() for t in tools.split(",")]
     
     resolved_tools = _get_tools(tool_names)
@@ -488,6 +509,8 @@ def tracker_main(
     _print_step_table(result.steps)
     console.print("\n")
     _print_summary(result)
+    
+    return result
 
 
 @app.command(name="batch")
@@ -617,3 +640,171 @@ def tracker_tools():
     
     console.print("\n[dim]Use --tools to specify custom tools, e.g.:[/dim]")
     console.print("[dim]  praisonai tracker 'task' --tools search_web,read_file[/dim]")
+
+
+# ============================================================================
+# JUDGE FEATURE
+# ============================================================================
+
+DEFAULT_JUDGE_CRITERIA = """Evaluate this autonomous agent execution trace:
+1. Task Completion: Did the agent fully complete the assigned task?
+2. Tool Selection: Were appropriate tools chosen for each step?
+3. Efficiency: Was the task completed with minimal unnecessary steps?
+4. Error Handling: Were errors handled gracefully without crashing?
+5. Output Quality: Is the final output accurate and useful?"""
+
+
+def _format_trace_for_judge(result: TrackerResult) -> str:
+    """Convert TrackerResult into a structured string for LLM evaluation."""
+    lines = []
+    lines.append(f"Task: \"{result.task}\"")
+    status = "success" if result.success else "failed"
+    lines.append(f"Completion: {status} (reason: {result.completion_reason})")
+    lines.append(f"Duration: {result.total_duration:.1f}s | Steps: {result.total_steps} | Tools Used: {', '.join(result.tools_used) if result.tools_used else 'None'}")
+    lines.append("")
+    
+    for step in result.steps:
+        icon = "✅" if step.success else "❌"
+        lines.append(f"Step {step.step_number}: [{step.action_type}] {step.action_name} ({step.duration_seconds:.1f}s) {icon}")
+        lines.append(f"  Input: {step.input_summary}")
+        lines.append(f"  Output: {step.output_summary}")
+        if step.error:
+            lines.append(f"  Error: {step.error}")
+        lines.append("")
+    
+    if result.gaps_identified:
+        lines.append(f"Gaps: {'; '.join(result.gaps_identified)}")
+    else:
+        lines.append("Gaps: None")
+    
+    return "\n".join(lines)
+
+
+def _print_judge_verdict(judge_result, threshold: float) -> None:
+    """Print the judge verdict with rich formatting."""
+    score = getattr(judge_result, 'score', 0) or 0
+    passed = score >= threshold
+    reasoning = getattr(judge_result, 'reasoning', '') or ''
+    suggestions = getattr(judge_result, 'suggestions', []) or []
+    
+    # Score bar
+    bar_len = 20
+    filled = int(score / 10 * bar_len)
+    bar = "█" * filled + "░" * (bar_len - filled)
+    
+    color = "green" if passed else ("yellow" if score >= 5 else "red")
+    icon = "✅" if passed else "❌"
+    
+    console.print(Panel(
+        f"""
+[bold]{icon} Score: [{color}]{score:.1f}/10[/{color}][/bold]  [{color}]{bar}[/{color}]
+[bold]Threshold:[/bold] {threshold}  |  [bold]Verdict:[/bold] [{'green' if passed else 'red'}]{'PASS' if passed else 'FAIL'}[/{'green' if passed else 'red'}]
+
+[bold]Reasoning:[/bold]
+{reasoning}
+""",
+        title="⚖️ Judge Verdict",
+        border_style=color,
+    ))
+    
+    if suggestions:
+        console.print("[bold yellow]💡 Suggestions:[/bold yellow]")
+        for s in suggestions:
+            console.print(f"  • {s}")
+
+
+@app.command(name="judge")
+def tracker_judge(
+    task: str = typer.Argument(..., help="Task to execute and judge"),
+    criteria: Optional[str] = typer.Option(None, "--criteria", "-c", help="Custom evaluation criteria"),
+    expected: Optional[str] = typer.Option(None, "--expected", "-e", help="Expected output for accuracy evaluation"),
+    threshold: float = typer.Option(7.0, "--threshold", help="Pass/fail score threshold (1-10)"),
+    max_iterations: int = typer.Option(20, "--max-iterations", "-n", help="Maximum iterations (default: 20)"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model to use"),
+    judge_model: Optional[str] = typer.Option(None, "--judge-model", help="LLM model for judge (default: same as agent)"),
+    tools: Optional[str] = typer.Option(None, "--tools", "-t", help="Comma-separated tool names to use"),
+    extended: bool = typer.Option(False, "--extended", help="Include extended tools (may require API keys)"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose output"),
+):
+    """Run a task and judge the execution quality.
+    
+    Executes the task with step tracking, then evaluates the execution
+    trace using an LLM judge. Reports a score (1-10), pass/fail verdict,
+    reasoning, and improvement suggestions.
+    
+    Examples:
+    
+        praisonai tracker judge "Calculate fibonacci(10) using execute_code"
+        
+        praisonai tracker judge "Search for AI news" --criteria "Must use search_web"
+        
+        praisonai tracker judge "What is 2+2?" --expected "4" --threshold 8.0
+    """
+    # Resolve tools
+    tool_names = AUTONOMY_DEFAULT_TOOLS.copy()
+    if extended:
+        tool_names.extend(EXTENDED_TOOLS)
+    if tools:
+        tool_names = [t.strip() for t in tools.split(",")]
+    
+    resolved_tools = _get_tools(tool_names)
+    
+    console.print(f"\n[bold cyan]⚖️ Agent Tracker + Judge[/bold cyan]")
+    console.print(f"[dim]Task: {_summarize_text(task, 70)}[/dim]")
+    console.print(f"[dim]Tools: {len(resolved_tools)} loaded | Threshold: {threshold}[/dim]\n")
+    
+    # Step 1: Run the task
+    console.print("[bold]Phase 1: Executing task...[/bold]\n")
+    
+    def step_callback(step: TrackedStep):
+        status = "✅" if step.success else "❌"
+        console.print(f"  [{step.step_number}] {status} {step.action_type}: {step.action_name} ({step.duration_seconds:.2f}s)")
+    
+    result = _run_tracked_task(
+        task=task,
+        tools=resolved_tools,
+        max_iterations=max_iterations,
+        model=model,
+        verbose=verbose,
+        step_callback=step_callback,
+    )
+    
+    # Print step table + summary
+    console.print("\n")
+    _print_step_table(result.steps)
+    console.print("\n")
+    _print_summary(result)
+    
+    # Step 2: Judge the execution
+    console.print("\n[bold]Phase 2: Judging execution...[/bold]\n")
+    
+    try:
+        from praisonaiagents.eval import Judge
+        
+        trace_text = _format_trace_for_judge(result)
+        
+        judge_kwargs = {}
+        if judge_model:
+            judge_kwargs["model"] = judge_model
+        elif model:
+            judge_kwargs["model"] = model
+        
+        judge = Judge(threshold=threshold, **judge_kwargs)
+        
+        eval_criteria = criteria or DEFAULT_JUDGE_CRITERIA
+        
+        judge_result = judge.run(
+            output=trace_text,
+            criteria=eval_criteria,
+            expected=expected,
+            input=task,
+        )
+        
+        _print_judge_verdict(judge_result, threshold)
+        
+    except ImportError:
+        console.print("[red]Error: praisonaiagents.eval not available[/red]")
+        console.print("[dim]Install with: pip install praisonaiagents[/dim]")
+    except Exception as e:
+        console.print(f"[red]Judge error: {e}[/red]")
+

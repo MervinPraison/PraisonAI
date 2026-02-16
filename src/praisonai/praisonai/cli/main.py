@@ -4561,6 +4561,7 @@ Now, {final_instruction.lower()}:"""
                         return ApprovalDecision(approved=True, reason="User approved")
                     else:
                         console.print("[red]❌ Denied[/red]")
+                        console.print("[dim]Tip: Use --trust to auto-approve all tools[/dim]")
                         return ApprovalDecision(approved=False, reason="User denied")
                 except (KeyboardInterrupt, EOFError):
                     status_info['approval_pending'] = False
@@ -4576,28 +4577,23 @@ Now, {final_instruction.lower()}:"""
         thread.start()
         
         # Show live status while processing
+        # Loop handles unlimited approval interruptions (each approval
+        # pauses the Live display, then we restart it afterwards)
         try:
-            with Live(build_status_display(), console=console, refresh_per_second=4, transient=True) as live:
-                status_info['live_instance'] = live
-                while not status_info['done']:
-                    # Check if approval is pending - stop Live to show prompt
-                    if status_info['approval_pending']:
-                        break
-                    live.update(build_status_display())
-                    time.sleep(0.1)
-            
-            # If approval was pending, wait for it to complete then restart Live
-            while status_info['approval_pending']:
-                time.sleep(0.1)
-            
-            # Continue with Live display if not done
-            if not status_info['done']:
+            while not status_info['done']:
                 with Live(build_status_display(), console=console, refresh_per_second=4, transient=True) as live:
+                    status_info['live_instance'] = live
                     while not status_info['done']:
+                        # Check if approval is pending - stop Live to show prompt
                         if status_info['approval_pending']:
                             break
                         live.update(build_status_display())
                         time.sleep(0.1)
+                
+                # If approval was pending, wait for it to complete then loop
+                # back to restart the Live display
+                while status_info['approval_pending']:
+                    time.sleep(0.1)
         except KeyboardInterrupt:
             console.print("\n[dim]Interrupted[/dim]")
             # Unregister callback (use local variable with None check)
@@ -4605,8 +4601,8 @@ Now, {final_instruction.lower()}:"""
                 del _sync_display_callbacks['tool_call']
             return None
         
-        # Wait for thread to complete
-        thread.join(timeout=1.0)
+        # Wait for thread to complete (generous timeout for long-running tasks)
+        thread.join(timeout=5.0)
         
         # Unregister callback to avoid memory leaks (use local variable with None check)
         if _sync_display_callbacks is not None and 'tool_call' in _sync_display_callbacks:
