@@ -2033,6 +2033,64 @@ Summary:"""
         if self._doom_loop_tracker is not None:
             self._doom_loop_tracker.reset()
     
+    @staticmethod
+    def _is_completion_signal(response_text: str) -> bool:
+        """Check if response contains a completion signal using word boundaries.
+        
+        Uses regex word boundaries to avoid false positives like
+        'abandoned' matching 'done' or 'unfinished' matching 'finished'.
+        
+        Args:
+            response_text: The agent response to check
+            
+        Returns:
+            True if a completion signal is detected
+        """
+        import re
+        response_lower = response_text.lower()
+        # Negation patterns that should NOT be treated as completion
+        _NEGATION_RE = re.compile(
+            r'\b(?:not|never|no longer|hardly|barely|isn\'t|aren\'t|wasn\'t|weren\'t|hasn\'t|haven\'t|hadn\'t|won\'t|wouldn\'t|can\'t|couldn\'t|shouldn\'t|don\'t|doesn\'t|didn\'t)\b'
+            r'.{0,20}'   # up to 20 chars between negation and keyword
+        )
+        # Word-boundary patterns to avoid substring false positives
+        _COMPLETION_PATTERNS = [
+            (re.compile(r'\btask\s+completed?\b'), False),         # no negation check needed
+            (re.compile(r'\bcompleted\s+successfully\b'), False),
+            (re.compile(r'\ball\s+done\b'), False),
+            (re.compile(r'\bdone\b'), True),          # 'done' needs negation check
+            (re.compile(r'\bfinished\b'), True),      # 'finished' needs negation check
+        ]
+        for pattern, needs_negation_check in _COMPLETION_PATTERNS:
+            match = pattern.search(response_lower)
+            if match:
+                if needs_negation_check:
+                    # Check if a negation word precedes the match within 30 chars
+                    start = max(0, match.start() - 30)
+                    prefix = response_lower[start:match.start()]
+                    if _NEGATION_RE.search(prefix):
+                        continue  # Skip — negated completion
+                    # Also check "not X yet" pattern
+                    end = min(len(response_lower), match.end() + 10)
+                    suffix = response_lower[match.end():end]
+                    if 'yet' in suffix:
+                        neg_prefix = response_lower[max(0, match.start() - 15):match.start()]
+                        if 'not' in neg_prefix:
+                            continue
+                return True
+        return False
+    
+    def _get_doom_recovery(self) -> str:
+        """Get doom loop recovery action from tracker.
+        
+        Returns:
+            Recovery action string: continue, retry_different, escalate_model,
+            request_help, or abort
+        """
+        if self._doom_loop_tracker is None:
+            return "continue"
+        return self._doom_loop_tracker.get_recovery_action()
+    
     def _bridge_autonomy_level(self, level: str) -> None:
         """Bridge autonomy level to per-agent approval backend (G3/G-BRIDGE-1 fix).
         
@@ -2144,18 +2202,44 @@ Summary:"""
                         started_at=started_at,
                     )
                 
-                # Check doom loop
+                # Check doom loop with graduated recovery (G-RECOVERY-2 fix)
                 if self._is_doom_loop():
-                    return AutonomyResult(
-                        success=False,
-                        output="Task stopped due to repeated actions (doom loop)",
-                        completion_reason="doom_loop",
-                        iterations=iterations,
-                        stage=stage,
-                        actions=actions_taken,
-                        duration_seconds=time_module.time() - start_time,
-                        started_at=started_at,
-                    )
+                    recovery = self._get_doom_recovery()
+                    obs = getattr(self, '_observability_hooks', None)
+                    if obs is not None:
+                        from ..escalation.observability import EventType as _EvtType
+                        obs.emit(_EvtType.STEP_END, {
+                            "doom_loop": True,
+                            "recovery_action": recovery,
+                            "iteration": iterations,
+                        })
+                    if recovery == "retry_different":
+                        prompt = prompt + "\n\n[System: Previous approach repeated. Try a completely different strategy.]"
+                        if self._doom_loop_tracker is not None:
+                            self._doom_loop_tracker.clear_actions()
+                        continue
+                    elif recovery == "request_help":
+                        return AutonomyResult(
+                            success=False,
+                            output="Task needs human guidance (doom loop recovery exhausted)",
+                            completion_reason="needs_help",
+                            iterations=iterations,
+                            stage=stage,
+                            actions=actions_taken,
+                            duration_seconds=time_module.time() - start_time,
+                            started_at=started_at,
+                        )
+                    else:
+                        return AutonomyResult(
+                            success=False,
+                            output="Task stopped due to repeated actions (doom loop)",
+                            completion_reason="doom_loop",
+                            iterations=iterations,
+                            stage=stage,
+                            actions=actions_taken,
+                            duration_seconds=time_module.time() - start_time,
+                            started_at=started_at,
+                        )
                 
                 # Execute one turn using the agent's chat method
                 # Always use the original prompt (prompt re-injection)
@@ -2233,14 +2317,8 @@ Summary:"""
                             started_at=started_at,
                         )
                 
-                # Check for keyword-based completion signals (fallback)
-                response_lower = response_str.lower()
-                completion_signals = [
-                    "task completed", "task complete", "done",
-                    "finished", "completed successfully",
-                ]
-                
-                if any(signal in response_lower for signal in completion_signals):
+                # Check for keyword-based completion signals (word-boundary, G-COMPLETION-1 fix)
+                if self._is_completion_signal(response_str):
                     return AutonomyResult(
                         success=True,
                         output=response_str,
@@ -2280,7 +2358,18 @@ Summary:"""
                 duration_seconds=time_module.time() - start_time,
                 started_at=started_at,
             )
-            
+        
+        except KeyboardInterrupt:
+            return AutonomyResult(
+                success=False,
+                output="Task cancelled by user",
+                completion_reason="cancelled",
+                iterations=iterations,
+                stage=stage,
+                actions=actions_taken,
+                duration_seconds=time_module.time() - start_time,
+                started_at=started_at,
+            )
         except Exception as e:
             return AutonomyResult(
                 success=False,
@@ -2396,18 +2485,44 @@ Summary:"""
                         started_at=started_at,
                     )
                 
-                # Check doom loop
+                # Check doom loop with graduated recovery (G-RECOVERY-2 fix)
                 if self._is_doom_loop():
-                    return AutonomyResult(
-                        success=False,
-                        output="Task stopped due to repeated actions (doom loop)",
-                        completion_reason="doom_loop",
-                        iterations=iterations,
-                        stage=stage,
-                        actions=actions_taken,
-                        duration_seconds=time_module.time() - start_time,
-                        started_at=started_at,
-                    )
+                    recovery = self._get_doom_recovery()
+                    obs = getattr(self, '_observability_hooks', None)
+                    if obs is not None:
+                        from ..escalation.observability import EventType as _EvtType
+                        obs.emit(_EvtType.STEP_END, {
+                            "doom_loop": True,
+                            "recovery_action": recovery,
+                            "iteration": iterations,
+                        })
+                    if recovery == "retry_different":
+                        prompt = prompt + "\n\n[System: Previous approach repeated. Try a completely different strategy.]"
+                        if self._doom_loop_tracker is not None:
+                            self._doom_loop_tracker.clear_actions()
+                        continue
+                    elif recovery == "request_help":
+                        return AutonomyResult(
+                            success=False,
+                            output="Task needs human guidance (doom loop recovery exhausted)",
+                            completion_reason="needs_help",
+                            iterations=iterations,
+                            stage=stage,
+                            actions=actions_taken,
+                            duration_seconds=time_module.time() - start_time,
+                            started_at=started_at,
+                        )
+                    else:
+                        return AutonomyResult(
+                            success=False,
+                            output="Task stopped due to repeated actions (doom loop)",
+                            completion_reason="doom_loop",
+                            iterations=iterations,
+                            stage=stage,
+                            actions=actions_taken,
+                            duration_seconds=time_module.time() - start_time,
+                            started_at=started_at,
+                        )
                 
                 # Execute one turn using the agent's async chat method
                 # Always use the original prompt (prompt re-injection)
@@ -2485,14 +2600,8 @@ Summary:"""
                             started_at=started_at,
                         )
                 
-                # Check for keyword-based completion signals (fallback)
-                response_lower = response_str.lower()
-                completion_signals = [
-                    "task completed", "task complete", "done",
-                    "finished", "completed successfully",
-                ]
-                
-                if any(signal in response_lower for signal in completion_signals):
+                # Check for keyword-based completion signals (word-boundary, G-COMPLETION-1 fix)
+                if self._is_completion_signal(response_str):
                     return AutonomyResult(
                         success=True,
                         output=response_str,
@@ -2538,7 +2647,18 @@ Summary:"""
                 duration_seconds=time_module.time() - start_time,
                 started_at=started_at,
             )
-            
+        
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            return AutonomyResult(
+                success=False,
+                output="Task cancelled",
+                completion_reason="cancelled",
+                iterations=iterations,
+                stage=stage,
+                actions=actions_taken,
+                duration_seconds=time_module.time() - start_time,
+                started_at=started_at,
+            )
         except Exception as e:
             return AutonomyResult(
                 success=False,

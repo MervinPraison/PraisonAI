@@ -240,8 +240,8 @@ class TestProgressiveEscalation:
         stage1 = agent.get_recommended_stage("What is Python?")
         assert stage1 == "direct"
         
-        # Then ask about a file
-        stage2 = agent.get_recommended_stage("Show me main.py")
+        # A prompt with file references but no simple-question signal → heuristic
+        stage2 = agent.get_recommended_stage("Read the contents of main.py and config.yaml")
         assert stage2 == "heuristic"
 
 

@@ -28,6 +28,9 @@ def loop_main(
     timeout: Optional[float] = typer.Option(None, "--timeout", "-t", help="Timeout in seconds"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model to use"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose output"),
+    observe: bool = typer.Option(False, "--observe", "-o", help="Enable observability event logging"),
+    recovery: bool = typer.Option(True, "--recovery/--no-recovery", help="Enable graduated doom loop recovery (default: on)"),
+    level: Optional[str] = typer.Option(None, "--level", "-l", help="Autonomy level: suggest, auto_edit, full_auto"),
 ):
     """Run an agent in an autonomous loop.
     
@@ -60,6 +63,9 @@ def loop_main(
         timeout=timeout,
         model=model,
         verbose=verbose,
+        observe=observe,
+        recovery=recovery,
+        level=level,
     )
 
 
@@ -71,6 +77,9 @@ def _run_loop(
     timeout: Optional[float],
     model: Optional[str],
     verbose: bool,
+    observe: bool = False,
+    recovery: bool = True,
+    level: Optional[str] = None,
 ):
     """Execute the autonomous loop."""
     try:
@@ -84,7 +93,10 @@ def _run_loop(
         "max_iterations": max_iterations,
         "completion_promise": completion_promise,
         "clear_context": clear_context,
+        "observe": observe,
     }
+    if level:
+        autonomy_config["level"] = level
     
     # Create agent
     agent_kwargs = {

@@ -240,13 +240,11 @@ class TestConfigFidelity:
                 f"Field {key} lost: expected {value}, got {agent.autonomy_config.get(key)}"
             )
 
-    def test_level_full_auto_sets_env_auto_approve(self):
-        """AutonomyConfig level='full_auto' must bridge to PRAISONAI_AUTO_APPROVE."""
+    def test_level_full_auto_sets_auto_approve_backend(self):
+        """AutonomyConfig level='full_auto' must set per-agent AutoApproveBackend."""
         from praisonaiagents import Agent
         from praisonaiagents.agent.autonomy import AutonomyConfig
-
-        # Clean env
-        os.environ.pop("PRAISONAI_AUTO_APPROVE", None)
+        from praisonaiagents.approval.backends import AutoApproveBackend
 
         agent = Agent(
             name="test_level_bridge",
@@ -254,13 +252,10 @@ class TestConfigFidelity:
             autonomy=AutonomyConfig(level="full_auto"),
         )
 
-        # After init with level=full_auto, env should be set
-        assert os.environ.get("PRAISONAI_AUTO_APPROVE", "").lower() in ("true", "1", "yes"), (
-            "level='full_auto' did not set PRAISONAI_AUTO_APPROVE"
+        # After init with level=full_auto, per-agent approval backend should be AutoApproveBackend
+        assert isinstance(agent._approval_backend, AutoApproveBackend), (
+            "level='full_auto' did not set per-agent AutoApproveBackend"
         )
-
-        # Clean up
-        os.environ.pop("PRAISONAI_AUTO_APPROVE", None)
 
     def test_level_suggest_does_not_set_auto_approve(self):
         """AutonomyConfig level='suggest' must NOT set auto-approve."""
@@ -277,11 +272,10 @@ class TestConfigFidelity:
 
         assert os.environ.get("PRAISONAI_AUTO_APPROVE", "").lower() not in ("true", "1", "yes")
 
-    def test_observe_emits_log_during_run_autonomous(self):
-        """AutonomyConfig observe=True must emit structured logs during run_autonomous()."""
+    def test_observe_emits_events_during_run_autonomous(self):
+        """AutonomyConfig observe=True must emit ObservabilityHooks events during run_autonomous()."""
         from praisonaiagents import Agent
         from praisonaiagents.agent.autonomy import AutonomyConfig
-        import logging
 
         agent = Agent(
             name="test_observe",
@@ -299,15 +293,12 @@ class TestConfigFidelity:
 
         agent.chat = mock_chat
 
-        # Capture log output using the logger that agent.py actually uses
-        with patch('logging.getLogger') as mock_get_logger:
-            mock_logger_instance = MagicMock()
-            mock_get_logger.return_value = mock_logger_instance
-            result = agent.run_autonomous("First refactor, then implement step by step")
-            # When observe=True, we expect info-level logs for each iteration
-            assert mock_logger_instance.info.called, (
-                "observe=True did not emit any log messages"
-            )
+        result = agent.run_autonomous("First, refactor, and then implement step by step")
+        # When observe=True, ObservabilityHooks should be wired and collect events
+        obs = getattr(agent, '_observability_hooks', None)
+        assert obs is not None, "observe=True did not create ObservabilityHooks"
+        events = obs.get_events()
+        assert len(events) > 0, "observe=True did not emit any observability events"
 
     def test_auto_escalate_progresses_stage(self):
         """auto_escalate=True must progress stage when stuck."""

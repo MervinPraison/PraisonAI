@@ -474,7 +474,8 @@ class TestAutonomySmokeTests:
     @patch("praisonaiagents.agent.agent.Agent.chat")
     def test_max_iterations_stops(self, mock_chat):
         from praisonaiagents import Agent
-        mock_chat.return_value = "Still working on it, not done yet..."
+        # Response must NOT contain any completion keywords: done, finished, completed, task complete
+        mock_chat.return_value = "Analyzing the codebase structure and dependencies..."
 
         agent = Agent(
             name="iter_agent",
@@ -483,7 +484,7 @@ class TestAutonomySmokeTests:
             llm="gpt-4o-mini",
         )
         result = agent.run_autonomous(
-            "First refactor auth, then add tests, then document"
+            "First, refactor auth, and then add tests, finally, write docs"
         )
         assert result.completion_reason == "max_iterations"
         assert result.iterations == 3

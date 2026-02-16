@@ -220,9 +220,11 @@ class TestDRY_Exports:
         assert AutonomyResult is not None
 
     def test_autonomy_stage_importable(self):
-        """AutonomyStage should be importable."""
+        """AutonomyStage should be importable and is now an alias for EscalationStage (IntEnum)."""
         from praisonaiagents.agent.autonomy import AutonomyStage
-        assert AutonomyStage.DIRECT.value == "direct"
+        from praisonaiagents.escalation.types import EscalationStage
+        assert AutonomyStage is EscalationStage
+        assert AutonomyStage.DIRECT.name == "DIRECT"
 
 
 # ---------------------------------------------------------------------------

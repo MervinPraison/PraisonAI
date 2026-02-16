@@ -219,6 +219,7 @@ def register_commands():
     from .commands.batch import app as batch_app
     from .commands.replay import app as replay_app
     from .commands.loop import app as loop_app
+    from .commands.tracker import app as tracker_app
     
     # Import new moltbot-inspired commands
     from .commands.bot import app as bot_app
@@ -287,6 +288,7 @@ def register_commands():
     app.add_typer(batch_app, name="batch", help="Run all PraisonAI scripts in current folder")
     app.add_typer(replay_app, name="replay", help="Context replay for debugging agent execution")
     app.add_typer(loop_app, name="loop", help="Autonomous agent execution loops")
+    app.add_typer(tracker_app, name="tracker", help="Autonomous agent tracking with step-by-step analysis")
     
     # Helper function for loading agents from config
     def _load_agents_from_config_file(config_path: str, console) -> list:

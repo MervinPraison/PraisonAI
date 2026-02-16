@@ -4016,7 +4016,7 @@ requires-dist = [
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen-v4'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.1.0" },
-    { name = "praisonaiagents", specifier = ">=1.5.6" },
+    { name = "praisonaiagents", specifier = ">=1.5.7" },
     { name = "pyautogen", marker = "extra == 'autogen'", specifier = "==0.2.29" },
     { name = "pyjwt", marker = "extra == 'os'", specifier = ">=2.8.0" },
     { name = "pyngrok", marker = "extra == 'call'", specifier = ">=1.4.0" },
@@ -4074,7 +4074,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.5.6"
+version = "1.5.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -4083,9 +4083,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/be/b9/cc08e4d3c71f8caa1c9817c49910e4b5879034afcce7c14e19e808f6b146/praisonaiagents-1.5.6.tar.gz", hash = "sha256:bfa62306c5f0c02f99a9bf143f1d3eb5f90d4a85da26bb481cad23bc74b7f1ba", size = 1203421, upload-time = "2026-02-15T06:45:33.814Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a3/e1/bf4a5ee72c1cf7d0bc30c4984f0a23319bba685c49ca96be7d75b214c517/praisonaiagents-1.5.7.tar.gz", hash = "sha256:f9599f8e530610e6545aa784c79e2cb0c5f282fe8585e7130fddc14350b35a1b", size = 1204864, upload-time = "2026-02-16T06:08:51.728Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c1/ad/5d82d47e4b139ee628f79c26411a18a71e11c56b54a3da937ed5a59bf640/praisonaiagents-1.5.6-py3-none-any.whl", hash = "sha256:986f17d0060ff73eca9b74802f505487cf80c1ae13ca366f76670f24727a7c8b", size = 1202075, upload-time = "2026-02-15T06:45:31.181Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/9a/a4b2f30d0f46f0136d9a862fc3a07c1402cd486add3c98e6ed36bd6b4c39/praisonaiagents-1.5.7-py3-none-any.whl", hash = "sha256:c81483bef9d573f8e5f84b67441f07615a7973e2880e97518954f06ac6d31c57", size = 1203482, upload-time = "2026-02-16T06:08:49.221Z" },
 ]
 
 [[package]]

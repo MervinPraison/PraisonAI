@@ -239,12 +239,34 @@ class AutonomyManager:
         When FULL_AUTO, set PRAISONAI_AUTO_APPROVE=true so the SDK's
         ApprovalRegistry.is_env_auto_approve() returns True.
         Otherwise, remove the env var to restore normal approval flow.
+        
+        Note: For multi-agent isolation, prefer get_autonomy_config() which
+        returns a per-agent config dict instead of global env vars.
         """
         import os
         if mode == AutonomyMode.FULL_AUTO:
             os.environ["PRAISONAI_AUTO_APPROVE"] = "true"
         else:
             os.environ.pop("PRAISONAI_AUTO_APPROVE", None)
+    
+    def get_autonomy_config(self) -> Dict[str, Any]:
+        """Get SDK-compatible autonomy config dict for Agent constructor.
+        
+        Maps CLI AutonomyMode to SDK AutonomyConfig level, enabling
+        per-agent approval without global env vars (G-BRIDGE-CLI fix).
+        
+        Returns:
+            Dict suitable for Agent(autonomy={...})
+        """
+        mode_to_level = {
+            AutonomyMode.SUGGEST: "suggest",
+            AutonomyMode.AUTO_EDIT: "auto_edit",
+            AutonomyMode.FULL_AUTO: "full_auto",
+        }
+        return {
+            "enabled": True,
+            "level": mode_to_level.get(self.mode, "suggest"),
+        }
     
     def request_approval(self, action: ActionRequest) -> ApprovalResult:
         """
