@@ -1,11 +1,15 @@
 """
 Tracker command for autonomous agent execution with step-by-step tracking.
 
-Provides CLI interface for running agents in autonomous mode with:
+Uses the centralized autonomy system with:
+- All default autonomy tools (search, file, shell, code, etc.)
+- Auto-approval enabled by default (full_auto mode)
 - Real-time step tracking and status output
-- Default tools (search, file, shell, code)
 - Summary table at completion
 - Gap analysis for debugging
+
+The tracker integrates with the Agent's autonomy system to provide
+comprehensive tracking of autonomous agent execution.
 """
 
 from typing import Optional, List
@@ -54,25 +58,53 @@ class TrackerResult:
     gaps_identified: List[str] = field(default_factory=list)
 
 
-# Default tools for tracker (commonly used, no API keys required)
-DEFAULT_TOOLS = [
-    "search_web",      # Web search (DuckDuckGo fallback)
-    "web_crawl",       # Web crawling
-    "read_file",       # File reading
-    "write_file",      # File writing
-    "list_files",      # Directory listing
-    "execute_command", # Shell commands
-    "execute_code",    # Python execution
-    "analyze_code",    # Code analysis
+# ============================================================================
+# CENTRALIZED AUTONOMY DEFAULT TOOLS
+# These are the default tools available in autonomy mode (no API keys required)
+# ============================================================================
+AUTONOMY_DEFAULT_TOOLS = [
+    # Web Search & Crawl
+    "search_web",       # Unified web search (DuckDuckGo fallback)
+    "internet_search",  # DuckDuckGo search
+    "web_crawl",        # Web page crawling
+    "scrape_page",      # Page scraping
+    "extract_text",     # Text extraction
+    "extract_links",    # Link extraction
+    
+    # File Operations
+    "read_file",        # Read file contents
+    "write_file",       # Write to files
+    "list_files",       # List directory contents
+    "copy_file",        # Copy files
+    "move_file",        # Move files
+    "delete_file",      # Delete files
+    "get_file_info",    # Get file metadata
+    
+    # Shell & System
+    "execute_command",  # Execute shell commands
+    "list_processes",   # List running processes
+    "get_system_info",  # Get system information
+    
+    # Python Code Execution
+    "execute_code",     # Execute Python code
+    "analyze_code",     # Analyze code structure
+    "format_code",      # Format Python code
+    "lint_code",        # Lint Python code
+    
+    # Scheduling
+    "schedule_add",     # Add scheduled task
+    "schedule_list",    # List scheduled tasks
+    "schedule_remove",  # Remove scheduled task
 ]
 
 # Extended tools (may require API keys)
 EXTENDED_TOOLS = [
-    "tavily_search",   # Tavily search (requires TAVILY_API_KEY)
-    "exa_search",      # Exa search (requires EXA_API_KEY)
-    "crawl4ai",        # Advanced crawling
-    "format_code",     # Code formatting
-    "lint_code",       # Code linting
+    "tavily_search",    # Tavily search (requires TAVILY_API_KEY)
+    "tavily_extract",   # Tavily extract
+    "exa_search",       # Exa search (requires EXA_API_KEY)
+    "exa_answer",       # Exa answer
+    "crawl4ai",         # Advanced crawling (requires playwright)
+    "ydc_search",       # You.com search (requires YDC_API_KEY)
 ]
 
 
@@ -90,7 +122,7 @@ def _get_tools(tool_names: List[str]) -> List:
                     tool_func = getattr(tool_func, name)
                 tools.append(tool_func)
             except AttributeError:
-                console.print(f"[yellow]Warning: Tool '{name}' not found, skipping[/yellow]")
+                pass  # Silently skip unavailable tools
     except ImportError:
         console.print("[red]Error: praisonaiagents not installed[/red]")
     return tools
@@ -113,9 +145,19 @@ def _run_tracked_task(
     model: Optional[str],
     verbose: bool,
     step_callback: Optional[callable] = None,
-    trust: bool = True,
+    auto_approve: bool = True,
 ) -> TrackerResult:
-    """Run a task with step tracking."""
+    """Run a task with step tracking using centralized autonomy system.
+    
+    Args:
+        task: The task to execute
+        tools: List of tool functions to use
+        max_iterations: Maximum autonomous iterations
+        model: LLM model to use (optional)
+        verbose: Show verbose output
+        step_callback: Callback for each step (optional)
+        auto_approve: Auto-approve all tool calls (default: True)
+    """
     from praisonaiagents import Agent
     
     steps: List[TrackedStep] = []
@@ -123,27 +165,35 @@ def _run_tracked_task(
     start_time = time.time()
     step_number = 0
     
-    # Create agent with tools - auto-approve for autonomous tracking
+    # ========================================================================
+    # CENTRALIZED AUTONOMY CONFIGURATION
+    # Uses full_auto level with auto-approval for autonomous tracking
+    # ========================================================================
     agent_kwargs = {
         "name": "tracker_agent",
         "instructions": """You are an autonomous agent with access to various tools.
 You MUST use tools to complete tasks - do NOT rely on your training knowledge alone.
-For research tasks: use search_web to find information.
-For file tasks: use read_file, write_file, list_files.
-For code tasks: use execute_code, analyze_code.
+
+TOOL USAGE RULES:
+- For research/search tasks: use search_web or internet_search
+- For file operations: use read_file, write_file, list_files
+- For code tasks: use execute_code, analyze_code
+- For shell commands: use execute_command
+- For web scraping: use web_crawl, scrape_page, extract_text
+
 When you have fully completed the task, say 'Task completed' or 'Done'.""",
         "tools": tools,
+        # Centralized autonomy configuration
         "autonomy": {
+            "enabled": True,
+            "level": "full_auto",  # Full autonomous mode
             "max_iterations": max_iterations,
             "doom_loop_threshold": 5,
-            "level": "full_auto" if trust else "suggest",
+            "auto_escalate": True,
         },
+        # Auto-approve all tools for tracker (agent-centric approval)
+        "approval": auto_approve,
     }
-    
-    # Auto-approve tools for tracker (autonomous mode)
-    if trust:
-        import os
-        os.environ["PRAISONAI_AUTO_APPROVE"] = "true"
     
     if model:
         agent_kwargs["llm"] = model
@@ -385,7 +435,7 @@ def tracker_main(
         return
     
     # Resolve tools
-    tool_names = DEFAULT_TOOLS.copy()
+    tool_names = AUTONOMY_DEFAULT_TOOLS.copy()
     if extended:
         tool_names.extend(EXTENDED_TOOLS)
     if tools:
@@ -456,7 +506,7 @@ def tracker_batch(
     console.print(f"\n[bold cyan]🔍 Batch Agent Tracker[/bold cyan]")
     console.print(f"[dim]Running {len(tasks)} tasks...[/dim]\n")
     
-    resolved_tools = _get_tools(DEFAULT_TOOLS)
+    resolved_tools = _get_tools(AUTONOMY_DEFAULT_TOOLS)
     results: List[TrackerResult] = []
     
     for i, task in enumerate(tasks, 1):
@@ -541,7 +591,7 @@ def tracker_tools():
     console.print("\n[bold cyan]🛠️ Available Tools[/bold cyan]\n")
     
     console.print("[bold]Default Tools (no API keys required):[/bold]")
-    for tool in DEFAULT_TOOLS:
+    for tool in AUTONOMY_DEFAULT_TOOLS:
         console.print(f"  • {tool}")
     
     console.print("\n[bold]Extended Tools (may require API keys):[/bold]")

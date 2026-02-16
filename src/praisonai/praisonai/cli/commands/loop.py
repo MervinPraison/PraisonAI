@@ -134,15 +134,10 @@ def _run_loop(
             typer.echo(f"   Timeout: {timeout}s")
         typer.echo("")
     
-    # Run autonomous loop
+    # Run autonomous loop using unified API
+    # agent.start() automatically uses run_autonomous() when autonomy=True
     try:
-        result = agent.run_autonomous(
-            prompt=prompt,
-            max_iterations=max_iterations,
-            timeout_seconds=timeout,
-            completion_promise=completion_promise,
-            clear_context=clear_context,
-        )
+        result = agent.start(prompt, timeout=timeout)
         
         # Display result
         if result.success:

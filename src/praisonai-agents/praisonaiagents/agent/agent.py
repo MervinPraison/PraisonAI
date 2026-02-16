@@ -6288,9 +6288,36 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             **kwargs: Additional arguments passed to achat()
             
         Returns:
-            The agent's response as a string
+            The agent's response as a string, or AutonomyResult if autonomy enabled
+            
+        Note:
+            If autonomy=True was set on the agent, astart() automatically uses
+            the autonomous loop (run_autonomous_async) instead of single-turn chat.
         """
         import sys
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # UNIFIED AUTONOMY API: If autonomy is enabled, route to run_autonomous_async
+        # This allows: Agent(autonomy=True) + await agent.astart("Task") to just work!
+        # ─────────────────────────────────────────────────────────────────────
+        if self.autonomy_enabled:
+            # Extract autonomy-specific kwargs
+            timeout = kwargs.pop('timeout', None)
+            kwargs.pop('stream', None)  # Not used in autonomous mode
+            
+            # Get config values from autonomy_config
+            auto_config = self.autonomy_config or {}
+            max_iterations = auto_config.get('max_iterations', 20)
+            completion_promise = auto_config.get('completion_promise')
+            clear_context = auto_config.get('clear_context', False)
+            
+            return await self.run_autonomous_async(
+                prompt=prompt,
+                max_iterations=max_iterations,
+                timeout_seconds=timeout,
+                completion_promise=completion_promise,
+                clear_context=clear_context,
+            )
         
         # Determine streaming behavior (same logic as start())
         stream_requested = kwargs.get('stream')
@@ -6523,6 +6550,9 @@ Write the complete compiled report:"""
             Unlike .run() which is always silent (production use), .start()
             enables verbose output by default when in a TTY for beginner-friendly
             interactive use. Use .run() for programmatic/scripted usage.
+            
+            If autonomy=True was set on the agent, start() automatically uses
+            the autonomous loop (run_autonomous) instead of single-turn chat.
         """
         import sys
         
@@ -6534,6 +6564,28 @@ Write the complete compiled report:"""
         if prompt and "{{" in prompt:
             from praisonaiagents.utils.variables import substitute_variables
             prompt = substitute_variables(prompt, {})
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # UNIFIED AUTONOMY API: If autonomy is enabled, route to run_autonomous
+        # This allows: Agent(autonomy=True) + agent.start("Task") to just work!
+        # ─────────────────────────────────────────────────────────────────────
+        if self.autonomy_enabled:
+            # Extract autonomy-specific kwargs
+            timeout = kwargs.pop('timeout', None)
+            
+            # Get config values from autonomy_config
+            auto_config = self.autonomy_config or {}
+            max_iterations = auto_config.get('max_iterations', 20)
+            completion_promise = auto_config.get('completion_promise')
+            clear_context = auto_config.get('clear_context', False)
+            
+            return self.run_autonomous(
+                prompt=prompt,
+                max_iterations=max_iterations,
+                timeout_seconds=timeout,
+                completion_promise=completion_promise,
+                clear_context=clear_context,
+            )
         
         # Load history from past sessions
         self._load_history_context()
