@@ -92,6 +92,18 @@ AUTONOMY_DEFAULT_TOOLS = [
     "format_code",      # Format Python code
     "lint_code",        # Lint Python code
     
+    # ACP Tools (Agent-Centric Protocol)
+    "acp_create_file",   # Create files (with approval tracking)
+    "acp_edit_file",     # Edit files (with approval tracking)
+    "acp_delete_file",   # Delete files (with approval tracking)
+    "acp_execute_command",  # Execute commands (with approval tracking)
+    
+    # LSP Tools (Language Server Protocol)
+    "lsp_list_symbols",      # List symbols in a file
+    "lsp_find_definition",   # Go to definition
+    "lsp_find_references",   # Find all references
+    "lsp_get_diagnostics",   # Get code diagnostics/errors
+    
     # Scheduling
     "schedule_add",     # Add scheduled task
     "schedule_list",    # List scheduled tasks
@@ -112,6 +124,7 @@ EXTENDED_TOOLS = [
 def _get_tools(tool_names: List[str]) -> List:
     """Resolve tool names to actual tool functions."""
     tools = []
+    resolved_names = set()
     try:
         from praisonaiagents import tools as tool_module
         for name in tool_names:
@@ -122,10 +135,30 @@ def _get_tools(tool_names: List[str]) -> List:
                 if hasattr(tool_func, '__file__') and hasattr(tool_func, name):
                     tool_func = getattr(tool_func, name)
                 tools.append(tool_func)
+                resolved_names.add(name)
             except AttributeError:
-                pass  # Silently skip unavailable tools
+                pass  # Try interactive tools below
     except ImportError:
         console.print("[red]Error: praisonaiagents not installed[/red]")
+    
+    # Resolve ACP/LSP tools via interactive_tools (they need runtime initialization)
+    unresolved = [n for n in tool_names if n not in resolved_names]
+    if any(n.startswith(("acp_", "lsp_")) for n in unresolved):
+        try:
+            from ..features.interactive_tools import get_interactive_tools, ToolConfig
+            config = ToolConfig.from_env()
+            config.workspace = os.getcwd()
+            interactive = get_interactive_tools(config=config)
+            interactive_map = {t.__name__: t for t in interactive}
+            for name in unresolved:
+                if name in interactive_map:
+                    tools.append(interactive_map[name])
+                    resolved_names.add(name)
+        except ImportError:
+            pass  # Interactive tools not available
+        except Exception as e:
+            console.print(f"[dim]Note: ACP/LSP tools not loaded: {e}[/dim]")
+    
     return tools
 
 
@@ -188,9 +221,11 @@ You MUST use tools to complete tasks - do NOT rely on your training knowledge al
 TOOL USAGE RULES:
 - For research/search tasks: use search_web or internet_search
 - For file operations: use read_file, write_file, list_files
+- For safe file creation/editing: use acp_create_file, acp_edit_file
 - For code tasks: use execute_code, analyze_code
-- For shell commands: use execute_command
+- For shell commands: use execute_command or acp_execute_command
 - For web scraping: use web_crawl, scrape_page, extract_text
+- For code intelligence: use lsp_list_symbols, lsp_find_definition, lsp_find_references, lsp_get_diagnostics
 
 When you have fully completed the task, say 'Task completed' or 'Done'.""",
         "tools": tools,
@@ -365,6 +400,13 @@ When you have fully completed the task, say 'Task completed' or 'Done'.""",
             gaps_identified=[f"Error: {str(e)}"],
         )
     finally:
+        # Stop the LSP/ACP runtime if it was started
+        try:
+            from ..features.interactive_tools import cleanup_runtime
+            cleanup_runtime()
+        except Exception:
+            pass
+        
         # Restore original PRAISONAI_AUTO_APPROVE env var
         if prev_auto_approve is None:
             os.environ.pop("PRAISONAI_AUTO_APPROVE", None)

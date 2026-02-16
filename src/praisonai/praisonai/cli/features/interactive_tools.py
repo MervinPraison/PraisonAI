@@ -186,29 +186,73 @@ def _load_basic_tools() -> Dict[str, Callable]:
     return tools
 
 
+# ── Shared runtime singleton ────────────────────────────────────────────────
+# ACP and LSP tools share ONE InteractiveRuntime to avoid duplicate LSP servers.
+_shared_runtime = None
+_shared_agent_tools = None
+
+
+def _get_shared_runtime(config: ToolConfig):
+    """Get or create a shared InteractiveRuntime instance.
+    
+    Returns (runtime, all_tools) — the runtime and the full list of
+    agent-centric tool functions created from it.
+    """
+    global _shared_runtime, _shared_agent_tools
+    
+    if _shared_runtime is not None and _shared_agent_tools is not None:
+        return _shared_runtime, _shared_agent_tools
+    
+    from .interactive_runtime import InteractiveRuntime, RuntimeConfig
+    from .agent_tools import create_agent_centric_tools
+    
+    runtime_config = RuntimeConfig(
+        workspace=config.workspace,
+        lsp_enabled=config.lsp_enabled,
+        acp_enabled=config.acp_enabled,
+        approval_mode=config.approval_mode,
+    )
+    
+    _shared_runtime = InteractiveRuntime(runtime_config)
+    _shared_agent_tools = create_agent_centric_tools(_shared_runtime)
+    
+    logger.debug("Created shared InteractiveRuntime")
+    return _shared_runtime, _shared_agent_tools
+
+
+def cleanup_runtime():
+    """Stop the shared InteractiveRuntime (LSP server, ACP session).
+    
+    Call this when the agent finishes to release resources.
+    Safe to call multiple times or when no runtime exists.
+    """
+    global _shared_runtime, _shared_agent_tools
+    
+    if _shared_runtime is not None:
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    pool.submit(asyncio.run, _shared_runtime.stop()).result(timeout=5)
+            else:
+                loop.run_until_complete(_shared_runtime.stop())
+        except Exception as e:
+            logger.debug(f"Runtime cleanup: {e}")
+        
+        _shared_runtime = None
+        _shared_agent_tools = None
+        logger.debug("Shared InteractiveRuntime stopped")
+
+
 def _load_acp_tools(config: ToolConfig) -> Dict[str, Callable]:
-    """Lazy load ACP tools with runtime initialization."""
+    """Lazy load ACP tools via the shared runtime."""
     tools = {}
     
     try:
-        from .interactive_runtime import InteractiveRuntime, RuntimeConfig
-        from .agent_tools import create_agent_centric_tools
+        _, all_tools = _get_shared_runtime(config)
         
-        # Create runtime config
-        runtime_config = RuntimeConfig(
-            workspace=config.workspace,
-            lsp_enabled=config.lsp_enabled,
-            acp_enabled=config.acp_enabled,
-            approval_mode=config.approval_mode,
-        )
-        
-        # Create runtime (lazy - doesn't start until needed)
-        runtime = InteractiveRuntime(runtime_config)
-        
-        # Get all agent-centric tools
-        all_tools = create_agent_centric_tools(runtime)
-        
-        # Map by name
         for tool in all_tools:
             name = tool.__name__
             if name.startswith("acp_"):
@@ -225,28 +269,12 @@ def _load_acp_tools(config: ToolConfig) -> Dict[str, Callable]:
 
 
 def _load_lsp_tools(config: ToolConfig) -> Dict[str, Callable]:
-    """Lazy load LSP tools with runtime initialization."""
+    """Lazy load LSP tools via the shared runtime."""
     tools = {}
     
     try:
-        from .interactive_runtime import InteractiveRuntime, RuntimeConfig
-        from .agent_tools import create_agent_centric_tools
+        _, all_tools = _get_shared_runtime(config)
         
-        # Create runtime config
-        runtime_config = RuntimeConfig(
-            workspace=config.workspace,
-            lsp_enabled=config.lsp_enabled,
-            acp_enabled=config.acp_enabled,
-            approval_mode=config.approval_mode,
-        )
-        
-        # Create runtime
-        runtime = InteractiveRuntime(runtime_config)
-        
-        # Get all agent-centric tools
-        all_tools = create_agent_centric_tools(runtime)
-        
-        # Map by name
         for tool in all_tools:
             name = tool.__name__
             if name.startswith("lsp_"):

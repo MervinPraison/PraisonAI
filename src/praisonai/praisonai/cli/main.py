@@ -4619,10 +4619,40 @@ Now, {final_instruction.lower()}:"""
         
         # Get the result and print it directly here to ensure it's displayed
         result = status_info['result']
-        if result:
-            console.print(result)
-        elif result == "" or result is None:
-            console.print("[dim]No response generated[/dim]")
+        
+        # Handle AutonomyResult from run_autonomous()
+        display_text = None
+        if result is not None:
+            if hasattr(result, 'output') and result.output:
+                display_text = result.output
+            elif isinstance(result, str) and result:
+                display_text = result
+            elif result:
+                display_text = str(result)
+        
+        if display_text:
+            console.print(display_text)
+        else:
+            # Last resort: extract from agent's chat history
+            extracted = None
+            if hasattr(agent, 'chat_history') and agent.chat_history:
+                for msg in reversed(agent.chat_history):
+                    if msg.get('role') == 'assistant' and msg.get('content'):
+                        extracted = msg['content']
+                        break
+            if extracted:
+                console.print(extracted)
+            elif status_info['tool_calls']:
+                console.print("[dim]Task completed (tools executed successfully)[/dim]")
+            else:
+                console.print("[dim]No response generated[/dim]")
+        
+        # Cleanup LSP/ACP runtime
+        try:
+            from .features.interactive_tools import cleanup_runtime
+            cleanup_runtime()
+        except Exception:
+            pass
         
         return result
 
