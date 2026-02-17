@@ -7,6 +7,7 @@ Event-loop driven async TUI with multi-pane layout.
 import asyncio
 import logging
 import os
+import time
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -54,6 +55,19 @@ if TEXTUAL_AVAILABLE:
         CSS = """
         Screen {
             background: $surface;
+        }
+        
+        /* Custom scrollbar styling */
+        ScrollableContainer > .scrollbar--thumb {
+            background: $accent 40%;
+        }
+        ScrollableContainer > .scrollbar--thumb:hover {
+            background: $accent 60%;
+        }
+        
+        /* Panel border accents */
+        Vertical {
+            border: none;
         }
         """
         
@@ -107,6 +121,7 @@ if TEXTUAL_AVAILABLE:
             # State
             self._current_run_id: Optional[str] = None
             self._streaming_content: str = ""
+            self._last_stream_update: float = 0.0  # Throttle streaming UI to 100ms
             self._total_tokens: int = 0
             self._total_cost: float = 0.0
             
@@ -183,6 +198,7 @@ if TEXTUAL_AVAILABLE:
                 on_output=self._handle_output,
                 on_complete=self._handle_complete,
                 on_error=self._handle_error,
+                on_tool_call=self._handle_tool_call,
                 default_tools=self.agent_config.get("tools", []),
             )
             
@@ -234,10 +250,10 @@ if TEXTUAL_AVAILABLE:
                 main_screen.set_processing(True)
             
             # Add user message to session store for history persistence
-            self.session_store.add_user_message(self.session_id, content)
+            self._session_store.add_user_message(self.session_id, content)
             
             # Get chat history for context continuity
-            chat_history = self.session_store.get_chat_history(self.session_id, max_messages=50)
+            chat_history = self._session_store.get_chat_history(self.session_id, max_messages=50)
             
             # Submit to queue with chat history
             # Note: tools are NOT included in config (they can't be JSON serialized)
@@ -391,11 +407,17 @@ if TEXTUAL_AVAILABLE:
         # Queue callbacks
         
         async def _handle_output(self, run_id: str, chunk: str) -> None:
-            """Handle streaming output."""
+            """Handle streaming output with 100ms throttle."""
             if run_id != self._current_run_id:
                 return
             
             self._streaming_content += chunk
+            
+            # Throttle UI updates to avoid O(n²) Markdown re-parsing
+            now = time.monotonic()
+            if now - self._last_stream_update < 0.1:  # 100ms throttle
+                return
+            self._last_stream_update = now
             
             main_screen = self.screen
             if isinstance(main_screen, MainScreen):
@@ -412,7 +434,7 @@ if TEXTUAL_AVAILABLE:
             
             # Store assistant response in session store for history persistence
             if output_content and run.session_id:
-                self.session_store.add_assistant_message(run.session_id, output_content, run_id)
+                self._session_store.add_assistant_message(run.session_id, output_content, run_id)
             
             # Update metrics
             if run.metrics:
@@ -760,6 +782,41 @@ Tip: Ask the agent to "commit the changes with message X".
                     tool_panel.set_available_tools(tools)
                 except Exception:
                     pass
+        
+        def _handle_tool_call(self, run_id: str, tool_name: str, tool_input: dict, tool_output: str) -> None:
+            """Handle tool call events from agent execution and display in ToolPanel."""
+            from .widgets.tool_panel import ToolPanelWidget, ToolCall
+            import uuid
+            
+            main_screen = self.screen
+            if not isinstance(main_screen, MainScreen):
+                return
+            
+            try:
+                tool_panel = main_screen.query_one("#tool-panel", ToolPanelWidget)
+                call_id = str(uuid.uuid4())[:8]
+                status = "completed" if tool_output is not None else "running"
+                
+                args_preview = ""
+                if tool_input:
+                    args_preview = str(tool_input)[:100]
+                
+                result_preview = None
+                if tool_output is not None:
+                    result_preview = str(tool_output)[:100]
+                
+                call = ToolCall(
+                    call_id=call_id,
+                    tool_name=tool_name or "unknown",
+                    args_preview=args_preview,
+                    status=status,
+                    result_preview=result_preview,
+                )
+                
+                # Use call_from_thread to safely update the widget from the worker thread
+                self.call_from_thread(tool_panel.add_call, call)
+            except Exception:
+                pass
         
         def action_quit(self) -> None:
             """Quit the application."""

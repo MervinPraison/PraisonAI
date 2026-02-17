@@ -72,34 +72,43 @@ if TEXTUAL_AVAILABLE:
             classes: Optional[str] = None,
         ):
             super().__init__("", name=name, id=id, classes=classes)
+            self._batch_updating = False  # Suppress individual watcher re-renders during batch
         
         def on_mount(self) -> None:
             """Handle mount."""
             self._update_display()
         
         def watch_session_id(self, value: str) -> None:
-            self._update_display()
+            if not self._batch_updating:
+                self._update_display()
         
         def watch_model(self, value: str) -> None:
-            self._update_display()
+            if not self._batch_updating:
+                self._update_display()
         
         def watch_total_tokens(self, value: int) -> None:
-            self._update_display()
+            if not self._batch_updating:
+                self._update_display()
         
         def watch_total_cost(self, value: float) -> None:
-            self._update_display()
+            if not self._batch_updating:
+                self._update_display()
         
         def watch_queued_count(self, value: int) -> None:
-            self._update_display()
+            if not self._batch_updating:
+                self._update_display()
         
         def watch_running_count(self, value: int) -> None:
-            self._update_display()
+            if not self._batch_updating:
+                self._update_display()
         
         def watch_is_processing(self, value: bool) -> None:
-            self._update_display()
+            if not self._batch_updating:
+                self._update_display()
         
         def watch_status_message(self, value: str) -> None:
-            self._update_display()
+            if not self._batch_updating:
+                self._update_display()
         
         def _update_display(self) -> None:
             """Update the status display."""
@@ -148,15 +157,20 @@ if TEXTUAL_AVAILABLE:
             self.update(text)
         
         def update_info(self, info: StatusInfo) -> None:
-            """Update all status info at once."""
-            self.session_id = info.session_id
-            self.model = info.model
-            self.total_tokens = info.total_tokens
-            self.total_cost = info.total_cost
-            self.queued_count = info.queued_count
-            self.running_count = info.running_count
-            self.is_processing = info.is_processing
-            self.status_message = info.status_message
+            """Update all status info at once (batched, single render)."""
+            self._batch_updating = True
+            try:
+                self.session_id = info.session_id
+                self.model = info.model
+                self.total_tokens = info.total_tokens
+                self.total_cost = info.total_cost
+                self.queued_count = info.queued_count
+                self.running_count = info.running_count
+                self.is_processing = info.is_processing
+                self.status_message = info.status_message
+            finally:
+                self._batch_updating = False
+            self._update_display()
 
 else:
     class StatusWidget:

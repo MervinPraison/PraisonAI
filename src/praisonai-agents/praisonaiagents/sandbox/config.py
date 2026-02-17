@@ -153,3 +153,55 @@ class SandboxConfig:
         return cls(
             sandbox_type="e2b",
         )
+    
+    @classmethod
+    def native(
+        cls,
+        writable_paths: List[str] = None,
+        network: bool = False,
+    ) -> "SandboxConfig":
+        """Create an OS-native sandbox configuration.
+        
+        Uses platform-specific sandboxing:
+        - macOS: Seatbelt (sandbox-exec)
+        - Linux: Landlock + bubblewrap
+        - Fallback: subprocess with restricted security policy
+        
+        Args:
+            writable_paths: Directories the agent may write to.
+                Defaults to current directory only.
+            network: Whether to allow network access. Defaults to False.
+            
+        Returns:
+            SandboxConfig with native sandbox type and restricted policy.
+            
+        Example::
+        
+            sandbox = SandboxConfig.native(
+                writable_paths=["./src", "./tests"],
+                network=False,
+            )
+        """
+        import os
+        
+        if writable_paths is None:
+            writable_paths = [os.getcwd()]
+        
+        # Resolve paths to absolute
+        resolved_paths = [os.path.abspath(p) for p in writable_paths]
+        
+        return cls(
+            sandbox_type="native",
+            working_dir=os.getcwd(),
+            security_policy=SecurityPolicy(
+                allow_network=network,
+                allow_file_write=True,
+                allow_subprocess=True,
+                allowed_paths=resolved_paths,
+            ),
+            metadata={
+                "writable_paths": resolved_paths,
+                "network": network,
+            },
+        )
+

@@ -250,11 +250,6 @@ DEFAULT_COMMANDS = [
     CommandInfo("sessions", "Browse saved sessions", ["sess"]),
     CommandInfo("tools", "Toggle tools panel", ["t"]),
     CommandInfo("exit", "Exit the TUI", ["quit", "q"]),
-    CommandInfo("plan", "Create an execution plan", []),
-    CommandInfo("undo", "Undo the last change", []),
-    CommandInfo("diff", "Show git diff of changes", []),
-    CommandInfo("commit", "Commit changes with AI message", []),
-    CommandInfo("map", "Show repository map", ["repo"]),
 ]
 
 

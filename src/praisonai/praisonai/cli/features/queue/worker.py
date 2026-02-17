@@ -99,6 +99,7 @@ class WorkerPool:
         on_complete: Optional[Callable[[str, QueuedRun], Coroutine[Any, Any, None]]] = None,
         on_error: Optional[Callable[[str, Exception], Coroutine[Any, Any, None]]] = None,
         on_event: Optional[Callable[[QueueEvent], Coroutine[Any, Any, None]]] = None,
+        on_tool_call: Optional[Callable] = None,
         max_workers: int = 4,
         poll_interval: float = 0.1,
         stream_buffer_size: int = 1000,
@@ -121,6 +122,7 @@ class WorkerPool:
         self.on_complete = on_complete
         self.on_error = on_error
         self.on_event = on_event
+        self.on_tool_call = on_tool_call
         self.max_workers = max_workers
         self.poll_interval = poll_interval
         self.stream_buffer_size = stream_buffer_size
@@ -254,6 +256,21 @@ class WorkerPool:
             # Execute with streaming if available
             chunk_index = 0
             
+            # Register TUI tool_call display callback to pipe tool events
+            if self.on_tool_call:
+                try:
+                    from praisonaiagents.main import register_display_callback
+                    _tool_call_cb = self.on_tool_call  # Capture for closure
+                    _run_id = run.run_id
+                    def _tui_tool_call_cb(message=None, tool_name=None, tool_input=None, tool_output=None, **kwargs):
+                        try:
+                            _tool_call_cb(_run_id, tool_name, tool_input, tool_output)
+                        except Exception:
+                            pass
+                    register_display_callback('tool_call', _tui_tool_call_cb)
+                except Exception:
+                    pass
+            
             # Try streaming first
             try:
                 async for chunk in self._stream_agent(agent, run.input_content):
@@ -364,20 +381,9 @@ class WorkerPool:
                 yield chunk
                 await asyncio.sleep(0)  # Yield control
         else:
-            # Fallback: get full response and yield in chunks
+            # No streaming available: yield full response at once (don't fake-stream)
             result = agent.chat(input_content)
-            
-            # Simulate streaming by yielding words
-            words = result.split()
-            chunk_size = 3  # Words per chunk
-            
-            for i in range(0, len(words), chunk_size):
-                chunk_words = words[i:i + chunk_size]
-                chunk = " ".join(chunk_words)
-                if i + chunk_size < len(words):
-                    chunk += " "
-                yield chunk
-                await asyncio.sleep(0.05)  # Small delay for streaming effect
+            yield result
     
     def get_stream_buffer(self, run_id: str) -> Optional[StreamBuffer]:
         """Get the stream buffer for a run."""

@@ -77,6 +77,9 @@ _AUTONOMY_TO_ESCALATION_SIGNAL = {v: k for k, v in _ESCALATION_TO_AUTONOMY_SIGNA
 class AutonomyConfig:
     """Configuration for Agent autonomy features.
     
+    Autonomy is the safety center: doom loops, escalation, sandbox,
+    filesystem tracking, and verification hooks all live here.
+    
     Attributes:
         enabled: Whether autonomy is enabled
         level: Autonomy level (suggest, auto_edit, full_auto)
@@ -87,6 +90,24 @@ class AutonomyConfig:
         completion_promise: Optional string that signals completion when wrapped in <promise>TEXT</promise>
         clear_context: Whether to clear chat history between iterations
         verification_hooks: List of VerificationHook instances for output verification
+        track_changes: Whether to track filesystem changes via shadow git.
+            Defaults to True when level="full_auto", False otherwise.
+            When enabled, agent.undo()/redo()/diff() become available.
+        sandbox: Optional SandboxConfig for execution isolation.
+            When level="full_auto" and sandbox is None, subprocess sandbox is auto-enabled.
+        snapshot_dir: Directory for snapshot storage. Defaults to ~/.praisonai/snapshots.
+    
+    Usage::
+    
+        # Simple — full_auto auto-enables tracking + sandbox
+        Agent(autonomy="full_auto")
+        
+        # Advanced — explicit config
+        Agent(autonomy=AutonomyConfig(
+            level="full_auto",
+            track_changes=True,
+            sandbox=SandboxConfig.native(writable_paths=["./src"]),
+        ))
     """
     enabled: bool = True
     level: str = "suggest"
@@ -97,6 +118,10 @@ class AutonomyConfig:
     completion_promise: Optional[str] = None
     clear_context: bool = False
     verification_hooks: Optional[List[Any]] = None
+    # Safety features — autonomy owns the safety model
+    track_changes: Optional[bool] = None  # None = auto (True for full_auto)
+    sandbox: Optional[Any] = None  # SandboxConfig (lazy import to avoid circular)
+    snapshot_dir: Optional[str] = None  # Defaults to ~/.praisonai/snapshots
     
     def __post_init__(self):
         if self.level not in VALID_AUTONOMY_LEVELS:
@@ -104,6 +129,20 @@ class AutonomyConfig:
                 f"Invalid autonomy level: {self.level!r}. "
                 f"Must be one of {sorted(VALID_AUTONOMY_LEVELS)}"
             )
+        # Auto-enable track_changes for full_auto if not explicitly set
+        if self.track_changes is None:
+            self.track_changes = (self.level == "full_auto")
+        # Default snapshot directory
+        if self.snapshot_dir is None:
+            import os
+            self.snapshot_dir = os.path.join(
+                os.path.expanduser("~"), ".praisonai", "snapshots"
+            )
+    
+    @property
+    def effective_track_changes(self) -> bool:
+        """Whether track_changes is effectively enabled."""
+        return bool(self.track_changes)
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AutonomyConfig":
@@ -124,6 +163,9 @@ class AutonomyConfig:
             completion_promise=data.get("completion_promise"),
             clear_context=data.get("clear_context", False),
             verification_hooks=data.get("verification_hooks"),
+            track_changes=data.get("track_changes"),
+            sandbox=data.get("sandbox"),
+            snapshot_dir=data.get("snapshot_dir"),
         )
 
 

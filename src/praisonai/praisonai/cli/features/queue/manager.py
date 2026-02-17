@@ -40,6 +40,7 @@ class QueueManager:
         on_complete: Optional[Callable[[str, QueuedRun], Coroutine[Any, Any, None]]] = None,
         on_error: Optional[Callable[[str, Exception], Coroutine[Any, Any, None]]] = None,
         on_event: Optional[Callable[[QueueEvent], Coroutine[Any, Any, None]]] = None,
+        on_tool_call: Optional[Callable] = None,
         default_tools: Optional[list] = None,
     ):
         """
@@ -51,6 +52,7 @@ class QueueManager:
             on_complete: Callback when run completes.
             on_error: Callback when run fails.
             on_event: Callback for queue events.
+            on_tool_call: Callback for tool call events (run_id, tool_name, tool_input, tool_output).
             default_tools: Default tools to use for all runs (stored in runtime registry).
         """
         self.config = config or QueueConfig()
@@ -64,6 +66,7 @@ class QueueManager:
         self._on_complete = on_complete
         self._on_error = on_error
         self._on_event = on_event
+        self._on_tool_call = on_tool_call
         
         # Worker pool (created on start)
         self.workers: Optional[WorkerPool] = None
@@ -107,6 +110,7 @@ class QueueManager:
             on_complete=self._wrap_complete_callback(),
             on_error=self._wrap_error_callback(),
             on_event=self._on_event,
+            on_tool_call=self._on_tool_call,
             max_workers=self.config.max_concurrent_global,
             poll_interval=self.config.worker_poll_interval,
             stream_buffer_size=self.config.stream_buffer_size,

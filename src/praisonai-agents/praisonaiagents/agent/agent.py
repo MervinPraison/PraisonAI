@@ -1918,6 +1918,9 @@ Summary:"""
             self.autonomy_config = {}
             self._autonomy_trigger = None
             self._doom_loop_tracker = None
+            self._file_snapshot = None
+            self._snapshot_stack = []
+            self._redo_stack = []
             return
         
         self.autonomy_enabled = True
@@ -1942,6 +1945,9 @@ Summary:"""
             self.autonomy_config = {}
             self._autonomy_trigger = None
             self._doom_loop_tracker = None
+            self._file_snapshot = None
+            self._snapshot_stack = []
+            self._redo_stack = []
             return
         
         # Preserve ALL AutonomyConfig fields in the dict (G14 fix: no lossy extraction)
@@ -1954,6 +1960,8 @@ Summary:"""
             "observe": config.observe,
             "completion_promise": config.completion_promise,
             "clear_context": config.clear_context,
+            "track_changes": config.effective_track_changes,
+            "snapshot_dir": config.snapshot_dir,
         }
         # Also preserve any extra user-provided keys from dict input
         if isinstance(autonomy, dict):
@@ -1967,6 +1975,21 @@ Summary:"""
         self._autonomy_trigger = AutonomyTrigger()
         self._doom_loop_tracker = DoomLoopTracker(threshold=config.doom_loop_threshold)
         
+        # Initialize FileSnapshot for filesystem tracking (lazy import)
+        self._file_snapshot = None
+        self._snapshot_stack = []  # Stack of snapshot hashes for undo/redo
+        self._redo_stack = []  # Redo stack
+        if config.effective_track_changes:
+            try:
+                from ..snapshot import FileSnapshot
+                import os
+                self._file_snapshot = FileSnapshot(
+                    project_path=os.getcwd(),
+                    snapshot_dir=config.snapshot_dir,
+                )
+            except Exception as e:
+                logger.debug(f"FileSnapshot init failed (git may not be available): {e}")
+        
         # Wire ObservabilityHooks when observe=True (G-UNUSED-2 fix)
         if config.observe:
             from ..escalation.observability import ObservabilityHooks
@@ -1976,6 +1999,93 @@ Summary:"""
         
         # Wire level → approval bridge (G3 fix)
         self._bridge_autonomy_level(config.level)
+    
+    # ================================================================
+    # Filesystem tracking convenience methods (powered by FileSnapshot)
+    # ================================================================
+    
+    def undo(self) -> bool:
+        """Undo the last set of file changes.
+        
+        Restores files to the state before the last autonomous iteration.
+        Requires ``autonomy=AutonomyConfig(track_changes=True)``.
+        
+        Returns:
+            True if undo was successful, False if nothing to undo.
+            
+        Example::
+        
+            agent = Agent(autonomy="full_auto")
+            result = agent.start("Refactor utils.py")
+            agent.undo()  # Restore original files
+        """
+        if self._file_snapshot is None or not self._snapshot_stack:
+            return False
+        try:
+            target_hash = self._snapshot_stack.pop()
+            # Get current hash before restore (for redo)
+            current_hash = self._file_snapshot.get_current_hash()
+            if current_hash:
+                self._redo_stack.append(current_hash)
+            self._file_snapshot.restore(target_hash)
+            return True
+        except Exception as e:
+            logger.debug(f"Undo failed: {e}")
+            return False
+    
+    def redo(self) -> bool:
+        """Redo a previously undone set of file changes.
+        
+        Re-applies file changes that were reverted by :meth:`undo`.
+        
+        Returns:
+            True if redo was successful, False if nothing to redo.
+        """
+        if self._file_snapshot is None or not self._redo_stack:
+            return False
+        try:
+            target_hash = self._redo_stack.pop()
+            current_hash = self._file_snapshot.get_current_hash()
+            if current_hash:
+                self._snapshot_stack.append(current_hash)
+            self._file_snapshot.restore(target_hash)
+            return True
+        except Exception as e:
+            logger.debug(f"Redo failed: {e}")
+            return False
+    
+    def diff(self, from_hash: Optional[str] = None):
+        """Get file diffs from autonomous execution.
+        
+        Returns a list of :class:`FileDiff` objects showing what files
+        were modified, with additions/deletions counts.
+        
+        Args:
+            from_hash: Base commit hash to diff from. If None, uses the
+                first snapshot (pre-autonomous state).
+        
+        Returns:
+            List of FileDiff objects, or empty list if tracking not enabled.
+            
+        Example::
+        
+            agent = Agent(autonomy="full_auto")
+            result = agent.start("Refactor utils.py")
+            for d in agent.diff():
+                print(f"{d.status}: {d.path} (+{d.additions}/-{d.deletions})")
+        """
+        if self._file_snapshot is None:
+            return []
+        try:
+            base = from_hash
+            if base is None and self._snapshot_stack:
+                base = self._snapshot_stack[0]
+            if base is None:
+                return []
+            return self._file_snapshot.diff(base)
+        except Exception as e:
+            logger.debug(f"Diff failed: {e}")
+            return []
     
     def analyze_prompt(self, prompt: str) -> set:
         """Analyze prompt for autonomy signals.
@@ -2158,6 +2268,15 @@ Summary:"""
                 "Autonomy must be enabled to use run_autonomous(). "
                 "Create agent with autonomy=True or autonomy={...}"
             )
+        
+        # Take initial snapshot before autonomous execution starts
+        if self._file_snapshot is not None:
+            try:
+                snap_info = self._file_snapshot.track(message="pre-autonomous")
+                self._snapshot_stack.append(snap_info.commit_hash)
+                self._redo_stack.clear()
+            except Exception as e:
+                logger.debug(f"Pre-autonomous snapshot failed: {e}")
         
         start_time = time_module.time()
         started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")

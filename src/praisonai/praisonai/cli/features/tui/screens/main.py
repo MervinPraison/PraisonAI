@@ -4,6 +4,7 @@ Main Screen for PraisonAI TUI.
 The primary chat interface screen.
 """
 
+import asyncio
 from typing import Optional
 
 try:
@@ -61,7 +62,7 @@ if TEXTUAL_AVAILABLE:
             layout: grid;
             grid-size: 2;
             grid-columns: 3fr 1fr;
-            grid-rows: 1 1fr auto 1;
+            grid-rows: 1 1fr auto auto 1;
             layers: base popup;
         }
         
@@ -81,6 +82,19 @@ if TEXTUAL_AVAILABLE:
             column-span: 2;
             height: auto;
             max-height: 10;
+        }
+        
+        MainScreen #processing-indicator {
+            column-span: 2;
+            height: 1;
+            background: $surface;
+            color: $accent;
+            text-align: center;
+            display: none;
+        }
+        
+        MainScreen #processing-indicator.visible {
+            display: block;
         }
         
         MainScreen Footer {
@@ -156,6 +170,7 @@ if TEXTUAL_AVAILABLE:
                     yield QueuePanelWidget(id="queue-panel", classes="sidebar-panel")
             
             yield ComposerWidget(id="composer")
+            yield Static("⠋ Thinking...", id="processing-indicator")
             
             yield Footer()
         
@@ -179,6 +194,17 @@ if TEXTUAL_AVAILABLE:
             # Focus composer
             composer = self.query_one("#composer", ComposerWidget)
             composer.focus_input()
+            
+            # Show welcome message
+            chat = self.query_one("#chat-widget", ChatWidget)
+            welcome = ChatMessage(
+                role="system",
+                content=(
+                    "**Welcome to PraisonAI** — type a message to get started.\n\n"
+                    "Quick tips:  `?` help · `\\` commands · `q` quit · `Esc` cancel"
+                ),
+            )
+            self.call_after_refresh(lambda: asyncio.ensure_future(chat.add_message(welcome)))
         
         def on_composer_widget_submitted(self, event: ComposerWidget.Submitted) -> None:
             """Handle message submission."""
@@ -493,6 +519,45 @@ if TEXTUAL_AVAILABLE:
             
             status = self.query_one("#status-bar", StatusWidget)
             status.is_processing = processing
+            
+            # Toggle animated processing indicator
+            try:
+                indicator = self.query_one("#processing-indicator", Static)
+                if processing:
+                    indicator.add_class("visible")
+                    self._start_spinner()
+                else:
+                    indicator.remove_class("visible")
+                    self._stop_spinner()
+            except Exception:
+                pass
+        
+        def _start_spinner(self) -> None:
+            """Start the animated spinner."""
+            self._spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+            self._spinner_index = 0
+            self.set_interval(0.1, self._animate_spinner, name="spinner")
+        
+        def _stop_spinner(self) -> None:
+            """Stop the animated spinner."""
+            try:
+                # Remove the timer by name
+                for timer in self._timers:
+                    if timer.name == "spinner":
+                        timer.stop()
+                        break
+            except Exception:
+                pass
+        
+        def _animate_spinner(self) -> None:
+            """Animate the spinner indicator."""
+            try:
+                indicator = self.query_one("#processing-indicator", Static)
+                frame = self._spinner_frames[self._spinner_index % len(self._spinner_frames)]
+                indicator.update(f"{frame} Thinking...")
+                self._spinner_index += 1
+            except Exception:
+                pass
 
 else:
     class MainScreen:

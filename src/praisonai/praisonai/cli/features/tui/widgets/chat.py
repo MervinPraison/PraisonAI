@@ -172,7 +172,7 @@ if TEXTUAL_AVAILABLE:
             await self.mount(panel)
             
             # Scroll to end to show new message
-            self.scroll_end(animate=False)
+            self.scroll_end(animate=True)
             
             if message.is_streaming:
                 self._streaming_widgets[message.run_id] = widget_id
@@ -202,7 +202,7 @@ if TEXTUAL_AVAILABLE:
                 widget.update(Panel(rendered, title="Assistant", border_style="bold green"))
                 
                 # Scroll to end to keep streaming content visible
-                self.scroll_end(animate=False)
+                self.scroll_end(animate=True)
                 
             except Exception:
                 pass
