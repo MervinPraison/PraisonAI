@@ -278,6 +278,15 @@ class AutonomyResult:
     error: Optional[str] = None
     started_at: Optional[str] = None
 
+    def __str__(self) -> str:
+        """Return the output text for display purposes.
+        
+        When AutonomyResult is printed or converted to str(), users
+        should see just the response — not the internal dataclass fields.
+        Use repr() for debugging details.
+        """
+        return self.output or ""
+
 
 class DoomLoopTracker:
     """Tracks actions to detect doom loops with graduated recovery.
