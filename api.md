@@ -51,6 +51,7 @@ Methods:
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">context_manager</a>(value)</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">delete_history</a>(index: int) -> bool</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">delete_history_matching</a>(pattern: str) -> int</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">diff</a>(from_hash: Optional[str] = None)</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">display_name</a>() -> str</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">ephemeral</a>()</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">execute</a>(task, context = None)</code>
@@ -79,6 +80,7 @@ Methods:
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">query</a>(question: str, **kwargs) -> 'RAGResult'</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">rag</a>()</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">rag_query</a>(question: str, **kwargs) -> 'RAGResult'</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">redo</a>() -> bool</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">retrieval_config</a>()</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">retrieve</a>(query: str, **kwargs) -> 'ContextPack'</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">rules_manager</a>()</code>
@@ -97,6 +99,7 @@ Methods:
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">switch_model</a>(new_model: str) -> None</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">thinking_budget</a>()</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">thinking_budget</a>(value)</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">undo</a>() -> bool</code>
 * <code title="class AutoAgents">AutoAgents.<a href="./src/praisonai-agents/praisonaiagents/agents/autoagents.py">astart</a>()</code>
 * <code title="class AutoAgents">AutoAgents.<a href="./src/praisonai-agents/praisonaiagents/agents/autoagents.py">start</a>()</code>
 * <code title="class AutoRagAgent">AutoRagAgent.<a href="./src/praisonai-agents/praisonaiagents/agents/auto_rag_agent.py">achat</a>(message: str, **kwargs) -> str</code>
@@ -609,6 +612,7 @@ from praisonaiagents import AutonomyConfig, AutonomyLevel, CachingConfig, Execut
 
 Methods:
 
+* <code title="class AutonomyConfig">AutonomyConfig.<a href="./src/praisonai-agents/praisonaiagents/agent/autonomy.py">effective_track_changes</a>() -> bool</code>
 * <code title="class AutonomyConfig">AutonomyConfig.<a href="./src/praisonai-agents/praisonaiagents/agent/autonomy.py">from_dict</a>(data: Dict[str, Any]) -> 'AutonomyConfig'</code>
 * <code title="class CachingConfig">CachingConfig.<a href="./src/praisonai-agents/praisonaiagents/config/feature_configs.py">to_dict</a>() -> Dict[str, Any]</code>
 * <code title="class ExecutionConfig">ExecutionConfig.<a href="./src/praisonai-agents/praisonaiagents/config/feature_configs.py">to_dict</a>() -> Dict[str, Any]</code>
