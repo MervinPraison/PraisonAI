@@ -5,6 +5,7 @@ Provides functionality to execute shell commands safely.
 """
 
 import os
+import re as _re
 import subprocess
 import shlex
 from typing import Optional, Dict, Any
@@ -29,6 +30,37 @@ DANGEROUS_COMMANDS = {
     'curl', 'wget', 'ssh', 'scp', 'rsync',
     'mv', 'cp',  # Can be destructive
 }
+
+# Patterns that indicate self-harm / destructive intent — never execute
+_FORBIDDEN_PATTERNS = [
+    _re.compile(r'rm\s+-[rf]{1,2}\s+[/~]'),          # rm -rf / or ~/
+    _re.compile(r'rm\s+-[rf]{1,2}\s+\.'),             # rm -rf .
+    _re.compile(r'>\s*/dev/(sd[a-z]|nvme|hd[a-z])'), # Overwrite disk
+    _re.compile(r'mkfs\b'),                            # Format filesystem
+    _re.compile(r'dd\s+if=.*of=/dev/'),               # Overwrite device
+    _re.compile(r':(){ :|:& };:'),                    # Fork bomb
+    _re.compile(r'DROP\s+(DATABASE|TABLE|SCHEMA)\s+', _re.IGNORECASE),
+    _re.compile(r'shutdown\s+(-[hHrR]\s+)?now', _re.IGNORECASE),
+]
+
+
+def is_forbidden_command(command: str) -> bool:
+    """
+    Check if a command matches a self-preservation forbidden pattern.
+
+    These patterns indicate destructive or self-harm intent that goes
+    beyond the normal DANGEROUS_COMMANDS list.
+
+    Args:
+        command: The command string to check.
+
+    Returns:
+        True if the command is explicitly forbidden.
+    """
+    for pattern in _FORBIDDEN_PATTERNS:
+        if pattern.search(command):
+            return True
+    return False
 
 
 def execute_command(
@@ -71,6 +103,17 @@ def execute_command(
         return {
             'success': False,
             'error': "Empty command",
+            'command': command,
+            'exit_code': -1,
+            'stdout': '',
+            'stderr': '',
+        }
+
+    # Self-preservation guard — block explicitly destructive patterns
+    if is_forbidden_command(command):
+        return {
+            'success': False,
+            'error': f"Command blocked by self-preservation policy: {command[:100]}",
             'command': command,
             'exit_code': -1,
             'stdout': '',

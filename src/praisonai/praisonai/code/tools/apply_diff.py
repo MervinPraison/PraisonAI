@@ -13,6 +13,7 @@ from ..utils.file_utils import (
     file_exists,
     is_path_within_directory,
 )
+from ...security.protected import is_protected, get_protection_reason
 
 
 def apply_diff(
@@ -76,6 +77,16 @@ def apply_diff(
     else:
         abs_path = os.path.abspath(path)
     
+    # Protected path check — never allow modification of system files
+    if is_protected(abs_path):
+        reason = get_protection_reason(abs_path) or "Protected system file"
+        return {
+            'success': False,
+            'error': f"Path '{path}' is protected: {reason}",
+            'path': path,
+            'applied_count': 0,
+        }
+
     # Security check
     if workspace:
         if not is_path_within_directory(abs_path, workspace):
