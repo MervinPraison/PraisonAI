@@ -65,6 +65,13 @@ class PythonTools:
             '__code__', '__class__', '__dict__', '__builtins__',
             '__import__', '__loader__', '__spec__', '__init_subclass__',
             '__set_name__', '__reduce__', '__reduce_ex__',
+            '__traceback__', '__qualname__', '__module__',
+            '__wrapped__', '__closure__', '__annotations__',
+            # Frame/code object introspection
+            'gi_frame', 'gi_code', 'cr_frame', 'cr_code',
+            'ag_frame', 'ag_code', 'tb_frame', 'tb_next',
+            'f_globals', 'f_locals', 'f_builtins', 'f_code',
+            'co_consts', 'co_names',
         })
 
         for node in ast.walk(tree):
@@ -145,6 +152,8 @@ class PythonTools:
                 'type': type,
                 'hasattr': hasattr,
                 'getattr': self._safe_getattr,
+                # Class definition support
+                '__build_class__': __builtins__['__build_class__'] if isinstance(__builtins__, dict) else getattr(__builtins__, '__build_class__', None),
                 # Disable dangerous functions
                 '__import__': None,
                 'eval': None,
