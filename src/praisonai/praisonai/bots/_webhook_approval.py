@@ -215,7 +215,9 @@ class WebhookApproval:
                     continue
 
                 # Check if decision is available
-                status = data.get("status", "").lower()
+                # (status may be int from HTTP status when response isn't JSON)
+                status = data.get("status", "")
+                status = str(status).lower() if status is not None else ""
                 if status == "pending":
                     continue
 

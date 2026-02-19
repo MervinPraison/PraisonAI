@@ -206,6 +206,7 @@ async function decide(d) {{
 
         url = f"http://{self._host}:{self._port}/approve/{request_id}"
         logger.info(f"HTTPApproval: Waiting for decision at {url}")
+        print(f"\n🔗 Open this URL to approve/deny:\n   {url}\n")
 
         # Poll for decision
         deadline = time.monotonic() + self._timeout
