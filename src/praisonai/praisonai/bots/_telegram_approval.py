@@ -64,15 +64,23 @@ class TelegramApproval:
             raise ValueError(
                 "Telegram bot token is required. Pass token= or set TELEGRAM_BOT_TOKEN env var."
             )
-        self._chat_id = chat_id or ""
+        self._chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID", "")
         self._timeout = timeout
         self._poll_interval = poll_interval
+        # Optional: set PRAISONAI_TELEGRAM_SSL_VERIFY=false to skip SSL verify (e.g. corporate proxy / CA issues)
+        _v = os.environ.get("PRAISONAI_TELEGRAM_SSL_VERIFY", "true").lower()
+        self._ssl_verify = _v not in ("false", "0", "no")
 
     def __repr__(self) -> str:
         masked = f"...{self._token[-4:]}" if len(self._token) > 4 else "***"
         return f"TelegramApproval(chat_id={self._chat_id!r}, token={masked!r})"
 
     # ── Internal Telegram API helper ───────────────────────────────────
+
+    def _connector(self):
+        """aiohttp connector with optional SSL verify (for corporate/proxy CA issues)."""
+        import aiohttp
+        return aiohttp.TCPConnector(ssl=self._ssl_verify)
 
     async def _telegram_api(
         self,
@@ -91,7 +99,7 @@ class TelegramApproval:
             ) as resp:
                 return await resp.json()
         else:
-            async with aiohttp.ClientSession() as _session:
+            async with aiohttp.ClientSession(connector=self._connector()) as _session:
                 async with _session.post(
                     url, json=payload,
                     timeout=aiohttp.ClientTimeout(total=15),
@@ -112,7 +120,7 @@ class TelegramApproval:
                 reason="No Telegram chat_id configured",
             )
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(connector=self._connector()) as session:
             # 1. Send approval message with inline keyboard
             text = self._build_message_text(request)
             keyboard = self._build_inline_keyboard(request)

@@ -66,13 +66,21 @@ class DiscordApproval:
             raise ValueError(
                 "Discord bot token is required. Pass token= or set DISCORD_BOT_TOKEN env var."
             )
-        self._channel_id = channel_id or ""
+        self._channel_id = channel_id or os.environ.get("DISCORD_CHANNEL_ID", "")
         self._timeout = timeout
         self._poll_interval = poll_interval
+        # Optional: set PRAISONAI_DISCORD_SSL_VERIFY=false to skip SSL verify (e.g. corporate proxy / CA issues)
+        _v = os.environ.get("PRAISONAI_DISCORD_SSL_VERIFY", "true").lower()
+        self._ssl_verify = _v not in ("false", "0", "no")
 
     def __repr__(self) -> str:
         masked = f"...{self._token[-4:]}" if len(self._token) > 4 else "***"
         return f"DiscordApproval(channel_id={self._channel_id!r}, token={masked!r})"
+
+    def _connector(self):
+        """aiohttp connector with optional SSL verify (for corporate/proxy CA issues)."""
+        import aiohttp
+        return aiohttp.TCPConnector(ssl=self._ssl_verify)
 
     # ── Internal Discord API helper ────────────────────────────────────
 
@@ -109,7 +117,7 @@ class DiscordApproval:
         if session is not None:
             return await _do_request(session)
         else:
-            async with aiohttp.ClientSession() as _session:
+            async with aiohttp.ClientSession(connector=self._connector()) as _session:
                 return await _do_request(_session)
 
     # ── ApprovalProtocol implementation ─────────────────────────────────
@@ -126,7 +134,7 @@ class DiscordApproval:
                 reason="No Discord channel_id configured",
             )
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(connector=self._connector()) as session:
             # 1. Post approval embed
             embed = self._build_embed(request)
             content = self._build_fallback_text(request)
@@ -349,7 +357,7 @@ class DiscordApproval:
                 ) as resp:
                     data = await resp.json()
             else:
-                async with aiohttp.ClientSession() as _session:
+                async with aiohttp.ClientSession(connector=self._connector()) as _session:
                     async with _session.patch(
                         url, headers=headers, json=payload,
                         timeout=aiohttp.ClientTimeout(total=10),
