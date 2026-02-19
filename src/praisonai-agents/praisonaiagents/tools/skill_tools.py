@@ -12,6 +12,7 @@ Usage:
 import subprocess
 import os
 import logging
+from ..approval import require_approval
 
 
 class SkillTools:
@@ -36,6 +37,7 @@ class SkillTools:
         """Set the working directory for path resolution."""
         self._working_directory = value
     
+    @require_approval(risk_level="critical")
     def run_skill_script(
         self,
         script_path: str,
@@ -221,6 +223,7 @@ class SkillTools:
 # Create default instance for direct function access
 _skill_tools = SkillTools()
 
+@require_approval(risk_level="critical")
 def run_skill_script(script_path: str, args: str = "", timeout: int = 60) -> str:
     """
     Execute a skill script from a skill's scripts/ directory.
