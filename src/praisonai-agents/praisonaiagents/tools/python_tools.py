@@ -37,6 +37,60 @@ class PythonTools:
                 f"Run: pip install {' '.join(missing)}"
             )
 
+    @staticmethod
+    def _safe_getattr(obj, name, *default):
+        """getattr wrapper that blocks access to dunder attributes."""
+        if isinstance(name, str) and name.startswith('_'):
+            raise AttributeError(
+                f"Access to private/protected attribute '{name}' is restricted"
+            )
+        return getattr(obj, name, *default) if default else getattr(obj, name)
+
+    @staticmethod
+    def _validate_code_ast(code: str):
+        """Validate code using AST — catches attacks that bypass text checks.
+
+        Returns error message string if dangerous, None if safe.
+        """
+        import ast
+
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            return None  # let compile() handle syntax errors later
+
+        # Dangerous dunder attributes attackers use for sandbox escape
+        _blocked_attrs = frozenset({
+            '__subclasses__', '__bases__', '__mro__', '__globals__',
+            '__code__', '__class__', '__dict__', '__builtins__',
+            '__import__', '__loader__', '__spec__', '__init_subclass__',
+            '__set_name__', '__reduce__', '__reduce_ex__',
+        })
+
+        for node in ast.walk(tree):
+            # Block import statements
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                return f"Import statements are not allowed"
+
+            # Block attribute access to dangerous dunders
+            if isinstance(node, ast.Attribute):
+                if node.attr in _blocked_attrs:
+                    return (
+                        f"Access to attribute '{node.attr}' is restricted"
+                    )
+
+            # Block calls to dangerous builtins by name
+            if isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Name) and func.id in (
+                    'exec', 'eval', 'compile', '__import__',
+                    'open', 'input', 'breakpoint',
+                    'setattr', 'delattr', 'dir',
+                ):
+                    return f"Call to '{func.id}' is not allowed"
+
+        return None
+
     @require_approval(risk_level="critical")
     def execute_code(
         self,
@@ -86,14 +140,11 @@ class PythonTools:
                 'KeyError': KeyError,
                 'IndexError': IndexError,
                 'RuntimeError': RuntimeError,
-                # Other safe functions
+                # Safe introspection (dunder-blocked wrapper)
                 'isinstance': isinstance,
                 'type': type,
                 'hasattr': hasattr,
-                'getattr': getattr,
-                'setattr': setattr,
-                'dir': dir,
-                'help': help,
+                'getattr': self._safe_getattr,
                 # Disable dangerous functions
                 '__import__': None,
                 'eval': None,
@@ -116,7 +167,18 @@ class PythonTools:
             if locals_dict is None:
                 locals_dict = {}
             
-            # Security check: validate code doesn't contain dangerous patterns
+            # Security check 1: AST-based validation (cannot be bypassed
+            # by string concatenation or runtime tricks)
+            ast_error = self._validate_code_ast(code)
+            if ast_error:
+                return {
+                    'result': None,
+                    'stdout': '',
+                    'stderr': f'Security Error: {ast_error}',
+                    'success': False
+                }
+
+            # Security check 2: text-based patterns (defense-in-depth)
             dangerous_patterns = [
                 '__import__', 'import ', 'from ', 'exec', 'eval', 
                 'compile', 'open(', 'file(', 'input(', 'raw_input',
