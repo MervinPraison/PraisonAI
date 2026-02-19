@@ -84,6 +84,27 @@ class TestTelegramApprovalInit:
         assert "1234567890:ABCDEF" not in r
         assert "99" in r
 
+    def test_env_var_chat_id(self, monkeypatch):
+        monkeypatch.setenv("TELEGRAM_CHAT_ID", "env-chat-456")
+        from praisonai.bots._telegram_approval import TelegramApproval
+
+        backend = TelegramApproval(token="t")
+        assert backend._chat_id == "env-chat-456"
+
+    def test_ssl_verify_default_true(self, monkeypatch):
+        monkeypatch.delenv("PRAISONAI_TELEGRAM_SSL_VERIFY", raising=False)
+        from praisonai.bots._telegram_approval import TelegramApproval
+
+        backend = TelegramApproval(token="t", chat_id="1")
+        assert backend._ssl_verify is True
+
+    def test_ssl_verify_env_false(self, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_TELEGRAM_SSL_VERIFY", "false")
+        from praisonai.bots._telegram_approval import TelegramApproval
+
+        backend = TelegramApproval(token="t", chat_id="1")
+        assert backend._ssl_verify is False
+
 
 # ── Message Builder ─────────────────────────────────────────────────────────
 

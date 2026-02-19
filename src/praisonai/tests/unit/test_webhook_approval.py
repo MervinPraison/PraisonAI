@@ -220,6 +220,28 @@ class TestApprovalFlowAsync:
         assert posted_payloads[0]["tool_name"] == "rm_file"
         assert "request_id" in posted_payloads[0]
 
+    def test_non_json_status_does_not_crash(self):
+        """Integer status (e.g. HTTP code) must not crash .lower()."""
+        from praisonai.bots._webhook_approval import WebhookApproval
+
+        backend = WebhookApproval(webhook_url="https://example.com", timeout=5, poll_interval=0.1)
+        poll_count = {"n": 0}
+
+        async def mock_http(method, url, payload=None, **kwargs):
+            if method == "POST":
+                return {"status": "pending"}
+            if method == "GET":
+                poll_count["n"] += 1
+                if poll_count["n"] <= 1:
+                    # Simulate non-JSON response where status is an int
+                    return {"status": 502}
+                return {"approved": True, "reason": "ok"}
+            return {}
+
+        backend._http_request = mock_http
+        decision = asyncio.run(backend.request_approval(self._make_request()))
+        assert decision.approved is True
+
 
 # ── Export / Import ─────────────────────────────────────────────────────────
 

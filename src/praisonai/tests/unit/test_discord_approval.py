@@ -68,6 +68,27 @@ class TestDiscordApprovalInit:
         assert "super-secret-token" not in r
         assert "99" in r
 
+    def test_env_var_channel_id(self, monkeypatch):
+        monkeypatch.setenv("DISCORD_CHANNEL_ID", "env-chan-123")
+        from praisonai.bots._discord_approval import DiscordApproval
+
+        backend = DiscordApproval(token="t")
+        assert backend._channel_id == "env-chan-123"
+
+    def test_ssl_verify_default_true(self, monkeypatch):
+        monkeypatch.delenv("PRAISONAI_DISCORD_SSL_VERIFY", raising=False)
+        from praisonai.bots._discord_approval import DiscordApproval
+
+        backend = DiscordApproval(token="t", channel_id="1")
+        assert backend._ssl_verify is True
+
+    def test_ssl_verify_env_false(self, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_DISCORD_SSL_VERIFY", "false")
+        from praisonai.bots._discord_approval import DiscordApproval
+
+        backend = DiscordApproval(token="t", channel_id="1")
+        assert backend._ssl_verify is False
+
 
 # ── Embed Builder ───────────────────────────────────────────────────────────
 
