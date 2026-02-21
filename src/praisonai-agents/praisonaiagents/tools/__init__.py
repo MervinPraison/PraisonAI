@@ -155,6 +155,13 @@ TOOL_MAPPINGS = {
     'schedule_list': ('.schedule_tools', None),
     'schedule_remove': ('.schedule_tools', None),
     'schedule_tools': ('.schedule_tools', None),
+
+    # Gather.is Tools (agent social network)
+    'gather_feed': ('.gather_tools', None),
+    'gather_agents': ('.gather_tools', None),
+    'gather_post': ('.gather_tools', None),
+    'gather_search': ('.gather_tools', None),
+    'gather_tools': ('.gather_tools', None),
 }
 
 _instances = {}  # Cache for class instances
