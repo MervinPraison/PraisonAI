@@ -9,6 +9,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+
+# Module-level deprecation warning
+import warnings as _deprecation_warnings
+_deprecation_warnings.warn(
+    "BotApprovalBackend is deprecated. Use platform-specific approval backends "
+    "(SlackApproval, TelegramApproval, DiscordApproval, WebhookApproval, HTTPApproval) instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
 import time
 from typing import Any, Dict
 
@@ -77,7 +86,7 @@ class BotApprovalBackend:
             msg = f"🔐 Approval required:\n\nTool: {tool_name}\nArgs: {args_preview}\n\nReply 'yes' to approve or 'no' to deny."
         
         # Create a future to wait for the response
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
         self._pending[request_id] = future
         

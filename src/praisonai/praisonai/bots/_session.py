@@ -145,7 +145,7 @@ class BotSessionManager:
         agent_lock = self._get_agent_lock(agent)
         async with user_lock:
             # Load history (may hit disk via run_in_executor for async safety)
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             user_history = await loop.run_in_executor(
                 None, self._load_history, user_id
             )

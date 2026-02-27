@@ -1343,6 +1343,21 @@ class Agent:
                 self.tools = list(tools)
         else:
             self.tools = tools or []
+        
+        # Inject default tools for autonomy mode (after self.tools is initialized)
+        if self.autonomy_enabled and hasattr(self, '_autonomy_config_obj'):
+            config = self._autonomy_config_obj
+            if config.default_tools is not None:
+                # User provided custom default tools
+                self.tools.extend(config.default_tools)
+            else:
+                # Use ast-grep tools as default (lazy import, graceful fallback)
+                try:
+                    from ..tools.ast_grep_tool import get_ast_grep_tools
+                    self.tools.extend(get_ast_grep_tools())
+                except ImportError:
+                    pass  # ast-grep tools not available, continue without
+        
         self.max_iter = max_iter
         self.max_rpm = max_rpm
         self.max_execution_time = max_execution_time
@@ -1962,6 +1977,7 @@ Summary:"""
             "clear_context": config.clear_context,
             "track_changes": config.effective_track_changes,
             "snapshot_dir": config.snapshot_dir,
+            "default_tools": config.default_tools,
         }
         # Also preserve any extra user-provided keys from dict input
         if isinstance(autonomy, dict):

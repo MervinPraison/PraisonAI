@@ -122,6 +122,8 @@ class AutonomyConfig:
     track_changes: Optional[bool] = None  # None = auto (True for full_auto)
     sandbox: Optional[Any] = None  # SandboxConfig (lazy import to avoid circular)
     snapshot_dir: Optional[str] = None  # Defaults to ~/.praisonai/snapshots
+    # Default tools for autonomy mode (auto-populated with code intelligence tools)
+    default_tools: Optional[List[Any]] = None  # None = auto (uses get_autonomy_default_tools())
     
     def __post_init__(self):
         if self.level not in VALID_AUTONOMY_LEVELS:
@@ -166,6 +168,7 @@ class AutonomyConfig:
             track_changes=data.get("track_changes"),
             sandbox=data.get("sandbox"),
             snapshot_dir=data.get("snapshot_dir"),
+            default_tools=data.get("default_tools"),
         )
 
 

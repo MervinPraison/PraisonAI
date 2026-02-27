@@ -146,6 +146,21 @@ wheels = [
 ]
 
 [[package]]
+name = "ast-grep-cli"
+version = "0.41.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/05/9c/4b5fbc28a606d1d3217891d41c8428518de8a52e8f83564daabbd4d8ba18/ast_grep_cli-0.41.0.tar.gz", hash = "sha256:9aee19fa53d582f4408ace5cffe3ff5635dff954c7ab78a15530c4acf5893a0e", size = 220762, upload-time = "2026-02-22T19:06:01.576Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cb/e2/e7604406b8487d43928a99fcfb66ac3aa9fba787527e901b96e65dbbd6d6/ast_grep_cli-0.41.0-py3-none-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:93085ee153855fa9b1f486884f8aad788fb111f1e6a96bcfde240071d5033199", size = 14488134, upload-time = "2026-02-22T19:05:54.26Z" },
+    { url = "https://files.pythonhosted.org/packages/65/b5/1f9ad69e28e2b98e0e99a4a7f981982937072c2a667f5ae808d8ffefa193/ast_grep_cli-0.41.0-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:8db8e877b365a553f83a2a0e158d8cfa17fc33f8033774ee3248665449dcad1b", size = 7261908, upload-time = "2026-02-22T19:06:02.5Z" },
+    { url = "https://files.pythonhosted.org/packages/f8/8b/ac2e7946e2b566483fb0005ed715767110663fb85a666030b38e43dee10f/ast_grep_cli-0.41.0-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:c10f70cd6e45ded98773022d9ae0bebfc497b8b2e85ae17e15abca174e7d0f93", size = 7106987, upload-time = "2026-02-22T19:05:59.003Z" },
+    { url = "https://files.pythonhosted.org/packages/f8/00/90cc9f094fad9116f29076c1a5393df50fba7d7b25c402d2611d96f7e3f9/ast_grep_cli-0.41.0-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:92d384608e5fd98a301a03a380e0ce011d46adcd5f6bcf53b0b9ba125faa43ad", size = 7417585, upload-time = "2026-02-22T19:06:00.307Z" },
+    { url = "https://files.pythonhosted.org/packages/be/1b/390fd8ab3164e0f9377bd272196612f5047bfed35eb704df1c1e84776075/ast_grep_cli-0.41.0-py3-none-win32.whl", hash = "sha256:a7a4682cde7a1e1a8083dd8feed6f968d8f90a109e7c0917e1d5066807dfa46e", size = 6974015, upload-time = "2026-02-22T19:05:55.956Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/f5/71984cca3d3533c7e0a7dfe1784b7f6b12931463f6c5ce95ec36d5169219/ast_grep_cli-0.41.0-py3-none-win_amd64.whl", hash = "sha256:00570076cbf30e9c4c93f5577137c4d63245974420eff9e1fb3e3c6a9abefe97", size = 7413122, upload-time = "2026-02-22T19:05:57.586Z" },
+    { url = "https://files.pythonhosted.org/packages/c1/ee/2add23700fa89661e84301c458a9a3218836edd5bbaeea49a7a283f4269a/ast_grep_cli-0.41.0-py3-none-win_arm64.whl", hash = "sha256:b8e0eeeec751fa213abc57ea20af4fdd8ae955a43e390914df85985f6933eb53", size = 7089061, upload-time = "2026-02-22T19:05:52.28Z" },
+]
+
+[[package]]
 name = "async-timeout"
 version = "4.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2549,7 +2564,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.5.15"
+version = "1.5.16"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -2588,6 +2603,9 @@ auth = [
     { name = "pyjwt" },
     { name = "python-jose", extra = ["cryptography"] },
     { name = "python-multipart" },
+]
+autonomy = [
+    { name = "ast-grep-cli" },
 ]
 graph = [
     { name = "chromadb" },
@@ -2629,6 +2647,7 @@ telemetry = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.8.0" },
+    { name = "ast-grep-cli", marker = "extra == 'autonomy'", specifier = ">=0.30.0" },
     { name = "chonkie", marker = "extra == 'knowledge'", specifier = ">=1.0.2" },
     { name = "chromadb", marker = "extra == 'graph'", specifier = ">=1.0.0" },
     { name = "chromadb", marker = "extra == 'knowledge'", specifier = ">=1.0.0" },
@@ -2669,7 +2688,7 @@ requires-dist = [
     { name = "uvicorn", marker = "extra == 'os'", specifier = ">=0.34.0" },
     { name = "websockets", marker = "extra == 'mcp'", specifier = ">=12.0" },
 ]
-provides-extras = ["mcp", "memory", "knowledge", "graph", "llm", "api", "os", "telemetry", "mongodb", "auth", "all"]
+provides-extras = ["mcp", "memory", "knowledge", "graph", "llm", "api", "os", "telemetry", "mongodb", "auth", "autonomy", "all"]
 
 [[package]]
 name = "propcache"

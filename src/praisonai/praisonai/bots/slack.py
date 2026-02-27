@@ -29,6 +29,7 @@ from .media import split_media_from_output, is_audio_file
 from ._commands import format_status, format_help
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
+from ._ack import AckReactor
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,10 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
         self._session: BotSessionManager = BotSessionManager()
         self._debouncer: InboundDebouncer = InboundDebouncer(
             debounce_ms=self.config.debounce_ms,
+        )
+        self._ack: AckReactor = AckReactor(
+            ack_emoji=self.config.ack_emoji,
+            done_emoji=self.config.done_emoji,
         )
         
         # Audio capabilities
@@ -194,6 +199,35 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                 should_respond = True
             
             if should_respond and self._agent:
+                channel_id = event.get("channel", "")
+                msg_ts = event.get("ts", "")
+                
+                # Ack reaction - show processing indicator
+                ack_ctx = None
+                if self._ack.enabled and self._client:
+                    async def _slack_react(emoji, **kw):
+                        try:
+                            # Slack uses emoji names without colons
+                            emoji_name = emoji.strip(":")
+                            await self._client.reactions_add(
+                                channel=channel_id,
+                                timestamp=msg_ts,
+                                name=emoji_name,
+                            )
+                        except Exception:
+                            pass  # Reactions may fail silently
+                    async def _slack_unreact(emoji, **kw):
+                        try:
+                            emoji_name = emoji.strip(":")
+                            await self._client.reactions_remove(
+                                channel=channel_id,
+                                timestamp=msg_ts,
+                                name=emoji_name,
+                            )
+                        except Exception:
+                            pass
+                    ack_ctx = await self._ack.ack(react_fn=_slack_react)
+                
                 try:
                     user_id = event.get("user", "unknown")
                     logger.info(f"Message received: {text[:100]}...")
@@ -201,7 +235,6 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                     response = await self._session.chat(self._agent, user_id, text)
                     logger.info(f"Response sent: {response[:100]}...")
                     
-                    channel_id = event.get("channel", "")
                     send_result = self.fire_message_sending(channel_id, str(response))
                     if send_result["cancel"]:
                         return
@@ -219,6 +252,10 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                         channel_id, say, response, thread_ts=thread_ts
                     )
                     self.fire_message_sent(channel_id, response)
+                    
+                    # Done reaction - show completion
+                    if ack_ctx and self._client:
+                        await self._ack.done(ack_ctx, react_fn=_slack_react, unreact_fn=_slack_unreact)
                 except Exception as e:
                     logger.error(f"Agent error: {e}")
                     error_msg = str(e)

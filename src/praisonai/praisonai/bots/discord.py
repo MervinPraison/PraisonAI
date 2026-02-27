@@ -27,6 +27,7 @@ from praisonaiagents.bots import (
 from ._commands import format_status, format_help
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
+from ._ack import AckReactor
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,10 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
         self._session: BotSessionManager = BotSessionManager()
         self._debouncer: InboundDebouncer = InboundDebouncer(
             debounce_ms=self.config.debounce_ms,
+        )
+        self._ack: AckReactor = AckReactor(
+            ack_emoji=self.config.ack_emoji,
+            done_emoji=self.config.done_emoji,
         )
     
     @property
@@ -186,6 +191,22 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                 
                 if self._agent:
                     user_id = str(message.author.id)
+                    
+                    # Ack reaction - show processing indicator
+                    ack_ctx = None
+                    if self._ack.enabled:
+                        async def _discord_react(emoji, **kw):
+                            try:
+                                await message.add_reaction(emoji)
+                            except Exception:
+                                pass  # Reactions may not be supported
+                        async def _discord_unreact(emoji, **kw):
+                            try:
+                                await message.remove_reaction(emoji, self._client.user)
+                            except Exception:
+                                pass
+                        ack_ctx = await self._ack.ack(react_fn=_discord_react)
+                    
                     async def _send_agent_response():
                         text_to_send = await self._debouncer.debounce(user_id, bot_message.text)
                         response = await self._session.chat(self._agent, user_id, text_to_send)
@@ -196,6 +217,9 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                             return
                         await self._send_long_message(message.channel, send_result["content"], reference=message)
                         self.fire_message_sent(str(message.channel.id), send_result["content"])
+                        # Done reaction - show completion
+                        if ack_ctx:
+                            await self._ack.done(ack_ctx, react_fn=_discord_react, unreact_fn=_discord_unreact)
 
                     if self.config.typing_indicator:
                         async with message.channel.typing():

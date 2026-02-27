@@ -45,6 +45,8 @@ from praisonaiagents.bots import (
 
 from ._commands import format_status, format_help
 from ._session import BotSessionManager
+from ._rate_limit import RateLimiter
+from ._ack import AckReactor
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +131,13 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
         self._message_handlers: List[Callable] = []
         self._runner: Any = None
         self._site: Any = None
+        self._http_session: Any = None  # Shared aiohttp session for connection pooling
+        self._background_tasks: set = set()  # Track background tasks to prevent silent failures
+        self._rate_limiter = RateLimiter.for_platform("whatsapp")  # Rate limiting for API calls
+        self._ack: AckReactor = AckReactor(
+            ack_emoji=self.config.ack_emoji,
+            done_emoji=self.config.done_emoji,
+        )
 
         # Web mode adapter (lazy initialized)
         self._web_adapter: Any = None
@@ -216,6 +225,7 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
     async def _start_cloud_mode(self) -> None:
         """Start the Cloud API webhook server."""
         try:
+            import aiohttp
             from aiohttp import web
         except ImportError:
             raise ImportError("aiohttp is required for WhatsApp bot. Install with: pip install aiohttp")
@@ -231,6 +241,7 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
 
         self._is_running = True
         self._started_at = time.time()
+        self._http_session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30))
         self._bot_user = BotUser(
             user_id=self._phone_number_id,
             username="whatsapp_bot",
@@ -257,6 +268,7 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
 
         ⚠️ EXPERIMENTAL: Uses reverse-engineered protocol.
         """
+        import aiohttp
         from ._whatsapp_web_adapter import WhatsAppWebAdapter
 
         async def _on_web_message(event: Any) -> None:
@@ -447,6 +459,7 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
 
         self._is_running = True
         self._started_at = time.time()
+        self._http_session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30))
         self._bot_user = BotUser(
             user_id="web_user",
             username="whatsapp_web_bot",
@@ -507,6 +520,15 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
                 await self._web_adapter.disconnect()
             except Exception as e:
                 logger.warning(f"Web adapter disconnect error: {e}")
+        # Cancel pending background tasks
+        for task in self._background_tasks:
+            task.cancel()
+        if self._background_tasks:
+            await asyncio.gather(*self._background_tasks, return_exceptions=True)
+        self._background_tasks.clear()
+        if self._http_session:
+            await self._http_session.close()
+            self._http_session = None
         logger.info("WhatsApp bot stopped")
 
     # ── Webhook handlers ────────────────────────────────────────────
@@ -561,7 +583,10 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
             return web.Response(status=400, text="Bad request")
 
         # Process asynchronously so we respond 200 immediately
-        asyncio.create_task(self._process_webhook_data(data))
+        # Track task to prevent silent failures
+        task = asyncio.create_task(self._process_webhook_data(data))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
         # Always respond 200 to acknowledge receipt
         return web.Response(status=200, text="OK")
@@ -681,6 +706,22 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
 
         # Route to agent
         if self._agent and content:
+            # Ack reaction - show processing indicator
+            ack_ctx = None
+            if self._ack.enabled:
+                async def _wa_react(emoji, **kw):
+                    try:
+                        await self.send_reaction(sender_id, msg_id, emoji)
+                    except Exception:
+                        pass
+                async def _wa_unreact(emoji, **kw):
+                    try:
+                        # WhatsApp doesn't have unreact, send empty reaction to clear
+                        await self.send_reaction(sender_id, msg_id, "")
+                    except Exception:
+                        pass
+                ack_ctx = await self._ack.ack(react_fn=_wa_react)
+            
             try:
                 response = await self._session_mgr.chat(
                     self._agent, sender_id, content
@@ -690,6 +731,9 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
                     if not send_result["cancel"]:
                         await self.send_message(sender_id, send_result["content"])
                         self.fire_message_sent(sender_id, send_result["content"])
+                        # Done reaction - show completion
+                        if ack_ctx:
+                            await self._ack.done(ack_ctx, react_fn=_wa_react, unreact_fn=_wa_unreact)
             except Exception as e:
                 logger.error(f"Agent chat error: {e}")
                 await self.send_message(sender_id, "Sorry, I encountered an error processing your message.")
@@ -733,9 +777,11 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
             if reply_to:
                 payload["context"] = {"message_id": reply_to}
 
+            # Rate limit before sending
+            await self._rate_limiter.acquire(to)
+
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                async with self._http_session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                         result = await resp.json()
                         if "error" in result:
                             logger.error(f"WhatsApp send error: {result['error']}")
@@ -783,9 +829,11 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
         if components:
             payload["template"]["components"] = components
 
+        # Rate limit before sending
+        await self._rate_limiter.acquire(to)
+
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            async with self._http_session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                     result = await resp.json()
                     if "error" in result:
                         logger.error(f"WhatsApp template error: {result['error']}")
@@ -820,8 +868,7 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
         }
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            async with self._http_session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                     await resp.json()
         except Exception as e:
             logger.error(f"Failed to send reaction: {e}")
@@ -845,8 +892,7 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
         }
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            async with self._http_session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                     await resp.json()
         except Exception as e:
             logger.error(f"Failed to mark as read: {e}")
@@ -883,8 +929,7 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
             import aiohttp
             url = f"{GRAPH_API_BASE}/{self._phone_number_id}"
             headers = {"Authorization": f"Bearer {self._token}"}
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            async with self._http_session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                     elapsed = (time.time() - started) * 1000
                     if resp.status == 200:
                         data = await resp.json()
@@ -904,7 +949,7 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
         from praisonaiagents.bots import HealthResult
         probe_result = await self.probe()
         uptime = (time.time() - self._started_at) if self._started_at else None
-        session_count = len(self._session._histories) if hasattr(self._session, '_histories') else 0
+        session_count = len(self._session_mgr._histories) if hasattr(self._session_mgr, '_histories') else 0
         return HealthResult(
             ok=self._is_running and probe_result.ok, platform="whatsapp",
             is_running=self._is_running, uptime_seconds=uptime,
