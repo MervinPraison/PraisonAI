@@ -167,8 +167,32 @@ TOOL_MAPPINGS = {
 
 _instances = {}  # Cache for class instances
 
+# Profile exports (lazy loaded)
+_PROFILE_EXPORTS = frozenset({
+    'ToolProfile', 'AUTONOMY_PROFILE', 'BUILTIN_PROFILES',
+    'register_profile', 'get_profile', 'resolve_profiles', 'list_profiles'
+})
+
 def __getattr__(name: str) -> Any:
-    """Smart lazy loading of tools with class method support."""
+    """Smart lazy loading of tools and profiles."""
+    # Handle profile imports first
+    if name in _PROFILE_EXPORTS:
+        from .profiles import (
+            ToolProfile, AUTONOMY_PROFILE, BUILTIN_PROFILES,
+            register_profile, get_profile, resolve_profiles, list_profiles
+        )
+        _profile_map = {
+            'ToolProfile': ToolProfile,
+            'AUTONOMY_PROFILE': AUTONOMY_PROFILE,
+            'BUILTIN_PROFILES': BUILTIN_PROFILES,
+            'register_profile': register_profile,
+            'get_profile': get_profile,
+            'resolve_profiles': resolve_profiles,
+            'list_profiles': list_profiles,
+        }
+        return _profile_map[name]
+    
+    # Handle tool mappings
     if name not in TOOL_MAPPINGS:
         raise AttributeError(f"module '{__package__}' has no attribute '{name}'")
     
@@ -223,4 +247,7 @@ __all__ = list(TOOL_MAPPINGS.keys()) + [
     # Validation and retry protocols
     'ValidationResult', 'ToolValidatorProtocol', 'AsyncToolValidatorProtocol', 'PassthroughValidator',
     'RetryPolicy', 'FallbackChain', 'ToolExecutionConfig',
+    # Tool profiles (DRY tool sets for autonomy/interactive modes)
+    'ToolProfile', 'AUTONOMY_PROFILE', 'BUILTIN_PROFILES',
+    'register_profile', 'get_profile', 'resolve_profiles', 'list_profiles',
 ]

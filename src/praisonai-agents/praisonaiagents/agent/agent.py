@@ -438,6 +438,7 @@ class Agent:
         hooks: Optional[Union[List[Any], Any]] = None,  # Union[list, HooksConfig]
         skills: Optional[Union[List[str], Any]] = None,  # Union[list, SkillsConfig]
         approval: Optional[Union[bool, Any]] = None,  # Union[bool, ApprovalProtocol backend]
+        tool_timeout: Optional[int] = None,  # P8/G11: Timeout in seconds for each tool call
     ):
         """Initialize an Agent instance.
 
@@ -1345,18 +1346,34 @@ class Agent:
             self.tools = tools or []
         
         # Inject default tools for autonomy mode (after self.tools is initialized)
+        # ONLY inject if caller didn't provide tools - avoid duplicates with CLI/wrapper tools
         if self.autonomy_enabled and hasattr(self, '_autonomy_config_obj'):
             config = self._autonomy_config_obj
             if config.default_tools is not None:
-                # User provided custom default tools
+                # User provided custom default tools via AutonomyConfig
                 self.tools.extend(config.default_tools)
-            else:
-                # Use ast-grep tools as default (lazy import, graceful fallback)
+            elif not self.tools:
+                # Only inject AUTONOMY_PROFILE if no tools were provided by caller
+                # This prevents duplicates when CLI/wrapper already provides tools
                 try:
-                    from ..tools.ast_grep_tool import get_ast_grep_tools
-                    self.tools.extend(get_ast_grep_tools())
+                    from ..tools.profiles import AUTONOMY_PROFILE
+                    from .. import tools as tools_module
+                    resolved_tools = []
+                    for tool_name in AUTONOMY_PROFILE.tools:
+                        try:
+                            tool = getattr(tools_module, tool_name)
+                            if tool is not None:
+                                resolved_tools.append(tool)
+                        except AttributeError:
+                            pass  # Tool not available, skip
+                    self.tools.extend(resolved_tools)
                 except ImportError:
-                    pass  # ast-grep tools not available, continue without
+                    # Fallback to ast-grep tools if profiles not available
+                    try:
+                        from ..tools.ast_grep_tool import get_ast_grep_tools
+                        self.tools.extend(get_ast_grep_tools())
+                    except ImportError:
+                        pass  # No default tools available
         
         self.max_iter = max_iter
         self.max_rpm = max_rpm
@@ -1477,6 +1494,9 @@ Your Goal: {self.goal}
             self._approval_backend = AutoApproveBackend()
         # Pending approvals for async (non-blocking) mode
         self._pending_approvals = {}
+        
+        # P8/G11: Tool timeout - prevent slow tools from blocking
+        self._tool_timeout = tool_timeout
         
         # Cache for system prompts and formatted tools with lazy thread-safe lock
         self._system_prompt_cache = {}
@@ -2286,13 +2306,16 @@ Summary:"""
             )
         
         # Take initial snapshot before autonomous execution starts
-        if self._file_snapshot is not None:
+        # NOTE: Snapshot tracking is disabled by default for performance (G12 fix)
+        # FileSnapshot.track() walks entire project and is too slow for large codebases
+        # Enable with autonomy={"snapshot": True} if needed
+        if self._file_snapshot is not None and self.autonomy_config.get("snapshot", False):
             try:
                 snap_info = self._file_snapshot.track(message="pre-autonomous")
                 self._snapshot_stack.append(snap_info.commit_hash)
                 self._redo_stack.clear()
             except Exception as e:
-                logger.debug(f"Pre-autonomous snapshot failed: {e}")
+                logging.debug(f"Pre-autonomous snapshot failed: {e}")
         
         start_time = time_module.time()
         started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -2319,10 +2342,20 @@ Summary:"""
         # Reset doom loop tracker for new task
         self._reset_doom_loop()
         
+        # P3/G2: Import callback helper for autonomy events
+        from ..main import execute_sync_callback
+        
         try:
             # Execute the autonomous loop
             while iterations < effective_max_iter:
                 iterations += 1
+                
+                # P3/G2: Emit autonomy_iteration callback for CLI visibility
+                execute_sync_callback('autonomy_iteration',
+                    iteration=iterations,
+                    max_iterations=effective_max_iter,
+                    stage=stage
+                )
                 
                 # Check timeout
                 if timeout_seconds and (time_module.time() - start_time) > timeout_seconds:
@@ -2340,6 +2373,13 @@ Summary:"""
                 # Check doom loop with graduated recovery (G-RECOVERY-2 fix)
                 if self._is_doom_loop():
                     recovery = self._get_doom_recovery()
+                    
+                    # P3/G2: Emit doom loop callback for CLI visibility
+                    execute_sync_callback('autonomy_doom_loop',
+                        iteration=iterations,
+                        recovery_action=recovery
+                    )
+                    
                     obs = getattr(self, '_observability_hooks', None)
                     if obs is not None:
                         from ..escalation.observability import EventType as _EvtType
@@ -2350,6 +2390,12 @@ Summary:"""
                         })
                     if recovery == "retry_different":
                         prompt = prompt + "\n\n[System: Previous approach repeated. Try a completely different strategy.]"
+                        if self._doom_loop_tracker is not None:
+                            self._doom_loop_tracker.clear_actions()
+                        continue
+                    elif recovery == "escalate_model":
+                        # Give the agent one more try with explicit error guidance
+                        prompt = prompt + "\n\n[System: You are stuck in a loop. CRITICAL: Check that all tool argument names exactly match the function signature. Do NOT add '=' to argument names. Use only the documented parameter names.]"
                         if self._doom_loop_tracker is not None:
                             self._doom_loop_tracker.clear_actions()
                         continue
@@ -2396,8 +2442,13 @@ Summary:"""
                 response_str = str(response)
                 
                 # Record the action for doom loop tracking (G1 fix: was missing)
+                # Use iteration number + response hash to avoid false positives
+                # when same prompt is re-injected (G8 fix: doom loop false positive)
                 self._record_action(
-                    "chat", {"prompt": prompt}, response_str[:200], True
+                    "chat", 
+                    {"iteration": iterations, "response_hash": hash(response_str[:500])}, 
+                    response_str[:200], 
+                    True
                 )
                 
                 # Record for action history
@@ -2433,14 +2484,28 @@ Summary:"""
                     stage_order = ["direct", "heuristic", "planned", "autonomous"]
                     idx = stage_order.index(stage) if stage in stage_order else 0
                     if idx < len(stage_order) - 1:
+                        prev_stage = stage
                         stage = stage_order[idx + 1]
+                        
+                        # P3/G2: Emit stage change callback for CLI visibility
+                        execute_sync_callback('autonomy_stage_change',
+                            from_stage=prev_stage,
+                            to_stage=stage
+                        )
+                        
                         if obs is not None:
-                            obs.emit(_EvtType.STAGE_ESCALATE, {"from": stage_order[idx], "to": stage})
+                            obs.emit(_EvtType.STAGE_ESCALATE, {"from": prev_stage, "to": stage})
                 
                 # Check for completion promise FIRST (structured signal)
                 if effective_promise:
                     promise_tag = f"<promise>{effective_promise}</promise>"
                     if promise_tag in response_str:
+                        # P3/G2: Emit completion callback
+                        execute_sync_callback('autonomy_complete',
+                            completion_reason="promise",
+                            iterations=iterations,
+                            duration_seconds=time_module.time() - start_time
+                        )
                         return AutonomyResult(
                             success=True,
                             output=response_str,
@@ -2454,6 +2519,12 @@ Summary:"""
                 
                 # Check for keyword-based completion signals (word-boundary, G-COMPLETION-1 fix)
                 if self._is_completion_signal(response_str):
+                    # P3/G2: Emit completion callback
+                    execute_sync_callback('autonomy_complete',
+                        completion_reason="goal",
+                        iterations=iterations,
+                        duration_seconds=time_module.time() - start_time
+                    )
                     return AutonomyResult(
                         success=True,
                         output=response_str,
@@ -2467,6 +2538,12 @@ Summary:"""
                 
                 # For DIRECT stage, complete after first response
                 if stage == "direct":
+                    # P3/G2: Emit completion callback
+                    execute_sync_callback('autonomy_complete',
+                        completion_reason="goal",
+                        iterations=iterations,
+                        duration_seconds=time_module.time() - start_time
+                    )
                     return AutonomyResult(
                         success=True,
                         output=response_str,
@@ -2483,6 +2560,12 @@ Summary:"""
                     self.clear_history()
             
             # Max iterations reached
+            # P3/G2: Emit completion callback for max iterations
+            execute_sync_callback('autonomy_complete',
+                completion_reason="max_iterations",
+                iterations=iterations,
+                duration_seconds=time_module.time() - start_time
+            )
             return AutonomyResult(
                 success=False,
                 output="Max iterations reached",
@@ -2636,6 +2719,11 @@ Summary:"""
                         if self._doom_loop_tracker is not None:
                             self._doom_loop_tracker.clear_actions()
                         continue
+                    elif recovery == "escalate_model":
+                        prompt = prompt + "\n\n[System: You are stuck in a loop. CRITICAL: Check that all tool argument names exactly match the function signature. Do NOT add '=' to argument names. Use only the documented parameter names.]"
+                        if self._doom_loop_tracker is not None:
+                            self._doom_loop_tracker.clear_actions()
+                        continue
                     elif recovery == "request_help":
                         return AutonomyResult(
                             success=False,
@@ -2679,8 +2767,13 @@ Summary:"""
                 response_str = str(response)
                 
                 # Record the action for doom loop tracking (G2 fix: was missing)
+                # Use iteration number + response hash to avoid false positives
+                # when same prompt is re-injected (G8 fix: doom loop false positive)
                 self._record_action(
-                    "chat", {"prompt": prompt}, response_str[:200], True
+                    "chat", 
+                    {"iteration": iterations, "response_hash": hash(response_str[:500])}, 
+                    response_str[:200], 
+                    True
                 )
                 
                 # Record for action history
@@ -4290,7 +4383,25 @@ Your Goal: {self.goal}"""
         
         try:
             sig = inspect.signature(func)
+            valid_params = set(sig.parameters.keys()) - {'self'}
             casted_args = {}
+            
+            # Sanitize argument names: strip trailing '=', whitespace, and
+            # other invalid chars that LLMs sometimes hallucinate in kwarg names
+            sanitized = {}
+            for raw_name, arg_value in arguments.items():
+                clean = raw_name.strip().rstrip('=').strip()
+                # If the cleaned name matches a valid param, use it;
+                # otherwise try case-insensitive match
+                if clean in valid_params:
+                    sanitized[clean] = arg_value
+                elif clean.lower() in {p.lower() for p in valid_params}:
+                    # Case-insensitive fuzzy match
+                    matched = next(p for p in valid_params if p.lower() == clean.lower())
+                    sanitized[matched] = arg_value
+                else:
+                    sanitized[clean] = arg_value
+            arguments = sanitized
             
             for param_name, arg_value in arguments.items():
                 if param_name in sig.parameters:
@@ -4378,7 +4489,19 @@ Your Goal: {self.goal}"""
                     arguments.update(res.output.modified_data)
 
             with with_injection_context(state):
-                result = self._execute_tool_impl(function_name, arguments)
+                # P8/G11: Apply tool timeout if configured
+                tool_timeout = getattr(self, '_tool_timeout', None)
+                if tool_timeout and tool_timeout > 0:
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(self._execute_tool_impl, function_name, arguments)
+                        try:
+                            result = future.result(timeout=tool_timeout)
+                        except concurrent.futures.TimeoutError:
+                            logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
+                            result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True}
+                else:
+                    result = self._execute_tool_impl(function_name, arguments)
             
             # Apply tool output truncation to prevent context overflow
             # Uses context manager budget if enabled, otherwise applies default limit
@@ -4430,6 +4553,13 @@ Your Goal: {self.goal}"""
                 execution_time_ms=(_time.time() - _tool_start_time) * 1000
             )
             self._hook_runner.execute_sync(HookEvent.AFTER_TOOL, after_tool_input, target=function_name)
+            
+            # G10 fix: Mark progress after successful tool execution
+            # This prevents false doom loop detection when tools succeed
+            if self._doom_loop_tracker is not None and result is not None:
+                is_error = isinstance(result, dict) and result.get('error')
+                if not is_error:
+                    self._doom_loop_tracker.mark_progress(f"tool:{function_name}")
             
             return result
         except Exception as e:

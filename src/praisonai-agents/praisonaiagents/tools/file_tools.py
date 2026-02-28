@@ -93,6 +93,12 @@ class FileTools:
             safe_path = FileTools._validate_path(filepath)
             # Create directory if it doesn't exist
             os.makedirs(os.path.dirname(safe_path), exist_ok=True)
+            # Auto-coerce non-string content (LLMs sometimes pass dicts/lists)
+            if not isinstance(content, str):
+                if isinstance(content, (dict, list)):
+                    content = json.dumps(content, indent=2, ensure_ascii=False)
+                else:
+                    content = str(content)
             with open(safe_path, 'w', encoding=encoding) as f:
                 f.write(content)
             return True

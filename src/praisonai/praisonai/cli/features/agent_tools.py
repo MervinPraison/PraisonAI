@@ -293,11 +293,18 @@ def create_agent_centric_tools(
             JSON string with list of symbols and their locations
         """
         async def _list():
-            result = await router.handle_query(
-                f"list all functions and classes in {file_path}",
-                file_path=file_path
-            )
-            return json.dumps(result.to_dict())
+            # Add 10s timeout to prevent LSP from blocking autonomy
+            try:
+                result = await asyncio.wait_for(
+                    router.handle_query(
+                        f"list all functions and classes in {file_path}",
+                        file_path=file_path
+                    ),
+                    timeout=10.0
+                )
+                return json.dumps(result.to_dict())
+            except asyncio.TimeoutError:
+                return json.dumps({"error": "LSP list_symbols timed out (10s)", "success": False})
         
         return run_async(_list())
     
@@ -317,8 +324,15 @@ def create_agent_centric_tools(
             if file_path:
                 query += f" in {file_path}"
             
-            result = await router.handle_query(query, file_path=file_path)
-            return json.dumps(result.to_dict())
+            # Add 10s timeout to prevent LSP from blocking autonomy
+            try:
+                result = await asyncio.wait_for(
+                    router.handle_query(query, file_path=file_path),
+                    timeout=10.0
+                )
+                return json.dumps(result.to_dict())
+            except asyncio.TimeoutError:
+                return json.dumps({"error": "LSP find_definition timed out (10s)", "success": False})
         
         return run_async(_find())
     
@@ -338,8 +352,15 @@ def create_agent_centric_tools(
             if file_path:
                 query += f" in {file_path}"
             
-            result = await router.handle_query(query, file_path=file_path)
-            return json.dumps(result.to_dict())
+            # Add 10s timeout to prevent LSP from blocking autonomy
+            try:
+                result = await asyncio.wait_for(
+                    router.handle_query(query, file_path=file_path),
+                    timeout=10.0
+                )
+                return json.dumps(result.to_dict())
+            except asyncio.TimeoutError:
+                return json.dumps({"error": "LSP find_references timed out (10s)", "success": False})
         
         return run_async(_find())
     
@@ -358,8 +379,15 @@ def create_agent_centric_tools(
             if file_path:
                 query += f" in {file_path}"
             
-            result = await router.handle_query(query, file_path=file_path)
-            return json.dumps(result.to_dict())
+            # Add 10s timeout to prevent LSP from blocking autonomy
+            try:
+                result = await asyncio.wait_for(
+                    router.handle_query(query, file_path=file_path),
+                    timeout=10.0
+                )
+                return json.dumps(result.to_dict())
+            except asyncio.TimeoutError:
+                return json.dumps({"error": "LSP diagnostics timed out (10s)", "success": False})
         
         return run_async(_get())
     

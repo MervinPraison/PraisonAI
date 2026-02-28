@@ -260,8 +260,15 @@ class PraisonAI:
         try:
             # Check if stdin is not a terminal (i.e., has piped input)
             if not sys.stdin.isatty():
-                stdin_content = sys.stdin.read().strip()
-                return stdin_content if stdin_content else None
+                import select
+                # Non-blocking check: only read if data is actually available.
+                # Without this, sys.stdin.read() blocks forever in non-TTY
+                # environments (subprocesses, CI/CD, IDE terminals, Docker)
+                # where stdin is a pipe with no EOF.
+                if select.select([sys.stdin], [], [], 0.0)[0]:
+                    stdin_content = sys.stdin.read().strip()
+                    return stdin_content if stdin_content else None
+                return None
         except Exception:
             # If there's any error reading stdin, ignore it
             pass
@@ -938,8 +945,22 @@ class PraisonAI:
         # Direct prompt flag - alternative to positional command
         parser.add_argument("-p", "--prompt", type=str, dest="prompt_flag", help="Direct prompt to execute (alternative to positional argument)")
         
-        # Autonomy Mode - control AI action approval
-        parser.add_argument("--autonomy", type=str, choices=["suggest", "auto_edit", "full_auto"], help="Set autonomy mode for AI actions")
+        # Autonomy Mode - full_auto by default for multi-turn autonomous execution
+        # ACP tools disabled by default for speed; use --acp to enable
+        parser.add_argument("--autonomy", type=str, choices=["suggest", "auto_edit", "full_auto", "disable"], 
+                          default=None, help="Set autonomy mode. Only use for multi-turn tasks that need iterative execution.")
+        parser.add_argument("--acp", action="store_true", 
+                          help="Enable ACP tools in autonomy mode (slower but more powerful file operations)")
+        parser.add_argument("--lsp", action="store_true", 
+                          help="Enable LSP tools in autonomy mode (slower but provides code intelligence)")
+        
+        # P3/G5: Display mode - control output verbosity
+        parser.add_argument("--display", type=str, choices=["minimal", "status", "verbose", "debug"],
+                          default="status", help="Display mode: minimal (result only), status (tool calls), verbose (args/results), debug (all)")
+        
+        # P8/G11: Tool timeout - prevent slow tools from blocking
+        parser.add_argument("--tool-timeout", type=int, default=60,
+                          help="Timeout in seconds for each tool call (default: 60)")
         
         # Tool Approval - control tool execution approval
         parser.add_argument("--trust", action="store_true", help="Auto-approve all tool executions (skip approval prompts)")
@@ -3861,6 +3882,12 @@ Provide ONLY the commit message, no explanations."""
                 "backstory": "You are a helpful AI assistant"
             }
             
+            # Autonomy Mode - full_auto by default for multi-turn autonomous execution
+            # ACP tools disabled by default for speed (~3s vs 174s+); use --acp to enable
+            autonomy_mode = getattr(self.args, 'autonomy', None) if hasattr(self, 'args') else None
+            if autonomy_mode and autonomy_mode not in ('disable', None):
+                agent_config["autonomy"] = {"level": autonomy_mode, "enabled": True}
+            
             # Set output mode based on --verbose flag
             # Uses consolidated 'output' param instead of deprecated 'verbose'
             if hasattr(self, 'args') and getattr(self.args, 'verbose', False):
@@ -3869,7 +3896,28 @@ Provide ONLY the commit message, no explanations."""
                 agent_config["output"] = "minimal"
             
             # Load default tools (same as interactive mode) unless --no-tools is set
+            # CRITICAL: For autonomy mode, disable slow ACP and LSP tools by default
+            # ACP tools go through complex orchestration (174s+ delays)
+            # LSP tools require starting language server (176s+ delays)
+            # Use --acp or --lsp flags to explicitly enable them.
             if not getattr(self.args, 'no_tools', False):
+                # Check if autonomy mode is enabled - disable ACP/LSP by default for speed
+                is_autonomy = autonomy_mode and autonomy_mode not in ('disable', None)
+                use_acp = getattr(self.args, 'acp', False)  # Explicit --acp flag
+                use_lsp = getattr(self.args, 'lsp', False)  # Explicit --lsp flag
+                
+                if is_autonomy:
+                    if not use_acp:
+                        # Force disable ACP for autonomy mode (use basic tools only)
+                        # This makes full_auto fast (~3s vs 174s+)
+                        self.args.no_acp = True
+                        logging.debug("Autonomy mode: ACP tools disabled for speed (use --acp to enable)")
+                    if not use_lsp:
+                        # Force disable LSP for autonomy mode
+                        # LSP requires starting language server (176s+ delays)
+                        self.args.no_lsp = True
+                        logging.debug("Autonomy mode: LSP tools disabled for speed (use --lsp to enable)")
+                
                 default_tools = self._load_interactive_tools()
                 if default_tools:
                     agent_config["tools"] = default_tools
@@ -3933,6 +3981,11 @@ Provide ONLY the commit message, no explanations."""
                     
                     if getattr(self.args, 'planning_reasoning', False):
                         agent_config["planning_reasoning"] = True
+                
+                # P8/G11: Tool timeout - prevent slow tools from blocking
+                tool_timeout = getattr(self.args, 'tool_timeout', 60)
+                if tool_timeout and tool_timeout > 0:
+                    agent_config["tool_timeout"] = tool_timeout
                 
                 # Memory
                 if getattr(self.args, 'memory', False):
@@ -4461,31 +4514,115 @@ Now, {final_instruction.lower()}:"""
             'start_time': time.time(),
             'available_tools': tool_names,
             'approval_pending': False,  # Flag to pause Live display during approval
-            'live_instance': None  # Reference to Live instance for stopping
+            'live_instance': None,  # Reference to Live instance for stopping
+            'last_result': None,  # Last tool result (for verbose/debug mode)
+            # P4: Pausable timer - track time spent waiting for user approval
+            'paused_time': 0.0,  # Total time spent waiting for approval
+            'pause_start': None,  # When current pause started
         }
         
-        def tool_call_callback(message):
-            """Callback triggered when a tool is called."""
-            # Extract tool name from message
-            if "Calling function:" in message:
-                # Format: "Calling function: function_name"
+        # P7/G3: Get display mode for tool args/results visibility
+        display_mode = getattr(self.args, 'display', 'status')
+        
+        def tool_call_callback(message=None, tool_name=None, tool_input=None, tool_output=None, **kwargs):
+            """Callback for tool call notifications with structured data support.
+            
+            P1/G3: Now accepts structured kwargs (tool_name, tool_input, tool_output)
+            in addition to legacy message parsing.
+            """
+            # P1/G3: Handle structured tool call (preferred)
+            if tool_name:
+                # Extract first arg value for preview (like Codex/Gemini)
+                arg_preview = ""
+                if tool_input and isinstance(tool_input, dict):
+                    first_val = next(iter(tool_input.values()), None)
+                    if isinstance(first_val, str):
+                        arg_preview = first_val[:60] + ("…" if len(first_val) > 60 else "")
+                
+                # Check if this is a new tool call (no output yet) or completion (has output)
+                if tool_output is None:
+                    # Tool starting - add to list with metadata
+                    entry = {
+                        "name": tool_name,
+                        "args": arg_preview,
+                        "status": "running",
+                        "start": time.time()
+                    }
+                    # Avoid duplicates
+                    existing_names = [tc.get("name") if isinstance(tc, dict) else tc for tc in status_info['tool_calls']]
+                    if tool_name not in existing_names:
+                        status_info['tool_calls'].append(entry)
+                    status_info['status'] = f"Using {tool_name}..."
+                else:
+                    # Tool completed - update status
+                    for tc in status_info['tool_calls']:
+                        if isinstance(tc, dict) and tc.get("name") == tool_name:
+                            tc["status"] = "ok"
+                            tc["duration"] = time.time() - tc.get("start", time.time())
+                            if display_mode in ('verbose', 'debug'):
+                                tc["result"] = str(tool_output)[:100]
+                            break
+                    status_info['status'] = "Processing result..."
+                return
+            
+            # Legacy fallback: parse message string
+            if message and "Calling function:" in message:
                 parts = message.split("Calling function:")
                 if len(parts) > 1:
-                    tool_name = parts[1].strip()
-                    if tool_name and tool_name not in status_info['tool_calls']:
-                        status_info['tool_calls'].append(tool_name)
-                        status_info['status'] = f"Using {tool_name}..."
-            elif "Function " in message and " returned:" in message:
-                # Format: "Function function_name returned: ..."
-                # Tool execution completed, update status
+                    name = parts[1].strip()
+                    if name:
+                        existing_names = [tc.get("name") if isinstance(tc, dict) else tc for tc in status_info['tool_calls']]
+                        if name not in existing_names:
+                            status_info['tool_calls'].append({"name": name, "args": "", "status": "running", "start": time.time()})
+                        status_info['status'] = f"Using {name}..."
+            elif message and "Function " in message and " returned:" in message:
                 status_info['status'] = "Processing result..."
         
         # Register callback for tool calls (use local variable)
         _register_display_callback('tool_call', tool_call_callback)
         
+        # P3/G2: Register autonomy callbacks for iteration/stage/completion visibility
+        def autonomy_iteration_callback(iteration=None, max_iterations=None, stage=None, **kwargs):
+            """Callback for autonomy iteration updates."""
+            if iteration is not None:
+                status_info['autonomy_iteration'] = iteration
+                status_info['autonomy_max_iterations'] = max_iterations
+                status_info['autonomy_stage'] = stage
+                status_info['status'] = f"Iteration {iteration}/{max_iterations} ({stage})"
+        
+        def autonomy_stage_change_callback(from_stage=None, to_stage=None, **kwargs):
+            """Callback for autonomy stage escalation."""
+            if to_stage:
+                status_info['autonomy_stage'] = to_stage
+                status_info['status'] = f"Escalated to {to_stage} stage"
+        
+        def autonomy_doom_loop_callback(iteration=None, recovery_action=None, **kwargs):
+            """Callback for doom loop detection."""
+            status_info['status'] = f"⚠️ Doom loop detected, {recovery_action}"
+        
+        def autonomy_complete_callback(completion_reason=None, iterations=None, duration_seconds=None, **kwargs):
+            """Callback for autonomy completion."""
+            status_info['autonomy_complete_reason'] = completion_reason
+            status_info['autonomy_total_iterations'] = iterations
+        
+        _register_display_callback('autonomy_iteration', autonomy_iteration_callback)
+        _register_display_callback('autonomy_stage_change', autonomy_stage_change_callback)
+        _register_display_callback('autonomy_doom_loop', autonomy_doom_loop_callback)
+        _register_display_callback('autonomy_complete', autonomy_complete_callback)
+        
+        # P5: Register retry callback for rate limit visibility
+        def retry_callback(attempt=None, max_attempts=None, error=None, retry_in_seconds=None, **kwargs):
+            """Callback for retry events (rate limiting)."""
+            if attempt is not None:
+                status_info['status'] = f"⏳ Rate limited, retrying in {retry_in_seconds:.0f}s ({attempt}/{max_attempts})"
+        
+        _register_display_callback('retry', retry_callback)
+        
         def build_status_display():
             """Build the status display text."""
-            elapsed = time.time() - status_info['start_time']
+            # P4: Calculate elapsed time minus paused time (time spent waiting for approval)
+            raw_elapsed = time.time() - status_info['start_time']
+            elapsed = raw_elapsed - status_info.get('paused_time', 0.0)
             
             # Main status with spinner
             text = Text()
@@ -4500,11 +4637,32 @@ Now, {final_instruction.lower()}:"""
                     tools_str += f" +{len(status_info['available_tools']) - 3} more"
                 text.append(f"\n  🔧 Tools: {tools_str}", style="dim")
             
-            # Show recent tool calls
+            # P1/G3: Show recent tool calls with args and status icons
             if status_info['tool_calls']:
                 text.append("\n")
-                for tool in status_info['tool_calls'][-3:]:  # Show last 3
-                    text.append(f"  ⚙ {tool}", style="dim yellow")
+                for tc in status_info['tool_calls'][-3:]:  # Show last 3
+                    if isinstance(tc, dict):
+                        # Structured tool call with metadata
+                        name = tc.get("name", "?")
+                        status = tc.get("status", "running")
+                        args = tc.get("args", "")
+                        duration = tc.get("duration")
+                        
+                        # Status icon
+                        icon = "✅" if status == "ok" else "❌" if status == "error" else "⚙"
+                        
+                        # Build display line: icon name → args (duration)
+                        line = f"  {icon} {name}"
+                        if args:
+                            line += f" → {args}"
+                        if duration:
+                            line += f" ({duration:.1f}s)"
+                        
+                        style = "dim green" if status == "ok" else "dim red" if status == "error" else "dim yellow"
+                        text.append(line, style=style)
+                    else:
+                        # Legacy string format
+                        text.append(f"  ⚙ {tc}", style="dim yellow")
                     text.append("\n")
             
             # Show handoffs
@@ -4512,6 +4670,13 @@ Now, {final_instruction.lower()}:"""
                 for handoff in status_info['handoffs'][-2:]:  # Show last 2
                     text.append(f"  → {handoff}", style="dim cyan")
                     text.append("\n")
+            
+            # P3/G2: Show autonomy iteration info if in autonomy mode
+            if status_info.get('autonomy_iteration'):
+                iter_num = status_info.get('autonomy_iteration', 0)
+                max_iter = status_info.get('autonomy_max_iterations', 20)
+                stage = status_info.get('autonomy_stage', 'direct')
+                text.append(f"\n  🔄 Iteration {iter_num}/{max_iter} • Stage: {stage}", style="dim magenta")
             
             return text
         
@@ -4536,6 +4701,9 @@ Now, {final_instruction.lower()}:"""
                 # Signal to stop Live display
                 status_info['approval_pending'] = True
                 
+                # P4: Start pause timer
+                status_info['pause_start'] = time.time()
+                
                 # Wait a moment for Live to stop
                 time.sleep(0.2)
                 
@@ -4554,6 +4722,12 @@ Now, {final_instruction.lower()}:"""
                 
                 try:
                     approved = Confirm.ask(f"[{risk_color}]Execute this {risk_level} risk tool?[/{risk_color}]", default=False)
+                    
+                    # P4: Stop pause timer and accumulate paused time
+                    if status_info['pause_start']:
+                        status_info['paused_time'] += time.time() - status_info['pause_start']
+                        status_info['pause_start'] = None
+                    
                     status_info['approval_pending'] = False
                     
                     if approved:
@@ -4564,6 +4738,11 @@ Now, {final_instruction.lower()}:"""
                         console.print("[dim]Tip: Use --trust to auto-approve all tools[/dim]")
                         return ApprovalDecision(approved=False, reason="User denied")
                 except (KeyboardInterrupt, EOFError):
+                    # P4: Stop pause timer on cancel too
+                    if status_info['pause_start']:
+                        status_info['paused_time'] += time.time() - status_info['pause_start']
+                        status_info['pause_start'] = None
+                    
                     status_info['approval_pending'] = False
                     console.print("\n[red]❌ Cancelled[/red]")
                     return ApprovalDecision(approved=False, reason="User cancelled")
@@ -4622,6 +4801,8 @@ Now, {final_instruction.lower()}:"""
         
         # Handle AutonomyResult from run_autonomous()
         display_text = None
+        completion_reason = None
+        iterations = None
         if result is not None:
             if hasattr(result, 'output') and result.output:
                 display_text = result.output
@@ -4629,6 +4810,12 @@ Now, {final_instruction.lower()}:"""
                 display_text = result
             elif result:
                 display_text = str(result)
+            
+            # G6 fix: Extract completion reason and iterations from AutonomyResult
+            if hasattr(result, 'completion_reason'):
+                completion_reason = result.completion_reason
+            if hasattr(result, 'iterations'):
+                iterations = result.iterations
         
         if display_text:
             console.print(display_text)
@@ -4646,6 +4833,15 @@ Now, {final_instruction.lower()}:"""
                 console.print("[dim]Task completed (tools executed successfully)[/dim]")
             else:
                 console.print("[dim]No response generated[/dim]")
+        
+        # G6 fix: Show completion reason and iterations for autonomy mode
+        if completion_reason or iterations:
+            meta_parts = []
+            if iterations:
+                meta_parts.append(f"iterations={iterations}")
+            if completion_reason:
+                meta_parts.append(f"reason={completion_reason}")
+            console.print(f"[dim]Autonomy: {', '.join(meta_parts)}[/dim]")
         
         # Cleanup LSP/ACP runtime
         try:

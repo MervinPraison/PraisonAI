@@ -103,6 +103,20 @@ __all__ = [
     'display_self_reflection',
 ]
 
+# P3/G2: Supported callback types documentation
+# Standard callbacks: tool_call, interaction, error, llm_start, llm_end
+# Autonomy callbacks (PraisonAI unique):
+#   - autonomy_iteration: {iteration, max_iterations, stage}
+#   - autonomy_stage_change: {from_stage, to_stage}
+#   - autonomy_doom_loop: {iteration, recovery_action}
+#   - autonomy_complete: {completion_reason, iterations, duration_seconds}
+#   - retry: {attempt, max_attempts, error, retry_in_seconds}
+SUPPORTED_CALLBACK_TYPES = [
+    'tool_call', 'interaction', 'error', 'llm_start', 'llm_end',
+    'autonomy_iteration', 'autonomy_stage_change', 'autonomy_doom_loop', 'autonomy_complete',
+    'retry',
+]
+
 def register_display_callback(display_type: str, callback_fn, is_async: bool = False):
     """Register a synchronous or asynchronous callback function for a specific display type.
     

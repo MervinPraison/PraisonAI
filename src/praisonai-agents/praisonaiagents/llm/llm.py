@@ -592,6 +592,18 @@ Respond with ONLY a valid JSON tool call in this format:
                         f"waiting {retry_delay:.1f}s before retry..."
                     )
 
+                    # P5: Emit retry callback for CLI visibility
+                    try:
+                        from ..main import execute_sync_callback
+                        execute_sync_callback('retry',
+                            attempt=attempt + 1,
+                            max_attempts=self._max_retries + 1,
+                            error=error_str[:200],
+                            retry_in_seconds=retry_delay
+                        )
+                    except ImportError:
+                        pass
+
                     if self._rate_limiter is not None:
                         self._rate_limiter.wait_for_retry(retry_delay)
                     else:
