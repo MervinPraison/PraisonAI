@@ -58,7 +58,6 @@ def _execute_core(
         
         agent_config = {
             "name": request.agent_name,
-            "verbose": False,
         }
         
         if request.agent_instructions:
@@ -183,7 +182,6 @@ async def execute_async_stream(
         
         agent_config = {
             "name": request.agent_name,
-            "verbose": False,
         }
         
         if request.agent_instructions:

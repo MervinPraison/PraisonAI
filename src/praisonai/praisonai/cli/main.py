@@ -955,8 +955,8 @@ class PraisonAI:
                           help="Enable LSP tools in autonomy mode (slower but provides code intelligence)")
         
         # P3/G5: Display mode - control output verbosity
-        parser.add_argument("--display", type=str, choices=["minimal", "status", "verbose", "debug"],
-                          default="status", help="Display mode: minimal (result only), status (tool calls), verbose (args/results), debug (all)")
+        parser.add_argument("--display", type=str, choices=["minimal", "status", "verbose", "debug", "jsonl", "json", "flow"],
+                          default="status", help="Display mode: minimal|status|verbose|debug|jsonl|json|flow")
         
         # P8/G11: Tool timeout - prevent slow tools from blocking
         parser.add_argument("--tool-timeout", type=int, default=60,
@@ -4264,16 +4264,149 @@ Provide ONLY the commit message, no explanations."""
                 else:
                     result = auto_rag.chat(prompt)
             else:
-                # Run with minimal status display when verbose=False
+                # Unified display mode dispatcher
+                display_mode = getattr(self.args, 'display', 'status')
+                
+                # Also check Typer global state (for -o json, --quiet, etc.)
+                try:
+                    from .app import state as typer_state
+                    if typer_state.quiet:
+                        display_mode = 'minimal'
+                    elif typer_state.output_format.value == 'json':
+                        display_mode = 'json'
+                    elif typer_state.output_format.value == 'stream-json':
+                        display_mode = 'jsonl'
+                    elif typer_state.screen_reader:
+                        display_mode = 'debug'  # trace-like, no spinners
+                except (ImportError, AttributeError):
+                    pass
+                
+                # Check legacy verbose flag
                 is_verbose = agent_config.get("verbose", False)
-                if not is_verbose:
-                    result = self._run_with_status_display(agent, prompt)
-                else:
-                    # Try start method first, fallback to chat
+                if is_verbose and display_mode == 'status':
+                    display_mode = 'verbose'
+                
+                if display_mode == 'minimal':
+                    # Quiet: result only, no spinners
                     if hasattr(agent, 'start'):
                         result = agent.start(prompt)
                     else:
                         result = agent.chat(prompt)
+                    # Still print the result
+                    if result is not None:
+                        output = getattr(result, 'output', None) or (str(result) if result else None)
+                        if output:
+                            print(output)
+                
+                elif display_mode == 'verbose':
+                    # SDK StatusOutput with timestamps and metrics
+                    try:
+                        from praisonaiagents.output.status import enable_status_output, disable_status_output
+                        enable_status_output(show_timestamps=True, show_metrics=True)
+                        if hasattr(agent, 'start'):
+                            result = agent.start(prompt)
+                        else:
+                            result = agent.chat(prompt)
+                        disable_status_output()
+                    except ImportError:
+                        if hasattr(agent, 'start'):
+                            result = agent.start(prompt)
+                        else:
+                            result = agent.chat(prompt)
+                
+                elif display_mode == 'debug':
+                    # SDK TraceOutput with markdown
+                    try:
+                        from praisonaiagents.output.trace import enable_trace_output, disable_trace_output
+                        enable_trace_output(use_markdown=True)
+                        if hasattr(agent, 'start'):
+                            result = agent.start(prompt)
+                        else:
+                            result = agent.chat(prompt)
+                        disable_trace_output()
+                    except ImportError:
+                        if hasattr(agent, 'start'):
+                            result = agent.start(prompt)
+                        else:
+                            result = agent.chat(prompt)
+                
+                elif display_mode == 'jsonl':
+                    # JSONL structured output for CI/CD
+                    from .features.display_jsonl import JsonlDisplay
+                    from praisonaiagents.main import register_display_callback as _reg_cb
+                    
+                    jsonl = JsonlDisplay()
+                    jsonl.on_init(model=agent_config.get('llm'))
+                    _reg_cb('tool_call', jsonl.on_tool_call)
+                    _reg_cb('llm_start', jsonl.on_llm_start)
+                    _reg_cb('autonomy_iteration', jsonl.on_autonomy_iteration)
+                    _reg_cb('autonomy_stage_change', jsonl.on_autonomy_stage_change)
+                    _reg_cb('autonomy_doom_loop', jsonl.on_autonomy_doom_loop)
+                    _reg_cb('autonomy_complete', lambda **kw: jsonl.on_complete(
+                        reason=kw.get('completion_reason'),
+                        iterations=kw.get('iterations'),
+                        duration_ms=(kw.get('duration_seconds') or 0) * 1000,
+                    ))
+                    
+                    start_time = time.time()
+                    if hasattr(agent, 'start'):
+                        result = agent.start(prompt)
+                    else:
+                        result = agent.chat(prompt)
+                    
+                    # Emit final result
+                    reason = getattr(result, 'completion_reason', None) if hasattr(result, 'completion_reason') else 'complete'
+                    iters = getattr(result, 'iterations', None) if hasattr(result, 'iterations') else None
+                    jsonl.on_complete(reason=reason or 'complete', iterations=iters,
+                                     duration_ms=(time.time() - start_time) * 1000)
+                    
+                    # Print result to stdout
+                    if hasattr(result, 'output') and result.output:
+                        print(result.output)
+                    elif isinstance(result, str):
+                        print(result)
+                
+                elif display_mode == 'json':
+                    # JSON envelope output
+                    import json as json_mod
+                    start_time = time.time()
+                    if hasattr(agent, 'start'):
+                        result = agent.start(prompt)
+                    else:
+                        result = agent.chat(prompt)
+                    
+                    output = result.output if hasattr(result, 'output') else str(result)
+                    envelope = {
+                        'result': output,
+                        'model': agent_config.get('llm'),
+                        'duration_ms': round((time.time() - start_time) * 1000),
+                    }
+                    if hasattr(result, 'completion_reason'):
+                        envelope['completion_reason'] = result.completion_reason
+                    if hasattr(result, 'iterations'):
+                        envelope['iterations'] = result.iterations
+                    print(json_mod.dumps(envelope, indent=2))
+                
+                elif display_mode == 'flow':
+                    # SDK FlowDisplay - visual agent→tool chart
+                    try:
+                        from praisonaiagents.flow_display import track_workflow
+                        flow = track_workflow()
+                        flow.start()
+                        if hasattr(agent, 'start'):
+                            result = agent.start(prompt)
+                        else:
+                            result = agent.chat(prompt)
+                        flow.stop()
+                    except ImportError:
+                        if hasattr(agent, 'start'):
+                            result = agent.start(prompt)
+                        else:
+                            result = agent.chat(prompt)
+                
+                else:
+                    # Default "status" mode - enhanced interactive display
+                    result = self._run_with_status_display(agent, prompt)
             
             # ===== POST-PROCESSING WITH NEW FEATURES =====
             
@@ -4505,7 +4638,7 @@ Now, {final_instruction.lower()}:"""
                     tool_names.append(tool.name)
         
         status_info = {
-            'status': 'Generating...',
+            'status': 'Thinking...',
             'tool_calls': [],
             'handoffs': [],
             'done': False,
@@ -4513,56 +4646,74 @@ Now, {final_instruction.lower()}:"""
             'error': None,
             'start_time': time.time(),
             'available_tools': tool_names,
-            'approval_pending': False,  # Flag to pause Live display during approval
-            'live_instance': None,  # Reference to Live instance for stopping
-            'last_result': None,  # Last tool result (for verbose/debug mode)
-            # P4: Pausable timer - track time spent waiting for user approval
-            'paused_time': 0.0,  # Total time spent waiting for approval
-            'pause_start': None,  # When current pause started
+            'approval_pending': False,
+            'live_instance': None,
+            'last_result': None,
+            # P4: Pausable timer
+            'paused_time': 0.0,
+            'pause_start': None,
+            # Phase 0: LLM and iteration tracking
+            'llm_active': False,
+            'llm_model': None,
+            'llm_calls': 0,
+            'total_tokens_out': 0,
         }
         
         # P7/G3: Get display mode for tool args/results visibility
         display_mode = getattr(self.args, 'display', 'status')
         
+        # Phase 0: Smart action verb mapping for tool names
+        _TOOL_VERBS = {
+            'read_file': 'Reading files...',
+            'write_file': 'Writing files...',
+            'execute_command': 'Executing code...',
+            'execute_code': 'Running code...',
+            'search': 'Searching...',
+            'internet_search': 'Searching the web...',
+            'web_search': 'Searching the web...',
+            'acp_create_file': 'Creating files...',
+            'acp_edit_file': 'Editing files...',
+            'acp_read_file': 'Reading files...',
+            'acp_list_directory': 'Listing directory...',
+            'list_directory': 'Listing directory...',
+        }
+        
         def tool_call_callback(message=None, tool_name=None, tool_input=None, tool_output=None, **kwargs):
-            """Callback for tool call notifications with structured data support.
-            
-            P1/G3: Now accepts structured kwargs (tool_name, tool_input, tool_output)
-            in addition to legacy message parsing.
-            """
-            # P1/G3: Handle structured tool call (preferred)
+            """Callback for tool call notifications with structured data support."""
+            # Handle structured tool call (preferred)
             if tool_name:
-                # Extract first arg value for preview (like Codex/Gemini)
+                # Extract first arg value for preview
                 arg_preview = ""
                 if tool_input and isinstance(tool_input, dict):
                     first_val = next(iter(tool_input.values()), None)
                     if isinstance(first_val, str):
                         arg_preview = first_val[:60] + ("…" if len(first_val) > 60 else "")
                 
-                # Check if this is a new tool call (no output yet) or completion (has output)
                 if tool_output is None:
-                    # Tool starting - add to list with metadata
+                    # Tool starting
                     entry = {
                         "name": tool_name,
                         "args": arg_preview,
                         "status": "running",
                         "start": time.time()
                     }
-                    # Avoid duplicates
-                    existing_names = [tc.get("name") if isinstance(tc, dict) else tc for tc in status_info['tool_calls']]
-                    if tool_name not in existing_names:
+                    # Avoid duplicates — match by name AND args for repeated calls
+                    running = [tc for tc in status_info['tool_calls'] 
+                               if isinstance(tc, dict) and tc.get("name") == tool_name and tc.get("status") == "running"]
+                    if not running:
                         status_info['tool_calls'].append(entry)
-                    status_info['status'] = f"Using {tool_name}..."
+                    # Phase 0: Use action verb instead of generic "Using X..."
+                    status_info['status'] = _TOOL_VERBS.get(tool_name, f"Using {tool_name}...")
                 else:
-                    # Tool completed - update status
-                    for tc in status_info['tool_calls']:
-                        if isinstance(tc, dict) and tc.get("name") == tool_name:
+                    # Tool completed — update the LAST running entry for this tool
+                    for tc in reversed(status_info['tool_calls']):
+                        if isinstance(tc, dict) and tc.get("name") == tool_name and tc.get("status") == "running":
                             tc["status"] = "ok"
                             tc["duration"] = time.time() - tc.get("start", time.time())
                             if display_mode in ('verbose', 'debug'):
                                 tc["result"] = str(tool_output)[:100]
                             break
-                    status_info['status'] = "Processing result..."
+                    status_info['status'] = "Processing..."
                 return
             
             # Legacy fallback: parse message string
@@ -4578,30 +4729,52 @@ Now, {final_instruction.lower()}:"""
             elif message and "Function " in message and " returned:" in message:
                 status_info['status'] = "Processing result..."
         
-        # Register callback for tool calls (use local variable)
+        # Register callback for tool calls
         _register_display_callback('tool_call', tool_call_callback)
         
-        # P3/G2: Register autonomy callbacks for iteration/stage/completion visibility
+        # Phase 0: Register LLM thinking callbacks
+        def llm_start_callback(model=None, agent_name=None, **kwargs):
+            """Show thinking indicator during LLM calls."""
+            status_info['llm_active'] = True
+            status_info['llm_model'] = model
+            # Only override status if no tool is actively running
+            running_tools = [tc for tc in status_info['tool_calls'] 
+                           if isinstance(tc, dict) and tc.get('status') == 'running']
+            if not running_tools:
+                status_info['status'] = 'Thinking...'
+        
+        def llm_end_callback(model=None, tokens_in=0, tokens_out=0, 
+                            cost=None, latency_ms=None, **kwargs):
+            """Track LLM call completion."""
+            status_info['llm_active'] = False
+            status_info['llm_calls'] = status_info.get('llm_calls', 0) + 1
+            if tokens_out:
+                status_info['total_tokens_out'] = status_info.get('total_tokens_out', 0) + tokens_out
+            # Set status to processing after thinking
+            running_tools = [tc for tc in status_info['tool_calls'] 
+                           if isinstance(tc, dict) and tc.get('status') == 'running']
+            if not running_tools:
+                status_info['status'] = 'Planning next step...'
+        
+        _register_display_callback('llm_start', llm_start_callback)
+        _register_display_callback('llm_end', llm_end_callback)
+        
+        # Autonomy callbacks for iteration/stage/completion visibility
         def autonomy_iteration_callback(iteration=None, max_iterations=None, stage=None, **kwargs):
-            """Callback for autonomy iteration updates."""
             if iteration is not None:
                 status_info['autonomy_iteration'] = iteration
                 status_info['autonomy_max_iterations'] = max_iterations
                 status_info['autonomy_stage'] = stage
-                status_info['status'] = f"Iteration {iteration}/{max_iterations} ({stage})"
         
         def autonomy_stage_change_callback(from_stage=None, to_stage=None, **kwargs):
-            """Callback for autonomy stage escalation."""
             if to_stage:
                 status_info['autonomy_stage'] = to_stage
-                status_info['status'] = f"Escalated to {to_stage} stage"
+                status_info['status'] = f"Stage → {to_stage}"
         
         def autonomy_doom_loop_callback(iteration=None, recovery_action=None, **kwargs):
-            """Callback for doom loop detection."""
-            status_info['status'] = f"⚠️ Doom loop detected, {recovery_action}"
+            status_info['status'] = f"⚠️ Loop detected → {recovery_action}"
         
         def autonomy_complete_callback(completion_reason=None, iterations=None, duration_seconds=None, **kwargs):
-            """Callback for autonomy completion."""
             status_info['autonomy_complete_reason'] = completion_reason
             status_info['autonomy_total_iterations'] = iterations
         
@@ -4610,73 +4783,75 @@ Now, {final_instruction.lower()}:"""
         _register_display_callback('autonomy_doom_loop', autonomy_doom_loop_callback)
         _register_display_callback('autonomy_complete', autonomy_complete_callback)
         
-        # P5: Register retry callback for rate limit visibility
+        # Retry callback for rate limit visibility
         def retry_callback(attempt=None, max_attempts=None, error=None, retry_in_seconds=None, **kwargs):
-            """Callback for retry events (rate limiting)."""
             if attempt is not None:
                 status_info['status'] = f"⏳ Rate limited, retrying in {retry_in_seconds:.0f}s ({attempt}/{max_attempts})"
         
         _register_display_callback('retry', retry_callback)
         
         def build_status_display():
-            """Build the status display text."""
-            # P4: Calculate elapsed time minus paused time (time spent waiting for approval)
+            """Build the interactive status display."""
             raw_elapsed = time.time() - status_info['start_time']
             elapsed = raw_elapsed - status_info.get('paused_time', 0.0)
             
-            # Main status with spinner
             text = Text()
-            text.append("⏳ ", style="cyan")
+            
+            # Phase 0: Robot emoji during LLM calls, hourglass during tools
+            icon = "🤖" if status_info.get('llm_active') else "⏳"
+            text.append(f"{icon} ", style="cyan")
             text.append(f"{status_info['status']} ", style="bold")
+            
+            # Phase 0: Inline iteration badge [Iteration 2/20 • autonomous]
+            iter_num = status_info.get('autonomy_iteration')
+            if iter_num:
+                max_iter = status_info.get('autonomy_max_iterations', 20)
+                stage = status_info.get('autonomy_stage', '')
+                text.append("[", style="dim magenta")
+                text.append(f"Iter {iter_num}/{max_iter}", style="magenta")
+                if stage:
+                    text.append(f" • {stage}", style="dim magenta")
+                text.append("] ", style="dim magenta")
+            
+            # Elapsed timer
             text.append(f"({elapsed:.1f}s)", style="dim")
             
-            # Show available tools on first line
+            # Available tools hint (only before first tool call)
             if status_info['available_tools'] and not status_info['tool_calls']:
                 tools_str = ', '.join(status_info['available_tools'][:3])
                 if len(status_info['available_tools']) > 3:
                     tools_str += f" +{len(status_info['available_tools']) - 3} more"
                 text.append(f"\n  🔧 Tools: {tools_str}", style="dim")
             
-            # P1/G3: Show recent tool calls with args and status icons
+            # Phase 0: Show last 5 tool calls with ✅/❌/⚙ indicators
             if status_info['tool_calls']:
                 text.append("\n")
-                for tc in status_info['tool_calls'][-3:]:  # Show last 3
+                for tc in status_info['tool_calls'][-5:]:
                     if isinstance(tc, dict):
-                        # Structured tool call with metadata
                         name = tc.get("name", "?")
-                        status = tc.get("status", "running")
+                        st = tc.get("status", "running")
                         args = tc.get("args", "")
                         duration = tc.get("duration")
                         
-                        # Status icon
-                        icon = "✅" if status == "ok" else "❌" if status == "error" else "⚙"
+                        tc_icon = "✅" if st == "ok" else "❌" if st == "error" else "⚙"
+                        style = "dim green" if st == "ok" else "dim red" if st == "error" else "yellow"
                         
-                        # Build display line: icon name → args (duration)
-                        line = f"  {icon} {name}"
+                        line = f"  {tc_icon} {name}"
                         if args:
                             line += f" → {args}"
                         if duration:
                             line += f" ({duration:.1f}s)"
                         
-                        style = "dim green" if status == "ok" else "dim red" if status == "error" else "dim yellow"
                         text.append(line, style=style)
                     else:
-                        # Legacy string format
                         text.append(f"  ⚙ {tc}", style="dim yellow")
                     text.append("\n")
             
-            # Show handoffs
+            # Handoffs
             if status_info['handoffs']:
-                for handoff in status_info['handoffs'][-2:]:  # Show last 2
+                for handoff in status_info['handoffs'][-2:]:
                     text.append(f"  → {handoff}", style="dim cyan")
                     text.append("\n")
-            
-            # P3/G2: Show autonomy iteration info if in autonomy mode
-            if status_info.get('autonomy_iteration'):
-                iter_num = status_info.get('autonomy_iteration', 0)
-                max_iter = status_info.get('autonomy_max_iterations', 20)
-                stage = status_info.get('autonomy_stage', 'direct')
-                text.append(f"\n  🔄 Iteration {iter_num}/{max_iter} • Stage: {stage}", style="dim magenta")
             
             return text
         
@@ -4783,20 +4958,18 @@ Now, {final_instruction.lower()}:"""
         # Wait for thread to complete (generous timeout for long-running tasks)
         thread.join(timeout=5.0)
         
-        # Unregister callback to avoid memory leaks (use local variable with None check)
-        if _sync_display_callbacks is not None and 'tool_call' in _sync_display_callbacks:
-            del _sync_display_callbacks['tool_call']
+        # Unregister all callbacks to avoid memory leaks
+        if _sync_display_callbacks is not None:
+            for cb_name in ['tool_call', 'llm_start', 'llm_end', 'autonomy_iteration',
+                           'autonomy_stage_change', 'autonomy_doom_loop', 'autonomy_complete', 'retry']:
+                _sync_display_callbacks.pop(cb_name, None)
         
         # Handle result
         if status_info['error']:
             console.print(f"[red]Error: {status_info['error']}[/red]")
             return None
         
-        # Show tool calls that were made (if any)
-        if status_info['tool_calls']:
-            console.print(f"[dim]Tools used: {', '.join(status_info['tool_calls'])}[/dim]")
-        
-        # Get the result and print it directly here to ensure it's displayed
+        # Get the result
         result = status_info['result']
         
         # Handle AutonomyResult from run_autonomous()
@@ -4811,7 +4984,6 @@ Now, {final_instruction.lower()}:"""
             elif result:
                 display_text = str(result)
             
-            # G6 fix: Extract completion reason and iterations from AutonomyResult
             if hasattr(result, 'completion_reason'):
                 completion_reason = result.completion_reason
             if hasattr(result, 'iterations'):
@@ -4834,14 +5006,27 @@ Now, {final_instruction.lower()}:"""
             else:
                 console.print("[dim]No response generated[/dim]")
         
-        # G6 fix: Show completion reason and iterations for autonomy mode
-        if completion_reason or iterations:
-            meta_parts = []
-            if iterations:
-                meta_parts.append(f"iterations={iterations}")
-            if completion_reason:
-                meta_parts.append(f"reason={completion_reason}")
-            console.print(f"[dim]Autonomy: {', '.join(meta_parts)}[/dim]")
+        # Phase 0: Rich completion banner
+        elapsed = time.time() - status_info['start_time'] - status_info.get('paused_time', 0)
+        tool_count = len([tc for tc in status_info.get('tool_calls', []) if isinstance(tc, dict)])
+        llm_calls = status_info.get('llm_calls', 0)
+        
+        parts = []
+        if iterations:
+            parts.append(f"{iterations} iterations")
+        if tool_count:
+            parts.append(f"{tool_count} tools")
+        if llm_calls:
+            parts.append(f"{llm_calls} LLM calls")
+        parts.append(f"{elapsed:.1f}s")
+        
+        reason = completion_reason or status_info.get('autonomy_complete_reason')
+        reason_icons = {"goal": "✅", "promise": "✅", "doom_loop": "🛑",
+                       "timeout": "⏰", "max_iterations": "🔄", "error": "❌"}
+        reason_label = reason or "complete"
+        r_icon = reason_icons.get(reason_label, "✅")
+        
+        console.print(f"\n{r_icon} Completed ({reason_label}) — {', '.join(parts)}")
         
         # Cleanup LSP/ACP runtime
         try:
