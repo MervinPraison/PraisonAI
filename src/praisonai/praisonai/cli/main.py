@@ -842,8 +842,8 @@ class PraisonAI:
                           help="Increase verbosity (-v=verbose, -vv=debug)")
         parser.add_argument("-q", "--quiet", action="count", default=0,
                           help="Decrease verbosity (-q=quiet, -qq=silent)")
-        parser.add_argument("--output", type=str, choices=["json", "jsonl"], dest="output_format",
-                          help="Machine-readable output format (json or jsonl)")
+        parser.add_argument("--output", type=str, choices=["json", "jsonl", "editor"], dest="output_format",
+                          help="Output format (json, jsonl, or editor for user-friendly conversation-style)")
         parser.add_argument("--flow", action="store_true",
                           help="Show visual agent→tool flow chart")
         parser.add_argument("--web", "--web-search", action="store_true", help="Enable native web search (OpenAI, Gemini, Anthropic, xAI, Perplexity)")
@@ -4398,6 +4398,36 @@ Provide ONLY the commit message, no explanations."""
                         else:
                             result = agent.chat(prompt)
                 
+                elif display_mode == 'editor':
+                    # --output editor: User-friendly conversation format
+                    from .features.editor_display import EditorDisplay, create_editor_callbacks
+                    from praisonaiagents.main import register_display_callback as _reg_cb
+                    
+                    editor_display = EditorDisplay()
+                    callbacks = create_editor_callbacks(editor_display)
+                    
+                    # Register callbacks
+                    for event_type, callback in callbacks.items():
+                        _reg_cb(event_type, callback)
+                    
+                    # Run agent
+                    if hasattr(agent, 'start'):
+                        result = agent.start(prompt)
+                    else:
+                        result = agent.chat(prompt)
+                    
+                    # Display final result
+                    output = result.output if hasattr(result, 'output') else str(result)
+                    if output:
+                        editor_display.result(output)
+                    
+                    # Show summary
+                    elapsed = editor_display.elapsed_time()
+                    editor_display.summary("Completed", [
+                        f"Duration: {elapsed:.1f}s",
+                        f"Blocks: {len(editor_display.get_blocks())}",
+                    ])
+                
                 else:
                     # Default: SDK status output — clean inline progress
                     # Shows: spinner + tool calls, no panels, no timestamps
@@ -4601,12 +4631,12 @@ Now, {final_instruction.lower()}:"""
         """Map CLI flags to a display mode string.
         
         Priority: --output > --flow > --display (deprecated) > -v/-q > default.
-        Returns one of: 'silent', 'quiet', 'verbose', 'debug', 'json', 'jsonl', 'flow', 'status'.
+        Returns one of: 'silent', 'quiet', 'verbose', 'debug', 'json', 'jsonl', 'flow', 'status', 'cursor'.
         """
         # Machine formats take highest priority
         output_fmt = getattr(self.args, 'output_format', None)
         if output_fmt:
-            return output_fmt  # "json" or "jsonl"
+            return output_fmt  # "json", "jsonl", or "cursor"
         
         # --flow is an independent feature flag
         if getattr(self.args, 'flow', False) or getattr(self.args, 'flow_display', False):
@@ -4639,7 +4669,7 @@ Now, {final_instruction.lower()}:"""
         if v >= 1:
             return 'verbose'
         
-        return 'status'  # Default: SDK inline status output
+        return 'editor'  # Default: User-friendly editor-style output
 
     def _handle_serve_command(self, args, unknown_args):
         """

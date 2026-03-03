@@ -18,6 +18,7 @@ class OutputMode(Enum):
     COMPACT = "compact"
     VERBOSE = "verbose"
     QUIET = "quiet"
+    EDITOR = "editor"  # User-friendly conversation format
 
 
 @dataclass
@@ -42,6 +43,8 @@ def get_default_mode() -> OutputMode:
         return OutputMode.COMPACT
     elif env_mode == "quiet":
         return OutputMode.QUIET
+    elif env_mode == "editor":
+        return OutputMode.EDITOR
     return OutputMode.VERBOSE
 
 
