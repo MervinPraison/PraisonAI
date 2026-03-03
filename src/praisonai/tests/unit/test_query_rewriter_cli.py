@@ -166,21 +166,23 @@ class TestHandleDirectPromptWithRewrite:
         mock_agent.start.return_value = "result"
         
         with patch.object(praison, '_rewrite_query_if_enabled', return_value="rewritten prompt") as mock_rewrite:
-            with patch.object(praison, '_run_with_status_display', return_value="result") as mock_run:
-                with patch('praisonai.cli.main.PRAISONAI_AVAILABLE', True):
-                    # Mock praisonaiagents and all its submodules
-                    mock_praisonaiagents = MagicMock()
-                    mock_praisonaiagents.Agent = MagicMock(return_value=mock_agent)
-                    mock_praisonaiagents.approval = MagicMock()
+            with patch('praisonai.cli.main.PRAISONAI_AVAILABLE', True):
+                # Mock praisonaiagents and all its submodules
+                mock_praisonaiagents = MagicMock()
+                mock_agent = MagicMock()
+                mock_agent.start.return_value = "result"
+                mock_praisonaiagents.Agent = MagicMock(return_value=mock_agent)
+                mock_praisonaiagents.approval = MagicMock()
+                
+                with patch.dict('sys.modules', {
+                    'praisonaiagents': mock_praisonaiagents,
+                    'praisonaiagents.approval': mock_praisonaiagents.approval,
+                    'praisonaiagents.output.status': MagicMock(),
+                }):
+                    praison.handle_direct_prompt("original prompt")
                     
-                    with patch.dict('sys.modules', {
-                        'praisonaiagents': mock_praisonaiagents,
-                        'praisonaiagents.approval': mock_praisonaiagents.approval
-                    }):
-                        praison.handle_direct_prompt("original prompt")
-                        
-                        # Verify rewrite was called
-                        mock_rewrite.assert_called_once_with("original prompt")
+                    # Verify rewrite was called
+                    mock_rewrite.assert_called_once_with("original prompt")
 
 
 class TestToolLoading:
