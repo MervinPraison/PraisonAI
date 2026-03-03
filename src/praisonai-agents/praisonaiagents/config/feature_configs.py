@@ -574,6 +574,10 @@ class OutputConfig:
     # Shows: [timestamp] Calling LLM..., Executing tool..., Response: ...
     status_trace: bool = False
     
+    # Editor output mode - beginner-friendly numbered steps
+    # Shows: Step 1: 📄 Creating file: path → ✓ Done
+    editor_output: bool = False
+    
     # Output file - save agent response to file automatically
     # When set, saves the response to the specified file path
     output_file: Optional[str] = None
@@ -596,6 +600,7 @@ class OutputConfig:
             "simple_output": self.simple_output,
             "show_parameters": self.show_parameters,
             "status_trace": self.status_trace,
+            "editor_output": self.editor_output,
             "output_file": self.output_file,
             "template": self.template,
         }

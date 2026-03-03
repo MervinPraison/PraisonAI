@@ -714,6 +714,7 @@ class Agent:
             json_output = getattr(_output_config, 'json_output', False)
             status_trace = getattr(_output_config, 'status_trace', False)  # New: clean inline status
             simple_output = getattr(_output_config, 'simple_output', False)  # status preset: no timestamps
+            editor_output = getattr(_output_config, 'editor_output', False)  # Editor: Step N display
             output_file = getattr(_output_config, 'output_file', None)  # Auto-save to file
             output_template = getattr(_output_config, 'template', None)  # Response template
         else:
@@ -723,10 +724,20 @@ class Agent:
             json_output = False
             status_trace = False
             simple_output = False
+            editor_output = False
         
-        # Enable trace output mode if configured (takes priority)
+        # Enable editor output mode if configured (beginner-friendly, takes priority)
+        # Shows: Step 1: 📄 Creating file: path → ✓ Done
+        if editor_output:
+            try:
+                from ..output.editor import enable_editor_output, is_editor_output_enabled
+                if not is_editor_output_enabled():
+                    enable_editor_output(use_color=True)
+            except ImportError:
+                pass  # Editor module not available
+        # Enable trace output mode if configured
         # This provides timestamped inline status with duration
-        if status_trace:
+        elif status_trace:
             try:
                 from ..output.trace import enable_trace_output, is_trace_output_enabled
                 if not is_trace_output_enabled():
@@ -4712,6 +4723,9 @@ Your Goal: {self.goal}"""
                 error_msg = f"Tool execution denied: {decision.reason}"
                 logging.warning(error_msg)
                 return {"error": error_msg, "approval_denied": True}
+            # Bridge: mark tool as approved in global registry context so
+            # @require_approval decorator wrappers skip their own check.
+            get_approval_registry().mark_approved(function_name)
             if decision.modified_args:
                 arguments = decision.modified_args
                 logging.info(f"Using modified arguments: {arguments}")
@@ -7667,6 +7681,10 @@ Write the complete compiled report:"""
                     error_msg = f"Tool execution denied: {decision.reason}"
                     logging.warning(error_msg)
                     return {"error": error_msg, "approval_denied": True}
+                # Bridge: mark tool as approved in global registry context so
+                # @require_approval decorator wrappers skip their own check.
+                from ..approval import get_approval_registry as _get_reg
+                _get_reg().mark_approved(function_name)
                 if decision.modified_args:
                     arguments = decision.modified_args
                     logging.info(f"Using modified arguments: {arguments}")

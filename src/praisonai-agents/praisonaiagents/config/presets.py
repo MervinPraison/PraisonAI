@@ -133,6 +133,17 @@ OUTPUT_PRESETS: Dict[str, Dict[str, Any]] = {
         "actions_trace": True,
         "json_output": True,  # Output as JSONL
     },
+    # Editor preset - beginner-friendly numbered steps
+    # Shows: Step 1: 📄 Creating file: path → ✓ Done
+    # Best for non-programmers and interactive scripts
+    "editor": {
+        "verbose": False,
+        "markdown": False,
+        "stream": False,
+        "metrics": False,
+        "reasoning_steps": False,
+        "editor_output": True,  # Enable editor display mode
+    },
     
     # ==========================================================================
     # ALIASES (for backward compatibility)

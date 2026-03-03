@@ -4399,16 +4399,18 @@ Provide ONLY the commit message, no explanations."""
                             result = agent.chat(prompt)
                 
                 elif display_mode == 'editor':
-                    # --output editor: User-friendly conversation format
-                    from .features.editor_display import EditorDisplay, create_editor_callbacks
-                    from praisonaiagents.main import register_display_callback as _reg_cb
-                    
-                    editor_display = EditorDisplay()
-                    callbacks = create_editor_callbacks(editor_display)
-                    
-                    # Register callbacks
-                    for event_type, callback in callbacks.items():
-                        _reg_cb(event_type, callback)
+                    # --output editor: User-friendly step-by-step format
+                    # Uses SDK EditorOutput (Step 1: 📄 Creating file → ✓ Done)
+                    try:
+                        from praisonaiagents.output.editor import enable_editor_output, disable_editor_output
+                        editor = enable_editor_output(use_color=True)
+                    except ImportError:
+                        # Fallback to local module if SDK version unavailable
+                        from .features.editor_display import EditorDisplay, create_editor_callbacks
+                        from praisonaiagents.main import register_display_callback as _reg_cb
+                        editor = EditorDisplay()
+                        for event_type, cb in create_editor_callbacks(editor).items():
+                            _reg_cb(event_type, cb)
                     
                     # Run agent
                     if hasattr(agent, 'start'):
@@ -4419,13 +4421,13 @@ Provide ONLY the commit message, no explanations."""
                     # Display final result
                     output = result.output if hasattr(result, 'output') else str(result)
                     if output:
-                        editor_display.result(output)
+                        editor.output(output) if hasattr(editor, 'output') else None
                     
                     # Show summary
-                    elapsed = editor_display.elapsed_time()
-                    editor_display.summary("Completed", [
+                    elapsed = editor.elapsed_time()
+                    editor.summary("Completed", [
                         f"Duration: {elapsed:.1f}s",
-                        f"Blocks: {len(editor_display.get_blocks())}",
+                        f"Blocks: {len(editor.get_blocks())}",
                     ])
                 
                 else:
