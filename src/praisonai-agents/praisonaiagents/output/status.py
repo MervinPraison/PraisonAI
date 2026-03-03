@@ -80,6 +80,7 @@ class StatusOutput:
         use_color: bool = True,
         show_timestamps: bool = True,  # NEW: control timestamp display
         show_metrics: bool = False,  # Enable metrics display for debug mode
+        show_tool_output: bool = True,  # Show tool result output inline
     ):
         self._file = file or sys.stderr  # Use stderr to not interfere with agent output
         self._format = format
@@ -87,6 +88,7 @@ class StatusOutput:
         self._use_color = use_color
         self._show_timestamps = show_timestamps
         self._show_metrics = show_metrics
+        self._show_tool_output = show_tool_output
         self._console = None
         self._tool_start_times: Dict[str, float] = {}
         self._lock = threading.Lock()  # Per-sink lock for thread safety
@@ -120,12 +122,12 @@ class StatusOutput:
         parts = []
         for k, v in (redacted or {}).items():
             if isinstance(v, str):
-                v_str = f'"{_truncate(v, 30)}"'
+                v_str = f'"{_truncate(v, 80)}"'
             else:
-                v_str = _truncate(str(v), 30)
+                v_str = _truncate(str(v), 80)
             parts.append(f"{k}={v_str}")
         
-        return _truncate(", ".join(parts), 80)
+        return _truncate(", ".join(parts), 200)
     
     def agent_start(self, agent_name: str) -> None:
         """Record agent start."""
@@ -185,8 +187,8 @@ class StatusOutput:
         """Record LLM call end with optional metrics for debug mode."""
         ts = time.time()
         
-        # Use latency_ms if provided, otherwise calculate from start time
-        if latency_ms is not None:
+        # Use latency_ms if provided and positive, otherwise calculate from start time
+        if latency_ms is not None and latency_ms > 0:
             duration_ms = latency_ms
         elif duration_ms is None and hasattr(self, '_llm_start_time'):
             start_ts = self._llm_start_time
@@ -267,9 +269,13 @@ class StatusOutput:
                 args_str = self._format_args(self._pending_tool_args)
             
             result_str = ""
-            if result_summary:
-                result_str = f" → {_truncate(result_summary, 50)}"
+            if self._show_tool_output:
+                if result_summary:
+                    result_str = f" → {_truncate(result_summary, 50)}"
+                elif error_message:
+                    result_str = f" → ✗ {_truncate(error_message, 50)}"
             elif error_message:
+                # Always show errors even when output is hidden
                 result_str = f" → ✗ {_truncate(error_message, 50)}"
             
             color = "cyan" if status == "ok" else "red"
@@ -285,9 +291,9 @@ class StatusOutput:
             separator = "─" * 50
             self._emit_text(separator, ts, "dim", show_timestamp=False)
             self._emit_text("Final Output:", ts, "bold", show_timestamp=False)
-            # Print actual content without truncation for final output
+            # Print actual content to stdout (not stderr) so users see it
             with self._lock:  # Thread-safe output
-                print(content, file=self._file)
+                print(content)
     
     def _emit_text(self, message: str, ts: float, style: str = None, show_timestamp: bool = True) -> None:
         """Emit a text line. Thread-safe for multi-agent execution."""
@@ -320,6 +326,7 @@ def enable_status_output(
     use_color: bool = True,
     show_timestamps: bool = True,
     show_metrics: bool = False,  # Enable metrics for debug mode
+    show_tool_output: bool = True,  # Show tool result output inline
 ) -> StatusOutput:
     """
     Enable actions output mode globally.
@@ -334,6 +341,7 @@ def enable_status_output(
         use_color: Whether to use colored output (default: True)
         show_timestamps: Whether to show timestamps (default: True)
         show_metrics: Whether to show token/cost metrics (default: False)
+        show_tool_output: Whether to show tool result output inline (default: True)
     
     Returns:
         StatusOutput instance for programmatic access
@@ -350,6 +358,7 @@ def enable_status_output(
         use_color=use_color,
         show_timestamps=show_timestamps,
         show_metrics=show_metrics,
+        show_tool_output=show_tool_output,
     )
     _status_output_enabled = True
     

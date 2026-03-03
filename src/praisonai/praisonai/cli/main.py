@@ -838,7 +838,14 @@ class PraisonAI:
         parser.add_argument("--no-acp", action="store_true", help="Disable ACP tools (agentic file operations with plan/approve/apply)")
         parser.add_argument("--no-lsp", action="store_true", help="Disable LSP tools (code intelligence: symbols, definitions, references)")
         parser.add_argument("--save", "-s", action="store_true", help="Save research output to file (output/research/)")
-        parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output for research")
+        parser.add_argument("-v", "--verbose", action="count", default=0,
+                          help="Increase verbosity (-v=verbose, -vv=debug)")
+        parser.add_argument("-q", "--quiet", action="count", default=0,
+                          help="Decrease verbosity (-q=quiet, -qq=silent)")
+        parser.add_argument("--output", type=str, choices=["json", "jsonl"], dest="output_format",
+                          help="Machine-readable output format (json or jsonl)")
+        parser.add_argument("--flow", action="store_true",
+                          help="Show visual agent→tool flow chart")
         parser.add_argument("--web", "--web-search", action="store_true", help="Enable native web search (OpenAI, Gemini, Anthropic, xAI, Perplexity)")
         parser.add_argument("--web-fetch", action="store_true", help="Enable web fetch to retrieve URL content (Anthropic only)")
         parser.add_argument("--prompt-caching", action="store_true", help="Enable prompt caching to reduce costs (OpenAI, Anthropic, Bedrock, Deepseek)")
@@ -954,9 +961,6 @@ class PraisonAI:
         parser.add_argument("--lsp", action="store_true", 
                           help="Enable LSP tools in autonomy mode (slower but provides code intelligence)")
         
-        # P3/G5: Display mode - control output verbosity
-        parser.add_argument("--display", type=str, choices=["minimal", "status", "verbose", "debug", "jsonl", "json", "flow"],
-                          default="status", help="Display mode: minimal|status|verbose|debug|jsonl|json|flow")
         
         # P8/G11: Tool timeout - prevent slow tools from blocking
         parser.add_argument("--tool-timeout", type=int, default=60,
@@ -3888,9 +3892,12 @@ Provide ONLY the commit message, no explanations."""
             if autonomy_mode and autonomy_mode not in ('disable', None):
                 agent_config["autonomy"] = {"level": autonomy_mode, "enabled": True}
             
-            # Set output mode based on --verbose flag
-            # Uses consolidated 'output' param instead of deprecated 'verbose'
-            if hasattr(self, 'args') and getattr(self.args, 'verbose', False):
+            # Set SDK output preset based on verbosity flags
+            # The display dispatcher handles CLI rendering; this controls SDK-level behavior
+            v = getattr(self.args, 'verbose', 0) if hasattr(self, 'args') else 0
+            if v >= 2:
+                agent_config["output"] = "verbose"  # SDK debug-level detail
+            elif v >= 1:
                 agent_config["output"] = "verbose"
             else:
                 agent_config["output"] = "minimal"
@@ -4264,42 +4271,29 @@ Provide ONLY the commit message, no explanations."""
                 else:
                     result = auto_rag.chat(prompt)
             else:
-                # Unified display mode dispatcher
-                display_mode = getattr(self.args, 'display', 'status')
+                # Resolve display mode from CLI flags
+                display_mode = self._resolve_display_mode()
                 
-                # Also check Typer global state (for -o json, --quiet, etc.)
-                try:
-                    from .app import state as typer_state
-                    if typer_state.quiet:
-                        display_mode = 'minimal'
-                    elif typer_state.output_format.value == 'json':
-                        display_mode = 'json'
-                    elif typer_state.output_format.value == 'stream-json':
-                        display_mode = 'jsonl'
-                    elif typer_state.screen_reader:
-                        display_mode = 'debug'  # trace-like, no spinners
-                except (ImportError, AttributeError):
-                    pass
-                
-                # Check legacy verbose flag
-                is_verbose = agent_config.get("verbose", False)
-                if is_verbose and display_mode == 'status':
-                    display_mode = 'verbose'
-                
-                if display_mode == 'minimal':
-                    # Quiet: result only, no spinners
+                if display_mode == 'silent':
+                    # -qq: No output at all, exit code only
                     if hasattr(agent, 'start'):
                         result = agent.start(prompt)
                     else:
                         result = agent.chat(prompt)
-                    # Still print the result
+                
+                elif display_mode == 'quiet':
+                    # -q: Result only, no spinners or status
+                    if hasattr(agent, 'start'):
+                        result = agent.start(prompt)
+                    else:
+                        result = agent.chat(prompt)
                     if result is not None:
                         output = getattr(result, 'output', None) or (str(result) if result else None)
                         if output:
                             print(output)
                 
                 elif display_mode == 'verbose':
-                    # SDK StatusOutput with timestamps and metrics
+                    # -v: SDK StatusOutput with timestamps and metrics
                     try:
                         from praisonaiagents.output.status import enable_status_output, disable_status_output
                         enable_status_output(show_timestamps=True, show_metrics=True)
@@ -4315,7 +4309,7 @@ Provide ONLY the commit message, no explanations."""
                             result = agent.chat(prompt)
                 
                 elif display_mode == 'debug':
-                    # SDK TraceOutput with markdown
+                    # -vv: SDK TraceOutput with markdown rendering
                     try:
                         from praisonaiagents.output.trace import enable_trace_output, disable_trace_output
                         enable_trace_output(use_markdown=True)
@@ -4331,7 +4325,7 @@ Provide ONLY the commit message, no explanations."""
                             result = agent.chat(prompt)
                 
                 elif display_mode == 'jsonl':
-                    # JSONL structured output for CI/CD
+                    # --output jsonl: JSONL structured output for CI/CD
                     from .features.display_jsonl import JsonlDisplay
                     from praisonaiagents.main import register_display_callback as _reg_cb
                     
@@ -4367,7 +4361,7 @@ Provide ONLY the commit message, no explanations."""
                         print(result)
                 
                 elif display_mode == 'json':
-                    # JSON envelope output
+                    # --output json: JSON envelope output
                     import json as json_mod
                     start_time = time.time()
                     if hasattr(agent, 'start'):
@@ -4388,7 +4382,7 @@ Provide ONLY the commit message, no explanations."""
                     print(json_mod.dumps(envelope, indent=2))
                 
                 elif display_mode == 'flow':
-                    # SDK FlowDisplay - visual agent→tool chart
+                    # --flow: SDK FlowDisplay - visual agent→tool chart
                     try:
                         from praisonaiagents.flow_display import track_workflow
                         flow = track_workflow()
@@ -4405,8 +4399,21 @@ Provide ONLY the commit message, no explanations."""
                             result = agent.chat(prompt)
                 
                 else:
-                    # Default "status" mode - enhanced interactive display
-                    result = self._run_with_status_display(agent, prompt)
+                    # Default: SDK status output — clean inline progress
+                    # Shows: spinner + tool calls, no panels, no timestamps
+                    try:
+                        from praisonaiagents.output.status import enable_status_output, disable_status_output
+                        enable_status_output(show_timestamps=False, show_metrics=False)
+                        if hasattr(agent, 'start'):
+                            result = agent.start(prompt)
+                        else:
+                            result = agent.chat(prompt)
+                        disable_status_output()
+                    except ImportError:
+                        if hasattr(agent, 'start'):
+                            result = agent.start(prompt)
+                        else:
+                            result = agent.chat(prompt)
             
             # ===== POST-PROCESSING WITH NEW FEATURES =====
             
@@ -4590,14 +4597,60 @@ Now, {final_instruction.lower()}:"""
         # Return the actual result for any downstream processing
         return result.output
 
+    def _resolve_display_mode(self):
+        """Map CLI flags to a display mode string.
+        
+        Priority: --output > --flow > --display (deprecated) > -v/-q > default.
+        Returns one of: 'silent', 'quiet', 'verbose', 'debug', 'json', 'jsonl', 'flow', 'status'.
+        """
+        # Machine formats take highest priority
+        output_fmt = getattr(self.args, 'output_format', None)
+        if output_fmt:
+            return output_fmt  # "json" or "jsonl"
+        
+        # --flow is an independent feature flag
+        if getattr(self.args, 'flow', False) or getattr(self.args, 'flow_display', False):
+            return 'flow'
+        
+        # Check Typer global state (for Typer subcommands)
+        try:
+            from .app import state as typer_state
+            if typer_state.quiet:
+                return 'quiet'
+            if hasattr(typer_state, 'output_format'):
+                if typer_state.output_format.value == 'json':
+                    return 'json'
+                elif typer_state.output_format.value == 'stream-json':
+                    return 'jsonl'
+            if typer_state.screen_reader:
+                return 'verbose'  # Accessible: timestamps but no spinners
+        except (ImportError, AttributeError):
+            pass
+        
+        # Verbosity ladder: -v/-vv/-q/-qq
+        v = getattr(self.args, 'verbose', 0)
+        q = getattr(self.args, 'quiet', 0)
+        if q >= 2:
+            return 'silent'
+        if q >= 1:
+            return 'quiet'
+        if v >= 2:
+            return 'debug'
+        if v >= 1:
+            return 'verbose'
+        
+        return 'status'  # Default: Rich Live TUI
+
     def _run_with_status_display(self, agent, prompt):
         """
-        Run agent with minimal status display (spinner + tool/handoff updates).
+        Run agent with Rich Live TUI display (default CLI experience).
         
         Shows:
-        - "Generating..." with spinner while processing
+        - Spinner with emoji (🤖 thinking, ⏳ tools)
         - Real-time tool call notifications via registered callback
+        - Autonomy iteration badges
         - Agent handoff notifications
+        - Elapsed time with pause tracking during approval
         """
         import threading
         import time
@@ -4660,7 +4713,7 @@ Now, {final_instruction.lower()}:"""
         }
         
         # P7/G3: Get display mode for tool args/results visibility
-        display_mode = getattr(self.args, 'display', 'status')
+        display_mode = self._resolve_display_mode()
         
         # Phase 0: Smart action verb mapping for tool names
         _TOOL_VERBS = {

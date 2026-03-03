@@ -99,10 +99,15 @@ def is_legacy_invocation(argv: List[str]) -> bool:
         '-p', '--autonomy', '--trust',
         '--sandbox', '--external-agent', '--compare', '--interval', '--timeout',
         '--max-cost', '--rpm', '--tpm', '--temperature',
+        # Display flags (verbosity ladder + machine output)
+        '--output', '--flow',
     ]
     
     for arg in argv:
         if arg in legacy_flags:
+            return True
+        # Handle -vv, -qq, -vvv etc. (count flags not in Typer)
+        if len(arg) > 2 and arg.startswith('-') and not arg.startswith('--') and arg[1:] in ('vv', 'qq', 'vvv', 'qqq'):
             return True
     
     # Check if first arg is a legacy command not in Typer
