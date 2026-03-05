@@ -5166,7 +5166,9 @@ Your Goal: {self.goal}"""
                     "display_fn": self._display_generating if self.verbose else None,
                     "reasoning_steps": reasoning_steps,
                     "verbose": self.verbose,
-                    "max_iterations": 10
+                    "max_iterations": 10,
+                    "stream_callback": self.stream_emitter.emit,
+                    "emit_events": True,
                 }
                 if response_format:
                     chat_kwargs["response_format"] = response_format
@@ -7419,11 +7421,31 @@ Write the complete compiled report:"""
                     if formatted_tools:
                         completion_args["tools"] = formatted_tools
                     
+                    # Import StreamEvent types for event emission
+                    from ..streaming.events import StreamEvent, StreamEventType
+                    import time as time_module
+                    
+                    # Emit REQUEST_START event
+                    request_start_perf = time_module.perf_counter()
+                    self.stream_emitter.emit(StreamEvent(
+                        type=StreamEventType.REQUEST_START,
+                        timestamp=request_start_perf,
+                        metadata={"model": self.llm, "message_count": len(messages)}
+                    ))
+                    
                     completion = self._openai_client.sync_client.chat.completions.create(**completion_args)
+                    
+                    # Emit HEADERS_RECEIVED event
+                    self.stream_emitter.emit(StreamEvent(
+                        type=StreamEventType.HEADERS_RECEIVED,
+                        timestamp=time_module.perf_counter()
+                    ))
                     
                     # Stream the response chunks without display
                     response_text = ""
                     tool_calls_data = []
+                    first_token_emitted = False
+                    last_content_time = None
                     
                     for chunk in completion:
                         delta = chunk.choices[0].delta
@@ -7432,6 +7454,24 @@ Write the complete compiled report:"""
                         if delta.content is not None:
                             chunk_content = delta.content
                             response_text += chunk_content
+                            last_content_time = time_module.perf_counter()
+                            
+                            # Emit FIRST_TOKEN on first content
+                            if not first_token_emitted:
+                                self.stream_emitter.emit(StreamEvent(
+                                    type=StreamEventType.FIRST_TOKEN,
+                                    timestamp=last_content_time,
+                                    content=chunk_content
+                                ))
+                                first_token_emitted = True
+                            else:
+                                # Emit DELTA_TEXT for subsequent tokens
+                                self.stream_emitter.emit(StreamEvent(
+                                    type=StreamEventType.DELTA_TEXT,
+                                    timestamp=last_content_time,
+                                    content=chunk_content
+                                ))
+                            
                             yield chunk_content
                         
                         # Handle tool calls (accumulate but don't yield as chunks)
@@ -7448,6 +7488,18 @@ Write the complete compiled report:"""
                                     tool_calls_data[tool_call_delta.index]['function']['name'] = tool_call_delta.function.name
                                 if tool_call_delta.function.arguments:
                                     tool_calls_data[tool_call_delta.index]['function']['arguments'] += tool_call_delta.function.arguments
+                    
+                    # Emit LAST_TOKEN and STREAM_END events after streaming loop
+                    if last_content_time:
+                        self.stream_emitter.emit(StreamEvent(
+                            type=StreamEventType.LAST_TOKEN,
+                            timestamp=last_content_time
+                        ))
+                    self.stream_emitter.emit(StreamEvent(
+                        type=StreamEventType.STREAM_END,
+                        timestamp=time_module.perf_counter(),
+                        metadata={"response_length": len(response_text)}
+                    ))
                     
                     # Handle any tool calls that were accumulated
                     if tool_calls_data:

@@ -1156,6 +1156,8 @@ class OpenAIClient:
         reasoning_steps: bool = False,
         verbose: bool = True,
         max_iterations: int = 10,
+        stream_callback: Optional[Callable] = None,
+        emit_events: bool = False,
         **kwargs
     ) -> Optional[ChatCompletion]:
         """
@@ -1179,6 +1181,8 @@ class OpenAIClient:
             reasoning_steps: Whether to show reasoning
             verbose: Whether to show verbose output
             max_iterations: Maximum tool calling iterations
+            stream_callback: Optional callback for StreamEvent emission
+            emit_events: Whether to emit StreamEvents (requires stream_callback)
             **kwargs: Additional API parameters
             
         Returns:
@@ -1208,6 +1212,8 @@ class OpenAIClient:
                     console=console,
                     display_fn=display_fn,
                     reasoning_steps=reasoning_steps,
+                    stream_callback=stream_callback,
+                    emit_events=emit_events,
                     **kwargs
                 )
             else:
@@ -1377,6 +1383,8 @@ class OpenAIClient:
         reasoning_steps: bool = False,
         verbose: bool = True,
         max_iterations: int = 10,
+        stream_callback: Optional[Callable] = None,
+        emit_events: bool = False,
         **kwargs
     ) -> Optional[ChatCompletion]:
         """
@@ -1394,6 +1402,8 @@ class OpenAIClient:
             reasoning_steps: Whether to show reasoning
             verbose: Whether to show verbose output
             max_iterations: Maximum tool calling iterations
+            stream_callback: Optional callback for StreamEvent emission (can be sync or async)
+            emit_events: Whether to emit StreamEvents (requires stream_callback)
             **kwargs: Additional API parameters
             
         Returns:
@@ -1419,6 +1429,8 @@ class OpenAIClient:
                     console=console,
                     display_fn=display_fn,
                     reasoning_steps=reasoning_steps,
+                    stream_callback=stream_callback,
+                    emit_events=emit_events,
                     **kwargs
                 )
             else:

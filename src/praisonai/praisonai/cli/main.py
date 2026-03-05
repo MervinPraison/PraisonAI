@@ -4401,16 +4401,8 @@ Provide ONLY the commit message, no explanations."""
                 elif display_mode == 'editor':
                     # --output editor: User-friendly step-by-step format
                     # Uses SDK EditorOutput (Step 1: 📄 Creating file → ✓ Done)
-                    try:
-                        from praisonaiagents.output.editor import enable_editor_output, disable_editor_output
-                        editor = enable_editor_output(use_color=True)
-                    except ImportError:
-                        # Fallback to local module if SDK version unavailable
-                        from .features.editor_display import EditorDisplay, create_editor_callbacks
-                        from praisonaiagents.main import register_display_callback as _reg_cb
-                        editor = EditorDisplay()
-                        for event_type, cb in create_editor_callbacks(editor).items():
-                            _reg_cb(event_type, cb)
+                    from praisonaiagents.output.editor import enable_editor_output, disable_editor_output
+                    editor = enable_editor_output(use_color=True)
                     
                     # Run agent
                     if hasattr(agent, 'start'):
@@ -4421,7 +4413,7 @@ Provide ONLY the commit message, no explanations."""
                     # Display final result
                     output = result.output if hasattr(result, 'output') else str(result)
                     if output:
-                        editor.output(output) if hasattr(editor, 'output') else None
+                        editor.output(output)
                     
                     # Show summary
                     elapsed = editor.elapsed_time()
@@ -4429,6 +4421,8 @@ Provide ONLY the commit message, no explanations."""
                         f"Duration: {elapsed:.1f}s",
                         f"Blocks: {len(editor.get_blocks())}",
                     ])
+                    
+                    disable_editor_output()
                 
                 else:
                     # Default: SDK status output — clean inline progress

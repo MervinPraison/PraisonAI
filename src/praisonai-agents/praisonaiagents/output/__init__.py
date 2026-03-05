@@ -49,6 +49,15 @@ __all__ = [
     "disable_trace_output",
     "is_trace_output_enabled",
     "get_trace_output",
+    # Editor output (for editor preset - beginner-friendly numbered steps)
+    "EditorOutput",
+    "enable_editor_output",
+    "disable_editor_output",
+    "is_editor_output_enabled",
+    "get_editor_output",
+    "TOOL_LABELS",
+    "BlockType",
+    "DisplayBlock",
 ]
 
 
@@ -111,5 +120,38 @@ def __getattr__(name: str):
     if name == "get_trace_output":
         from .trace import get_trace_output
         return get_trace_output
+    
+    # Editor output (for editor preset - beginner-friendly numbered steps)
+    if name == "EditorOutput":
+        from .editor import EditorOutput
+        return EditorOutput
+    
+    if name == "enable_editor_output":
+        from .editor import enable_editor_output
+        return enable_editor_output
+    
+    if name == "disable_editor_output":
+        from .editor import disable_editor_output
+        return disable_editor_output
+    
+    if name == "is_editor_output_enabled":
+        from .editor import is_editor_output_enabled
+        return is_editor_output_enabled
+    
+    if name == "get_editor_output":
+        from .editor import get_editor_output
+        return get_editor_output
+    
+    if name == "TOOL_LABELS":
+        from .editor import TOOL_LABELS
+        return TOOL_LABELS
+    
+    if name == "BlockType":
+        from .editor import BlockType
+        return BlockType
+    
+    if name == "DisplayBlock":
+        from .editor import DisplayBlock
+        return DisplayBlock
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
