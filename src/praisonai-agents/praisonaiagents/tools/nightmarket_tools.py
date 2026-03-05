@@ -20,10 +20,27 @@ the x402 payment protocol — no API keys or subscriptions needed.
 from typing import List, Dict, Optional
 import logging
 import json
+from urllib.request import urlopen, Request
+from urllib.error import HTTPError
+from urllib.parse import urlencode, quote
 
 logger = logging.getLogger(__name__)
 
 NIGHTMARKET_BASE_URL = "https://nightmarket.ai/api"
+
+# Allowed headers that can be passed through to API calls
+_SAFE_HEADERS = frozenset({
+    "accept", "content-type", "payment-signature", "authorization",
+    "x-api-key", "user-agent",
+})
+
+
+def _validate_endpoint_id(endpoint_id: str) -> str:
+    """Validate and sanitize endpoint_id to prevent path traversal."""
+    sanitized = quote(endpoint_id, safe="")
+    if ".." in endpoint_id or "/" in endpoint_id:
+        raise ValueError(f"Invalid endpoint_id: {endpoint_id}")
+    return sanitized
 
 
 def nightmarket_search(query: str = "", sort: str = "popular") -> List[Dict]:
@@ -37,9 +54,6 @@ def nightmarket_search(query: str = "", sort: str = "popular") -> List[Dict]:
         List of available API services with id, name, description, method, price, and seller info
     """
     try:
-        from urllib.request import urlopen, Request
-        from urllib.parse import urlencode
-
         params = {"sort": sort}
         if query:
             params["search"] = query
@@ -49,7 +63,7 @@ def nightmarket_search(query: str = "", sort: str = "popular") -> List[Dict]:
         with urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode())
     except Exception as e:
-        logger.error(f"Nightmarket search failed: {e}")
+        logger.exception(f"Nightmarket search failed: {e}")
         return [{"error": str(e)}]
 
 
@@ -63,20 +77,20 @@ def nightmarket_service_details(endpoint_id: str) -> Dict:
         Service details including name, description, method, price, request/response examples
     """
     try:
-        from urllib.request import urlopen, Request
-
-        url = f"{NIGHTMARKET_BASE_URL}/marketplace/{endpoint_id}"
+        safe_id = _validate_endpoint_id(endpoint_id)
+        url = f"{NIGHTMARKET_BASE_URL}/marketplace/{safe_id}"
         req = Request(url, headers={"Accept": "application/json"})
         with urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode())
     except Exception as e:
-        logger.error(f"Nightmarket service details failed: {e}")
+        logger.exception(f"Nightmarket service details failed: {e}")
         return {"error": str(e)}
 
 
 def nightmarket_call(
     endpoint_id: str,
     method: str = "GET",
+    params: Optional[Dict] = None,
     body: Optional[Dict] = None,
     headers: Optional[Dict] = None,
     payment_signature: Optional[str] = None,
@@ -87,6 +101,7 @@ def nightmarket_call(
     Args:
         endpoint_id: The service endpoint ID
         method: HTTP method — GET, POST, PUT, PATCH, DELETE (default: GET)
+        params: Query parameters for the request URL (optional)
         body: Request body for POST/PUT/PATCH (optional)
         headers: Additional HTTP headers (optional)
         payment_signature: Base64-encoded x402 payment proof from CrowPay (optional)
@@ -95,13 +110,17 @@ def nightmarket_call(
         API response, or 402 payment details if unpaid
     """
     try:
-        from urllib.request import urlopen, Request
-        from urllib.error import HTTPError
+        safe_id = _validate_endpoint_id(endpoint_id)
+        url = f"{NIGHTMARKET_BASE_URL}/x402/{safe_id}"
+        if params:
+            url = f"{url}?{urlencode(params, doseq=True)}"
 
-        url = f"{NIGHTMARKET_BASE_URL}/x402/{endpoint_id}"
         req_headers = {"Accept": "application/json"}
         if headers:
-            req_headers.update(headers)
+            # Filter to safe headers only
+            for k, v in headers.items():
+                if k.lower() in _SAFE_HEADERS:
+                    req_headers[k] = v
         if payment_signature:
             req_headers["payment-signature"] = payment_signature
 
@@ -117,7 +136,11 @@ def nightmarket_call(
                 return result
         except HTTPError as e:
             if e.code == 402:
-                payment_info = json.loads(e.read().decode()) if e.read else {}
+                raw_body = e.read()
+                try:
+                    payment_info = json.loads(raw_body.decode()) if raw_body else {}
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    payment_info = {"raw_body": raw_body.decode(errors="replace")} if raw_body else {}
                 payment_header = e.headers.get("PAYMENT-REQUIRED", "")
                 return {
                     "status": 402,
@@ -127,5 +150,5 @@ def nightmarket_call(
                 }
             raise
     except Exception as e:
-        logger.error(f"Nightmarket call failed: {e}")
+        logger.exception(f"Nightmarket call failed: {e}")
         return {"error": str(e)}
