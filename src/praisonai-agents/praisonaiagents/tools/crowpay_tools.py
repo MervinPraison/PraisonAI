@@ -7,26 +7,51 @@ from praisonaiagents.tools import crowpay_setup, crowpay_authorize, crowpay_auth
 wallet = crowpay_setup()
 
 # Authorize an x402 payment (after getting a 402 response)
-result = crowpay_authorize(api_key, payment_required_body, "ServiceName", "Why paying")
+result = crowpay_authorize(payment_required_body, "ServiceName", "Why paying")
 
 # Authorize a credit card payment
-result = crowpay_authorize_card(api_key, 500, "OpenAI", "GPT-4 credits")
+result = crowpay_authorize_card(500, "OpenAI", "GPT-4 credits")
 
 # Poll for human approval status
-status = crowpay_poll_status(api_key, approval_id)
+status = crowpay_poll_status(approval_id)
 
 CrowPay (https://crowpay.ai) provides managed wallets for AI agents with spending rules,
 human approval workflows, and audit trails. Supports x402 (USDC on Base) and credit card
 payments via the x402 payment protocol.
+
+Set CROWPAY_API_KEY environment variable to avoid passing keys in function arguments.
 """
 
 from typing import Dict, Optional
 import logging
 import json
+import os
+from urllib.request import urlopen, Request
+from urllib.error import HTTPError
+from urllib.parse import urlencode, quote
 
 logger = logging.getLogger(__name__)
 
 CROWPAY_BASE_URL = "https://api.crowpay.ai"
+
+
+def _get_api_key(explicit_key: Optional[str] = None) -> str:
+    """Get API key from explicit argument or CROWPAY_API_KEY environment variable."""
+    key = explicit_key or os.environ.get("CROWPAY_API_KEY", "")
+    if not key:
+        raise ValueError("No API key provided. Set CROWPAY_API_KEY env var or pass api_key argument.")
+    return key
+
+
+def _parse_http_error(e: HTTPError) -> Dict:
+    """Safely parse HTTP error responses, preserving status code."""
+    raw = e.read().decode("utf-8", errors="replace") if e.fp else ""
+    try:
+        payload = json.loads(raw) if raw else {}
+    except json.JSONDecodeError:
+        payload = {"error": raw or str(e)}
+    payload["_status_code"] = e.code
+    return payload
 
 
 def crowpay_setup(network: str = "eip155:8453") -> Dict:
@@ -42,8 +67,6 @@ def crowpay_setup(network: str = "eip155:8453") -> Dict:
         Dict with apiKey, walletAddress, claimUrl, fundingInstructions
     """
     try:
-        from urllib.request import urlopen, Request
-
         data = json.dumps({"network": network}).encode()
         req = Request(
             f"{CROWPAY_BASE_URL}/setup",
@@ -54,25 +77,25 @@ def crowpay_setup(network: str = "eip155:8453") -> Dict:
         with urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode())
     except Exception as e:
-        logger.error(f"CrowPay setup failed: {e}")
+        logger.exception(f"CrowPay setup failed: {e}")
         return {"error": str(e)}
 
 
 def crowpay_authorize(
-    api_key: str,
     payment_required: Dict,
     merchant: str,
     reason: str,
+    api_key: Optional[str] = None,
     platform: str = "PraisonAI",
     service: str = "",
 ) -> Dict:
     """Authorize an x402 payment. Forward the 402 response body from an API here.
 
     Args:
-        api_key: CrowPay API key (crow_sk_...)
         payment_required: The full HTTP 402 response body from the x402 API
         merchant: Human-readable name of the service
         reason: Why the payment is needed
+        api_key: CrowPay API key (optional if CROWPAY_API_KEY env var is set)
         platform: Which platform is making the request (default: PraisonAI)
         service: What service/product the payment is for (optional)
 
@@ -82,8 +105,7 @@ def crowpay_authorize(
         On 403: denied with reason
     """
     try:
-        from urllib.request import urlopen, Request
-        from urllib.error import HTTPError
+        key = _get_api_key(api_key)
 
         body = {
             "paymentRequired": payment_required,
@@ -100,7 +122,7 @@ def crowpay_authorize(
             data=data,
             headers={
                 "Content-Type": "application/json",
-                "X-API-Key": api_key,
+                "X-API-Key": key,
             },
             method="POST",
         )
@@ -108,20 +130,17 @@ def crowpay_authorize(
             with urlopen(req, timeout=15) as resp:
                 return json.loads(resp.read().decode())
         except HTTPError as e:
-            resp_body = e.read().decode() if e.read else "{}"
-            result = json.loads(resp_body)
-            result["_status_code"] = e.code
-            return result
+            return _parse_http_error(e)
     except Exception as e:
-        logger.error(f"CrowPay authorize failed: {e}")
+        logger.exception(f"CrowPay authorize failed: {e}")
         return {"error": str(e)}
 
 
 def crowpay_authorize_card(
-    api_key: str,
     amount_cents: int,
     merchant: str,
     reason: str,
+    api_key: Optional[str] = None,
     currency: str = "usd",
     platform: str = "PraisonAI",
     service: str = "",
@@ -129,10 +148,10 @@ def crowpay_authorize_card(
     """Request a credit card payment via CrowPay.
 
     Args:
-        api_key: CrowPay API key (crow_sk_...)
         amount_cents: Amount in cents (1000 = $10.00)
         merchant: Merchant name
         reason: Why the payment is needed
+        api_key: CrowPay API key (optional if CROWPAY_API_KEY env var is set)
         currency: Currency code (default: usd)
         platform: Which platform is making the request (default: PraisonAI)
         service: What service/product the payment is for (optional)
@@ -143,8 +162,7 @@ def crowpay_authorize_card(
         On 403: denied with reason
     """
     try:
-        from urllib.request import urlopen, Request
-        from urllib.error import HTTPError
+        key = _get_api_key(api_key)
 
         body = {
             "amountCents": amount_cents,
@@ -162,7 +180,7 @@ def crowpay_authorize_card(
             data=data,
             headers={
                 "Content-Type": "application/json",
-                "X-API-Key": api_key,
+                "X-API-Key": key,
             },
             method="POST",
         )
@@ -170,53 +188,50 @@ def crowpay_authorize_card(
             with urlopen(req, timeout=15) as resp:
                 return json.loads(resp.read().decode())
         except HTTPError as e:
-            resp_body = e.read().decode() if e.read else "{}"
-            result = json.loads(resp_body)
-            result["_status_code"] = e.code
-            return result
+            return _parse_http_error(e)
     except Exception as e:
-        logger.error(f"CrowPay card authorize failed: {e}")
+        logger.exception(f"CrowPay card authorize failed: {e}")
         return {"error": str(e)}
 
 
-def crowpay_poll_status(api_key: str, approval_id: str) -> Dict:
+def crowpay_poll_status(approval_id: str, api_key: Optional[str] = None) -> Dict:
     """Poll for the status of a pending CrowPay approval.
 
     Call every 3 seconds until you get a terminal state.
 
     Args:
-        api_key: CrowPay API key (crow_sk_...)
         approval_id: The approvalId from a 202 response
+        api_key: CrowPay API key (optional if CROWPAY_API_KEY env var is set)
 
     Returns:
         Status dict. Terminal states: payload/sptToken present (approved),
         status=denied, status=timeout, status=failed
     """
     try:
-        from urllib.request import urlopen, Request
+        key = _get_api_key(api_key)
 
-        url = f"{CROWPAY_BASE_URL}/authorize/status?id={approval_id}"
-        req = Request(url, headers={"X-API-Key": api_key})
+        url = f"{CROWPAY_BASE_URL}/authorize/status?{urlencode({'id': approval_id})}"
+        req = Request(url, headers={"X-API-Key": key})
         with urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode())
     except Exception as e:
-        logger.error(f"CrowPay poll failed: {e}")
+        logger.exception(f"CrowPay poll failed: {e}")
         return {"error": str(e)}
 
 
-def crowpay_settle(api_key: str, transaction_id: str, tx_hash: str) -> Dict:
+def crowpay_settle(transaction_id: str, tx_hash: str, api_key: Optional[str] = None) -> Dict:
     """Report x402 payment settlement. Idempotent — safe to call multiple times.
 
     Args:
-        api_key: CrowPay API key (crow_sk_...)
         transaction_id: Transaction ID from the authorize response
         tx_hash: On-chain transaction hash
+        api_key: CrowPay API key (optional if CROWPAY_API_KEY env var is set)
 
     Returns:
         Success confirmation
     """
     try:
-        from urllib.request import urlopen, Request
+        key = _get_api_key(api_key)
 
         data = json.dumps({"transactionId": transaction_id, "txHash": tx_hash}).encode()
         req = Request(
@@ -224,12 +239,12 @@ def crowpay_settle(api_key: str, transaction_id: str, tx_hash: str) -> Dict:
             data=data,
             headers={
                 "Content-Type": "application/json",
-                "X-API-Key": api_key,
+                "X-API-Key": key,
             },
             method="POST",
         )
         with urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode())
     except Exception as e:
-        logger.error(f"CrowPay settle failed: {e}")
+        logger.exception(f"CrowPay settle failed: {e}")
         return {"error": str(e)}
