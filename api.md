@@ -923,6 +923,8 @@ Methods:
 * <code title="cli">praisonai profile snapshot <a href="./src/praisonai/praisonai/cli/commands/profile.py">--help</a></code>
 * <code title="cli">praisonai profile startup <a href="./src/praisonai/praisonai/cli/commands/profile.py">--help</a></code>
 * <code title="cli">praisonai profile suite <a href="./src/praisonai/praisonai/cli/commands/profile.py">--help</a></code>
+* <code title="cli">praisonai publish publish-main <a href="./src/praisonai/praisonai/cli/commands/publish.py">--help</a></code>
+* <code title="cli">praisonai publish pypi <a href="./src/praisonai/praisonai/cli/commands/publish.py">--help</a></code>
 * <code title="cli">praisonai rag chat <a href="./src/praisonai/praisonai/cli/commands/rag.py">--help</a></code>
 * <code title="cli">praisonai rag eval <a href="./src/praisonai/praisonai/cli/commands/rag.py">--help</a></code>
 * <code title="cli">praisonai rag index <a href="./src/praisonai/praisonai/cli/commands/rag.py">--help</a></code>
