@@ -13,7 +13,7 @@ from typing import List, Tuple
 LEGACY_COMMANDS = {
     'chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research',
     'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools',
-    'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile',
+    'todo', 'docs', 'mcp', 'commit', 'publish', 'serve', 'schedule', 'skills', 'profile',
     'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy',
     'templates', 'recipe', 'endpoints', 'audio', 'embed', 'images', 'moderate',
     'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants',
@@ -34,7 +34,7 @@ TYPER_COMMANDS = {
     # Previously legacy-only commands (now in Typer)
     'chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research',
     'memory', 'workflow', 'tools', 'knowledge', 'deploy', 'agents', 'skills',
-    'eval', 'templates', 'recipe', 'todo', 'docs', 'commit', 'hooks', 'rules',
+    'eval', 'templates', 'recipe', 'todo', 'docs', 'commit', 'publish', 'hooks', 'rules',
     'registry', 'package', 'endpoints', 'test', 'examples', 'batch',
     # Replay commands
     'replay',

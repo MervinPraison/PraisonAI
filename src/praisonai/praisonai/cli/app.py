@@ -209,6 +209,7 @@ def register_commands():
     from .commands.todo import app as todo_app
     from .commands.docs import app as docs_app
     from .commands.commit import app as commit_app
+    from .commands.publish import app as publish_app
     from .commands.hooks import app as hooks_app
     from .commands.rules import app as rules_app
     from .commands.registry import app as registry_app
@@ -278,6 +279,7 @@ def register_commands():
     app.add_typer(todo_app, name="todo", help="Todo/task management")
     app.add_typer(docs_app, name="docs", help="Documentation management")
     app.add_typer(commit_app, name="commit", help="AI-assisted git commits")
+    app.add_typer(publish_app, name="publish", help="Package publishing")
     app.add_typer(hooks_app, name="hooks", help="Hook management")
     app.add_typer(rules_app, name="rules", help="Rules management")
     app.add_typer(registry_app, name="registry", help="Registry management")
