@@ -3516,7 +3516,7 @@ class PraisonAI:
                 return
             
             # Handle auto mode
-            auto_mode = '-a' in args or '--auto' in args
+            auto_mode = '-a' in args or '--auto' in args or '--all' in args
             if auto_mode:
                 print("[cyan]Auto-staging all changes...[/cyan]")
                 subprocess.run(["git", "add", "-A"], capture_output=True)
