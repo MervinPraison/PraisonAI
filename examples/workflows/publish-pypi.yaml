@@ -1,0 +1,40 @@
+# Example Step Workflow: Publish to PyPI
+# Usage:
+#   praisonai workflow run publish-pypi.yaml --dry-run
+#   praisonai workflow run publish-pypi.yaml
+#   praisonai workflow run publish-pypi.yaml --major
+#   praisonai workflow run publish-pypi.yaml --minor
+#   praisonai workflow run publish-pypi.yaml --no-bump
+
+type: job
+name: publish-pypi
+description: Publish package to PyPI with automatic version bump
+
+vars:
+  token_var:
+    default: PYPI_TOKEN
+    description: Environment variable for PyPI token
+
+flags:
+  major: { description: "Bump major version (X.0.0)" }
+  minor: { description: "Bump minor version (X.Y.0)" }
+  no-bump: { description: "Skip version bump" }
+
+steps:
+  - name: Bump version
+    action: bump-version
+    file: pyproject.toml
+    strategy: patch
+    if: "{{ not flags.no_bump }}"
+
+  - name: Clean dist
+    run: rm -rf dist
+
+  - name: Lock dependencies
+    run: uv lock
+
+  - name: Build package
+    run: uv build
+
+  - name: Publish to PyPI
+    run: uv publish --token ${{ env.PYPI_TOKEN }}

@@ -1,0 +1,33 @@
+# Example: File-Based Actions (Option A)
+#
+# Actions loaded from .py files in the actions/ directory next to this workflow.
+# Each action file exports: run(step, flags, cwd) → dict
+#
+# Directory structure:
+#   examples/workflows/
+#   ├── file-actions-demo.yaml   ← this file
+#   └── actions/
+#       ├── system_info.py       ← action: system-info
+#       └── line_count.py        ← action: line-count
+#
+# Usage:
+#   praisonai workflow run file-actions-demo.yaml
+#   praisonai workflow run file-actions-demo.yaml --dry-run
+
+type: job
+name: file-actions-demo
+description: Demonstrates file-based custom actions from actions/ directory
+
+steps:
+  - name: System info
+    action: system-info
+
+  - name: Count Python files
+    action: line-count
+    pattern: "*.py"
+    directory: "."
+
+  - name: Count YAML files
+    action: line-count
+    pattern: "*.yaml"
+    directory: "."

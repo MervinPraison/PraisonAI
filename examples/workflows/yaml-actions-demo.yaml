@@ -1,0 +1,40 @@
+# Example: YAML-Defined Actions (Option B)
+#
+# Actions defined inline in the workflow — self-contained, portable.
+# No external files needed.
+#
+# Usage:
+#   praisonai workflow run yaml-actions-demo.yaml
+#   praisonai workflow run yaml-actions-demo.yaml --dry-run
+
+type: job
+name: yaml-actions-demo
+description: Demonstrates YAML-defined custom actions
+
+# Define reusable actions inline
+actions:
+  check-python:
+    run: python3 --version
+
+  count-files:
+    script: |
+      import os
+      cwd = os.getcwd()
+      py_files = [f for f in os.listdir(cwd) if f.endswith('.py')]
+      yaml_files = [f for f in os.listdir(cwd) if f.endswith('.yaml') or f.endswith('.yml')]
+      result = f"Python: {len(py_files)}, YAML: {len(yaml_files)}"
+
+  timestamp:
+    script: |
+      from datetime import datetime
+      result = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+steps:
+  - name: Check Python version
+    action: check-python
+
+  - name: Count project files
+    action: count-files
+
+  - name: Get timestamp
+    action: timestamp

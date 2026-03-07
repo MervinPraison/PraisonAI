@@ -354,6 +354,10 @@ Example:
         """
         Run a YAML workflow file.
         
+        Supports two modes:
+        - type: job  → deterministic step executor (shell, python, actions)
+        - default    → agent workflow (LLM-based)
+        
         Args:
             args: [file.yaml, --var, key=value, ...]
             
@@ -368,6 +372,18 @@ Example:
         if not os.path.exists(file_path):
             self.print_status(f"File not found: {file_path}", "error")
             return None
+        
+        # Detect type: job → route to job executor
+        try:
+            import yaml
+            with open(file_path, 'r') as f:
+                raw_data = yaml.safe_load(f)
+            if isinstance(raw_data, dict) and raw_data.get("type") == "job":
+                from .job_workflow import JobWorkflowExecutor
+                executor = JobWorkflowExecutor(raw_data, file_path)
+                return executor.run(args)
+        except Exception:
+            pass  # Fall through to agent workflow
         
         manager = self._get_manager()
         if not manager:
@@ -564,6 +580,7 @@ Example:
         table = Table(title="Available Workflows")
         table.add_column("File", style="cyan")
         table.add_column("Name", style="green")
+        table.add_column("Type", style="magenta")
         table.add_column("Steps", style="yellow")
         
         parser = self._get_parser()
@@ -571,18 +588,33 @@ Example:
         
         for yaml_file in yaml_files:
             try:
-                if parser:
+                # Check if it's a job workflow
+                import yaml
+                with open(yaml_file, 'r') as f:
+                    raw = yaml.safe_load(f)
+                
+                if isinstance(raw, dict) and raw.get("type") == "job":
+                    wf_name = raw.get("name", yaml_file.stem)
+                    step_count = len(raw.get("steps", []))
+                    table.add_row(
+                        yaml_file.name,
+                        wf_name,
+                        "[bold magenta]job[/bold magenta]",
+                        str(step_count),
+                    )
+                elif parser:
                     workflow = parser.parse_file(yaml_file)
                     table.add_row(
                         yaml_file.name,
                         workflow.name,
-                        str(len(workflow.steps))
+                        "[dim]agent[/dim]",
+                        str(len(workflow.steps)),
                     )
                 else:
-                    table.add_row(yaml_file.name, "N/A", "N/A")
+                    table.add_row(yaml_file.name, "N/A", "?", "N/A")
                 workflow_names.append(yaml_file.name)
             except Exception as e:
-                table.add_row(yaml_file.name, f"Error: {e}", "N/A")
+                table.add_row(yaml_file.name, f"Error: {e}", "?", "N/A")
         
         rprint(table)
         return workflow_names
