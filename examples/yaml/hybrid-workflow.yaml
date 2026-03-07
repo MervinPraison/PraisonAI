@@ -1,0 +1,89 @@
+# Hybrid Workflow Example
+#
+# This workflow demonstrates the `type: hybrid` feature that combines:
+# - Deterministic steps (run, action) from job workflows
+# - Agent-centric steps (agent, judge, approve) from job workflows
+# - Multi-agent workflow steps (workflow, parallel)
+#
+# Run with: praisonai workflow run hybrid-workflow.yaml
+# Dry run:  praisonai workflow run hybrid-workflow.yaml --dry-run
+
+type: hybrid
+name: hybrid-release-pipeline
+description: Hybrid workflow combining shell commands, AI agents, and multi-agent steps
+
+# Define agents for multi-agent workflow steps
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research and gather information
+    instructions: Provide concise, factual research findings
+    model: gpt-4o-mini
+
+  writer:
+    name: Writer
+    role: Content Writer
+    goal: Write clear, engaging content
+    instructions: Write professional documentation
+    model: gpt-4o-mini
+
+flags:
+  skip-tests:
+    description: Skip test execution
+  auto-approve:
+    description: Auto-approve deployment
+
+steps:
+  # Step 1: Deterministic - Check environment
+  - name: Check environment
+    run: echo "Checking environment..." && python --version
+
+  # Step 2: Agent - Generate release notes
+  - name: Generate release notes
+    agent:
+      role: Technical Writer
+      instructions: You write clear, concise release notes
+      prompt: Generate release notes for version 1.2.0 with bug fixes and new features
+      model: gpt-4o-mini
+    output_file: RELEASE_NOTES.md
+
+  # Step 3: Parallel - Run multiple checks simultaneously
+  - name: Parallel checks
+    parallel:
+      - run: echo "Running lint check..."
+      - run: echo "Running type check..."
+      - run: echo "Running security scan..."
+
+  # Step 4: Multi-agent workflow step
+  - name: Research and document
+    workflow:
+      agent: researcher
+      action: Research best practices for release management
+
+  # Step 5: Judge - Quality gate
+  - name: Quality check
+    judge:
+      input_file: RELEASE_NOTES.md
+      criteria: |
+        - Completeness: All sections present
+        - Clarity: Easy to understand
+        - Professional tone
+      threshold: 7.0
+      on_fail: warn
+
+  # Step 6: Approve - Human approval gate
+  - name: Approve release
+    approve:
+      description: Review and approve the release
+      risk_level: medium
+      auto_approve: "{{ flags.auto_approve }}"
+
+  # Step 7: Deterministic - Build
+  - name: Build package
+    run: echo "Building package..."
+    if: "{{ not flags.skip_tests }}"
+
+  # Step 8: Final notification
+  - name: Notify completion
+    run: echo "✅ Hybrid workflow completed successfully!"

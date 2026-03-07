@@ -1,0 +1,70 @@
+# Agent-Centric Job Workflow Example
+# 
+# This workflow demonstrates the new agent-centric step types:
+# - agent:   AI agent execution
+# - judge:   AI quality gate with threshold
+# - approve: AI or human approval gate
+#
+# Run with: praisonai workflow run agent-centric-job-workflow.yaml
+# Dry run:  praisonai workflow run agent-centric-job-workflow.yaml --dry-run
+
+type: job
+name: smart-release
+description: Intelligent release workflow with AI-powered steps
+
+flags:
+  major:
+    description: Bump major version
+  minor:
+    description: Bump minor version
+  skip-approval:
+    description: Skip approval gate (auto-approve)
+
+steps:
+  # Step 1: Deterministic - Bump version
+  - name: Bump version
+    action: bump-version
+    strategy: patch
+
+  # Step 2: Agent - Generate changelog
+  - name: Generate changelog
+    agent:
+      role: Technical Writer
+      instructions: |
+        You are a technical writer who creates clear, concise changelogs.
+        Focus on user-facing changes, bug fixes, and new features.
+      prompt: |
+        Generate a changelog entry for the latest release.
+        Include sections for: Features, Bug Fixes, and Breaking Changes.
+        Keep it concise and professional.
+      model: gpt-4o-mini
+    output_file: CHANGELOG_ENTRY.md
+
+  # Step 3: Judge - Quality check
+  - name: Quality check
+    judge:
+      input_file: CHANGELOG_ENTRY.md
+      criteria: |
+        - Completeness: All sections present (Features, Bug Fixes, Breaking Changes)
+        - Clarity: Easy to understand for end users
+        - Formatting: Proper markdown structure
+        - Conciseness: Not overly verbose
+      threshold: 7.0
+      on_fail: warn
+      model: gpt-4o-mini
+
+  # Step 4: Approve - Human approval gate
+  - name: Approve release
+    approve:
+      description: Review and approve the release
+      risk_level: medium
+      auto_approve: "{{ flags.skip_approval }}"
+
+  # Step 5: Deterministic - Build
+  - name: Build package
+    run: echo "Building package..."
+
+  # Step 6: Deterministic - Publish (conditional)
+  - name: Publish to PyPI
+    run: echo "Publishing to PyPI..."
+    if: "{{ not flags.skip_approval }}"

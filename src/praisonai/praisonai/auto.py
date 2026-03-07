@@ -11,7 +11,7 @@ This module uses FULL LAZY LOADING for all heavy dependencies:
 This ensures minimal import-time overhead.
 """
 from pydantic import BaseModel
-from typing import Dict, List, Optional, Type, TypeVar
+from typing import Any, Dict, List, Optional, Type, TypeVar
 import os
 import json
 import yaml
@@ -1371,6 +1371,170 @@ Example structure:
             }
             if agent_data.get('tools'):
                 workflow_yaml['agents'][agent_id]['tools'] = agent_data['tools']
+        
+        # Write to file
+        full_path = os.path.abspath(self.workflow_file)
+        with open(full_path, 'w') as f:
+            yaml.dump(workflow_yaml, f, default_flow_style=False, sort_keys=False)
+        
+        return full_path
+
+
+# =============================================================================
+# Job Workflow Auto Generator (Strategy 4)
+# =============================================================================
+
+class JobWorkflowStep(BaseModel):
+    """A single step in a job workflow."""
+    name: str
+    step_type: str  # "agent", "judge", "approve", "run", "action"
+    config: Dict[str, Any]
+
+
+class JobWorkflowStructure(BaseModel):
+    """Structure for a job workflow with agent-centric steps."""
+    name: str
+    description: str
+    steps: List[JobWorkflowStep]
+
+
+class JobWorkflowAutoGenerator(BaseAutoGenerator):
+    """
+    Auto-generates job workflow YAML files with agent-centric steps.
+    
+    Generates workflows with `type: job` that include:
+    - agent: steps for AI agent execution
+    - judge: steps for quality gates
+    - approve: steps for approval gates
+    - run: steps for shell commands
+    - action: steps for built-in actions
+    
+    Usage:
+        generator = JobWorkflowAutoGenerator(topic="Generate changelog and publish")
+        path = generator.generate()
+    """
+    
+    def __init__(self, topic: str = "Automate a task",
+                 workflow_file: str = "job_workflow.yaml",
+                 config_list: Optional[List[Dict]] = None):
+        """
+        Initialize the JobWorkflowAutoGenerator.
+        
+        Args:
+            topic: The task/topic for the workflow
+            workflow_file: Output file name
+            config_list: Optional LLM configuration
+        """
+        super().__init__(config_list=config_list)
+        self.topic = topic
+        self.workflow_file = workflow_file
+    
+    def generate(self, include_judge: bool = True, include_approve: bool = False) -> str:
+        """
+        Generate a job workflow YAML file.
+        
+        Args:
+            include_judge: Include a judge step for quality gating
+            include_approve: Include an approve step for human approval
+            
+        Returns:
+            Path to the generated workflow file
+        """
+        prompt = self._get_prompt(include_judge, include_approve)
+        
+        response = self._structured_completion(
+            response_model=JobWorkflowStructure,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that designs job workflow structures with AI agent steps."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return self._save_workflow(response)
+    
+    def _get_prompt(self, include_judge: bool, include_approve: bool) -> str:
+        """Generate the prompt for job workflow generation."""
+        tools_list = ", ".join(self.get_available_tools())
+        
+        prompt = f"""Generate a job workflow structure for: "{self.topic}"
+
+A job workflow uses `type: job` and supports these step types:
+1. **agent** - AI agent execution (role, instructions, prompt, model, tools, output_file)
+2. **judge** - Quality gate with threshold (input_file, criteria, threshold, on_fail)
+3. **approve** - Approval gate (description, risk_level, auto_approve)
+4. **run** - Shell command execution
+5. **action** - Built-in action (e.g., bump-version)
+
+REQUIREMENTS:
+- Create 2-4 steps that accomplish the task
+- At least one step MUST be an "agent" step
+{"- Include a 'judge' step to validate quality" if include_judge else ""}
+{"- Include an 'approve' step for human approval before critical actions" if include_approve else ""}
+- Each step should have a clear name and purpose
+
+Available tools for agent steps: {tools_list}
+
+STEP CONFIG FORMATS:
+- agent: {{"role": "...", "instructions": "...", "prompt": "...", "model": "gpt-4o-mini", "tools": [], "output_file": "..."}}
+- judge: {{"input_file": "...", "criteria": "...", "threshold": 7.0, "on_fail": "stop"}}
+- approve: {{"description": "...", "risk_level": "medium", "auto_approve": false}}
+- run: {{"command": "..."}}
+- action: {{"name": "bump-version", "strategy": "patch"}}
+
+Generate a workflow for: {self.topic}
+"""
+        return prompt
+    
+    def _save_workflow(self, data: JobWorkflowStructure) -> str:
+        """Save the job workflow to a YAML file."""
+        # Build the workflow YAML structure
+        workflow_yaml = {
+            'type': 'job',
+            'name': data.name,
+            'description': data.description,
+            'steps': []
+        }
+        
+        # Convert steps
+        for step in data.steps:
+            step_dict = {'name': step.name}
+            
+            if step.step_type == 'agent':
+                step_dict['agent'] = {
+                    'role': step.config.get('role', 'Assistant'),
+                    'instructions': step.config.get('instructions', ''),
+                    'prompt': step.config.get('prompt', step.config.get('instructions', '')),
+                    'model': step.config.get('model', 'gpt-4o-mini'),
+                }
+                if step.config.get('tools'):
+                    step_dict['agent']['tools'] = step.config['tools']
+                if step.config.get('output_file'):
+                    step_dict['output_file'] = step.config['output_file']
+                    
+            elif step.step_type == 'judge':
+                step_dict['judge'] = {
+                    'input_file': step.config.get('input_file', ''),
+                    'criteria': step.config.get('criteria', 'Output is high quality'),
+                    'threshold': step.config.get('threshold', 7.0),
+                    'on_fail': step.config.get('on_fail', 'stop'),
+                }
+                
+            elif step.step_type == 'approve':
+                step_dict['approve'] = {
+                    'description': step.config.get('description', 'Approve this step'),
+                    'risk_level': step.config.get('risk_level', 'medium'),
+                    'auto_approve': step.config.get('auto_approve', False),
+                }
+                
+            elif step.step_type == 'run':
+                step_dict['run'] = step.config.get('command', 'echo "Step executed"')
+                
+            elif step.step_type == 'action':
+                step_dict['action'] = step.config.get('name', 'bump-version')
+                if step.config.get('strategy'):
+                    step_dict['strategy'] = step.config['strategy']
+            
+            workflow_yaml['steps'].append(step_dict)
         
         # Write to file
         full_path = os.path.abspath(self.workflow_file)

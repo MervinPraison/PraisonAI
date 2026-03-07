@@ -1,9 +1,19 @@
 """
 Job Workflow Executor for PraisonAI CLI.
 
-General-purpose, deterministic step executor for workflows with `type: job`.
-Supports multiple step types: shell commands, Python scripts, inline Python,
-and built-in actions — all in a single YAML workflow.
+General-purpose step executor for workflows with `type: job`.
+Supports multiple step types:
+
+**Deterministic steps** (no LLM):
+    - run:     Shell command via subprocess
+    - python:  Python script file
+    - script:  Inline Python code
+    - action:  Built-in or YAML-defined action
+
+**Agent-centric steps** (AI-powered):
+    - agent:   Single AI agent execution
+    - judge:   AI quality gate with threshold
+    - approve: AI or human approval gate
 
 Usage:
     praisonai workflow run publish-pypi.yaml
@@ -22,13 +32,19 @@ from typing import Any, Dict, List, Optional
 
 class JobWorkflowExecutor:
     """
-    Execute a `type: job` workflow — ordered, deterministic steps.
+    Execute a `type: job` workflow — ordered steps with optional AI integration.
 
     Step types (detected by key):
-        run:     Shell command via subprocess
-        python:  Python script file
-        script:  Inline Python code
-        action:  Built-in action (e.g., bump-version)
+        Deterministic (no LLM):
+            run:     Shell command via subprocess
+            python:  Python script file
+            script:  Inline Python code
+            action:  Built-in or YAML-defined action
+
+        Agent-centric (AI-powered):
+            agent:   Single AI agent execution
+            judge:   AI quality gate with threshold
+            approve: AI or human approval gate
     """
 
     # Built-in actions registry
@@ -60,7 +76,6 @@ class JobWorkflowExecutor:
         """
         from rich.console import Console
         from rich.panel import Panel
-        from rich.table import Table
 
         console = Console()
         dry_run = "--dry-run" in args
@@ -95,16 +110,33 @@ class JobWorkflowExecutor:
             # Detect step type
             step_type, step_target = self._detect_step_type(step)
             if not step_type:
-                console.print(f"  [red]✗ {step_name}[/red] — unknown step type (need run/python/script/action)")
+                console.print(f"  [red]✗ {step_name}[/red] — unknown step type (need run/python/script/action/agent/judge/approve)")
                 results.append({"name": step_name, "status": "error", "error": "unknown step type"})
                 failed = True
                 break
 
-            # Resolve variables in the target
-            step_target = self._resolve_vars(step_target, flags)
+            # Resolve variables in the target (only for string targets)
+            if isinstance(step_target, str):
+                step_target = self._resolve_vars(step_target, flags)
 
             if dry_run:
-                console.print(f"  [cyan]● {step_name}[/cyan] — [dim]{step_type}: {self._truncate(step_target, 80)}[/dim]")
+                # Format dry-run display based on step type
+                if step_type == "agent":
+                    agent_info = step_target if isinstance(step_target, dict) else {"instructions": step_target}
+                    role = agent_info.get("role", "Assistant")
+                    model = agent_info.get("model", "gpt-4o-mini")
+                    display = f"agent: {role} (model: {model})"
+                elif step_type == "judge":
+                    judge_info = step_target if isinstance(step_target, dict) else {"criteria": step_target}
+                    threshold = judge_info.get("threshold", 7.0)
+                    display = f"judge: threshold={threshold}"
+                elif step_type == "approve":
+                    approve_info = step_target if isinstance(step_target, dict) else {"description": step_target}
+                    risk = approve_info.get("risk_level", "medium")
+                    display = f"approve: risk={risk}"
+                else:
+                    display = f"{step_type}: {self._truncate(str(step_target), 80)}"
+                console.print(f"  [cyan]● {step_name}[/cyan] — [dim]{display}[/dim]")
                 results.append({"name": step_name, "status": "dry-run", "type": step_type})
                 continue
 
@@ -151,6 +183,7 @@ class JobWorkflowExecutor:
 
     def _detect_step_type(self, step: Dict) -> tuple:
         """Detect step type from keys. Returns (type, target) or (None, None)."""
+        # Deterministic steps
         if "run" in step:
             return "shell", step["run"]
         if "python" in step:
@@ -159,15 +192,23 @@ class JobWorkflowExecutor:
             return "script", step["script"]
         if "action" in step:
             return "action", step["action"]
+        # Agent-centric steps
+        if "agent" in step:
+            return "agent", step["agent"]
+        if "judge" in step:
+            return "judge", step["judge"]
+        if "approve" in step:
+            return "approve", step["approve"]
         return None, None
 
     # ------------------------------------------------------------------
     # Step executors
     # ------------------------------------------------------------------
 
-    def _execute_step(self, step_type: str, target: str, step: Dict, flags: Dict) -> Dict:
+    def _execute_step(self, step_type: str, target: Any, step: Dict, flags: Dict) -> Dict:
         """Route to the correct executor."""
         try:
+            # Deterministic steps
             if step_type == "shell":
                 return self._exec_shell(target, step)
             elif step_type == "python":
@@ -176,6 +217,13 @@ class JobWorkflowExecutor:
                 return self._exec_inline_python(target, step, flags)
             elif step_type == "action":
                 return self._exec_action(target, step, flags)
+            # Agent-centric steps
+            elif step_type == "agent":
+                return self._exec_agent_step(target, step, flags)
+            elif step_type == "judge":
+                return self._exec_judge_step(target, step, flags)
+            elif step_type == "approve":
+                return self._exec_approve_step(target, step, flags)
             else:
                 return {"ok": False, "error": f"Unknown step type: {step_type}"}
         except Exception as e:
@@ -260,6 +308,9 @@ class JobWorkflowExecutor:
 
     def _exec_yaml_action(self, name: str, action_def: Dict, step: Dict, flags: Dict) -> Dict:
         """Execute an action defined inline in the YAML actions: block."""
+        # Agent-powered action
+        if "agent" in action_def:
+            return self._exec_agent_step(action_def["agent"], {**action_def, **step}, flags)
         if "script" in action_def:
             # Merge action-level config into namespace
             merged_step = {**action_def, **step}
@@ -270,7 +321,7 @@ class JobWorkflowExecutor:
         elif "python" in action_def:
             merged_step = {**action_def, **step}
             return self._exec_python_script(action_def["python"], merged_step)
-        return {"ok": False, "error": f"Action '{name}' has no run/script/python key"}
+        return {"ok": False, "error": f"Action '{name}' has no run/script/python/agent key"}
 
     def _find_action_file(self, action_name: str) -> Optional[Path]:
         """
@@ -329,6 +380,231 @@ class JobWorkflowExecutor:
             "bump-version": self._action_bump_version,
         }
         return builtins.get(action_name)
+
+    # ------------------------------------------------------------------
+    # Agent-centric step executors
+    # ------------------------------------------------------------------
+
+    def _exec_agent_step(self, agent_config: Any, step: Dict, flags: Dict) -> Dict:
+        """
+        Execute an agent step using praisonaiagents.Agent.
+        
+        Args:
+            agent_config: Agent configuration (dict with role, instructions, tools, etc.)
+            step: Full step definition (may include output_file)
+            flags: Workflow flags
+            
+        Returns:
+            Dict with ok, output, and optionally error
+        """
+        try:
+            from praisonaiagents import Agent
+        except ImportError:
+            return {"ok": False, "error": "praisonaiagents not installed. Install with: pip install praisonaiagents"}
+        
+        # Handle both dict config and simple string
+        if isinstance(agent_config, str):
+            agent_config = {"instructions": agent_config}
+        
+        # Build agent
+        agent_name = agent_config.get("name", step.get("name", "workflow-agent"))
+        role = agent_config.get("role", "Assistant")
+        instructions = agent_config.get("instructions", "")
+        model = agent_config.get("model", "gpt-4o-mini")
+        tools = self._resolve_agent_tools(agent_config.get("tools", []))
+        
+        try:
+            agent = Agent(
+                name=agent_name,
+                role=role,
+                instructions=instructions,
+                tools=tools,
+                llm=model,
+            )
+            
+            # Get prompt - use prompt field, or instructions, or goal
+            prompt = agent_config.get("prompt", agent_config.get("goal", instructions))
+            prompt = self._resolve_vars(str(prompt), flags)
+            
+            # Execute agent
+            result = agent.chat(prompt)
+            output = str(result) if result else ""
+            
+            # Write to file if specified
+            output_file = step.get("output_file") or agent_config.get("output_file")
+            if output_file:
+                output_path = Path(self._cwd) / output_file
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_text(output)
+            
+            return {"ok": True, "output": output}
+            
+        except Exception as e:
+            error_msg = str(e)
+            # Check for API key issues
+            if "api_key" in error_msg.lower() or "authentication" in error_msg.lower():
+                return {"ok": False, "error": f"Agent step '{agent_name}' requires an LLM API key. Set OPENAI_API_KEY or use --model ollama/llama3 for local execution. Original error: {error_msg}"}
+            return {"ok": False, "error": error_msg}
+
+    def _exec_judge_step(self, judge_config: Any, step: Dict, flags: Dict) -> Dict:
+        """
+        Execute a judge step for quality gating.
+        
+        Args:
+            judge_config: Judge configuration (dict with input_file, criteria, threshold, etc.)
+            step: Full step definition
+            flags: Workflow flags
+            
+        Returns:
+            Dict with ok, score, feedback, and optionally error
+        """
+        try:
+            from praisonaiagents.eval import Judge
+        except ImportError:
+            return {"ok": False, "error": "praisonaiagents.eval not available. Install with: pip install praisonaiagents"}
+        
+        # Handle both dict config and simple string (criteria)
+        if isinstance(judge_config, str):
+            judge_config = {"criteria": judge_config}
+        
+        # Get input
+        input_file = judge_config.get("input_file")
+        if input_file:
+            input_path = Path(self._cwd) / input_file
+            if not input_path.exists():
+                return {"ok": False, "error": f"Input file not found: {input_path}"}
+            input_text = input_path.read_text()
+        else:
+            input_text = judge_config.get("input", "")
+        
+        if not input_text:
+            return {"ok": False, "error": "Judge step requires input_file or input"}
+        
+        criteria = judge_config.get("criteria", "Output is high quality")
+        threshold = float(judge_config.get("threshold", 7.0))
+        model = judge_config.get("model", "gpt-4o-mini")
+        on_fail = judge_config.get("on_fail", "stop")  # stop | warn | retry
+        
+        try:
+            judge = Judge(criteria=criteria, model=model)
+            result = judge.evaluate(input_text)
+            
+            score = result.score if hasattr(result, 'score') else 0.0
+            feedback = result.feedback if hasattr(result, 'feedback') else str(result)
+            passed = score >= threshold
+            
+            if not passed and on_fail == "warn":
+                # Warn but continue
+                return {"ok": True, "score": score, "feedback": feedback, "passed": False, "warning": f"Score {score} below threshold {threshold}"}
+            
+            return {"ok": passed, "score": score, "feedback": feedback, "passed": passed}
+            
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def _exec_approve_step(self, approve_config: Any, step: Dict, flags: Dict) -> Dict:
+        """
+        Execute an approval gate step.
+        
+        Args:
+            approve_config: Approval configuration (dict with description, risk_level, etc.)
+            step: Full step definition
+            flags: Workflow flags
+            
+        Returns:
+            Dict with ok, reason, and optionally error
+        """
+        try:
+            from praisonaiagents.approval.backends import ConsoleBackend, AutoApproveBackend
+            from praisonaiagents.approval.protocols import ApprovalRequest
+        except ImportError:
+            return {"ok": False, "error": "praisonaiagents.approval not available. Install with: pip install praisonaiagents"}
+        
+        # Handle both dict config and simple string (description)
+        if isinstance(approve_config, str):
+            approve_config = {"description": approve_config}
+        
+        description = approve_config.get("description", step.get("name", "Workflow step"))
+        risk_level = approve_config.get("risk_level", "medium")
+        auto_approve = approve_config.get("auto_approve", False)
+        
+        # Build context from previous step results if available
+        context = {
+            "step_name": step.get("name", "Unknown"),
+            "workflow": self._name,
+            "description": description,
+        }
+        
+        request = ApprovalRequest(
+            tool_name="workflow_step",
+            arguments=context,
+            risk_level=risk_level,
+            agent_name=self._name,
+        )
+        
+        try:
+            if auto_approve:
+                backend = AutoApproveBackend()
+            else:
+                backend = ConsoleBackend()
+            
+            decision = backend.request_approval_sync(request)
+            
+            return {
+                "ok": decision.approved,
+                "reason": decision.reason,
+                "approver": getattr(decision, 'approver', 'user'),
+            }
+            
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def _resolve_agent_tools(self, tool_names: List) -> List:
+        """
+        Resolve tool names to actual tool functions.
+        
+        Args:
+            tool_names: List of tool names (strings) or tool functions
+            
+        Returns:
+            List of resolved tool functions
+        """
+        if not tool_names:
+            return []
+        
+        resolved = []
+        for tool in tool_names:
+            if callable(tool):
+                # Already a function
+                resolved.append(tool)
+            elif isinstance(tool, str):
+                # Try to resolve from registry
+                try:
+                    from praisonaiagents.tools import get_tool
+                    resolved_tool = get_tool(tool)
+                    if resolved_tool:
+                        resolved.append(resolved_tool)
+                except (ImportError, Exception):
+                    # Try common tools
+                    if tool == "execute_command":
+                        try:
+                            from praisonaiagents.tools import execute_command
+                            resolved.append(execute_command)
+                        except ImportError:
+                            pass
+                    elif tool == "read_file":
+                        try:
+                            from praisonaiagents.tools import read_file
+                            resolved.append(read_file)
+                        except ImportError:
+                            pass
+                    elif tool == "write_file":
+                        try:
+                            from praisonaiagents.tools import write_file
+                            resolved.append(write_file)
+                        except ImportError:
+                            pass
+        return resolved
 
     # ------------------------------------------------------------------
     # Built-in actions

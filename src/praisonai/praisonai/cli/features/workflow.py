@@ -373,15 +373,21 @@ Example:
             self.print_status(f"File not found: {file_path}", "error")
             return None
         
-        # Detect type: job → route to job executor
+        # Detect type: job or hybrid → route to appropriate executor
         try:
             import yaml
             with open(file_path, 'r') as f:
                 raw_data = yaml.safe_load(f)
-            if isinstance(raw_data, dict) and raw_data.get("type") == "job":
-                from .job_workflow import JobWorkflowExecutor
-                executor = JobWorkflowExecutor(raw_data, file_path)
-                return executor.run(args)
+            if isinstance(raw_data, dict):
+                workflow_type = raw_data.get("type")
+                if workflow_type == "job":
+                    from .job_workflow import JobWorkflowExecutor
+                    executor = JobWorkflowExecutor(raw_data, file_path)
+                    return executor.run(args)
+                elif workflow_type == "hybrid":
+                    from .hybrid_workflow import HybridWorkflowExecutor
+                    executor = HybridWorkflowExecutor(raw_data, file_path)
+                    return executor.run(args)
         except Exception:
             pass  # Fall through to agent workflow
         
@@ -679,7 +685,7 @@ Example:
         Auto-generate a workflow from a topic description.
         
         Args:
-            args: ["topic description", --pattern, <pattern>, --output, <file.yaml>]
+            args: ["topic description", --pattern, <pattern>, --output, <file.yaml>, --type, <job|agent>]
             
         Returns:
             Path to created file
@@ -688,6 +694,9 @@ Example:
         topic = None
         pattern = "sequential"
         output_file = None
+        workflow_type = "agent"  # Default to agent workflow
+        include_judge = False
+        include_approve = False
         
         i = 0
         while i < len(args):
@@ -697,6 +706,15 @@ Example:
             elif args[i] == "--output" and i + 1 < len(args):
                 output_file = args[i + 1]
                 i += 2
+            elif args[i] == "--type" and i + 1 < len(args):
+                workflow_type = args[i + 1]
+                i += 2
+            elif args[i] == "--judge":
+                include_judge = True
+                i += 1
+            elif args[i] == "--approve":
+                include_approve = True
+                i += 1
             elif not args[i].startswith("--") and topic is None:
                 topic = args[i]
                 i += 1
@@ -704,40 +722,63 @@ Example:
                 i += 1
         
         if not topic:
-            self.print_status('Usage: praisonai workflow auto "topic" --pattern <pattern>', "error")
+            self.print_status('Usage: praisonai workflow auto "topic" [--type job|agent] [--pattern <pattern>]', "error")
+            self.print_status("Types: job (agent-centric steps), agent (multi-agent workflow)", "info")
             self.print_status("Patterns: sequential, routing, parallel", "info")
             return None
         
-        # Validate pattern
-        valid_patterns = ["sequential", "routing", "parallel", "loop", "orchestrator-workers", "evaluator-optimizer"]
-        if pattern not in valid_patterns:
-            self.print_status(f"Unknown pattern: {pattern}", "error")
-            self.print_status(f"Valid patterns: {', '.join(valid_patterns)}", "info")
+        # Validate workflow type
+        if workflow_type not in ["job", "agent"]:
+            self.print_status(f"Unknown type: {workflow_type}", "error")
+            self.print_status("Valid types: job, agent", "info")
             return None
+        
+        # Validate pattern (only for agent workflows)
+        if workflow_type == "agent":
+            valid_patterns = ["sequential", "routing", "parallel", "loop", "orchestrator-workers", "evaluator-optimizer"]
+            if pattern not in valid_patterns:
+                self.print_status(f"Unknown pattern: {pattern}", "error")
+                self.print_status(f"Valid patterns: {', '.join(valid_patterns)}", "info")
+                return None
         
         # Default output file
         if not output_file:
             # Create safe filename from topic
             safe_name = "".join(c if c.isalnum() else "_" for c in topic[:30]).lower()
-            output_file = f"{safe_name}_workflow.yaml"
+            suffix = "job_workflow" if workflow_type == "job" else "workflow"
+            output_file = f"{safe_name}_{suffix}.yaml"
         
         # Check if file exists
         if os.path.exists(output_file):
             self.print_status(f"File already exists: {output_file}", "error")
             return None
         
-        self.print_status(f"Generating {pattern} workflow for: {topic}", "info")
+        self.print_status(f"Generating {workflow_type} workflow for: {topic}", "info")
         
         try:
-            # Lazy import to avoid performance impact
-            from praisonai.auto import WorkflowAutoGenerator
-            
-            generator = WorkflowAutoGenerator(
-                topic=topic,
-                workflow_file=output_file
-            )
-            
-            result_path = generator.generate(pattern=pattern)
+            if workflow_type == "job":
+                # Generate job workflow with agent-centric steps
+                from praisonai.auto import JobWorkflowAutoGenerator
+                
+                generator = JobWorkflowAutoGenerator(
+                    topic=topic,
+                    workflow_file=output_file
+                )
+                
+                result_path = generator.generate(
+                    include_judge=include_judge,
+                    include_approve=include_approve
+                )
+            else:
+                # Generate agent workflow (existing behavior)
+                from praisonai.auto import WorkflowAutoGenerator
+                
+                generator = WorkflowAutoGenerator(
+                    topic=topic,
+                    workflow_file=output_file
+                )
+                
+                result_path = generator.generate(pattern=pattern)
             
             self.print_status(f"✓ Created workflow: {result_path}", "success")
             self.print_status(f"Run with: praisonai workflow run {output_file}", "info")
