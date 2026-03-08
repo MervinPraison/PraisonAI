@@ -996,7 +996,7 @@ class Agent:
             session_id = _history_session_id
         elif _history_enabled and session_id is None and _history_session_id is None:
             import hashlib as _hl
-            _agent_hash = _hl.md5(name.encode()).hexdigest()[:8]
+            _agent_hash = _hl.md5((name or "agent").encode()).hexdigest()[:8]
             session_id = f"history_{_agent_hash}"
             _history_session_id = session_id
         
