@@ -163,6 +163,11 @@ TOOL_MAPPINGS = {
     'is_ast_grep_available': ('.ast_grep_tool', None),
     'get_ast_grep_tools': ('.ast_grep_tool', None),
     'ast_grep_tools': ('.ast_grep_tool', None),
+
+    # Nightmarket Tools
+    'nightmarket_search': ('.nightmarket_tools', None),
+    'nightmarket_service_details': ('.nightmarket_tools', None),
+    'nightmarket_call': ('.nightmarket_tools', None),
 }
 
 _instances = {}  # Cache for class instances
