@@ -163,6 +163,13 @@ TOOL_MAPPINGS = {
     'is_ast_grep_available': ('.ast_grep_tool', None),
     'get_ast_grep_tools': ('.ast_grep_tool', None),
     'ast_grep_tools': ('.ast_grep_tool', None),
+
+    # CrowPay Tools
+    'crowpay_setup': ('.crowpay_tools', None),
+    'crowpay_authorize': ('.crowpay_tools', None),
+    'crowpay_authorize_card': ('.crowpay_tools', None),
+    'crowpay_poll_status': ('.crowpay_tools', None),
+    'crowpay_settle': ('.crowpay_tools', None),
 }
 
 _instances = {}  # Cache for class instances
