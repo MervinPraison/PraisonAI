@@ -497,9 +497,36 @@ class WebSocketGateway:
             except Exception as e:
                 logger.error(f"Error sending to client {client_id}: {e}")
     
-    def register_agent(self, agent: "Agent", agent_id: Optional[str] = None) -> str:
-        """Register an agent with the gateway."""
+    def register_agent(
+        self,
+        agent: "Agent",
+        agent_id: Optional[str] = None,
+        *,
+        overwrite: bool = True,
+    ) -> str:
+        """Register an agent with the gateway.
+        
+        Args:
+            agent: The agent instance to register
+            agent_id: Optional custom ID (auto-generated if not provided)
+            overwrite: If False, raises ValueError on duplicate ID (default: True for backward compat)
+            
+        Returns:
+            The agent ID used for registration
+            
+        Raises:
+            ValueError: If overwrite=False and agent_id already exists
+        """
         aid = agent_id or getattr(agent, "agent_id", None) or str(uuid.uuid4())
+        
+        # B10: Handle duplicate registration
+        if aid in self._agents:
+            if not overwrite:
+                raise ValueError(
+                    f"Agent '{aid}' already registered. Use overwrite=True to replace."
+                )
+            logger.warning(f"Overwriting existing agent: {aid}")
+        
         self._agents[aid] = agent
         logger.info(f"Agent registered: {aid}")
         return aid
@@ -564,6 +591,38 @@ class WebSocketGateway:
             List of client IDs
         """
         return list(self._clients.keys())
+    
+    # ── Channel Bot Management (Public API - B7) ─────────────────────────
+    
+    def list_channel_bots(self) -> List[str]:
+        """List all registered channel bot names.
+        
+        Returns:
+            List of channel bot names (e.g., ['discord', 'telegram'])
+        """
+        return list(self._channel_bots.keys())
+    
+    def get_channel_bot(self, name: str) -> Optional[Any]:
+        """Get a channel bot by name.
+        
+        Args:
+            name: The channel bot name (e.g., 'discord', 'telegram')
+            
+        Returns:
+            The bot instance or None if not found
+        """
+        return self._channel_bots.get(name)
+    
+    def has_channel_bot(self, name: str) -> bool:
+        """Check if a channel bot is registered.
+        
+        Args:
+            name: The channel bot name
+            
+        Returns:
+            True if the bot exists, False otherwise
+        """
+        return name in self._channel_bots
     
     def create_session(
         self,

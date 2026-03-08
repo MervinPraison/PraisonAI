@@ -91,7 +91,10 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
         allowed_numbers: Optional[List[str]] = None,
         allowed_groups: Optional[List[str]] = None,
         respond_to_all: bool = False,
+        **kwargs,
     ):
+        # B9: Store extra kwargs for forward compatibility
+        self._extra_kwargs = kwargs
         # Mode: "cloud" (default, Meta Cloud API) or "web" (neonize, experimental)
         self._mode = mode.lower().strip()
         if self._mode not in ("cloud", "web"):

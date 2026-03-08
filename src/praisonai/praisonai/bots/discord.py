@@ -59,6 +59,7 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
         token: str,
         agent: Optional["Agent"] = None,
         config: Optional[BotConfig] = None,
+        **kwargs,
     ):
         """Initialize the Discord bot.
         
@@ -66,7 +67,10 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
             token: Discord bot token
             agent: Optional agent to handle messages
             config: Optional bot configuration
+            **kwargs: Additional arguments for forward compatibility
         """
+        # B9: Store extra kwargs for forward compatibility
+        self._extra_kwargs = kwargs
         self._token = token
         self._agent = agent
         self.config = config or BotConfig(token=token)

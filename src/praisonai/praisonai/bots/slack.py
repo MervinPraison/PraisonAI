@@ -67,6 +67,7 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
         signing_secret: Optional[str] = None,
         agent: Optional["Agent"] = None,
         config: Optional[BotConfig] = None,
+        **kwargs,
     ):
         """Initialize the Slack bot.
         
@@ -76,7 +77,10 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
             signing_secret: Signing secret for webhook verification
             agent: Optional agent to handle messages
             config: Optional bot configuration
+            **kwargs: Additional arguments for forward compatibility
         """
+        # B9: Store extra kwargs for forward compatibility
+        self._extra_kwargs = kwargs
         self._token = token
         self._app_token = app_token
         self._signing_secret = signing_secret
