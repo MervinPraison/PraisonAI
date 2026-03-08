@@ -67,6 +67,9 @@ class SessionData:
     agent_name: Optional[str] = None
     user_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # Gap S3: Gateway integration - link session to gateway session
+    gateway_session_id: Optional[str] = None
+    agent_id: Optional[str] = None  # Gateway agent ID (different from agent_name)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -78,6 +81,8 @@ class SessionData:
             "agent_name": self.agent_name,
             "user_id": self.user_id,
             "metadata": self.metadata,
+            "gateway_session_id": self.gateway_session_id,
+            "agent_id": self.agent_id,
         }
     
     @classmethod
@@ -95,6 +100,8 @@ class SessionData:
             agent_name=data.get("agent_name"),
             user_id=data.get("user_id"),
             metadata=data.get("metadata", {}),
+            gateway_session_id=data.get("gateway_session_id"),
+            agent_id=data.get("agent_id"),
         )
     
     def get_chat_history(self, max_messages: Optional[int] = None) -> List[Dict[str, str]]:
@@ -488,6 +495,177 @@ class DefaultSessionStore:
         # Sort by updated_at descending
         sessions.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
         return sessions[:limit]
+    
+    # ── Agent-Level Queries (Gap S4) ──────────────────────────────────
+    
+    def list_sessions_by_agent(self, agent_name: str, limit: int = 50) -> List[str]:
+        """List session IDs for a specific agent.
+        
+        Gap S4: Enables querying sessions by agent instead of just session ID.
+        
+        Args:
+            agent_name: The agent name to filter by
+            limit: Maximum number of session IDs to return
+            
+        Returns:
+            List of session IDs belonging to the specified agent
+        """
+        session_ids = []
+        
+        try:
+            for filename in os.listdir(self.session_dir):
+                if filename.endswith(".json"):
+                    filepath = os.path.join(self.session_dir, filename)
+                    try:
+                        with open(filepath, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        if data.get("agent_name") == agent_name:
+                            session_ids.append(data.get("session_id", filename[:-5]))
+                    except (json.JSONDecodeError, IOError):
+                        continue
+        except (IOError, OSError):
+            pass
+        
+        return session_ids[:limit]
+    
+    def get_sessions_by_agent(
+        self,
+        agent_name: str,
+        limit: int = 10,
+    ) -> List[SessionData]:
+        """Get full session data for a specific agent.
+        
+        Gap S4: Enables retrieving all sessions for an agent.
+        
+        Args:
+            agent_name: The agent name to filter by
+            limit: Maximum number of sessions to return
+            
+        Returns:
+            List of SessionData objects for the specified agent
+        """
+        session_ids = self.list_sessions_by_agent(agent_name, limit)
+        return [self._load_session(sid) for sid in session_ids]
+    
+    def get_agent_chat_history(
+        self,
+        agent_name: str,
+        max_messages: Optional[int] = None,
+        max_sessions: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """Get combined chat history across all sessions for an agent.
+        
+        Gap S4: Enables retrieving conversation history by agent.
+        
+        Args:
+            agent_name: The agent name to filter by
+            max_messages: Maximum messages per session
+            max_sessions: Maximum number of sessions to include
+            
+        Returns:
+            List of messages with session context
+        """
+        sessions = self.get_sessions_by_agent(agent_name, max_sessions)
+        messages = []
+        
+        for session in sessions:
+            history = session.get_chat_history(max_messages)
+            for msg in history:
+                messages.append({
+                    **msg,
+                    "session_id": session.session_id,
+                    "agent_name": agent_name,
+                })
+        
+        return messages
+    
+    # ── Gateway Integration (Gap S3) ──────────────────────────────────
+    
+    def set_gateway_info(
+        self,
+        session_id: str,
+        gateway_session_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+    ) -> bool:
+        """Link a session to a gateway session.
+        
+        Gap S3: Enables memory to be scoped to gateway agents/sessions.
+        
+        Args:
+            session_id: The local session ID
+            gateway_session_id: The gateway session ID to link to
+            agent_id: The gateway agent ID
+            
+        Returns:
+            True if saved successfully
+        """
+        session = self._load_session(session_id)
+        
+        with self._lock:
+            if gateway_session_id:
+                session.gateway_session_id = gateway_session_id
+            if agent_id:
+                session.agent_id = agent_id
+            self._cache[session_id] = session
+        
+        return self._save_session(session)
+    
+    def get_by_gateway_session(self, gateway_session_id: str) -> Optional[SessionData]:
+        """Get session data linked to a gateway session.
+        
+        Gap S3: Enables retrieving memory by gateway session ID.
+        
+        Args:
+            gateway_session_id: The gateway session ID to look up
+            
+        Returns:
+            SessionData if found, None otherwise
+        """
+        try:
+            for filename in os.listdir(self.session_dir):
+                if filename.endswith(".json"):
+                    filepath = os.path.join(self.session_dir, filename)
+                    try:
+                        with open(filepath, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        if data.get("gateway_session_id") == gateway_session_id:
+                            return SessionData.from_dict(data)
+                    except (json.JSONDecodeError, IOError):
+                        continue
+        except (IOError, OSError):
+            pass
+        
+        return None
+    
+    def list_sessions_by_gateway_agent(self, agent_id: str, limit: int = 50) -> List[str]:
+        """List session IDs linked to a gateway agent.
+        
+        Gap S3: Enables querying sessions by gateway agent ID.
+        
+        Args:
+            agent_id: The gateway agent ID to filter by
+            limit: Maximum number of session IDs to return
+            
+        Returns:
+            List of session IDs linked to the gateway agent
+        """
+        session_ids = []
+        
+        try:
+            for filename in os.listdir(self.session_dir):
+                if filename.endswith(".json"):
+                    filepath = os.path.join(self.session_dir, filename)
+                    try:
+                        with open(filepath, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        if data.get("agent_id") == agent_id:
+                            session_ids.append(data.get("session_id", filename[:-5]))
+                    except (json.JSONDecodeError, IOError):
+                        continue
+        except (IOError, OSError):
+            pass
+        
+        return session_ids[:limit]
     
     def session_exists(self, session_id: str) -> bool:
         """Check if a session exists."""

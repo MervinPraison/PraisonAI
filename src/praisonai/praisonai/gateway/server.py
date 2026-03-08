@@ -109,6 +109,66 @@ class WebSocketGateway:
         await gateway.start()
     """
     
+    @classmethod
+    def from_config_file(
+        cls,
+        config_path: str = "config.yaml",
+        section: str = "gateway",
+    ) -> "WebSocketGateway":
+        """Create a gateway from a YAML configuration file.
+        
+        Gap S5: Enables gateway config persistence via standard config files.
+        
+        Args:
+            config_path: Path to the YAML config file
+            section: Config section containing gateway settings (default: "gateway")
+            
+        Returns:
+            Configured WebSocketGateway instance
+            
+        Example config.yaml:
+            gateway:
+              host: "0.0.0.0"
+              port: 8765
+              auth_token: "${GATEWAY_AUTH_TOKEN}"
+              max_connections: 1000
+              heartbeat_interval: 30
+        """
+        import yaml
+        
+        if not os.path.exists(config_path):
+            logger.warning(f"Config file not found: {config_path}, using defaults")
+            return cls()
+        
+        with open(config_path, "r") as f:
+            raw = yaml.safe_load(f) or {}
+        
+        gateway_config = raw.get(section, {})
+        if not gateway_config:
+            logger.warning(f"No '{section}' section in {config_path}, using defaults")
+            return cls()
+        
+        # Substitute environment variables
+        def _substitute(value):
+            if isinstance(value, str):
+                return cls._substitute_env_vars(value)
+            return value
+        
+        # Build GatewayConfig
+        config = GatewayConfig(
+            host=_substitute(gateway_config.get("host", "127.0.0.1")),
+            port=int(gateway_config.get("port", 8765)),
+            auth_token=_substitute(gateway_config.get("auth_token")),
+            max_connections=int(gateway_config.get("max_connections", 1000)),
+            heartbeat_interval=int(gateway_config.get("heartbeat_interval", 30)),
+            reconnect_timeout=int(gateway_config.get("reconnect_timeout", 60)),
+            ssl_cert=_substitute(gateway_config.get("ssl_cert")),
+            ssl_key=_substitute(gateway_config.get("ssl_key")),
+        )
+        
+        logger.info(f"Gateway config loaded from {config_path}")
+        return cls(config=config)
+    
     def __init__(
         self,
         host: str = "127.0.0.1",
@@ -459,6 +519,51 @@ class WebSocketGateway:
     def list_agents(self) -> List[str]:
         """List all registered agent IDs."""
         return list(self._agents.keys())
+    
+    # ── Client Management (Public API) ────────────────────────────────
+    
+    def add_client(self, client_id: str, websocket: Any) -> None:
+        """Register a client WebSocket connection.
+        
+        Args:
+            client_id: Unique client identifier
+            websocket: WebSocket connection object
+        """
+        self._clients[client_id] = websocket
+        logger.debug(f"Client added: {client_id}")
+    
+    def remove_client(self, client_id: str) -> bool:
+        """Unregister a client connection.
+        
+        Args:
+            client_id: The client ID to remove
+            
+        Returns:
+            True if client was found and removed, False otherwise
+        """
+        removed = self._clients.pop(client_id, None) is not None
+        if removed:
+            logger.debug(f"Client removed: {client_id}")
+        return removed
+    
+    def get_client(self, client_id: str) -> Optional[Any]:
+        """Get a client WebSocket by ID.
+        
+        Args:
+            client_id: The client ID to look up
+            
+        Returns:
+            The WebSocket connection or None if not found
+        """
+        return self._clients.get(client_id)
+    
+    def list_clients(self) -> List[str]:
+        """List all connected client IDs.
+        
+        Returns:
+            List of client IDs
+        """
+        return list(self._clients.keys())
     
     def create_session(
         self,
