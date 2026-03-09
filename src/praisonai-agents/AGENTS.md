@@ -123,6 +123,8 @@ Pattern: Each major module has a protocols.py file
 - Protocols define WHAT (interface contract)
 - Adapters implement HOW (concrete implementation)
 - Naming: XProtocol for interfaces, XAdapter for implementations
+  (ALWAYS suffix with "Protocol" — never use bare concept names like TraceSink)
+- File placement: All protocols live in protocols.py within their module
 - Users can implement any protocol for custom behavior
 ```
 
@@ -286,9 +288,19 @@ save() / load()  # Disk persistence (NOT store)
 # Configuration
 class XConfig:   # Configuration dataclass (MemoryConfig, HooksConfig)
 
-# Protocols
-class XProtocol(Protocol):  # Abstract interface
-class XAdapter:             # Implementation
+# Protocols — ALWAYS suffix with "Protocol"
+class XProtocol(Protocol):  # Abstract interface (TraceSinkProtocol, MemoryProtocol)
+class XAdapter:             # Concrete implementation (ChromaAdapter, FileAdapter)
+
+# ✅ CORRECT protocol naming:
+class MemoryProtocol(Protocol): ...        # Clear it's a protocol
+class SessionStoreProtocol(Protocol): ...  # Descriptive + Protocol suffix
+class TraceSinkProtocol(Protocol): ...     # In protocols.py + suffixed
+
+# ❌ WRONG protocol naming:
+class TraceSink(Protocol): ...     # Missing Protocol suffix — ambiguous
+class IMemory(Protocol): ...       # TypeScript convention, not Python
+class MemoryBase(Protocol): ...    # "Base" implies ABC, not Protocol
 
 # Execution
 run()            # Synchronous, blocking

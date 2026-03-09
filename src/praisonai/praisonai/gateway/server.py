@@ -815,22 +815,76 @@ class WebSocketGateway:
         return _resolve(raw)
 
     def _create_agents_from_config(self, agents_cfg: Dict[str, Dict[str, Any]]) -> None:
-        """Create and register Agent instances from the agents section of gateway.yaml."""
+        """Create and register Agent instances from the agents section of gateway.yaml.
+        
+        Supports all agent configuration options including:
+        - tools: List of tool names to resolve via ToolResolver
+        - tool_choice: Tool selection mode ('auto', 'required', 'none')
+        - reflection: Enable reflection/interactive mode (default: True)
+        - allow_delegation: Allow task delegation
+        - role: Agent role (CrewAI-style)
+        - goal: Agent goal (CrewAI-style)
+        - backstory: Agent backstory (CrewAI-style)
+        """
         from praisonaiagents import Agent
+
+        # G1: Resolve tool names to callables (same pattern as agents_generator)
+        tool_resolver = None
+        try:
+            from praisonai.tool_resolver import ToolResolver
+            tool_resolver = ToolResolver()
+        except ImportError:
+            logger.debug("ToolResolver not available, agents will have no tools")
 
         for agent_id, agent_def in agents_cfg.items():
             instructions = agent_def.get("instructions", "")
             model = agent_def.get("model", None)
             memory = agent_def.get("memory", False)
+            
+            # G4: Support role/goal/backstory for CrewAI-style agents
+            role = agent_def.get("role", None)
+            goal = agent_def.get("goal", None)
+            backstory = agent_def.get("backstory", None)
+            
+            # G1: Resolve tools from YAML config
+            agent_tools = []
+            yaml_tool_names = agent_def.get("tools", [])
+            if yaml_tool_names and tool_resolver:
+                for tool_name in yaml_tool_names:
+                    if not tool_name or not isinstance(tool_name, str):
+                        continue
+                    tool_name = tool_name.strip()
+                    resolved = tool_resolver.resolve(tool_name)
+                    if resolved:
+                        agent_tools.append(resolved)
+                        logger.debug(f"Resolved tool '{tool_name}' for agent '{agent_id}'")
+                    else:
+                        logger.warning(f"Tool '{tool_name}' not found for agent '{agent_id}'")
+            
+            # Additional agent options from YAML
+            tool_choice = agent_def.get("tool_choice", None)
+            reflection = agent_def.get("reflection", True)  # Default: enable reflection/interactive mode
+            allow_delegation = agent_def.get("allow_delegation", False)
 
             agent = Agent(
                 name=agent_id,
                 instructions=instructions,
                 llm=model,
                 memory=memory,
+                tools=agent_tools if agent_tools else None,
+                reflection=reflection,
+                allow_delegation=allow_delegation,
+                role=role,
+                goal=goal,
+                backstory=backstory,
             )
+            
+            # Store tool_choice for later use in chat()
+            if tool_choice:
+                agent._yaml_tool_choice = tool_choice
+            
             self.register_agent(agent, agent_id=agent_id)
-            logger.info(f"Created agent '{agent_id}' (model={model})")
+            logger.info(f"Created agent '{agent_id}' (model={model}, tools={len(agent_tools)}, reflection={reflection})")
 
     def _determine_routing_context(
         self, channel_type: str, message_metadata: Dict[str, Any]
