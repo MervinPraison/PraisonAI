@@ -232,7 +232,10 @@ class TestMultiChannelGatewayConfig:
         """Test MultiChannelGatewayConfig with defaults."""
         from praisonaiagents.gateway import MultiChannelGatewayConfig
         config = MultiChannelGatewayConfig()
-        assert isinstance(config.gateway, GatewayConfig)
+        # Use qualname check to be robust against module reimport identity issues
+        assert type(config.gateway).__qualname__ == "GatewayConfig", (
+            f"Expected GatewayConfig, got {type(config.gateway).__qualname__}"
+        )
         assert config.agents == {}
         assert config.channels == {}
 

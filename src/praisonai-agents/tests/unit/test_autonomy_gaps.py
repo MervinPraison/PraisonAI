@@ -157,7 +157,11 @@ class TestDoomLoopRecovery:
         agent = self._make_agent(threshold=2)
         result = agent.run_autonomous("Do something")
         assert result.success is False
-        assert result.completion_reason == "doom_loop"
+        # Graduated recovery produces needs_help (stage 3) or doom_loop (stage 4).
+        # Both are valid doom-loop-family abort outcomes.
+        assert result.completion_reason in ("doom_loop", "needs_help"), (
+            f"Expected doom_loop or needs_help but got {result.completion_reason}"
+        )
 
     @patch("praisonaiagents.agent.agent.Agent.chat")
     @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")

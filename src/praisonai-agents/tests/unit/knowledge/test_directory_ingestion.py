@@ -16,6 +16,17 @@ requires_knowledge = pytest.mark.skipif(
 )
 
 
+def _make_knowledge_or_skip():
+    """Create a Knowledge() instance, skipping if OpenAI API key is unavailable."""
+    from praisonaiagents import Knowledge
+    try:
+        return Knowledge()
+    except Exception as e:
+        if "api_key" in str(e).lower() or "openai" in str(e).lower():
+            pytest.skip(f"Skipping: OpenAI API key required for embeddings: {e}")
+        raise
+
+
 @requires_knowledge
 class TestDirectoryIngestion:
     """Test that directories are properly processed and file contents stored."""
@@ -42,10 +53,14 @@ class TestDirectoryIngestion:
     
     def test_directory_ingestion_stores_text_not_path(self, temp_knowledge_dir):
         """Test that ingesting a directory stores file contents, not the directory path."""
-        from praisonaiagents import Knowledge
+        knowledge = _make_knowledge_or_skip()
         
-        knowledge = Knowledge()
-        result = knowledge.add(temp_knowledge_dir, user_id='test_user')
+        try:
+            result = knowledge.add(temp_knowledge_dir, user_id='test_user')
+        except Exception as e:
+            if "api_key" in str(e).lower() or "openai" in str(e).lower():
+                pytest.skip(f"Skipping: OpenAI API key required: {e}")
+            raise
         
         # Should have results from files
         assert 'results' in result
@@ -65,10 +80,14 @@ class TestDirectoryIngestion:
     
     def test_directory_ingestion_processes_multiple_files(self, temp_knowledge_dir):
         """Test that all files in a directory are processed."""
-        from praisonaiagents import Knowledge
+        knowledge = _make_knowledge_or_skip()
         
-        knowledge = Knowledge()
-        result = knowledge.add(temp_knowledge_dir, user_id='test_user')
+        try:
+            knowledge.add(temp_knowledge_dir, user_id='test_user')
+        except Exception as e:
+            if "api_key" in str(e).lower() or "openai" in str(e).lower():
+                pytest.skip(f"Skipping: OpenAI API key required: {e}")
+            raise
         
         # Search for content from both files
         search1 = knowledge.search('ZEBRA-71', user_id='test_user')
@@ -80,10 +99,14 @@ class TestDirectoryIngestion:
     
     def test_directory_ingestion_sets_metadata(self, temp_knowledge_dir):
         """Test that file metadata is properly set."""
-        from praisonaiagents import Knowledge
+        knowledge = _make_knowledge_or_skip()
         
-        knowledge = Knowledge()
-        knowledge.add(temp_knowledge_dir, user_id='test_user')
+        try:
+            knowledge.add(temp_knowledge_dir, user_id='test_user')
+        except Exception as e:
+            if "api_key" in str(e).lower() or "openai" in str(e).lower():
+                pytest.skip(f"Skipping: OpenAI API key required: {e}")
+            raise
         
         search_result = knowledge.search('ZEBRA-71', user_id='test_user')
         
@@ -114,15 +137,20 @@ class TestContextBuilderUsesText:
         """Test that Agent._get_knowledge_context returns text, not path."""
         from praisonaiagents import Agent
         
-        agent = Agent(
-            name='TestAgent',
-            instructions='Answer based on knowledge.',
-            knowledge=[temp_knowledge_dir],
-            output='silent',
-        )
-        
-        # Ensure knowledge is processed
-        agent._ensure_knowledge_processed()
+        try:
+            agent = Agent(
+                name='TestAgent',
+                instructions='Answer based on knowledge.',
+                knowledge=[temp_knowledge_dir],
+                output='silent',
+            )
+            
+            # Ensure knowledge is processed
+            agent._ensure_knowledge_processed()
+        except Exception as e:
+            if "api_key" in str(e).lower() or "openai" in str(e).lower():
+                pytest.skip(f"Skipping: OpenAI API key required: {e}")
+            raise
         
         # Get context
         context, _ = agent._get_knowledge_context('What is the password?', use_rag=True)

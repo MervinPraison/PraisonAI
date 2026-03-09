@@ -801,7 +801,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'recipe', 'endpoints', 'audio', 'embed', 'embedding', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor', 'registry', 'package', 'install', 'uninstall', 'acp', 'debug', 'lsp', 'diag', 'browser', 'replay', 'bot', 'gateway', 'sandbox', 'wizard', 'migrate', 'security', 'persistence']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'recipe', 'endpoints', 'audio', 'embed', 'embedding', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor', 'registry', 'package', 'install', 'uninstall', 'acp', 'debug', 'lsp', 'diag', 'browser', 'replay', 'bot', 'gateway', 'sandbox', 'wizard', 'migrate', 'security', 'persistence', 'paths']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -1710,6 +1710,19 @@ class PraisonAI:
                 from .features.audit_cli import handle_audit_command
                 exit_code = handle_audit_command(unknown_args)
                 sys.exit(exit_code)
+
+            elif args.command == 'paths':
+                # Paths command - storage path inspection
+                # Routes to Typer CLI for paths commands (show)
+                from .app import app as typer_app, register_commands
+                register_commands()
+                import sys as _sys
+                _sys.argv = ['praisonai', 'paths'] + unknown_args
+                try:
+                    typer_app()
+                except SystemExit as e:
+                    sys.exit(e.code if e.code else 0)
+                sys.exit(0)
 
         # Only check framework availability for agent-related operations
         if not args.command and (args.init or args.auto or args.framework):

@@ -23,14 +23,18 @@ from unittest.mock import patch, MagicMock, PropertyMock
 class TestDoomLoopFiring:
     """G1/G2: Doom loop detection must actually fire in run_autonomous()."""
 
-    def test_doom_loop_fires_when_agent_repeats_same_response(self):
+    @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
+    def test_doom_loop_fires_when_agent_repeats_same_response(self, mock_stage):
         """run_autonomous() must call _record_action() so DoomLoopTracker gets data."""
         from praisonaiagents import Agent
 
         agent = Agent(
             name="test_doom",
             instructions="You are a test agent",
-            autonomy={"max_iterations": 10, "doom_loop_threshold": 3},
+            # Need enough iterations for graduated recovery to exhaust all 4 stages:
+            # threshold=3 means 3 identical actions per doom-loop cycle, 4 recovery
+            # stages, plus check iterations = ~16 iterations minimum.
+            autonomy={"max_iterations": 25, "doom_loop_threshold": 3},
         )
 
         # Mock chat to return the same response every time
@@ -43,16 +47,16 @@ class TestDoomLoopFiring:
 
         agent.chat = mock_chat
 
-        # Use a prompt that triggers autonomous stage (multi-step)
-        # so the loop runs multiple iterations instead of exiting after 1 (direct)
         result = agent.run_autonomous("First refactor the auth module, then test it step by step")
 
-        # Doom loop should have been detected before max_iterations
-        assert result.completion_reason == "doom_loop", (
-            f"Expected doom_loop but got {result.completion_reason} after {result.iterations} iterations"
+        # Graduated recovery produces needs_help (stage 3) or doom_loop (stage 4).
+        # Both are valid doom-loop-family abort outcomes.
+        assert result.completion_reason in ("doom_loop", "needs_help"), (
+            f"Expected doom_loop or needs_help but got {result.completion_reason} "
+            f"after {result.iterations} iterations"
         )
         assert result.success is False
-        assert result.iterations < 10  # Should stop well before max
+        assert result.iterations < 25  # Should stop well before max
 
     def test_doom_loop_does_not_fire_with_varied_responses(self):
         """Varied responses should NOT trigger doom loop."""
