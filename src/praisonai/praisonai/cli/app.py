@@ -184,6 +184,7 @@ def register_commands():
     from .commands.run import app as run_app
     from .commands.profile import app as profile_app
     from .commands.benchmark import app as benchmark_app
+    from .commands.paths import app as paths_app
     
     # Import new command modules - Previously legacy-only commands
     from .commands.chat import app as chat_app
@@ -252,6 +253,7 @@ def register_commands():
     app.add_typer(run_app, name="run", help="Run agents")
     app.add_typer(profile_app, name="profile", help="Performance profiling and diagnostics")
     app.add_typer(benchmark_app, name="benchmark", help="Comprehensive performance benchmarking")
+    app.add_typer(paths_app, name="paths", help="Storage path inspection and migration")
     
     # Register sub-apps - Terminal-native commands
     app.add_typer(chat_app, name="chat", help="Terminal-native interactive chat (REPL)")
