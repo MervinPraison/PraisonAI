@@ -2955,7 +2955,8 @@ class WorkflowManager:
         ```
     """
     
-    WORKFLOWS_DIR = ".praisonai/workflows"
+    from ..paths import DEFAULT_DIR_NAME as _DIR_NAME
+    WORKFLOWS_DIR = f"{_DIR_NAME}/workflows"
     SUPPORTED_EXTENSIONS = [".md", ".yaml", ".yml"]
     
     def __init__(
@@ -4246,7 +4247,8 @@ class WorkflowManager:
     
     def _get_checkpoints_dir(self) -> Path:
         """Get the checkpoints directory path."""
-        checkpoints_dir = self.workspace_path / ".praisonai" / "checkpoints"
+        from ..paths import DEFAULT_DIR_NAME
+        checkpoints_dir = self.workspace_path / DEFAULT_DIR_NAME / "checkpoints"
         checkpoints_dir.mkdir(parents=True, exist_ok=True)
         return checkpoints_dir
     

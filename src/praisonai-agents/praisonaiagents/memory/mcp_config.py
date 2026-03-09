@@ -113,7 +113,8 @@ class MCPConfigManager:
     - Easy server management
     """
     
-    MCP_DIR_NAME = ".praisonai/mcp"
+    from ..paths import DEFAULT_DIR_NAME as _DIR_NAME
+    MCP_DIR_NAME = f"{_DIR_NAME}/mcp"
     SUPPORTED_EXTENSIONS = [".json", ".mcpjson"]
     
     def __init__(
@@ -131,7 +132,11 @@ class MCPConfigManager:
             verbose: Verbosity level
         """
         self.workspace_path = Path(workspace_path) if workspace_path else Path.cwd()
-        self.global_mcp_path = Path(global_mcp_path) if global_mcp_path else Path.home() / ".praisonai" / "mcp"
+        if global_mcp_path:
+            self.global_mcp_path = Path(global_mcp_path)
+        else:
+            from ..paths import get_mcp_dir
+            self.global_mcp_path = get_mcp_dir()
         self.verbose = verbose
         
         self._configs: Dict[str, MCPConfig] = {}

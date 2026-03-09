@@ -85,14 +85,32 @@ _config_cache: Optional[Dict[str, Any]] = None
 _config_loaded: bool = False
 
 
+def _default_project_plugins_dir():
+    """Return project-local plugins directory via paths.py."""
+    from ..paths import get_project_data_dir
+    return get_project_data_dir() / "plugins"
+
+
+def _default_global_plugins_dir():
+    """Return user-global plugins directory via paths.py."""
+    from ..paths import get_plugins_dir
+    return get_plugins_dir()
+
+
+def get_project_data_dir():
+    """Re-export for local use in config search."""
+    from ..paths import get_project_data_dir as _gpd
+    return _gpd()
+
+
 @dataclass
 class PluginsConfig:
     """Configuration for the plugin system."""
     enabled: Union[bool, List[str]] = False  # True, False, or list of plugin names
     auto_discover: bool = True
     directories: List[str] = field(default_factory=lambda: [
-        "./.praisonai/plugins/",
-        "~/.praisonai/plugins/"
+        str(_default_project_plugins_dir()),
+        str(_default_global_plugins_dir())
     ])
     
     def to_dict(self) -> Dict[str, Any]:
@@ -174,7 +192,7 @@ def _find_config_file() -> Optional[Path]:
     # Project-local locations
     cwd = Path.cwd()
     local_paths = [
-        cwd / ".praisonai" / "config.toml",
+        get_project_data_dir() / "config.toml",
         cwd / "praisonai.toml",
     ]
     
@@ -183,8 +201,8 @@ def _find_config_file() -> Optional[Path]:
             return path
     
     # User global location
-    home = Path.home()
-    global_path = home / ".praisonai" / "config.toml"
+    from ..paths import get_data_dir
+    global_path = get_data_dir() / "config.toml"
     if global_path.exists():
         return global_path
     
@@ -245,8 +263,8 @@ def _dict_to_plugins_config(data: Dict[str, Any]) -> PluginsConfig:
         enabled=data.get("enabled", False),
         auto_discover=data.get("auto_discover", True),
         directories=data.get("directories", [
-            "./.praisonai/plugins/",
-            "~/.praisonai/plugins/"
+            str(_default_project_plugins_dir()),
+            str(_default_global_plugins_dir())
         ]),
     )
 

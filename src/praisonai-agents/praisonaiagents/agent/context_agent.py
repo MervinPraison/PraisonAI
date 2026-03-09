@@ -162,7 +162,8 @@ class ContextAgent(Agent):
         
         # Enhanced logging and output management
         self.debug_mode = os.getenv('LOGLEVEL', '').lower() == 'debug'
-        self.output_dir = Path(".praisonai/prp")  # Save in .praisonai/prp folder
+        from ..paths import get_project_prp_dir
+        self.output_dir = get_project_prp_dir()  # Save in .praisonai/prp folder
         self.setup_output_directories()  # Create directories first
         self.setup_logging()              # Then setup logging
         

@@ -122,7 +122,8 @@ class RulesManager:
         ```
     """
     
-    RULES_DIR_NAME = ".praisonai/rules"
+    from ..paths import DEFAULT_DIR_NAME as _DIR_NAME
+    RULES_DIR_NAME = f"{_DIR_NAME}/rules"
     SUPPORTED_EXTENSIONS = [".md", ".mdc", ".txt"]
     
     # Root-level instruction files (like Claude, Codex, Gemini, Cursor, Windsurf)
@@ -165,7 +166,11 @@ class RulesManager:
             verbose: Verbosity level
         """
         self.workspace_path = Path(workspace_path) if workspace_path else Path.cwd()
-        self.global_rules_path = Path(global_rules_path) if global_rules_path else Path.home() / ".praisonai" / "rules"
+        if global_rules_path:
+            self.global_rules_path = Path(global_rules_path)
+        else:
+            from ..paths import get_rules_dir
+            self.global_rules_path = get_rules_dir()
         self.verbose = verbose
         
         self._rules: Dict[str, Rule] = {}

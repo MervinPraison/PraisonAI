@@ -103,7 +103,8 @@ class HooksManager:
         ```
     """
     
-    CONFIG_FILE = ".praisonai/hooks.json"
+    from ..paths import DEFAULT_DIR_NAME as _DIR_NAME
+    CONFIG_FILE = f"{_DIR_NAME}/hooks.json"
     
     def __init__(
         self,
@@ -384,7 +385,8 @@ class HooksManager:
             timeout: Global timeout in seconds
             enabled: Whether hooks are enabled
         """
-        config_dir = self.workspace_path / ".praisonai"
+        from ..paths import DEFAULT_DIR_NAME
+        config_dir = self.workspace_path / DEFAULT_DIR_NAME
         config_dir.mkdir(parents=True, exist_ok=True)
         
         config = {

@@ -136,10 +136,8 @@ class AutonomyConfig:
             self.track_changes = (self.level == "full_auto")
         # Default snapshot directory
         if self.snapshot_dir is None:
-            import os
-            self.snapshot_dir = os.path.join(
-                os.path.expanduser("~"), ".praisonai", "snapshots"
-            )
+            from ..paths import get_snapshots_dir
+            self.snapshot_dir = str(get_snapshots_dir())
     
     @property
     def effective_track_changes(self) -> bool:

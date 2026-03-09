@@ -92,7 +92,7 @@ class RetrievalConfig:
     vector_store_provider: str = "chroma"
     vector_store_config: Dict[str, Any] = field(default_factory=dict)
     collection_name: Optional[str] = None
-    persist_path: str = ".praisonai"
+    persist_path: str = None  # Resolved to str(get_project_data_dir()) in __post_init__
     
     # Embedding configuration
     embedder_provider: Optional[str] = None
@@ -112,6 +112,11 @@ class RetrievalConfig:
 {context}
 </retrieved_context>"""
     system_separation: bool = True  # Use system prompt separation for safety
+
+    def __post_init__(self):
+        if self.persist_path is None:
+            from ..paths import get_project_data_dir
+            self.persist_path = str(get_project_data_dir())
     
     def get_token_budget(self, model_name: Optional[str] = None):
         """
@@ -233,7 +238,7 @@ class RetrievalConfig:
             vector_store_provider=data.get("vector_store_provider", "chroma"),
             vector_store_config=data.get("vector_store_config", {}),
             collection_name=data.get("collection_name"),
-            persist_path=data.get("persist_path", ".praisonai"),
+            persist_path=data.get("persist_path"),
             embedder_provider=data.get("embedder_provider"),
             embedder_model=data.get("embedder_model"),
             auto_keywords=auto_keywords,

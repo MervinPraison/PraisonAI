@@ -512,14 +512,16 @@ class AgentTeam:
                 if not mem_cfg:
                     mem_cfg = next((t.config.get('memory_config') for t in tasks if hasattr(t, 'config') and t.config), None)
                 if not mem_cfg:
+                    from ..paths import get_project_data_dir
+                    _pd = str(get_project_data_dir())
                     mem_cfg = {
                         "provider": "rag",
                         "use_embedding": True,
                         "storage": {
                             "type": "sqlite",
-                            "path": "./.praisonai/memory.db"
+                            "path": f"{_pd}/memory.db"
                         },
-                        "rag_db_path": "./.praisonai/chroma_db"
+                        "rag_db_path": f"{_pd}/chroma_db"
                     }
                 if _embedder:
                     if isinstance(_embedder, dict):

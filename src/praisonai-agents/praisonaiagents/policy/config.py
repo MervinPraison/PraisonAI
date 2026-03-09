@@ -15,8 +15,9 @@ from typing import Optional, List, Any, Dict
 
 logger = logging.getLogger(__name__)
 
-# Default rules file path (follows ~/.praisonai/ convention)
-DEFAULT_RULES_DIR = os.path.join(os.path.expanduser("~"), ".praisonai", "rules")
+# Default rules file path (uses centralized paths - DRY)
+from ..paths import get_rules_dir as _get_rules_dir
+DEFAULT_RULES_DIR = str(_get_rules_dir())
 DEFAULT_RULES_FILE = os.path.join(DEFAULT_RULES_DIR, "default.rules")
 
 

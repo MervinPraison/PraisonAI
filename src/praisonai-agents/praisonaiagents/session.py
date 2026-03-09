@@ -83,7 +83,7 @@ class Session:
             default_memory_config = {
                 "provider": "rag",
                 "use_embedding": False,  # Disable embeddings to avoid OpenAI API key requirement
-                "rag_db_path": f".praisonai/sessions/{self.session_id}/chroma_db"
+                "rag_db_path": str(self._get_session_dir() / "chroma_db")
             }
             if memory_config:
                 default_memory_config.update(memory_config)
@@ -94,7 +94,7 @@ class Session:
             self.knowledge_config = default_knowledge_config
 
             # Create session directory
-            os.makedirs(f".praisonai/sessions/{self.session_id}", exist_ok=True)
+            self._get_session_dir().mkdir(parents=True, exist_ok=True)
 
             # Initialize components lazily
             self._memory = None
@@ -109,6 +109,12 @@ class Session:
             self._knowledge = None
             self._agents_instance = None
             self._agents = {}  # Track agents and their chat histories
+
+    def _get_session_dir(self):
+        """Return session-specific directory using paths.py."""
+        from pathlib import Path
+        from .paths import get_project_sessions_dir
+        return get_project_sessions_dir() / self.session_id
 
     @property
     def memory(self) -> Memory:

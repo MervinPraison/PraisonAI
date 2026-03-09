@@ -80,7 +80,8 @@ class DocsManager:
     - Priority-based ordering
     """
     
-    DOCS_DIR_NAME = ".praisonai/docs"
+    from ..paths import DEFAULT_DIR_NAME as _DIR_NAME
+    DOCS_DIR_NAME = f"{_DIR_NAME}/docs"
     SUPPORTED_EXTENSIONS = [".md", ".txt", ".rst"]
     
     # Maximum characters per doc (context window management)
@@ -101,7 +102,11 @@ class DocsManager:
             verbose: Verbosity level
         """
         self.workspace_path = Path(workspace_path) if workspace_path else Path.cwd()
-        self.global_docs_path = Path(global_docs_path) if global_docs_path else Path.home() / ".praisonai" / "docs"
+        if global_docs_path:
+            self.global_docs_path = Path(global_docs_path)
+        else:
+            from ..paths import get_docs_dir
+            self.global_docs_path = get_docs_dir()
         self.verbose = verbose
         
         self._docs: Dict[str, Doc] = {}

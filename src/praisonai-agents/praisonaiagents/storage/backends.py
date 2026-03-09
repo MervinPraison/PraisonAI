@@ -19,7 +19,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ..paths import get_storage_dir
+from ..paths import get_storage_dir, get_storage_path
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +175,7 @@ class SQLiteBackend:
     
     def __init__(
         self,
-        db_path: str = "~/.praisonai/storage.db",
+        db_path: str = None,
         table_name: str = "praison_storage",
         auto_create: bool = True,
     ):
@@ -187,7 +187,7 @@ class SQLiteBackend:
             table_name: Name of the storage table
             auto_create: Create table if it doesn't exist
         """
-        self.db_path = os.path.expanduser(db_path)
+        self.db_path = os.path.expanduser(db_path) if db_path else str(get_storage_path())
         self.table_name = table_name
         self._local = threading.local()
         

@@ -99,7 +99,7 @@ class HierarchicalSummarizer:
     def __init__(
         self,
         llm=None,
-        persist_path: str = ".praisonai/summaries",
+        persist_path: str = None,
         verbose: bool = False,
     ):
         """
@@ -111,6 +111,9 @@ class HierarchicalSummarizer:
             verbose: Enable verbose logging
         """
         self._llm = llm
+        if persist_path is None:
+            from ..paths import get_project_summaries_dir
+            persist_path = str(get_project_summaries_dir())
         self._persist_path = persist_path
         self._verbose = verbose
         self._hierarchy: Dict[str, SummaryNode] = {}

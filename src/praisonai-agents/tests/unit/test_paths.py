@@ -322,3 +322,146 @@ class TestImportPerformance:
         
         # Should import in under 10ms (no heavy deps)
         assert elapsed < 0.01, f"Import took {elapsed*1000:.2f}ms, expected < 10ms"
+
+
+class TestProjectLocalHelpers:
+    """Tests for project-local path helpers (get_project_*_dir)."""
+
+    def test_project_sessions_dir(self):
+        """get_project_sessions_dir returns .praisonai/sessions/ in cwd."""
+        from praisonaiagents.paths import get_project_sessions_dir
+
+        result = get_project_sessions_dir()
+        assert result == Path.cwd() / ".praisonai" / "sessions"
+
+    def test_project_sessions_dir_custom_path(self, tmp_path):
+        """get_project_sessions_dir accepts custom project path."""
+        from praisonaiagents.paths import get_project_sessions_dir
+
+        result = get_project_sessions_dir(tmp_path)
+        assert result == tmp_path / ".praisonai" / "sessions"
+
+    def test_project_knowledge_dir(self):
+        """get_project_knowledge_dir returns .praisonai/knowledge/ in cwd."""
+        from praisonaiagents.paths import get_project_knowledge_dir
+
+        result = get_project_knowledge_dir()
+        assert result == Path.cwd() / ".praisonai" / "knowledge"
+
+    def test_project_knowledge_dir_custom_path(self, tmp_path):
+        """get_project_knowledge_dir accepts custom project path."""
+        from praisonaiagents.paths import get_project_knowledge_dir
+
+        result = get_project_knowledge_dir(tmp_path)
+        assert result == tmp_path / ".praisonai" / "knowledge"
+
+    def test_project_summaries_dir(self):
+        """get_project_summaries_dir returns .praisonai/summaries/ in cwd."""
+        from praisonaiagents.paths import get_project_summaries_dir
+
+        result = get_project_summaries_dir()
+        assert result == Path.cwd() / ".praisonai" / "summaries"
+
+    def test_project_prp_dir(self):
+        """get_project_prp_dir returns .praisonai/prp/ in cwd."""
+        from praisonaiagents.paths import get_project_prp_dir
+
+        result = get_project_prp_dir()
+        assert result == Path.cwd() / ".praisonai" / "prp"
+
+
+class TestGetSchedulesDir:
+    """Tests for get_schedules_dir() function."""
+
+    def test_returns_schedules_subdir(self):
+        """Should return schedules subdirectory of data dir."""
+        from praisonaiagents.paths import get_schedules_dir
+
+        result = get_schedules_dir()
+        assert result == Path.home() / ".praisonai" / "schedules"
+
+    def test_respects_env_override(self):
+        """Should respect PRAISONAI_HOME override."""
+        from praisonaiagents.paths import get_schedules_dir
+
+        with patch.dict(os.environ, {"PRAISONAI_HOME": "/custom"}):
+            result = get_schedules_dir()
+            assert result == Path("/custom/schedules")
+
+
+class TestGetStoragePath:
+    """Tests for get_storage_path() function."""
+
+    def test_returns_storage_db(self):
+        """Should return storage.db in data dir."""
+        from praisonaiagents.paths import get_storage_path
+
+        result = get_storage_path()
+        assert result == Path.home() / ".praisonai" / "storage.db"
+
+    def test_respects_env_override(self):
+        """Should respect PRAISONAI_HOME override."""
+        from praisonaiagents.paths import get_storage_path
+
+        with patch.dict(os.environ, {"PRAISONAI_HOME": "/custom"}):
+            result = get_storage_path()
+            assert result == Path("/custom/storage.db")
+
+
+class TestModuleWiring:
+    """Tests verifying that modules use paths.py instead of hardcoded paths."""
+
+    def test_policy_config_uses_paths(self):
+        """policy/config.py should resolve rules dir via paths.py."""
+        from praisonaiagents.policy.config import DEFAULT_RULES_DIR
+        from praisonaiagents.paths import get_rules_dir
+
+        assert DEFAULT_RULES_DIR == str(get_rules_dir())
+
+    def test_policy_config_no_hardcoded_expanduser(self):
+        """policy/config.py should not have hardcoded expanduser for rules."""
+        import inspect
+        from praisonaiagents.policy import config
+
+        source = inspect.getsource(config)
+        # The module should not contain expanduser + .praisonai for rules
+        assert 'expanduser("~"), ".praisonai", "rules"' not in source
+
+    def test_autonomy_snapshot_dir_defaults_via_paths(self):
+        """autonomy.py AutonomyConfig should default snapshot_dir via paths.py."""
+        from praisonaiagents.agent.autonomy import AutonomyConfig
+        from praisonaiagents.paths import get_snapshots_dir
+
+        config = AutonomyConfig()
+        assert config.snapshot_dir == str(get_snapshots_dir())
+
+    def test_autonomy_snapshot_dir_respects_env(self):
+        """AutonomyConfig snapshot_dir should respect PRAISONAI_HOME."""
+        from praisonaiagents.paths import _clear_cache
+
+        _clear_cache()
+        with patch.dict(os.environ, {"PRAISONAI_HOME": "/custom"}):
+            from praisonaiagents.agent.autonomy import AutonomyConfig
+
+            config = AutonomyConfig()
+            assert config.snapshot_dir == str(Path("/custom/snapshots"))
+        _clear_cache()
+
+    def test_scheduler_store_uses_paths(self):
+        """scheduler/store.py should resolve default dir via paths.py."""
+        from praisonaiagents.scheduler.store import _DEFAULT_DIR
+        from praisonaiagents.paths import get_schedules_dir
+
+        assert _DEFAULT_DIR == str(get_schedules_dir())
+
+    def test_sqlite_backend_default_uses_paths(self):
+        """SQLiteBackend default db_path should use paths.py."""
+        from praisonaiagents.storage.backends import SQLiteBackend
+        from praisonaiagents.paths import get_storage_path
+
+        # We can't construct SQLiteBackend without it trying to create the DB,
+        # so we verify the import is present
+        import inspect
+        source = inspect.getsource(SQLiteBackend.__init__)
+        assert "get_storage_path" in source
+

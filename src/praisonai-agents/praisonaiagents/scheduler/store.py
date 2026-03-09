@@ -15,7 +15,8 @@ from .models import ScheduleJob
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DIR = os.path.join(os.path.expanduser("~"), ".praisonai", "schedules")
+from ..paths import get_schedules_dir as _get_schedules_dir
+_DEFAULT_DIR = str(_get_schedules_dir())
 _JOBS_FILE = "jobs.json"
 
 

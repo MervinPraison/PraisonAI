@@ -309,6 +309,78 @@ def get_project_data_dir(project_path: Optional[Union[str, Path]] = None) -> Pat
     return base / DEFAULT_DIR_NAME
 
 
+def get_project_sessions_dir(project_path: Optional[Union[str, Path]] = None) -> Path:
+    """
+    Get project-level sessions directory.
+    
+    Args:
+        project_path: Project root (defaults to cwd)
+        
+    Returns:
+        Path to .praisonai/sessions/ in project
+    """
+    return get_project_data_dir(project_path) / "sessions"
+
+
+def get_project_knowledge_dir(project_path: Optional[Union[str, Path]] = None) -> Path:
+    """
+    Get project-level knowledge directory.
+    
+    Args:
+        project_path: Project root (defaults to cwd)
+        
+    Returns:
+        Path to .praisonai/knowledge/ in project
+    """
+    return get_project_data_dir(project_path) / "knowledge"
+
+
+def get_project_summaries_dir(project_path: Optional[Union[str, Path]] = None) -> Path:
+    """
+    Get project-level summaries directory for RAG.
+    
+    Args:
+        project_path: Project root (defaults to cwd)
+        
+    Returns:
+        Path to .praisonai/summaries/ in project
+    """
+    return get_project_data_dir(project_path) / "summaries"
+
+
+def get_project_prp_dir(project_path: Optional[Union[str, Path]] = None) -> Path:
+    """
+    Get project-level PRP output directory.
+    
+    Args:
+        project_path: Project root (defaults to cwd)
+        
+    Returns:
+        Path to .praisonai/prp/ in project
+    """
+    return get_project_data_dir(project_path) / "prp"
+
+
+def get_schedules_dir() -> Path:
+    """
+    Get schedules directory.
+    
+    Returns:
+        Path to ~/.praisonai/schedules/
+    """
+    return get_data_dir() / "schedules"
+
+
+def get_storage_path() -> Path:
+    """
+    Get default SQLite storage database path.
+    
+    Returns:
+        Path to ~/.praisonai/storage.db
+    """
+    return get_data_dir() / "storage.db"
+
+
 def ensure_dir(path: Union[str, Path]) -> Path:
     """
     Ensure a directory exists, creating it if necessary.
@@ -352,6 +424,8 @@ def get_all_paths() -> Dict[str, Path]:
         "rules": get_rules_dir(),
         "permissions": get_permissions_dir(),
         "storage": get_storage_dir(),
+        "storage_db": get_storage_path(),
+        "schedules": get_schedules_dir(),
         "checkpoints": get_checkpoints_dir(),
         "snapshots": get_snapshots_dir(),
         "learn": get_learn_dir(),
