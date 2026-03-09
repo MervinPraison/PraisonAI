@@ -906,6 +906,7 @@ Methods:
 * <code title="cli">praisonai package install <a href="./src/praisonai/praisonai/cli/commands/package.py">--help</a></code>
 * <code title="cli">praisonai package list <a href="./src/praisonai/praisonai/cli/commands/package.py">--help</a></code>
 * <code title="cli">praisonai package uninstall <a href="./src/praisonai/praisonai/cli/commands/package.py">--help</a></code>
+* <code title="cli">praisonai paths show <a href="./src/praisonai/praisonai/cli/commands/paths.py">--help</a></code>
 * <code title="cli">praisonai plugins create <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
 * <code title="cli">praisonai plugins disable <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
 * <code title="cli">praisonai plugins discover <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
