@@ -62,7 +62,9 @@ class LearnMode(str, Enum):
     
     DISABLED: No automatic learning (manual capture only)
     AGENTIC: Agent autonomously extracts and stores learnings after each conversation
-    PROPOSE: Agent proposes learnings for user approval before storing
+    PROPOSE: (Future) Agent proposes learnings for user approval before storing.
+             Note: PROPOSE mode is defined but not yet implemented. Using it will
+             behave the same as DISABLED until the approval workflow is added.
     """
     DISABLED = "disabled"
     AGENTIC = "agentic"
@@ -132,10 +134,6 @@ class LearnConfig:
     # LLM for learning extraction
     llm: Optional[str] = None  # LLM model for extracting learnings (defaults to agent's LLM)
     
-    # Maintenance settings
-    auto_consolidate: bool = True     # Auto-consolidate learnings
-    retention_days: Optional[int] = None  # Days to retain (None = forever)
-    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -152,8 +150,6 @@ class LearnConfig:
             "db_url": self.db_url,
             "store_path": self.store_path,
             "llm": self.llm,
-            "auto_consolidate": self.auto_consolidate,
-            "retention_days": self.retention_days,
         }
 
 

@@ -40,6 +40,9 @@ class MemoryProtocol(Protocol):
             
             def search_long_term(self, query: str, limit: int = 5, **kwargs):
                 return self._data[:limit]
+            
+            def get_all_memories(self, **kwargs):
+                return self._data
         
         # Use in agent
         memory: MemoryProtocol = InMemoryStore()
@@ -119,6 +122,15 @@ class MemoryProtocol(Protocol):
             
         Returns:
             List of matching memory entries
+        """
+        ...
+
+    def get_all_memories(self, **kwargs) -> List[Dict[str, Any]]:
+        """
+        Get all memories from all backends.
+        
+        Returns:
+            List of all memory entries (short-term and long-term combined)
         """
         ...
 

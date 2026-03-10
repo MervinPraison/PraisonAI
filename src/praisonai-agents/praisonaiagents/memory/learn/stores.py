@@ -73,12 +73,23 @@ class BaseStore(ABC):
         self._backend = backend
         self.store_path = store_path or self._default_path()
         self._entries: Dict[str, LearnEntry] = {}
+        self._was_updated: bool = False
         
         # DRY: Use BaseJSONStore for thread-safe storage
-        self._store = BaseJSONStore(
-            storage_path=self.store_path,
-            backend=backend,
-        )
+        # Fall back to FILE backend if connection fails (e.g., Redis unavailable)
+        try:
+            self._store = BaseJSONStore(
+                storage_path=self.store_path,
+                backend=backend,
+            )
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to connect to backend: {e}. Falling back to FILE.")
+            self._backend = None
+            self._store = BaseJSONStore(
+                storage_path=self.store_path,
+                backend=None,
+            )
         self._load()
     
     @property
@@ -86,6 +97,15 @@ class BaseStore(ABC):
     def store_name(self) -> str:
         """Name of the store (used for file naming)."""
         pass
+    
+    @property
+    def was_updated(self) -> bool:
+        """Whether this store has been modified since last reset."""
+        return self._was_updated
+    
+    def reset_updated(self) -> None:
+        """Reset the was_updated flag."""
+        self._was_updated = False
     
     def _default_path(self) -> str:
         """Default storage path (uses centralized paths - DRY)."""
@@ -106,7 +126,24 @@ class BaseStore(ABC):
         self._store.save({k: v.to_dict() for k, v in self._entries.items()})
     
     def add(self, content: str, metadata: Optional[Dict[str, Any]] = None) -> LearnEntry:
-        """Add a new entry."""
+        """Add a new entry with deduplication.
+        
+        Checks for exact content matches to prevent duplicate learnings.
+        If a duplicate is found, returns the existing entry instead of creating a new one.
+        """
+        # Deduplication: Check for exact content match
+        content_normalized = content.strip().lower()
+        for existing_entry in self._entries.values():
+            if existing_entry.content.strip().lower() == content_normalized:
+                # Update metadata if provided, but don't create duplicate
+                if metadata:
+                    existing_entry.metadata.update(metadata)
+                    existing_entry.updated_at = datetime.utcnow().isoformat()
+                    self._save()
+                    self._was_updated = True
+                return existing_entry
+        
+        # No duplicate found, create new entry
         entry_id = f"{self.store_name}_{len(self._entries)}_{datetime.utcnow().timestamp()}"
         entry = LearnEntry(
             id=entry_id,
@@ -115,6 +152,7 @@ class BaseStore(ABC):
         )
         self._entries[entry_id] = entry
         self._save()
+        self._was_updated = True
         return entry
     
     def get(self, entry_id: str) -> Optional[LearnEntry]:
@@ -146,6 +184,7 @@ class BaseStore(ABC):
             entry.metadata.update(metadata)
         entry.updated_at = datetime.utcnow().isoformat()
         self._save()
+        self._was_updated = True
         return entry
     
     def delete(self, entry_id: str) -> bool:
@@ -153,6 +192,7 @@ class BaseStore(ABC):
         if entry_id in self._entries:
             del self._entries[entry_id]
             self._save()
+            self._was_updated = True
             return True
         return False
     
@@ -161,6 +201,7 @@ class BaseStore(ABC):
         count = len(self._entries)
         self._entries = {}
         self._save()
+        self._was_updated = True
         return count
 
 

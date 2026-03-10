@@ -989,7 +989,9 @@ class Agent:
             if learn is False:
                 _learn_config = None
             elif learn is True:
-                _learn_config = LearnConfig()
+                # learn=True shorthand enables AGENTIC mode (auto-learning)
+                from ..memory.learn.protocols import LearnMode
+                _learn_config = LearnConfig(mode=LearnMode.AGENTIC)
             elif isinstance(learn, LearnConfig):
                 _learn_config = learn
             elif isinstance(learn, dict):
@@ -1000,7 +1002,9 @@ class Agent:
             # Fallback to memory.learn for backward compatibility
             if _memory_config.learn:
                 if _memory_config.learn is True:
-                    _learn_config = LearnConfig()
+                    # learn=True shorthand enables AGENTIC mode
+                    from ..memory.learn.protocols import LearnMode
+                    _learn_config = LearnConfig(mode=LearnMode.AGENTIC)
                 elif isinstance(_memory_config.learn, LearnConfig):
                     _learn_config = _memory_config.learn
                 elif isinstance(_memory_config.learn, dict):
@@ -4652,6 +4656,36 @@ Your Goal: {self.goal}"""
             prompt_str = prompt if isinstance(prompt, str) else str(prompt)
             self._process_auto_memory(prompt_str, str(response))
         
+        # Auto-learning extraction (opt-in via LearnConfig(mode=LearnMode.AGENTIC))
+        self._process_auto_learning()
+        
+        return response
+
+    async def _atrigger_after_agent_hook(self, prompt, response, start_time, tools_used=None):
+        """Async version: Trigger AFTER_AGENT hook and return response."""
+        from ..hooks import HookEvent, AfterAgentInput
+        after_agent_input = AfterAgentInput(
+            session_id=getattr(self, '_session_id', 'default'),
+            cwd=os.getcwd(),
+            event_name=HookEvent.AFTER_AGENT,
+            timestamp=str(time.time()),
+            agent_name=self.name,
+            prompt=prompt if isinstance(prompt, str) else str(prompt),
+            response=response or "",
+            tools_used=tools_used or [],
+            total_tokens=0,
+            execution_time_ms=(time.time() - start_time) * 1000
+        )
+        await self._hook_runner.execute(HookEvent.AFTER_AGENT, after_agent_input)
+        
+        # Auto-memory extraction (opt-in via MemoryConfig(auto_memory=True))
+        if response:
+            prompt_str = prompt if isinstance(prompt, str) else str(prompt)
+            self._process_auto_memory(prompt_str, str(response))
+        
+        # Auto-learning extraction (opt-in via LearnConfig(mode=LearnMode.AGENTIC))
+        self._process_auto_learning()
+        
         return response
 
     
@@ -6058,7 +6092,7 @@ Your Goal: {self.goal}"""
                                 validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                 # Execute callback after validation
                                 self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
-                                return validated_response
+                                return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
                             except Exception as e:
                                 logging.error(f"Agent {self.name}: Guardrail validation failed for JSON output: {e}")
                                 # Rollback chat history on guardrail failure
@@ -6090,7 +6124,7 @@ Your Goal: {self.goal}"""
                                 validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                 # Execute callback after validation
                                 self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
-                                return validated_response
+                                return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
                             except Exception as e:
                                 logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
                                 # Rollback chat history on guardrail failure
@@ -6160,7 +6194,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                     self._end_run(validated_response, "completed", {"duration_ms": (time.time() - start_time) * 1000})
-                                    return validated_response
+                                    return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
                                     # Rollback chat history on guardrail failure
@@ -6179,7 +6213,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
-                                    return validated_response
+                                    return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed after max reflections: {e}")
                                     # Rollback chat history on guardrail failure
@@ -6367,7 +6401,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id)
                         # Execute callback after validation
                         self._execute_callback_and_display(normalized_content, validated_response, time.time() - start_time, task_name, task_description, task_id)
-                        return validated_response
+                        return await self._atrigger_after_agent_hook(prompt, validated_response, start_time)
                     except Exception as e:
                         logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
                         # Rollback chat history on guardrail failure
@@ -6445,7 +6479,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                         # Execute callback after tool completion
                         self._execute_callback_and_display(original_prompt, result, time.time() - start_time, task_name, task_description, task_id)
-                        return result
+                        return await self._atrigger_after_agent_hook(original_prompt, result, start_time)
                     elif output_json or output_pydantic:
                         response = await self._openai_client.async_client.chat.completions.create(
                             model=self.llm,
@@ -6459,7 +6493,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                         # Execute callback after JSON/Pydantic completion
                         self._execute_callback_and_display(original_prompt, response_text, time.time() - start_time, task_name, task_description, task_id)
-                        return response_text
+                        return await self._atrigger_after_agent_hook(original_prompt, response_text, start_time)
                     else:
                         response = await self._openai_client.async_client.chat.completions.create(
                             model=self.llm,
@@ -6499,7 +6533,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                                             total_time = time.time() - start_time
                                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
-                                        return response_text
+                                        return await self._atrigger_after_agent_hook(original_prompt, response_text, start_time)
                                     
                                     reflection_response = await self._openai_client.async_client.beta.chat.completions.parse(
                                         model=self.reflect_llm if self.reflect_llm else self.llm,
@@ -6557,7 +6591,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                             # Execute callback after validation
                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
-                            return validated_response
+                            return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
                         except Exception as e:
                             logging.error(f"Agent {self.name}: Guardrail validation failed for OpenAI client: {e}")
                             # Rollback chat history on guardrail failure
@@ -7277,6 +7311,77 @@ Write the complete compiled report:"""
             )
         except Exception as e:
             logging.debug(f"Auto-memory extraction failed: {e}")
+
+    def _process_auto_learning(self):
+        """Process auto-learning extraction after agent response.
+        
+        Called after each agent response when LearnMode.AGENTIC is set.
+        Uses LearnManager.process_conversation() to extract and store learnings
+        (persona, insights, patterns) from the conversation. No-op when learning
+        is disabled or mode is not AGENTIC.
+        """
+        # Quick exit if no learn config or mode is not AGENTIC
+        if not self._learn_config:
+            return
+        
+        # Check if mode is AGENTIC (auto-extract learnings)
+        from ..memory.learn.protocols import LearnMode
+        mode = getattr(self._learn_config, 'mode', None)
+        
+        # Handle PROPOSE mode — extract but store as pending for user approval
+        if (isinstance(mode, LearnMode) and mode == LearnMode.PROPOSE) or \
+           (isinstance(mode, str) and mode == 'propose'):
+            learn_manager = None
+            if self._memory_instance and hasattr(self._memory_instance, 'learn'):
+                learn_manager = self._memory_instance.learn
+            if learn_manager:
+                try:
+                    recent_messages = self.chat_history[-2:] if len(self.chat_history) >= 2 else self.chat_history
+                    if recent_messages:
+                        # Use same extraction as AGENTIC, but don't auto-store
+                        result = learn_manager.process_conversation(
+                            messages=recent_messages,
+                            llm=getattr(self._learn_config, 'llm', None) or self.llm,
+                            extract_only=True,
+                        )
+                        # Move extracted items to pending queue
+                        if result:
+                            for p in result.get("persona", []):
+                                if p:
+                                    learn_manager.add_pending(p, category="persona")
+                            for i in result.get("insights", []):
+                                if i:
+                                    learn_manager.add_pending(i, category="insights")
+                            for pt in result.get("patterns", []):
+                                if pt:
+                                    learn_manager.add_pending(pt, category="patterns")
+                except Exception as e:
+                    logging.debug(f"PROPOSE mode learning extraction failed: {e}")
+            return
+        
+        if mode is None or (isinstance(mode, LearnMode) and mode != LearnMode.AGENTIC):
+            return
+        if isinstance(mode, str) and mode != 'agentic':
+            return
+        
+        # Get LearnManager from memory instance
+        learn_manager = None
+        if self._memory_instance and hasattr(self._memory_instance, 'learn'):
+            learn_manager = self._memory_instance.learn
+        
+        if not learn_manager:
+            return
+        
+        try:
+            # Process recent conversation (last 2 messages: user + assistant)
+            recent_messages = self.chat_history[-2:] if len(self.chat_history) >= 2 else self.chat_history
+            if recent_messages:
+                learn_manager.process_conversation(
+                    messages=recent_messages,
+                    llm=getattr(self._learn_config, 'llm', None) or self.llm,
+                )
+        except Exception as e:
+            logging.debug(f"Auto-learning extraction failed: {e}")
 
     def _auto_save_session(self):
         """Auto-save session if auto_save is enabled.

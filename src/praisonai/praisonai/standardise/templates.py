@@ -148,8 +148,10 @@ icon: "lightbulb"
 
 ```mermaid
 graph LR
-    A[Input] --> B[{name}]
-    B --> C[Output]
+    A[Input]:::agent --> B[{name}]:::tool --> C[Output]:::agent
+
+    classDef agent fill:#8B0000,color:#fff
+    classDef tool fill:#189AB4,color:#fff
 ```
 
 ## When to Use

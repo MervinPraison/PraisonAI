@@ -5,19 +5,10 @@ Provides Protocol interfaces for learning implementations.
 Enables custom learning backends and extensibility.
 """
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
-from enum import Enum
 
-
-class LearnMode(str, Enum):
-    """Learning mode for automatic learning extraction.
-    
-    DISABLED: No automatic learning (manual capture only)
-    AGENTIC: Agent autonomously extracts and stores learnings
-    PROPOSE: Agent proposes learnings for user approval
-    """
-    DISABLED = "disabled"
-    AGENTIC = "agentic"
-    PROPOSE = "propose"
+# Re-export LearnMode from feature_configs (canonical location)
+# This avoids duplication while maintaining backward compatibility
+from ...config.feature_configs import LearnMode
 
 
 @runtime_checkable

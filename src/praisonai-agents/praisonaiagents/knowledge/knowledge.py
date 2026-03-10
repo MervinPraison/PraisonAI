@@ -1,7 +1,5 @@
 import os
 import logging
-import uuid
-import time
 from datetime import datetime
 from .chunking import Chunking
 from functools import cached_property
@@ -414,8 +412,9 @@ class Knowledge:
 
     @cached_property
     def config(self):
-        # Generate unique collection name for each instance (only if not provided in config)
-        default_collection = f"test_{int(time.time())}_{str(uuid.uuid4())[:8]}"
+        # Use deterministic collection name for persistence across restarts
+        # Only generate unique name if explicitly requested via config
+        default_collection = "praisonai_knowledge"
         from ..paths import get_project_data_dir
         persist_dir = str(get_project_data_dir())
 

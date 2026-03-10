@@ -265,3 +265,77 @@ class TestAgentWithLearnMode:
         
         assert agent._learn_config is not None
         assert agent._learn_config.backend == LearnBackend.SQLITE
+
+    def test_agent_has_process_auto_learning_method(self):
+        """Agent should have _process_auto_learning method."""
+        from praisonaiagents import Agent
+        
+        agent = Agent(name="test", instructions="Test agent")
+        assert hasattr(agent, '_process_auto_learning')
+        assert callable(agent._process_auto_learning)
+
+
+class TestCustomStores:
+    """Test custom_stores support in LearnManager."""
+
+    def test_learn_manager_accepts_custom_stores(self):
+        """LearnManager should accept custom_stores parameter."""
+        from praisonaiagents import LearnManager, LearnConfig
+        
+        class MyCustomStore:
+            def __init__(self):
+                self.data = []
+            def add(self, content, metadata=None):
+                self.data.append(content)
+                return {"id": "1", "content": content}
+            def search(self, query, limit=10):
+                return []
+            def list_all(self, limit=100):
+                return self.data
+            def get(self, entry_id):
+                return None
+            def update(self, entry_id, content, metadata=None):
+                return None
+            def delete(self, entry_id):
+                return True
+            def clear(self):
+                return 0
+        
+        custom_store = MyCustomStore()
+        manager = LearnManager(
+            config=LearnConfig(persona=True),
+            custom_stores={"domain": custom_store}
+        )
+        
+        assert "domain" in manager._stores
+        assert manager._stores["domain"] is custom_store
+
+    def test_custom_stores_can_override_builtin(self):
+        """Custom stores can override built-in stores."""
+        from praisonaiagents import LearnManager, LearnConfig
+        
+        class MyPersonaStore:
+            def add(self, content, metadata=None):
+                return {"id": "custom", "content": content}
+            def search(self, query, limit=10):
+                return []
+            def list_all(self, limit=100):
+                return []
+            def get(self, entry_id):
+                return None
+            def update(self, entry_id, content, metadata=None):
+                return None
+            def delete(self, entry_id):
+                return True
+            def clear(self):
+                return 0
+        
+        custom_persona = MyPersonaStore()
+        manager = LearnManager(
+            config=LearnConfig(persona=True),
+            custom_stores={"persona": custom_persona}
+        )
+        
+        # Custom stores should override built-in stores
+        assert "persona" in manager._stores
+        assert manager._stores["persona"] is custom_persona

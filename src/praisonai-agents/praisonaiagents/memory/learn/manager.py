@@ -6,8 +6,9 @@ capturing and retrieving learned information.
 """
 
 from typing import Any, Dict, List, Optional
+import logging
 
-from ...config.feature_configs import LearnConfig, LearnScope
+from ...config.feature_configs import LearnConfig, LearnScope, LearnBackend
 from .stores import (
     PersonaStore,
     InsightStore,
@@ -43,65 +44,162 @@ class LearnManager:
         config: Optional[LearnConfig] = None,
         user_id: Optional[str] = None,
         store_path: Optional[str] = None,
+        custom_stores: Optional[Dict[str, Any]] = None,
     ):
+        """
+        Initialize LearnManager.
+        
+        Args:
+            config: LearnConfig for enabling/disabling learning capabilities
+            user_id: User identifier for scoping learnings
+            store_path: Custom path for storing learning data
+            custom_stores: Optional dict of custom store implementations.
+                          Keys are store names (e.g., "domain", "skills").
+                          Values must implement LearnProtocol (add, search, list_all, etc.)
+                          
+        Example:
+            ```python
+            class MyDomainStore:
+                def add(self, content, metadata=None): ...
+                def search(self, query, limit=10): ...
+                def list_all(self, limit=100): ...
+                def get(self, entry_id): ...
+                def update(self, entry_id, content, metadata=None): ...
+                def delete(self, entry_id): ...
+                def clear(self): ...
+            
+            manager = LearnManager(
+                config=LearnConfig(persona=True),
+                custom_stores={"domain": MyDomainStore()}
+            )
+            ```
+        """
         self.config = config or LearnConfig()
         self.user_id = user_id or "default"
         self.store_path = store_path or self.config.store_path
+        
+        # Resolve backend from config
+        self._backend = self._create_backend()
+        if self._backend is not None:
+            logging.info(
+                f"LearnManager using {self.config.backend} backend"
+            )
         
         scope = self.config.scope
         if isinstance(scope, LearnScope):
             scope = scope.value
         
         self._stores: Dict[str, Any] = {}
+        self._custom_stores = custom_stores or {}
         
-        if self.config.persona:
+        # Built-in stores are added first, custom stores can override them
+        if self.config.persona and "persona" not in self._custom_stores:
             self._stores["persona"] = PersonaStore(
                 store_path=self._get_store_path("persona"),
                 user_id=self.user_id,
                 scope=scope,
+                backend=self._backend,
             )
         
-        if self.config.insights:
+        if self.config.insights and "insights" not in self._custom_stores:
             self._stores["insights"] = InsightStore(
                 store_path=self._get_store_path("insights"),
                 user_id=self.user_id,
                 scope=scope,
+                backend=self._backend,
             )
         
-        if self.config.thread:
+        if self.config.thread and "threads" not in self._custom_stores:
             self._stores["threads"] = ThreadStore(
                 store_path=self._get_store_path("threads"),
                 user_id=self.user_id,
                 scope=scope,
+                backend=self._backend,
             )
         
-        if self.config.patterns:
+        if self.config.patterns and "patterns" not in self._custom_stores:
             self._stores["patterns"] = PatternStore(
                 store_path=self._get_store_path("patterns"),
                 user_id=self.user_id,
                 scope=scope,
+                backend=self._backend,
             )
         
-        if self.config.decisions:
+        if self.config.decisions and "decisions" not in self._custom_stores:
             self._stores["decisions"] = DecisionStore(
                 store_path=self._get_store_path("decisions"),
                 user_id=self.user_id,
                 scope=scope,
+                backend=self._backend,
             )
         
-        if self.config.feedback:
+        if self.config.feedback and "feedback" not in self._custom_stores:
             self._stores["feedback"] = FeedbackStore(
                 store_path=self._get_store_path("feedback"),
                 user_id=self.user_id,
                 scope=scope,
+                backend=self._backend,
             )
         
-        if self.config.improvements:
+        if self.config.improvements and "improvements" not in self._custom_stores:
             self._stores["improvements"] = ImprovementStore(
                 store_path=self._get_store_path("improvements"),
                 user_id=self.user_id,
                 scope=scope,
+                backend=self._backend,
             )
+        
+        # Add custom stores last (they override built-in stores)
+        if self._custom_stores:
+            for name, store in self._custom_stores.items():
+                self._stores[name] = store
+        
+        # PROPOSE mode: pending learnings queue
+        self._pending: List[LearnEntry] = []
+    
+    def _create_backend(self) -> Any:
+        """Create a storage backend from config.
+        
+        Returns backend instance or None for FILE (default) backend.
+        Falls back to None (FILE) on error.
+        """
+        backend = self.config.backend
+        backend_str = backend.value if isinstance(backend, LearnBackend) else str(backend)
+        
+        if backend_str == "file":
+            return None  # FILE uses BaseJSONStore default
+        
+        if backend_str == "sqlite":
+            try:
+                from ...storage.backends import SQLiteBackend
+                db_path = self.config.db_url or f"{self.store_path or 'learn'}/learn.db"
+                # Strip sqlite:/// prefix if present
+                if db_path.startswith("sqlite:///"):
+                    db_path = db_path[len("sqlite:///"):]
+                return SQLiteBackend(db_path=db_path, table_name="learn_store")
+            except Exception as e:
+                logging.warning(f"Failed to create SQLite backend: {e}. Falling back to FILE.")
+                return None
+        
+        if backend_str == "redis":
+            try:
+                from ...storage.backends import RedisBackend
+                url = self.config.db_url or "redis://localhost:6379"
+                return RedisBackend(url=url, prefix="praison:learn:")
+            except Exception as e:
+                logging.warning(f"Failed to create Redis backend: {e}. Falling back to FILE.")
+                return None
+        
+        if backend_str == "mongodb":
+            logging.warning(
+                f"MongoDB backend is not yet implemented. "
+                f"Falling back to FILE backend. "
+                f"Use custom_stores= for custom MongoDB implementations."
+            )
+            return None
+        
+        logging.warning(f"Unknown learn backend '{backend_str}'. Falling back to FILE.")
+        return None
     
     def _get_store_path(self, store_name: str) -> Optional[str]:
         """Get path for a specific store."""
@@ -216,6 +314,88 @@ class LearnManager:
             for store_name, store in self._stores.items()
         }
     
+    @property
+    def pending_learnings(self) -> List[LearnEntry]:
+        """Get list of pending learnings awaiting approval (PROPOSE mode)."""
+        return list(self._pending)
+    
+    def add_pending(
+        self,
+        content: str,
+        category: str = "persona",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> LearnEntry:
+        """Add a learning to the pending queue for user approval.
+        
+        Args:
+            content: The learning content
+            category: Store category (persona, insights, patterns, etc.)
+            metadata: Optional metadata
+            
+        Returns:
+            The pending LearnEntry
+        """
+        from datetime import datetime
+        entry_id = f"pending_{category}_{len(self._pending)}_{datetime.utcnow().timestamp()}"
+        entry = LearnEntry(
+            id=entry_id,
+            content=content,
+            metadata={**(metadata or {}), "category": category, "status": "pending"},
+        )
+        self._pending.append(entry)
+        return entry
+    
+    def approve_learning(self, entry_id: str) -> bool:
+        """Approve a pending learning — move it to the appropriate store.
+        
+        Args:
+            entry_id: ID of the pending learning to approve
+            
+        Returns:
+            True if approved and stored, False if not found
+        """
+        for i, entry in enumerate(self._pending):
+            if entry.id == entry_id:
+                category = entry.metadata.get("category", "persona")
+                # Route to appropriate store
+                if category in self._stores:
+                    self._stores[category].add(entry.content, entry.metadata)
+                elif "persona" in self._stores:
+                    self._stores["persona"].add(entry.content, entry.metadata)
+                self._pending.pop(i)
+                return True
+        return False
+    
+    def reject_learning(self, entry_id: str) -> bool:
+        """Reject a pending learning — discard it.
+        
+        Args:
+            entry_id: ID of the pending learning to reject
+            
+        Returns:
+            True if found and rejected, False if not found
+        """
+        for i, entry in enumerate(self._pending):
+            if entry.id == entry_id:
+                self._pending.pop(i)
+                return True
+        return False
+    
+    def approve_all_learnings(self) -> int:
+        """Approve all pending learnings at once.
+        
+        Returns:
+            Number of learnings approved
+        """
+        count = 0
+        while self._pending:
+            entry = self._pending[0]
+            if self.approve_learning(entry.id):
+                count += 1
+            else:
+                break  # Safety
+        return count
+    
     def to_system_prompt_context(self) -> str:
         """
         Generate context suitable for injection into system prompt.
@@ -280,6 +460,7 @@ class LearnManager:
         self,
         messages: List[Dict[str, Any]],
         llm: Optional[str] = None,
+        extract_only: bool = False,
     ) -> Dict[str, Any]:
         """
         Process a conversation to extract learnings automatically.
@@ -334,40 +515,42 @@ Return empty arrays if nothing is found for a category."""
 
         try:
             # Lazy import to avoid circular dependency
-            from ...llm import llm_call
+            from ...llm import LLM
+            import json
             
             model = llm or "gpt-4o-mini"
-            response = llm_call(
-                model=model,
-                messages=[{"role": "user", "content": extraction_prompt}],
-                response_format={"type": "json_object"},
+            llm_instance = LLM(model=model)
+            response = llm_instance.get_response(
+                prompt=extraction_prompt,
+                output_json=True,
             )
             
-            # Parse response
-            import json
-            content = response.get("content", "{}")
-            if hasattr(content, "content"):
-                content = content.content
+            # Parse response - handle both string and dict responses
+            if isinstance(response, str):
+                extracted = json.loads(response)
+            elif isinstance(response, dict):
+                extracted = response
+            else:
+                extracted = {"persona": [], "insights": [], "patterns": []}
             
-            extracted = json.loads(content) if isinstance(content, str) else content
-            
-            # Store extracted learnings
+            # Store extracted learnings (unless extract_only)
             stored = {"persona": 0, "insights": 0, "patterns": 0}
             
-            for preference in extracted.get("persona", []):
-                if preference and "persona" in self._stores:
-                    self.capture_persona(preference)
-                    stored["persona"] += 1
-            
-            for insight in extracted.get("insights", []):
-                if insight and "insights" in self._stores:
-                    self.capture_insight(insight, source="auto_extraction")
-                    stored["insights"] += 1
-            
-            for pattern in extracted.get("patterns", []):
-                if pattern and "patterns" in self._stores:
-                    self.capture_pattern(pattern, pattern_type="auto_extracted")
-                    stored["patterns"] += 1
+            if not extract_only:
+                for preference in extracted.get("persona", []):
+                    if preference and "persona" in self._stores:
+                        self.capture_persona(preference)
+                        stored["persona"] += 1
+                
+                for insight in extracted.get("insights", []):
+                    if insight and "insights" in self._stores:
+                        self.capture_insight(insight, source="auto_extraction")
+                        stored["insights"] += 1
+                
+                for pattern in extracted.get("patterns", []):
+                    if pattern and "patterns" in self._stores:
+                        self.capture_pattern(pattern, pattern_type="auto_extracted")
+                        stored["patterns"] += 1
             
             return {
                 "persona": extracted.get("persona", []),
@@ -426,21 +609,31 @@ Only include items that are clearly evident from the conversation.
 Return empty arrays if nothing is found for a category."""
 
         try:
-            from ...llm import allm_call
+            # Lazy import to avoid circular dependency
+            from ...llm import LLM
+            import json
+            import asyncio
             
             model = llm or "gpt-4o-mini"
-            response = await allm_call(
-                model=model,
-                messages=[{"role": "user", "content": extraction_prompt}],
-                response_format={"type": "json_object"},
+            llm_instance = LLM(model=model)
+            
+            # Run sync LLM call in executor for async compatibility
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: llm_instance.get_response(
+                    prompt=extraction_prompt,
+                    output_json=True,
+                )
             )
             
-            import json
-            content = response.get("content", "{}")
-            if hasattr(content, "content"):
-                content = content.content
-            
-            extracted = json.loads(content) if isinstance(content, str) else content
+            # Parse response - handle both string and dict responses
+            if isinstance(response, str):
+                extracted = json.loads(response)
+            elif isinstance(response, dict):
+                extracted = response
+            else:
+                extracted = {"persona": [], "insights": [], "patterns": []}
             
             stored = {"persona": 0, "insights": 0, "patterns": 0}
             

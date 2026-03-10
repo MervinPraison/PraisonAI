@@ -1156,7 +1156,7 @@ print(f'Section 5: {{result5}}')
             "1. Follow the template structure exactly",
             "2. Use REAL, WORKING code examples (not placeholders)",
             "3. Be concise but comprehensive",
-            "4. Include a mermaid diagram if this is a concept page",
+            "4. Include exactly TWO mermaid diagrams for concept pages: (1) high-level flow graph LR, (2) detailed flowchart TB with subgraphs. Use colour scheme: classDef agent fill:#8B0000,color:#fff and classDef tool fill:#189AB4,color:#fff - apply :::agent to inputs/outputs/agents, :::tool to processes",
             "5. Use Mintlify MDX components (CodeGroup, Tabs, Cards)",
             "6. Ensure all imports are correct for praisonaiagents",
             "7. Code examples must be complete and runnable",

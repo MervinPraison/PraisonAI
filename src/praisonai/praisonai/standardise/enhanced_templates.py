@@ -28,25 +28,31 @@ icon: "{icon}"
 
 ```mermaid
 flowchart LR
+    A[User Request]:::agent --> B[Process]:::tool
+    B --> C[Validate]:::tool
+    C --> D[Execute]:::tool
+    D --> E[Result]:::agent
+
+    classDef agent fill:#8B0000,color:#fff
+    classDef tool fill:#189AB4,color:#fff
+```
+
+```mermaid
+flowchart TB
     subgraph Input
-        A[User Request]
+        A[User Request]:::agent
     end
-    
     subgraph {name}
-        B[Process] --> C[Validate]
-        C --> D[Execute]
+        B[Process]:::tool --> C[Validate]:::tool --> D[Execute]:::tool
     end
-    
     subgraph Output
-        E[Result]
+        E[Result]:::agent
     end
-    
     A --> B
     D --> E
-    
-    style B fill:#189AB4,color:#fff
-    style C fill:#2E8B57,color:#fff
-    style D fill:#8B0000,color:#fff
+
+    classDef agent fill:#8B0000,color:#fff
+    classDef tool fill:#189AB4,color:#fff
 ```
 
 ## Types of {name}

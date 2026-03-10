@@ -33,8 +33,6 @@ class TestLearnConfig:
         assert config.feedback is False
         assert config.improvements is False
         assert config.scope == LearnScope.PRIVATE
-        assert config.auto_consolidate is True
-        assert config.retention_days is None
     
     def test_custom_values(self):
         """Test LearnConfig with custom values."""
@@ -43,12 +41,10 @@ class TestLearnConfig:
             insights=True,
             patterns=True,
             scope=LearnScope.SHARED,
-            retention_days=30,
         )
         assert config.persona is False
         assert config.patterns is True
         assert config.scope == LearnScope.SHARED
-        assert config.retention_days == 30
     
     def test_to_dict(self):
         """Test LearnConfig to_dict method."""
@@ -269,6 +265,198 @@ class TestLearnManager:
         assert "concise" in context
         assert "Learned Insights" in context
         assert "Python" in context
+
+
+class TestBackendWiring:
+    """P3-A: Test LearnBackend wiring — SQLite, Redis, FILE."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.mkdtemp()
+
+    def teardown_method(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_sqlite_backend_round_trip(self):
+        """SQLite backend stores and retrieves learnings."""
+        from praisonaiagents.config.feature_configs import LearnBackend
+        config = LearnConfig(
+            persona=True, insights=True, patterns=False,
+            backend=LearnBackend.SQLITE,
+        )
+        manager = LearnManager(config=config, user_id="test", store_path=self.temp_dir)
+
+        # Store
+        entry = manager.capture_persona("Prefers dark mode")
+        assert entry is not None
+        assert "dark mode" in entry.content
+
+        # Retrieve
+        context = manager.get_persona_context()
+        assert any("dark mode" in c for c in context)
+
+    def test_file_backend_unchanged(self):
+        """FILE backend works as before (default)."""
+        config = LearnConfig(persona=True)
+        manager = LearnManager(config=config, user_id="test", store_path=self.temp_dir)
+        entry = manager.capture_persona("Prefers light mode")
+        assert entry is not None
+
+        # Verify JSON file exists
+        store_files = list(Path(self.temp_dir).rglob("*.json"))
+        assert len(store_files) > 0
+
+    def test_redis_fallback_when_unavailable(self):
+        """Redis backend falls back to FILE when Redis not running."""
+        import warnings
+        from praisonaiagents.config.feature_configs import LearnBackend
+        config = LearnConfig(
+            persona=True,
+            backend=LearnBackend.REDIS,
+            db_url="redis://localhost:59999",  # unlikely port
+        )
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            manager = LearnManager(config=config, user_id="test", store_path=self.temp_dir)
+
+        # Should still work with FILE fallback
+        entry = manager.capture_persona("Redis fallback test")
+        assert entry is not None
+
+    def test_mongodb_warns_and_falls_back(self):
+        """MongoDB warns and falls back to FILE."""
+        from praisonaiagents.config.feature_configs import LearnBackend
+        config = LearnConfig(
+            persona=True,
+            backend=LearnBackend.MONGODB,
+        )
+        # Should not crash, falls back to FILE
+        manager = LearnManager(config=config, user_id="test", store_path=self.temp_dir)
+        entry = manager.capture_persona("Mongo fallback test")
+        assert entry is not None
+
+
+class TestWasUpdated:
+    """P3-B: Test was_updated tracking on BaseStore."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.mkdtemp()
+
+    def teardown_method(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_was_updated_false_initially(self):
+        """New store starts with was_updated=False."""
+        store = PersonaStore(store_path=os.path.join(self.temp_dir, "persona.json"))
+        assert store.was_updated is False
+
+    def test_was_updated_true_after_add(self):
+        """was_updated becomes True after add()."""
+        store = PersonaStore(store_path=os.path.join(self.temp_dir, "persona.json"))
+        store.add("test preference")
+        assert store.was_updated is True
+
+    def test_was_updated_true_after_update(self):
+        """was_updated becomes True after update()."""
+        store = PersonaStore(store_path=os.path.join(self.temp_dir, "persona.json"))
+        entry = store.add("preference")
+        store.reset_updated()
+        store.update(entry.id, "updated preference")
+        assert store.was_updated is True
+
+    def test_was_updated_true_after_delete(self):
+        """was_updated becomes True after delete()."""
+        store = PersonaStore(store_path=os.path.join(self.temp_dir, "persona.json"))
+        entry = store.add("to delete")
+        store.reset_updated()
+        store.delete(entry.id)
+        assert store.was_updated is True
+
+    def test_was_updated_true_after_clear(self):
+        """was_updated becomes True after clear()."""
+        store = PersonaStore(store_path=os.path.join(self.temp_dir, "persona.json"))
+        store.add("something")
+        store.reset_updated()
+        store.clear()
+        assert store.was_updated is True
+
+    def test_reset_updated(self):
+        """reset_updated() sets flag back to False."""
+        store = PersonaStore(store_path=os.path.join(self.temp_dir, "persona.json"))
+        store.add("test")
+        assert store.was_updated is True
+        store.reset_updated()
+        assert store.was_updated is False
+
+
+class TestProposeMode:
+    """P3-C: Test PROPOSE mode — extract but don't auto-store."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.mkdtemp()
+
+    def teardown_method(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_pending_learnings_initially_empty(self):
+        """Pending learnings list starts empty."""
+        config = LearnConfig(persona=True, mode="propose")
+        manager = LearnManager(config=config, user_id="test", store_path=self.temp_dir)
+        assert manager.pending_learnings == []
+
+    def test_add_pending_learning(self):
+        """Can add a pending learning manually."""
+        config = LearnConfig(persona=True, mode="propose")
+        manager = LearnManager(config=config, user_id="test", store_path=self.temp_dir)
+        manager.add_pending("User prefers Python", category="persona")
+        assert len(manager.pending_learnings) == 1
+        assert "Python" in manager.pending_learnings[0].content
+
+    def test_approve_learning_moves_to_store(self):
+        """Approving a pending learning moves it to the main store."""
+        config = LearnConfig(persona=True, mode="propose")
+        manager = LearnManager(config=config, user_id="test", store_path=self.temp_dir)
+        manager.add_pending("User likes concise answers", category="persona")
+        pending_id = manager.pending_learnings[0].id
+
+        result = manager.approve_learning(pending_id)
+        assert result is True
+        assert len(manager.pending_learnings) == 0
+        # Should now be in persona store
+        personas = manager.get_persona_context()
+        assert any("concise" in p for p in personas)
+
+    def test_reject_learning_discards(self):
+        """Rejecting a pending learning discards it."""
+        config = LearnConfig(persona=True, mode="propose")
+        manager = LearnManager(config=config, user_id="test", store_path=self.temp_dir)
+        manager.add_pending("Bad learning", category="persona")
+        pending_id = manager.pending_learnings[0].id
+
+        result = manager.reject_learning(pending_id)
+        assert result is True
+        assert len(manager.pending_learnings) == 0
+        # Should NOT be in any store
+        personas = manager.get_persona_context()
+        assert not any("Bad learning" in p for p in personas)
+
+    def test_approve_all_learnings(self):
+        """Bulk approve all pending learnings."""
+        config = LearnConfig(persona=True, insights=True, mode="propose")
+        manager = LearnManager(config=config, user_id="test", store_path=self.temp_dir)
+        manager.add_pending("Preference A", category="persona")
+        manager.add_pending("Insight B", category="insights")
+        assert len(manager.pending_learnings) == 2
+
+        count = manager.approve_all_learnings()
+        assert count == 2
+        assert len(manager.pending_learnings) == 0
+
+    def test_reject_nonexistent_learning(self):
+        """Rejecting a nonexistent ID returns False."""
+        config = LearnConfig(persona=True, mode="propose")
+        manager = LearnManager(config=config, user_id="test", store_path=self.temp_dir)
+        result = manager.reject_learning("nonexistent_id")
+        assert result is False
 
 
 class TestNoCortexParam:
