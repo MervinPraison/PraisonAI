@@ -4863,7 +4863,14 @@ Your Goal: {self.goal}"""
         return {"error": error_msg}
 
     def clear_history(self):
+        """Clear all chat history.
+        
+        Also resets _auto_save_last_index to prevent silent message loss
+        when auto_save is enabled.
+        """
         self.chat_history = []
+        # Reset auto-save index to prevent stale index causing message loss
+        self._auto_save_last_index = 0
 
     # -------------------------------------------------------------------------
     #                       History Management Methods
@@ -4888,6 +4895,8 @@ Your Goal: {self.goal}"""
             
             deleted_count = len(self.chat_history) - keep_last
             self.chat_history = self.chat_history[-keep_last:]
+            # Reset auto-save index to match new history length
+            self._auto_save_last_index = len(self.chat_history)
             return deleted_count
     
     def delete_history(self, index: int) -> bool:
@@ -4905,6 +4914,12 @@ Your Goal: {self.goal}"""
         with self._history_lock:
             try:
                 del self.chat_history[index]
+                # Adjust auto-save index if deletion affects saved range
+                if hasattr(self, '_auto_save_last_index'):
+                    self._auto_save_last_index = min(
+                        self._auto_save_last_index,
+                        len(self.chat_history)
+                    )
                 return True
             except IndexError:
                 return False
@@ -4927,7 +4942,14 @@ Your Goal: {self.goal}"""
                 msg for msg in self.chat_history
                 if pattern.lower() not in msg.get("content", "").lower()
             ]
-            return original_len - len(self.chat_history)
+            deleted_count = original_len - len(self.chat_history)
+            # Adjust auto-save index if deletion affects saved range
+            if deleted_count > 0 and hasattr(self, '_auto_save_last_index'):
+                self._auto_save_last_index = min(
+                    self._auto_save_last_index,
+                    len(self.chat_history)
+                )
+            return deleted_count
     
     def get_history_size(self) -> int:
         """Get the current number of messages in chat history."""
@@ -7213,6 +7235,9 @@ Write the complete compiled report:"""
         G-1 FIX: Routes to SessionStore instead of Memory.save_session() to
         maintain clean separation between conversation history (SessionStore)
         and semantic memory (Memory).
+        
+        Issue 1 FIX: Track last saved index to avoid duplicate insertion when
+        called multiple times in the same session.
         """
         if not self.auto_save:
             return
@@ -7224,19 +7249,30 @@ Write the complete compiled report:"""
                 for msg in self.chat_history
             ]
             
+            # Issue 1 FIX: Only save NEW messages since last save
+            # Track last saved index to avoid duplicates
+            last_saved = getattr(self, '_auto_save_last_index', 0)
+            new_messages = clean_history[last_saved:]
+            
+            if not new_messages:
+                return  # Nothing new to save
+            
             # G-1 FIX: Use SessionStore for conversation history persistence
             # This maintains clean separation: Memory = facts, SessionStore = turns
             if self._session_store is not None:
-                # Persist each message to SessionStore
-                for msg in clean_history:
+                # Persist only NEW messages to SessionStore
+                for msg in new_messages:
                     self._session_store.add_message(
                         self.auto_save,  # Use auto_save name as session_id
                         role=msg.get("role", "user"),
                         content=msg.get("content", ""),
                     )
-                logging.debug(f"Auto-saved session to SessionStore: {self.auto_save}")
+                # Update last saved index
+                self._auto_save_last_index = len(clean_history)
+                logging.debug(f"Auto-saved {len(new_messages)} new messages to SessionStore: {self.auto_save}")
             elif self._memory_instance and hasattr(self._memory_instance, 'save_session'):
                 # Fallback to Memory.save_session() for backward compatibility
+                # Memory.save_session() replaces entire history, so no duplicate issue
                 self._memory_instance.save_session(
                     name=self.auto_save,
                     conversation_history=clean_history,

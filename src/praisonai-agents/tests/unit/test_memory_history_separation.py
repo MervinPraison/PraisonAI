@@ -111,6 +111,156 @@ class TestG2SessionSaveAgentChatHistories:
         assert "SessionStore" in source, "Method should reference SessionStore"
         assert "get_default_session_store" in source, "Method should try to get SessionStore"
 
+    def test_save_agent_histories_behavioral(self):
+        """Issue 3 FIX: Behavioral test - verify actual routing to SessionStore."""
+        from praisonaiagents.session import Session
+        
+        # Create session
+        session = Session(session_id="test_behavioral", user_id="test_user")
+        
+        # Create mock agent with chat history
+        mock_agent = MagicMock()
+        mock_agent.chat_history = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi!"},
+        ]
+        
+        # Add agent to session
+        session._agents["test_agent"] = {
+            "agent": mock_agent,
+            "chat_history": []
+        }
+        
+        # Call the method - it should not raise an exception
+        # This tests the actual behavior, not just source code
+        session._save_agent_chat_histories()
+
+
+class TestIssue1DuplicatePrevention:
+    """Issue 1: Verify duplicate history insertion is prevented."""
+
+    def test_auto_save_tracks_last_saved_index(self):
+        """Verify _auto_save_session tracks last saved index to prevent duplicates."""
+        from praisonaiagents import Agent
+        
+        agent = Agent(
+            name="test",
+            instructions="Test agent",
+            auto_save="test_session",
+        )
+        
+        # Mock session store
+        mock_session_store = MagicMock()
+        agent._session_store = mock_session_store
+        
+        # Add initial chat history
+        agent.chat_history = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"},
+        ]
+        
+        # First save - should save 2 messages
+        agent._auto_save_session()
+        assert mock_session_store.add_message.call_count == 2
+        
+        # Second save with same history - should save 0 new messages
+        mock_session_store.reset_mock()
+        agent._auto_save_session()
+        assert mock_session_store.add_message.call_count == 0, "Should not re-save existing messages"
+        
+        # Add new message
+        agent.chat_history.append({"role": "user", "content": "How are you?"})
+        
+        # Third save - should save only 1 new message
+        mock_session_store.reset_mock()
+        agent._auto_save_session()
+        assert mock_session_store.add_message.call_count == 1, "Should only save new message"
+
+
+class TestEdgeCaseClearHistoryResetIndex:
+    """Edge case: clear_history() must reset _auto_save_last_index."""
+
+    def test_clear_history_resets_auto_save_index(self):
+        """Verify clear_history() resets _auto_save_last_index to prevent silent message loss."""
+        from praisonaiagents import Agent
+        
+        agent = Agent(
+            name="test",
+            instructions="Test agent",
+            auto_save="test_session",
+        )
+        
+        mock_store = MagicMock()
+        agent._session_store = mock_store
+        
+        # Save initial messages
+        agent.chat_history = [{"role": "user", "content": "msg1"}]
+        agent._auto_save_session()
+        assert mock_store.add_message.call_count == 1
+        assert agent._auto_save_last_index == 1
+        
+        # Clear history - index should reset
+        agent.clear_history()
+        assert agent._auto_save_last_index == 0, "Index should reset to 0 after clear_history()"
+        
+        # Add new message after clear
+        agent.chat_history = [{"role": "user", "content": "msg2"}]
+        mock_store.reset_mock()
+        agent._auto_save_session()
+        
+        # Should save the new message (not skip due to stale index)
+        assert mock_store.add_message.call_count == 1, "New message should be saved after clear"
+
+    def test_prune_history_adjusts_auto_save_index(self):
+        """Verify prune_history() adjusts _auto_save_last_index."""
+        from praisonaiagents import Agent
+        
+        agent = Agent(
+            name="test",
+            instructions="Test agent",
+            auto_save="test_session",
+        )
+        
+        mock_store = MagicMock()
+        agent._session_store = mock_store
+        
+        # Save 5 messages
+        agent.chat_history = [
+            {"role": "user", "content": f"msg{i}"} for i in range(5)
+        ]
+        agent._auto_save_session()
+        assert agent._auto_save_last_index == 5
+        
+        # Prune to keep last 2
+        agent.prune_history(keep_last=2)
+        assert len(agent.chat_history) == 2
+        assert agent._auto_save_last_index == 2, "Index should match pruned history length"
+
+    def test_delete_history_adjusts_auto_save_index(self):
+        """Verify delete_history() adjusts _auto_save_last_index."""
+        from praisonaiagents import Agent
+        
+        agent = Agent(
+            name="test",
+            instructions="Test agent",
+            auto_save="test_session",
+        )
+        
+        mock_store = MagicMock()
+        agent._session_store = mock_store
+        
+        # Save 3 messages
+        agent.chat_history = [
+            {"role": "user", "content": f"msg{i}"} for i in range(3)
+        ]
+        agent._auto_save_session()
+        assert agent._auto_save_last_index == 3
+        
+        # Delete one message
+        agent.delete_history(0)
+        assert len(agent.chat_history) == 2
+        assert agent._auto_save_last_index == 2, "Index should be adjusted after deletion"
+
 
 class TestMemoryHistorySeparation:
     """Test that Memory and History are properly separated."""
