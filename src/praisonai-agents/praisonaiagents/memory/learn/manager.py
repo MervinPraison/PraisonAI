@@ -275,3 +275,198 @@ class LearnManager:
         # Note: threads are session-specific and not included in system prompt
         
         return "\n".join(parts) if parts else ""
+    
+    def process_conversation(
+        self,
+        messages: List[Dict[str, Any]],
+        llm: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Process a conversation to extract learnings automatically.
+        
+        Uses LLM to analyze the conversation and extract:
+        - User preferences (persona)
+        - Insights and observations
+        - Patterns in user behavior
+        
+        Args:
+            messages: Conversation messages (list of {"role": ..., "content": ...})
+            llm: Optional LLM model to use for extraction (defaults to gpt-4o-mini)
+            
+        Returns:
+            Dictionary with extracted learnings:
+            {
+                "persona": [...],
+                "insights": [...],
+                "patterns": [...],
+                "stored": {"persona": N, "insights": N, "patterns": N}
+            }
+        """
+        if not messages:
+            return {"persona": [], "insights": [], "patterns": [], "stored": {}}
+        
+        # Build conversation text
+        conversation_text = "\n".join([
+            f"{msg.get('role', 'unknown')}: {msg.get('content', '')}"
+            for msg in messages
+        ])
+        
+        # Use LLM to extract learnings
+        extraction_prompt = f"""Analyze this conversation and extract learnings.
+
+CONVERSATION:
+{conversation_text}
+
+Extract the following (if present):
+1. USER PREFERENCES: Things the user likes, dislikes, prefers, or their style
+2. INSIGHTS: Observations about the user's domain, work, or context
+3. PATTERNS: Recurring behaviors or request patterns
+
+Return JSON:
+{{
+    "persona": ["preference 1", "preference 2"],
+    "insights": ["insight 1", "insight 2"],
+    "patterns": ["pattern 1", "pattern 2"]
+}}
+
+Only include items that are clearly evident from the conversation.
+Return empty arrays if nothing is found for a category."""
+
+        try:
+            # Lazy import to avoid circular dependency
+            from ...llm import llm_call
+            
+            model = llm or "gpt-4o-mini"
+            response = llm_call(
+                model=model,
+                messages=[{"role": "user", "content": extraction_prompt}],
+                response_format={"type": "json_object"},
+            )
+            
+            # Parse response
+            import json
+            content = response.get("content", "{}")
+            if hasattr(content, "content"):
+                content = content.content
+            
+            extracted = json.loads(content) if isinstance(content, str) else content
+            
+            # Store extracted learnings
+            stored = {"persona": 0, "insights": 0, "patterns": 0}
+            
+            for preference in extracted.get("persona", []):
+                if preference and "persona" in self._stores:
+                    self.capture_persona(preference)
+                    stored["persona"] += 1
+            
+            for insight in extracted.get("insights", []):
+                if insight and "insights" in self._stores:
+                    self.capture_insight(insight, source="auto_extraction")
+                    stored["insights"] += 1
+            
+            for pattern in extracted.get("patterns", []):
+                if pattern and "patterns" in self._stores:
+                    self.capture_pattern(pattern, pattern_type="auto_extracted")
+                    stored["patterns"] += 1
+            
+            return {
+                "persona": extracted.get("persona", []),
+                "insights": extracted.get("insights", []),
+                "patterns": extracted.get("patterns", []),
+                "stored": stored,
+            }
+            
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to extract learnings: {e}")
+            return {"persona": [], "insights": [], "patterns": [], "stored": {}, "error": str(e)}
+    
+    async def aprocess_conversation(
+        self,
+        messages: List[Dict[str, Any]],
+        llm: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Async version of process_conversation.
+        
+        Args:
+            messages: Conversation messages
+            llm: Optional LLM model
+            
+        Returns:
+            Dictionary with extracted learnings
+        """
+        if not messages:
+            return {"persona": [], "insights": [], "patterns": [], "stored": {}}
+        
+        # Build conversation text
+        conversation_text = "\n".join([
+            f"{msg.get('role', 'unknown')}: {msg.get('content', '')}"
+            for msg in messages
+        ])
+        
+        extraction_prompt = f"""Analyze this conversation and extract learnings.
+
+CONVERSATION:
+{conversation_text}
+
+Extract the following (if present):
+1. USER PREFERENCES: Things the user likes, dislikes, prefers, or their style
+2. INSIGHTS: Observations about the user's domain, work, or context
+3. PATTERNS: Recurring behaviors or request patterns
+
+Return JSON:
+{{
+    "persona": ["preference 1", "preference 2"],
+    "insights": ["insight 1", "insight 2"],
+    "patterns": ["pattern 1", "pattern 2"]
+}}
+
+Only include items that are clearly evident from the conversation.
+Return empty arrays if nothing is found for a category."""
+
+        try:
+            from ...llm import allm_call
+            
+            model = llm or "gpt-4o-mini"
+            response = await allm_call(
+                model=model,
+                messages=[{"role": "user", "content": extraction_prompt}],
+                response_format={"type": "json_object"},
+            )
+            
+            import json
+            content = response.get("content", "{}")
+            if hasattr(content, "content"):
+                content = content.content
+            
+            extracted = json.loads(content) if isinstance(content, str) else content
+            
+            stored = {"persona": 0, "insights": 0, "patterns": 0}
+            
+            for preference in extracted.get("persona", []):
+                if preference and "persona" in self._stores:
+                    self.capture_persona(preference)
+                    stored["persona"] += 1
+            
+            for insight in extracted.get("insights", []):
+                if insight and "insights" in self._stores:
+                    self.capture_insight(insight, source="auto_extraction")
+                    stored["insights"] += 1
+            
+            for pattern in extracted.get("patterns", []):
+                if pattern and "patterns" in self._stores:
+                    self.capture_pattern(pattern, pattern_type="auto_extracted")
+                    stored["patterns"] += 1
+            
+            return {
+                "persona": extracted.get("persona", []),
+                "insights": extracted.get("insights", []),
+                "patterns": extracted.get("patterns", []),
+                "stored": stored,
+            }
+            
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to extract learnings: {e}")
+            return {"persona": [], "insights": [], "patterns": [], "stored": {}, "error": str(e)}

@@ -569,6 +569,7 @@ class AgentFlow:
     reflection: Optional[Any] = None  # Union[bool, ReflectionConfig] - self-reflection
     execution: Optional[Any] = None  # Union[str, ExecutionConfig] - execution control
     caching: Optional[Any] = None  # Union[bool, CachingConfig] - caching
+    learn: Optional[Any] = None  # Union[bool, LearnConfig] - continuous learning
     
     # ============================================================
     # ROBUSTNESS PARAMS (debugging & audit trail)
@@ -1901,14 +1902,46 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             # Only pass output_config if it has values
             output_json_model = output_config.get('json_model') if output_config else None
             output_pydantic_model = output_config.get('pydantic_model') if output_config else None
-            return Task(
+            # Extract remaining YAML step-level attributes (previously dead stores)
+            yaml_guardrail = getattr(step, '_yaml_guardrail', None)
+            yaml_max_retries = getattr(step, '_yaml_max_retries', None)
+            yaml_expected_output = getattr(step, '_yaml_expected_output', None)
+            yaml_output_file = getattr(step, '_yaml_output_file', None)
+            yaml_skip_on_failure = getattr(step, '_yaml_skip_on_failure', None)
+            yaml_retry_delay = getattr(step, '_yaml_retry_delay', None)
+            yaml_create_directory = getattr(step, '_yaml_create_directory', None)
+            yaml_callback = getattr(step, '_yaml_callback', None)
+            yaml_async_execution = getattr(step, '_yaml_async_execution', None)
+
+            # Build Task kwargs — only include YAML overrides when present
+            task_kwargs = dict(
                 name=yaml_step_name or getattr(step, 'name', f'agent_{index+1}'),
                 agent=step,
                 tools=agent_tools,
                 action=action,
                 output_json=output_json_model,
-                output_pydantic=output_pydantic_model
+                output_pydantic=output_pydantic_model,
             )
+            if yaml_guardrail is not None:
+                task_kwargs['guardrails'] = yaml_guardrail
+            if yaml_max_retries is not None:
+                task_kwargs['max_retries'] = yaml_max_retries
+            if yaml_expected_output is not None:
+                task_kwargs['expected_output'] = yaml_expected_output
+            if yaml_output_file is not None:
+                task_kwargs['output_file'] = yaml_output_file
+            if yaml_skip_on_failure is not None:
+                task_kwargs['skip_on_failure'] = yaml_skip_on_failure
+            if yaml_retry_delay is not None:
+                task_kwargs['retry_delay'] = yaml_retry_delay
+            if yaml_create_directory is not None:
+                task_kwargs['create_directory'] = yaml_create_directory
+            if yaml_callback is not None:
+                task_kwargs['callback'] = yaml_callback
+            if yaml_async_execution is not None:
+                task_kwargs['async_execution'] = yaml_async_execution
+
+            return Task(**task_kwargs)
         elif callable(step):
             return Task(
                 name=getattr(step, '__name__', f'step_{index+1}'),

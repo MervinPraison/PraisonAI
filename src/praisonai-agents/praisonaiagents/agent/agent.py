@@ -439,6 +439,7 @@ class Agent:
         skills: Optional[Union[List[str], Any]] = None,  # Union[list, SkillsConfig]
         approval: Optional[Union[bool, Any]] = None,  # Union[bool, ApprovalProtocol backend]
         tool_timeout: Optional[int] = None,  # P8/G11: Timeout in seconds for each tool call
+        learn: Optional[Union[bool, Any]] = None,  # Union[bool, LearnConfig] - Continuous learning (peer to memory)
     ):
         """Initialize an Agent instance.
 
@@ -509,6 +510,11 @@ class Agent:
             skills: Agent skills. Accepts:
                 - List[str]: Skill directory paths
                 - SkillsConfig: Custom configuration
+            learn: Continuous learning configuration. Accepts:
+                - bool: True enables with defaults, False disables
+                - LearnConfig: Custom configuration
+                Learning is a first-class citizen, peer to memory. It captures patterns,
+                preferences, and insights from interactions to improve future responses.
 
         Raises:
             ValueError: If all of name, role, goal, backstory, and instructions are None.
@@ -968,6 +974,45 @@ class Agent:
                 pass
         elif memory is False:
             memory = None
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # Resolve LEARN param - FAST PATH (top-level, peer to memory)
+        # learn= is a first-class citizen, independent of memory=
+        # ─────────────────────────────────────────────────────────────────────
+        from ..config.feature_configs import LearnConfig
+        
+        _learn_config = None
+        
+        # Top-level learn= takes precedence over memory.learn
+        if learn is not None:
+            # Explicit top-level learn= param
+            if learn is False:
+                _learn_config = None
+            elif learn is True:
+                _learn_config = LearnConfig()
+            elif isinstance(learn, LearnConfig):
+                _learn_config = learn
+            elif isinstance(learn, dict):
+                _learn_config = LearnConfig(**learn)
+            else:
+                _learn_config = learn  # Pass through
+        elif _memory_config is not None and isinstance(_memory_config, MemoryConfig):
+            # Fallback to memory.learn for backward compatibility
+            if _memory_config.learn:
+                if _memory_config.learn is True:
+                    _learn_config = LearnConfig()
+                elif isinstance(_memory_config.learn, LearnConfig):
+                    _learn_config = _memory_config.learn
+                elif isinstance(_memory_config.learn, dict):
+                    _learn_config = LearnConfig(**_memory_config.learn)
+        
+        # If learn is enabled but memory is not, we need to enable memory for learn to work
+        if _learn_config is not None and memory is None:
+            # Enable minimal memory for learn to work
+            memory = {"learn": _learn_config.to_dict() if hasattr(_learn_config, 'to_dict') else _learn_config}
+        elif _learn_config is not None and isinstance(memory, dict):
+            # Merge learn config into memory dict
+            memory["learn"] = _learn_config.to_dict() if hasattr(_learn_config, 'to_dict') else _learn_config
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve HISTORY from MemoryConfig - FAST PATH
@@ -1575,6 +1620,10 @@ Your Goal: {self.goal}
         self._history_enabled = _history_enabled
         self._history_limit = _history_limit
         self._history_session_id = _history_session_id
+        
+        # Learning configuration (top-level, peer to memory)
+        # Stored for access via agent._learn_config
+        self._learn_config = _learn_config
 
         # Agent-centric feature instances (lazy loaded for zero performance impact)
         self._auto_memory = auto_memory

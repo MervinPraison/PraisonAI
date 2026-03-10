@@ -220,6 +220,7 @@ class AgentTeam:
         web: Optional[Any] = None,  # Union[bool, WebConfig] - web search/fetch
         reflection: Optional[Any] = None,  # Union[bool, ReflectionConfig] - self-reflection
         caching: Optional[Any] = None,  # Union[bool, CachingConfig] - caching
+        learn: Optional[Any] = None,  # Union[bool, LearnConfig] - continuous learning
     ):
         """
         Initialize AgentManager with consolidated feature parameters.
@@ -243,8 +244,10 @@ class AgentTeam:
             guardrails: Guardrails configuration (bool | Callable | GuardrailConfig)
             web: Web search/fetch configuration (bool | WebConfig)
             reflection: Self-reflection configuration (bool | ReflectionConfig)
+            learn: Continuous learning configuration (bool | LearnConfig)
         """
         # Store new params for propagation to agents
+        self._learn = learn
         self.llm = llm  # Store default LLM for API consistency
         self._autonomy = autonomy
         self._knowledge = knowledge

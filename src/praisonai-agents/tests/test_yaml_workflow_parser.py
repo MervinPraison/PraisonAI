@@ -434,7 +434,7 @@ callbacks:
 
 
 class TestYAMLWorkflowParserGuardrails:
-    """Tests for guardrails parsing."""
+    """Tests for guardrails parsing and wiring to Task objects."""
     
     def test_parse_step_guardrail(self):
         """Test parsing guardrail on a step."""
@@ -459,6 +459,167 @@ steps:
         workflow = parser.parse_string(yaml_content)
         
         assert workflow is not None
+    
+    def test_guardrail_wired_to_task(self):
+        """Test that guardrail string from YAML is wired into the Task object."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Guardrail Wiring Test
+agents:
+  writer:
+    name: Writer
+    role: Writer
+    goal: Write
+    instructions: "Write content"
+
+steps:
+  - agent: writer
+    action: "Write professional content"
+    guardrail: "Ensure the content is professional and error-free"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        # Normalize the step to a Task (this is what run() does internally)
+        task = workflow._normalize_single_step(workflow.steps[0], 0)
+        
+        # The guardrail string must be set on the Task
+        assert task.guardrail == "Ensure the content is professional and error-free"
+        # _setup_guardrail should have created an LLMGuardrail instance
+        assert task._guardrail_fn is not None
+    
+    def test_max_retries_wired_to_task(self):
+        """Test that max_retries from YAML is wired into the Task object."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Retries Wiring Test
+agents:
+  writer:
+    name: Writer
+    role: Writer
+    goal: Write
+    instructions: "Write content"
+
+steps:
+  - agent: writer
+    action: "Write content"
+    max_retries: 7
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        task = workflow._normalize_single_step(workflow.steps[0], 0)
+        
+        assert task.max_retries == 7
+    
+    def test_expected_output_wired_to_task(self):
+        """Test that expected_output from YAML is wired into the Task object."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Expected Output Wiring Test
+agents:
+  writer:
+    name: Writer
+    role: Writer
+    goal: Write
+    instructions: "Write content"
+
+steps:
+  - agent: writer
+    action: "Write a blog post"
+    expected_output: "A well-structured blog post with introduction, body, and conclusion"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        task = workflow._normalize_single_step(workflow.steps[0], 0)
+        
+        assert task.expected_output == "A well-structured blog post with introduction, body, and conclusion"
+    
+    def test_skip_on_failure_wired_to_task(self):
+        """Test that skip_on_failure from YAML is wired into the Task object."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Skip Failure Wiring Test
+agents:
+  writer:
+    name: Writer
+    role: Writer
+    goal: Write
+    instructions: "Write content"
+
+steps:
+  - agent: writer
+    action: "Write content"
+    skip_on_failure: true
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        task = workflow._normalize_single_step(workflow.steps[0], 0)
+        
+        assert task.skip_on_failure == True
+    
+    def test_output_file_wired_to_task(self):
+        """Test that output_file from YAML is wired into the Task object."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Output File Wiring Test
+agents:
+  writer:
+    name: Writer
+    role: Writer
+    goal: Write
+    instructions: "Write content"
+
+steps:
+  - agent: writer
+    action: "Write content"
+    output_file: "output/result.txt"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        task = workflow._normalize_single_step(workflow.steps[0], 0)
+        
+        assert task.output_file == "output/result.txt"
+    
+    def test_all_yaml_step_attrs_wired(self):
+        """Test that ALL YAML step-level attributes are wired through to Task."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Full Wiring Test
+agents:
+  writer:
+    name: Writer
+    role: Writer
+    goal: Write
+    instructions: "Write content"
+
+steps:
+  - agent: writer
+    action: "Write content"
+    guardrail: "Check quality"
+    max_retries: 5
+    expected_output: "High quality content"
+    output_file: "out.txt"
+    skip_on_failure: true
+    retry_delay: 2.5
+    create_directory: true
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        task = workflow._normalize_single_step(workflow.steps[0], 0)
+        
+        assert task.guardrail == "Check quality"
+        assert task.max_retries == 5
+        assert task.expected_output == "High quality content"
+        assert task.output_file == "out.txt"
+        assert task.skip_on_failure == True
+        assert task.retry_delay == 2.5
+        assert task.create_directory == True
 
 
 class TestYAMLWorkflowParserVariables:
