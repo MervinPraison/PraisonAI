@@ -3475,10 +3475,17 @@ Summary:"""
         if not self._memory_instance:
             return
         
-        if memory_type == "short_term" and hasattr(self._memory_instance, 'add_short_term'):
-            self._memory_instance.add_short_term(content, **kwargs)
-        elif memory_type == "long_term" and hasattr(self._memory_instance, 'add_long_term'):
-            self._memory_instance.add_long_term(content, **kwargs)
+        # Use protocol names first (store_*), fallback to legacy names (add_*)
+        if memory_type == "short_term":
+            if hasattr(self._memory_instance, 'store_short_term'):
+                self._memory_instance.store_short_term(content, **kwargs)
+            elif hasattr(self._memory_instance, 'add_short_term'):
+                self._memory_instance.add_short_term(content, **kwargs)
+        elif memory_type == "long_term":
+            if hasattr(self._memory_instance, 'store_long_term'):
+                self._memory_instance.store_long_term(content, **kwargs)
+            elif hasattr(self._memory_instance, 'add_long_term'):
+                self._memory_instance.add_long_term(content, **kwargs)
         elif memory_type == "entity" and hasattr(self._memory_instance, 'add_entity'):
             self._memory_instance.add_entity(content, **kwargs)
         elif memory_type == "episodic" and hasattr(self._memory_instance, 'add_episodic'):

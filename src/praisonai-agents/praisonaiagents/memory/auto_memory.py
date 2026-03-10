@@ -245,7 +245,7 @@ class AutoMemory:
     
     def __init__(
         self,
-        memory: "FileMemory",
+        memory: Any,
         enabled: bool = True,
         extractor: Optional[AutoMemoryExtractor] = None,
         min_importance: float = 0.6,

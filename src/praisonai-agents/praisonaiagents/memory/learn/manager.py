@@ -191,12 +191,13 @@ class LearnManager:
                 return None
         
         if backend_str == "mongodb":
-            logging.warning(
-                f"MongoDB backend is not yet implemented. "
-                f"Falling back to FILE backend. "
-                f"Use custom_stores= for custom MongoDB implementations."
-            )
-            return None
+            try:
+                from ...storage.backends import MongoDBBackend
+                url = self.config.db_url or "mongodb://localhost:27017/"
+                return MongoDBBackend(url=url, collection="praison_learn")
+            except Exception as e:
+                logging.warning(f"Failed to create MongoDB backend: {e}. Falling back to FILE.")
+                return None
         
         logging.warning(f"Unknown learn backend '{backend_str}'. Falling back to FILE.")
         return None

@@ -29,6 +29,7 @@ __all__ = [
     "FileBackend",
     "SQLiteBackend",
     "RedisBackend",
+    "MongoDBBackend",
     "get_backend",
 ]
 
@@ -47,6 +48,7 @@ _LAZY_IMPORTS = {
     "FileBackend": ("backends", "FileBackend"),
     "SQLiteBackend": ("backends", "SQLiteBackend"),
     "RedisBackend": ("backends", "RedisBackend"),
+    "MongoDBBackend": ("backends", "MongoDBBackend"),
     "get_backend": ("backends", "get_backend"),
 }
 

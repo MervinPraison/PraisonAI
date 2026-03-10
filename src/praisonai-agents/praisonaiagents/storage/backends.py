@@ -13,6 +13,7 @@ DRY: All backends implement StorageBackendProtocol for consistent interface.
 
 import json
 import os
+import time
 import threading
 import tempfile
 import logging
@@ -456,6 +457,114 @@ class RedisBackend:
             self._client = None
 
 
+class MongoDBBackend:
+    """
+    MongoDB-based storage backend.
+    
+    Uses MongoDB for document-oriented data storage.
+    Requires the `pymongo` package (optional dependency).
+    
+    Example:
+        ```python
+        backend = MongoDBBackend(url="mongodb://localhost:27017/")
+        backend.save("session_123", {"messages": []})
+        data = backend.load("session_123")
+        ```
+    """
+    
+    def __init__(
+        self,
+        url: str = "mongodb://localhost:27017/",
+        database: str = "praisonai",
+        collection: str = "praison_storage",
+        max_pool_size: int = 50,
+    ):
+        self.url = url
+        self.database = database
+        self.collection_name = collection
+        self.max_pool_size = max_pool_size
+        self._client = None
+        self._collection = None
+    
+    def _get_collection(self):
+        """Lazy initialize MongoDB client and collection."""
+        if self._collection is None:
+            try:
+                import pymongo
+            except ImportError:
+                raise ImportError(
+                    "MongoDB backend requires the 'pymongo' package. "
+                    "Install with: pip install pymongo"
+                )
+            self._client = pymongo.MongoClient(
+                self.url,
+                maxPoolSize=self.max_pool_size,
+                retryWrites=True,
+                retryReads=True,
+                serverSelectionTimeoutMS=5000,  # 5 second timeout for connection
+            )
+            db = self._client[self.database]
+            self._collection = db[self.collection_name]
+        return self._collection
+    
+    def save(self, key: str, data: Dict[str, Any]) -> None:
+        """Save data with the given key (upsert)."""
+        collection = self._get_collection()
+        json_data = json.dumps(data, default=str, ensure_ascii=False)
+        collection.replace_one(
+            {"_id": key},
+            {"_id": key, "data": json_data, "updated_at": time.time()},
+            upsert=True,
+        )
+    
+    def load(self, key: str) -> Optional[Dict[str, Any]]:
+        """Load data by key."""
+        collection = self._get_collection()
+        doc = collection.find_one({"_id": key})
+        if doc and "data" in doc:
+            try:
+                return json.loads(doc["data"])
+            except json.JSONDecodeError:
+                return None
+        return None
+    
+    def delete(self, key: str) -> bool:
+        """Delete data by key."""
+        collection = self._get_collection()
+        result = collection.delete_one({"_id": key})
+        return result.deleted_count > 0
+    
+    def list_keys(self, prefix: str = "") -> List[str]:
+        """List all keys, optionally filtered by prefix."""
+        collection = self._get_collection()
+        if prefix:
+            cursor = collection.find(
+                {"_id": {"$regex": f"^{prefix}"}},
+                {"_id": 1}
+            )
+        else:
+            cursor = collection.find({}, {"_id": 1})
+        return sorted([doc["_id"] for doc in cursor])
+    
+    def exists(self, key: str) -> bool:
+        """Check if a key exists."""
+        collection = self._get_collection()
+        return collection.count_documents({"_id": key}, limit=1) > 0
+    
+    def clear(self) -> int:
+        """Clear all data. Returns number of items deleted."""
+        collection = self._get_collection()
+        result = collection.delete_many({})
+        return result.deleted_count
+    
+    def close(self) -> None:
+        """Close the MongoDB connection."""
+        if self._client:
+            self._client.close()
+            self._client = None
+            self._collection = None
+
+
 def get_backend(
     backend_type: str = "file",
     **kwargs
@@ -488,6 +597,8 @@ def get_backend(
         return SQLiteBackend(**kwargs)
     elif backend_type == "redis":
         return RedisBackend(**kwargs)
+    elif backend_type == "mongodb":
+        return MongoDBBackend(**kwargs)
     else:
         raise ValueError(f"Unknown backend type: {backend_type}")
 
@@ -496,5 +607,6 @@ __all__ = [
     'FileBackend',
     'SQLiteBackend',
     'RedisBackend',
+    'MongoDBBackend',
     'get_backend',
 ]

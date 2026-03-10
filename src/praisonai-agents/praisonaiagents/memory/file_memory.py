@@ -1066,6 +1066,55 @@ class FileMemory:
             "storage_path": str(self.user_path)
         }
     
+    # -------------------------------------------------------------------------
+    #                    MemoryProtocol Compliance Aliases
+    # -------------------------------------------------------------------------
+    
+    def store_short_term(
+        self,
+        text: str,
+        metadata: Optional[Dict[str, Any]] = None,
+        **kwargs
+    ) -> str:
+        """Protocol-compliant alias for add_short_term."""
+        return self.add_short_term(text, metadata)
+    
+    def store_long_term(
+        self,
+        text: str,
+        metadata: Optional[Dict[str, Any]] = None,
+        **kwargs
+    ) -> str:
+        """Protocol-compliant alias for add_long_term."""
+        return self.add_long_term(text, metadata)
+    
+    def search_short_term(
+        self,
+        query: str,
+        limit: int = 5,
+        **kwargs
+    ) -> List[Dict[str, Any]]:
+        """Protocol-compliant alias for search (short_term only)."""
+        return self.search(query, memory_types=["short_term"], limit=limit)
+    
+    def search_long_term(
+        self,
+        query: str,
+        limit: int = 5,
+        **kwargs
+    ) -> List[Dict[str, Any]]:
+        """Protocol-compliant alias for search (long_term only)."""
+        return self.search(query, memory_types=["long_term"], limit=limit)
+    
+    def get_all_memories(self, **kwargs) -> List[Dict[str, Any]]:
+        """Get all memories from short-term and long-term stores."""
+        all_memories = []
+        for item in self._short_term:
+            all_memories.append({"type": "short_term", **item.to_dict()})
+        for item in self._long_term:
+            all_memories.append({"type": "long_term", **item.to_dict()})
+        return all_memories
+    
     def export(self) -> Dict[str, Any]:
         """Export all memory data."""
         return {
