@@ -7208,8 +7208,13 @@ Write the complete compiled report:"""
             logging.debug(f"Auto-memory extraction failed: {e}")
 
     def _auto_save_session(self):
-        """Auto-save session if auto_save is enabled."""
-        if not self.auto_save or not self._memory_instance:
+        """Auto-save session if auto_save is enabled.
+        
+        G-1 FIX: Routes to SessionStore instead of Memory.save_session() to
+        maintain clean separation between conversation history (SessionStore)
+        and semantic memory (Memory).
+        """
+        if not self.auto_save:
             return
         
         try:
@@ -7219,12 +7224,25 @@ Write the complete compiled report:"""
                 for msg in self.chat_history
             ]
             
-            self._memory_instance.save_session(
-                name=self.auto_save,
-                conversation_history=clean_history,
-                metadata={"agent_name": self.name, "user_id": self.user_id}
-            )
-            logging.debug(f"Auto-saved session: {self.auto_save}")
+            # G-1 FIX: Use SessionStore for conversation history persistence
+            # This maintains clean separation: Memory = facts, SessionStore = turns
+            if self._session_store is not None:
+                # Persist each message to SessionStore
+                for msg in clean_history:
+                    self._session_store.add_message(
+                        self.auto_save,  # Use auto_save name as session_id
+                        role=msg.get("role", "user"),
+                        content=msg.get("content", ""),
+                    )
+                logging.debug(f"Auto-saved session to SessionStore: {self.auto_save}")
+            elif self._memory_instance and hasattr(self._memory_instance, 'save_session'):
+                # Fallback to Memory.save_session() for backward compatibility
+                self._memory_instance.save_session(
+                    name=self.auto_save,
+                    conversation_history=clean_history,
+                    metadata={"agent_name": self.name, "user_id": self.user_id}
+                )
+                logging.debug(f"Auto-saved session to Memory: {self.auto_save}")
         except Exception as e:
             logging.debug(f"Error auto-saving session: {e}")
 

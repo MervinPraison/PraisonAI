@@ -311,7 +311,12 @@ class Session:
                     }
 
     def _save_agent_chat_histories(self) -> None:
-        """Save all agent chat histories to memory."""
+        """Save all agent chat histories.
+        
+        G-2 FIX: Routes to SessionStore instead of Memory.store_short_term() to
+        maintain clean separation between conversation history (SessionStore)
+        and semantic memory (Memory). Falls back to Memory for backward compat.
+        """
         if self.is_remote:
             return
         
@@ -326,17 +331,37 @@ class Session:
                 chat_history = agent_data.get("chat_history")
             
             if chat_history is not None:
-                history_text = f"Agent chat history for {agent_key}"
-                self.memory.store_short_term(
-                    text=history_text,
-                    metadata={
-                        "type": "agent_chat_history",
-                        "session_id": self.session_id,
-                        "user_id": self.user_id,
-                        "agent_key": agent_key,
-                        "chat_history": chat_history
-                    }
-                )
+                # G-2 FIX: Try SessionStore first for clean separation
+                session_store = None
+                try:
+                    from . import get_default_session_store
+                    session_store = get_default_session_store()
+                except ImportError:
+                    pass
+                
+                if session_store is not None:
+                    # Use SessionStore for conversation history
+                    session_id = f"{self.session_id}_{agent_key}"
+                    for msg in chat_history:
+                        if isinstance(msg, dict):
+                            session_store.add_message(
+                                session_id,
+                                role=msg.get("role", "user"),
+                                content=msg.get("content", ""),
+                            )
+                else:
+                    # Fallback to Memory.store_short_term() for backward compatibility
+                    history_text = f"Agent chat history for {agent_key}"
+                    self.memory.store_short_term(
+                        text=history_text,
+                        metadata={
+                            "type": "agent_chat_history",
+                            "session_id": self.session_id,
+                            "user_id": self.user_id,
+                            "agent_key": agent_key,
+                            "chat_history": chat_history
+                        }
+                    )
 
     def get_state(self, key: str, default: Any = None) -> Any:
         """Get a specific state value"""
