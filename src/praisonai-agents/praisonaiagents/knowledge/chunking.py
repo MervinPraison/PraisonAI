@@ -20,34 +20,59 @@ class Chunking:
     @cached_property
     def SUPPORTED_CHUNKERS(self) -> Dict[str, Any]:
         """Lazy load chunker classes."""
+        chunkers = {}
         try:
-            from chonkie import (
-                TokenChunker,
-                SentenceChunker,
-                SemanticChunker,
-                SDPMChunker,
-                LateChunker,
-                RecursiveChunker,
-                CodeChunker,
-                NeuralChunker,
-                SlumberChunker
-            )
+            from chonkie import TokenChunker
+            chunkers['token'] = TokenChunker
         except ImportError:
+            pass
+        try:
+            from chonkie import SentenceChunker
+            chunkers['sentence'] = SentenceChunker
+        except ImportError:
+            pass
+        try:
+            from chonkie import SemanticChunker
+            chunkers['semantic'] = SemanticChunker
+        except ImportError:
+            pass
+        try:
+            from chonkie import SDPMChunker
+            chunkers['sdpm'] = SDPMChunker
+        except ImportError:
+            pass
+        try:
+            from chonkie import LateChunker
+            chunkers['late'] = LateChunker
+        except ImportError:
+            pass
+        try:
+            from chonkie import RecursiveChunker
+            chunkers['recursive'] = RecursiveChunker
+        except ImportError:
+            pass
+        try:
+            from chonkie import CodeChunker
+            chunkers['code'] = CodeChunker
+        except ImportError:
+            pass
+        try:
+            from chonkie import NeuralChunker
+            chunkers['neural'] = NeuralChunker
+        except ImportError:
+            pass
+        try:
+            from chonkie import SlumberChunker
+            chunkers['slumber'] = SlumberChunker
+        except ImportError:
+            pass
+
+        if not chunkers:
             raise ImportError(
                 "chonkie package not found. Please install it using: pip install 'praisonaiagents[knowledge]'"
             )
-            
-        return {
-            'token': TokenChunker,
-            'sentence': SentenceChunker,
-            'semantic': SemanticChunker,
-            'sdpm': SDPMChunker,
-            'late': LateChunker,
-            'recursive': RecursiveChunker,
-            'code': CodeChunker,
-            'neural': NeuralChunker,
-            'slumber': SlumberChunker
-        }
+
+        return chunkers
 
     def __init__(
         self,
@@ -116,7 +141,18 @@ class Chunking:
         if self._chunker is None:
             chunker_cls = self.SUPPORTED_CHUNKERS[self.chunker_type]
             common_params = self._get_chunker_params()
-            self._chunker = chunker_cls(**common_params)
+            try:
+                self._chunker = chunker_cls(**common_params)
+            except TypeError:
+                # Chonkie API may have changed — retry with just chunk_size
+                fallback_params = {'chunk_size': self.chunk_size}
+                if 'embedding_model' in common_params:
+                    fallback_params['embedding_model'] = common_params['embedding_model']
+                try:
+                    self._chunker = chunker_cls(**fallback_params)
+                except TypeError:
+                    # Last resort — no params
+                    self._chunker = chunker_cls()
         
         return self._chunker
     
