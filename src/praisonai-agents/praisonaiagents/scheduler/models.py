@@ -52,6 +52,39 @@ class Schedule:
 
 
 @dataclass
+class DeliveryTarget:
+    """Where to deliver the result when a scheduled job fires.
+
+    Attributes:
+        channel: Platform name (``"telegram"``, ``"discord"``,
+                 ``"slack"``, ``"whatsapp"``).
+        channel_id: Platform-specific chat / channel / group ID.
+        thread_id: Optional thread ID for threaded delivery.
+    """
+
+    channel: str = ""
+    channel_id: str = ""
+    thread_id: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        d: Dict[str, Any] = {
+            "channel": self.channel,
+            "channel_id": self.channel_id,
+        }
+        if self.thread_id is not None:
+            d["thread_id"] = self.thread_id
+        return d
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "DeliveryTarget":
+        return cls(
+            channel=d.get("channel", ""),
+            channel_id=d.get("channel_id", ""),
+            thread_id=d.get("thread_id"),
+        )
+
+
+@dataclass
 class ScheduleJob:
     """A persisted scheduled job.
 
@@ -67,6 +100,8 @@ class ScheduleJob:
         delete_after_run: Auto-remove after first execution (one-shot).
         created_at: Epoch timestamp.
         last_run_at: Epoch timestamp of most recent execution.
+        delivery: Optional delivery target for routing results back
+                  to a channel bot (e.g. Telegram chat).
     """
 
     name: str = ""
@@ -79,11 +114,12 @@ class ScheduleJob:
     delete_after_run: bool = False
     created_at: float = field(default_factory=time.time)
     last_run_at: Optional[float] = None
+    delivery: Optional[DeliveryTarget] = None
 
     # ── serialisation ────────────────────────────────────────────────
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d: Dict[str, Any] = {
             "id": self.id,
             "name": self.name,
             "schedule": self.schedule.to_dict(),
@@ -95,10 +131,14 @@ class ScheduleJob:
             "created_at": self.created_at,
             "last_run_at": self.last_run_at,
         }
+        if self.delivery is not None:
+            d["delivery"] = self.delivery.to_dict()
+        return d
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "ScheduleJob":
         sched_data = d.get("schedule", {})
+        delivery_data = d.get("delivery")
         return cls(
             id=d.get("id", uuid.uuid4().hex[:12]),
             name=d.get("name", ""),
@@ -110,4 +150,5 @@ class ScheduleJob:
             delete_after_run=d.get("delete_after_run", False),
             created_at=d.get("created_at", time.time()),
             last_run_at=d.get("last_run_at"),
+            delivery=DeliveryTarget.from_dict(delivery_data) if isinstance(delivery_data, dict) else None,
         )

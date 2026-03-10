@@ -41,6 +41,8 @@ def schedule_add(
     name: str,
     schedule: str,
     message: str = "",
+    channel: str = "",
+    channel_id: str = "",
 ) -> str:
     """Add a new scheduled job.
 
@@ -53,16 +55,29 @@ def schedule_add(
             - "at:2026-03-01T09:00:00"  (one-shot ISO timestamp)
             - "in 20 minutes"           (relative one-shot)
         message: The prompt or reminder text to deliver when triggered.
+        channel: Delivery platform ("telegram", "discord", "slack",
+                 "whatsapp"). If set with channel_id, the result will
+                 be sent back to that chat when the job fires.
+        channel_id: Target chat/channel/group ID on the platform.
 
     Returns:
         Confirmation string with the job id.
     """
     try:
         from ..scheduler.parser import parse_schedule
-        from ..scheduler.models import ScheduleJob
+        from ..scheduler.models import ScheduleJob, DeliveryTarget
 
         sched = parse_schedule(schedule)
-        job = ScheduleJob(name=name, schedule=sched, message=message)
+
+        delivery = None
+        if channel and channel_id:
+            delivery = DeliveryTarget(
+                channel=channel, channel_id=channel_id,
+            )
+
+        job = ScheduleJob(
+            name=name, schedule=sched, message=message, delivery=delivery,
+        )
 
         store = _get_store()
 
@@ -72,7 +87,8 @@ def schedule_add(
             return f"A schedule named '{name}' already exists (id: {existing.id}). Remove it first or choose a different name."
 
         store.add(job)
-        return f"Schedule '{name}' added (id: {job.id}, {schedule})."
+        delivery_note = f" → deliver to {channel}:{channel_id}" if delivery else ""
+        return f"Schedule '{name}' added (id: {job.id}, {schedule}{delivery_note})."
     except ValueError as e:
         return f"Error adding schedule: {e}"
     except Exception as e:

@@ -202,6 +202,9 @@ class WebSocketGateway:
         self._channel_bots: Dict[str, Any] = {}  # channel_name -> bot instance
         self._routing_rules: Dict[str, Dict[str, str]] = {}  # channel_name -> {context -> agent_id}
         self._channel_tasks: List[asyncio.Task] = []
+        
+        # Scheduler tick background task
+        self._scheduler_task: Optional[asyncio.Task] = None
     
     @property
     def is_running(self) -> bool:
@@ -721,6 +724,91 @@ class WebSocketGateway:
             "clients": len(self._clients),
             "channels": channel_status,
         }
+
+    # ── Scheduled delivery ────────────────────────────────────────────
+
+    async def _deliver_scheduled_result(
+        self, delivery: Any, text: str,
+    ) -> None:
+        """Route a scheduled job result to the correct channel bot.
+
+        Args:
+            delivery: A ``DeliveryTarget`` with ``channel`` and ``channel_id``.
+            text: The agent response to deliver.
+        """
+        channel = getattr(delivery, "channel", "") or ""
+        channel_id = getattr(delivery, "channel_id", "") or ""
+        thread_id = getattr(delivery, "thread_id", None)
+
+        if not channel or not channel_id:
+            logger.warning("Delivery target missing channel or channel_id, skipping")
+            return
+
+        bot = self.get_channel_bot(channel)
+        if bot is None:
+            # Try case-insensitive lookup
+            for name, b in self._channel_bots.items():
+                if name.lower() == channel.lower():
+                    bot = b
+                    break
+
+        if bot is None:
+            logger.warning(
+                "No channel bot '%s' found for scheduled delivery", channel,
+            )
+            return
+
+        try:
+            await bot.send_message(
+                channel_id, text, thread_id=thread_id,
+            )
+            logger.info(
+                "Delivered scheduled result to %s:%s", channel, channel_id,
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to deliver to %s:%s: %s", channel, channel_id, e,
+            )
+
+    def _start_scheduler_tick(self, interval: float = 15.0) -> None:
+        """Start a background task that polls the scheduler for due jobs.
+
+        Creates a ``ScheduledAgentExecutor`` wired to:
+        - a ``ScheduleRunner`` with a ``FileScheduleStore``
+        - this gateway's agent registry for resolution
+        - ``_deliver_scheduled_result`` for outbound delivery
+        """
+        async def _run():
+            try:
+                from praisonaiagents.scheduler import (
+                    ScheduleRunner,
+                    FileScheduleStore,
+                )
+                from praisonai.scheduler.executor import ScheduledAgentExecutor
+            except ImportError as e:
+                logger.warning(
+                    "Scheduler dependencies not available, skipping tick: %s", e,
+                )
+                return
+
+            store = FileScheduleStore()
+            runner = ScheduleRunner(store)
+
+            def _resolve_agent(agent_id):
+                if agent_id:
+                    return self._agents.get(agent_id)
+                # Fallback: first registered agent
+                return next(iter(self._agents.values()), None) if self._agents else None
+
+            executor = ScheduledAgentExecutor(
+                runner=runner,
+                agent_resolver=_resolve_agent,
+                delivery_handler=self._deliver_scheduled_result,
+            )
+            await executor.run_loop(interval=interval)
+
+        self._scheduler_task = asyncio.create_task(_run())
+        logger.info("Scheduler tick started (interval=15s)")
 
     # ── Multi-bot lifecycle ───────────────────────────────────────────
 
@@ -1289,6 +1377,8 @@ class WebSocketGateway:
             self._config_watch_task = asyncio.create_task(
                 self._watch_config(config_path)
             )
+            # Launch scheduler tick to poll for due jobs
+            self._start_scheduler_tick()
             await self.start()
 
         # Register signal handlers for graceful shutdown using
@@ -1316,4 +1406,6 @@ class WebSocketGateway:
         finally:
             if self._config_watch_task:
                 self._config_watch_task.cancel()
+            if self._scheduler_task:
+                self._scheduler_task.cancel()
             await self.stop_channels()

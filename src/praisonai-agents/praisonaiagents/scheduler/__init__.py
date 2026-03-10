@@ -20,7 +20,7 @@ Default storage: ~/.praisonai/schedules/jobs.json
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .models import Schedule, ScheduleJob
+    from .models import Schedule, ScheduleJob, DeliveryTarget
     from .store import FileScheduleStore
     from .parser import parse_schedule
     from .runner import ScheduleRunner
@@ -33,10 +33,11 @@ def __getattr__(name: str):
     if name in _module_cache:
         return _module_cache[name]
 
-    if name in ("Schedule", "ScheduleJob"):
-        from .models import Schedule, ScheduleJob
+    if name in ("Schedule", "ScheduleJob", "DeliveryTarget"):
+        from .models import Schedule, ScheduleJob, DeliveryTarget
         _module_cache["Schedule"] = Schedule
         _module_cache["ScheduleJob"] = ScheduleJob
+        _module_cache["DeliveryTarget"] = DeliveryTarget
         return _module_cache[name]
 
     if name == "FileScheduleStore":
@@ -60,6 +61,7 @@ def __getattr__(name: str):
 __all__ = [
     "Schedule",
     "ScheduleJob",
+    "DeliveryTarget",
     "FileScheduleStore",
     "parse_schedule",
     "ScheduleRunner",

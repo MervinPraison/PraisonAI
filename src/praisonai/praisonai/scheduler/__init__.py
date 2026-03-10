@@ -17,6 +17,8 @@ __all__ = [
     'ScheduleParser',
     'ExecutorInterface',
     'PraisonAgentExecutor',
+    'ScheduledAgentExecutor',
+    'JobResult',
 ]
 
 # Lazy imports for modules that will be created later
@@ -42,4 +44,7 @@ def __getattr__(name):
     elif name == 'create_deployment_scheduler':
         from .agent_scheduler import create_agent_scheduler
         return create_agent_scheduler
+    elif name in ('ScheduledAgentExecutor', 'JobResult'):
+        from .executor import ScheduledAgentExecutor, JobResult
+        return ScheduledAgentExecutor if name == 'ScheduledAgentExecutor' else JobResult
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

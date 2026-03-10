@@ -67,16 +67,22 @@ class LLMGuardrail:
         self.logger.warning(f"Unknown LLM type: {type(llm)}, treating as-is")
         return llm
     
-    def __call__(self, task_output: TaskOutput) -> Tuple[bool, Union[str, TaskOutput]]:
+    def __call__(self, task_output) -> Tuple[bool, Union[str, "TaskOutput"]]:
         """Validate the task output using the LLM.
         
         Args:
-            task_output: The task output to validate
+            task_output: The task output to validate (TaskOutput or plain str)
             
         Returns:
             Tuple of (success, result) where result is the output or error message
         """
         try:
+            # Accept plain str for convenience (e.g. chat-input screening)
+            if isinstance(task_output, str):
+                raw_text = task_output
+            else:
+                raw_text = task_output.raw
+
             if not self.llm:
                 self.logger.warning("No LLM provided for guardrail validation")
                 return True, task_output
@@ -88,7 +94,7 @@ You are a quality assurance validator. Your task is to evaluate the following ou
 Validation Criteria: {self.description}
 
 Output to Validate:
-{task_output.raw}
+{raw_text}
 
 Please evaluate if this output meets the criteria. Respond with:
 1. "PASS" if the output meets all criteria

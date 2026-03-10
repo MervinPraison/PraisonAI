@@ -37,6 +37,47 @@ def _run_schedule(args: list) -> int:
         return 4
 
 
+@app.command("add")
+def schedule_add_cmd(
+    name: str = typer.Argument(..., help="Schedule name (e.g. 'morning-hello')"),
+    schedule: str = typer.Option(..., "--schedule", "-s", help="When to run: 'hourly', 'daily', '*/30m', 'cron:0 9 * * *', 'at:2026-03-01T09:00', 'in 20 minutes'"),
+    message: str = typer.Option("", "--message", "-m", help="Prompt / reminder text"),
+    channel: str = typer.Option("", "--channel", help="Delivery platform: telegram, discord, slack, whatsapp"),
+    channel_id: str = typer.Option("", "--channel-id", help="Target chat/channel ID on the platform"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+):
+    """Add a job to the schedule store (with optional delivery target).
+
+    Examples:
+        praisonai schedule add "morning-hello" -s "cron:0 9 * * *" -m "say hello"
+        praisonai schedule add "tg-reminder" -s daily -m "check email" --channel telegram --channel-id 12345
+    """
+    output = get_output_controller()
+    try:
+        from praisonaiagents.tools.schedule_tools import schedule_add as _schedule_add
+
+        result = _schedule_add(
+            name=name,
+            schedule=schedule,
+            message=message,
+            channel=channel,
+            channel_id=channel_id,
+        )
+
+        if json_output:
+            import json as _json
+            print(_json.dumps({"result": result}))
+        else:
+            if "Error" in result:
+                output.print_error(result)
+                raise typer.Exit(1)
+            else:
+                output.print_success(result)
+    except ImportError as e:
+        output.print_error(f"Schedule tools not available: {e}")
+        raise typer.Exit(4)
+
+
 @app.command("start")
 def schedule_start(
     agents_file: str = typer.Argument("agents.yaml", help="Agents YAML file"),
