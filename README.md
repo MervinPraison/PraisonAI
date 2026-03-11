@@ -17,7 +17,7 @@
 
 <div align="center">
 
-# Praison AI
+# PraisonAI 🦞
 
 <a href="https://trendshift.io/repositories/9130" target="_blank"><img src="https://trendshift.io/api/badge/repositories/9130" alt="MervinPraison%2FPraisonAI | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
 
@@ -109,6 +109,9 @@ python -c "from praisonaiagents import Agent; Agent(instructions='You are a help
 | 🕸️ | **Graph Memory** — Neo4j-style relationship tracking | [Docs](https://docs.praison.ai/docs/features/graph-memory) |
 | 📚 | **RAG + Quality-Based RAG** — auto quality scoring retrieval | [Docs](https://docs.praison.ai/docs/features/rag) |
 | 🏖️ | **Sandbox Execution** — isolated code execution | [Docs](https://docs.praison.ai/docs/features/sandbox) |
+| 📱 | **Messaging Bots** — Telegram, Discord, Slack, WhatsApp | `praisonai bot telegram` |
+| 🖥️ | **Bot Gateway** — multi-agent routing across channels | [Docs](https://docs.praison.ai/docs/features/bot-gateway) |
+| 🦞 | **Dashboard UI** — chat, agents, memory, knowledge, cron | `pip install "praisonai[claw]"` |
 
 ---
 
@@ -126,6 +129,12 @@ For the full framework with CLI support:
 
 ```bash
 pip install praisonai
+```
+
+🦞 **Full Dashboard** with bots, memory, knowledge, and gateway:
+
+```bash
+pip install "praisonai[claw]"
 ```
 
 ### JavaScript SDK

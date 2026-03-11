@@ -94,3 +94,5 @@ Cargo.lock
 *.pdb
 .windsurf
 .agent
+
+src/praisonai/build
