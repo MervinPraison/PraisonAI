@@ -203,8 +203,26 @@ class ScheduledAgentExecutor:
             )
 
         # Execute via agent.chat() in a thread (sync-safe)
+        # Wire session_target: "main" preserves context, "isolated" is fresh
         try:
-            result = await asyncio.to_thread(agent.chat, message)
+            session_target = getattr(job, "session_target", "isolated")
+            delivery = getattr(job, "delivery", None)
+            session_id = (
+                getattr(delivery, "session_id", None)
+                if delivery else None
+            )
+
+            # Build chat kwargs
+            chat_kwargs: Dict[str, Any] = {}
+            if session_target == "main" and session_id:
+                chat_kwargs["session_id"] = session_id
+            else:
+                # Isolated mode: use a cron-specific session
+                chat_kwargs["session_id"] = f"cron_{job.id}"
+
+            result = await asyncio.to_thread(
+                agent.chat, message, **chat_kwargs,
+            )
             result_str = str(result)
         except Exception as e:
             logger.warning("Job '%s' execution failed: %s", job.id, e)

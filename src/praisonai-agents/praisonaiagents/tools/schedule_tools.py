@@ -43,6 +43,8 @@ def schedule_add(
     message: str = "",
     channel: str = "",
     channel_id: str = "",
+    agent_id: str = "",
+    session_id: str = "",
 ) -> str:
     """Add a new scheduled job.
 
@@ -59,6 +61,10 @@ def schedule_add(
                  "whatsapp"). If set with channel_id, the result will
                  be sent back to that chat when the job fires.
         channel_id: Target chat/channel/group ID on the platform.
+        agent_id: Which agent should execute this job. If empty, the
+                  executor uses its default agent.
+        session_id: Optional session ID to preserve conversation context.
+                    If set, the agent will have access to prior chat history.
 
     Returns:
         Confirmation string with the job id.
@@ -72,11 +78,17 @@ def schedule_add(
         delivery = None
         if channel and channel_id:
             delivery = DeliveryTarget(
-                channel=channel, channel_id=channel_id,
+                channel=channel,
+                channel_id=channel_id,
+                session_id=session_id or None,
             )
 
         job = ScheduleJob(
-            name=name, schedule=sched, message=message, delivery=delivery,
+            name=name,
+            schedule=sched,
+            message=message,
+            agent_id=agent_id or None,
+            delivery=delivery,
         )
 
         store = _get_store()
@@ -88,7 +100,8 @@ def schedule_add(
 
         store.add(job)
         delivery_note = f" → deliver to {channel}:{channel_id}" if delivery else ""
-        return f"Schedule '{name}' added (id: {job.id}, {schedule}{delivery_note})."
+        agent_note = f" agent={agent_id}" if agent_id else ""
+        return f"Schedule '{name}' added (id: {job.id}, {schedule}{agent_note}{delivery_note})."
     except ValueError as e:
         return f"Error adding schedule: {e}"
     except Exception as e:
@@ -121,10 +134,15 @@ def schedule_list() -> str:
                 sched_str = f"at: {sched.at}"
             else:
                 sched_str = str(sched.kind)
-            lines.append(
-                f"  - {j.name} (id: {j.id}) [{status}] — {sched_str}"
-                + (f" — \"{j.message}\"" if j.message else "")
-            )
+
+            parts = [f"  - {j.name} (id: {j.id}) [{status}] — {sched_str}"]
+            if j.agent_id:
+                parts.append(f" agent={j.agent_id}")
+            if j.delivery:
+                parts.append(f" → {j.delivery.channel}:{j.delivery.channel_id}")
+            if j.message:
+                parts.append(f' — "{j.message}"')
+            lines.append("".join(parts))
         return "\n".join(lines)
     except Exception as e:
         logger.error("schedule_list failed: %s", e, exc_info=True)

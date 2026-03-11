@@ -42,15 +42,17 @@ def schedule_add_cmd(
     name: str = typer.Argument(..., help="Schedule name (e.g. 'morning-hello')"),
     schedule: str = typer.Option(..., "--schedule", "-s", help="When to run: 'hourly', 'daily', '*/30m', 'cron:0 9 * * *', 'at:2026-03-01T09:00', 'in 20 minutes'"),
     message: str = typer.Option("", "--message", "-m", help="Prompt / reminder text"),
+    agent: str = typer.Option("", "--agent", "-a", help="Agent ID to execute this job (default: first registered agent)"),
     channel: str = typer.Option("", "--channel", help="Delivery platform: telegram, discord, slack, whatsapp"),
     channel_id: str = typer.Option("", "--channel-id", help="Target chat/channel ID on the platform"),
+    session_id: str = typer.Option("", "--session-id", help="Session ID to preserve conversation context"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
 ):
     """Add a job to the schedule store (with optional delivery target).
 
     Examples:
         praisonai schedule add "morning-hello" -s "cron:0 9 * * *" -m "say hello"
-        praisonai schedule add "tg-reminder" -s daily -m "check email" --channel telegram --channel-id 12345
+        praisonai schedule add "tg-reminder" -s daily -m "check email" --agent support --channel telegram --channel-id 12345
     """
     output = get_output_controller()
     try:
@@ -60,8 +62,10 @@ def schedule_add_cmd(
             name=name,
             schedule=schedule,
             message=message,
+            agent_id=agent,
             channel=channel,
             channel_id=channel_id,
+            session_id=session_id,
         )
 
         if json_output:

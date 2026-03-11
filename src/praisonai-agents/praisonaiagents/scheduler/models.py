@@ -60,11 +60,14 @@ class DeliveryTarget:
                  ``"slack"``, ``"whatsapp"``).
         channel_id: Platform-specific chat / channel / group ID.
         thread_id: Optional thread ID for threaded delivery.
+        session_id: Optional session ID to preserve conversation
+                    context when the cron fires.
     """
 
     channel: str = ""
     channel_id: str = ""
     thread_id: Optional[str] = None
+    session_id: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {
@@ -73,6 +76,8 @@ class DeliveryTarget:
         }
         if self.thread_id is not None:
             d["thread_id"] = self.thread_id
+        if self.session_id is not None:
+            d["session_id"] = self.session_id
         return d
 
     @classmethod
@@ -81,6 +86,7 @@ class DeliveryTarget:
             channel=d.get("channel", ""),
             channel_id=d.get("channel_id", ""),
             thread_id=d.get("thread_id"),
+            session_id=d.get("session_id"),
         )
 
 
