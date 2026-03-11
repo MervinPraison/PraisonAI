@@ -2663,8 +2663,8 @@ name = "linkpreview"
 version = "0.12.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "beautifulsoup4" },
-    { name = "requests" },
+    { name = "beautifulsoup4", marker = "python_full_version < '3.14' or sys_platform != 'win32'" },
+    { name = "requests", marker = "python_full_version < '3.14' or sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/66/54/e538987c8ce1e8585a276ecf018ed8eb958eb17649e893d04bde235c7ccf/linkpreview-0.12.1.tar.gz", hash = "sha256:4f3ec342a848d23dbe5c953daa574c4096a98167b4f8b41e57734a8e85b413e4", size = 15417, upload-time = "2025-08-15T17:59:25Z" }
 wheels = [
@@ -2804,12 +2804,12 @@ name = "magika"
 version = "0.5.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "click" },
+    { name = "click", marker = "python_full_version < '3.14' or sys_platform != 'win32'" },
     { name = "numpy", marker = "python_full_version < '3.13'" },
-    { name = "onnxruntime" },
-    { name = "python-dotenv" },
-    { name = "tabulate" },
-    { name = "tqdm" },
+    { name = "onnxruntime", marker = "python_full_version < '3.14' or sys_platform != 'win32'" },
+    { name = "python-dotenv", marker = "python_full_version < '3.14' or sys_platform != 'win32'" },
+    { name = "tabulate", marker = "python_full_version < '3.14' or sys_platform != 'win32'" },
+    { name = "tqdm", marker = "python_full_version < '3.14' or sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1a/58/c1d8887354d0ff2256d4d78d08a69bcc55719a0189afa706c51da04390f2/magika-0.5.1.tar.gz", hash = "sha256:43dc1153a1637327225a626a1550c0a395a1d45ea33ec1f5d46b9b080238bee0", size = 1005077, upload-time = "2024-03-07T16:44:24.377Z" }
 wheels = [
@@ -3374,15 +3374,15 @@ name = "neonize"
 version = "0.3.10.post6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "httpx" },
-    { name = "linkpreview" },
-    { name = "phonenumbers" },
-    { name = "pillow" },
-    { name = "protobuf" },
+    { name = "httpx", marker = "python_full_version < '3.14' or sys_platform != 'win32'" },
+    { name = "linkpreview", marker = "python_full_version < '3.14' or sys_platform != 'win32'" },
+    { name = "phonenumbers", marker = "python_full_version < '3.14' or sys_platform != 'win32'" },
+    { name = "pillow", marker = "python_full_version < '3.14' or sys_platform != 'win32'" },
+    { name = "protobuf", marker = "python_full_version < '3.14' or sys_platform != 'win32'" },
     { name = "python-magic", marker = "sys_platform != 'win32'" },
-    { name = "requests" },
-    { name = "segno" },
-    { name = "tqdm" },
+    { name = "requests", marker = "python_full_version < '3.14' or sys_platform != 'win32'" },
+    { name = "segno", marker = "python_full_version < '3.14' or sys_platform != 'win32'" },
+    { name = "tqdm", marker = "python_full_version < '3.14' or sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/17/9a/5c69113c2b98e18765c4fb74bf91cf8b594132e6b87bdde5fa0c588e81c9/neonize-0.3.10.post6.tar.gz", hash = "sha256:b43cb09634f4a4c455bef23861e3909f28aad13c6a1507773dc3671ab0cf011d", size = 5967927, upload-time = "2025-05-21T17:22:13.92Z" }
 wheels = [
@@ -4798,16 +4798,25 @@ chat = [
 ]
 claw = [
     { name = "aiohttp" },
+    { name = "aiosqlite" },
     { name = "aiui", extra = ["all"] },
     { name = "brotlicffi" },
+    { name = "chainlit" },
+    { name = "crawl4ai" },
+    { name = "ddgs" },
     { name = "discord-py" },
     { name = "fastapi" },
+    { name = "flask" },
+    { name = "greenlet" },
     { name = "praisonaiagents", extra = ["all"] },
     { name = "python-telegram-bot" },
     { name = "slack-bolt" },
     { name = "slack-sdk" },
+    { name = "sqlalchemy" },
     { name = "sse-starlette" },
+    { name = "tavily-python" },
     { name = "uvicorn" },
+    { name = "websockets" },
 ]
 code = [
     { name = "aiosqlite" },
@@ -4863,6 +4872,7 @@ requires-dist = [
     { name = "aiohttp", marker = "extra == 'claw'", specifier = ">=3.8.0" },
     { name = "aiosqlite", marker = "extra == 'all'", specifier = ">=0.20.0" },
     { name = "aiosqlite", marker = "extra == 'chat'", specifier = ">=0.20.0" },
+    { name = "aiosqlite", marker = "extra == 'claw'", specifier = ">=0.20.0" },
     { name = "aiosqlite", marker = "extra == 'code'", specifier = ">=0.20.0" },
     { name = "aiosqlite", marker = "extra == 'realtime'", specifier = ">=0.20.0" },
     { name = "aiosqlite", marker = "extra == 'ui'", specifier = ">=0.20.0" },
@@ -4874,17 +4884,20 @@ requires-dist = [
     { name = "brotlicffi", marker = "extra == 'claw'", specifier = ">=1.0.0" },
     { name = "chainlit", marker = "extra == 'all'", specifier = ">=2.8.5,<=2.9.4" },
     { name = "chainlit", marker = "extra == 'chat'", specifier = ">=2.8.5,<=2.9.4" },
+    { name = "chainlit", marker = "extra == 'claw'", specifier = ">=2.8.5,<=2.9.4" },
     { name = "chainlit", marker = "extra == 'code'", specifier = ">=2.8.5,<=2.9.4" },
     { name = "chainlit", marker = "extra == 'realtime'", specifier = ">=2.8.5,<=2.9.4" },
     { name = "chainlit", marker = "extra == 'ui'", specifier = ">=2.8.5,<=2.9.4" },
     { name = "crawl4ai", marker = "extra == 'all'", specifier = ">=0.7.0" },
     { name = "crawl4ai", marker = "extra == 'chat'", specifier = ">=0.7.0" },
+    { name = "crawl4ai", marker = "extra == 'claw'", specifier = ">=0.7.0" },
     { name = "crawl4ai", marker = "extra == 'code'", specifier = ">=0.7.0" },
     { name = "crawl4ai", marker = "extra == 'realtime'", specifier = ">=0.7.0" },
     { name = "crewai", marker = "extra == 'autogen'" },
     { name = "crewai", marker = "extra == 'autogen-v4'" },
     { name = "crewai", marker = "extra == 'crewai'", specifier = ">=0.157.0" },
     { name = "ddgs", marker = "extra == 'all'", specifier = ">=8.0.0" },
+    { name = "ddgs", marker = "extra == 'claw'", specifier = ">=8.0.0" },
     { name = "ddgs", marker = "extra == 'realtime'", specifier = ">=8.0.0" },
     { name = "discord-py", marker = "extra == 'bot'", specifier = ">=2.0.0" },
     { name = "discord-py", marker = "extra == 'claw'", specifier = ">=2.0.0" },
@@ -4896,10 +4909,12 @@ requires-dist = [
     { name = "flaml", extras = ["automl"], marker = "extra == 'call'", specifier = ">=2.3.1" },
     { name = "flask", marker = "extra == 'all'", specifier = ">=3.0.0" },
     { name = "flask", marker = "extra == 'api'", specifier = ">=3.0.0" },
+    { name = "flask", marker = "extra == 'claw'", specifier = ">=3.0.0" },
     { name = "gradio", marker = "extra == 'all'", specifier = ">=4.26.0" },
     { name = "gradio", marker = "extra == 'gradio'", specifier = ">=4.26.0" },
     { name = "greenlet", marker = "extra == 'all'", specifier = ">=3.0.3" },
     { name = "greenlet", marker = "extra == 'chat'", specifier = ">=3.0.3" },
+    { name = "greenlet", marker = "extra == 'claw'", specifier = ">=3.0.3" },
     { name = "greenlet", marker = "extra == 'code'", specifier = ">=3.0.3" },
     { name = "greenlet", marker = "extra == 'realtime'", specifier = ">=3.0.3" },
     { name = "greenlet", marker = "extra == 'ui'", specifier = ">=3.0.3" },
@@ -4915,7 +4930,7 @@ requires-dist = [
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen-v4'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.1.0" },
-    { name = "praisonaiagents", specifier = ">=1.5.40" },
+    { name = "praisonaiagents", specifier = ">=1.5.41" },
     { name = "praisonaiagents", extras = ["all"], marker = "extra == 'claw'", specifier = ">=1.5.40" },
     { name = "pyautogen", marker = "extra == 'autogen'", specifier = "==0.2.29" },
     { name = "pyjwt", marker = "extra == 'os'", specifier = ">=2.8.0" },
@@ -4937,6 +4952,7 @@ requires-dist = [
     { name = "slack-sdk", marker = "extra == 'claw'", specifier = ">=3.0.0" },
     { name = "sqlalchemy", marker = "extra == 'all'", specifier = ">=2.0.36" },
     { name = "sqlalchemy", marker = "extra == 'chat'", specifier = ">=2.0.36" },
+    { name = "sqlalchemy", marker = "extra == 'claw'", specifier = ">=2.0.36" },
     { name = "sqlalchemy", marker = "extra == 'code'", specifier = ">=2.0.36" },
     { name = "sqlalchemy", marker = "extra == 'realtime'", specifier = ">=2.0.36" },
     { name = "sqlalchemy", marker = "extra == 'ui'", specifier = ">=2.0.36" },
@@ -4946,6 +4962,7 @@ requires-dist = [
     { name = "sse-starlette", marker = "extra == 'os'", specifier = ">=1.6.0" },
     { name = "tavily-python", marker = "extra == 'all'", specifier = "==0.5.0" },
     { name = "tavily-python", marker = "extra == 'chat'", specifier = "==0.5.0" },
+    { name = "tavily-python", marker = "extra == 'claw'", specifier = "==0.5.0" },
     { name = "tavily-python", marker = "extra == 'code'", specifier = "==0.5.0" },
     { name = "tavily-python", marker = "extra == 'realtime'", specifier = "==0.5.0" },
     { name = "textual", specifier = ">=0.47.0" },
@@ -4959,6 +4976,7 @@ requires-dist = [
     { name = "uvicorn", marker = "extra == 'os'", specifier = ">=0.34.0" },
     { name = "websockets", marker = "extra == 'all'", specifier = ">=12.0" },
     { name = "websockets", marker = "extra == 'call'", specifier = ">=12.0" },
+    { name = "websockets", marker = "extra == 'claw'", specifier = ">=12.0" },
     { name = "websockets", marker = "extra == 'realtime'", specifier = ">=12.0" },
     { name = "yfinance", marker = "extra == 'all'", specifier = ">=0.2.44" },
     { name = "yfinance", marker = "extra == 'realtime'", specifier = ">=0.2.44" },
@@ -4979,7 +4997,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.5.40"
+version = "1.5.41"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -4988,9 +5006,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ce/3c/6129c47131991b1f173e82a53d2d75048aba129762596ae94d4c38c8cada/praisonaiagents-1.5.40.tar.gz", hash = "sha256:abc20867760a0d4e7f1bc9afed2d3dbf5fa07b8bf085ab42091e7751ee887d47", size = 1168457, upload-time = "2026-03-11T21:21:59.497Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ef/e4/67f39102ff18133f1601bff5fb78b930122af444c43b56fa71212cc7a852/praisonaiagents-1.5.41.tar.gz", hash = "sha256:837d7a810c7a07fe095d1158ed5e632ba60fe5645172a167760fa72661747f5c", size = 1168448, upload-time = "2026-03-11T22:29:56.517Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c0/be/8ccfdd2259ff25dd19f146f19b64e33938358739996fc94db1451c197471/praisonaiagents-1.5.40-py3-none-any.whl", hash = "sha256:a1bd220a864893530550795702eb09ab928fcea1a5fdf4af47e907471d361698", size = 1213554, upload-time = "2026-03-11T21:21:57.598Z" },
+    { url = "https://files.pythonhosted.org/packages/94/13/0d1d6d7911ade017f99c8f77a2d9f11994e3424fdba9491e518182d65a73/praisonaiagents-1.5.41-py3-none-any.whl", hash = "sha256:9960d839b20ad15e61c13c2d44adff4fed15a32007cfb380a3bf4f889d471b8b", size = 1213551, upload-time = "2026-03-11T22:29:54.78Z" },
 ]
 
 [package.optional-dependencies]
