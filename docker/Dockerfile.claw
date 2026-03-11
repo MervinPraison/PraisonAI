@@ -1,0 +1,61 @@
+# PraisonAI 🦞 Claw — All-in-one: dashboard + bots + gateway + agents
+#
+# Build:    docker build -f docker/Dockerfile.claw -t praisonai:claw ..
+# Run:      docker run -p 8082:8082 -e OPENAI_API_KEY=sk-xxx praisonai:claw
+# Health:   curl http://localhost:8082/health
+#
+# Override CMD for other modes:
+#   Bot:     docker run -e ... praisonai:claw praisonai bot telegram
+#   Gateway: docker run -e ... praisonai:claw praisonai gateway start
+#   Serve:   docker run -e ... praisonai:claw praisonai serve agents.yaml
+#   Shell:   docker run --rm -it praisonai:claw bash
+
+FROM python:3.12-slim AS base
+
+# ── Environment ──────────────────────────────────────────────────────────────
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    AIUI_PORT=8082 \
+    AIUI_HOST=0.0.0.0 \
+    AIUI_DATA_DIR=/data
+
+WORKDIR /app
+
+# ── System dependencies ─────────────────────────────────────────────────────
+# tini:            PID 1 signal handling (graceful shutdown on Fly/Railway/k8s)
+# curl:            HEALTHCHECK probe
+# build-essential: compile native Python wheels (chromadb, etc.)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tini \
+    curl \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Install PraisonAI 🦞 ────────────────────────────────────────────────────
+# Single command installs: AIUI dashboard, agents SDK (memory/knowledge/llm/mcp),
+# bot channels (Telegram/Discord/Slack), gateway, search tools, and more.
+RUN pip install --no-cache-dir "praisonai[claw]"
+
+# ── Data volume ──────────────────────────────────────────────────────────────
+# Persistence for sessions, config, memory, knowledge stores
+RUN mkdir -p /data
+VOLUME /data
+
+# ── Entrypoint ───────────────────────────────────────────────────────────────
+# Ensures /data exists and forwards all signals via tini
+RUN printf '#!/bin/sh\n\
+    set -e\n\
+    mkdir -p /data 2>/dev/null || true\n\
+    exec "$@"\n' > /usr/local/bin/entrypoint.sh \
+    && chmod +x /usr/local/bin/entrypoint.sh
+
+EXPOSE 8082
+
+# ── Health check ─────────────────────────────────────────────────────────────
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -f http://localhost:8082/health || exit 1
+
+# ── Run ──────────────────────────────────────────────────────────────────────
+# Default: AIUI dashboard. Override CMD for bot/gateway/serve modes.
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
+CMD ["aiui", "run", "--host", "0.0.0.0", "--port", "8082"]

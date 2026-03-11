@@ -1,6 +1,29 @@
 version: '3.8'
 
 services:
+  # PraisonAI 🦞 Claw — Recommended all-in-one service
+  claw:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.claw
+    volumes:
+      - claw_data:/data
+    ports:
+      - "8082:8082"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8082/health" ]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    networks:
+      - praison_network
+
+  # ─── Legacy services (kept for backward compatibility) ─────────────────
+
   # PraisonAI UI Service
   ui:
     build:
@@ -92,6 +115,8 @@ services:
   # For bot services (Slack, Discord, Telegram), see docker/bots/
 
 volumes:
+  claw_data:
+    driver: local
   praison_data:
     driver: local
 
