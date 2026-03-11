@@ -83,6 +83,7 @@ python -c "from praisonaiagents import Agent; Agent(instructions='You are a help
 | | Feature | How |
 |--|---------|-----|
 | ⚡ | **Fastest framework** — 3.77μs (1,209x faster than LangGraph) | [Benchmarks](https://docs.praison.ai/docs/features/performance-benchmarks) |
+| 🦞 | **Dashboard UI** — chat, agents, memory, knowledge, cron | `pip install "praisonai[claw]"` |
 | 🔌 | **MCP Protocol** — stdio, HTTP, WebSocket, SSE | `tools=MCP("npx ...")` |
 | 🧠 | **Planning Mode** — plan → execute → reason | `planning=True` |
 | 🔍 | **Deep Research** — multi-step autonomous research | [Docs](https://docs.praison.ai/docs/agents/deep-research) |
@@ -111,7 +112,6 @@ python -c "from praisonaiagents import Agent; Agent(instructions='You are a help
 | 🏖️ | **Sandbox Execution** — isolated code execution | [Docs](https://docs.praison.ai/docs/features/sandbox) |
 | 📱 | **Messaging Bots** — Telegram, Discord, Slack, WhatsApp | `praisonai bot telegram` |
 | 🖥️ | **Bot Gateway** — multi-agent routing across channels | [Docs](https://docs.praison.ai/docs/features/bot-gateway) |
-| 🦞 | **Dashboard UI** — chat, agents, memory, knowledge, cron | `pip install "praisonai[claw]"` |
 
 ---
 
