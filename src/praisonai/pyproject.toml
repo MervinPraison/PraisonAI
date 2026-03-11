@@ -12,7 +12,7 @@ dependencies = [
     "rich>=13.7",
     "markdown>=3.5",
     "pyparsing>=3.0.0",
-    "praisonaiagents>=1.5.39",
+    "praisonaiagents>=1.5.40",
     "python-dotenv>=0.19.0",
     "litellm>=1.81.0",
     "PyYAML>=6.0",
@@ -141,7 +141,7 @@ claw = [
     # PraisonAI 🦞 — Full dashboard + bots + memory + knowledge + gateway
     # Install: pip install "praisonai[claw]"
     "aiui[all]>=0.3.60",
-    "praisonaiagents[all]>=1.5.39",
+    "praisonaiagents[all]>=1.5.40",
     # Gateway
     "fastapi>=0.115.0",
     "uvicorn>=0.34.0",
@@ -165,8 +165,16 @@ Homepage = "https://docs.praison.ai"
 Repository = "https://github.com/mervinpraison/PraisonAI"
 
 [tool.uv]
-# Exclude neonize from lock resolution; it conflicts with autogen-core (protobuf version)
-override-dependencies = ["neonize ; sys_platform == 'never'"]
+# Exclude from lock resolution — these cause cross-extra conflicts that
+# never occur at install time (nobody installs [claw]+[autogen]+[crewai] together):
+#   neonize:        conflicts with autogen-core (protobuf version)
+#   magika:         numpy>=2.1 (via markitdown) vs pyautogen numpy<2
+#   neo4j-graphrag: json-repair tight pins vs crewai transitive deps
+override-dependencies = [
+    "neonize ; sys_platform == 'never'",
+    "magika ; sys_platform == 'never'",
+    "neo4j-graphrag ; sys_platform == 'never'",
+]
 
 [build-system]
 requires = ["setuptools>=64"]
