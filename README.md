@@ -94,23 +94,23 @@ python -c "from praisonaiagents import Agent; Agent(instructions='You are a help
 | 💾 | **20+ Databases** — one-line persistence | `db=db("postgresql://...")` |
 | 🔎 | **Web Search + Fetch** — native browsing | `web_search=True` |
 | 🪞 | **Self Reflection** — agent reviews its own output | [Docs](https://docs.praison.ai/docs/concepts/reflection) |
-| 📊 | **Model Router** — auto-routes to cheapest capable model | [Docs](https://docs.praison.ai/docs/features/model-router) |
-| 🔀 | **Workflow Patterns** — route, parallel, loop, repeat | [Docs](https://docs.praison.ai/docs/concepts/agentflow) |
+| � | **Workflow Patterns** — route, parallel, loop, repeat | [Docs](https://docs.praison.ai/docs/concepts/agentflow) |
 | 💡 | **Prompt Caching** — reduce latency + cost | `prompt_caching=True` |
+| 🧠 | **Memory (zero deps)** — works out of the box | `memory=True` |
+| � | **Sessions + Auto-Save** — persistent state across restarts | `auto_save="my-project"` |
+| 💭 | **Thinking Budgets** — control reasoning depth | `thinking_budget=1024` |
+| 📚 | **RAG + Quality-Based RAG** — auto quality scoring retrieval | [Docs](https://docs.praison.ai/docs/concepts/rag) |
+| � | **Messaging Bots** — Telegram, Discord, Slack, WhatsApp | `praisonai bot telegram` |
+| 📊 | **Model Router** — auto-routes to cheapest capable model | [Docs](https://docs.praison.ai/docs/features/model-router) |
 | 🧊 | **Shadow Git Checkpoints** — auto-rollback on failure | [Docs](https://docs.praison.ai/docs/features/checkpoints) |
 | 📡 | **A2A Protocol** — agent-to-agent interop | [Docs](https://docs.praison.ai/docs/features/a2a) |
-| 🧠 | **Memory (zero deps)** — works out of the box | `memory=True` |
 | 📏 | **Context Compaction** — never hit token limits | [Docs](https://docs.praison.ai/docs/features/context-compaction) |
-| 💬 | **Sessions + Auto-Save** — persistent state across restarts | `auto_save="my-project"` |
 | 📡 | **Telemetry** — OpenTelemetry traces, spans, metrics | [Docs](https://docs.praison.ai/docs/features/telemetry) |
 | 📜 | **Policy Engine** — declarative agent behavior control | [Docs](https://docs.praison.ai/docs/features/policy-engine) |
-| 💭 | **Thinking Budgets** — control reasoning depth | `thinking_budget=1024` |
 | 🔄 | **Background Tasks** — fire-and-forget agents | [Docs](https://docs.praison.ai/docs/features/background-tasks) |
 | 🔁 | **Doom Loop Detection** — auto-recovery from stuck agents | [Docs](https://docs.praison.ai/docs/features/doom-loop-detection) |
 | 🕸️ | **Graph Memory** — Neo4j-style relationship tracking | [Docs](https://docs.praison.ai/docs/features/graph-memory) |
-| 📚 | **RAG + Quality-Based RAG** — auto quality scoring retrieval | [Docs](https://docs.praison.ai/docs/concepts/rag) |
 | 🏖️ | **Sandbox Execution** — isolated code execution | [Docs](https://docs.praison.ai/docs/features/sandbox) |
-| 📱 | **Messaging Bots** — Telegram, Discord, Slack, WhatsApp | `praisonai bot telegram` |
 | 🖥️ | **Bot Gateway** — multi-agent routing across channels | [Docs](https://docs.praison.ai/docs/features/bot-gateway) |
 
 ---
