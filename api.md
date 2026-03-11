@@ -381,7 +381,7 @@ from praisonaiagents import GuardrailAction, GuardrailConfig, LLMGuardrail
 Methods:
 
 * <code title="class GuardrailConfig">GuardrailConfig.<a href="./src/praisonai-agents/praisonaiagents/config/feature_configs.py">to_dict</a>() -> Dict[str, Any]</code>
-* <code title="class LLMGuardrail">LLMGuardrail.<a href="./src/praisonai-agents/praisonaiagents/guardrails/llm_guardrail.py">__call__</a>(task_output: TaskOutput) -> Tuple[bool, Union[str, TaskOutput]]</code>
+* <code title="class LLMGuardrail">LLMGuardrail.<a href="./src/praisonai-agents/praisonaiagents/guardrails/llm_guardrail.py">__call__</a>(task_output) -> Tuple[bool, Union[str, 'TaskOutput']]</code>
 
 # Planning
 
@@ -868,7 +868,9 @@ Methods:
 * <code title="cli">praisonai examples run <a href="./src/praisonai/praisonai/cli/commands/examples.py">--help</a></code>
 * <code title="cli">praisonai examples run-all <a href="./src/praisonai/praisonai/cli/commands/examples.py">--help</a></code>
 * <code title="cli">praisonai examples stats <a href="./src/praisonai/praisonai/cli/commands/examples.py">--help</a></code>
+* <code title="cli">praisonai gateway channels <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway gateway-callback <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
+* <code title="cli">praisonai gateway send <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway start <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway status <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai hooks add <a href="./src/praisonai/praisonai/cli/commands/hooks.py">--help</a></code>
@@ -964,6 +966,7 @@ Methods:
 * <code title="cli">praisonai sandbox recreate <a href="./src/praisonai/praisonai/cli/commands/sandbox.py">--help</a></code>
 * <code title="cli">praisonai sandbox sandbox-callback <a href="./src/praisonai/praisonai/cli/commands/sandbox.py">--help</a></code>
 * <code title="cli">praisonai sandbox status <a href="./src/praisonai/praisonai/cli/commands/sandbox.py">--help</a></code>
+* <code title="cli">praisonai schedule add <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
 * <code title="cli">praisonai schedule delete <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
 * <code title="cli">praisonai schedule describe <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
 * <code title="cli">praisonai schedule list <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
