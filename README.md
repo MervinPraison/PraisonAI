@@ -232,6 +232,127 @@ npm install praisonai
 
 ---
 
+## 📘 Using Python Code
+
+### 1. Single Agent
+
+```python
+from praisonaiagents import Agent
+agent = Agent(instructions="You are a helpful AI assistant")
+agent.start("Write a movie script about a robot in Mars")
+```
+
+### 2. Multi Agents
+
+```python
+from praisonaiagents import Agent, Agents
+
+research_agent = Agent(instructions="Research about AI")
+summarise_agent = Agent(instructions="Summarise research agent's findings")
+agents = Agents(agents=[research_agent, summarise_agent])
+agents.start()
+```
+
+### 3. MCP (Model Context Protocol)
+
+```python
+from praisonaiagents import Agent, MCP
+
+# stdio - Local NPX/Python servers
+agent = Agent(tools=MCP("npx @modelcontextprotocol/server-memory"))
+
+# Streamable HTTP - Production servers
+agent = Agent(tools=MCP("https://api.example.com/mcp"))
+
+# WebSocket - Real-time bidirectional
+agent = Agent(tools=MCP("wss://api.example.com/mcp", auth_token="token"))
+
+# With environment variables
+agent = Agent(
+    tools=MCP(
+        command="npx",
+        args=["-y", "@modelcontextprotocol/server-brave-search"],
+        env={"BRAVE_API_KEY": "your-key"}
+    )
+)
+```
+
+> 📖 [Full MCP docs](https://docs.praison.ai/docs/mcp/transports) — stdio, HTTP, WebSocket, SSE transports
+
+### 4. Custom Tools
+
+```python
+from praisonaiagents import Agent, tool
+
+@tool
+def search(query: str) -> str:
+    """Search the web for information."""
+    return f"Results for: {query}"
+
+@tool
+def calculate(expression: str) -> float:
+    """Evaluate a math expression."""
+    return eval(expression)
+
+agent = Agent(
+    instructions="You are a helpful assistant",
+    tools=[search, calculate]
+)
+agent.start("Search for AI news and calculate 15*4")
+```
+
+> 📖 [Full tools docs](https://docs.praison.ai/docs/tools/tools) — BaseTool, tool packages, 100+ built-in tools
+
+### 5. Persistence (Databases)
+
+```python
+from praisonaiagents import Agent, db
+
+agent = Agent(
+    name="Assistant",
+    db=db(database_url="postgresql://localhost/mydb"),
+    session_id="my-session"
+)
+agent.chat("Hello!")  # Auto-persists messages, runs, traces
+```
+
+> 📖 [Full persistence docs](https://docs.praison.ai/docs/databases/overview) — PostgreSQL, MySQL, SQLite, MongoDB, Redis, and 20+ more
+
+### 6. AgentClaw 🦞 (Dashboard UI)
+
+Connect your AI agents to **Telegram, Discord, Slack, WhatsApp** and more — all from a single command.
+
+```bash
+pip install "praisonai[claw]"
+praisonai claw
+```
+
+Open **http://localhost:8082** — the dashboard comes with 13 built-in pages: Chat, Agents, Memory, Knowledge, Channels, Guardrails, Cron, and more. Add messaging channels directly from the UI.
+
+> 📖 [Full Claw docs](https://docs.praison.ai/docs/concepts/claw) — platform tokens, CLI options, Docker, and YAML agent mode
+
+---
+
+## 🎯 CLI Quick Reference
+
+| Category | Commands |
+|----------|----------|
+| **Execution** | `praisonai`, `--auto`, `--interactive`, `--chat` |
+| **Research** | `research`, `--query-rewrite`, `--deep-research` |
+| **Planning** | `--planning`, `--planning-tools`, `--planning-reasoning` |
+| **Workflows** | `workflow run`, `workflow list`, `workflow auto` |
+| **Memory** | `memory show`, `memory add`, `memory search`, `memory clear` |
+| **Knowledge** | `knowledge add`, `knowledge query`, `knowledge list` |
+| **Sessions** | `session list`, `session resume`, `session delete` |
+| **Tools** | `tools list`, `tools info`, `tools search` |
+| **MCP** | `mcp list`, `mcp create`, `mcp enable` |
+| **Development** | `commit`, `docs`, `checkpoint`, `hooks` |
+| **Scheduling** | `schedule start`, `schedule list`, `schedule stop` |
+
+> 📖 [Full CLI reference](https://docs.praison.ai/docs/cli/cli-reference)
+
+---
+
 ## ✨ Key Features
 
 <details open>
@@ -491,127 +612,6 @@ npm install praisonai
 | Agent Scheduler | [Example](examples/python/scheduled_agents/news_checker_live.py) | [📖](https://docs.praison.ai/docs/cli/scheduler) |
 
 </details>
-
----
-
-## 📘 Using Python Code
-
-### 1. Single Agent
-
-```python
-from praisonaiagents import Agent
-agent = Agent(instructions="You are a helpful AI assistant")
-agent.start("Write a movie script about a robot in Mars")
-```
-
-### 2. Multi Agents
-
-```python
-from praisonaiagents import Agent, Agents
-
-research_agent = Agent(instructions="Research about AI")
-summarise_agent = Agent(instructions="Summarise research agent's findings")
-agents = Agents(agents=[research_agent, summarise_agent])
-agents.start()
-```
-
-### 3. MCP (Model Context Protocol)
-
-```python
-from praisonaiagents import Agent, MCP
-
-# stdio - Local NPX/Python servers
-agent = Agent(tools=MCP("npx @modelcontextprotocol/server-memory"))
-
-# Streamable HTTP - Production servers
-agent = Agent(tools=MCP("https://api.example.com/mcp"))
-
-# WebSocket - Real-time bidirectional
-agent = Agent(tools=MCP("wss://api.example.com/mcp", auth_token="token"))
-
-# With environment variables
-agent = Agent(
-    tools=MCP(
-        command="npx",
-        args=["-y", "@modelcontextprotocol/server-brave-search"],
-        env={"BRAVE_API_KEY": "your-key"}
-    )
-)
-```
-
-> 📖 [Full MCP docs](https://docs.praison.ai/docs/mcp/transports) — stdio, HTTP, WebSocket, SSE transports
-
-### 4. Custom Tools
-
-```python
-from praisonaiagents import Agent, tool
-
-@tool
-def search(query: str) -> str:
-    """Search the web for information."""
-    return f"Results for: {query}"
-
-@tool
-def calculate(expression: str) -> float:
-    """Evaluate a math expression."""
-    return eval(expression)
-
-agent = Agent(
-    instructions="You are a helpful assistant",
-    tools=[search, calculate]
-)
-agent.start("Search for AI news and calculate 15*4")
-```
-
-> 📖 [Full tools docs](https://docs.praison.ai/docs/tools/tools) — BaseTool, tool packages, 100+ built-in tools
-
-### 5. Persistence (Databases)
-
-```python
-from praisonaiagents import Agent, db
-
-agent = Agent(
-    name="Assistant",
-    db=db(database_url="postgresql://localhost/mydb"),
-    session_id="my-session"
-)
-agent.chat("Hello!")  # Auto-persists messages, runs, traces
-```
-
-> 📖 [Full persistence docs](https://docs.praison.ai/docs/databases/overview) — PostgreSQL, MySQL, SQLite, MongoDB, Redis, and 20+ more
-
-### 6. AgentClaw 🦞 (Dashboard UI)
-
-Connect your AI agents to **Telegram, Discord, Slack, WhatsApp** and more — all from a single command.
-
-```bash
-pip install "praisonai[claw]"
-praisonai claw
-```
-
-Open **http://localhost:8082** — the dashboard comes with 13 built-in pages: Chat, Agents, Memory, Knowledge, Channels, Guardrails, Cron, and more. Add messaging channels directly from the UI.
-
-> 📖 [Full Claw docs](https://docs.praison.ai/docs/concepts/claw) — platform tokens, CLI options, Docker, and YAML agent mode
-
----
-
-## 🎯 CLI Quick Reference
-
-| Category | Commands |
-|----------|----------|
-| **Execution** | `praisonai`, `--auto`, `--interactive`, `--chat` |
-| **Research** | `research`, `--query-rewrite`, `--deep-research` |
-| **Planning** | `--planning`, `--planning-tools`, `--planning-reasoning` |
-| **Workflows** | `workflow run`, `workflow list`, `workflow auto` |
-| **Memory** | `memory show`, `memory add`, `memory search`, `memory clear` |
-| **Knowledge** | `knowledge add`, `knowledge query`, `knowledge list` |
-| **Sessions** | `session list`, `session resume`, `session delete` |
-| **Tools** | `tools list`, `tools info`, `tools search` |
-| **MCP** | `mcp list`, `mcp create`, `mcp enable` |
-| **Development** | `commit`, `docs`, `checkpoint`, `hooks` |
-| **Scheduling** | `schedule start`, `schedule list`, `schedule stop` |
-
-> 📖 [Full CLI reference](https://docs.praison.ai/docs/cli/cli-reference)
 
 ---
 

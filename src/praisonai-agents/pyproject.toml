@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "praisonaiagents"
-version = "1.5.43"
+version = "1.5.44"
 description = "Praison AI agents for completing complex tasks with Self Reflection Agents"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -88,6 +88,11 @@ autonomy = [
     "ast-grep-cli>=0.30.0"
 ]
 
+# Web search (DuckDuckGo — zero-config, no API key required)
+search = [
+    "ddgs>=9.0.0",
+]
+
 # Combined features
 all = [
     "praisonaiagents[memory]",
@@ -98,7 +103,8 @@ all = [
     "praisonaiagents[api]",
     "praisonaiagents[telemetry]",
     "praisonaiagents[mongodb]",
-    "praisonaiagents[auth]"
+    "praisonaiagents[auth]",
+    "praisonaiagents[search]"
 ]
 
 [tool.setuptools.packages.find]

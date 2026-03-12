@@ -226,9 +226,9 @@ class MentionsParser:
         """Process @web:query mention."""
         try:
             # Try to use web search
-            from praisonaiagents.tools import duckduckgo_search
+            from praisonaiagents.tools import duckduckgo
             
-            results = duckduckgo_search(query, max_results=3)
+            results = duckduckgo(query, max_results=3)
             if results:
                 return f"# Web Search: {query}\n{results}"
             else:
@@ -236,7 +236,7 @@ class MentionsParser:
                 
         except ImportError:
             self._log("Web search not available", logging.WARNING)
-            return f"# Web Search: {query}\n[Web search not available. Install with: pip install duckduckgo-search]"
+            return f"# Web Search: {query}\n[Web search not available. Install with: pip install ddgs]"
         except Exception as e:
             self._log(f"Error in web search: {e}", logging.ERROR)
             return f"# Web Search: {query}\n[Error: {e}]"

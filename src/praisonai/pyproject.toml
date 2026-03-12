@@ -75,7 +75,7 @@ realtime = [
     "websockets>=12.0",
     "plotly>=5.24.0",
     "yfinance>=0.2.44",
-    "ddgs>=8.0.0",
+    "ddgs>=9.0.0",
     "sqlalchemy>=2.0.36"
 ]
 call = [
@@ -121,7 +121,7 @@ all = [
     "websockets>=12.0",
     "plotly>=5.24.0",
     "yfinance>=0.2.44",
-    "ddgs>=8.0.0",
+    "ddgs>=9.0.0",
 ]
 bot = [
     # Dependencies for Telegram, Discord, Slack, and WhatsApp bots
@@ -131,6 +131,7 @@ bot = [
     "slack-bolt>=1.18.0",
     "brotlicffi>=1.0.0",
     "aiohttp>=3.8.0",
+    "ddgs>=9.0.0",  # DuckDuckGo search for agent web tools
 ]
 bot-whatsapp-web = [
     # WhatsApp Web mode (experimental, token-free via QR scan)
@@ -156,7 +157,7 @@ claw = [
     "tavily-python==0.5.0",
     "crawl4ai>=0.7.0",
     "websockets>=12.0",
-    "ddgs>=8.0.0",
+    "ddgs>=9.0.0",
     # Bot channels (Telegram, Discord, Slack)
     "python-telegram-bot>=20.0",
     "discord.py>=2.0.0",
