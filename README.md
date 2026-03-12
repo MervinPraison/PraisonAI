@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/logo/dark.png" />
-    <source media="(prefers-color-scheme: light)" srcset="docs/logo/light.png" />
-    <img alt="PraisonAI Logo" src="docs/logo/light.png" />
+    <source media="(prefers-color-scheme: dark)" srcset="src/praisonai/praisonai/public/logo_dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="src/praisonai/praisonai/public/logo_light.png" />
+    <img alt="PraisonAI Logo" src="src/praisonai/praisonai/public/logo_light.png" />
   </picture>
 </p>
 
@@ -24,6 +24,10 @@
 </div>
 
 PraisonAI 🦞 — Automate and solve complex challenges with AI agent teams that plan, research, code, and deliver results to Telegram, Discord, and WhatsApp — running 24/7. A low-code, production-ready multi-agent framework with handoffs, guardrails, memory, RAG, and 100+ LLM providers, built around simplicity, customisation, and effective human-agent collaboration.
+
+- 🚀 **Deploy AI agent teams** that research, code, and deliver — running 24/7
+- 📡 **Connect to Telegram, Discord, Slack** with a single command
+- 🔧 **100+ LLM providers**, memory, guardrails, and RAG — built in
 
 <p align="center">
   <img src="src/praisonai/praisonai/public/dashboard.png" alt="PraisonAI Dashboard" width="800" />
@@ -163,29 +167,7 @@ praisonai claw
 npm install praisonai
 ```
 
-### Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `OPENAI_API_KEY` | Yes* | OpenAI API key |
-| `ANTHROPIC_API_KEY` | No | Anthropic Claude API key |
-| `GOOGLE_API_KEY` | No | Google Gemini API key |
-| `GROQ_API_KEY` | No | Groq API key |
-| `OPENAI_BASE_URL` | No | Custom API endpoint (for Ollama, Groq, etc.) |
-
-> *At least one LLM provider API key is required.
-
-```bash
-# Set your API key
-export OPENAI_API_KEY=your_key_here
-
-# For Ollama (local models)
-export OPENAI_BASE_URL=http://localhost:11434/v1
-
-# For Groq
-export OPENAI_API_KEY=your_groq_key
-export OPENAI_BASE_URL=https://api.groq.com/openai/v1
-```
 
 ---
 
@@ -455,6 +437,30 @@ export OPENAI_BASE_URL=https://api.groq.com/openai/v1
 
 PraisonAI supports 100+ LLM providers through seamless integration:
 
+<p align="center">
+<img src="https://img.shields.io/badge/OpenAI-412991?style=flat&logo=openai&logoColor=white" alt="OpenAI" />
+<img src="https://img.shields.io/badge/Anthropic-191919?style=flat&logo=anthropic&logoColor=white" alt="Anthropic" />
+<img src="https://img.shields.io/badge/Google_Gemini-4285F4?style=flat&logo=google&logoColor=white" alt="Google Gemini" />
+<img src="https://img.shields.io/badge/DeepSeek-566AB2?style=flat" alt="DeepSeek" />
+<img src="https://img.shields.io/badge/Azure-0078D4?style=flat&logo=microsoftazure&logoColor=white" alt="Azure" />
+<img src="https://img.shields.io/badge/Ollama-000000?style=flat" alt="Ollama" />
+<img src="https://img.shields.io/badge/Groq-F05237?style=flat" alt="Groq" />
+<img src="https://img.shields.io/badge/Mistral-FF7000?style=flat" alt="Mistral" />
+<img src="https://img.shields.io/badge/Cerebras-F05A28?style=flat" alt="Cerebras" />
+<img src="https://img.shields.io/badge/Cohere-39594D?style=flat" alt="Cohere" />
+<img src="https://img.shields.io/badge/OpenRouter-6467F2?style=flat" alt="OpenRouter" />
+<img src="https://img.shields.io/badge/Perplexity-20808D?style=flat" alt="Perplexity" />
+<img src="https://img.shields.io/badge/Fireworks-FF6B35?style=flat" alt="Fireworks" />
+<img src="https://img.shields.io/badge/AWS_Bedrock-FF9900?style=flat&logo=amazonaws&logoColor=white" alt="AWS Bedrock" />
+<img src="https://img.shields.io/badge/xAI_Grok-000000?style=flat" alt="xAI Grok" />
+<img src="https://img.shields.io/badge/Vertex_AI-4285F4?style=flat&logo=googlecloud&logoColor=white" alt="Vertex AI" />
+<img src="https://img.shields.io/badge/HuggingFace-FFD21E?style=flat&logo=huggingface&logoColor=black" alt="HuggingFace" />
+<img src="https://img.shields.io/badge/Together_AI-000000?style=flat" alt="Together AI" />
+<img src="https://img.shields.io/badge/Databricks-FF3621?style=flat&logo=databricks&logoColor=white" alt="Databricks" />
+<img src="https://img.shields.io/badge/Replicate-262626?style=flat" alt="Replicate" />
+<img src="https://img.shields.io/badge/Cloudflare-F38020?style=flat&logo=cloudflare&logoColor=white" alt="Cloudflare" />
+</p>
+
 <details>
 <summary><strong>View all 24 providers</strong></summary>
 
@@ -495,7 +501,7 @@ PraisonAI supports 100+ LLM providers through seamless integration:
 
 ```python
 from praisonaiagents import Agent
-agent = Agent(instructions="Your are a helpful AI assistant")
+agent = Agent(instructions="You are a helpful AI assistant")
 agent.start("Write a movie script about a robot in Mars")
 ```
 
@@ -623,10 +629,6 @@ const agent = new Agent({ instructions: 'You are a helpful AI assistant' });
 agent.start('Write a movie script about a robot in Mars');
 ```
 
-![PraisonAI CLI Demo](docs/demo/praisonai-cli-demo.gif)
-
----
-
 ---
 
 ## ⭐ Star History
@@ -673,46 +675,7 @@ Learn PraisonAI through our comprehensive video series:
 
 ## 👥 Contributing
 
-We welcome contributions from the community! Here's how you can contribute:
-
-1. **Fork on GitHub** - Use the "Fork" button on the [repository page](https://github.com/MervinPraison/PraisonAI)
-2. **Clone your fork** - `git clone https://github.com/yourusername/praisonAI.git`
-3. **Create a branch** - `git checkout -b new-feature`
-4. **Make changes and commit** - `git commit -am "Add some feature"`
-5. **Push to your fork** - `git push origin new-feature`
-6. **Submit a pull request** - Via GitHub's web interface
-7. **Await feedback** - From project maintainers
-
----
-
-## 🔧 Development
-
-### Using uv
-
-```bash
-# Install uv if you haven't already
-pip install uv
-
-# Install from requirements
-uv pip install -r pyproject.toml
-
-# Install with extras
-uv pip install -r pyproject.toml --extra code
-uv pip install -r pyproject.toml --extra "crewai,autogen"
-```
-
-### Bump and Release
-
-```bash
-# From project root - bumps version and releases in one command
-python src/praisonai/scripts/bump_and_release.py 2.2.99
-
-# With praisonaiagents dependency
-python src/praisonai/scripts/bump_and_release.py 2.2.99 --agents 0.0.169
-
-# Then publish
-cd src/praisonai && uv publish
-```
+We welcome contributions! Fork the repo, create a branch, and submit a PR → [Contributing Guide](https://github.com/MervinPraison/PraisonAI/blob/main/CONTRIBUTING.md).
 
 ---
 
@@ -736,7 +699,7 @@ Ensure your API key is set:
 export OPENAI_API_KEY=your_key_here
 ```
 
-For other providers, see [Environment Variables](#environment-variables).
+For other providers, see [Models docs](https://docs.praison.ai/docs/models).
 
 </details>
 
