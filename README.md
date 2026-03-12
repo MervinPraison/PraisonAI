@@ -63,6 +63,21 @@ PraisonAI Agents is the **fastest AI agent framework** for agent instantiation.
 
 ---
 
+## 🎯 Use Cases
+
+AI agents solving real-world problems across industries:
+
+| Use Case | Description |
+|----------|-------------|
+| 🔍 **Research & Analysis** | Conduct deep research, gather information, and generate insights from multiple sources automatically |
+| 💻 **Code Generation** | Write, debug, and refactor code with AI agents that understand your codebase and requirements |
+| ✍️ **Content Creation** | Generate blog posts, documentation, marketing copy, and technical writing with multi-agent teams |
+| 📊 **Data Pipelines** | Extract, transform, and analyze data from APIs, databases, and web sources automatically |
+| 🤖 **Customer Support** | Deploy 24/7 support bots on Telegram, Discord, Slack with memory and knowledge-backed responses |
+| ⚙️ **Workflow Automation** | Automate multi-step business processes with agents that hand off tasks, verify results, and self-correct |
+
+---
+
 ## 🚀 Quick Start
 
 Get started with PraisonAI in under 1 minute:
@@ -86,7 +101,7 @@ python -c "from praisonaiagents import Agent; Agent(instructions='You are a help
 
 | | Feature | How |
 |--|---------|-----|
-| ⚡ | **Fastest framework** — 3.77μs (1,209x faster than LangGraph) | [Benchmarks](https://docs.praison.ai/docs/features/performance-benchmarks) |
+| ⚡ | **Fastest framework** — 3.77μs (faster than LangGraph) | [Benchmarks](https://docs.praison.ai/docs/features/performance-benchmarks) |
 | 🦞 | **AgentClaw UI** — chat, agents, memory, knowledge, cron | `pip install "praisonai[claw]"` |
 | 🔌 | **MCP Protocol** — stdio, HTTP, WebSocket, SSE | `tools=MCP("npx ...")` |
 | 🧠 | **Planning Mode** — plan → execute → reason | `planning=True` |
@@ -611,19 +626,6 @@ agent.start('Write a movie script about a robot in Mars');
 ![PraisonAI CLI Demo](docs/demo/praisonai-cli-demo.gif)
 
 ---
-
-## 🎯 Use Cases
-
-AI agents solving real-world problems across industries:
-
-| Use Case | Description |
-|----------|-------------|
-| 🔍 **Research & Analysis** | Conduct deep research, gather information, and generate insights from multiple sources automatically |
-| 💻 **Code Generation** | Write, debug, and refactor code with AI agents that understand your codebase and requirements |
-| ✍️ **Content Creation** | Generate blog posts, documentation, marketing copy, and technical writing with multi-agent teams |
-| 📊 **Data Pipelines** | Extract, transform, and analyze data from APIs, databases, and web sources automatically |
-| 🤖 **Customer Support** | Deploy 24/7 support bots on Telegram, Discord, Slack with memory and knowledge-backed responses |
-| ⚙️ **Workflow Automation** | Automate multi-step business processes with agents that hand off tasks, verify results, and self-correct |
 
 ---
 
