@@ -139,6 +139,7 @@ pip install praisonai
 
 ```bash
 pip install "praisonai[claw]"
+praisonai claw
 ```
 
 ### JavaScript SDK
