@@ -559,6 +559,19 @@ agent.chat("Hello!")  # Auto-persists messages, runs, traces
 
 > 📖 [Full persistence docs](https://docs.praison.ai/docs/databases/overview) — PostgreSQL, MySQL, SQLite, MongoDB, Redis, and 20+ more
 
+### 6. PraisonAI Claw 🦞
+
+Connect your AI agents to **Telegram, Discord, Slack, WhatsApp** and more — all from a single command.
+
+```bash
+pip install "praisonai[claw]"
+praisonai claw
+```
+
+Open **http://localhost:8082** — the dashboard comes with 13 built-in pages: Chat, Agents, Memory, Knowledge, Channels, Guardrails, Cron, and more. Add messaging channels directly from the UI.
+
+> 📖 [Full Claw docs](https://docs.praison.ai/docs/concepts/claw) — platform tokens, CLI options, Docker, and YAML agent mode
+
 ---
 
 ## 🎯 CLI Quick Reference
