@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="src/praisonai/praisonai/public/logo_dark.png" />
     <source media="(prefers-color-scheme: light)" srcset="src/praisonai/praisonai/public/logo_light.png" />
-    <img alt="PraisonAI Logo" src="src/praisonai/praisonai/public/logo_light.png" />
+    <img alt="PraisonAI Logo" src="src/praisonai/praisonai/public/logo_light.png" width="250" />
   </picture>
 </p>
 
@@ -82,25 +82,6 @@ AI agents solving real-world problems across industries:
 
 ---
 
-## 🚀 Quick Start
-
-Get started with PraisonAI in under 1 minute:
-
-```bash
-# Install
-pip install praisonaiagents
-
-# Set API key
-export OPENAI_API_KEY=your_key_here
-
-# Create a simple agent
-python -c "from praisonaiagents import Agent; Agent(instructions='You are a helpful AI assistant').start('Write a haiku about AI')"
-```
-
-> **Next Steps:** [Single Agent Example](#1-single-agent) | [Multi Agents](#2-multi-agents) | [Full Docs](https://docs.praison.ai)
-
----
-
 ## 🌟 Why PraisonAI?
 
 | | Feature | How |
@@ -117,13 +98,13 @@ python -c "from praisonaiagents import Agent; Agent(instructions='You are a help
 | 💾 | **20+ Databases** — one-line persistence | `db=db("postgresql://...")` |
 | 🔎 | **Web Search + Fetch** — native browsing | `web_search=True` |
 | 🪞 | **Self Reflection** — agent reviews its own output | [Docs](https://docs.praison.ai/docs/concepts/reflection) |
-| � | **Workflow Patterns** — route, parallel, loop, repeat | [Docs](https://docs.praison.ai/docs/concepts/agentflow) |
+| 🔀 | **Workflow Patterns** — route, parallel, loop, repeat | [Docs](https://docs.praison.ai/docs/concepts/agentflow) |
 | 💡 | **Prompt Caching** — reduce latency + cost | `prompt_caching=True` |
 | 🧠 | **Memory (zero deps)** — works out of the box | `memory=True` |
-| � | **Sessions + Auto-Save** — persistent state across restarts | `auto_save="my-project"` |
+| 💾 | **Sessions + Auto-Save** — persistent state across restarts | `auto_save="my-project"` |
 | 💭 | **Thinking Budgets** — control reasoning depth | `thinking_budget=1024` |
 | 📚 | **RAG + Quality-Based RAG** — auto quality scoring retrieval | [Docs](https://docs.praison.ai/docs/concepts/rag) |
-| � | **Messaging Bots** — Telegram, Discord, Slack, WhatsApp | `praisonai bot telegram` |
+| 🤖 | **Messaging Bots** — Telegram, Discord, Slack, WhatsApp | `praisonai bot telegram` |
 | 📊 | **Model Router** — auto-routes to cheapest capable model | [Docs](https://docs.praison.ai/docs/features/model-router) |
 | 🧊 | **Shadow Git Checkpoints** — auto-rollback on failure | [Docs](https://docs.praison.ai/docs/features/checkpoints) |
 | 📡 | **A2A Protocol** — agent-to-agent interop | [Docs](https://docs.praison.ai/docs/features/a2a) |
@@ -135,6 +116,87 @@ python -c "from praisonaiagents import Agent; Agent(instructions='You are a help
 | 🕸️ | **Graph Memory** — Neo4j-style relationship tracking | [Docs](https://docs.praison.ai/docs/features/graph-memory) |
 | 🏖️ | **Sandbox Execution** — isolated code execution | [Docs](https://docs.praison.ai/docs/features/sandbox) |
 | 🖥️ | **Bot Gateway** — multi-agent routing across channels | [Docs](https://docs.praison.ai/docs/features/bot-gateway) |
+
+---
+
+## 🌐 Supported Providers
+
+PraisonAI supports 100+ LLM providers through seamless integration:
+
+<p align="center">
+<img src="https://img.shields.io/badge/OpenAI-412991?style=flat&logo=openai&logoColor=white" alt="OpenAI" />
+<img src="https://img.shields.io/badge/Anthropic-191919?style=flat&logo=anthropic&logoColor=white" alt="Anthropic" />
+<img src="https://img.shields.io/badge/Google_Gemini-4285F4?style=flat&logo=google&logoColor=white" alt="Google Gemini" />
+<img src="https://img.shields.io/badge/DeepSeek-566AB2?style=flat" alt="DeepSeek" />
+<img src="https://img.shields.io/badge/Azure-0078D4?style=flat&logo=microsoftazure&logoColor=white" alt="Azure" />
+<img src="https://img.shields.io/badge/Ollama-000000?style=flat" alt="Ollama" />
+<img src="https://img.shields.io/badge/Groq-F05237?style=flat" alt="Groq" />
+<img src="https://img.shields.io/badge/Mistral-FF7000?style=flat" alt="Mistral" />
+<img src="https://img.shields.io/badge/Cerebras-F05A28?style=flat" alt="Cerebras" />
+<img src="https://img.shields.io/badge/Cohere-39594D?style=flat" alt="Cohere" />
+<img src="https://img.shields.io/badge/OpenRouter-6467F2?style=flat" alt="OpenRouter" />
+<img src="https://img.shields.io/badge/Perplexity-20808D?style=flat" alt="Perplexity" />
+<img src="https://img.shields.io/badge/Fireworks-FF6B35?style=flat" alt="Fireworks" />
+<img src="https://img.shields.io/badge/AWS_Bedrock-FF9900?style=flat&logo=amazonaws&logoColor=white" alt="AWS Bedrock" />
+<img src="https://img.shields.io/badge/xAI_Grok-000000?style=flat" alt="xAI Grok" />
+<img src="https://img.shields.io/badge/Vertex_AI-4285F4?style=flat&logo=googlecloud&logoColor=white" alt="Vertex AI" />
+<img src="https://img.shields.io/badge/HuggingFace-FFD21E?style=flat&logo=huggingface&logoColor=black" alt="HuggingFace" />
+<img src="https://img.shields.io/badge/Together_AI-000000?style=flat" alt="Together AI" />
+<img src="https://img.shields.io/badge/Databricks-FF3621?style=flat&logo=databricks&logoColor=white" alt="Databricks" />
+<img src="https://img.shields.io/badge/Replicate-262626?style=flat" alt="Replicate" />
+<img src="https://img.shields.io/badge/Cloudflare-F38020?style=flat&logo=cloudflare&logoColor=white" alt="Cloudflare" />
+</p>
+
+<details>
+<summary><strong>View all 24 providers with examples</strong></summary>
+
+| Provider | Example |
+|----------|:-------:|
+| OpenAI | [Example](examples/python/providers/openai/openai_gpt4_example.py) |
+| Anthropic | [Example](examples/python/providers/anthropic/anthropic_claude_example.py) |
+| Google Gemini | [Example](examples/python/providers/google/google_gemini_example.py) |
+| Ollama | [Example](examples/python/providers/ollama/ollama-agents.py) |
+| Groq | [Example](examples/python/providers/groq/kimi_with_groq_example.py) |
+| DeepSeek | [Example](examples/python/providers/deepseek/deepseek_example.py) |
+| xAI Grok | [Example](examples/python/providers/xai/xai_grok_example.py) |
+| Mistral | [Example](examples/python/providers/mistral/mistral_example.py) |
+| Cohere | [Example](examples/python/providers/cohere/cohere_example.py) |
+| Perplexity | [Example](examples/python/providers/perplexity/perplexity_example.py) |
+| Fireworks | [Example](examples/python/providers/fireworks/fireworks_example.py) |
+| Together AI | [Example](examples/python/providers/together/together_ai_example.py) |
+| OpenRouter | [Example](examples/python/providers/openrouter/openrouter_example.py) |
+| HuggingFace | [Example](examples/python/providers/huggingface/huggingface_example.py) |
+| Azure OpenAI | [Example](examples/python/providers/azure/azure_openai_example.py) |
+| AWS Bedrock | [Example](examples/python/providers/aws/aws_bedrock_example.py) |
+| Google Vertex | [Example](examples/python/providers/vertex/vertex_example.py) |
+| Databricks | [Example](examples/python/providers/databricks/databricks_example.py) |
+| Cloudflare | [Example](examples/python/providers/cloudflare/cloudflare_example.py) |
+| AI21 | [Example](examples/python/providers/ai21/ai21_example.py) |
+| Replicate | [Example](examples/python/providers/replicate/replicate_example.py) |
+| SageMaker | [Example](examples/python/providers/sagemaker/sagemaker_example.py) |
+| Moonshot | [Example](examples/python/providers/moonshot/moonshot_example.py) |
+| vLLM | [Example](examples/python/providers/vllm/vllm_example.py) |
+
+</details>
+
+---
+
+## 🚀 Quick Start
+
+Get started with PraisonAI in under 1 minute:
+
+```bash
+# Install
+pip install praisonaiagents
+
+# Set API key
+export OPENAI_API_KEY=your_key_here
+
+# Create a simple agent
+python -c "from praisonaiagents import Agent; Agent(instructions='You are a helpful AI assistant').start('Write a haiku about AI')"
+```
+
+> **Next Steps:** [Single Agent Example](#1-single-agent) | [Multi Agents](#2-multi-agents) | [Full Docs](https://docs.praison.ai)
 
 ---
 
@@ -428,68 +490,6 @@ npm install praisonai
 | Feature | Code | Docs |
 |---------|:----:|:----:|
 | Agent Scheduler | [Example](examples/python/scheduled_agents/news_checker_live.py) | [📖](https://docs.praison.ai/docs/cli/scheduler) |
-
-</details>
-
----
-
-## 🌐 Supported Providers
-
-PraisonAI supports 100+ LLM providers through seamless integration:
-
-<p align="center">
-<img src="https://img.shields.io/badge/OpenAI-412991?style=flat&logo=openai&logoColor=white" alt="OpenAI" />
-<img src="https://img.shields.io/badge/Anthropic-191919?style=flat&logo=anthropic&logoColor=white" alt="Anthropic" />
-<img src="https://img.shields.io/badge/Google_Gemini-4285F4?style=flat&logo=google&logoColor=white" alt="Google Gemini" />
-<img src="https://img.shields.io/badge/DeepSeek-566AB2?style=flat" alt="DeepSeek" />
-<img src="https://img.shields.io/badge/Azure-0078D4?style=flat&logo=microsoftazure&logoColor=white" alt="Azure" />
-<img src="https://img.shields.io/badge/Ollama-000000?style=flat" alt="Ollama" />
-<img src="https://img.shields.io/badge/Groq-F05237?style=flat" alt="Groq" />
-<img src="https://img.shields.io/badge/Mistral-FF7000?style=flat" alt="Mistral" />
-<img src="https://img.shields.io/badge/Cerebras-F05A28?style=flat" alt="Cerebras" />
-<img src="https://img.shields.io/badge/Cohere-39594D?style=flat" alt="Cohere" />
-<img src="https://img.shields.io/badge/OpenRouter-6467F2?style=flat" alt="OpenRouter" />
-<img src="https://img.shields.io/badge/Perplexity-20808D?style=flat" alt="Perplexity" />
-<img src="https://img.shields.io/badge/Fireworks-FF6B35?style=flat" alt="Fireworks" />
-<img src="https://img.shields.io/badge/AWS_Bedrock-FF9900?style=flat&logo=amazonaws&logoColor=white" alt="AWS Bedrock" />
-<img src="https://img.shields.io/badge/xAI_Grok-000000?style=flat" alt="xAI Grok" />
-<img src="https://img.shields.io/badge/Vertex_AI-4285F4?style=flat&logo=googlecloud&logoColor=white" alt="Vertex AI" />
-<img src="https://img.shields.io/badge/HuggingFace-FFD21E?style=flat&logo=huggingface&logoColor=black" alt="HuggingFace" />
-<img src="https://img.shields.io/badge/Together_AI-000000?style=flat" alt="Together AI" />
-<img src="https://img.shields.io/badge/Databricks-FF3621?style=flat&logo=databricks&logoColor=white" alt="Databricks" />
-<img src="https://img.shields.io/badge/Replicate-262626?style=flat" alt="Replicate" />
-<img src="https://img.shields.io/badge/Cloudflare-F38020?style=flat&logo=cloudflare&logoColor=white" alt="Cloudflare" />
-</p>
-
-<details>
-<summary><strong>View all 24 providers</strong></summary>
-
-| Provider | Example |
-|----------|:-------:|
-| OpenAI | [Example](examples/python/providers/openai/openai_gpt4_example.py) |
-| Anthropic | [Example](examples/python/providers/anthropic/anthropic_claude_example.py) |
-| Google Gemini | [Example](examples/python/providers/google/google_gemini_example.py) |
-| Ollama | [Example](examples/python/providers/ollama/ollama-agents.py) |
-| Groq | [Example](examples/python/providers/groq/kimi_with_groq_example.py) |
-| DeepSeek | [Example](examples/python/providers/deepseek/deepseek_example.py) |
-| xAI Grok | [Example](examples/python/providers/xai/xai_grok_example.py) |
-| Mistral | [Example](examples/python/providers/mistral/mistral_example.py) |
-| Cohere | [Example](examples/python/providers/cohere/cohere_example.py) |
-| Perplexity | [Example](examples/python/providers/perplexity/perplexity_example.py) |
-| Fireworks | [Example](examples/python/providers/fireworks/fireworks_example.py) |
-| Together AI | [Example](examples/python/providers/together/together_ai_example.py) |
-| OpenRouter | [Example](examples/python/providers/openrouter/openrouter_example.py) |
-| HuggingFace | [Example](examples/python/providers/huggingface/huggingface_example.py) |
-| Azure OpenAI | [Example](examples/python/providers/azure/azure_openai_example.py) |
-| AWS Bedrock | [Example](examples/python/providers/aws/aws_bedrock_example.py) |
-| Google Vertex | [Example](examples/python/providers/vertex/vertex_example.py) |
-| Databricks | [Example](examples/python/providers/databricks/databricks_example.py) |
-| Cloudflare | [Example](examples/python/providers/cloudflare/cloudflare_example.py) |
-| AI21 | [Example](examples/python/providers/ai21/ai21_example.py) |
-| Replicate | [Example](examples/python/providers/replicate/replicate_example.py) |
-| SageMaker | [Example](examples/python/providers/sagemaker/sagemaker_example.py) |
-| Moonshot | [Example](examples/python/providers/moonshot/moonshot_example.py) |
-| vLLM | [Example](examples/python/providers/vllm/vllm_example.py) |
 
 </details>
 
