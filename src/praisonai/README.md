@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/logo/dark.png" />
-    <source media="(prefers-color-scheme: light)" srcset="docs/logo/light.png" />
-    <img alt="PraisonAI Logo" src="docs/logo/light.png" />
+    <source media="(prefers-color-scheme: dark)" srcset="src/praisonai/praisonai/public/logo_dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="src/praisonai/praisonai/public/logo_light.png" />
+    <img alt="PraisonAI Logo" src="src/praisonai/praisonai/public/logo_light.png" width="250" />
   </picture>
 </p>
 
@@ -24,6 +24,10 @@
 </div>
 
 PraisonAI 🦞 — Automate and solve complex challenges with AI agent teams that plan, research, code, and deliver results to Telegram, Discord, and WhatsApp — running 24/7. A low-code, production-ready multi-agent framework with handoffs, guardrails, memory, RAG, and 100+ LLM providers, built around simplicity, customisation, and effective human-agent collaboration.
+
+<p align="center">
+  <img src="src/praisonai/praisonai/public/dashboard.png" alt="PraisonAI Dashboard" width="800" />
+</p>
 
 <div align="center">
   <a href="https://docs.praison.ai">
@@ -59,6 +63,123 @@ PraisonAI Agents is the **fastest AI agent framework** for agent instantiation.
 
 ---
 
+## 🎯 Use Cases
+
+AI agents solving real-world problems across industries:
+
+| Use Case | Description |
+|----------|-------------|
+| 🔍 **Research & Analysis** | Conduct deep research, gather information, and generate insights from multiple sources automatically |
+| 💻 **Code Generation** | Write, debug, and refactor code with AI agents that understand your codebase and requirements |
+| ✍️ **Content Creation** | Generate blog posts, documentation, marketing copy, and technical writing with multi-agent teams |
+| 📊 **Data Pipelines** | Extract, transform, and analyze data from APIs, databases, and web sources automatically |
+| 🤖 **Customer Support** | Deploy 24/7 support bots on Telegram, Discord, Slack with memory and knowledge-backed responses |
+| ⚙️ **Workflow Automation** | Automate multi-step business processes with agents that hand off tasks, verify results, and self-correct |
+
+---
+
+##  Supported Providers
+
+PraisonAI supports 100+ LLM providers through seamless integration:
+
+<p align="center">
+<img src="https://img.shields.io/badge/OpenAI-412991?style=flat&logo=openai&logoColor=white" alt="OpenAI" />
+<img src="https://img.shields.io/badge/Anthropic-191919?style=flat&logo=anthropic&logoColor=white" alt="Anthropic" />
+<img src="https://img.shields.io/badge/Google_Gemini-4285F4?style=flat&logo=google&logoColor=white" alt="Google Gemini" />
+<img src="https://img.shields.io/badge/DeepSeek-566AB2?style=flat" alt="DeepSeek" />
+<img src="https://img.shields.io/badge/Azure-0078D4?style=flat&logo=microsoftazure&logoColor=white" alt="Azure" />
+<img src="https://img.shields.io/badge/Ollama-000000?style=flat" alt="Ollama" />
+<img src="https://img.shields.io/badge/Groq-F05237?style=flat" alt="Groq" />
+<img src="https://img.shields.io/badge/Mistral-FF7000?style=flat" alt="Mistral" />
+<img src="https://img.shields.io/badge/Cerebras-F05A28?style=flat" alt="Cerebras" />
+<img src="https://img.shields.io/badge/Cohere-39594D?style=flat" alt="Cohere" />
+<img src="https://img.shields.io/badge/OpenRouter-6467F2?style=flat" alt="OpenRouter" />
+<img src="https://img.shields.io/badge/Perplexity-20808D?style=flat" alt="Perplexity" />
+<img src="https://img.shields.io/badge/Fireworks-FF6B35?style=flat" alt="Fireworks" />
+<img src="https://img.shields.io/badge/AWS_Bedrock-FF9900?style=flat&logo=amazonaws&logoColor=white" alt="AWS Bedrock" />
+<img src="https://img.shields.io/badge/xAI_Grok-000000?style=flat" alt="xAI Grok" />
+<img src="https://img.shields.io/badge/Vertex_AI-4285F4?style=flat&logo=googlecloud&logoColor=white" alt="Vertex AI" />
+<img src="https://img.shields.io/badge/HuggingFace-FFD21E?style=flat&logo=huggingface&logoColor=black" alt="HuggingFace" />
+<img src="https://img.shields.io/badge/Together_AI-000000?style=flat" alt="Together AI" />
+<img src="https://img.shields.io/badge/Databricks-FF3621?style=flat&logo=databricks&logoColor=white" alt="Databricks" />
+<img src="https://img.shields.io/badge/Replicate-262626?style=flat" alt="Replicate" />
+<img src="https://img.shields.io/badge/Cloudflare-F38020?style=flat&logo=cloudflare&logoColor=white" alt="Cloudflare" />
+</p>
+
+<details>
+<summary><strong>View all 24 providers with examples</strong></summary>
+
+| Provider | Example |
+|----------|:-------:|
+| OpenAI | [Example](examples/python/providers/openai/openai_gpt4_example.py) |
+| Anthropic | [Example](examples/python/providers/anthropic/anthropic_claude_example.py) |
+| Google Gemini | [Example](examples/python/providers/google/google_gemini_example.py) |
+| Ollama | [Example](examples/python/providers/ollama/ollama-agents.py) |
+| Groq | [Example](examples/python/providers/groq/kimi_with_groq_example.py) |
+| DeepSeek | [Example](examples/python/providers/deepseek/deepseek_example.py) |
+| xAI Grok | [Example](examples/python/providers/xai/xai_grok_example.py) |
+| Mistral | [Example](examples/python/providers/mistral/mistral_example.py) |
+| Cohere | [Example](examples/python/providers/cohere/cohere_example.py) |
+| Perplexity | [Example](examples/python/providers/perplexity/perplexity_example.py) |
+| Fireworks | [Example](examples/python/providers/fireworks/fireworks_example.py) |
+| Together AI | [Example](examples/python/providers/together/together_ai_example.py) |
+| OpenRouter | [Example](examples/python/providers/openrouter/openrouter_example.py) |
+| HuggingFace | [Example](examples/python/providers/huggingface/huggingface_example.py) |
+| Azure OpenAI | [Example](examples/python/providers/azure/azure_openai_example.py) |
+| AWS Bedrock | [Example](examples/python/providers/aws/aws_bedrock_example.py) |
+| Google Vertex | [Example](examples/python/providers/vertex/vertex_example.py) |
+| Databricks | [Example](examples/python/providers/databricks/databricks_example.py) |
+| Cloudflare | [Example](examples/python/providers/cloudflare/cloudflare_example.py) |
+| AI21 | [Example](examples/python/providers/ai21/ai21_example.py) |
+| Replicate | [Example](examples/python/providers/replicate/replicate_example.py) |
+| SageMaker | [Example](examples/python/providers/sagemaker/sagemaker_example.py) |
+| Moonshot | [Example](examples/python/providers/moonshot/moonshot_example.py) |
+| vLLM | [Example](examples/python/providers/vllm/vllm_example.py) |
+
+</details>
+
+---
+
+## 🌟 Why PraisonAI?
+
+| | Feature | How |
+|--|---------|-----|
+| 🔌 | **MCP Protocol** — stdio, HTTP, WebSocket, SSE | `tools=MCP("npx ...")` |
+| 🧠 | **Planning Mode** — plan → execute → reason | `planning=True` |
+| 🔍 | **Deep Research** — multi-step autonomous research | [Docs](https://docs.praison.ai/docs/agents/deep-research) |
+| 🤖 | **External Agents** — orchestrate Claude Code, Gemini CLI, Codex | [Docs](https://docs.praison.ai/docs/code/external-agents) |
+| 🔄 | **Agent Handoffs** — seamless conversation passing | `handoff=True` |
+| 🛡️ | **Guardrails** — input/output validation | [Docs](https://docs.praison.ai/docs/concepts/guardrails) |
+|  | **Web Search + Fetch** — native browsing | `web_search=True` |
+| 🪞 | **Self Reflection** — agent reviews its own output | [Docs](https://docs.praison.ai/docs/concepts/reflection) |
+| 🔀 | **Workflow Patterns** — route, parallel, loop, repeat | [Docs](https://docs.praison.ai/docs/concepts/agentflow) |
+| 🧠 | **Memory (zero deps)** — works out of the box | `memory=True` |
+
+<details>
+<summary><strong>View all 25 features</strong></summary>
+
+| | Feature | How |
+|--|---------|-----|
+| 💡 | **Prompt Caching** — reduce latency + cost | `prompt_caching=True` |
+| 💾 | **Sessions + Auto-Save** — persistent state across restarts | `auto_save="my-project"` |
+| 💭 | **Thinking Budgets** — control reasoning depth | `thinking_budget=1024` |
+| 📚 | **RAG + Quality-Based RAG** — auto quality scoring retrieval | [Docs](https://docs.praison.ai/docs/concepts/rag) |
+| 📊 | **Model Router** — auto-routes to cheapest capable model | [Docs](https://docs.praison.ai/docs/features/model-router) |
+| 🧊 | **Shadow Git Checkpoints** — auto-rollback on failure | [Docs](https://docs.praison.ai/docs/features/checkpoints) |
+| 📡 | **A2A Protocol** — agent-to-agent interop | [Docs](https://docs.praison.ai/docs/features/a2a) |
+| 📏 | **Context Compaction** — never hit token limits | [Docs](https://docs.praison.ai/docs/features/context-compaction) |
+| 📡 | **Telemetry** — OpenTelemetry traces, spans, metrics | [Docs](https://docs.praison.ai/docs/features/telemetry) |
+| 📜 | **Policy Engine** — declarative agent behavior control | [Docs](https://docs.praison.ai/docs/features/policy-engine) |
+| 🔄 | **Background Tasks** — fire-and-forget agents | [Docs](https://docs.praison.ai/docs/features/background-tasks) |
+| 🔁 | **Doom Loop Detection** — auto-recovery from stuck agents | [Docs](https://docs.praison.ai/docs/features/doom-loop-detection) |
+| 🕸️ | **Graph Memory** — Neo4j-style relationship tracking | [Docs](https://docs.praison.ai/docs/features/graph-memory) |
+| 🏖️ | **Sandbox Execution** — isolated code execution | [Docs](https://docs.praison.ai/docs/features/sandbox) |
+| 🖥️ | **Bot Gateway** — multi-agent routing across channels | [Docs](https://docs.praison.ai/docs/features/bot-gateway) |
+
+</details>
+
+---
+
 ## 🚀 Quick Start
 
 Get started with PraisonAI in under 1 minute:
@@ -78,43 +199,6 @@ python -c "from praisonaiagents import Agent; Agent(instructions='You are a help
 
 ---
 
-## 🌟 Why PraisonAI?
-
-| | Feature | How |
-|--|---------|-----|
-| ⚡ | **Fastest framework** — 3.77μs (1,209x faster than LangGraph) | [Benchmarks](https://docs.praison.ai/docs/features/performance-benchmarks) |
-| 🦞 | **Dashboard UI** — chat, agents, memory, knowledge, cron | `pip install "praisonai[claw]"` |
-| 🔌 | **MCP Protocol** — stdio, HTTP, WebSocket, SSE | `tools=MCP("npx ...")` |
-| 🧠 | **Planning Mode** — plan → execute → reason | `planning=True` |
-| 🔍 | **Deep Research** — multi-step autonomous research | [Docs](https://docs.praison.ai/docs/agents/deep-research) |
-| 🤖 | **External Agents** — orchestrate Claude Code, Gemini CLI, Codex | [Docs](https://docs.praison.ai/docs/code/external-agents) |
-| 🔄 | **Agent Handoffs** — seamless conversation passing | `handoff=True` |
-| 🌐 | **100+ LLM Providers** — OpenAI, Anthropic, Gemini, Ollama, Groq... | [Models](https://docs.praison.ai/docs/models) |
-| 🛡️ | **Guardrails** — input/output validation | [Docs](https://docs.praison.ai/docs/concepts/guardrails) |
-| 💾 | **20+ Databases** — one-line persistence | `db=db("postgresql://...")` |
-| 🔎 | **Web Search + Fetch** — native browsing | `web_search=True` |
-| 🪞 | **Self Reflection** — agent reviews its own output | [Docs](https://docs.praison.ai/docs/concepts/reflection) |
-| � | **Workflow Patterns** — route, parallel, loop, repeat | [Docs](https://docs.praison.ai/docs/concepts/agentflow) |
-| 💡 | **Prompt Caching** — reduce latency + cost | `prompt_caching=True` |
-| 🧠 | **Memory (zero deps)** — works out of the box | `memory=True` |
-| � | **Sessions + Auto-Save** — persistent state across restarts | `auto_save="my-project"` |
-| 💭 | **Thinking Budgets** — control reasoning depth | `thinking_budget=1024` |
-| 📚 | **RAG + Quality-Based RAG** — auto quality scoring retrieval | [Docs](https://docs.praison.ai/docs/concepts/rag) |
-| � | **Messaging Bots** — Telegram, Discord, Slack, WhatsApp | `praisonai bot telegram` |
-| 📊 | **Model Router** — auto-routes to cheapest capable model | [Docs](https://docs.praison.ai/docs/features/model-router) |
-| 🧊 | **Shadow Git Checkpoints** — auto-rollback on failure | [Docs](https://docs.praison.ai/docs/features/checkpoints) |
-| 📡 | **A2A Protocol** — agent-to-agent interop | [Docs](https://docs.praison.ai/docs/features/a2a) |
-| 📏 | **Context Compaction** — never hit token limits | [Docs](https://docs.praison.ai/docs/features/context-compaction) |
-| 📡 | **Telemetry** — OpenTelemetry traces, spans, metrics | [Docs](https://docs.praison.ai/docs/features/telemetry) |
-| 📜 | **Policy Engine** — declarative agent behavior control | [Docs](https://docs.praison.ai/docs/features/policy-engine) |
-| 🔄 | **Background Tasks** — fire-and-forget agents | [Docs](https://docs.praison.ai/docs/features/background-tasks) |
-| 🔁 | **Doom Loop Detection** — auto-recovery from stuck agents | [Docs](https://docs.praison.ai/docs/features/doom-loop-detection) |
-| 🕸️ | **Graph Memory** — Neo4j-style relationship tracking | [Docs](https://docs.praison.ai/docs/features/graph-memory) |
-| 🏖️ | **Sandbox Execution** — isolated code execution | [Docs](https://docs.praison.ai/docs/features/sandbox) |
-| 🖥️ | **Bot Gateway** — multi-agent routing across channels | [Docs](https://docs.praison.ai/docs/features/bot-gateway) |
-
----
-
 ## 📦 Installation
 
 ### Python SDK
@@ -131,10 +215,11 @@ For the full framework with CLI support:
 pip install praisonai
 ```
 
-🦞 **Full Dashboard** with bots, memory, knowledge, and gateway:
+🦞 **AgentClaw** — full UI with bots, memory, knowledge, and gateway:
 
 ```bash
 pip install "praisonai[claw]"
+praisonai claw
 ```
 
 ### JavaScript SDK
@@ -143,29 +228,128 @@ pip install "praisonai[claw]"
 npm install praisonai
 ```
 
-### Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `OPENAI_API_KEY` | Yes* | OpenAI API key |
-| `ANTHROPIC_API_KEY` | No | Anthropic Claude API key |
-| `GOOGLE_API_KEY` | No | Google Gemini API key |
-| `GROQ_API_KEY` | No | Groq API key |
-| `OPENAI_BASE_URL` | No | Custom API endpoint (for Ollama, Groq, etc.) |
 
-> *At least one LLM provider API key is required.
+---
+
+## 📘 Using Python Code
+
+### 1. Single Agent
+
+```python
+from praisonaiagents import Agent
+agent = Agent(instructions="You are a helpful AI assistant")
+agent.start("Write a movie script about a robot in Mars")
+```
+
+### 2. Multi Agents
+
+```python
+from praisonaiagents import Agent, Agents
+
+research_agent = Agent(instructions="Research about AI")
+summarise_agent = Agent(instructions="Summarise research agent's findings")
+agents = Agents(agents=[research_agent, summarise_agent])
+agents.start()
+```
+
+### 3. MCP (Model Context Protocol)
+
+```python
+from praisonaiagents import Agent, MCP
+
+# stdio - Local NPX/Python servers
+agent = Agent(tools=MCP("npx @modelcontextprotocol/server-memory"))
+
+# Streamable HTTP - Production servers
+agent = Agent(tools=MCP("https://api.example.com/mcp"))
+
+# WebSocket - Real-time bidirectional
+agent = Agent(tools=MCP("wss://api.example.com/mcp", auth_token="token"))
+
+# With environment variables
+agent = Agent(
+    tools=MCP(
+        command="npx",
+        args=["-y", "@modelcontextprotocol/server-brave-search"],
+        env={"BRAVE_API_KEY": "your-key"}
+    )
+)
+```
+
+> 📖 [Full MCP docs](https://docs.praison.ai/docs/mcp/transports) — stdio, HTTP, WebSocket, SSE transports
+
+### 4. Custom Tools
+
+```python
+from praisonaiagents import Agent, tool
+
+@tool
+def search(query: str) -> str:
+    """Search the web for information."""
+    return f"Results for: {query}"
+
+@tool
+def calculate(expression: str) -> float:
+    """Evaluate a math expression."""
+    return eval(expression)
+
+agent = Agent(
+    instructions="You are a helpful assistant",
+    tools=[search, calculate]
+)
+agent.start("Search for AI news and calculate 15*4")
+```
+
+> 📖 [Full tools docs](https://docs.praison.ai/docs/tools/tools) — BaseTool, tool packages, 100+ built-in tools
+
+### 5. Persistence (Databases)
+
+```python
+from praisonaiagents import Agent, db
+
+agent = Agent(
+    name="Assistant",
+    db=db(database_url="postgresql://localhost/mydb"),
+    session_id="my-session"
+)
+agent.chat("Hello!")  # Auto-persists messages, runs, traces
+```
+
+> 📖 [Full persistence docs](https://docs.praison.ai/docs/databases/overview) — PostgreSQL, MySQL, SQLite, MongoDB, Redis, and 20+ more
+
+### 6. AgentClaw 🦞 (Dashboard UI)
+
+Connect your AI agents to **Telegram, Discord, Slack, WhatsApp** and more — all from a single command.
 
 ```bash
-# Set your API key
-export OPENAI_API_KEY=your_key_here
-
-# For Ollama (local models)
-export OPENAI_BASE_URL=http://localhost:11434/v1
-
-# For Groq
-export OPENAI_API_KEY=your_groq_key
-export OPENAI_BASE_URL=https://api.groq.com/openai/v1
+pip install "praisonai[claw]"
+praisonai claw
 ```
+
+Open **http://localhost:8082** — the dashboard comes with 13 built-in pages: Chat, Agents, Memory, Knowledge, Channels, Guardrails, Cron, and more. Add messaging channels directly from the UI.
+
+> 📖 [Full Claw docs](https://docs.praison.ai/docs/concepts/claw) — platform tokens, CLI options, Docker, and YAML agent mode
+
+---
+
+## 🎯 CLI Quick Reference
+
+| Category | Commands |
+|----------|----------|
+| **Execution** | `praisonai`, `--auto`, `--interactive`, `--chat` |
+| **Research** | `research`, `--query-rewrite`, `--deep-research` |
+| **Planning** | `--planning`, `--planning-tools`, `--planning-reasoning` |
+| **Workflows** | `workflow run`, `workflow list`, `workflow auto` |
+| **Memory** | `memory show`, `memory add`, `memory search`, `memory clear` |
+| **Knowledge** | `knowledge add`, `knowledge query`, `knowledge list` |
+| **Sessions** | `session list`, `session resume`, `session delete` |
+| **Tools** | `tools list`, `tools info`, `tools search` |
+| **MCP** | `mcp list`, `mcp create`, `mcp enable` |
+| **Development** | `commit`, `docs`, `checkpoint`, `hooks` |
+| **Scheduling** | `schedule start`, `schedule list`, `schedule stop` |
+
+> 📖 [Full CLI reference](https://docs.praison.ai/docs/cli/cli-reference)
 
 ---
 
@@ -431,152 +615,6 @@ export OPENAI_BASE_URL=https://api.groq.com/openai/v1
 
 ---
 
-## 🌐 Supported Providers
-
-PraisonAI supports 100+ LLM providers through seamless integration:
-
-<details>
-<summary><strong>View all 24 providers</strong></summary>
-
-| Provider | Example |
-|----------|:-------:|
-| OpenAI | [Example](examples/python/providers/openai/openai_gpt4_example.py) |
-| Anthropic | [Example](examples/python/providers/anthropic/anthropic_claude_example.py) |
-| Google Gemini | [Example](examples/python/providers/google/google_gemini_example.py) |
-| Ollama | [Example](examples/python/providers/ollama/ollama-agents.py) |
-| Groq | [Example](examples/python/providers/groq/kimi_with_groq_example.py) |
-| DeepSeek | [Example](examples/python/providers/deepseek/deepseek_example.py) |
-| xAI Grok | [Example](examples/python/providers/xai/xai_grok_example.py) |
-| Mistral | [Example](examples/python/providers/mistral/mistral_example.py) |
-| Cohere | [Example](examples/python/providers/cohere/cohere_example.py) |
-| Perplexity | [Example](examples/python/providers/perplexity/perplexity_example.py) |
-| Fireworks | [Example](examples/python/providers/fireworks/fireworks_example.py) |
-| Together AI | [Example](examples/python/providers/together/together_ai_example.py) |
-| OpenRouter | [Example](examples/python/providers/openrouter/openrouter_example.py) |
-| HuggingFace | [Example](examples/python/providers/huggingface/huggingface_example.py) |
-| Azure OpenAI | [Example](examples/python/providers/azure/azure_openai_example.py) |
-| AWS Bedrock | [Example](examples/python/providers/aws/aws_bedrock_example.py) |
-| Google Vertex | [Example](examples/python/providers/vertex/vertex_example.py) |
-| Databricks | [Example](examples/python/providers/databricks/databricks_example.py) |
-| Cloudflare | [Example](examples/python/providers/cloudflare/cloudflare_example.py) |
-| AI21 | [Example](examples/python/providers/ai21/ai21_example.py) |
-| Replicate | [Example](examples/python/providers/replicate/replicate_example.py) |
-| SageMaker | [Example](examples/python/providers/sagemaker/sagemaker_example.py) |
-| Moonshot | [Example](examples/python/providers/moonshot/moonshot_example.py) |
-| vLLM | [Example](examples/python/providers/vllm/vllm_example.py) |
-
-</details>
-
----
-
-## 📘 Using Python Code
-
-### 1. Single Agent
-
-```python
-from praisonaiagents import Agent
-agent = Agent(instructions="Your are a helpful AI assistant")
-agent.start("Write a movie script about a robot in Mars")
-```
-
-### 2. Multi Agents
-
-```python
-from praisonaiagents import Agent, Agents
-
-research_agent = Agent(instructions="Research about AI")
-summarise_agent = Agent(instructions="Summarise research agent's findings")
-agents = Agents(agents=[research_agent, summarise_agent])
-agents.start()
-```
-
-### 3. MCP (Model Context Protocol)
-
-```python
-from praisonaiagents import Agent, MCP
-
-# stdio - Local NPX/Python servers
-agent = Agent(tools=MCP("npx @modelcontextprotocol/server-memory"))
-
-# Streamable HTTP - Production servers
-agent = Agent(tools=MCP("https://api.example.com/mcp"))
-
-# WebSocket - Real-time bidirectional
-agent = Agent(tools=MCP("wss://api.example.com/mcp", auth_token="token"))
-
-# With environment variables
-agent = Agent(
-    tools=MCP(
-        command="npx",
-        args=["-y", "@modelcontextprotocol/server-brave-search"],
-        env={"BRAVE_API_KEY": "your-key"}
-    )
-)
-```
-
-> 📖 [Full MCP docs](https://docs.praison.ai/docs/mcp/transports) — stdio, HTTP, WebSocket, SSE transports
-
-### 4. Custom Tools
-
-```python
-from praisonaiagents import Agent, tool
-
-@tool
-def search(query: str) -> str:
-    """Search the web for information."""
-    return f"Results for: {query}"
-
-@tool
-def calculate(expression: str) -> float:
-    """Evaluate a math expression."""
-    return eval(expression)
-
-agent = Agent(
-    instructions="You are a helpful assistant",
-    tools=[search, calculate]
-)
-agent.start("Search for AI news and calculate 15*4")
-```
-
-> 📖 [Full tools docs](https://docs.praison.ai/docs/tools/tools) — BaseTool, tool packages, 100+ built-in tools
-
-### 5. Persistence (Databases)
-
-```python
-from praisonaiagents import Agent, db
-
-agent = Agent(
-    name="Assistant",
-    db=db(database_url="postgresql://localhost/mydb"),
-    session_id="my-session"
-)
-agent.chat("Hello!")  # Auto-persists messages, runs, traces
-```
-
-> 📖 [Full persistence docs](https://docs.praison.ai/docs/databases/overview) — PostgreSQL, MySQL, SQLite, MongoDB, Redis, and 20+ more
-
----
-
-## 🎯 CLI Quick Reference
-
-| Category | Commands |
-|----------|----------|
-| **Execution** | `praisonai`, `--auto`, `--interactive`, `--chat` |
-| **Research** | `research`, `--query-rewrite`, `--deep-research` |
-| **Planning** | `--planning`, `--planning-tools`, `--planning-reasoning` |
-| **Workflows** | `workflow run`, `workflow list`, `workflow auto` |
-| **Memory** | `memory show`, `memory add`, `memory search`, `memory clear` |
-| **Knowledge** | `knowledge add`, `knowledge query`, `knowledge list` |
-| **Sessions** | `session list`, `session resume`, `session delete` |
-| **Tools** | `tools list`, `tools info`, `tools search` |
-| **MCP** | `mcp list`, `mcp create`, `mcp enable` |
-| **Development** | `commit`, `docs`, `checkpoint`, `hooks` |
-| **Scheduling** | `schedule start`, `schedule list`, `schedule stop` |
-
-> 📖 [Full CLI reference](https://docs.praison.ai/docs/cli/cli-reference)
-
----
-
 ## 💻 Using JavaScript Code
 
 ```bash
@@ -589,8 +627,6 @@ const { Agent } = require('praisonai');
 const agent = new Agent({ instructions: 'You are a helpful AI assistant' });
 agent.start('Write a movie script about a robot in Mars');
 ```
-
-![PraisonAI CLI Demo](docs/demo/praisonai-cli-demo.gif)
 
 ---
 
@@ -638,46 +674,7 @@ Learn PraisonAI through our comprehensive video series:
 
 ## 👥 Contributing
 
-We welcome contributions from the community! Here's how you can contribute:
-
-1. **Fork on GitHub** - Use the "Fork" button on the [repository page](https://github.com/MervinPraison/PraisonAI)
-2. **Clone your fork** - `git clone https://github.com/yourusername/praisonAI.git`
-3. **Create a branch** - `git checkout -b new-feature`
-4. **Make changes and commit** - `git commit -am "Add some feature"`
-5. **Push to your fork** - `git push origin new-feature`
-6. **Submit a pull request** - Via GitHub's web interface
-7. **Await feedback** - From project maintainers
-
----
-
-## 🔧 Development
-
-### Using uv
-
-```bash
-# Install uv if you haven't already
-pip install uv
-
-# Install from requirements
-uv pip install -r pyproject.toml
-
-# Install with extras
-uv pip install -r pyproject.toml --extra code
-uv pip install -r pyproject.toml --extra "crewai,autogen"
-```
-
-### Bump and Release
-
-```bash
-# From project root - bumps version and releases in one command
-python src/praisonai/scripts/bump_and_release.py 2.2.99
-
-# With praisonaiagents dependency
-python src/praisonai/scripts/bump_and_release.py 2.2.99 --agents 0.0.169
-
-# Then publish
-cd src/praisonai && uv publish
-```
+We welcome contributions! Fork the repo, create a branch, and submit a PR → [Contributing Guide](https://github.com/MervinPraison/PraisonAI/blob/main/CONTRIBUTING.md).
 
 ---
 
@@ -701,7 +698,7 @@ Ensure your API key is set:
 export OPENAI_API_KEY=your_key_here
 ```
 
-For other providers, see [Environment Variables](#environment-variables).
+For other providers, see [Models docs](https://docs.praison.ai/docs/models).
 
 </details>
 
@@ -797,8 +794,10 @@ See [MCP docs](https://docs.praison.ai/docs/mcp/transports) for all transport op
 <div align="center">
   <p><strong>Made with ❤️ by the PraisonAI Team</strong></p>
   <p>
-    <a href="https://docs.praison.ai">Documentation</a> •
+    <a href="https://docs.praison.ai">📚 Documentation</a> •
     <a href="https://github.com/MervinPraison/PraisonAI">GitHub</a> •
-    <a href="https://github.com/MervinPraison/PraisonAI/issues">Issues</a>
+    <a href="https://youtube.com/@MervinPraison">▶️ YouTube</a> •
+    <a href="https://x.com/MervinPraison">𝕏 X</a> •
+    <a href="https://linkedin.com/in/mervinpraison">💼 LinkedIn</a>
   </p>
 </div>

@@ -163,6 +163,10 @@ TOOL_MAPPINGS = {
     'is_ast_grep_available': ('.ast_grep_tool', None),
     'get_ast_grep_tools': ('.ast_grep_tool', None),
     'ast_grep_tools': ('.ast_grep_tool', None),
+    
+    # Memory Tools (active memory store/search for agents)
+    'store_memory': ('.memory', None),
+    'search_memory': ('.memory', None),
 }
 
 _instances = {}  # Cache for class instances
@@ -221,7 +225,8 @@ def __getattr__(name: str) -> Any:
             'web_crawl', 'crawl_web', 'get_available_crawl_providers',
             'run_skill_script', 'read_skill_file', 'list_skill_scripts', 'create_skill_tools',
             'schedule_add', 'schedule_list', 'schedule_remove',
-            'ast_grep_search', 'ast_grep_rewrite', 'ast_grep_scan', 'is_ast_grep_available', 'get_ast_grep_tools'
+            'ast_grep_search', 'ast_grep_rewrite', 'ast_grep_scan', 'is_ast_grep_available', 'get_ast_grep_tools',
+            'store_memory', 'search_memory'
         ]:
             return getattr(module, name)
         if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools', 'schedule_tools', 'ast_grep_tools']:

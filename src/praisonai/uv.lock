@@ -4768,6 +4768,7 @@ autogen-v4 = [
 bot = [
     { name = "aiohttp" },
     { name = "brotlicffi" },
+    { name = "ddgs" },
     { name = "discord-py" },
     { name = "python-telegram-bot" },
     { name = "slack-bolt" },
@@ -4896,9 +4897,10 @@ requires-dist = [
     { name = "crewai", marker = "extra == 'autogen'" },
     { name = "crewai", marker = "extra == 'autogen-v4'" },
     { name = "crewai", marker = "extra == 'crewai'", specifier = ">=0.157.0" },
-    { name = "ddgs", marker = "extra == 'all'", specifier = ">=8.0.0" },
-    { name = "ddgs", marker = "extra == 'claw'", specifier = ">=8.0.0" },
-    { name = "ddgs", marker = "extra == 'realtime'", specifier = ">=8.0.0" },
+    { name = "ddgs", marker = "extra == 'all'", specifier = ">=9.0.0" },
+    { name = "ddgs", marker = "extra == 'bot'", specifier = ">=9.0.0" },
+    { name = "ddgs", marker = "extra == 'claw'", specifier = ">=9.0.0" },
+    { name = "ddgs", marker = "extra == 'realtime'", specifier = ">=9.0.0" },
     { name = "discord-py", marker = "extra == 'bot'", specifier = ">=2.0.0" },
     { name = "discord-py", marker = "extra == 'claw'", specifier = ">=2.0.0" },
     { name = "fastapi", marker = "extra == 'all'", specifier = ">=0.115.0" },
@@ -4930,7 +4932,7 @@ requires-dist = [
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen-v4'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.1.0" },
-    { name = "praisonaiagents", specifier = ">=1.5.43" },
+    { name = "praisonaiagents", specifier = ">=1.5.44" },
     { name = "praisonaiagents", extras = ["all"], marker = "extra == 'claw'", specifier = ">=1.5.40" },
     { name = "pyautogen", marker = "extra == 'autogen'", specifier = "==0.2.29" },
     { name = "pyjwt", marker = "extra == 'os'", specifier = ">=2.8.0" },
@@ -4997,7 +4999,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.5.43"
+version = "1.5.44"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -5006,15 +5008,16 @@ dependencies = [
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0b/cf/026fd843423dd99d7863e9988e8cc387483a9f3a4342c455a63675807bb9/praisonaiagents-1.5.43.tar.gz", hash = "sha256:4b05048f0e1ac816e0ae6f91c4cabe978a00709713d7095991b27bb9bdb55029", size = 1168403, upload-time = "2026-03-12T00:25:04.728Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ab/85/5630e9588cf5ad44aa3bc91335d4e839dd290ddd0e6c32daa8521bad308a/praisonaiagents-1.5.44.tar.gz", hash = "sha256:0f09aca8b68079b705ebe0d98c934eaacc028ff48000b61a6dd87e772df33965", size = 1170799, upload-time = "2026-03-12T12:00:38.436Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/89/e3/594b72fee01af90083f73a3f5880a8677038a8f496c3c1b40120bf727290/praisonaiagents-1.5.43-py3-none-any.whl", hash = "sha256:4259298e915ed778a60d61ffc95306abbcf2a8fc5243a7080feb78866e1c8adb", size = 1213541, upload-time = "2026-03-12T00:25:02.828Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/7e/bb82ddf6451a8c23895d601c1fd7ad3f789e25cba8dec16a561e8a51212e/praisonaiagents-1.5.44-py3-none-any.whl", hash = "sha256:3bedcec1b30964ab54d6df04591a5369440929e726eab2aa15f7832ac7fa4df3", size = 1215457, upload-time = "2026-03-12T12:00:36.691Z" },
 ]
 
 [package.optional-dependencies]
 all = [
     { name = "chonkie" },
     { name = "chromadb" },
+    { name = "ddgs" },
     { name = "fastapi" },
     { name = "litellm" },
     { name = "markitdown", extra = ["all"] },
