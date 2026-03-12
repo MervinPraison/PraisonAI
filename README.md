@@ -25,6 +25,10 @@
 
 PraisonAI 🦞 — Automate and solve complex challenges with AI agent teams that plan, research, code, and deliver results to Telegram, Discord, and WhatsApp — running 24/7. A low-code, production-ready multi-agent framework with handoffs, guardrails, memory, RAG, and 100+ LLM providers, built around simplicity, customisation, and effective human-agent collaboration.
 
+<p align="center">
+  <img src="src/praisonai/praisonai/public/dashboard.png" alt="PraisonAI Dashboard" width="800" />
+</p>
+
 <div align="center">
   <a href="https://docs.praison.ai">
     <p align="center">
