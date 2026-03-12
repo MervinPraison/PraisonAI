@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from .store import FileScheduleStore
     from .parser import parse_schedule
     from .runner import ScheduleRunner
+    from .loop import ScheduleLoop
 
 _module_cache = {}
 
@@ -55,6 +56,11 @@ def __getattr__(name: str):
         _module_cache[name] = ScheduleRunner
         return ScheduleRunner
 
+    if name == "ScheduleLoop":
+        from .loop import ScheduleLoop
+        _module_cache[name] = ScheduleLoop
+        return ScheduleLoop
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -65,4 +71,5 @@ __all__ = [
     "FileScheduleStore",
     "parse_schedule",
     "ScheduleRunner",
+    "ScheduleLoop",
 ]

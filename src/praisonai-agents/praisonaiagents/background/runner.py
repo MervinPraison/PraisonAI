@@ -319,3 +319,106 @@ class BackgroundRunner:
             except asyncio.CancelledError:
                 pass
             self._cleanup_task = None
+
+    # ── Sync-friendly wrappers ──────────────────────────────────────────
+
+    def submit_sync(
+        self,
+        func: Callable,
+        args: tuple = (),
+        kwargs: Optional[Dict[str, Any]] = None,
+        name: Optional[str] = None,
+        timeout: Optional[float] = None,
+        on_complete: Optional[Callable[[BackgroundTask], None]] = None,
+    ) -> BackgroundTask:
+        """Submit a task from synchronous code.
+
+        Creates a background event loop (once) and schedules the task
+        there.  Returns the ``BackgroundTask`` immediately so callers
+        can poll ``task.status`` / ``task.result`` without blocking.
+
+        Args:
+            func: Function to execute (sync or async)
+            args: Positional arguments for *func*
+            kwargs: Keyword arguments for *func*
+            name: Optional human-readable task name
+            timeout: Optional timeout in seconds
+            on_complete: Callback when task completes
+
+        Returns:
+            BackgroundTask for tracking
+        """
+        loop = _get_bg_loop()
+        future = asyncio.run_coroutine_threadsafe(
+            self.submit(
+                func, args=args, kwargs=kwargs,
+                name=name, timeout=timeout, on_complete=on_complete,
+            ),
+            loop,
+        )
+        # Block briefly to get the BackgroundTask object (not the task result).
+        return future.result(timeout=5)
+
+    def submit_agent_sync(
+        self,
+        agent: Any,
+        prompt: str,
+        name: Optional[str] = None,
+        timeout: Optional[float] = None,
+        on_complete: Optional[Callable[[BackgroundTask], None]] = None,
+    ) -> BackgroundTask:
+        """Submit an agent task from synchronous code.
+
+        Convenience wrapper around :meth:`submit_sync` that resolves
+        the agent's callable automatically.
+
+        Args:
+            agent: Agent instance (must have ``start``, ``chat``, or ``run``)
+            prompt: Prompt to send to the agent
+            name: Optional task name
+            timeout: Optional timeout in seconds
+            on_complete: Callback when task completes
+
+        Returns:
+            BackgroundTask for tracking
+        """
+        loop = _get_bg_loop()
+        future = asyncio.run_coroutine_threadsafe(
+            self.submit_agent(
+                agent, prompt,
+                name=name, timeout=timeout, on_complete=on_complete,
+            ),
+            loop,
+        )
+        return future.result(timeout=5)
+
+
+# ── Module-level background event loop (lazy, daemon) ───────────────────
+
+import threading as _threading
+
+_bg_loop: Optional[asyncio.AbstractEventLoop] = None
+_bg_lock = _threading.Lock()
+
+
+def _get_bg_loop() -> asyncio.AbstractEventLoop:
+    """Return a running event loop on a background daemon thread.
+
+    Created once on first call; reused thereafter.  The thread is a
+    daemon so it won't prevent process exit.
+    """
+    global _bg_loop
+    if _bg_loop is not None and _bg_loop.is_running():
+        return _bg_loop
+
+    with _bg_lock:
+        # Double-check after acquiring lock.
+        if _bg_loop is not None and _bg_loop.is_running():
+            return _bg_loop
+
+        _bg_loop = asyncio.new_event_loop()
+
+        t = _threading.Thread(target=_bg_loop.run_forever, daemon=True)
+        t.start()
+
+    return _bg_loop
