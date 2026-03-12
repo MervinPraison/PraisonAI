@@ -1226,6 +1226,7 @@ class WebSocketGateway:
             from telegram import Update
             from telegram.ext import (
                 Application,
+                CommandHandler,
                 MessageHandler,
                 filters,
             )
@@ -1267,6 +1268,8 @@ class WebSocketGateway:
             if not message_text:
                 return
 
+            user_id = str(update.message.from_user.id) if update.message.from_user else "unknown"
+
             # Determine routing context
             chat_type = update.message.chat.type if update.message.chat else "private"
             routing_ctx = gateway._determine_routing_context(
@@ -1280,9 +1283,33 @@ class WebSocketGateway:
             if bot.config.typing_indicator:
                 await update.message.chat.send_action("typing")
 
+            # Ack reaction — show processing indicator
+            ack_ctx = None
+            if bot._ack.enabled:
+                async def _tg_react(emoji, **kw):
+                    try:
+                        from telegram import ReactionTypeEmoji
+                        await app.bot.set_message_reaction(
+                            chat_id=update.message.chat_id,
+                            message_id=update.message.message_id,
+                            reaction=[ReactionTypeEmoji(emoji=emoji)],
+                        )
+                    except Exception:
+                        pass
+                async def _tg_unreact(emoji, **kw):
+                    try:
+                        await app.bot.set_message_reaction(
+                            chat_id=update.message.chat_id,
+                            message_id=update.message.message_id,
+                            reaction=[],
+                        )
+                    except Exception:
+                        pass
+                ack_ctx = await bot._ack.ack(react_fn=_tg_react)
+
             try:
-                loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(None, agent.chat, message_text)
+                message_text = await bot._debouncer.debounce(user_id, message_text)
+                response = await bot._session.chat(agent, user_id, message_text)
                 if hasattr(bot, '_send_response_with_media'):
                     await bot._send_response_with_media(
                         update.message.chat_id,
@@ -1291,6 +1318,9 @@ class WebSocketGateway:
                     )
                 else:
                     await update.message.reply_text(str(response))
+                # Done reaction
+                if ack_ctx:
+                    await bot._ack.done(ack_ctx, react_fn=_tg_react, unreact_fn=_tg_unreact)
             except Exception as e:
                 logger.error(f"Agent error in {name}: {e}")
                 await update.message.reply_text(f"Error: {str(e)}")
@@ -1298,7 +1328,27 @@ class WebSocketGateway:
         async def handle_voice(update: Update, context: Any):
             await handle_message(update, context)
 
+        async def handle_status(update: Update, context: Any):
+            if not update.message:
+                return
+            await update.message.reply_text(bot._format_status())
+
+        async def handle_new(update: Update, context: Any):
+            if not update.message:
+                return
+            user_id = str(update.message.from_user.id) if update.message.from_user else "unknown"
+            bot._session.reset(user_id)
+            await update.message.reply_text("Session reset. Starting fresh conversation.")
+
+        async def handle_help(update: Update, context: Any):
+            if not update.message:
+                return
+            await update.message.reply_text(bot._format_help())
+
         # Register handlers
+        app.add_handler(CommandHandler("status", handle_status))
+        app.add_handler(CommandHandler("new", handle_new))
+        app.add_handler(CommandHandler("help", handle_help))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
 

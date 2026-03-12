@@ -73,6 +73,17 @@ _ESCALATION_TO_AUTONOMY_SIGNAL = {
 _AUTONOMY_TO_ESCALATION_SIGNAL = {v: k for k, v in _ESCALATION_TO_AUTONOMY_SIGNAL.items()}
 
 
+# Valid autonomy modes
+VALID_AUTONOMY_MODES = {"caller", "iterative"}
+
+# Smart default mode based on level
+_LEVEL_TO_DEFAULT_MODE = {
+    "suggest": "caller",
+    "auto_edit": "caller",
+    "full_auto": "iterative",
+}
+
+
 @dataclass
 class AutonomyConfig:
     """Configuration for Agent autonomy features.
@@ -83,6 +94,10 @@ class AutonomyConfig:
     Attributes:
         enabled: Whether autonomy is enabled
         level: Autonomy level (suggest, auto_edit, full_auto)
+        mode: Execution mode — "caller" (single chat call, wrapper-equivalent)
+            or "iterative" (internal loop with completion detection).
+            Defaults based on level: suggest/auto_edit → "caller",
+            full_auto → "iterative".
         max_iterations: Maximum iterations before stopping
         doom_loop_threshold: Number of repeated actions to trigger doom loop
         auto_escalate: Whether to automatically escalate complexity
@@ -99,18 +114,21 @@ class AutonomyConfig:
     
     Usage::
     
-        # Simple — full_auto auto-enables tracking + sandbox
+        # Simple — default caller mode (wrapper-equivalent, no wasteful loop)
+        Agent(autonomy=True)  # level=suggest, mode=caller
+        
+        # Full auto — iterative loop with completion detection
         Agent(autonomy="full_auto")
         
-        # Advanced — explicit config
+        # Ralph Loop — explicit iterative mode with completion promise
         Agent(autonomy=AutonomyConfig(
-            level="full_auto",
-            track_changes=True,
-            sandbox=SandboxConfig.native(writable_paths=["./src"]),
+            mode="iterative",
+            completion_promise="COMPLETE",
         ))
     """
     enabled: bool = True
     level: str = "suggest"
+    mode: Optional[str] = None  # None = smart default based on level
     max_iterations: int = 20
     doom_loop_threshold: int = 3
     auto_escalate: bool = True
@@ -130,6 +148,14 @@ class AutonomyConfig:
             raise ValueError(
                 f"Invalid autonomy level: {self.level!r}. "
                 f"Must be one of {sorted(VALID_AUTONOMY_LEVELS)}"
+            )
+        # Smart default mode based on level
+        if self.mode is None:
+            self.mode = _LEVEL_TO_DEFAULT_MODE.get(self.level, "caller")
+        elif self.mode not in VALID_AUTONOMY_MODES:
+            raise ValueError(
+                f"Invalid autonomy mode: {self.mode!r}. "
+                f"Must be one of {sorted(VALID_AUTONOMY_MODES)}"
             )
         # Auto-enable track_changes for full_auto if not explicitly set
         if self.track_changes is None:
@@ -156,6 +182,7 @@ class AutonomyConfig:
         return cls(
             enabled=data.get("enabled", True),
             level=level,
+            mode=data.get("mode"),  # None = smart default in __post_init__
             max_iterations=data.get("max_iterations", 20),
             doom_loop_threshold=data.get("doom_loop_threshold", 3),
             auto_escalate=data.get("auto_escalate", True),

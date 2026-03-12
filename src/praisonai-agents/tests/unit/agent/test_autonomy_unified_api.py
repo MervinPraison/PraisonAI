@@ -2,15 +2,10 @@
 TDD tests for unified autonomy API.
 
 Goal: Agent(autonomy=True) + agent.start("Task") should automatically
-use the autonomous loop. No need to call run_autonomous() separately.
-
-Current (redundant):
-    agent = Agent(autonomy=True)
-    result = agent.run_autonomous("Task")  # Why two steps?
-
-Proposed (unified):
-    agent = Agent(autonomy=True)
-    result = agent.start("Task")  # Automatically uses autonomy loop!
+use the appropriate mode based on config:
+  - level=suggest (default) → caller mode (single chat call)
+  - level=full_auto → iterative mode (run_autonomous loop)
+  - explicit mode overrides level-based default
 """
 
 import pytest
@@ -21,16 +16,11 @@ class TestUnifiedAutonomyAPI:
     """Test that start() automatically uses autonomy when enabled."""
     
     def test_start_uses_autonomy_when_enabled(self):
-        """start() should route to run_autonomous when autonomy=True."""
+        """start() should use caller mode (chat) when autonomy=True (default level=suggest)."""
         from praisonaiagents import Agent
         
-        with patch.object(Agent, 'run_autonomous') as mock_run_auto:
-            mock_run_auto.return_value = MagicMock(
-                success=True,
-                output="Task completed",
-                completion_reason="goal",
-                iterations=1,
-            )
+        with patch.object(Agent, 'chat') as mock_chat:
+            mock_chat.return_value = "Task completed"
             
             agent = Agent(
                 name="test",
@@ -41,10 +31,11 @@ class TestUnifiedAutonomyAPI:
             
             result = agent.start("Do something")
             
-            # Should have called run_autonomous, not chat
-            mock_run_auto.assert_called_once()
-            call_kwargs = mock_run_auto.call_args[1]
-            assert call_kwargs.get("prompt") == "Do something"
+            # With default level=suggest, should use caller mode (chat)
+            mock_chat.assert_called_once()
+            from praisonaiagents.agent.autonomy import AutonomyResult
+            assert isinstance(result, AutonomyResult)
+            assert result.completion_reason == "caller_mode"
     
     def test_start_uses_chat_when_autonomy_disabled(self):
         """start() should use regular chat when autonomy is not enabled."""
@@ -67,18 +58,12 @@ class TestUnifiedAutonomyAPI:
             mock_chat.assert_called()
     
     def test_start_returns_autonomy_result_when_autonomy_enabled(self):
-        """start() should return AutonomyResult when autonomy is enabled."""
+        """start() should return AutonomyResult when autonomy is enabled (caller mode)."""
         from praisonaiagents import Agent
         from praisonaiagents.agent.autonomy import AutonomyResult
         
-        with patch.object(Agent, 'run_autonomous') as mock_run_auto:
-            mock_result = AutonomyResult(
-                success=True,
-                output="Done!",
-                completion_reason="goal",
-                iterations=2,
-            )
-            mock_run_auto.return_value = mock_result
+        with patch.object(Agent, 'chat') as mock_chat:
+            mock_chat.return_value = "Done!"
             
             agent = Agent(
                 name="test",
@@ -94,7 +79,7 @@ class TestUnifiedAutonomyAPI:
             assert result.output == "Done!"
     
     def test_start_passes_autonomy_config_to_run_autonomous(self):
-        """start() should pass autonomy config values to run_autonomous."""
+        """start() should pass autonomy config values to run_autonomous in iterative mode."""
         from praisonaiagents import Agent
         
         with patch.object(Agent, 'run_autonomous') as mock_run_auto:
@@ -107,6 +92,7 @@ class TestUnifiedAutonomyAPI:
                     "max_iterations": 15,
                     "completion_promise": "DONE",
                     "clear_context": True,
+                    "mode": "iterative",  # Explicit iterative mode
                 },
                 llm="gpt-4o-mini",
             )
@@ -119,7 +105,7 @@ class TestUnifiedAutonomyAPI:
             assert call_kwargs.get("clear_context") is True
     
     def test_start_timeout_passed_to_run_autonomous(self):
-        """start(timeout=X) should pass timeout to run_autonomous."""
+        """start(timeout=X) should pass timeout to run_autonomous in iterative mode."""
         from praisonaiagents import Agent
         
         with patch.object(Agent, 'run_autonomous') as mock_run_auto:
@@ -128,7 +114,7 @@ class TestUnifiedAutonomyAPI:
             agent = Agent(
                 name="test",
                 instructions="Test agent",
-                autonomy=True,
+                autonomy={"mode": "iterative"},  # Must be iterative for run_autonomous
                 llm="gpt-4o-mini",
             )
             
@@ -218,16 +204,12 @@ class TestAsyncUnifiedAPI:
     
     @pytest.mark.asyncio
     async def test_astart_uses_autonomy_when_enabled(self):
-        """astart() should route to run_autonomous_async when autonomy=True."""
+        """astart() should use caller mode (achat) when autonomy=True."""
         from praisonaiagents import Agent
+        from praisonaiagents.agent.autonomy import AutonomyResult
         
-        with patch.object(Agent, 'run_autonomous_async') as mock_run_auto:
-            mock_run_auto.return_value = MagicMock(
-                success=True,
-                output="Task completed",
-                completion_reason="goal",
-                iterations=1,
-            )
+        with patch.object(Agent, 'achat') as mock_achat:
+            mock_achat.return_value = "Task completed"
             
             agent = Agent(
                 name="test",
@@ -238,7 +220,8 @@ class TestAsyncUnifiedAPI:
             
             result = await agent.astart("Do something")
             
-            mock_run_auto.assert_called_once()
+            mock_achat.assert_called_once()
+            assert isinstance(result, AutonomyResult)
     
     @pytest.mark.asyncio
     async def test_astart_uses_achat_when_autonomy_disabled(self):
@@ -264,7 +247,7 @@ class TestCLISimplification:
     """Test that CLI can use simplified API."""
     
     def test_cli_can_use_start_for_loop(self):
-        """CLI loop command should be able to use agent.start() directly."""
+        """CLI loop command should be able to use agent.start() in iterative mode."""
         from praisonaiagents import Agent
         
         with patch.object(Agent, 'run_autonomous') as mock_run_auto:
@@ -277,13 +260,14 @@ class TestCLISimplification:
                 started_at="2024-01-01T00:00:00Z",
             )
             
-            # This is what CLI should do - simple!
+            # CLI loop must explicitly set mode="iterative"
             agent = Agent(
                 name="loop_agent",
                 instructions="Complete the task",
                 autonomy={
                     "max_iterations": 10,
                     "completion_promise": "DONE",
+                    "mode": "iterative",  # Explicit for loop
                 },
                 llm="gpt-4o-mini",
             )

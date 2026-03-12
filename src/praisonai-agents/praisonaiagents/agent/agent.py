@@ -2053,6 +2053,7 @@ Summary:"""
         self.autonomy_config = {
             "enabled": config.enabled,
             "level": config.level,
+            "mode": config.mode,
             "max_iterations": config.max_iterations,
             "doom_loop_threshold": config.doom_loop_threshold,
             "auto_escalate": config.auto_escalate,
@@ -6744,23 +6745,49 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # This allows: Agent(autonomy=True) + await agent.astart("Task") to just work!
         # ─────────────────────────────────────────────────────────────────────
         if self.autonomy_enabled:
-            # Extract autonomy-specific kwargs
-            timeout = kwargs.pop('timeout', None)
-            kwargs.pop('stream', None)  # Not used in autonomous mode
-            
-            # Get config values from autonomy_config
             auto_config = self.autonomy_config or {}
-            max_iterations = auto_config.get('max_iterations', 20)
-            completion_promise = auto_config.get('completion_promise')
-            clear_context = auto_config.get('clear_context', False)
+            mode = auto_config.get('mode', 'caller')
             
-            return await self.run_autonomous_async(
-                prompt=prompt,
-                max_iterations=max_iterations,
-                timeout_seconds=timeout,
-                completion_promise=completion_promise,
-                clear_context=clear_context,
-            )
+            if mode == 'iterative':
+                # Iterative mode: use run_autonomous_async (backward compat for full_auto)
+                timeout = kwargs.pop('timeout', None)
+                kwargs.pop('stream', None)  # Not used in autonomous mode
+                max_iterations = auto_config.get('max_iterations', 20)
+                completion_promise = auto_config.get('completion_promise')
+                clear_context = auto_config.get('clear_context', False)
+                
+                return await self.run_autonomous_async(
+                    prompt=prompt,
+                    max_iterations=max_iterations,
+                    timeout_seconds=timeout,
+                    completion_promise=completion_promise,
+                    clear_context=clear_context,
+                )
+            else:
+                # Caller mode: single achat() call, wrapper-equivalent
+                import time as time_module
+                from datetime import datetime, timezone
+                start_time = time_module.time()
+                started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                
+                response = await self.achat(prompt, **kwargs)
+                response_str = str(response) if response else ""
+                
+                # Auto-save session after chat
+                self._auto_save_session()
+                
+                # Wrap in AutonomyResult for consistent API
+                from .autonomy import AutonomyResult
+                return AutonomyResult(
+                    success=True,
+                    output=response_str,
+                    completion_reason="caller_mode",
+                    iterations=1,
+                    stage="direct",
+                    actions=[],
+                    duration_seconds=time_module.time() - start_time,
+                    started_at=started_at,
+                )
         
         # Determine streaming behavior (same logic as start())
         stream_requested = kwargs.get('stream')
@@ -7013,22 +7040,54 @@ Write the complete compiled report:"""
         # This allows: Agent(autonomy=True) + agent.start("Task") to just work!
         # ─────────────────────────────────────────────────────────────────────
         if self.autonomy_enabled:
-            # Extract autonomy-specific kwargs
-            timeout = kwargs.pop('timeout', None)
-            
-            # Get config values from autonomy_config
             auto_config = self.autonomy_config or {}
-            max_iterations = auto_config.get('max_iterations', 20)
-            completion_promise = auto_config.get('completion_promise')
-            clear_context = auto_config.get('clear_context', False)
+            mode = auto_config.get('mode', 'caller')
             
-            return self.run_autonomous(
-                prompt=prompt,
-                max_iterations=max_iterations,
-                timeout_seconds=timeout,
-                completion_promise=completion_promise,
-                clear_context=clear_context,
-            )
+            if mode == 'iterative':
+                # Iterative mode: use run_autonomous (backward compat for full_auto)
+                timeout = kwargs.pop('timeout', None)
+                max_iterations = auto_config.get('max_iterations', 20)
+                completion_promise = auto_config.get('completion_promise')
+                clear_context = auto_config.get('clear_context', False)
+                
+                return self.run_autonomous(
+                    prompt=prompt,
+                    max_iterations=max_iterations,
+                    timeout_seconds=timeout,
+                    completion_promise=completion_promise,
+                    clear_context=clear_context,
+                )
+            else:
+                # Caller mode: single chat() call, wrapper-equivalent
+                # All init-time features (approval, doom-loop per-tool,
+                # track_changes, sandbox, default_tools) are already wired.
+                import time as time_module
+                from datetime import datetime, timezone
+                start_time = time_module.time()
+                started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                
+                # Load history from past sessions
+                self._load_history_context()
+                
+                # Use chat() — all tools, approval, doom-loop per-tool work
+                response = self.chat(prompt, **kwargs)
+                response_str = str(response) if response else ""
+                
+                # Auto-save session after chat
+                self._auto_save_session()
+                
+                # Wrap in AutonomyResult for consistent API
+                from .autonomy import AutonomyResult
+                return AutonomyResult(
+                    success=True,
+                    output=response_str,
+                    completion_reason="caller_mode",
+                    iterations=1,
+                    stage="direct",
+                    actions=[],
+                    duration_seconds=time_module.time() - start_time,
+                    started_at=started_at,
+                )
         
         # Load history from past sessions
         self._load_history_context()
