@@ -87,7 +87,7 @@ python -c "from praisonaiagents import Agent; Agent(instructions='You are a help
 | | Feature | How |
 |--|---------|-----|
 | ⚡ | **Fastest framework** — 3.77μs (1,209x faster than LangGraph) | [Benchmarks](https://docs.praison.ai/docs/features/performance-benchmarks) |
-| 🦞 | **Dashboard UI** — chat, agents, memory, knowledge, cron | `pip install "praisonai[claw]"` |
+| 🦞 | **AgentClaw UI** — chat, agents, memory, knowledge, cron | `pip install "praisonai[claw]"` |
 | 🔌 | **MCP Protocol** — stdio, HTTP, WebSocket, SSE | `tools=MCP("npx ...")` |
 | 🧠 | **Planning Mode** — plan → execute → reason | `planning=True` |
 | 🔍 | **Deep Research** — multi-step autonomous research | [Docs](https://docs.praison.ai/docs/agents/deep-research) |
@@ -135,7 +135,7 @@ For the full framework with CLI support:
 pip install praisonai
 ```
 
-🦞 **Full Dashboard** with bots, memory, knowledge, and gateway:
+🦞 **AgentClaw** — full UI with bots, memory, knowledge, and gateway:
 
 ```bash
 pip install "praisonai[claw]"
@@ -560,7 +560,7 @@ agent.chat("Hello!")  # Auto-persists messages, runs, traces
 
 > 📖 [Full persistence docs](https://docs.praison.ai/docs/databases/overview) — PostgreSQL, MySQL, SQLite, MongoDB, Redis, and 20+ more
 
-### 6. PraisonAI Claw 🦞 (Dashboard UI)
+### 6. AgentClaw 🦞 (Dashboard UI)
 
 Connect your AI agents to **Telegram, Discord, Slack, WhatsApp** and more — all from a single command.
 
@@ -609,6 +609,21 @@ agent.start('Write a movie script about a robot in Mars');
 ```
 
 ![PraisonAI CLI Demo](docs/demo/praisonai-cli-demo.gif)
+
+---
+
+## 🎯 Use Cases
+
+AI agents solving real-world problems across industries:
+
+| Use Case | Description |
+|----------|-------------|
+| 🔍 **Research & Analysis** | Conduct deep research, gather information, and generate insights from multiple sources automatically |
+| 💻 **Code Generation** | Write, debug, and refactor code with AI agents that understand your codebase and requirements |
+| ✍️ **Content Creation** | Generate blog posts, documentation, marketing copy, and technical writing with multi-agent teams |
+| 📊 **Data Pipelines** | Extract, transform, and analyze data from APIs, databases, and web sources automatically |
+| 🤖 **Customer Support** | Deploy 24/7 support bots on Telegram, Discord, Slack with memory and knowledge-backed responses |
+| ⚙️ **Workflow Automation** | Automate multi-step business processes with agents that hand off tasks, verify results, and self-correct |
 
 ---
 
@@ -815,8 +830,10 @@ See [MCP docs](https://docs.praison.ai/docs/mcp/transports) for all transport op
 <div align="center">
   <p><strong>Made with ❤️ by the PraisonAI Team</strong></p>
   <p>
-    <a href="https://docs.praison.ai">Documentation</a> •
+    <a href="https://docs.praison.ai">📚 Documentation</a> •
     <a href="https://github.com/MervinPraison/PraisonAI">GitHub</a> •
-    <a href="https://github.com/MervinPraison/PraisonAI/issues">Issues</a>
+    <a href="https://youtube.com/@MervinPraison">▶️ YouTube</a> •
+    <a href="https://x.com/MervinPraison">𝕏 X</a> •
+    <a href="https://linkedin.com/in/mervinpraison">💼 LinkedIn</a>
   </p>
 </div>
