@@ -4520,6 +4520,7 @@ Your Goal: {self.goal}"""
             run_id=getattr(self, '_current_run_id', 'unknown'),
             session_id=getattr(self, '_session_id', None) or 'default',
             last_user_message=self.chat_history[-1].get('content') if self.chat_history else None,
+            memory=getattr(self, '_memory_instance', None),
             metadata={'agent_name': self.name}
         )
         

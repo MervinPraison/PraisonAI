@@ -429,3 +429,393 @@ class TestA2AJsonRpc:
         data = response.json()
         assert "error" in data
         assert data["error"]["code"] == -32602
+
+
+# ============================================================================
+# G11: AgentTeam Routing Tests
+# ============================================================================
+
+def _make_team_app():
+    """Create test app with mocked AgentTeam (agents=)."""
+    from fastapi import FastAPI
+    from praisonaiagents.ui.a2a import A2A
+    
+    # Mock an AgentTeam with .start() method
+    mock_team = MagicMock()
+    mock_team.name = "Test Team"
+    mock_team.start = MagicMock(return_value="Team result")
+    
+    a2a = A2A(agents=mock_team, name="Team A2A")
+    
+    app = FastAPI()
+    app.include_router(a2a.get_router())
+    
+    return app, a2a, mock_team
+
+
+class TestA2AAgentTeamRouting:
+    """G11: Tests for AgentTeam routing via agents= param."""
+    
+    def test_a2a_agents_message_send(self):
+        """message/send with agents= should call team.start()."""
+        from fastapi.testclient import TestClient
+        
+        app, a2a, mock_team = _make_team_app()
+        client = TestClient(app)
+        
+        response = client.post("/a2a", json={
+            "jsonrpc": "2.0",
+            "method": "message/send",
+            "id": "team-1",
+            "params": {
+                "message": {
+                    "messageId": "m1",
+                    "role": "user",
+                    "parts": [{"text": "Research AI"}]
+                }
+            }
+        })
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "result" in data
+        assert data["result"]["status"]["state"] == "completed"
+        # Verify team.start() was called, not agent.chat()
+        mock_team.start.assert_called_once()
+    
+    def test_a2a_agents_message_stream(self):
+        """message/stream with agents= should work."""
+        from fastapi.testclient import TestClient
+        
+        app, a2a, mock_team = _make_team_app()
+        client = TestClient(app)
+        
+        response = client.post("/a2a", json={
+            "jsonrpc": "2.0",
+            "method": "message/stream",
+            "id": "team-s1",
+            "params": {
+                "message": {
+                    "messageId": "m1",
+                    "role": "user",
+                    "parts": [{"text": "Stream this"}]
+                }
+            }
+        })
+        
+        assert response.status_code == 200
+        text = response.text
+        assert "event:" in text
+    
+    def test_a2a_agent_takes_priority(self):
+        """When both agent= and agents= provided, agent takes priority."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from praisonaiagents import Agent
+        from praisonaiagents.ui.a2a import A2A
+        
+        agent = Agent(name="Priority", role="Tester", goal="Test")
+        mock_team = MagicMock()
+        mock_team.name = "Team"
+        
+        a2a = A2A(agent=agent, agents=mock_team)
+        a2a.agent.chat = MagicMock(return_value="Agent wins")
+        
+        app = FastAPI()
+        app.include_router(a2a.get_router())
+        client = TestClient(app)
+        
+        response = client.post("/a2a", json={
+            "jsonrpc": "2.0",
+            "method": "message/send",
+            "id": "pri-1",
+            "params": {
+                "message": {
+                    "messageId": "m1",
+                    "role": "user",
+                    "parts": [{"text": "Who responds?"}]
+                }
+            }
+        })
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "result" in data
+        # agent.chat should be called, not team.start
+        a2a.agent.chat.assert_called_once()
+        mock_team.start.assert_not_called()
+
+
+# ============================================================================
+# G9: serve() Convenience Tests
+# ============================================================================
+
+class TestA2AServe:
+    """G9: Tests for A2A.serve() convenience method."""
+    
+    def test_a2a_serve_method_exists(self):
+        """A2A should have a serve() method."""
+        from praisonaiagents import Agent
+        from praisonaiagents.ui.a2a import A2A
+        
+        agent = Agent(name="Serve", role="Helper", goal="Help")
+        a2a = A2A(agent=agent)
+        
+        assert hasattr(a2a, 'serve')
+        assert callable(a2a.serve)
+    
+    def test_a2a_serve_creates_app(self):
+        """serve() should create a FastAPI app and call uvicorn.run."""
+        from praisonaiagents import Agent
+        from praisonaiagents.ui.a2a import A2A
+        
+        agent = Agent(name="Serve", role="Helper", goal="Help")
+        a2a = A2A(agent=agent)
+        
+        with patch("uvicorn.run") as mock_run:
+            a2a.serve(host="127.0.0.1", port=9999)
+            mock_run.assert_called_once()
+            # Verify the app passed to uvicorn is a FastAPI instance
+            call_args = mock_run.call_args
+            assert call_args[1].get("host") == "127.0.0.1"
+            assert call_args[1].get("port") == 9999
+
+
+# ============================================================================
+# G8: Auth Token Tests
+# ============================================================================
+
+def _make_auth_app(auth_token=None):
+    """Create test app with optional auth_token."""
+    from fastapi import FastAPI
+    from praisonaiagents import Agent
+    from praisonaiagents.ui.a2a import A2A
+    
+    agent = Agent(name="Auth Test", role="Tester", goal="Test")
+    a2a = A2A(agent=agent, auth_token=auth_token)
+    
+    app = FastAPI()
+    app.include_router(a2a.get_router())
+    
+    return app, a2a
+
+
+class TestA2AAuth:
+    """G8: Tests for auth_token support."""
+    
+    def test_a2a_auth_valid_token(self):
+        """Valid bearer token → 200."""
+        from fastapi.testclient import TestClient
+        
+        app, a2a = _make_auth_app(auth_token="sk-secret")
+        a2a.agent.chat = MagicMock(return_value="Authed")
+        client = TestClient(app)
+        
+        response = client.post(
+            "/a2a",
+            json={
+                "jsonrpc": "2.0",
+                "method": "message/send",
+                "id": "auth-1",
+                "params": {
+                    "message": {
+                        "messageId": "m1",
+                        "role": "user",
+                        "parts": [{"text": "Hello"}]
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer sk-secret"}
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "result" in data
+    
+    def test_a2a_auth_invalid_token(self):
+        """Wrong bearer token → 401."""
+        from fastapi.testclient import TestClient
+        
+        app, _ = _make_auth_app(auth_token="sk-secret")
+        client = TestClient(app)
+        
+        response = client.post(
+            "/a2a",
+            json={
+                "jsonrpc": "2.0",
+                "method": "message/send",
+                "id": "auth-2",
+                "params": {
+                    "message": {
+                        "messageId": "m1",
+                        "role": "user",
+                        "parts": [{"text": "Hello"}]
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer wrong-token"}
+        )
+        
+        assert response.status_code == 401
+    
+    def test_a2a_auth_missing_header(self):
+        """No Authorization header → 401."""
+        from fastapi.testclient import TestClient
+        
+        app, _ = _make_auth_app(auth_token="sk-secret")
+        client = TestClient(app)
+        
+        response = client.post("/a2a", json={
+            "jsonrpc": "2.0",
+            "method": "message/send",
+            "id": "auth-3",
+            "params": {
+                "message": {
+                    "messageId": "m1",
+                    "role": "user",
+                    "parts": [{"text": "Hello"}]
+                }
+            }
+        })
+        
+        assert response.status_code == 401
+    
+    def test_a2a_no_auth_configured(self):
+        """No auth_token set → open access (200)."""
+        from fastapi.testclient import TestClient
+        
+        app, a2a = _make_auth_app(auth_token=None)
+        a2a.agent.chat = MagicMock(return_value="Open")
+        client = TestClient(app)
+        
+        response = client.post("/a2a", json={
+            "jsonrpc": "2.0",
+            "method": "message/send",
+            "id": "no-auth-1",
+            "params": {
+                "message": {
+                    "messageId": "m1",
+                    "role": "user",
+                    "parts": [{"text": "Hello"}]
+                }
+            }
+        })
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "result" in data
+    
+    def test_a2a_auth_on_discovery_endpoint(self):
+        """Agent card endpoint should remain open even with auth."""
+        from fastapi.testclient import TestClient
+        
+        app, _ = _make_auth_app(auth_token="sk-secret")
+        client = TestClient(app)
+        
+        # Discovery endpoints should be public per A2A spec
+        response = client.get("/.well-known/agent.json")
+        assert response.status_code == 200
+
+
+# ============================================================================
+# G13: Part Conversion Tests
+# ============================================================================
+
+class TestA2APartConversion:
+    """G13: Tests for url/data part handling in _parse_message and conversion."""
+    
+    def test_parse_message_with_url_part(self):
+        """Parts with 'url' field should be parsed."""
+        from praisonaiagents.ui.a2a.a2a import _parse_message
+        
+        msg = _parse_message({
+            "messageId": "m1",
+            "role": "user",
+            "parts": [
+                {"url": "https://example.com/img.png", "mediaType": "image/png"}
+            ]
+        })
+        
+        assert len(msg.parts) == 1
+    
+    def test_parse_message_with_data_part(self):
+        """Parts with 'data' field should be parsed."""
+        from praisonaiagents.ui.a2a.a2a import _parse_message
+        
+        msg = _parse_message({
+            "messageId": "m1",
+            "role": "user",
+            "parts": [
+                {"data": {"key": "value"}}
+            ]
+        })
+        
+        assert len(msg.parts) == 1
+    
+    def test_parse_message_mixed_parts(self):
+        """Mixed text + url + data parts should all be parsed."""
+        from praisonaiagents.ui.a2a.a2a import _parse_message
+        
+        msg = _parse_message({
+            "messageId": "m1",
+            "role": "user",
+            "parts": [
+                {"text": "Hello"},
+                {"url": "https://example.com/doc.pdf", "mediaType": "application/pdf"},
+                {"data": {"x": 1}}
+            ]
+        })
+        
+        assert len(msg.parts) == 3
+    
+    def test_conversion_url_part_to_openai(self):
+        """FilePart with url should convert to OpenAI image_url format."""
+        from praisonaiagents.ui.a2a.conversion import a2a_to_praisonai_messages
+        from praisonaiagents.ui.a2a.types import Message, FilePart, Role
+        
+        msg = Message(
+            message_id="m1",
+            role=Role.USER,
+            parts=[FilePart(file_uri="https://example.com/img.png", media_type="image/png")],
+        )
+        
+        result = a2a_to_praisonai_messages([msg])
+        assert len(result) == 1
+        content = result[0]["content"]
+        # Should contain image_url reference
+        assert isinstance(content, list)
+        assert any(p.get("type") == "image_url" for p in content)
+    
+    def test_conversion_data_part_to_openai(self):
+        """DataPart should convert to text with JSON content."""
+        from praisonaiagents.ui.a2a.conversion import a2a_to_praisonai_messages
+        from praisonaiagents.ui.a2a.types import Message, DataPart, Role
+        
+        msg = Message(
+            message_id="m1",
+            role=Role.USER,
+            parts=[DataPart(data={"key": "value"})],
+        )
+        
+        result = a2a_to_praisonai_messages([msg])
+        assert len(result) == 1
+        content = result[0]["content"]
+        assert isinstance(content, list)
+        assert any("key" in str(p) for p in content)
+    
+    def test_extract_user_input_with_url_parts(self):
+        """extract_user_input should handle non-text parts gracefully."""
+        from praisonaiagents.ui.a2a.conversion import extract_user_input
+        from praisonaiagents.ui.a2a.types import Message, FilePart, TextPart, Role
+        
+        msg = Message(
+            message_id="m1",
+            role=Role.USER,
+            parts=[
+                TextPart(text="Please analyze"),
+                FilePart(file_uri="https://example.com/img.png"),
+            ],
+        )
+        
+        result = extract_user_input([msg])
+        assert "analyze" in result
