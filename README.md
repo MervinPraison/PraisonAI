@@ -82,44 +82,7 @@ AI agents solving real-world problems across industries:
 
 ---
 
-## 🌟 Why PraisonAI?
-
-| | Feature | How |
-|--|---------|-----|
-| ⚡ | **Fastest framework** — 3.77μs (faster than LangGraph) | [Benchmarks](https://docs.praison.ai/docs/features/performance-benchmarks) |
-| 🦞 | **AgentClaw UI** — chat, agents, memory, knowledge, cron | `pip install "praisonai[claw]"` |
-| 🔌 | **MCP Protocol** — stdio, HTTP, WebSocket, SSE | `tools=MCP("npx ...")` |
-| 🧠 | **Planning Mode** — plan → execute → reason | `planning=True` |
-| 🔍 | **Deep Research** — multi-step autonomous research | [Docs](https://docs.praison.ai/docs/agents/deep-research) |
-| 🤖 | **External Agents** — orchestrate Claude Code, Gemini CLI, Codex | [Docs](https://docs.praison.ai/docs/code/external-agents) |
-| 🔄 | **Agent Handoffs** — seamless conversation passing | `handoff=True` |
-| 🌐 | **100+ LLM Providers** — OpenAI, Anthropic, Gemini, Ollama, Groq... | [Models](https://docs.praison.ai/docs/models) |
-| 🛡️ | **Guardrails** — input/output validation | [Docs](https://docs.praison.ai/docs/concepts/guardrails) |
-| 💾 | **20+ Databases** — one-line persistence | `db=db("postgresql://...")` |
-| 🔎 | **Web Search + Fetch** — native browsing | `web_search=True` |
-| 🪞 | **Self Reflection** — agent reviews its own output | [Docs](https://docs.praison.ai/docs/concepts/reflection) |
-| 🔀 | **Workflow Patterns** — route, parallel, loop, repeat | [Docs](https://docs.praison.ai/docs/concepts/agentflow) |
-| 💡 | **Prompt Caching** — reduce latency + cost | `prompt_caching=True` |
-| 🧠 | **Memory (zero deps)** — works out of the box | `memory=True` |
-| 💾 | **Sessions + Auto-Save** — persistent state across restarts | `auto_save="my-project"` |
-| 💭 | **Thinking Budgets** — control reasoning depth | `thinking_budget=1024` |
-| 📚 | **RAG + Quality-Based RAG** — auto quality scoring retrieval | [Docs](https://docs.praison.ai/docs/concepts/rag) |
-| 🤖 | **Messaging Bots** — Telegram, Discord, Slack, WhatsApp | `praisonai bot telegram` |
-| 📊 | **Model Router** — auto-routes to cheapest capable model | [Docs](https://docs.praison.ai/docs/features/model-router) |
-| 🧊 | **Shadow Git Checkpoints** — auto-rollback on failure | [Docs](https://docs.praison.ai/docs/features/checkpoints) |
-| 📡 | **A2A Protocol** — agent-to-agent interop | [Docs](https://docs.praison.ai/docs/features/a2a) |
-| 📏 | **Context Compaction** — never hit token limits | [Docs](https://docs.praison.ai/docs/features/context-compaction) |
-| 📡 | **Telemetry** — OpenTelemetry traces, spans, metrics | [Docs](https://docs.praison.ai/docs/features/telemetry) |
-| 📜 | **Policy Engine** — declarative agent behavior control | [Docs](https://docs.praison.ai/docs/features/policy-engine) |
-| 🔄 | **Background Tasks** — fire-and-forget agents | [Docs](https://docs.praison.ai/docs/features/background-tasks) |
-| 🔁 | **Doom Loop Detection** — auto-recovery from stuck agents | [Docs](https://docs.praison.ai/docs/features/doom-loop-detection) |
-| 🕸️ | **Graph Memory** — Neo4j-style relationship tracking | [Docs](https://docs.praison.ai/docs/features/graph-memory) |
-| 🏖️ | **Sandbox Execution** — isolated code execution | [Docs](https://docs.praison.ai/docs/features/sandbox) |
-| 🖥️ | **Bot Gateway** — multi-agent routing across channels | [Docs](https://docs.praison.ai/docs/features/bot-gateway) |
-
----
-
-## 🌐 Supported Providers
+##  Supported Providers
 
 PraisonAI supports 100+ LLM providers through seamless integration:
 
@@ -176,6 +139,46 @@ PraisonAI supports 100+ LLM providers through seamless integration:
 | SageMaker | [Example](examples/python/providers/sagemaker/sagemaker_example.py) |
 | Moonshot | [Example](examples/python/providers/moonshot/moonshot_example.py) |
 | vLLM | [Example](examples/python/providers/vllm/vllm_example.py) |
+
+</details>
+
+---
+
+## 🌟 Why PraisonAI?
+
+| | Feature | How |
+|--|---------|-----|
+| 🔌 | **MCP Protocol** — stdio, HTTP, WebSocket, SSE | `tools=MCP("npx ...")` |
+| 🧠 | **Planning Mode** — plan → execute → reason | `planning=True` |
+| 🔍 | **Deep Research** — multi-step autonomous research | [Docs](https://docs.praison.ai/docs/agents/deep-research) |
+| 🤖 | **External Agents** — orchestrate Claude Code, Gemini CLI, Codex | [Docs](https://docs.praison.ai/docs/code/external-agents) |
+| 🔄 | **Agent Handoffs** — seamless conversation passing | `handoff=True` |
+| 🛡️ | **Guardrails** — input/output validation | [Docs](https://docs.praison.ai/docs/concepts/guardrails) |
+|  | **Web Search + Fetch** — native browsing | `web_search=True` |
+| 🪞 | **Self Reflection** — agent reviews its own output | [Docs](https://docs.praison.ai/docs/concepts/reflection) |
+| 🔀 | **Workflow Patterns** — route, parallel, loop, repeat | [Docs](https://docs.praison.ai/docs/concepts/agentflow) |
+| 🧠 | **Memory (zero deps)** — works out of the box | `memory=True` |
+
+<details>
+<summary><strong>View all 25 features</strong></summary>
+
+| | Feature | How |
+|--|---------|-----|
+| 💡 | **Prompt Caching** — reduce latency + cost | `prompt_caching=True` |
+| 💾 | **Sessions + Auto-Save** — persistent state across restarts | `auto_save="my-project"` |
+| 💭 | **Thinking Budgets** — control reasoning depth | `thinking_budget=1024` |
+| 📚 | **RAG + Quality-Based RAG** — auto quality scoring retrieval | [Docs](https://docs.praison.ai/docs/concepts/rag) |
+| 📊 | **Model Router** — auto-routes to cheapest capable model | [Docs](https://docs.praison.ai/docs/features/model-router) |
+| 🧊 | **Shadow Git Checkpoints** — auto-rollback on failure | [Docs](https://docs.praison.ai/docs/features/checkpoints) |
+| 📡 | **A2A Protocol** — agent-to-agent interop | [Docs](https://docs.praison.ai/docs/features/a2a) |
+| 📏 | **Context Compaction** — never hit token limits | [Docs](https://docs.praison.ai/docs/features/context-compaction) |
+| 📡 | **Telemetry** — OpenTelemetry traces, spans, metrics | [Docs](https://docs.praison.ai/docs/features/telemetry) |
+| 📜 | **Policy Engine** — declarative agent behavior control | [Docs](https://docs.praison.ai/docs/features/policy-engine) |
+| 🔄 | **Background Tasks** — fire-and-forget agents | [Docs](https://docs.praison.ai/docs/features/background-tasks) |
+| 🔁 | **Doom Loop Detection** — auto-recovery from stuck agents | [Docs](https://docs.praison.ai/docs/features/doom-loop-detection) |
+| 🕸️ | **Graph Memory** — Neo4j-style relationship tracking | [Docs](https://docs.praison.ai/docs/features/graph-memory) |
+| 🏖️ | **Sandbox Execution** — isolated code execution | [Docs](https://docs.praison.ai/docs/features/sandbox) |
+| 🖥️ | **Bot Gateway** — multi-agent routing across channels | [Docs](https://docs.praison.ai/docs/features/bot-gateway) |
 
 </details>
 
