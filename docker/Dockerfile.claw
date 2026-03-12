@@ -56,6 +56,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -f http://localhost:8082/health || exit 1
 
 # ── Run ──────────────────────────────────────────────────────────────────────
-# Default: AIUI dashboard. Override CMD for bot/gateway/serve modes.
+# Default: AIUI dashboard via praisonai claw. Override CMD for bot/gateway/serve.
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
-CMD ["aiui", "run", "--host", "0.0.0.0", "--port", "8082"]
+CMD ["praisonai", "claw", "--port", "8082"]
