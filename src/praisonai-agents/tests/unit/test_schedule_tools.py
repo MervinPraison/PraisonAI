@@ -410,3 +410,93 @@ class TestToolMappings:
         assert callable(schedule_list)
         schedule_remove = getattr(tools, 'schedule_remove')
         assert callable(schedule_remove)
+
+
+# ─── 9. ScheduleLoop Tests ───────────────────────────────────────────────────
+
+class TestScheduleLoop:
+    """Test ScheduleLoop tick loop."""
+
+    def test_schedule_loop_fires_due_jobs(self, tmp_path):
+        """ScheduleLoop calls on_trigger for each due job."""
+        from praisonaiagents.scheduler.loop import ScheduleLoop
+        from praisonaiagents.scheduler.store import FileScheduleStore
+        from praisonaiagents.scheduler.models import ScheduleJob, Schedule
+        import threading
+
+        store = FileScheduleStore(store_dir=str(tmp_path))
+        job = ScheduleJob(
+            name="fire-me",
+            schedule=Schedule(kind="every", every_seconds=1),
+            message="hello",
+        )
+        job.last_run_at = time.time() - 10  # due
+        store.add(job)
+
+        triggered = []
+        event = threading.Event()
+
+        def on_trigger(j):
+            triggered.append(j.name)
+            event.set()
+
+        loop = ScheduleLoop(on_trigger=on_trigger, store=store, tick_seconds=0.1)
+        loop.start()
+        assert loop.is_running
+
+        event.wait(timeout=3)
+        loop.stop()
+
+        assert "fire-me" in triggered
+
+    def test_schedule_loop_updates_last_run(self, tmp_path):
+        """After triggering, last_run_at is updated so job doesn't re-fire."""
+        from praisonaiagents.scheduler.loop import ScheduleLoop
+        from praisonaiagents.scheduler.store import FileScheduleStore
+        from praisonaiagents.scheduler.models import ScheduleJob, Schedule
+        import threading
+
+        store = FileScheduleStore(store_dir=str(tmp_path))
+        old_time = time.time() - 100
+        job = ScheduleJob(
+            name="update-me",
+            schedule=Schedule(kind="every", every_seconds=1),
+            message="test",
+        )
+        job.last_run_at = old_time
+        store.add(job)
+
+        event = threading.Event()
+        def on_trigger(j):
+            event.set()
+
+        loop = ScheduleLoop(on_trigger=on_trigger, store=store, tick_seconds=0.1)
+        loop.start()
+        event.wait(timeout=3)
+        loop.stop()
+
+        updated = store.get(job.id)
+        assert updated.last_run_at > old_time
+
+    def test_schedule_loop_start_stop(self, tmp_path):
+        """ScheduleLoop starts and stops cleanly."""
+        from praisonaiagents.scheduler.loop import ScheduleLoop
+        from praisonaiagents.scheduler.store import FileScheduleStore
+
+        store = FileScheduleStore(store_dir=str(tmp_path))
+        loop = ScheduleLoop(on_trigger=lambda j: None, store=store, tick_seconds=0.1)
+
+        assert not loop.is_running
+        loop.start()
+        assert loop.is_running
+        # start() when already running is a no-op
+        loop.start()
+        assert loop.is_running
+        loop.stop()
+        assert not loop.is_running
+
+    def test_schedule_loop_lazy_import(self):
+        """ScheduleLoop can be imported from scheduler package."""
+        from praisonaiagents.scheduler import ScheduleLoop
+        assert ScheduleLoop is not None
+

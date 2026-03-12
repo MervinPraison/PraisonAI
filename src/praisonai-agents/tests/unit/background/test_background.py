@@ -397,5 +397,57 @@ class TestBackgroundRunner:
         assert all(t.status == TaskStatus.CANCELLED for t in runner.tasks)
 
 
+# =============================================================================
+# BackgroundRunner Sync-Wrapper Tests
+# =============================================================================
+
+class TestBackgroundRunnerSync:
+    """Tests for submit_sync / submit_agent_sync methods."""
+
+    def test_submit_sync_function(self):
+        """submit_sync runs a plain function and returns a trackable task."""
+        runner = BackgroundRunner()
+
+        def double(x):
+            return x * 2
+
+        task = runner.submit_sync(func=double, args=(7,), name="sync-double")
+        assert task is not None
+        assert task.name == "sync-double"
+
+        # Wait for the result (polling).
+        import time
+        for _ in range(50):
+            if task.is_completed:
+                break
+            time.sleep(0.1)
+
+        assert task.is_successful
+        assert task.result == 14
+
+    def test_submit_agent_sync(self):
+        """submit_agent_sync dispatches a mock agent start()."""
+        runner = BackgroundRunner()
+
+        class FakeAgent:
+            name = "faker"
+            def start(self, prompt):
+                return f"echo: {prompt}"
+
+        agent = FakeAgent()
+        task = runner.submit_agent_sync(agent, "hello", name="sync-agent")
+        assert task is not None
+
+        import time
+        for _ in range(50):
+            if task.is_completed:
+                break
+            time.sleep(0.1)
+
+        assert task.is_successful
+        assert task.result == "echo: hello"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+

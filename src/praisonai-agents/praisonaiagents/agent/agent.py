@@ -4521,6 +4521,7 @@ Your Goal: {self.goal}"""
             session_id=getattr(self, '_session_id', None) or 'default',
             last_user_message=self.chat_history[-1].get('content') if self.chat_history else None,
             memory=getattr(self, '_memory_instance', None),
+            learn_manager=getattr(getattr(self, '_memory_instance', None), 'learn', None),
             metadata={'agent_name': self.name}
         )
         

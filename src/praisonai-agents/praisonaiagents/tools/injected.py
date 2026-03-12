@@ -60,6 +60,7 @@ class AgentState:
     last_user_message: Optional[str] = None
     last_agent_message: Optional[str] = None
     memory: Optional[Any] = None
+    learn_manager: Optional[Any] = None
     previous_tool_results: List[Any] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
     
