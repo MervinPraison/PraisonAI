@@ -559,7 +559,7 @@ agent.chat("Hello!")  # Auto-persists messages, runs, traces
 
 > 📖 [Full persistence docs](https://docs.praison.ai/docs/databases/overview) — PostgreSQL, MySQL, SQLite, MongoDB, Redis, and 20+ more
 
-### 6. PraisonAI Claw 🦞
+### 6. PraisonAI Claw 🦞 (Dashboard UI)
 
 Connect your AI agents to **Telegram, Discord, Slack, WhatsApp** and more — all from a single command.
 
