@@ -802,6 +802,7 @@ Methods:
 * <code title="cli">praisonai call call-main <a href="./src/praisonai/praisonai/cli/commands/call.py">--help</a></code>
 * <code title="cli">praisonai chat <a href="./src/praisonai/praisonai/cli/main.py">--help</a></code>
 * <code title="cli">praisonai chat chat-main <a href="./src/praisonai/praisonai/cli/commands/chat.py">--help</a></code>
+* <code title="cli">praisonai claw claw <a href="./src/praisonai/praisonai/cli/commands/claw.py">--help</a></code>
 * <code title="cli">praisonai code <a href="./src/praisonai/praisonai/cli/main.py">--help</a></code>
 * <code title="cli">praisonai code code-main <a href="./src/praisonai/praisonai/cli/commands/code.py">--help</a></code>
 * <code title="cli">praisonai commit commit-main <a href="./src/praisonai/praisonai/cli/commands/commit.py">--help</a></code>
