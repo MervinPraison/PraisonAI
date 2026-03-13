@@ -635,8 +635,13 @@ class TestNoToolCallTermination:
     @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
     def test_no_tool_calls_completes_after_consecutive_turns(self, mock_stage, mock_chat):
         """When model makes no tool calls for 2+ consecutive turns, should complete."""
-        # Response without completion keywords, but no tool calls made
-        mock_chat.return_value = "I have analyzed the situation and here is my analysis of the data."
+        # Use varied responses to avoid triggering doom loop detection.
+        # Each response is unique so doom loop fingerprints differ.
+        call_count = [0]
+        def side_effect(prompt):
+            call_count[0] += 1
+            return f"Analysis iteration {call_count[0]}: examining the data from angle {call_count[0]}."
+        mock_chat.side_effect = side_effect
         agent = self._make_agent()
         # Don't set any tool count — simulates no tools being called
         result = agent.run_autonomous("Analyze something")

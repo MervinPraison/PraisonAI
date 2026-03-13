@@ -2022,6 +2022,7 @@ Summary:"""
             self._redo_stack = []
             self._autonomy_turn_tool_count = 0
             self._consecutive_no_tool_turns = 0
+            self._doom_recovery_active = False
             return
         
         self.autonomy_enabled = True
@@ -2051,6 +2052,7 @@ Summary:"""
             self._redo_stack = []
             self._autonomy_turn_tool_count = 0
             self._consecutive_no_tool_turns = 0
+            self._doom_recovery_active = False
             return
         
         # Preserve ALL AutonomyConfig fields in the dict (G14 fix: no lossy extraction)
@@ -2079,6 +2081,7 @@ Summary:"""
         
         self._autonomy_trigger = AutonomyTrigger()
         self._doom_loop_tracker = DoomLoopTracker(threshold=config.doom_loop_threshold)
+        self._doom_recovery_active = False
         
         # Initialize FileSnapshot for filesystem tracking (lazy import)
         self._file_snapshot = None
@@ -2500,12 +2503,14 @@ Summary:"""
                         if self._doom_loop_tracker is not None:
                             self._doom_loop_tracker.clear_actions()
                         self._consecutive_no_tool_turns = 0
+                        self._doom_recovery_active = True
                         continue
                     elif recovery == "escalate_model":
                         prompt = prompt + "\n\n[System: You are stuck in a loop. CRITICAL: Check that all tool argument names exactly match the function signature. Do NOT add '=' to argument names. Use only the documented parameter names.]"
                         if self._doom_loop_tracker is not None:
                             self._doom_loop_tracker.clear_actions()
                         self._consecutive_no_tool_turns = 0
+                        self._doom_recovery_active = True
                         continue
                     elif recovery == "request_help":
                         return AutonomyResult(
@@ -2665,10 +2670,11 @@ Summary:"""
                 # No-tool-call termination: if model makes no tool calls for 2+
                 # consecutive turns, treat as completion signal.
                 # Skip first iteration (model may be planning).
-                # Only applies to agents WITH tools — for tool-less agents,
-                # no_tool_calls is meaningless and would mask doom loop detection.
-                has_tools = bool(getattr(self, 'tools', None))
-                if self._autonomy_turn_tool_count == 0 and iterations > 1 and has_tools:
+                # Suppressed when doom recovery is active — once a doom loop
+                # is detected, no_tool_calls (a success exit) should not fire;
+                # the doom loop system manages termination instead.
+                if (self._autonomy_turn_tool_count == 0 and iterations > 1
+                        and not self._doom_recovery_active):
                     self._consecutive_no_tool_turns += 1
                     if self._consecutive_no_tool_turns >= 2:
                         execute_sync_callback('autonomy_complete',
@@ -2887,12 +2893,14 @@ Summary:"""
                         if self._doom_loop_tracker is not None:
                             self._doom_loop_tracker.clear_actions()
                         self._consecutive_no_tool_turns = 0
+                        self._doom_recovery_active = True
                         continue
                     elif recovery == "escalate_model":
                         prompt = prompt + "\n\n[System: You are stuck in a loop. CRITICAL: Check that all tool argument names exactly match the function signature. Do NOT add '=' to argument names. Use only the documented parameter names.]"
                         if self._doom_loop_tracker is not None:
                             self._doom_loop_tracker.clear_actions()
                         self._consecutive_no_tool_turns = 0
+                        self._doom_recovery_active = True
                         continue
                     elif recovery == "request_help":
                         return AutonomyResult(
@@ -3018,10 +3026,11 @@ Summary:"""
                 
                 # No-tool-call termination: if model makes no tool calls for 2+
                 # consecutive turns, treat as completion signal.
-                # Only applies to agents WITH tools — for tool-less agents,
-                # no_tool_calls is meaningless and would mask doom loop detection.
-                has_tools = bool(getattr(self, 'tools', None))
-                if self._autonomy_turn_tool_count == 0 and iterations > 1 and has_tools:
+                # Suppressed when doom recovery is active — once a doom loop
+                # is detected, no_tool_calls (a success exit) should not fire;
+                # the doom loop system manages termination instead.
+                if (self._autonomy_turn_tool_count == 0 and iterations > 1
+                        and not self._doom_recovery_active):
                     self._consecutive_no_tool_turns += 1
                     if self._consecutive_no_tool_turns >= 2:
                         return AutonomyResult(
