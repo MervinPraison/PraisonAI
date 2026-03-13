@@ -4469,7 +4469,33 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     instructions += "\n" + content
             else:
                 # user / assistant / tool messages become input items
-                input_items.append(msg)
+                # Special handling for Chat Completions→Responses API format:
+                if role == "assistant" and msg.get("tool_calls"):
+                    # Assistant message with tool_calls → emit text (if any)
+                    # then emit function_call items for each tool call
+                    content = msg.get("content")
+                    if content and content.strip():
+                        input_items.append({"role": "assistant", "content": content})
+                    for tc in msg["tool_calls"]:
+                        fn = tc.get("function", tc) if isinstance(tc, dict) else tc
+                        fn_name = fn.get("name", "") if isinstance(fn, dict) else getattr(fn, "name", "")
+                        fn_args = fn.get("arguments", "{}") if isinstance(fn, dict) else getattr(fn, "arguments", "{}")
+                        tc_id = tc.get("id", "") if isinstance(tc, dict) else getattr(tc, "id", "")
+                        input_items.append({
+                            "type": "function_call",
+                            "call_id": tc_id,
+                            "name": fn_name,
+                            "arguments": fn_args if isinstance(fn_args, str) else json.dumps(fn_args),
+                        })
+                elif role == "tool":
+                    # Tool result → function_call_output
+                    input_items.append({
+                        "type": "function_call_output",
+                        "call_id": msg.get("tool_call_id", ""),
+                        "output": msg.get("content", ""),
+                    })
+                else:
+                    input_items.append(msg)
 
         if instructions:
             params["instructions"] = instructions

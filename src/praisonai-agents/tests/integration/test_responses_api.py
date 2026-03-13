@@ -90,14 +90,16 @@ class TestResponsesAPIParamBuilder:
         assert params["input"][0]["role"] == "user"
         assert params["temperature"] == 0.7
 
-    def test_tools_pass_through(self):
+    def test_tools_transformed_to_responses_format(self):
         from praisonaiagents.llm.llm import LLM
 
         llm = LLM(model="gpt-4o")
-        tools = [{"type": "function", "function": {"name": "add", "parameters": {}}}]
+        # Chat Completions format: nested under "function"
+        tools = [{"type": "function", "function": {"name": "add", "description": "Add nums", "parameters": {}}}]
         params = llm._build_responses_params(messages=[{"role": "user", "content": "hi"}], tools=tools)
 
-        assert params["tools"] == tools
+        # Should be transformed to Responses API format: flattened
+        assert params["tools"] == [{"type": "function", "name": "add", "description": "Add nums", "parameters": {}}]
         assert params["tool_choice"] == "auto"
 
 
