@@ -1685,6 +1685,167 @@ Now provide your final answer using this result. Summarize the information natur
                     # Initial callback is in agent._chat_completion, so this triggers for all loop iterations
                     _get_display_functions()['execute_sync_callback']('llm_start', model=self.model, agent_name=agent_name)
 
+                    # ── Responses API path ──────────────────────────────────
+                    # OpenAI models use the Responses API which returns text
+                    # and tool calls as separate output items — no content:null.
+                    if self._supports_responses_api():
+                        responses_params = self._build_responses_params(
+                            messages=messages,
+                            tools=formatted_tools,
+                            temperature=temperature,
+                            output_json=output_json,
+                            output_pydantic=output_pydantic,
+                            **{k: v for k, v in kwargs.items() if k != 'reasoning_steps'},
+                        )
+
+                        if stream:
+                            response_text, tool_calls = self._stream_responses_api(
+                                responses_params,
+                                verbose=verbose,
+                                stream_callback=stream_callback,
+                                emit_events=emit_events,
+                                current_time=current_time,
+                            )
+                        else:
+                            resp = self._call_responses_api(**responses_params)
+                            response_text, tool_calls, _reasoning = self._extract_from_responses_output(resp)
+
+                            # Track token usage
+                            if self.metrics and hasattr(resp, 'usage') and resp.usage:
+                                usage = resp.usage
+                                tokens_in = getattr(usage, 'input_tokens', 0) or 0
+                                tokens_out = getattr(usage, 'output_tokens', 0) or 0
+                                # Emit llm_end with metrics
+                                llm_latency_ms = (time.time() - current_time) * 1000
+                                _get_display_functions()['execute_sync_callback'](
+                                    'llm_end', model=self.model,
+                                    tokens_in=tokens_in, tokens_out=tokens_out,
+                                    cost=None, latency_ms=llm_latency_ms,
+                                )
+
+                            # Emit reasoning if present
+                            if _emit and _reasoning:
+                                stream_callback(StreamEvent(
+                                    type=StreamEventType.DELTA_TEXT,
+                                    timestamp=time.perf_counter(),
+                                    content=_reasoning, is_reasoning=True,
+                                ))
+                            # Emit text content as stream event
+                            if _emit and response_text:
+                                stream_callback(StreamEvent(
+                                    type=StreamEventType.DELTA_TEXT,
+                                    timestamp=time.perf_counter(),
+                                    content=response_text, is_reasoning=False,
+                                ))
+
+                        # Build a Chat-Completions-compatible final_response
+                        # so all downstream code (display, callbacks) works unchanged
+                        final_response = {
+                            "choices": [{
+                                "message": {
+                                    "content": response_text,
+                                    "tool_calls": tool_calls,
+                                }
+                            }]
+                        }
+
+                        # Display / callback handling (same as Chat Completions path)
+                        if verbose and not interaction_displayed:
+                            _get_display_functions()['display_interaction'](
+                                original_prompt, response_text,
+                                markdown=markdown,
+                                generation_time=time.time() - current_time,
+                                console=self.console,
+                                agent_name=agent_name, agent_role=agent_role,
+                                agent_tools=agent_tools, task_name=task_name,
+                                task_description=task_description, task_id=task_id,
+                            )
+                            interaction_displayed = True
+                            callback_executed = True
+                        elif not callback_executed:
+                            _get_display_functions()['execute_sync_callback'](
+                                'interaction',
+                                message=original_prompt, response=response_text,
+                                markdown=markdown,
+                                generation_time=time.time() - current_time,
+                                agent_name=agent_name, agent_role=agent_role,
+                                agent_tools=agent_tools, task_name=task_name,
+                                task_description=task_description, task_id=task_id,
+                            )
+                            callback_executed = True
+
+                        # Emit llm_content for intermediate narrative display
+                        if response_text and response_text.strip():
+                            _get_display_functions()['execute_sync_callback'](
+                                'llm_content',
+                                content=response_text.strip(),
+                                agent_name=agent_name,
+                            )
+
+                        # ── Handle tool calls ───────────────────────────────
+                        if tool_calls and execute_tool_fn:
+                            serializable_tool_calls = self._serialize_tool_calls(tool_calls)
+                            messages.append({
+                                "role": "assistant",
+                                "content": response_text,
+                                "tool_calls": serializable_tool_calls,
+                            })
+
+                            tool_results = []
+                            for tool_call in tool_calls:
+                                function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call)
+
+                                logging.debug(f"[RESPONSES_API] Executing tool {function_name} with args: {arguments}")
+                                tool_result = execute_tool_fn(function_name, arguments, tool_call_id=tool_call_id)
+                                tool_results.append(tool_result)
+                                accumulated_tool_results.append(tool_result)
+
+                                if verbose:
+                                    display_message = f"Agent {agent_name} called function '{function_name}' with arguments: {arguments}\n"
+                                    display_message += f"Function returned: {tool_result}" if tool_result else "Function returned no output"
+                                    _get_display_functions()['display_tool_call'](display_message, console=self.console)
+
+                                result_str = json.dumps(tool_result) if tool_result else "empty"
+                                _get_display_functions()['execute_sync_callback'](
+                                    'tool_call',
+                                    message=f"Calling function: {function_name}",
+                                    tool_name=function_name,
+                                    tool_input=arguments,
+                                    tool_output=result_str[:200] if result_str else None,
+                                )
+
+                                # Append tool result as standard tool message
+                                if tool_result is None:
+                                    content = "Function returned an empty output"
+                                elif isinstance(tool_result, dict) and 'error' in tool_result:
+                                    content = f"Error: {tool_result.get('error', 'Unknown error')}. Please inform the user."
+                                elif isinstance(tool_result, list) and tool_result and isinstance(tool_result[0], dict) and 'error' in tool_result[0]:
+                                    content = f"Error: {tool_result[0].get('error', 'Unknown error')}. Please inform the user."
+                                else:
+                                    content = json.dumps(tool_result)
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call_id,
+                                    "content": content,
+                                })
+
+                            # Safety: break after 5 iterations
+                            if iteration_count >= 5:
+                                final_response_text = response_text.strip() if response_text else "Task completed."
+                                break
+
+                            iteration_count += 1
+                            response_text = ""
+                            continue
+                        else:
+                            # No tool calls — we have a final answer
+                            if iteration_count > 0:
+                                final_response_text = response_text.strip() if response_text else ""
+                            else:
+                                final_response_text = response_text.strip() if response_text else ""
+                            break
+
+                    # ── Chat Completions path (unchanged) ───────────────────
                     # If reasoning_steps is True, do a single non-streaming call
                     if reasoning_steps:
                         resp = litellm.completion(
@@ -3257,6 +3418,104 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 reasoning_content = None
                 tool_calls = []
                 
+                # ── Responses API path (async) ──────────────────────────
+                if self._supports_responses_api():
+                    responses_params = self._build_responses_params(
+                        messages=messages,
+                        tools=formatted_tools,
+                        temperature=temperature,
+                        output_json=output_json,
+                        output_pydantic=output_pydantic,
+                        **{k: v for k, v in kwargs.items() if k != 'reasoning_steps'},
+                    )
+                    current_time = time.time()
+
+                    if stream:
+                        response_text, tool_calls = await self._stream_responses_api_async(
+                            responses_params,
+                            stream_callback=kwargs.get('stream_callback'),
+                            emit_events=kwargs.get('emit_events', False),
+                        )
+                    else:
+                        resp = await self._call_responses_api_async(**responses_params)
+                        response_text, tool_calls, _reasoning = self._extract_from_responses_output(resp)
+
+                    # Build Chat-Completions-compatible final_response
+                    final_response = {
+                        "choices": [{
+                            "message": {
+                                "content": response_text,
+                                "tool_calls": tool_calls,
+                            }
+                        }]
+                    }
+
+                    # Display / callback handling
+                    if verbose and not interaction_displayed:
+                        _get_display_functions()['display_interaction'](
+                            original_prompt, response_text,
+                            markdown=markdown,
+                            generation_time=time.time() - current_time,
+                            console=self.console,
+                            agent_name=agent_name, agent_role=agent_role,
+                            agent_tools=agent_tools, task_name=task_name,
+                            task_description=task_description, task_id=task_id,
+                        )
+                        interaction_displayed = True
+                        callback_executed = True
+
+                    # Emit llm_content for narrative display
+                    if response_text and response_text.strip():
+                        _get_display_functions()['execute_sync_callback'](
+                            'llm_content',
+                            content=response_text.strip(),
+                            agent_name=agent_name,
+                        )
+
+                    # ── Handle tool calls ────────────────────────────
+                    if tool_calls and execute_tool_fn:
+                        serializable_tool_calls = self._serialize_tool_calls(tool_calls)
+                        messages.append({
+                            "role": "assistant",
+                            "content": response_text,
+                            "tool_calls": serializable_tool_calls,
+                        })
+
+                        for tool_call in tool_calls:
+                            function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call)
+                            logging.debug(f"[RESPONSES_API_ASYNC] Executing tool {function_name}")
+                            tool_result = execute_tool_fn(function_name, arguments, tool_call_id=tool_call_id)
+                            accumulated_tool_results.append(tool_result)
+
+                            if verbose:
+                                display_message = f"Agent {agent_name} called function '{function_name}' with arguments: {arguments}\n"
+                                display_message += f"Function returned: {tool_result}" if tool_result else "Function returned no output"
+                                _get_display_functions()['display_tool_call'](display_message, console=self.console)
+
+                            # Append tool result
+                            if tool_result is None:
+                                content = "Function returned an empty output"
+                            elif isinstance(tool_result, dict) and 'error' in tool_result:
+                                content = f"Error: {tool_result.get('error', 'Unknown error')}. Please inform the user."
+                            else:
+                                content = json.dumps(tool_result)
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "content": content,
+                            })
+
+                        if iteration_count >= 5:
+                            final_response_text = response_text.strip() if response_text else "Task completed."
+                            break
+
+                        iteration_count += 1
+                        continue
+                    else:
+                        final_response_text = response_text.strip() if response_text else ""
+                        break
+
+                # ── Chat Completions path (unchanged) ───────────────
                 if reasoning_steps and iteration_count == 0:
                     # Non-streaming call to capture reasoning
                     resp = await litellm.acompletion(
@@ -4128,6 +4387,475 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 logging.debug(f"Claude memory tool enabled with beta header: {beta_header}")
         
         return params
+
+    # ── Responses API support ───────────────────────────────────────────
+    # These methods add a Responses API call path alongside the existing
+    # Chat Completions path.  Model detection gates which path is used.
+
+    def _supports_responses_api(self) -> bool:
+        """
+        Check if the current model supports the OpenAI Responses API.
+
+        Returns True for OpenAI models that support the Responses API
+        (gpt-4o, gpt-4-turbo, o1, o3, chatgpt-4o, etc.).
+        Returns False for Anthropic, Gemini, Ollama, local, and all other models.
+        """
+        if not self.model:
+            return False
+        model_lower = self.model.lower()
+
+        # Exclude non-OpenAI providers that happen to use similar model names
+        if self._is_ollama_provider():
+            return False
+        if self._is_gemini_model():
+            return False
+        if self._is_anthropic_model():
+            return False
+
+        # Explicit prefix check for OpenAI & Azure OpenAI
+        # Note: Azure models often start with the deployment name, but LiteLLM
+        # normalises them to "azure/<model>" – the prefixes below handle both.
+        _openai_prefixes = (
+            "gpt-4o", "gpt-4-turbo", "gpt-4.1", "gpt-4.5",
+            "o1", "o3", "o4",
+            "chatgpt-4o",
+            "azure/gpt-4o", "azure/gpt-4-turbo", "azure/gpt-4.1",
+            "azure/o1", "azure/o3", "azure/o4",
+        )
+        # Match on prefix (gpt-4o, gpt-4o-mini, gpt-4o-2024-08-06, etc.)
+        for prefix in _openai_prefixes:
+            if model_lower.startswith(prefix):
+                return True
+
+        # Any model routed through openai/ prefix
+        if model_lower.startswith("openai/"):
+            remainder = model_lower[len("openai/"):]
+            for prefix in _openai_prefixes:
+                if remainder.startswith(prefix):
+                    return True
+
+        return False
+
+    def _build_responses_params(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict]] = None,
+        temperature: Optional[float] = None,
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """
+        Build parameters for ``litellm.responses()`` from the Chat Completions-
+        style message list that PraisonAI already constructs.
+
+        Mapping:
+          - system message  → ``instructions``
+          - remaining messages  → ``input`` (list of role/content items)
+          - tools → ``tools`` (Responses API uses same function schema)
+          - temperature, max_tokens, etc. → direct pass-through
+        """
+        params: Dict[str, Any] = {"model": self.model}
+
+        # ── Extract system instructions ─────────────────────────────────
+        instructions = None
+        input_items: List[Dict[str, Any]] = []
+        for msg in messages:
+            role = msg.get("role", "")
+            if role in ("system", "developer"):
+                # Accumulate system / developer messages as instructions
+                content = msg.get("content", "")
+                if instructions is None:
+                    instructions = content
+                else:
+                    instructions += "\n" + content
+            else:
+                # user / assistant / tool messages become input items
+                input_items.append(msg)
+
+        if instructions:
+            params["instructions"] = instructions
+        params["input"] = input_items
+
+        # ── Tools ───────────────────────────────────────────────────────
+        if tools:
+            # Responses API tool format differs from Chat Completions:
+            #   Chat Completions: {"type": "function", "function": {"name": ..., "parameters": ...}}
+            #   Responses API:    {"type": "function", "name": ..., "parameters": ...}
+            # Transform Chat Completions format → Responses API format
+            responses_tools = []
+            for tool in tools:
+                if isinstance(tool, dict) and "function" in tool:
+                    fn = tool["function"]
+                    responses_tool = {
+                        "type": "function",
+                        "name": fn.get("name", ""),
+                    }
+                    if "description" in fn:
+                        responses_tool["description"] = fn["description"]
+                    if "parameters" in fn:
+                        responses_tool["parameters"] = fn["parameters"]
+                    if fn.get("strict") is not None:
+                        responses_tool["strict"] = fn["strict"]
+                    responses_tools.append(responses_tool)
+                else:
+                    # Already in Responses API format or unknown — pass through
+                    responses_tools.append(tool)
+            params["tools"] = responses_tools
+            if "tool_choice" not in kwargs:
+                params["tool_choice"] = "auto"
+
+        # ── Scalar params ───────────────────────────────────────────────
+        if temperature is not None:
+            params["temperature"] = temperature
+        if self.max_tokens:
+            params["max_output_tokens"] = self.max_tokens
+        if self.top_p:
+            params["top_p"] = self.top_p
+        if self.base_url:
+            params["base_url"] = self.base_url
+        if self.api_key:
+            params["api_key"] = self.api_key
+        if self.timeout:
+            params["timeout"] = self.timeout
+
+        # ── Structured output ───────────────────────────────────────────
+        output_json = kwargs.pop("output_json", None)
+        output_pydantic = kwargs.pop("output_pydantic", None)
+        schema_model = output_json or output_pydantic
+        if schema_model:
+            from .model_capabilities import supports_structured_outputs
+            if supports_structured_outputs(self.model):
+                if hasattr(schema_model, 'model_json_schema'):
+                    schema = schema_model.model_json_schema()
+                    params['text'] = {
+                        "format": {
+                            "type": "json_schema",
+                            "name": getattr(schema_model, '__name__', 'response'),
+                            "schema": schema,
+                            "strict": True,
+                        }
+                    }
+
+        # ── Pass through remaining kwargs (stream, etc.) ────────────────
+        # Filter out internal PraisonAI params that are not Responses API params
+        _internal = {
+            'output_json', 'output_pydantic',
+            'reflection', 'self_reflect', 'max_reflect', 'min_reflect', 'reflect_llm',
+            'verbose', 'markdown',
+            'agent_name', 'agent_role', 'agent_tools',
+            'task_name', 'task_description', 'task_id',
+            'execute_tool_fn', 'stream_callback', 'emit_events',
+            'console', 'reasoning_steps',
+        }
+        for k, v in kwargs.items():
+            if k not in _internal and v is not None:
+                params[k] = v
+
+        return params
+
+    def _call_responses_api(self, **params) -> Any:
+        """
+        Call ``litellm.responses()`` synchronously with retry support.
+        Returns a ``ResponsesAPIResponse`` object.
+        """
+        import litellm
+        return self._call_with_retry(litellm.responses, **params)
+
+    async def _call_responses_api_async(self, **params) -> Any:
+        """
+        Call ``litellm.aresponses()`` asynchronously with retry support.
+        Returns a ``ResponsesAPIResponse`` object.
+        """
+        import litellm
+        return await self._call_with_retry_async(litellm.aresponses, **params)
+
+    def _extract_from_responses_output(self, response) -> tuple:
+        """
+        Parse a ``ResponsesAPIResponse`` into the same (text, tool_calls,
+        reasoning_content) tuple that the Chat Completions path produces.
+
+        The Responses API returns an ``output`` list where:
+          - items with type="message" contain text in content[].text
+          - items with type="function_call" contain tool call info
+        Unlike Chat Completions, text and tool calls are *always* separate
+        items, so ``content`` is never null when text is present.
+        """
+        response_text = ""
+        tool_calls: List[Dict[str, Any]] = []
+        reasoning_content = None
+
+        output_items = getattr(response, 'output', None) or []
+        for item in output_items:
+            # Handle both dict and object access
+            if isinstance(item, dict):
+                item_type = item.get("type", "")
+            else:
+                item_type = getattr(item, "type", "")
+
+            if item_type == "message":
+                # Extract text from content blocks
+                if isinstance(item, dict):
+                    content_list = item.get("content", [])
+                else:
+                    content_list = getattr(item, "content", [])
+                for content_block in content_list:
+                    if isinstance(content_block, dict):
+                        block_type = content_block.get("type", "")
+                        block_text = content_block.get("text", "") or ""
+                    else:
+                        block_type = getattr(content_block, "type", "")
+                        block_text = getattr(content_block, "text", "") or ""
+
+                    if block_type == "output_text":
+                        response_text += block_text
+                    elif block_type == "reasoning":
+                        reasoning_content = (reasoning_content or "") + block_text
+
+            elif item_type == "function_call":
+                # Extract tool call information
+                if isinstance(item, dict):
+                    call_id = item.get("call_id", item.get("id", f"tool_{len(tool_calls)}"))
+                    fn_name = item.get("name", "")
+                    fn_args = item.get("arguments", "{}")
+                else:
+                    call_id = getattr(item, "call_id", None) or getattr(item, "id", f"tool_{len(tool_calls)}")
+                    fn_name = getattr(item, "name", "")
+                    fn_args = getattr(item, "arguments", "{}")
+
+                tool_calls.append({
+                    "id": call_id,
+                    "type": "function",
+                    "function": {
+                        "name": fn_name,
+                        "arguments": fn_args if isinstance(fn_args, str) else json.dumps(fn_args),
+                    }
+                })
+
+            elif item_type == "reasoning":
+                # Some models return top-level reasoning items
+                if isinstance(item, dict):
+                    reasoning_text = item.get("summary", "") or item.get("text", "")
+                else:
+                    reasoning_text = getattr(item, "summary", "") or getattr(item, "text", "")
+                if reasoning_text:
+                    reasoning_content = (reasoning_content or "") + str(reasoning_text)
+
+        return response_text, tool_calls if tool_calls else None, reasoning_content
+
+    def _stream_responses_api(
+        self,
+        params: Dict[str, Any],
+        verbose: bool = True,
+        stream_callback: Optional[Callable] = None,
+        emit_events: bool = False,
+        current_time: Optional[float] = None,
+    ) -> tuple:
+        """
+        Stream a Responses API call, accumulating text and tool calls.
+
+        Returns the same (response_text, tool_calls) tuple as the Chat
+        Completions streaming path.  Emits StreamEvents when configured.
+        """
+        import litellm
+
+        params["stream"] = True
+        response_text = ""
+        # tool_calls accumulator: {output_index: {"id":..., "name":..., "arguments":...}}
+        _pending_tools: Dict[int, Dict[str, Any]] = {}
+        _emit = emit_events and stream_callback is not None
+
+        if _emit:
+            from ..streaming.events import StreamEvent, StreamEventType
+
+        for event in litellm.responses(**params):
+            # Access event type — handle both object and dict
+            if isinstance(event, dict):
+                evt_type = event.get("type", "")
+            else:
+                evt_type = getattr(event, "type", "")
+
+            # ── Text delta ──────────────────────────────────────────
+            if evt_type == "response.output_text.delta":
+                delta_text = (event.get("delta", "") if isinstance(event, dict)
+                              else getattr(event, "delta", ""))
+                response_text += delta_text
+                if _emit and delta_text:
+                    stream_callback(StreamEvent(
+                        type=StreamEventType.DELTA_TEXT,
+                        timestamp=time.perf_counter(),
+                        content=delta_text,
+                        is_reasoning=False,
+                    ))
+
+            # ── Reasoning delta ─────────────────────────────────────
+            elif evt_type == "response.reasoning_summary_text.delta":
+                delta_text = (event.get("delta", "") if isinstance(event, dict)
+                              else getattr(event, "delta", ""))
+                if _emit and delta_text:
+                    stream_callback(StreamEvent(
+                        type=StreamEventType.DELTA_TEXT,
+                        timestamp=time.perf_counter(),
+                        content=delta_text,
+                        is_reasoning=True,
+                    ))
+
+            # ── Function call arguments delta ───────────────────────
+            elif evt_type == "response.function_call_arguments.delta":
+                idx = (event.get("output_index", 0) if isinstance(event, dict)
+                       else getattr(event, "output_index", 0))
+                delta_args = (event.get("delta", "") if isinstance(event, dict)
+                              else getattr(event, "delta", ""))
+                if idx not in _pending_tools:
+                    item_id = (event.get("item_id", f"tool_{idx}") if isinstance(event, dict)
+                               else getattr(event, "item_id", f"tool_{idx}"))
+                    _pending_tools[idx] = {
+                        "id": item_id,
+                        "name": "",
+                        "arguments": "",
+                    }
+                _pending_tools[idx]["arguments"] += delta_args
+
+            # ── Output item done — finalise tool call metadata ──────
+            elif evt_type == "response.output_item.done":
+                if isinstance(event, dict):
+                    item = event.get("item", {})
+                    idx = event.get("output_index", 0)
+                else:
+                    item = getattr(event, "item", None) or {}
+                    idx = getattr(event, "output_index", 0)
+
+                if isinstance(item, dict):
+                    i_type = item.get("type", "")
+                else:
+                    i_type = getattr(item, "type", "")
+
+                if i_type == "function_call":
+                    if isinstance(item, dict):
+                        call_id = item.get("call_id", item.get("id", f"tool_{idx}"))
+                        fn_name = item.get("name", "")
+                        fn_args = item.get("arguments", "")
+                    else:
+                        call_id = getattr(item, "call_id", None) or getattr(item, "id", f"tool_{idx}")
+                        fn_name = getattr(item, "name", "")
+                        fn_args = getattr(item, "arguments", "")
+
+                    if idx in _pending_tools:
+                        _pending_tools[idx]["id"] = call_id
+                        _pending_tools[idx]["name"] = fn_name
+                        # Prefer the accumulated delta args if available, else use final
+                        if not _pending_tools[idx]["arguments"]:
+                            _pending_tools[idx]["arguments"] = fn_args
+                    else:
+                        _pending_tools[idx] = {
+                            "id": call_id,
+                            "name": fn_name,
+                            "arguments": fn_args,
+                        }
+
+        # ── Build tool_calls list in output_index order ─────────────
+        tool_calls: List[Dict[str, Any]] = []
+        for idx in sorted(_pending_tools.keys()):
+            tc = _pending_tools[idx]
+            tool_calls.append({
+                "id": tc["id"],
+                "type": "function",
+                "function": {
+                    "name": tc["name"],
+                    "arguments": tc["arguments"],
+                },
+            })
+
+        return response_text, tool_calls if tool_calls else None
+
+    async def _stream_responses_api_async(
+        self,
+        params: Dict[str, Any],
+        stream_callback: Optional[Callable] = None,
+        emit_events: bool = False,
+    ) -> tuple:
+        """
+        Async streaming for Responses API.
+        Returns (response_text, tool_calls).
+        """
+        import litellm
+
+        params["stream"] = True
+        response_text = ""
+        _pending_tools: Dict[int, Dict[str, Any]] = {}
+        _emit = emit_events and stream_callback is not None
+
+        if _emit:
+            from ..streaming.events import StreamEvent, StreamEventType
+
+        async for event in await litellm.aresponses(**params):
+            if isinstance(event, dict):
+                evt_type = event.get("type", "")
+            else:
+                evt_type = getattr(event, "type", "")
+
+            if evt_type == "response.output_text.delta":
+                delta_text = (event.get("delta", "") if isinstance(event, dict)
+                              else getattr(event, "delta", ""))
+                response_text += delta_text
+                if _emit and delta_text:
+                    stream_callback(StreamEvent(
+                        type=StreamEventType.DELTA_TEXT,
+                        timestamp=time.perf_counter(),
+                        content=delta_text,
+                        is_reasoning=False,
+                    ))
+
+            elif evt_type == "response.function_call_arguments.delta":
+                idx = (event.get("output_index", 0) if isinstance(event, dict)
+                       else getattr(event, "output_index", 0))
+                delta_args = (event.get("delta", "") if isinstance(event, dict)
+                              else getattr(event, "delta", ""))
+                if idx not in _pending_tools:
+                    item_id = (event.get("item_id", f"tool_{idx}") if isinstance(event, dict)
+                               else getattr(event, "item_id", f"tool_{idx}"))
+                    _pending_tools[idx] = {"id": item_id, "name": "", "arguments": ""}
+                _pending_tools[idx]["arguments"] += delta_args
+
+            elif evt_type == "response.output_item.done":
+                if isinstance(event, dict):
+                    item = event.get("item", {})
+                    idx = event.get("output_index", 0)
+                else:
+                    item = getattr(event, "item", None) or {}
+                    idx = getattr(event, "output_index", 0)
+
+                if isinstance(item, dict):
+                    i_type = item.get("type", "")
+                else:
+                    i_type = getattr(item, "type", "")
+
+                if i_type == "function_call":
+                    if isinstance(item, dict):
+                        call_id = item.get("call_id", item.get("id", f"tool_{idx}"))
+                        fn_name = item.get("name", "")
+                        fn_args = item.get("arguments", "")
+                    else:
+                        call_id = getattr(item, "call_id", None) or getattr(item, "id", f"tool_{idx}")
+                        fn_name = getattr(item, "name", "")
+                        fn_args = getattr(item, "arguments", "")
+
+                    if idx in _pending_tools:
+                        _pending_tools[idx]["id"] = call_id
+                        _pending_tools[idx]["name"] = fn_name
+                        if not _pending_tools[idx]["arguments"]:
+                            _pending_tools[idx]["arguments"] = fn_args
+                    else:
+                        _pending_tools[idx] = {"id": call_id, "name": fn_name, "arguments": fn_args}
+
+        tool_calls: List[Dict[str, Any]] = []
+        for idx in sorted(_pending_tools.keys()):
+            tc = _pending_tools[idx]
+            tool_calls.append({
+                "id": tc["id"],
+                "type": "function",
+                "function": {"name": tc["name"], "arguments": tc["arguments"]},
+            })
+
+        return response_text, tool_calls if tool_calls else None
 
     def _prepare_response_logging(self, temperature: float, stream: bool, verbose: bool, markdown: bool, **kwargs) -> Optional[Dict[str, Any]]:
         """Prepare debug logging information for response methods"""
