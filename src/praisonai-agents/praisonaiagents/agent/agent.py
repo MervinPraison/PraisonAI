@@ -2833,7 +2833,45 @@ Summary:"""
                         started_at=started_at,
                     )
                 
-                # Check doom loop with graduated recovery (G-RECOVERY-2 fix)
+                
+                # Execute one turn using the agent's async chat method
+                # Always use the original prompt (prompt re-injection)
+                # Reset per-turn tool count for no-tool-call detection
+                self._autonomy_turn_tool_count = 0
+                try:
+                    response = await self.achat(prompt)
+                except Exception as e:
+                    return AutonomyResult(
+                        success=False,
+                        output=str(e),
+                        completion_reason="error",
+                        iterations=iterations,
+                        stage=stage,
+                        actions=actions_taken,
+                        duration_seconds=time_module.time() - start_time,
+                        error=str(e),
+                        started_at=started_at,
+                    )
+                
+                response_str = str(response)
+                
+                # Record response text for content streaming loop detection
+                if self._doom_loop_tracker is not None:
+                    self._doom_loop_tracker.record_response(response_str)
+                
+                # Record the action for doom loop tracking (G1 fix: was missing)
+                # Use response hash only — iteration was removed because it made
+                # every fingerprint unique, preventing doom loop detection.
+                self._record_action(
+                    "chat", 
+                    {"response_hash": hash(response_str[:500])}, 
+                    response_str[:200], 
+                    True
+                )
+                
+                # Check doom loop AFTER recording action so detector sees
+                # the current iteration's fingerprint (repositioned from top
+                # of loop for correct detection timing).
                 if self._is_doom_loop():
                     recovery = self._get_doom_recovery()
                     obs = getattr(self, '_observability_hooks', None)
@@ -2848,11 +2886,13 @@ Summary:"""
                         prompt = prompt + "\n\n[System: Previous approach repeated. Try a completely different strategy.]"
                         if self._doom_loop_tracker is not None:
                             self._doom_loop_tracker.clear_actions()
+                        self._consecutive_no_tool_turns = 0
                         continue
                     elif recovery == "escalate_model":
                         prompt = prompt + "\n\n[System: You are stuck in a loop. CRITICAL: Check that all tool argument names exactly match the function signature. Do NOT add '=' to argument names. Use only the documented parameter names.]"
                         if self._doom_loop_tracker is not None:
                             self._doom_loop_tracker.clear_actions()
+                        self._consecutive_no_tool_turns = 0
                         continue
                     elif recovery == "request_help":
                         return AutonomyResult(
@@ -2876,35 +2916,6 @@ Summary:"""
                             duration_seconds=time_module.time() - start_time,
                             started_at=started_at,
                         )
-                
-                # Execute one turn using the agent's async chat method
-                # Always use the original prompt (prompt re-injection)
-                try:
-                    response = await self.achat(prompt)
-                except Exception as e:
-                    return AutonomyResult(
-                        success=False,
-                        output=str(e),
-                        completion_reason="error",
-                        iterations=iterations,
-                        stage=stage,
-                        actions=actions_taken,
-                        duration_seconds=time_module.time() - start_time,
-                        error=str(e),
-                        started_at=started_at,
-                    )
-                
-                response_str = str(response)
-                
-                # Record the action for doom loop tracking (G2 fix: was missing)
-                # Use iteration number + response hash to avoid false positives
-                # when same prompt is re-injected (G8 fix: doom loop false positive)
-                self._record_action(
-                    "chat", 
-                    {"iteration": iterations, "response_hash": hash(response_str[:500])}, 
-                    response_str[:200], 
-                    True
-                )
                 
                 # Record for action history
                 actions_taken.append({
@@ -2931,6 +2942,23 @@ Summary:"""
                 
                 # Auto-save session after each async iteration (memory integration)
                 self._auto_save_session()
+                
+                # ─────────────────────────────────────────────────────────────
+                # TOOL-CALL COMPLETION: If the model used tools this turn AND
+                # produced a substantive response, the inner loop completed
+                # the task naturally (model stopped calling tools = done).
+                # ─────────────────────────────────────────────────────────────
+                if self._autonomy_turn_tool_count > 0 and len(response_str) > 100:
+                    return AutonomyResult(
+                        success=True,
+                        output=response_str,
+                        completion_reason="tool_completion",
+                        iterations=iterations,
+                        stage=stage,
+                        actions=actions_taken,
+                        duration_seconds=time_module.time() - start_time,
+                        started_at=started_at,
+                    )
                 
                 # Auto-escalate stage if stuck (G11 fix: wire auto_escalate)
                 if (self.autonomy_config.get("auto_escalate")
@@ -2987,6 +3015,27 @@ Summary:"""
                 # Clear context between iterations if enabled
                 if effective_clear_context:
                     self.clear_history()
+                
+                # No-tool-call termination: if model makes no tool calls for 2+
+                # consecutive turns, treat as completion signal.
+                # Only applies to agents WITH tools — for tool-less agents,
+                # no_tool_calls is meaningless and would mask doom loop detection.
+                has_tools = bool(getattr(self, 'tools', None))
+                if self._autonomy_turn_tool_count == 0 and iterations > 1 and has_tools:
+                    self._consecutive_no_tool_turns += 1
+                    if self._consecutive_no_tool_turns >= 2:
+                        return AutonomyResult(
+                            success=True,
+                            output=response_str,
+                            completion_reason="no_tool_calls",
+                            iterations=iterations,
+                            stage=stage,
+                            actions=actions_taken,
+                            duration_seconds=time_module.time() - start_time,
+                            started_at=started_at,
+                        )
+                else:
+                    self._consecutive_no_tool_turns = 0
                 
                 # Yield control to allow other async tasks to run
                 await asyncio.sleep(0)
