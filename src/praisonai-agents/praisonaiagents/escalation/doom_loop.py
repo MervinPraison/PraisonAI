@@ -22,6 +22,7 @@ class DoomLoopType(Enum):
     NO_PROGRESS = "no_progress"              # No meaningful progress
     CIRCULAR_PLAN = "circular_plan"          # Plan loops back to start
     RESOURCE_EXHAUSTION = "resource_exhaustion"  # Budget exceeded
+    REPEATED_OUTPUT = "repeated_output"      # Same output text repeated (content chanting)
 
 
 class RecoveryAction(Enum):
@@ -58,6 +59,10 @@ class DoomLoopConfig:
     initial_backoff: float = 1.0         # Initial backoff in seconds
     backoff_multiplier: float = 2.0      # Backoff multiplier
     max_backoff: float = 30.0            # Maximum backoff
+    
+    # Content streaming detection
+    max_repeated_chunks: int = 8         # Max identical output chunks before flagging
+    content_chunk_size: int = 50         # Sliding window chunk size (chars)
 
 
 @dataclass
@@ -116,6 +121,7 @@ class DoomLoopDetector:
         self._start_time: Optional[float] = None
         self._progress_markers: List[str] = []
         self._current_backoff: float = self.config.initial_backoff
+        self._content_chunk_counts: Dict[str, int] = {}  # hash -> count
     
     def start_session(self):
         """Start a new detection session."""
@@ -125,6 +131,7 @@ class DoomLoopDetector:
         self._recovery_attempts = 0
         self._progress_markers.clear()
         self._current_backoff = self.config.initial_backoff
+        self._content_chunk_counts.clear()
     
     def record_action(
         self,
@@ -162,6 +169,25 @@ class DoomLoopDetector:
         if self.is_doom_loop():
             self._handle_loop_detection()
     
+    def record_response(self, text: str):
+        """
+        Record model response text for content streaming loop detection.
+        
+        Hashes sliding window chunks and tracks repetition counts.
+        Inspired by gemini-cli's sliding window approach.
+        
+        Args:
+            text: The model's response text
+        """
+        if not text or len(text) < self.config.content_chunk_size:
+            return
+        
+        chunk_size = self.config.content_chunk_size
+        for i in range(0, len(text) - chunk_size + 1, chunk_size):
+            chunk = text[i:i + chunk_size]
+            chunk_hash = hashlib.md5(chunk.encode()).hexdigest()[:16]
+            self._content_chunk_counts[chunk_hash] = self._content_chunk_counts.get(chunk_hash, 0) + 1
+    
     def mark_progress(self, marker: str):
         """
         Mark meaningful progress.
@@ -178,6 +204,10 @@ class DoomLoopDetector:
         Returns:
             True if doom loop detected
         """
+        # Content streaming loop can occur even without recorded actions
+        if self._check_content_loop():
+            return True
+        
         if len(self._actions) < 2:
             return False
         
@@ -201,6 +231,10 @@ class DoomLoopDetector:
         if self._check_resource_exhaustion():
             return True
         
+        # Check for content streaming loops (repeated output text)
+        if self._check_content_loop():
+            return True
+        
         return False
     
     def get_loop_type(self) -> Optional[DoomLoopType]:
@@ -215,6 +249,8 @@ class DoomLoopDetector:
             return DoomLoopType.NO_PROGRESS
         if self._check_resource_exhaustion():
             return DoomLoopType.RESOURCE_EXHAUSTION
+        if self._check_content_loop():
+            return DoomLoopType.REPEATED_OUTPUT
         return None
     
     def get_loop_event(self) -> Optional[DoomLoopEvent]:
@@ -371,6 +407,19 @@ class DoomLoopDetector:
         elapsed = time.time() - self._start_time
         return elapsed > self.config.max_total_time
     
+    def _check_content_loop(self) -> bool:
+        """Check for repeated output text (content streaming loop).
+        
+        Uses sliding window chunk hashing. If any chunk hash appears
+        more than max_repeated_chunks times, it indicates the model
+        is generating repetitive output (chanting).
+        """
+        if not self._content_chunk_counts:
+            return False
+        
+        threshold = self.config.max_repeated_chunks
+        return any(count >= threshold for count in self._content_chunk_counts.values())
+    
     def _determine_recovery_action(self, loop_type: DoomLoopType) -> RecoveryAction:
         """Determine appropriate recovery action."""
         # If max recovery attempts reached, abort
@@ -407,6 +456,9 @@ class DoomLoopDetector:
             DoomLoopType.CIRCULAR_PLAN: "Plan has looped back to a previous state",
             DoomLoopType.RESOURCE_EXHAUSTION: (
                 f"Exceeded time limit of {self.config.max_total_time}s"
+            ),
+            DoomLoopType.REPEATED_OUTPUT: (
+                f"Model output repeating — {self.config.max_repeated_chunks}+ identical chunks detected"
             ),
         }
         return descriptions.get(loop_type, "Unknown loop type")

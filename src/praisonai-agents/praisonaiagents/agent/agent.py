@@ -2020,6 +2020,8 @@ Summary:"""
             self._file_snapshot = None
             self._snapshot_stack = []
             self._redo_stack = []
+            self._autonomy_turn_tool_count = 0
+            self._consecutive_no_tool_turns = 0
             return
         
         self.autonomy_enabled = True
@@ -2047,6 +2049,8 @@ Summary:"""
             self._file_snapshot = None
             self._snapshot_stack = []
             self._redo_stack = []
+            self._autonomy_turn_tool_count = 0
+            self._consecutive_no_tool_turns = 0
             return
         
         # Preserve ALL AutonomyConfig fields in the dict (G14 fix: no lossy extraction)
@@ -2489,6 +2493,8 @@ Summary:"""
                 
                 # Execute one turn using the agent's chat method
                 # Always use the original prompt (prompt re-injection)
+                # Reset per-turn tool count for no-tool-call detection
+                self._autonomy_turn_tool_count = 0
                 try:
                     response = self.chat(prompt)
                 except Exception as e:
@@ -2505,6 +2511,10 @@ Summary:"""
                     )
                 
                 response_str = str(response)
+                
+                # Record response text for content streaming loop detection
+                if self._doom_loop_tracker is not None:
+                    self._doom_loop_tracker.record_response(response_str)
                 
                 # Record the action for doom loop tracking (G1 fix: was missing)
                 # Use iteration number + response hash to avoid false positives
@@ -2623,6 +2633,30 @@ Summary:"""
                 # Clear context between iterations if enabled
                 if effective_clear_context:
                     self.clear_history()
+                
+                # No-tool-call termination: if model makes no tool calls for 2+
+                # consecutive turns, treat as completion signal.
+                # Skip first iteration (model may be planning).
+                if self._autonomy_turn_tool_count == 0 and iterations > 1:
+                    self._consecutive_no_tool_turns += 1
+                    if self._consecutive_no_tool_turns >= 2:
+                        execute_sync_callback('autonomy_complete',
+                            completion_reason="no_tool_calls",
+                            iterations=iterations,
+                            duration_seconds=time_module.time() - start_time
+                        )
+                        return AutonomyResult(
+                            success=True,
+                            output=response_str,
+                            completion_reason="no_tool_calls",
+                            iterations=iterations,
+                            stage=stage,
+                            actions=actions_taken,
+                            duration_seconds=time_module.time() - start_time,
+                            started_at=started_at,
+                        )
+                else:
+                    self._consecutive_no_tool_turns = 0
             
             # Max iterations reached
             # P3/G2: Emit completion callback for max iterations
@@ -4634,6 +4668,9 @@ Your Goal: {self.goal}"""
                 is_error = isinstance(result, dict) and result.get('error')
                 if not is_error:
                     self._doom_loop_tracker.mark_progress(f"tool:{function_name}")
+            
+            # Increment per-turn tool count for no-tool-call detection
+            self._autonomy_turn_tool_count = getattr(self, '_autonomy_turn_tool_count', 0) + 1
             
             return result
         except Exception as e:

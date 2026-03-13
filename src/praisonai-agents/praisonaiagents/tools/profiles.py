@@ -78,13 +78,23 @@ BUILTIN_PROFILES: Dict[str, ToolProfile] = {
         tools=["schedule_add", "schedule_list", "schedule_remove"],
         description="Agent-centric scheduling",
     ),
+    "memory": ToolProfile(
+        name="memory",
+        tools=["store_memory", "search_memory"],
+        description="Active memory store/search (requires memory=True on Agent)",
+    ),
+    "learning": ToolProfile(
+        name="learning",
+        tools=["store_learning", "search_learning"],
+        description="Categorized knowledge store/search (requires learn=True on Agent)",
+    ),
 }
 
 
 def _build_autonomy_tools() -> List[str]:
     """Build the autonomy profile tools list (deduped)."""
     tools = []
-    for profile_name in ["code_intelligence", "file_ops", "shell", "web"]:
+    for profile_name in ["code_intelligence", "file_ops", "shell", "web", "memory", "learning", "schedule"]:
         profile = BUILTIN_PROFILES[profile_name]
         for tool in profile.tools:
             if tool not in tools:
@@ -96,7 +106,7 @@ def _build_autonomy_tools() -> List[str]:
 AUTONOMY_PROFILE = ToolProfile(
     name="autonomy",
     tools=_build_autonomy_tools(),
-    description="Default tools for autonomous agents (file_ops + shell + web + code_intelligence)",
+    description="Default tools for autonomous agents (code_intelligence + file_ops + shell + web + memory + learning + schedule)",
 )
 
 

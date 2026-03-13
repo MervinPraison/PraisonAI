@@ -153,8 +153,12 @@ class TestDoomLoopRecovery:
     @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
     def test_doom_loop_eventually_aborts(self, mock_stage, mock_chat):
         """After exhausting recovery attempts, should abort."""
-        mock_chat.return_value = "Still processing the same thing"
         agent = self._make_agent(threshold=2)
+        def side_effect(prompt):
+            # Simulate tool calls so no-tool-call termination doesn't fire
+            agent._autonomy_turn_tool_count = 1
+            return "Still processing the same thing"
+        mock_chat.side_effect = side_effect
         result = agent.run_autonomous("Do something")
         assert result.success is False
         # Graduated recovery produces needs_help (stage 3) or doom_loop (stage 4).
@@ -168,7 +172,6 @@ class TestDoomLoopRecovery:
     def test_doom_loop_recovery_emits_observability(self, mock_stage, mock_chat):
         """Recovery actions should emit observability events when observe=True."""
         from praisonaiagents import Agent
-        mock_chat.return_value = "Still processing the same thing"
         agent = Agent(
             instructions="Test agent",
             autonomy={
@@ -178,6 +181,11 @@ class TestDoomLoopRecovery:
                 "observe": True,
             },
         )
+        def side_effect(prompt):
+            # Simulate tool calls so no-tool-call termination doesn't fire
+            agent._autonomy_turn_tool_count = 1
+            return "Still processing the same thing"
+        mock_chat.side_effect = side_effect
         result = agent.run_autonomous("Do something")
         obs = getattr(agent, '_observability_hooks', None)
         assert obs is not None
@@ -545,3 +553,130 @@ class TestCLIBridgeApproval:
         mgr = AutonomyManager(mode=AutonomyMode.FULL_AUTO)
         config = mgr.get_autonomy_config()
         assert config["level"] == "full_auto"
+
+
+# ============================================================
+# Content Streaming Loop Detection
+# ============================================================
+
+class TestContentStreamingDetection:
+    """Tests for content streaming loop detection in DoomLoopDetector."""
+
+    def test_repeated_chunks_detected(self):
+        """Repeated identical response text should trigger content loop detection."""
+        from praisonaiagents.escalation.doom_loop import DoomLoopDetector, DoomLoopConfig
+        detector = DoomLoopDetector(DoomLoopConfig(
+            max_repeated_chunks=5,
+            max_identical_actions=100,  # disable action-based detection
+            max_similar_actions=100,
+            max_consecutive_failures=100,
+            max_no_progress_steps=100,
+        ))
+        detector.start_session()
+        # Feed identical responses
+        repeated_text = "The quick brown fox jumps over the lazy dog. " * 5
+        for _ in range(10):
+            detector.record_response(repeated_text)
+        assert detector.is_doom_loop() is True
+        assert detector.get_loop_type().value == "repeated_output"
+
+    def test_varied_content_not_flagged(self):
+        """Diverse response text should NOT trigger content loop detection."""
+        from praisonaiagents.escalation.doom_loop import DoomLoopDetector, DoomLoopConfig
+        detector = DoomLoopDetector(DoomLoopConfig(
+            max_repeated_chunks=5,
+            max_identical_actions=100,
+            max_similar_actions=100,
+            max_consecutive_failures=100,
+            max_no_progress_steps=100,
+        ))
+        detector.start_session()
+        # Feed unique responses
+        for i in range(10):
+            detector.record_response(f"Unique response number {i} with different content every time: {i * 7}")
+        assert detector._check_content_loop() is False
+
+    def test_content_loop_resets_on_start_session(self):
+        """start_session() should reset content tracking."""
+        from praisonaiagents.escalation.doom_loop import DoomLoopDetector, DoomLoopConfig
+        detector = DoomLoopDetector(DoomLoopConfig(max_repeated_chunks=3))
+        detector.start_session()
+        repeated = "Same text repeated over and over again here. " * 5
+        for _ in range(10):
+            detector.record_response(repeated)
+        assert detector._check_content_loop() is True
+        # Reset
+        detector.start_session()
+        assert detector._check_content_loop() is False
+
+    def test_tracker_record_response_delegates(self):
+        """DoomLoopTracker.record_response() should delegate to DoomLoopDetector."""
+        from praisonaiagents.agent.autonomy import DoomLoopTracker
+        tracker = DoomLoopTracker(threshold=3)
+        with patch.object(tracker._delegate, 'record_response') as mock_rec:
+            tracker.record_response("some response text")
+        mock_rec.assert_called_once_with("some response text")
+
+
+# ============================================================
+# No-Tool-Call Termination Signal
+# ============================================================
+
+class TestNoToolCallTermination:
+    """Tests for no-tool-call termination in run_autonomous()."""
+
+    def _make_agent(self, **autonomy_overrides):
+        from praisonaiagents import Agent
+        config = {"max_iterations": 10, "auto_escalate": False}
+        config.update(autonomy_overrides)
+        return Agent(instructions="Test agent", autonomy=config)
+
+    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
+    def test_no_tool_calls_completes_after_consecutive_turns(self, mock_stage, mock_chat):
+        """When model makes no tool calls for 2+ consecutive turns, should complete."""
+        # Response without completion keywords, but no tool calls made
+        mock_chat.return_value = "I have analyzed the situation and here is my analysis of the data."
+        agent = self._make_agent()
+        # Don't set any tool count — simulates no tools being called
+        result = agent.run_autonomous("Analyze something")
+        assert result.success is True
+        assert result.completion_reason == "no_tool_calls"
+        # Should take at least 2 iterations (first is allowed, second confirms)
+        assert result.iterations >= 2
+
+    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
+    def test_tool_calls_prevent_premature_completion(self, mock_stage, mock_chat):
+        """When tools are called, should NOT trigger no_tool_calls completion."""
+        call_count = [0]
+        def side_effect(prompt):
+            call_count[0] += 1
+            # Simulate agent incrementing tool count during chat
+            agent._autonomy_turn_tool_count = 1  # Tool was called
+            if call_count[0] >= 4:
+                return "Task completed."
+            return "I ran a tool and got results, processing further..."
+        mock_chat.side_effect = side_effect
+        agent = self._make_agent()
+        result = agent.run_autonomous("Do something")
+        assert result.success is True
+        # Should complete via keyword, not no_tool_calls
+        assert result.completion_reason == "goal"
+
+    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
+    def test_first_iteration_no_tools_does_not_terminate(self, mock_stage, mock_chat):
+        """First iteration without tools should NOT terminate — model might be planning."""
+        call_count = [0]
+        def side_effect(prompt):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return "Let me plan my approach to this problem."
+            return "Task completed."
+        mock_chat.side_effect = side_effect
+        agent = self._make_agent()
+        result = agent.run_autonomous("Do something")
+        assert result.success is True
+        # First iteration should not terminate, so we get at least 2
+        assert result.iterations >= 2

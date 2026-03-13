@@ -405,6 +405,14 @@ class DoomLoopTracker:
         """
         self._delegate.mark_progress(marker)
     
+    def record_response(self, text: str) -> None:
+        """Record model response text for content streaming loop detection.
+        
+        Args:
+            text: The model's response text
+        """
+        self._delegate.record_response(text)
+    
     def reset(self) -> None:
         """Reset the tracker completely."""
         self._delegate.start_session()

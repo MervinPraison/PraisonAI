@@ -170,22 +170,30 @@ class Bot:
         current_tools = getattr(agent, 'tools', None) or []
         if not current_tools:
             try:
-                from praisonaiagents.tools import (
-                    schedule_add, schedule_list, schedule_remove,
-                )
-                default_tools = [schedule_add, schedule_list, schedule_remove]
-                
-                # Try to add search_web if available
+                from praisonaiagents.tools.profiles import resolve_profiles
+                from praisonaiagents.tools import ToolResolver
+                tool_names = resolve_profiles("web", "schedule", "memory", "learning")
+                resolver = ToolResolver()
+                default_tools = resolver.resolve_many(tool_names)
+                if default_tools:
+                    agent.tools = default_tools
+                    logger.debug(f"Bot: applied {len(default_tools)} default tools (via profiles) to agent '{getattr(agent, 'name', '?')}'")
+            except Exception:
+                # Fallback: hardcoded imports if profiles unavailable
                 try:
-                    from praisonaiagents.tools import search_web
-                    default_tools.insert(0, search_web)
-                except (ImportError, AttributeError):
-                    pass
-                
-                agent.tools = default_tools
-                logger.debug(f"Bot: applied default tools to agent '{getattr(agent, 'name', '?')}'")
-            except ImportError:
-                pass  # Tools not available, skip
+                    from praisonaiagents.tools import (
+                        schedule_add, schedule_list, schedule_remove,
+                    )
+                    default_tools = [schedule_add, schedule_list, schedule_remove]
+                    try:
+                        from praisonaiagents.tools import search_web
+                        default_tools.insert(0, search_web)
+                    except (ImportError, AttributeError):
+                        pass
+                    agent.tools = default_tools
+                    logger.debug(f"Bot: applied default tools (fallback) to agent '{getattr(agent, 'name', '?')}'")
+                except ImportError:
+                    pass  # Tools not available, skip
         
         return agent
 
