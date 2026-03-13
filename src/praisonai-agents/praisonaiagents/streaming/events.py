@@ -25,7 +25,9 @@ class StreamEventType(Enum):
     FIRST_TOKEN = "first_token"          # First content delta received (TTFT marker)
     DELTA_TEXT = "delta_text"            # Text content delta
     DELTA_TOOL_CALL = "delta_tool_call"  # Tool call delta (function name, args chunk)
-    TOOL_CALL_END = "tool_call_end"      # Tool call complete
+    TOOL_CALL_END = "tool_call_end"      # Tool call complete (stream end marker)
+    TOOL_CALL_START = "tool_call_start"  # Tool execution starting (complete parsed args)
+    TOOL_CALL_RESULT = "tool_call_result"  # Tool execution completed (with result)
     LAST_TOKEN = "last_token"            # Final content delta
     STREAM_END = "stream_end"            # Stream completed successfully
     ERROR = "error"                      # Error during streaming

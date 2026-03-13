@@ -4567,12 +4567,28 @@ Your Goal: {self.goal}"""
         """Execute tool within injection context, with optional output truncation."""
         from ..tools.injected import with_injection_context
         from ..trace.context_events import get_context_emitter
+        from ..streaming.events import StreamEvent, StreamEventType
         import time as _time
         
         # Emit tool call start event (zero overhead when not set)
         _trace_emitter = get_context_emitter()
         _trace_emitter.tool_call_start(self.name, function_name, arguments)
         _tool_start_time = _time.time()
+        _tool_start_perf = _time.perf_counter()
+        
+        # Emit TOOL_CALL_START to stream_emitter (for AIUI/AG-UI consumers)
+        # Zero overhead when no callbacks registered
+        if hasattr(self, '_Agent__stream_emitter') and self.__stream_emitter is not None and self.__stream_emitter.has_callbacks:
+            self.__stream_emitter.emit(StreamEvent(
+                type=StreamEventType.TOOL_CALL_START,
+                timestamp=_tool_start_perf,
+                tool_call={
+                    "name": function_name,
+                    "arguments": arguments,  # PARSED DICT, not JSON string
+                    "id": getattr(self, '_current_tool_call_id', None),
+                },
+                agent_id=self.name,
+            ))
         
         try:
             # Trigger BEFORE_TOOL hook
@@ -4646,6 +4662,24 @@ Your Goal: {self.goal}"""
             # Emit tool call end event (truncation handled by context_events.py)
             _duration_ms = (_time.time() - _tool_start_time) * 1000
             _trace_emitter.tool_call_end(self.name, function_name, str(result) if result else None, _duration_ms)
+            
+            # Emit TOOL_CALL_RESULT to stream_emitter (for AIUI/AG-UI consumers)
+            # Zero overhead when no callbacks registered
+            if hasattr(self, '_Agent__stream_emitter') and self.__stream_emitter is not None and self.__stream_emitter.has_callbacks:
+                # Truncate result for stream event (keep it reasonable for UI display)
+                result_summary = str(result)[:500] if result else None
+                self.__stream_emitter.emit(StreamEvent(
+                    type=StreamEventType.TOOL_CALL_RESULT,
+                    timestamp=_time.perf_counter(),
+                    tool_call={
+                        "name": function_name,
+                        "arguments": arguments,
+                        "result": result_summary,
+                        "id": getattr(self, '_current_tool_call_id', None),
+                    },
+                    agent_id=self.name,
+                    metadata={"duration_ms": _duration_ms},
+                ))
             
             # Trigger AFTER_TOOL hook
             from ..hooks import HookEvent, AfterToolInput
