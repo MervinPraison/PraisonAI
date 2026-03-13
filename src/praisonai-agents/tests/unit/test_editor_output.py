@@ -320,3 +320,62 @@ class TestEnableDisable:
         assert get_editor_output() is editor
         
         disable_editor_output()
+
+
+class TestLlmContentCallback:
+    """Test llm_content callback for intermediate narrative display."""
+
+    def setup_method(self):
+        """Clean up callback state before each test."""
+        from praisonaiagents.main import sync_display_callbacks
+        from praisonaiagents.output.editor import disable_editor_output
+        sync_display_callbacks.pop('llm_content', None)
+        disable_editor_output()
+
+    def teardown_method(self):
+        """Restore state after each test."""
+        from praisonaiagents.main import sync_display_callbacks
+        from praisonaiagents.output.editor import disable_editor_output
+        sync_display_callbacks.pop('llm_content', None)
+        disable_editor_output()
+
+    def test_llm_content_in_supported_types(self):
+        """llm_content must be a documented supported callback type."""
+        from praisonaiagents.main import SUPPORTED_CALLBACK_TYPES
+        assert 'llm_content' in SUPPORTED_CALLBACK_TYPES
+
+    def test_enable_editor_output_registers_llm_content(self):
+        """enable_editor_output must register a llm_content callback."""
+        from praisonaiagents.output.editor import enable_editor_output
+        from praisonaiagents.main import sync_display_callbacks
+
+        enable_editor_output(use_color=False)
+        assert 'llm_content' in sync_display_callbacks
+
+    def test_llm_content_callback_fires_narrative(self):
+        """Firing llm_content callback must create a NARRATIVE block."""
+        from praisonaiagents.output.editor import enable_editor_output, get_editor_output, BlockType
+        from praisonaiagents.main import execute_sync_callback
+
+        enable_editor_output(use_color=False)
+        execute_sync_callback('llm_content', content="Let me analyze this further.")
+        
+        editor = get_editor_output()
+        blocks = editor.get_blocks()
+        narrative_blocks = [b for b in blocks if b.type == BlockType.NARRATIVE]
+        assert len(narrative_blocks) == 1
+        assert narrative_blocks[0].content == "Let me analyze this further."
+
+    def test_llm_content_callback_skips_empty(self):
+        """Firing llm_content with empty content must not create a block."""
+        from praisonaiagents.output.editor import enable_editor_output, get_editor_output, BlockType
+        from praisonaiagents.main import execute_sync_callback
+
+        enable_editor_output(use_color=False)
+        execute_sync_callback('llm_content', content="")
+        execute_sync_callback('llm_content', content="   ")
+
+        editor = get_editor_output()
+        blocks = editor.get_blocks()
+        narrative_blocks = [b for b in blocks if b.type == BlockType.NARRATIVE]
+        assert len(narrative_blocks) == 0

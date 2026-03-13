@@ -2439,57 +2439,6 @@ Summary:"""
                         started_at=started_at,
                     )
                 
-                # Check doom loop with graduated recovery (G-RECOVERY-2 fix)
-                if self._is_doom_loop():
-                    recovery = self._get_doom_recovery()
-                    
-                    # P3/G2: Emit doom loop callback for CLI visibility
-                    execute_sync_callback('autonomy_doom_loop',
-                        iteration=iterations,
-                        recovery_action=recovery
-                    )
-                    
-                    obs = getattr(self, '_observability_hooks', None)
-                    if obs is not None:
-                        from ..escalation.observability import EventType as _EvtType
-                        obs.emit(_EvtType.STEP_END, {
-                            "doom_loop": True,
-                            "recovery_action": recovery,
-                            "iteration": iterations,
-                        })
-                    if recovery == "retry_different":
-                        prompt = prompt + "\n\n[System: Previous approach repeated. Try a completely different strategy.]"
-                        if self._doom_loop_tracker is not None:
-                            self._doom_loop_tracker.clear_actions()
-                        continue
-                    elif recovery == "escalate_model":
-                        # Give the agent one more try with explicit error guidance
-                        prompt = prompt + "\n\n[System: You are stuck in a loop. CRITICAL: Check that all tool argument names exactly match the function signature. Do NOT add '=' to argument names. Use only the documented parameter names.]"
-                        if self._doom_loop_tracker is not None:
-                            self._doom_loop_tracker.clear_actions()
-                        continue
-                    elif recovery == "request_help":
-                        return AutonomyResult(
-                            success=False,
-                            output="Task needs human guidance (doom loop recovery exhausted)",
-                            completion_reason="needs_help",
-                            iterations=iterations,
-                            stage=stage,
-                            actions=actions_taken,
-                            duration_seconds=time_module.time() - start_time,
-                            started_at=started_at,
-                        )
-                    else:
-                        return AutonomyResult(
-                            success=False,
-                            output="Task stopped due to repeated actions (doom loop)",
-                            completion_reason="doom_loop",
-                            iterations=iterations,
-                            stage=stage,
-                            actions=actions_taken,
-                            duration_seconds=time_module.time() - start_time,
-                            started_at=started_at,
-                        )
                 
                 # Execute one turn using the agent's chat method
                 # Always use the original prompt (prompt re-injection)
@@ -2517,14 +2466,69 @@ Summary:"""
                     self._doom_loop_tracker.record_response(response_str)
                 
                 # Record the action for doom loop tracking (G1 fix: was missing)
-                # Use iteration number + response hash to avoid false positives
-                # when same prompt is re-injected (G8 fix: doom loop false positive)
+                # Use response hash only — iteration was removed because it made
+                # every fingerprint unique, preventing doom loop detection.
                 self._record_action(
                     "chat", 
-                    {"iteration": iterations, "response_hash": hash(response_str[:500])}, 
+                    {"response_hash": hash(response_str[:500])}, 
                     response_str[:200], 
                     True
                 )
+                
+                # Check doom loop AFTER recording action so detector sees
+                # the current iteration's fingerprint (repositioned from top
+                # of loop for correct detection timing).
+                if self._is_doom_loop():
+                    recovery = self._get_doom_recovery()
+                    
+                    # P3/G2: Emit doom loop callback for CLI visibility
+                    execute_sync_callback('autonomy_doom_loop',
+                        iteration=iterations,
+                        recovery_action=recovery
+                    )
+                    
+                    obs = getattr(self, '_observability_hooks', None)
+                    if obs is not None:
+                        from ..escalation.observability import EventType as _EvtType
+                        obs.emit(_EvtType.STEP_END, {
+                            "doom_loop": True,
+                            "recovery_action": recovery,
+                            "iteration": iterations,
+                        })
+                    if recovery == "retry_different":
+                        prompt = prompt + "\n\n[System: Previous approach repeated. Try a completely different strategy.]"
+                        if self._doom_loop_tracker is not None:
+                            self._doom_loop_tracker.clear_actions()
+                        self._consecutive_no_tool_turns = 0
+                        continue
+                    elif recovery == "escalate_model":
+                        prompt = prompt + "\n\n[System: You are stuck in a loop. CRITICAL: Check that all tool argument names exactly match the function signature. Do NOT add '=' to argument names. Use only the documented parameter names.]"
+                        if self._doom_loop_tracker is not None:
+                            self._doom_loop_tracker.clear_actions()
+                        self._consecutive_no_tool_turns = 0
+                        continue
+                    elif recovery == "request_help":
+                        return AutonomyResult(
+                            success=False,
+                            output="Task needs human guidance (doom loop recovery exhausted)",
+                            completion_reason="needs_help",
+                            iterations=iterations,
+                            stage=stage,
+                            actions=actions_taken,
+                            duration_seconds=time_module.time() - start_time,
+                            started_at=started_at,
+                        )
+                    else:
+                        return AutonomyResult(
+                            success=False,
+                            output="Task stopped due to repeated actions (doom loop)",
+                            completion_reason="doom_loop",
+                            iterations=iterations,
+                            stage=stage,
+                            actions=actions_taken,
+                            duration_seconds=time_module.time() - start_time,
+                            started_at=started_at,
+                        )
                 
                 # Record for action history
                 actions_taken.append({
@@ -2661,7 +2665,10 @@ Summary:"""
                 # No-tool-call termination: if model makes no tool calls for 2+
                 # consecutive turns, treat as completion signal.
                 # Skip first iteration (model may be planning).
-                if self._autonomy_turn_tool_count == 0 and iterations > 1:
+                # Only applies to agents WITH tools — for tool-less agents,
+                # no_tool_calls is meaningless and would mask doom loop detection.
+                has_tools = bool(getattr(self, 'tools', None))
+                if self._autonomy_turn_tool_count == 0 and iterations > 1 and has_tools:
                     self._consecutive_no_tool_turns += 1
                     if self._consecutive_no_tool_turns >= 2:
                         execute_sync_callback('autonomy_complete',

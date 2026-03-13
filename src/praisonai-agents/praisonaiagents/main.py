@@ -112,7 +112,7 @@ __all__ = [
 #   - autonomy_complete: {completion_reason, iterations, duration_seconds}
 #   - retry: {attempt, max_attempts, error, retry_in_seconds}
 SUPPORTED_CALLBACK_TYPES = [
-    'tool_call', 'interaction', 'error', 'llm_start', 'llm_end',
+    'tool_call', 'interaction', 'error', 'llm_start', 'llm_end', 'llm_content',
     'autonomy_iteration', 'autonomy_stage_change', 'autonomy_doom_loop', 'autonomy_complete',
     'retry',
 ]
