@@ -4436,10 +4436,9 @@ Provide ONLY the commit message, no explanations."""
                     else:
                         result = agent.chat(prompt)
                     
-                    # Display final result
+                    # SDK callbacks (interaction, llm_content) handle display —
+                    # no explicit editor.output() needed here.
                     output = result.output if hasattr(result, 'output') else str(result)
-                    if output:
-                        editor.output(output)
                     
                     # Show summary
                     elapsed = editor.elapsed_time()

@@ -2271,18 +2271,19 @@ Now provide your final answer using this result. Summarize the information natur
                     # Reset repair count on successful tool call
                     self._current_repair_count = 0
                     
+                    # Emit intermediate LLM narrative for display
+                    # This fires for ALL responses with text, not just tool-call turns.
+                    # Competitors (Gemini CLI, Codex, OpenCode) display this inline.
+                    # Skip if interaction callback already displayed this text.
+                    if response_text and response_text.strip() and not callback_executed:
+                        _get_display_functions()['execute_sync_callback'](
+                            'llm_content',
+                            content=response_text.strip(),
+                            agent_name=agent_name,
+                        )
+
                     # Handle tool calls - Sequential tool calling logic
                     if tool_calls and execute_tool_fn:
-                        # Emit intermediate LLM narrative before tool execution
-                        # This is the text the LLM generated alongside tool calls,
-                        # explaining its reasoning — competitors display this inline.
-                        if response_text and response_text.strip():
-                            _get_display_functions()['execute_sync_callback'](
-                                'llm_content',
-                                content=response_text.strip(),
-                                agent_name=agent_name,
-                            )
-                        
                         # Convert tool_calls to a serializable format for all providers
                         serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                         # Check if this is Ollama provider
@@ -2969,15 +2970,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             logging.error(f"Non-recoverable stream iterator error: {iterator_error}")
                             raise iterator_error
                     
+                    # Emit intermediate LLM narrative for display
+                    # (parity with non-streaming path above)
+                    if response_text and response_text.strip() and not callback_executed:
+                        _get_display_functions()['execute_sync_callback'](
+                            'llm_content',
+                            content=response_text.strip(),
+                            agent_name=agent_name,
+                        )
+
                     # After streaming completes, handle tool calls if present
                     if tool_calls and execute_tool_fn:
-                        # Emit intermediate LLM narrative (parity with streaming path)
-                        if response_text and response_text.strip():
-                            _get_display_functions()['execute_sync_callback'](
-                                'llm_content',
-                                content=response_text.strip(),
-                                agent_name=agent_name,
-                            )
                         # Add assistant message with tool calls to conversation
                         if self._is_ollama_provider():
                             messages.append({
