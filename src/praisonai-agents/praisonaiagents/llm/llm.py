@@ -2313,7 +2313,7 @@ Now provide your final answer using this result. Summarize the information natur
                                 arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, tools)
 
                             logging.debug(f"[TOOL_EXEC_DEBUG] About to execute tool {function_name} with args: {arguments}")
-                            tool_result = execute_tool_fn(function_name, arguments)
+                            tool_result = execute_tool_fn(function_name, arguments, tool_call_id=tool_call_id)
                             logging.debug(f"[TOOL_EXEC_DEBUG] Tool execution result: {tool_result}")
                             tool_results.append(tool_result)  # Store the result
                             accumulated_tool_results.append(tool_result)  # Accumulate across iterations
@@ -2981,8 +2981,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
                             
                             try:
-                                # Execute the tool
-                                tool_result = execute_tool_fn(function_name, arguments)
+                                # Execute the tool (pass tool_call_id for event correlation)
+                                tool_result = execute_tool_fn(function_name, arguments, tool_call_id=tool_call_id)
                                 
                                 # Add tool result to messages
                                 tool_message = self._create_tool_message(function_name, tool_result, tool_call_id, is_ollama)

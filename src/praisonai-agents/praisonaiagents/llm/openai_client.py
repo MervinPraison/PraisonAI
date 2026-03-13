@@ -1341,8 +1341,9 @@ class OpenAIClient:
                     # Always trigger callback for tool call tracking (even when verbose=False)
                     display_tool_call_fn = _get_display_tool_call()
                     
-                    # Execute the tool
-                    tool_result = execute_tool_fn(function_name, arguments)
+                    # Execute the tool (pass tool_call_id for event correlation)
+                    _tool_call_id = tool_call.id if hasattr(tool_call, 'id') else tool_call.get('id')
+                    tool_result = execute_tool_fn(function_name, arguments, tool_call_id=_tool_call_id)
                     results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
                     
                     # Trigger callback with structured parameters for status output
@@ -1529,15 +1530,16 @@ class OpenAIClient:
                     if verbose and console:
                         console.print(f"[dim]Arguments:[/dim] {arguments}")
                     
-                    # Execute the tool (async)
+                    # Execute the tool (async) - pass tool_call_id for event correlation
+                    _tool_call_id = tool_call.id if hasattr(tool_call, 'id') else tool_call.get('id')
                     if asyncio.iscoroutinefunction(execute_tool_fn):
-                        tool_result = await execute_tool_fn(function_name, arguments)
+                        tool_result = await execute_tool_fn(function_name, arguments, tool_call_id=_tool_call_id)
                     else:
                         # Run sync function in executor
                         loop = asyncio.get_event_loop()
                         tool_result = await loop.run_in_executor(
                             None, 
-                            lambda: execute_tool_fn(function_name, arguments)
+                            lambda fn=function_name, args=arguments, tcid=_tool_call_id: execute_tool_fn(fn, args, tool_call_id=tcid)
                         )
                     
                     results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
@@ -1718,9 +1720,10 @@ class OpenAIClient:
                         if verbose:
                             yield f"\n[Calling function: {function_name}]"
                         
-                        # Execute the tool with error handling
+                        # Execute the tool with error handling (pass tool_call_id for event correlation)
+                        _tool_call_id = tool_call.id if hasattr(tool_call, 'id') else tool_call.get('id')
                         try:
-                            tool_result = execute_tool_fn(function_name, arguments)
+                            tool_result = execute_tool_fn(function_name, arguments, tool_call_id=_tool_call_id)
                             results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
                         except Exception as e:
                             results_str = f"Error executing function: {str(e)}"

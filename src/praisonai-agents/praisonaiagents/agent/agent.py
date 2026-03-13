@@ -2552,6 +2552,30 @@ Summary:"""
                 # Auto-save session after each iteration (memory integration)
                 self._auto_save_session()
                 
+                # ─────────────────────────────────────────────────────────────
+                # TOOL-CALL COMPLETION: If the model used tools this turn AND
+                # produced a substantive response, the inner loop completed
+                # the task naturally (model stopped calling tools = done).
+                # This is the same signal the CLI/wrapper path trusts.
+                # ─────────────────────────────────────────────────────────────
+                if self._autonomy_turn_tool_count > 0 and len(response_str) > 100:
+                    # P3/G2: Emit completion callback
+                    execute_sync_callback('autonomy_complete',
+                        completion_reason="tool_completion",
+                        iterations=iterations,
+                        duration_seconds=time_module.time() - start_time
+                    )
+                    return AutonomyResult(
+                        success=True,
+                        output=response_str,
+                        completion_reason="tool_completion",
+                        iterations=iterations,
+                        stage=stage,
+                        actions=actions_taken,
+                        duration_seconds=time_module.time() - start_time,
+                        started_at=started_at,
+                    )
+                
                 # Auto-escalate stage if stuck (G11 fix: wire auto_escalate)
                 if (self.autonomy_config.get("auto_escalate")
                         and iterations > 1
@@ -4538,10 +4562,16 @@ Your Goal: {self.goal}"""
             logging.debug(f"Type casting failed for {getattr(func, '__name__', 'unknown function')}: {e}")
             return arguments
 
-    def execute_tool(self, function_name, arguments):
+    def execute_tool(self, function_name, arguments, tool_call_id=None):
         """
         Execute a tool dynamically based on the function name and arguments.
         Injects agent state for tools with Injected[T] parameters.
+        
+        Args:
+            function_name: Name of the tool function to execute
+            arguments: Dictionary of arguments to pass to the tool
+            tool_call_id: Optional ID from the LLM's tool_call (e.g., 'call_xxxxx')
+                         Used for correlating TOOL_CALL_START/RESULT stream events
         """
         logging.debug(f"{self.name} executing tool {function_name} with arguments: {arguments}")
         
@@ -4561,10 +4591,17 @@ Your Goal: {self.goal}"""
         )
         
         # Execute within injection context
-        return self._execute_tool_with_context(function_name, arguments, state)
+        return self._execute_tool_with_context(function_name, arguments, state, tool_call_id)
     
-    def _execute_tool_with_context(self, function_name, arguments, state):
-        """Execute tool within injection context, with optional output truncation."""
+    def _execute_tool_with_context(self, function_name, arguments, state, tool_call_id=None):
+        """Execute tool within injection context, with optional output truncation.
+        
+        Args:
+            function_name: Name of the tool function to execute
+            arguments: Dictionary of arguments to pass to the tool
+            state: AgentState for injection context
+            tool_call_id: Optional ID from the LLM's tool_call (e.g., 'call_xxxxx')
+        """
         from ..tools.injected import with_injection_context
         from ..trace.context_events import get_context_emitter
         from ..streaming.events import StreamEvent, StreamEventType
@@ -4585,7 +4622,7 @@ Your Goal: {self.goal}"""
                 tool_call={
                     "name": function_name,
                     "arguments": arguments,  # PARSED DICT, not JSON string
-                    "id": getattr(self, '_current_tool_call_id', None),
+                    "id": tool_call_id,  # Now properly threaded through
                 },
                 agent_id=self.name,
             ))
@@ -4675,7 +4712,7 @@ Your Goal: {self.goal}"""
                         "name": function_name,
                         "arguments": arguments,
                         "result": result_summary,
-                        "id": getattr(self, '_current_tool_call_id', None),
+                        "id": tool_call_id,  # Now properly threaded through
                     },
                     agent_id=self.name,
                     metadata={"duration_ms": _duration_ms},
@@ -7875,7 +7912,8 @@ Write the complete compiled report:"""
                                     
                                     tool_result = self.execute_tool(
                                         tool_call['function']['name'], 
-                                        parsed_args
+                                        parsed_args,
+                                        tool_call_id=tool_call.get('id')
                                     )
                                     # Add tool result to chat history
                                     self.chat_history.append({

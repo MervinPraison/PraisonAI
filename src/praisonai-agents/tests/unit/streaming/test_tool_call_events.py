@@ -188,3 +188,40 @@ class TestToolCallEventSemantics:
         # Start has dict args
         assert isinstance(start_event.tool_call["arguments"], dict)
         assert "query" in start_event.tool_call["arguments"]
+
+
+class TestToolCallIdPropagation:
+    """Test that tool_call_id is properly threaded through execute_tool."""
+    
+    def test_execute_tool_accepts_tool_call_id(self):
+        """Verify execute_tool() accepts tool_call_id parameter."""
+        from praisonaiagents import Agent
+        import inspect
+        
+        sig = inspect.signature(Agent.execute_tool)
+        params = list(sig.parameters.keys())
+        assert 'tool_call_id' in params, "execute_tool should accept tool_call_id parameter"
+    
+    def test_execute_tool_with_context_accepts_tool_call_id(self):
+        """Verify _execute_tool_with_context() accepts tool_call_id parameter."""
+        from praisonaiagents import Agent
+        import inspect
+        
+        sig = inspect.signature(Agent._execute_tool_with_context)
+        params = list(sig.parameters.keys())
+        assert 'tool_call_id' in params, "_execute_tool_with_context should accept tool_call_id parameter"
+    
+    def test_tool_call_id_in_stream_event(self):
+        """Verify tool_call_id can be included in StreamEvent."""
+        from praisonaiagents.streaming.events import StreamEvent, StreamEventType
+        
+        event = StreamEvent(
+            type=StreamEventType.TOOL_CALL_START,
+            tool_call={
+                "name": "test_tool",
+                "arguments": {"arg": "value"},
+                "id": "call_abc123xyz",  # The tool_call_id
+            },
+        )
+        
+        assert event.tool_call["id"] == "call_abc123xyz"
