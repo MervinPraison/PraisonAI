@@ -2069,18 +2069,59 @@ Now provide your final answer using this result. Summarize the information natur
                                     }]
                                 }
                             else:
-                                # For non-streaming + non-verbose: no display_generating (per user requirements)
-                                final_response = litellm.completion(
-                                    **self._build_completion_params(
-                                        messages=messages,
-                                        tools=formatted_tools,
-                                        temperature=temperature,
-                                        stream=False,
-                                        output_json=output_json,
-                                        output_pydantic=output_pydantic,
-                                        **kwargs
+                                # For non-streaming + non-verbose path
+                                # When editor output is enabled, use silent streaming
+                                # to capture intermediate text (OpenAI returns content:null
+                                # on tool-call turns in non-streaming mode, but streaming
+                                # delivers text tokens before tool call tokens).
+                                _use_silent_stream = False
+                                try:
+                                    from ..output.editor import is_editor_output_enabled
+                                    _use_silent_stream = is_editor_output_enabled()
+                                except Exception:
+                                    pass
+
+                                if _use_silent_stream:
+                                    # Silent streaming: no display, just accumulate
+                                    response_text = ""
+                                    tool_calls = []
+                                    for chunk in litellm.completion(
+                                        **self._build_completion_params(
+                                            messages=messages,
+                                            tools=formatted_tools,
+                                            temperature=temperature,
+                                            stream=True,
+                                            output_json=output_json,
+                                            output_pydantic=output_pydantic,
+                                            **kwargs
+                                        )
+                                    ):
+                                        if chunk and chunk.choices and chunk.choices[0].delta:
+                                            delta = chunk.choices[0].delta
+                                            response_text, tool_calls = self._process_stream_delta(
+                                                delta, response_text, tool_calls, formatted_tools
+                                            )
+                                    final_response = {
+                                        "choices": [{
+                                            "message": {
+                                                "content": response_text,
+                                                "tool_calls": tool_calls if tool_calls else None
+                                            }
+                                        }]
+                                    }
+                                else:
+                                    # Standard non-streaming path
+                                    final_response = litellm.completion(
+                                        **self._build_completion_params(
+                                            messages=messages,
+                                            tools=formatted_tools,
+                                            temperature=temperature,
+                                            stream=False,
+                                            output_json=output_json,
+                                            output_pydantic=output_pydantic,
+                                            **kwargs
+                                        )
                                     )
-                                )
                                 # Handle None content from Gemini
                                 response_content = final_response["choices"][0]["message"].get("content")
                                 response_text = response_content if response_content is not None else ""
@@ -2274,8 +2315,7 @@ Now provide your final answer using this result. Summarize the information natur
                     # Emit intermediate LLM narrative for display
                     # This fires for ALL responses with text, not just tool-call turns.
                     # Competitors (Gemini CLI, Codex, OpenCode) display this inline.
-                    # Skip if interaction callback already displayed this text.
-                    if response_text and response_text.strip() and not callback_executed:
+                    if response_text and response_text.strip():
                         _get_display_functions()['execute_sync_callback'](
                             'llm_content',
                             content=response_text.strip(),
@@ -2972,7 +3012,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Emit intermediate LLM narrative for display
                     # (parity with non-streaming path above)
-                    if response_text and response_text.strip() and not callback_executed:
+                    if response_text and response_text.strip():
                         _get_display_functions()['execute_sync_callback'](
                             'llm_content',
                             content=response_text.strip(),
