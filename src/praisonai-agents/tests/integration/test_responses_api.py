@@ -251,7 +251,111 @@ class TestResponsesAPIRealAgent:
 
         assert response is not None
         assert "42" in response, f"Expected '42' in response, got: {response[:200]}"
-        print(f"[PASS] Tool call via Responses API - response contains '42'")
+        print(f"[PASS] Tool call via Responses API (Path P1) - response contains '42'")
+
+    def test_openai_client_path_with_tool(self):
+        """
+        Test bare model (gpt-4o-mini) with tool via OpenAIClient (Path P2) —
+        now using Responses API. This is the key test for the content:null fix
+        on the OpenAIClient path.
+        """
+        from praisonaiagents import Agent
+
+        def add_numbers(a: int, b: int) -> int:
+            """Add two numbers together."""
+            return a + b
+
+        agent = Agent(
+            name="ToolAgentP2",
+            instructions="You are a math assistant. Use the add_numbers tool.",
+            model="gpt-4o-mini",  # bare model → OpenAIClient path
+            tools=[add_numbers],
+        )
+        response = agent.chat("What is 15 + 27? Use the tool.")
+
+        assert response is not None
+        assert "42" in response, f"Expected '42' in response, got: {response[:200]}"
+        print(f"[PASS] Tool call via OpenAIClient Responses API (Path P2) - response contains '42'")
+
+
+# ── OpenAIClient-specific unit tests ───────────────────────────────────
+
+class TestOpenAIClientResponsesAPI:
+    """Verify OpenAIClient Responses API helper methods."""
+
+    def test_supports_responses_api_static(self):
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        # Positive cases
+        assert OpenAIClient._supports_responses_api("gpt-4o-mini")
+        assert OpenAIClient._supports_responses_api("gpt-4o")
+        assert OpenAIClient._supports_responses_api("gpt-4-turbo")
+        assert OpenAIClient._supports_responses_api("o3-mini")
+        assert OpenAIClient._supports_responses_api("gpt-4.1")
+        assert OpenAIClient._supports_responses_api("chatgpt-4o-latest")
+
+        # Negative cases  
+        assert not OpenAIClient._supports_responses_api("claude-3-opus")
+        assert not OpenAIClient._supports_responses_api("ollama/llama3")
+        assert not OpenAIClient._supports_responses_api("gemini/gemini-pro")
+        assert not OpenAIClient._supports_responses_api("deepseek/deepseek-chat")
+        assert not OpenAIClient._supports_responses_api("")
+
+    def test_build_responses_input(self):
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)  # skip __init__
+        messages = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Hi"},
+        ]
+        tools = [{"type": "function", "function": {"name": "add", "description": "Add", "parameters": {}}}]
+        
+        params = client._build_responses_input(messages, "gpt-4o-mini", 0.5, tools)
+        
+        assert params["model"] == "gpt-4o-mini"
+        assert params["instructions"] == "You are helpful."
+        assert len(params["input"]) == 1  # only user msg
+        assert params["input"][0]["role"] == "user"
+        assert params["temperature"] == 0.5
+        # Tools should be in Responses API format (flattened)
+        assert params["tools"] == [{"type": "function", "name": "add", "description": "Add", "parameters": {}}]
+
+    def test_responses_to_chat_completion(self):
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+
+        class MockItem:
+            def __init__(self, **kwargs):
+                for k, v in kwargs.items():
+                    setattr(self, k, v)
+
+        class MockResponse:
+            id = "resp_test"
+            model = "gpt-4o-mini"
+            output = [
+                MockItem(
+                    type="message",
+                    content=[MockItem(type="output_text", text="Hello!")]
+                ),
+                MockItem(
+                    type="function_call",
+                    call_id="call_1",
+                    name="add",
+                    arguments='{"a":1,"b":2}'
+                ),
+            ]
+            usage = MockItem(input_tokens=10, output_tokens=5, total_tokens=15)
+
+        result = client._responses_to_chat_completion(MockResponse())
+        
+        assert result.id == "resp_test"
+        assert result.choices[0].message.content == "Hello!"
+        assert result.choices[0].message.tool_calls is not None
+        assert len(result.choices[0].message.tool_calls) == 1
+        assert result.choices[0].message.tool_calls[0].function["name"] == "add"
+        assert result.choices[0].finish_reason == "tool_calls"
 
 
 if __name__ == "__main__":
@@ -261,3 +365,4 @@ if __name__ == "__main__":
         pytest.main([__file__, "-v", "-s", "-k", "not Real"])
     else:
         pytest.main([__file__, "-v", "-s"])
+

@@ -325,6 +325,10 @@ class PraisonAI:
         # Update config_list model if --model flag is provided
         if getattr(args, 'model', None):
             self.config_list[0]['model'] = args.model
+            # Bridge --model to args.llm so direct prompts also use it
+            # (args.llm is what handle_direct_prompt checks for Agent config)
+            if not getattr(args, 'llm', None):
+                args.llm = args.model
 
         # Check for piped input from stdin
         stdin_input = self.read_stdin_if_available()

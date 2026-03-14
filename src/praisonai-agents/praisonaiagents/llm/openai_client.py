@@ -539,6 +539,229 @@ class OpenAIClient:
                 
         return result
     
+    # ─── Responses API helpers ──────────────────────────────────────────────
+    
+    @staticmethod
+    def _supports_responses_api(model: str) -> bool:
+        """
+        Returns True for OpenAI models that support the Responses API.
+        Mirrors LLM._supports_responses_api but works as a static method
+        on a plain model string.
+        """
+        if not model:
+            return False
+        model_lower = model.lower()
+
+        # Exclude non-OpenAI providers
+        _non_openai = (
+            "ollama/", "ollama_chat/", "gemini/", "vertex_ai/",
+            "anthropic/", "claude", "deepseek/",
+        )
+        for prefix in _non_openai:
+            if model_lower.startswith(prefix):
+                return False
+
+        _openai_prefixes = (
+            "gpt-4o", "gpt-4-turbo", "gpt-4.1", "gpt-4.5",
+            "gpt-5",
+            "o1", "o3", "o4",
+            "chatgpt-4o",
+            "azure/gpt-4o", "azure/gpt-4-turbo", "azure/gpt-4.1",
+            "azure/gpt-5",
+            "azure/o1", "azure/o3", "azure/o4",
+        )
+        for prefix in _openai_prefixes:
+            if model_lower.startswith(prefix):
+                return True
+
+        # openai/ prefix
+        if model_lower.startswith("openai/"):
+            remainder = model_lower[len("openai/"):]
+            for prefix in _openai_prefixes:
+                if remainder.startswith(prefix):
+                    return True
+
+        return False
+
+    def _use_responses_api(self, model: str) -> bool:
+        """
+        Returns True if Responses API should be used for this call.
+        Only returns True when:
+        1. The model supports Responses API (OpenAI model)
+        2. No custom base_url is set (not a local server)
+        3. The openai SDK has the 'responses' attribute
+        """
+        if self.base_url:
+            return False
+        if not self._supports_responses_api(model):
+            return False
+        try:
+            return hasattr(self.sync_client, 'responses')
+        except Exception:
+            return False
+
+    def _build_responses_input(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+        temperature: float = 1.0,
+        tools: Optional[List[Dict]] = None,
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """
+        Transform Chat Completions-style messages and tools into
+        Responses API parameters.
+
+        Mapping:
+          - system message  → ``instructions``
+          - remaining msgs  → ``input`` (list of role/content items)
+          - tools are flattened from Chat Completions nested format
+        """
+        params: Dict[str, Any] = {"model": model}
+
+        # ── Extract system instructions ──────────────────────────────────
+        instructions = None
+        input_items: List[Dict[str, Any]] = []
+        for msg in messages:
+            role = msg.get("role", "")
+            if role in ("system", "developer"):
+                content = msg.get("content", "")
+                if instructions is None:
+                    instructions = content
+                else:
+                    instructions += "\n" + content
+            else:
+                # Handle Chat Completions → Responses API format transforms
+                if role == "assistant" and msg.get("tool_calls"):
+                    content = msg.get("content")
+                    if content and content.strip():
+                        input_items.append({"role": "assistant", "content": content})
+                    for tc in msg["tool_calls"]:
+                        fn = tc.get("function", tc) if isinstance(tc, dict) else tc
+                        fn_name = fn.get("name", "") if isinstance(fn, dict) else getattr(fn, "name", "")
+                        fn_args = fn.get("arguments", "{}") if isinstance(fn, dict) else getattr(fn, "arguments", "{}")
+                        tc_id = tc.get("id", "") if isinstance(tc, dict) else getattr(tc, "id", "")
+                        # Skip items with empty name — API rejects them
+                        if not fn_name:
+                            continue
+                        input_items.append({
+                            "type": "function_call",
+                            "call_id": tc_id,
+                            "name": fn_name,
+                            "arguments": fn_args if isinstance(fn_args, str) else json.dumps(fn_args),
+                        })
+                elif role == "tool":
+                    input_items.append({
+                        "type": "function_call_output",
+                        "call_id": msg.get("tool_call_id", ""),
+                        "output": msg.get("content", ""),
+                    })
+                else:
+                    input_items.append(msg)
+
+        if instructions:
+            params["instructions"] = instructions
+        params["input"] = input_items
+
+        # ── Transform tools to Responses API format ──────────────────────
+        if tools:
+            responses_tools = []
+            for tool in tools:
+                if isinstance(tool, dict) and "function" in tool:
+                    fn = tool["function"]
+                    responses_tool = {
+                        "type": "function",
+                        "name": fn.get("name", ""),
+                    }
+                    if "description" in fn:
+                        responses_tool["description"] = fn["description"]
+                    if "parameters" in fn:
+                        responses_tool["parameters"] = fn["parameters"]
+                    if fn.get("strict") is not None:
+                        responses_tool["strict"] = fn["strict"]
+                    responses_tools.append(responses_tool)
+                else:
+                    responses_tools.append(tool)
+            params["tools"] = responses_tools
+            params["tool_choice"] = kwargs.pop("tool_choice", "auto")
+
+        # ── Scalar params ────────────────────────────────────────────────
+        if temperature is not None:
+            params["temperature"] = temperature
+
+        return params
+
+    def _responses_to_chat_completion(self, response) -> ChatCompletion:
+        """
+        Wrap a Responses API response into a ChatCompletion dataclass
+        so that all downstream code (tool loop, display, callbacks)
+        works without modification.
+        """
+        response_text = ""
+        tool_calls_list: List[ToolCall] = []
+
+        output_items = getattr(response, 'output', None) or []
+        for item in output_items:
+            item_type = getattr(item, "type", "") if not isinstance(item, dict) else item.get("type", "")
+
+            if item_type == "message":
+                content_list = getattr(item, "content", []) if not isinstance(item, dict) else item.get("content", [])
+                for content_block in content_list:
+                    if isinstance(content_block, dict):
+                        block_type = content_block.get("type", "")
+                        block_text = content_block.get("text", "") or ""
+                    else:
+                        block_type = getattr(content_block, "type", "")
+                        block_text = getattr(content_block, "text", "") or ""
+                    if block_type == "output_text":
+                        response_text += block_text
+
+            elif item_type == "function_call":
+                if isinstance(item, dict):
+                    call_id = item.get("call_id", item.get("id", f"tool_{len(tool_calls_list)}"))
+                    fn_name = item.get("name", "")
+                    fn_args = item.get("arguments", "{}")
+                else:
+                    call_id = getattr(item, "call_id", None) or getattr(item, "id", f"tool_{len(tool_calls_list)}")
+                    fn_name = getattr(item, "name", "")
+                    fn_args = getattr(item, "arguments", "{}")
+                tool_calls_list.append(ToolCall(
+                    id=call_id,
+                    type="function",
+                    function={
+                        "name": fn_name,
+                        "arguments": fn_args if isinstance(fn_args, str) else json.dumps(fn_args),
+                    }
+                ))
+
+        # Build usage
+        raw_usage = getattr(response, 'usage', None)
+        usage = None
+        if raw_usage:
+            usage = CompletionUsage(
+                prompt_tokens=getattr(raw_usage, 'input_tokens', 0),
+                completion_tokens=getattr(raw_usage, 'output_tokens', 0),
+                total_tokens=getattr(raw_usage, 'total_tokens', 0),
+            )
+
+        message = ChatCompletionMessage(
+            content=response_text if response_text else None,
+            role="assistant",
+            tool_calls=tool_calls_list if tool_calls_list else None,
+        )
+        choice = Choice(
+            finish_reason="tool_calls" if tool_calls_list else "stop",
+            index=0,
+            message=message,
+        )
+        return ChatCompletion(
+            id=getattr(response, 'id', 'resp_unknown'),
+            choices=[choice],
+            created=int(time.time()),
+            model=getattr(response, 'model', ''),
+            usage=usage,
+        )
+
     def _generate_tool_definition(self, func: Callable) -> Optional[Dict]:
         """Generate a tool definition from a callable function."""
         try:
@@ -675,6 +898,44 @@ class OpenAIClient:
                     metadata={"model": model, "message_count": len(messages)}
                 ))
             
+            # ── Responses API path ───────────────────────────────────────
+            if self._use_responses_api(model):
+                try:
+                    resp_params = self._build_responses_input(
+                        messages, model, temperature, tools, **kwargs
+                    )
+                    raw = self.sync_client.responses.create(**resp_params)
+                    final_response = self._responses_to_chat_completion(raw)
+                    
+                    # Display the response text if display_fn provided
+                    response_text = final_response.choices[0].message.content or ""
+                    if display_fn and response_text:
+                        from rich.markdown import Markdown
+                        console.print(Markdown(response_text))
+                    
+                    # Emit stream events for compatibility
+                    if _emit:
+                        now = time.perf_counter()
+                        if response_text:
+                            stream_callback(StreamEvent(
+                                type=StreamEventType.FIRST_TOKEN,
+                                timestamp=now, content=response_text[:50]
+                            ))
+                            stream_callback(StreamEvent(
+                                type=StreamEventType.LAST_TOKEN,
+                                timestamp=now
+                            ))
+                        stream_callback(StreamEvent(
+                            type=StreamEventType.STREAM_END,
+                            timestamp=now, metadata={"responses_api": True}
+                        ))
+                    
+                    return final_response
+                except Exception as e:
+                    self.logger.warning(f"Responses API streaming failed, falling back: {e}")
+                    # Fall through to Chat Completions streaming
+            
+            # ── Chat Completions streaming path ─────────────────────────
             # Create the response stream
             response_stream = self.sync_client.chat.completions.create(
                 model=model,
@@ -897,6 +1158,49 @@ class OpenAIClient:
                 else:
                     stream_callback(event)
             
+            # ── Responses API path ───────────────────────────────────────
+            if self._use_responses_api(model):
+                try:
+                    resp_params = self._build_responses_input(
+                        messages, model, temperature, tools, **kwargs
+                    )
+                    raw = await self.async_client.responses.create(**resp_params)
+                    final_response = self._responses_to_chat_completion(raw)
+                    
+                    # Display the response text if display_fn provided
+                    response_text = final_response.choices[0].message.content or ""
+                    if display_fn and response_text:
+                        from rich.markdown import Markdown
+                        console.print(Markdown(response_text))
+                    
+                    # Emit stream events for compatibility
+                    if _emit:
+                        now = time.perf_counter()
+                        async def _emit_event(evt):
+                            if asyncio.iscoroutinefunction(stream_callback):
+                                await stream_callback(evt)
+                            else:
+                                stream_callback(evt)
+                        if response_text:
+                            await _emit_event(StreamEvent(
+                                type=StreamEventType.FIRST_TOKEN,
+                                timestamp=now, content=response_text[:50]
+                            ))
+                            await _emit_event(StreamEvent(
+                                type=StreamEventType.LAST_TOKEN,
+                                timestamp=now
+                            ))
+                        await _emit_event(StreamEvent(
+                            type=StreamEventType.STREAM_END,
+                            timestamp=now, metadata={"responses_api": True}
+                        ))
+                    
+                    return final_response
+                except Exception as e:
+                    self.logger.warning(f"Responses API async streaming failed, falling back: {e}")
+                    # Fall through to Chat Completions streaming
+            
+            # ── Chat Completions streaming path ─────────────────────────
             # Create the response stream
             response_stream = await self.async_client.chat.completions.create(
                 model=model,
@@ -1078,6 +1382,20 @@ class OpenAIClient:
         Returns:
             ChatCompletion object or stream iterator
         """
+        # ── Responses API path (non-streaming only) ────────────────────
+        if not stream and self._use_responses_api(model):
+            try:
+                resp_params = self._build_responses_input(
+                    messages, model, temperature, tools,
+                    tool_choice=tool_choice, **kwargs
+                )
+                raw = self.sync_client.responses.create(**resp_params)
+                return self._responses_to_chat_completion(raw)
+            except Exception as e:
+                self.logger.warning(f"Responses API failed, falling back to Chat Completions: {e}")
+                # Fall through to Chat Completions
+
+        # ── Chat Completions path ─────────────────────────────────────
         params = {
             "model": model,
             "messages": messages,
@@ -1123,6 +1441,20 @@ class OpenAIClient:
         Returns:
             ChatCompletion object or async stream iterator
         """
+        # ── Responses API path (non-streaming only) ────────────────────
+        if not stream and self._use_responses_api(model):
+            try:
+                resp_params = self._build_responses_input(
+                    messages, model, temperature, tools,
+                    tool_choice=tool_choice, **kwargs
+                )
+                raw = await self.async_client.responses.create(**resp_params)
+                return self._responses_to_chat_completion(raw)
+            except Exception as e:
+                self.logger.warning(f"Responses API failed, falling back to Chat Completions: {e}")
+                # Fall through to Chat Completions
+
+        # ── Chat Completions path ─────────────────────────────────────
         params = {
             "model": model,
             "messages": messages,
@@ -1308,6 +1640,19 @@ class OpenAIClient:
             # Check for tool calls
             tool_calls = getattr(final_response.choices[0].message, 'tool_calls', None)
             
+            # Emit llm_content for intermediate narrative display
+            # (gpt-4.1+ models produce text alongside tool calls)
+            response_content = getattr(final_response.choices[0].message, 'content', None)
+            if response_content and response_content.strip() and tool_calls:
+                try:
+                    execute_sync_callback(
+                        'llm_content',
+                        content=response_content.strip(),
+                        agent_name=None,
+                    )
+                except Exception:
+                    pass  # Narrative display is optional
+            
             if tool_calls and execute_tool_fn:
                 # Convert ToolCall dataclass objects to dict for JSON serialization
                 serializable_tool_calls = []
@@ -1492,6 +1837,20 @@ class OpenAIClient:
             
             # Check for tool calls
             tool_calls = getattr(final_response.choices[0].message, 'tool_calls', None)
+            
+            # Emit llm_content for intermediate narrative display
+            # (gpt-4.1+ models produce text alongside tool calls)
+            response_content = getattr(final_response.choices[0].message, 'content', None)
+            if response_content and response_content.strip() and tool_calls:
+                try:
+                    from ..main import execute_sync_callback as _esc
+                    _esc(
+                        'llm_content',
+                        content=response_content.strip(),
+                        agent_name=None,
+                    )
+                except Exception:
+                    pass  # Narrative display is optional
             
             if tool_calls and execute_tool_fn:
                 # Convert ToolCall dataclass objects to dict for JSON serialization

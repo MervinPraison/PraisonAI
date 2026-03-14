@@ -88,7 +88,6 @@ class TestAgentKnowledgeRetrieval:
             instructions="Answer based ONLY on the provided knowledge. Quote exact codes.",
             knowledge=[temp_knowledge_dir],
             user_id="live_test_user",
-            verbose=False,
         )
         
         response = agent.chat("What is the project code for Phoenix Initiative?")
@@ -105,7 +104,6 @@ class TestAgentKnowledgeRetrieval:
             instructions="Answer based ONLY on the provided knowledge. Quote exact codes.",
             knowledge=[temp_knowledge_dir],
             user_id="live_test_user",
-            verbose=False,
         )
         
         response = agent.chat("What is the budget code?")
@@ -122,7 +120,6 @@ class TestAgentKnowledgeRetrieval:
             instructions="Answer based ONLY on the provided knowledge. Quote exact codes.",
             knowledge=[temp_knowledge_dir],
             user_id="live_test_user",
-            verbose=False,
         )
         
         response = agent.chat("What is the security code?")

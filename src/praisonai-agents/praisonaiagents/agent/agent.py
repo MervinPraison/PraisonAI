@@ -1322,6 +1322,7 @@ class Agent:
                         llm_config['api_key'] = api_key
                     llm_config['metrics'] = metrics
                     self.llm_instance = LLM(**llm_config)
+                    self.llm = llm.get('model', Agent._get_default_model())
                 else:
                     # Create LLM with model string and base_url (cached for performance)
                     model_name = llm or Agent._get_default_model()
@@ -1335,6 +1336,7 @@ class Agent:
                         prompt_caching=prompt_caching,
                         claude_memory=claude_memory
                     )
+                    self.llm = model_name
                 self._using_custom_llm = True
             except ImportError as e:
                 raise ImportError(
@@ -1354,6 +1356,7 @@ class Agent:
                 llm['metrics'] = metrics
                 self.llm_instance = LLM(**llm)  # Pass all dict items as kwargs
                 self._using_custom_llm = True
+                self.llm = llm.get('model', Agent._get_default_model())
             except ImportError as e:
                 raise ImportError(
                     "LLM features requested but dependencies not installed. "
@@ -6200,6 +6203,7 @@ Your Goal: {self.goal}"""
                 use_native_format=use_native_format
             )
             
+
             # Store chat history length for potential rollback
             chat_history_length = len(self.chat_history)
             
@@ -6231,6 +6235,7 @@ Your Goal: {self.goal}"""
             )
             # Use processed messages for the LLM call
             messages = processed_messages
+            
             
             # Wrap entire while loop in try-except for rollback on any failure
             try:

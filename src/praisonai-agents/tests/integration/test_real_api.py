@@ -57,7 +57,6 @@ class TestAgentRealAPI:
             name="TestAgent",
             instructions="You are a helpful assistant. Keep responses very brief.",
             llm="gpt-4o-mini",
-            verbose=False
         )
         
         response = agent.chat("Say 'hello' and nothing else.")
@@ -82,7 +81,6 @@ class TestAgentRealAPI:
             instructions="You are a math assistant. Use the add_numbers tool when asked to add.",
             llm="gpt-4o-mini",
             tools=[add_numbers],
-            verbose=False
         )
         
         response = agent.chat("What is 5 + 3? Use the add_numbers tool.")
@@ -100,7 +98,6 @@ class TestAgentRealAPI:
             name="HistoryAgent",
             instructions="You are a helpful assistant. Remember what the user tells you.",
             llm="gpt-4o-mini",
-            verbose=False
         )
         
         # First message
@@ -189,7 +186,6 @@ class TestAnthropicAPI:
             name="ClaudeAgent",
             instructions="You are a helpful assistant. Keep responses very brief.",
             llm="claude-3-5-sonnet-20241022",
-            verbose=False
         )
         
         response = agent.chat("Say 'hello' and nothing else.")
@@ -223,7 +219,6 @@ class TestGoogleAPI:
             name="GeminiAgent",
             instructions="You are a helpful assistant. Keep responses very brief.",
             llm="gemini/gemini-2.0-flash",
-            verbose=False
         )
         
         response = agent.chat("Say 'hello' and nothing else.")

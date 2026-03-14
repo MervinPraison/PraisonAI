@@ -99,7 +99,6 @@ def test_db_hook_lifecycle():
         instructions="Test agent",
         db=mock_db,
         session_id="test-session-001",
-        verbose=False
     )
     
     # Verify db is stored
@@ -125,7 +124,6 @@ def test_db_none_unchanged_behavior():
     agent = Agent(
         name="TestAgent",
         instructions="Test agent",
-        verbose=False
     )
     
     # Verify db is None
@@ -157,7 +155,6 @@ def test_session_id_auto_generation():
         instructions="Test agent",
         db=mock_db,
         # No session_id provided
-        verbose=False
     )
     
     # Trigger db initialization
