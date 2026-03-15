@@ -4278,7 +4278,7 @@ Your Goal: {self.goal}"""
             
             if tool_names:
                 system_prompt += f"\n\nYou have access to the following tools: {', '.join(tool_names)}. Use these tools when appropriate to help complete your tasks. Always use tools when they can help provide accurate information or perform actions."
-                system_prompt += "\n\nExplain Before Acting: When calling tools, provide a brief one-sentence explanation of what you are about to do and why before making the tool call. This helps maintain transparency. Skip explanations only for repetitive low-level operations where narration would be noisy."
+                system_prompt += "\n\nExplain Before Acting: Before calling a tool, provide a brief one-sentence explanation of what you are about to do and why. Skip explanations only for repetitive low-level operations where narration would be noisy. When performing a batch of similar operations (e.g. searching for multiple items), explain the group once rather than narrating each call individually."
         
         # Cache the generated system prompt (only if cache_key is set, i.e., memory not enabled)
         # Simple cache size limit to prevent unbounded growth
