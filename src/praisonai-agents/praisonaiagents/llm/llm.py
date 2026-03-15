@@ -107,7 +107,7 @@ class LLM:
     MODEL_WINDOWS = {
         # OpenAI
         "gpt-4": 6144,                    # 8,192 actual
-        "gpt-4o-mini": 96000,                  # 128,000 actual
+        "gpt-4o": 96000,                       # 128,000 actual
         "gpt-4o-mini": 96000,            # 128,000 actual
         "gpt-4-turbo": 96000,            # 128,000 actual
         "o1-preview": 96000,             # 128,000 actual
