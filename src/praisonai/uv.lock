@@ -4740,6 +4740,7 @@ all = [
     { name = "greenlet" },
     { name = "playwright" },
     { name = "plotly" },
+    { name = "psutil" },
     { name = "sqlalchemy" },
     { name = "sse-starlette" },
     { name = "tavily-python" },
@@ -4770,6 +4771,7 @@ bot = [
     { name = "brotlicffi" },
     { name = "ddgs" },
     { name = "discord-py" },
+    { name = "psutil" },
     { name = "python-telegram-bot" },
     { name = "slack-bolt" },
     { name = "slack-sdk" },
@@ -4810,6 +4812,7 @@ claw = [
     { name = "flask" },
     { name = "greenlet" },
     { name = "praisonaiagents", extra = ["all"] },
+    { name = "psutil" },
     { name = "python-telegram-bot" },
     { name = "slack-bolt" },
     { name = "slack-sdk" },
@@ -4932,8 +4935,11 @@ requires-dist = [
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen-v4'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.1.0" },
-    { name = "praisonaiagents", specifier = ">=1.5.63" },
+    { name = "praisonaiagents", specifier = ">=1.5.64" },
     { name = "praisonaiagents", extras = ["all"], marker = "extra == 'claw'", specifier = ">=1.5.40" },
+    { name = "psutil", marker = "extra == 'all'", specifier = ">=5.9.0" },
+    { name = "psutil", marker = "extra == 'bot'", specifier = ">=5.9.0" },
+    { name = "psutil", marker = "extra == 'claw'", specifier = ">=5.9.0" },
     { name = "pyautogen", marker = "extra == 'autogen'", specifier = "==0.2.29" },
     { name = "pyjwt", marker = "extra == 'os'", specifier = ">=2.8.0" },
     { name = "pyngrok", marker = "extra == 'call'", specifier = ">=1.4.0" },
@@ -4999,7 +5005,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.5.63"
+version = "1.5.64"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -5008,9 +5014,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ac/4e/1f9cbcd17c1d9b21baeff6993ccfc7029eb556b444d1cb38117552d3099a/praisonaiagents-1.5.63.tar.gz", hash = "sha256:a3184448b8e9443f9e47be32672bc4e8f9cb367318866b43fcc7e5489cdb5b8a", size = 1189596, upload-time = "2026-03-15T15:30:52.544Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/22/2c/59c74c7b768f62ea01a0127a3b369c9a9483a239a2d303e1b38dedaa7188/praisonaiagents-1.5.64.tar.gz", hash = "sha256:1c0190b5e22b64e8d9b435719ff0e8072d65b4a081f5927d26795d28b87187ab", size = 1189886, upload-time = "2026-03-16T09:58:43.606Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a1/18/9de6aa1a592b957fe02e533500fce5131ebd9b37e3d4679c155cecf17bbc/praisonaiagents-1.5.63-py3-none-any.whl", hash = "sha256:b47ef6ecbbe097e49a8724d0761585af3aa589a2a7b9de05fa35168c7d590030", size = 1234818, upload-time = "2026-03-15T15:30:50.227Z" },
+    { url = "https://files.pythonhosted.org/packages/27/64/e84606278812504a637c1884c263a85d27bc1085259238c46cd45500fa94/praisonaiagents-1.5.64-py3-none-any.whl", hash = "sha256:9126a5db393c5a4e8f550aa2e39e9fdb7db24e6e79e66842029fdf62307a39cb", size = 1235047, upload-time = "2026-03-16T09:58:41.456Z" },
 ]
 
 [package.optional-dependencies]

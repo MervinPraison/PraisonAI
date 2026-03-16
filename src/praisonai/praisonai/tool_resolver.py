@@ -112,7 +112,15 @@ class ToolResolver:
             if hasattr(agent_tools, 'TOOL_MAPPINGS'):
                 if name in agent_tools.TOOL_MAPPINGS:
                     # Use __getattr__ to lazily load the tool
-                    tool = getattr(agent_tools, name, None)
+                    try:
+                        tool = getattr(agent_tools, name)
+                    except Exception as e:
+                        # Tool exists in TOOL_MAPPINGS but failed to load
+                        # (e.g. missing dependency like psutil)
+                        logger.warning(
+                            f"Tool '{name}' exists in TOOL_MAPPINGS but failed to load: {e}"
+                        )
+                        return None
                     if tool is not None:
                         logger.debug(f"Resolved '{name}' from praisonaiagents.tools")
                         return tool

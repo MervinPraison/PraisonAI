@@ -13,7 +13,8 @@ import logging
 import os
 import time
 import platform
-import psutil
+# psutil is imported lazily inside methods that need it
+# to avoid hard failure when the package is not installed
 from typing import Dict, List, Optional, Union
 from ..approval import require_approval
 
@@ -25,14 +26,8 @@ class ShellTools:
         self._check_dependencies()
     
     def _check_dependencies(self):
-        """Check if required packages are installed."""
-        try:
-            import psutil
-        except ImportError:
-            raise ImportError(
-                "Required package not available. Please install: psutil\n"
-                "Run: pip install psutil"
-            )
+        """Check if required packages are installed (lazy — no hard failure)."""
+        pass
     
     @require_approval(risk_level="critical")
     def execute_command(
@@ -117,11 +112,16 @@ class ShellTools:
             
             except subprocess.TimeoutExpired:
                 # Kill process on timeout
-                parent = psutil.Process(process.pid)
-                children = parent.children(recursive=True)
-                for child in children:
-                    child.kill()
-                parent.kill()
+                try:
+                    import psutil
+                    parent = psutil.Process(process.pid)
+                    children = parent.children(recursive=True)
+                    for child in children:
+                        child.kill()
+                    parent.kill()
+                except ImportError:
+                    # Fallback: kill without psutil
+                    process.kill()
                 
                 return {
                     'stdout': '',
@@ -148,6 +148,10 @@ class ShellTools:
         Returns:
             List of process information dictionaries
         """
+        try:
+            import psutil
+        except ImportError:
+            return [{"error": "psutil is required for list_processes. Install with: pip install psutil"}]
         try:
             processes = []
             for proc in psutil.process_iter(['pid', 'name', 'username', 'memory_percent', 'cpu_percent']):
@@ -188,6 +192,13 @@ class ShellTools:
             Dictionary with operation results
         """
         try:
+            import psutil
+        except ImportError:
+            return {
+                'success': False,
+                'message': 'psutil is required for kill_process. Install with: pip install psutil'
+            }
+        try:
             process = psutil.Process(pid)
             if force:
                 process.kill()  # SIGKILL
@@ -223,6 +234,10 @@ class ShellTools:
             Dictionary with system information
         """
         try:
+            import psutil
+        except ImportError:
+            return {"error": "psutil is required for get_system_info. Install with: pip install psutil"}
+        try:
             cpu_percent = psutil.cpu_percent(interval=1)
             memory = psutil.virtual_memory()
             # Use appropriate root path for the OS
@@ -256,12 +271,30 @@ class ShellTools:
             logging.error(error_msg)
             return {}
 
-# Create instance for direct function access
-_shell_tools = ShellTools()
-execute_command = _shell_tools.execute_command
-list_processes = _shell_tools.list_processes
-kill_process = _shell_tools.kill_process
-get_system_info = _shell_tools.get_system_info
+# Lazy instance — deferred so module can be imported without psutil
+_shell_tools = None
+
+def _get_shell_tools():
+    global _shell_tools
+    if _shell_tools is None:
+        _shell_tools = ShellTools()
+    return _shell_tools
+
+def execute_command(*args, **kwargs):
+    """Execute a shell command safely."""
+    return _get_shell_tools().execute_command(*args, **kwargs)
+
+def list_processes(*args, **kwargs):
+    """List running processes with their details."""
+    return _get_shell_tools().list_processes(*args, **kwargs)
+
+def kill_process(*args, **kwargs):
+    """Kill a process by its PID."""
+    return _get_shell_tools().kill_process(*args, **kwargs)
+
+def get_system_info(*args, **kwargs):
+    """Get system information."""
+    return _get_shell_tools().get_system_info(*args, **kwargs)
 
 if __name__ == "__main__":
     # Example usage
