@@ -130,7 +130,15 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
         self._is_running = False
         self._started_at: Optional[float] = None
         self._bot_user: Optional[BotUser] = None
-        self._session_mgr = BotSessionManager()
+        try:
+            from praisonaiagents.session import get_default_session_store
+            _store = get_default_session_store()
+        except Exception:
+            _store = None
+        self._session_mgr = BotSessionManager(
+            store=_store,
+            platform="whatsapp",
+        )
         self._message_handlers: List[Callable] = []
         self._runner: Any = None
         self._site: Any = None

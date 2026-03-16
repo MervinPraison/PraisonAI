@@ -85,7 +85,15 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._message_handlers: List[Callable] = []
         self._command_handlers: Dict[str, Callable] = {}
         self._started_at: Optional[float] = None
-        self._session: BotSessionManager = BotSessionManager()
+        try:
+            from praisonaiagents.session import get_default_session_store
+            _store = get_default_session_store()
+        except Exception:
+            _store = None
+        self._session: BotSessionManager = BotSessionManager(
+            store=_store,
+            platform="telegram",
+        )
         self._debouncer: InboundDebouncer = InboundDebouncer(
             debounce_ms=self.config.debounce_ms,
         )
