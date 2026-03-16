@@ -5,9 +5,24 @@ Provides Model Context Protocol server integration.
 Usage: praisonai "prompt" --mcp "npx -y @modelcontextprotocol/server-filesystem ."
 """
 
+import os
 import shlex
 from typing import Any, Dict, Tuple, List
 from .base import FlagHandler
+
+# Executables allowed as MCP server commands from the CLI.
+# The SDK MCP() class is intentionally unrestricted — developers control their own inputs.
+ALLOWED_MCP_COMMANDS = {
+    "npx", "npx.cmd", "npx.exe",
+    "node", "node.exe",
+    "python", "python3", "python.exe", "python3.exe",
+    "uvx", "uvx.exe",
+    "uv", "uv.exe",
+    "docker", "docker.exe",
+    "deno", "deno.exe",
+    "bun", "bun.exe",
+    "pipx",
+}
 
 
 class MCPHandler(FlagHandler):
@@ -56,6 +71,9 @@ class MCPHandler(FlagHandler):
             
         Returns:
             Tuple of (command, args, env_dict)
+            
+        Raises:
+            ValueError: If the command executable is not in the allowed list.
         """
         # Parse command using shell-like splitting
         parts = shlex.split(command)
@@ -64,6 +82,14 @@ class MCPHandler(FlagHandler):
         
         cmd = parts[0]
         args = parts[1:] if len(parts) > 1 else []
+        
+        # Validate executable against allowlist
+        basename = os.path.basename(cmd)
+        if basename not in ALLOWED_MCP_COMMANDS:
+            raise ValueError(
+                f"Command '{cmd}' is not in the allowed MCP executables list. "
+                f"Allowed: {', '.join(sorted(ALLOWED_MCP_COMMANDS - {c for c in ALLOWED_MCP_COMMANDS if '.' in c}))}"
+            )
         
         # Parse environment variables
         env = {}
@@ -94,7 +120,11 @@ class MCPHandler(FlagHandler):
         
         from praisonaiagents import MCP
         
-        cmd, args, env = self.parse_mcp_command(command, env_vars)
+        try:
+            cmd, args, env = self.parse_mcp_command(command, env_vars)
+        except ValueError as e:
+            self.print_status(str(e), "error")
+            return None
         
         if not cmd:
             self.print_status("Invalid MCP command", "error")
