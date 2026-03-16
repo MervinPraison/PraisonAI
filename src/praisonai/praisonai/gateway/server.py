@@ -865,7 +865,7 @@ class WebSocketGateway:
         elif not isinstance(raw["channels"], dict) or not raw["channels"]:
             errors.append("'channels' must be a non-empty dictionary")
         else:
-            valid_platforms = {"telegram", "discord", "slack", "whatsapp"}
+            valid_platforms = {"telegram", "discord", "slack", "whatsapp", "email", "agentmail"}
             for cname, cdef in raw["channels"].items():
                 if not isinstance(cdef, dict):
                     errors.append(f"Channel '{cname}' must be a dictionary")
@@ -880,7 +880,9 @@ class WebSocketGateway:
                 # WhatsApp web mode doesn't require a token
                 is_wa_web = (platform == "whatsapp" and
                              cdef.get("mode", "cloud").lower().strip() == "web")
-                if not cdef.get("token") and not is_wa_web:
+                # Email/AgentMail use env vars for tokens — not required in YAML
+                is_email_platform = platform in ("email", "agentmail")
+                if not cdef.get("token") and not is_wa_web and not is_email_platform:
                     errors.append(
                         f"Channel '{cname}' missing 'token' "
                         "(use ${{ENV_VAR}} syntax for env vars)"
@@ -1078,7 +1080,9 @@ class WebSocketGateway:
             # WhatsApp web mode doesn't require a token
             wa_web_mode = (channel_type == "whatsapp" and
                            ch_cfg.get("mode", "cloud").lower().strip() == "web")
-            if not token and not wa_web_mode:
+            # Email/AgentMail use env vars for tokens — not required in YAML
+            is_email_platform = channel_type in ("email", "agentmail")
+            if not token and not wa_web_mode and not is_email_platform:
                 logger.warning(f"No token for channel '{channel_name}', skipping")
                 continue
 
@@ -1142,6 +1146,25 @@ class WebSocketGateway:
                 webhook_port=int(ch_cfg.get("webhook_port", 8080)),
                 mode=wa_mode,
                 creds_dir=ch_cfg.get("creds_dir"),
+            )
+        elif channel_type == "email":
+            from praisonai.bots import EmailBot
+            email_token = token or os.environ.get("EMAIL_APP_PASSWORD", "")
+            return EmailBot(
+                token=email_token,
+                agent=agent,
+                email_address=ch_cfg.get("email_address") or os.environ.get("EMAIL_ADDRESS", ""),
+                imap_server=ch_cfg.get("imap_server") or os.environ.get("EMAIL_IMAP_SERVER", ""),
+                smtp_server=ch_cfg.get("smtp_server") or os.environ.get("EMAIL_SMTP_SERVER", ""),
+            )
+        elif channel_type == "agentmail":
+            from praisonai.bots import AgentMailBot
+            am_token = token or os.environ.get("AGENTMAIL_API_KEY", "")
+            return AgentMailBot(
+                token=am_token,
+                agent=agent,
+                inbox_id=ch_cfg.get("inbox_id") or os.environ.get("AGENTMAIL_INBOX_ID", ""),
+                domain=ch_cfg.get("domain") or os.environ.get("AGENTMAIL_DOMAIN", ""),
             )
         else:
             logger.warning(f"Unknown channel type: {channel_type}")

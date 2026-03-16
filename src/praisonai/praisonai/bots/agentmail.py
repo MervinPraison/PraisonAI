@@ -169,12 +169,9 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
         
         # Create or get inbox
         if self._inbox_id:
-            # Use existing inbox
-            try:
-                inbox = client.inboxes.get(self._inbox_id)
-                self._email_address = inbox.email_address
-            except Exception as e:
-                raise ConnectionError(f"Failed to get inbox {self._inbox_id}: {e}")
+            # Use existing inbox — inbox_id IS the email address in AgentMail SDK
+            self._email_address = self._inbox_id
+            logger.info(f"Using existing AgentMail inbox: {self._email_address}")
         else:
             # Create new inbox
             try:
@@ -182,8 +179,9 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
                 if self._domain:
                     inbox_params["domain"] = self._domain
                 inbox = client.inboxes.create(**inbox_params)
-                self._inbox_id = inbox.id
-                self._email_address = inbox.email_address
+                # SDK v0.4.7: inbox_id IS the email address (e.g. "user@agentmail.to")
+                self._inbox_id = inbox.inbox_id
+                self._email_address = inbox.inbox_id
                 logger.info(f"Created AgentMail inbox: {self._email_address}")
             except Exception as e:
                 raise ConnectionError(f"Failed to create inbox: {e}")
@@ -245,18 +243,23 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
         client = self._get_client()
         
         try:
-            # List messages from inbox
-            messages = client.inboxes.messages.list(self._inbox_id)
+            # SDK v0.4.7: list() returns ListMessagesResponse with .messages list
+            response = client.inboxes.messages.list(self._inbox_id)
+            msg_list = response.messages if hasattr(response, 'messages') else response
             
-            for msg in messages:
+            for msg in msg_list:
+                # SDK v0.4.7: Message uses .message_id, not .id
+                msg_id = msg.message_id
+                
                 # Skip already processed
-                if msg.id in self._processed_ids:
+                if msg_id in self._processed_ids:
                     continue
                 
-                self._processed_ids.add(msg.id)
+                self._processed_ids.add(msg_id)
                 
-                # Extract sender info
-                sender_email = extract_email_address(msg.from_address or "")
+                # SDK v0.4.7: Message uses .from_ (not .from_address)
+                sender_raw = getattr(msg, 'from_', '') or ''
+                sender_email = extract_email_address(sender_raw)
                 
                 # Skip auto-replies and blocked senders
                 headers = getattr(msg, 'headers', {}) or {}
@@ -268,11 +271,11 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
                     logger.debug(f"Skipping blocked sender: {sender_email}")
                     continue
                 
-                # Build BotMessage
-                body = getattr(msg, 'extracted_text', '') or getattr(msg, 'body', '') or ''
+                # Build BotMessage — SDK uses .text / .extracted_text, not .body
+                body = getattr(msg, 'extracted_text', '') or getattr(msg, 'text', '') or ''
                 
                 message = BotMessage(
-                    message_id=msg.id,
+                    message_id=msg_id,
                     content=body,
                     message_type=MessageType.TEXT,
                     sender=BotUser(
@@ -287,7 +290,7 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
                     thread_id=getattr(msg, 'thread_id', None),
                     metadata={
                         "subject": getattr(msg, 'subject', ''),
-                        "message_id": getattr(msg, 'message_id', ''),
+                        "message_id": msg_id,
                         "in_reply_to": getattr(msg, 'in_reply_to', ''),
                     },
                 )
@@ -379,20 +382,26 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
         client = self._get_client()
         
         # Send via AgentMail API
+        # SDK v0.4.7: uses text= (not body=); reply_to= is Reply-To header
+        # For replying to a message, use messages.reply() method
         try:
-            send_params = {
-                "to": channel_id,
-                "subject": subject,
-                "body": body,
-            }
-            
             if reply_to:
-                send_params["in_reply_to"] = reply_to
-            if thread_id:
-                send_params["thread_id"] = thread_id
-            
-            result = client.inboxes.messages.send(self._inbox_id, **send_params)
-            message_id = getattr(result, 'id', str(uuid.uuid4()))
+                # reply_to contains the original message_id — use reply() method
+                result = client.inboxes.messages.reply(
+                    self._inbox_id,
+                    reply_to,  # message_id of original message
+                    text=body,
+                    subject=subject,
+                )
+            else:
+                result = client.inboxes.messages.send(
+                    self._inbox_id,
+                    to=channel_id,
+                    subject=subject,
+                    text=body,
+                )
+            # SendMessageResponse has .message_id
+            message_id = getattr(result, 'message_id', str(uuid.uuid4()))
             
         except Exception as e:
             logger.error(f"Failed to send email: {e}")
@@ -485,9 +494,11 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
         
         inbox = client.inboxes.create(**params)
         
+        # SDK v0.4.7: inbox_id IS the email address
         return {
-            "id": inbox.id,
-            "email_address": inbox.email_address,
+            "id": inbox.inbox_id,
+            "email_address": inbox.inbox_id,
+            "display_name": getattr(inbox, "display_name", None),
         }
     
     async def list_inboxes(self) -> List[Dict[str, Any]]:
@@ -497,14 +508,17 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
             List of inbox details
         """
         client = self._get_client()
-        inboxes = client.inboxes.list()
+        # SDK v0.4.7: list() returns response object with .inboxes list
+        result = client.inboxes.list()
+        inbox_list = result.inboxes if hasattr(result, 'inboxes') else result
         
         return [
             {
-                "id": inbox.id,
-                "email_address": inbox.email_address,
+                "id": inbox.inbox_id,
+                "email_address": inbox.inbox_id,
+                "display_name": getattr(inbox, "display_name", None),
             }
-            for inbox in inboxes
+            for inbox in inbox_list
         ]
     
     async def delete_inbox(self, inbox_id: str) -> bool:

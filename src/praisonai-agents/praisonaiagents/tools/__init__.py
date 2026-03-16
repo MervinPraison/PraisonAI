@@ -171,6 +171,13 @@ TOOL_MAPPINGS = {
     # Learning Tools (active categorized knowledge store/search)
     'store_learning': ('.learning', None),
     'search_learning': ('.learning', None),
+
+    # Email Tools (AgentMail-based send/read/list)
+    'send_email': ('.email_tools', None),
+    'list_emails': ('.email_tools', None),
+    'read_email': ('.email_tools', None),
+    'list_inboxes': ('.email_tools', None),
+    'email_tools': ('.email_tools', None),
 }
 
 _instances = {}  # Cache for class instances
@@ -231,10 +238,11 @@ def __getattr__(name: str) -> Any:
             'schedule_add', 'schedule_list', 'schedule_remove',
             'ast_grep_search', 'ast_grep_rewrite', 'ast_grep_scan', 'is_ast_grep_available', 'get_ast_grep_tools',
             'store_memory', 'search_memory',
-            'store_learning', 'search_learning'
+            'store_learning', 'search_learning',
+            'send_email', 'list_emails', 'read_email', 'list_inboxes'
         ]:
             return getattr(module, name)
-        if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools', 'schedule_tools', 'ast_grep_tools']:
+        if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools', 'schedule_tools', 'ast_grep_tools', 'email_tools']:
             return module  # Returns the callable module
         return getattr(module, name)
     else:

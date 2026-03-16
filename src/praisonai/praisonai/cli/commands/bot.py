@@ -355,6 +355,89 @@ def bot_whatsapp(
     )
 
 
+@app.command("email")
+def bot_email(
+    token: Optional[str] = typer.Option(None, "--token", "-t", help="Email app password", envvar="EMAIL_APP_PASSWORD"),
+    email_address: Optional[str] = typer.Option(None, "--email", help="Email address", envvar="EMAIL_ADDRESS"),
+    imap_server: Optional[str] = typer.Option(None, "--imap", help="IMAP server"),
+    smtp_server: Optional[str] = typer.Option(None, "--smtp", help="SMTP server"),
+    agent: Optional[str] = typer.Option(None, "--agent", "-a", help="Agent YAML configuration file"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model to use"),
+    tools: Optional[List[str]] = typer.Option(None, "--tools", help="Tools to enable"),
+    memory: bool = typer.Option(False, "--memory", help="Enable memory"),
+    knowledge: bool = typer.Option(False, "--knowledge", help="Enable knowledge/RAG"),
+    web_search: bool = typer.Option(False, "--web", "--web-search", help="Enable web search"),
+    auto_approve: bool = typer.Option(False, "--auto-approve", help="Auto-approve all tool executions"),
+):
+    """Start an Email bot (IMAP/SMTP).
+    
+    Examples:
+        praisonai bot email --token $EMAIL_APP_PASSWORD --email user@gmail.com
+        praisonai bot email --agent agents.yaml --memory
+    """
+    from ..features.bots_cli import BotHandler, BotCapabilities
+    
+    capabilities = BotCapabilities(
+        tools=tools or [],
+        memory=memory,
+        knowledge=knowledge,
+        web_search=web_search,
+        auto_approve=auto_approve,
+        model=model,
+    )
+    
+    handler = BotHandler()
+    handler.start_email(
+        token=token,
+        agent_file=agent,
+        capabilities=capabilities,
+        email_address=email_address,
+        imap_server=imap_server,
+        smtp_server=smtp_server,
+    )
+
+
+@app.command("agentmail")
+def bot_agentmail(
+    token: Optional[str] = typer.Option(None, "--token", "-t", help="AgentMail API key", envvar="AGENTMAIL_API_KEY"),
+    inbox_id: Optional[str] = typer.Option(None, "--inbox", help="Existing inbox ID / email address", envvar="AGENTMAIL_INBOX_ID"),
+    domain: Optional[str] = typer.Option(None, "--domain", help="Custom domain for new inboxes", envvar="AGENTMAIL_DOMAIN"),
+    agent: Optional[str] = typer.Option(None, "--agent", "-a", help="Agent YAML configuration file"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model to use"),
+    tools: Optional[List[str]] = typer.Option(None, "--tools", help="Tools to enable"),
+    memory: bool = typer.Option(False, "--memory", help="Enable memory"),
+    knowledge: bool = typer.Option(False, "--knowledge", help="Enable knowledge/RAG"),
+    web_search: bool = typer.Option(False, "--web", "--web-search", help="Enable web search"),
+    auto_approve: bool = typer.Option(False, "--auto-approve", help="Auto-approve all tool executions"),
+):
+    """Start an AgentMail bot (API-first email for AI agents).
+    
+    Examples:
+        praisonai bot agentmail --token $AGENTMAIL_API_KEY
+        praisonai bot agentmail --inbox praison@agentmail.to
+        praisonai bot agentmail --agent agents.yaml --memory
+    """
+    from ..features.bots_cli import BotHandler, BotCapabilities
+    
+    capabilities = BotCapabilities(
+        tools=tools or [],
+        memory=memory,
+        knowledge=knowledge,
+        web_search=web_search,
+        auto_approve=auto_approve,
+        model=model,
+    )
+    
+    handler = BotHandler()
+    handler.start_agentmail(
+        token=token,
+        agent_file=agent,
+        capabilities=capabilities,
+        inbox_id=inbox_id,
+        domain=domain,
+    )
+
+
 @app.callback(invoke_without_command=True)
 def bot_callback(ctx: typer.Context):
     """Show bot help if no subcommand provided."""
@@ -369,6 +452,8 @@ Start a bot on any platform with: praisonai bot <platform>
   [green]discord[/green]     Discord Bot API  
   [green]slack[/green]       Slack Socket Mode
   [green]whatsapp[/green]    WhatsApp Cloud API or Web mode (QR scan)
+  [green]email[/green]       Email via IMAP/SMTP
+  [green]agentmail[/green]   AgentMail API (API-first email for AI agents)
 
 [bold]Capability Options (all platforms):[/bold]
   [yellow]--agent FILE[/yellow]          Agent YAML configuration

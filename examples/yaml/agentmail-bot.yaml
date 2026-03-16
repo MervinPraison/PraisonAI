@@ -1,0 +1,27 @@
+# PraisonAI AgentMail Bot Configuration (Zero-Code)
+#
+# AgentMail = API-first email (no IMAP/SMTP). Programmatic inboxes.
+#
+# Usage:
+#   praisonai bot start --config agentmail-bot.yaml
+#
+# Requires:
+#   pip install praisonai agentmail
+#   export AGENTMAIL_API_KEY=am_...
+#
+# Optional env vars:
+#   AGENTMAIL_INBOX_ID=inbox_...  (reuse existing inbox)
+#   AGENTMAIL_DOMAIN=mycompany.com (custom domain for new inboxes)
+
+# Agent configuration
+agent:
+  name: "Email Assistant"
+  instructions: "You are a helpful email assistant. Keep replies concise and professional."
+  model: "gpt-4o-mini"
+  memory: true
+
+# Channel configuration (multi-channel format)
+channels:
+  agentmail:
+    token: "${AGENTMAIL_API_KEY}"
+    # Optional: inbox_id, domain are resolved from env vars automatically

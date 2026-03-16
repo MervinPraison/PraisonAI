@@ -190,12 +190,25 @@ class BotHandler:
         
         platform = config.get("platform")
         if not platform:
-            print("Error: 'platform' is required in bot config (telegram, discord, or slack)")
-            return
+            # Also try channels-style config (multi-channel format)
+            channels = config.get("channels")
+            if channels and isinstance(channels, dict):
+                # Pick first channel as platform
+                platform = next(iter(channels))
+                # Merge channel config into top level for token resolution
+                channel_conf = channels[platform] or {}
+                if "token" not in config and channel_conf.get("token"):
+                    config["token"] = channel_conf["token"]
+                if "bot_token" not in config and channel_conf.get("bot_token"):
+                    config["token"] = channel_conf["bot_token"]
+            else:
+                print("Error: 'platform' or 'channels' is required in bot config")
+                return
         
         platform = platform.lower().strip()
-        if platform not in ("telegram", "discord", "slack", "whatsapp"):
-            print(f"Error: Unknown platform '{platform}'. Use: telegram, discord, slack, whatsapp")
+        valid_platforms = ("telegram", "discord", "slack", "whatsapp", "email", "agentmail")
+        if platform not in valid_platforms:
+            print(f"Error: Unknown platform '{platform}'. Use: {', '.join(valid_platforms)}")
             return
         
         token = resolve_env_vars(config.get("token", ""))
@@ -271,6 +284,25 @@ class BotHandler:
                 allowed_numbers=wa_allowed_numbers,
                 allowed_groups=wa_allowed_groups,
                 respond_to_all=bool(wa_respond_to_all),
+            )
+        elif platform == "email":
+            self.start_email(
+                token=token or None,
+                agent_file=None,
+                capabilities=capabilities,
+                agent_config_dict=agent_config,
+                email_address=resolve_env_vars(config.get("email_address", "")),
+                imap_server=resolve_env_vars(config.get("imap_server", "")),
+                smtp_server=resolve_env_vars(config.get("smtp_server", "")),
+            )
+        elif platform == "agentmail":
+            self.start_agentmail(
+                token=token or None,
+                agent_file=None,
+                capabilities=capabilities,
+                agent_config_dict=agent_config,
+                inbox_id=resolve_env_vars(config.get("inbox_id", "")),
+                domain=resolve_env_vars(config.get("domain", "")),
             )
     
     def start_telegram(
@@ -521,6 +553,117 @@ class BotHandler:
                 asyncio.run(bot.stop())
             except Exception:
                 pass  # neonize Go threads may already be gone
+
+    def start_email(
+        self,
+        token: Optional[str] = None,
+        agent_file: Optional[str] = None,
+        capabilities: Optional[BotCapabilities] = None,
+        agent_config_dict: Optional[Dict[str, Any]] = None,
+        email_address: Optional[str] = None,
+        imap_server: Optional[str] = None,
+        smtp_server: Optional[str] = None,
+    ) -> None:
+        """Start an Email bot (IMAP/SMTP).
+        
+        Args:
+            token: Email app password (or EMAIL_APP_PASSWORD env var)
+            agent_file: Optional path to agent config file
+            capabilities: Optional capabilities configuration
+            agent_config_dict: Optional agent config dict from bot YAML
+            email_address: Email address to use
+            imap_server: IMAP server hostname
+            smtp_server: SMTP server hostname
+        """
+        self._load_dotenv()
+        token = token or os.environ.get("EMAIL_APP_PASSWORD")
+        if not token:
+            print("Error: Email app password required")
+            print("Provide via --token or EMAIL_APP_PASSWORD environment variable")
+            return
+        
+        if capabilities and capabilities.auto_approve:
+            os.environ["PRAISONAI_AUTO_APPROVE"] = "true"
+        
+        try:
+            from praisonai.bots import EmailBot
+        except ImportError as e:
+            print(f"Error: EmailBot import failed. {e}")
+            return
+        
+        agent = self._load_agent(agent_file, capabilities, agent_config_dict=agent_config_dict)
+        bot = EmailBot(
+            token=token,
+            agent=agent,
+            email_address=email_address or None,
+            imap_server=imap_server or None,
+            smtp_server=smtp_server or None,
+        )
+        
+        self._print_startup_info("Email (IMAP/SMTP)", capabilities)
+        
+        try:
+            asyncio.run(bot.start())
+        except KeyboardInterrupt:
+            print("\nStopping bot...")
+            asyncio.run(bot.stop())
+
+    def start_agentmail(
+        self,
+        token: Optional[str] = None,
+        agent_file: Optional[str] = None,
+        capabilities: Optional[BotCapabilities] = None,
+        agent_config_dict: Optional[Dict[str, Any]] = None,
+        inbox_id: Optional[str] = None,
+        domain: Optional[str] = None,
+    ) -> None:
+        """Start an AgentMail bot (API-first email).
+        
+        Args:
+            token: AgentMail API key (or AGENTMAIL_API_KEY env var)
+            agent_file: Optional path to agent config file
+            capabilities: Optional capabilities configuration
+            agent_config_dict: Optional agent config dict from bot YAML
+            inbox_id: Existing inbox ID / email address to reuse
+            domain: Custom domain for new inboxes
+        """
+        self._load_dotenv()
+        token = token or os.environ.get("AGENTMAIL_API_KEY")
+        if not token:
+            print("Error: AgentMail API key required")
+            print("Provide via --token or AGENTMAIL_API_KEY environment variable")
+            return
+        
+        if capabilities and capabilities.auto_approve:
+            os.environ["PRAISONAI_AUTO_APPROVE"] = "true"
+        
+        try:
+            from praisonai.bots import AgentMailBot
+        except ImportError as e:
+            print(f"Error: AgentMailBot import failed. {e}")
+            print("Install with: pip install agentmail")
+            return
+        
+        inbox_id = inbox_id or os.environ.get("AGENTMAIL_INBOX_ID")
+        domain = domain or os.environ.get("AGENTMAIL_DOMAIN")
+        
+        agent = self._load_agent(agent_file, capabilities, agent_config_dict=agent_config_dict)
+        bot = AgentMailBot(
+            token=token,
+            agent=agent,
+            inbox_id=inbox_id,
+            domain=domain,
+        )
+        
+        self._print_startup_info("AgentMail", capabilities)
+        if inbox_id:
+            print(f"Inbox: {inbox_id}")
+        
+        try:
+            asyncio.run(bot.start())
+        except KeyboardInterrupt:
+            print("\nStopping bot...")
+            asyncio.run(bot.stop())
 
     def _get_agent_kwargs(self, capabilities: Optional[BotCapabilities]) -> Dict[str, Any]:
         """Extract Agent constructor kwargs from BotCapabilities (DRY).

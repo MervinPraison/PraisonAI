@@ -88,6 +88,11 @@ BUILTIN_PROFILES: Dict[str, ToolProfile] = {
         tools=["store_learning", "search_learning"],
         description="Categorized knowledge store/search (requires learn=True on Agent)",
     ),
+    "email": ToolProfile(
+        name="email",
+        tools=["send_email", "list_emails", "read_email"],
+        description="Email send/read via AgentMail (requires AGENTMAIL_API_KEY)",
+    ),
 }
 
 
