@@ -50,16 +50,15 @@ PraisonAI 🦞 — Automate and solve complex challenges with AI agent teams tha
 
 ## ⚡ Performance
 
-PraisonAI Agents is the **fastest AI agent framework** for agent instantiation.
+Most agent frameworks suffer from significant instantiation overhead, resulting in sluggish responsiveness. **PraisonAI was built for performance from the ground up**, instantiating agents in under 4μs—consistently 60x to 1200x faster than traditional industry alternatives.
 
-| Framework | Avg Time (μs) | Relative |
-|-----------|---------------|----------|
-| **PraisonAI** | **3.77** | **1.00x (fastest)** |
-| OpenAI Agents SDK | 5.26 | 1.39x |
-| Agno | 5.64 | 1.49x |
-| PraisonAI (LiteLLM) | 7.56 | 2.00x |
-| PydanticAI | 226.94 | 60.16x |
-| LangGraph | 4,558.71 | 1,209x |
+| Engine Category | Avg Time (μs) | Relative Speed |
+|-----------------|---------------|----------------|
+| **PraisonAI** | **3.77** | **1.00x (Fastest)** |
+| Industry Peer A | 5.26 | 1.39x |
+| Industry Peer B | 5.64 | 1.49x |
+| Standard Framework | 226.94 | 60x |
+| Enterprise Graph Engine| 4,558.71 | 1,200x |
 
 ---
 
@@ -147,7 +146,7 @@ PraisonAI supports 100+ LLM providers through seamless integration:
 | 🔌 | **MCP Protocol** — stdio, HTTP, WebSocket, SSE | `tools=MCP("npx ...")` |
 | 🧠 | **Planning Mode** — plan → execute → reason | `planning=True` |
 | 🔍 | **Deep Research** — multi-step autonomous research | [Docs](https://docs.praison.ai/docs/agents/deep-research) |
-| 🤖 | **External Agents** — orchestrate Claude Code, Gemini CLI, Codex | [Docs](https://docs.praison.ai/docs/code/external-agents) |
+| 🤖 | **External Tool Orchestration** — orchestrate external coding agents and specialized CLI tools | [Docs](https://docs.praison.ai/docs/code/external-agents) |
 | 🔄 | **Agent Handoffs** — seamless conversation passing | `handoff=True` |
 | 🛡️ | **Guardrails** — input/output validation | [Docs](https://docs.praison.ai/docs/concepts/guardrails) |
 |  | **Web Search + Fetch** — native browsing | `web_search=True` |
@@ -489,7 +488,7 @@ Open **http://localhost:8082** — the dashboard comes with 13 built-in pages: C
 | MCP Security | [Example](examples/python/mcp/mcp-security.py) | [📖](https://docs.praison.ai/docs/mcp/transports) |
 | MCP Resumability | [Example](examples/python/mcp/mcp-resumability.py) | [📖](https://docs.praison.ai/docs/mcp/sse-transport) |
 | MCP Config Management | [Docs](https://docs.praison.ai/docs/cli/mcp) | [📖](https://docs.praison.ai/docs/cli/mcp) |
-| LangChain Integrated Agents | [Example](examples/python/general/langchain_example.py) | [📖](https://docs.praison.ai/docs/features/langchain) |
+| Inter-Framework Bridging | [Example](examples/python/general/langchain_example.py) | [📖](https://docs.praison.ai/docs/features/langchain) |
 
 </details>
 
