@@ -22,6 +22,8 @@ if TYPE_CHECKING:
         ChatCommandProtocol,
         ProbeResult,
         HealthResult,
+        EmailProtocol,
+        EmailInbox,
     )
 from .protocols import (
     BotProtocol,
@@ -37,6 +39,8 @@ from .protocols import (
     BotOSProtocol,
     ProbeResult,
     HealthResult,
+    EmailProtocol,
+    EmailInbox,
 )
 from .config import BotConfig, BotOSConfig
 
@@ -56,4 +60,6 @@ __all__ = [
     "BotOSConfig",
     "ProbeResult",
     "HealthResult",
+    "EmailProtocol",
+    "EmailInbox",
 ]

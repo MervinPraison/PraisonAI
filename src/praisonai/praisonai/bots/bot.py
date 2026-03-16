@@ -46,6 +46,7 @@ _TOKEN_ENV_MAP = {
     "slack": "SLACK_BOT_TOKEN",
     "whatsapp": "WHATSAPP_ACCESS_TOKEN",
     "email": "EMAIL_APP_PASSWORD",
+    "agentmail": "AGENTMAIL_API_KEY",
 }
 
 # Platform-specific extra env vars
@@ -56,6 +57,10 @@ _EXTRA_ENV_MAP = {
         "email_address": "EMAIL_ADDRESS",
         "imap_server": "EMAIL_IMAP_SERVER",
         "smtp_server": "EMAIL_SMTP_SERVER",
+    },
+    "agentmail": {
+        "inbox_id": "AGENTMAIL_INBOX_ID",
+        "domain": "AGENTMAIL_DOMAIN",
     },
 }
 

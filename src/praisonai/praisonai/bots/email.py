@@ -37,26 +37,9 @@ from praisonaiagents.bots import (
 )
 
 from ._session import BotSessionManager
+from ._email_utils import is_auto_reply, is_blocked_sender
 
 logger = logging.getLogger(__name__)
-
-# Headers to detect auto-replies and prevent infinite loops
-_AUTO_REPLY_HEADERS = {
-    "auto-submitted",
-    "x-auto-response-suppress",
-    "x-autoreply",
-    "x-autorespond",
-}
-
-# Senders to never reply to
-_BLOCKED_SENDERS = {
-    "mailer-daemon",
-    "postmaster",
-    "noreply",
-    "no-reply",
-    "donotreply",
-    "do-not-reply",
-}
 
 
 class EmailBot(ChatCommandMixin, MessageHookMixin):
@@ -352,18 +335,12 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
     
     def _is_auto_reply(self, msg: email.message.Message) -> bool:
         """Check if email is an auto-reply."""
-        for header in _AUTO_REPLY_HEADERS:
-            if msg.get(header):
-                return True
-        return False
+        headers = {k: v for k, v in msg.items()}
+        return is_auto_reply(headers)
     
     def _is_blocked_sender(self, sender: str) -> bool:
         """Check if sender should be blocked."""
-        sender_lower = sender.lower()
-        for blocked in _BLOCKED_SENDERS:
-            if blocked in sender_lower:
-                return True
-        return False
+        return is_blocked_sender(sender)
     
     def _extract_body(self, msg: email.message.Message) -> str:
         """Extract plain text body from email."""

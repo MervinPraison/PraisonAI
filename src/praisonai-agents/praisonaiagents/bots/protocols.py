@@ -614,6 +614,96 @@ class ChatCommandProtocol(Protocol):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# EmailProtocol — email-specific bot capabilities
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+@dataclass
+class EmailInbox:
+    """Information about an email inbox.
+    
+    Attributes:
+        id: Unique inbox identifier
+        email_address: The inbox's email address
+        domain: Domain of the inbox
+        created_at: When the inbox was created (ISO format)
+    """
+    
+    id: str
+    email_address: str
+    domain: str = ""
+    created_at: Optional[str] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "id": self.id,
+            "email_address": self.email_address,
+            "domain": self.domain,
+            "created_at": self.created_at,
+        }
+
+
+@runtime_checkable
+class EmailProtocol(Protocol):
+    """Protocol for email bots with inbox lifecycle management.
+    
+    Extends BotProtocol with email-specific capabilities like
+    programmatic inbox creation, listing, and deletion.
+    
+    This protocol is optional — only AgentMail-style bots that
+    support API-based inbox management need to implement it.
+    Traditional IMAP/SMTP bots (EmailBot) do not implement this.
+    
+    Example:
+        # Check if a bot supports inbox management
+        if isinstance(bot, EmailProtocol):
+            inbox = await bot.create_inbox(domain="mycompany.com")
+            print(f"Created: {inbox['email_address']}")
+    """
+    
+    @property
+    def email_address(self) -> Optional[str]:
+        """The bot's current email address."""
+        ...
+    
+    async def create_inbox(
+        self,
+        domain: Optional[str] = None,
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """Create a new email inbox programmatically.
+        
+        Args:
+            domain: Optional custom domain for the inbox
+            **kwargs: Additional provider-specific parameters
+            
+        Returns:
+            Dict with at least 'id' and 'email_address' keys
+        """
+        ...
+    
+    async def list_inboxes(self) -> List[Dict[str, Any]]:
+        """List all inboxes accessible to this bot.
+        
+        Returns:
+            List of inbox dicts with 'id' and 'email_address' keys
+        """
+        ...
+    
+    async def delete_inbox(self, inbox_id: str) -> bool:
+        """Delete an inbox.
+        
+        Args:
+            inbox_id: ID of the inbox to delete
+            
+        Returns:
+            True if deleted successfully
+        """
+        ...
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # BotOS Protocol — multi-platform bot orchestration
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

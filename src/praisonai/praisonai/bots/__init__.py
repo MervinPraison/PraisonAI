@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from .slack import SlackBot
     from .whatsapp import WhatsAppBot
     from .email import EmailBot
+    from .agentmail import AgentMailBot
     from .bot import Bot
     from .botos import BotOS
     from ._slack_approval import SlackApproval
@@ -38,6 +39,9 @@ def __getattr__(name: str):
     if name == "EmailBot":
         from .email import EmailBot
         return EmailBot
+    if name == "AgentMailBot":
+        from .agentmail import AgentMailBot
+        return AgentMailBot
     if name == "Bot":
         from .bot import Bot
         return Bot
@@ -62,7 +66,7 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
-    "TelegramBot", "DiscordBot", "SlackBot", "WhatsAppBot", "EmailBot",
+    "TelegramBot", "DiscordBot", "SlackBot", "WhatsAppBot", "EmailBot", "AgentMailBot",
     "Bot", "BotOS",
     "SlackApproval", "TelegramApproval", "DiscordApproval",
     "WebhookApproval", "HTTPApproval",

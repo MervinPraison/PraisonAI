@@ -91,7 +91,7 @@ class BotYamlSchema(BaseModel):
                 "(telegram, discord, slack, whatsapp) to your bot.yaml"
             )
         # Validate channel names
-        valid_platforms = {"telegram", "discord", "slack", "whatsapp", "email"}
+        valid_platforms = {"telegram", "discord", "slack", "whatsapp", "email", "agentmail"}
         for name in self.channels:
             if name not in valid_platforms:
                 raise ValueError(
