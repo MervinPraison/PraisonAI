@@ -91,7 +91,12 @@ BUILTIN_PROFILES: Dict[str, ToolProfile] = {
     "email": ToolProfile(
         name="email",
         tools=["send_email", "list_emails", "read_email"],
-        description="Email send/read via AgentMail (requires AGENTMAIL_API_KEY)",
+        description="Email send/read via AgentMail API (requires AGENTMAIL_API_KEY)",
+    ),
+    "smtp_email": ToolProfile(
+        name="smtp_email",
+        tools=["smtp_send_email", "smtp_read_inbox"],
+        description="Email send/read via SMTP/IMAP with mailbox credentials (requires EMAIL_ADDRESS, EMAIL_PASSWORD)",
     ),
 }
 

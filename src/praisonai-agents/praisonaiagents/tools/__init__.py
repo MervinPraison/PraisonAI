@@ -177,6 +177,9 @@ TOOL_MAPPINGS = {
     'list_emails': ('.email_tools', None),
     'read_email': ('.email_tools', None),
     'list_inboxes': ('.email_tools', None),
+    # Email Tools (SMTP/IMAP-based — direct mailbox credentials)
+    'smtp_send_email': ('.email_tools', None),
+    'smtp_read_inbox': ('.email_tools', None),
     'email_tools': ('.email_tools', None),
 }
 
@@ -239,7 +242,8 @@ def __getattr__(name: str) -> Any:
             'ast_grep_search', 'ast_grep_rewrite', 'ast_grep_scan', 'is_ast_grep_available', 'get_ast_grep_tools',
             'store_memory', 'search_memory',
             'store_learning', 'search_learning',
-            'send_email', 'list_emails', 'read_email', 'list_inboxes'
+            'send_email', 'list_emails', 'read_email', 'list_inboxes',
+            'smtp_send_email', 'smtp_read_inbox'
         ]:
             return getattr(module, name)
         if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools', 'schedule_tools', 'ast_grep_tools', 'email_tools']:
