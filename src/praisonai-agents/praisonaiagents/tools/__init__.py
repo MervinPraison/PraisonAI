@@ -138,9 +138,9 @@ TOOL_MAPPINGS = {
     'get_available_providers': ('.web_search', None),
     
     # Unified Web Crawl (auto-fallback across providers)
-    'web_crawl': ('.web_crawl', None),
-    'crawl_web': ('.web_crawl', None),  # Alias
-    'get_available_crawl_providers': ('.web_crawl', None),
+    'web_crawl': ('.web_crawl_tools', None),
+    'crawl_web': ('.web_crawl_tools', None),  # Alias
+    'get_available_crawl_providers': ('.web_crawl_tools', None),
     
     # Skill Tools (for Agent Skills script execution)
     'run_skill_script': ('.skill_tools', None),
