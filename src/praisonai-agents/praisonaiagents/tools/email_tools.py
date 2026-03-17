@@ -213,6 +213,71 @@ def list_inboxes() -> str:
         return f"Failed to list inboxes: {e}"
 
 
+def reply_email(message_id: str, body: str) -> str:
+    """Reply to an email message.
+
+    Args:
+        message_id: The message ID to reply to (get this from list_emails)
+        body: Reply body text
+
+    Returns:
+        Confirmation with the reply message ID
+    """
+    client = _get_client()
+    inbox_id = _get_inbox_id()
+
+    # Normalize angle brackets (LLMs often strip them)
+    if "@" in message_id and not message_id.startswith("<"):
+        message_id = f"<{message_id}>"
+
+    try:
+        result = client.inboxes.messages.reply(
+            inbox_id,
+            message_id,
+            text=body,
+        )
+        reply_id = getattr(result, "message_id", "unknown")
+        logger.info(f"Reply sent: {reply_id}")
+        return f"Reply sent successfully (ID: {reply_id})"
+    except Exception as e:
+        logger.error(f"Failed to reply to {message_id}: {e}")
+        return f"Failed to reply: {e}"
+
+
+def create_inbox(display_name: Optional[str] = None) -> str:
+    """Create a new email inbox on AgentMail.
+
+    Args:
+        display_name: Optional display name for the inbox
+
+    Returns:
+        Details of the created inbox
+    """
+    client = _get_client()
+
+    try:
+        if display_name:
+            try:
+                from agentmail.inboxes.types import CreateInboxRequest
+                result = client.inboxes.create(
+                    request=CreateInboxRequest(display_name=display_name)
+                )
+            except ImportError:
+                # Fallback if agentmail types not available
+                result = client.inboxes.create()
+        else:
+            result = client.inboxes.create()
+
+        inbox_id = getattr(result, "inbox_id", "unknown")
+        name = getattr(result, "display_name", "") or ""
+        logger.info(f"Inbox created: {inbox_id}")
+        label = f"{inbox_id} ({name})" if name else inbox_id
+        return f"Inbox created: {label}"
+    except Exception as e:
+        logger.error(f"Failed to create inbox: {e}")
+        return f"Failed to create inbox: {e}"
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # SMTP/IMAP Backend — uses standard mailbox credentials
 # Zero external dependencies (Python stdlib smtplib + imaplib)

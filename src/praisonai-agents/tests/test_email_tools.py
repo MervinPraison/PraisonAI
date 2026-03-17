@@ -255,6 +255,133 @@ class TestEmailTools(unittest.TestCase):
         from praisonaiagents.tools.email_tools import send_email as direct
         self.assertIs(send_email, direct)
 
+    # ── reply_email ──────────────────────────────────────────────
+
+    def test_reply_email_success(self):
+        mock_mod, mock_client = self._mock_agentmail_module()
+
+        mock_result = MagicMock()
+        mock_result.message_id = "reply_msg_1"
+        mock_result.thread_id = "thread_1"
+        mock_client.inboxes.messages.reply.return_value = mock_result
+
+        with patch.dict("sys.modules", {"agentmail": mock_mod}):
+            from praisonaiagents.tools.email_tools import reply_email
+            import praisonaiagents.tools.email_tools as et
+            et._client = None
+
+            result = reply_email(message_id="msg_100", body="Thanks!")
+
+        self.assertIn("reply_msg_1", result)
+        self.assertIn("Reply sent", result)
+        mock_client.inboxes.messages.reply.assert_called_once_with(
+            "test@agentmail.to",
+            "msg_100",
+            text="Thanks!",
+        )
+
+    def test_reply_email_uses_text_not_body(self):
+        """SDK reply uses text= not body= parameter."""
+        mock_mod, mock_client = self._mock_agentmail_module()
+        mock_result = MagicMock()
+        mock_result.message_id = "r1"
+        mock_result.thread_id = "t1"
+        mock_client.inboxes.messages.reply.return_value = mock_result
+
+        with patch.dict("sys.modules", {"agentmail": mock_mod}):
+            from praisonaiagents.tools.email_tools import reply_email
+            import praisonaiagents.tools.email_tools as et
+            et._client = None
+
+            reply_email(message_id="m1", body="b")
+
+        call_kwargs = mock_client.inboxes.messages.reply.call_args
+        self.assertIn("text", call_kwargs.kwargs)
+        self.assertNotIn("body", call_kwargs.kwargs)
+
+    # ── create_inbox ─────────────────────────────────────────────
+
+    def test_create_inbox_success(self):
+        mock_mod, mock_client = self._mock_agentmail_module()
+
+        mock_inbox = MagicMock()
+        mock_inbox.inbox_id = "new_inbox@agentmail.to"
+        mock_inbox.display_name = "My Agent"
+        mock_client.inboxes.create.return_value = mock_inbox
+
+        with patch.dict("sys.modules", {"agentmail": mock_mod}):
+            from praisonaiagents.tools.email_tools import create_inbox
+            import praisonaiagents.tools.email_tools as et
+            et._client = None
+
+            result = create_inbox(display_name="My Agent")
+
+        self.assertIn("new_inbox@agentmail.to", result)
+        self.assertIn("created", result.lower())
+
+    # ── Angle-bracket normalization ──────────────────────────────
+
+    def test_read_email_angle_bracket_normalization(self):
+        """LLMs strip angle brackets from message IDs. read_email should add them."""
+        mock_mod, mock_client = self._mock_agentmail_module()
+
+        mock_msg = MagicMock()
+        mock_msg.from_ = "s@test.com"
+        mock_msg.to = ["r@test.com"]
+        mock_msg.subject = "Test"
+        mock_msg.extracted_text = "Body"
+        mock_msg.timestamp = "now"
+        mock_msg.in_reply_to = ""
+        mock_client.inboxes.messages.get.return_value = mock_msg
+
+        with patch.dict("sys.modules", {"agentmail": mock_mod}):
+            from praisonaiagents.tools.email_tools import read_email
+            import praisonaiagents.tools.email_tools as et
+            et._client = None
+
+            # Pass WITHOUT angle brackets — should be normalized
+            read_email(message_id="abc123@agentmail.to")
+
+        # The API call should have angle brackets
+        call_args = mock_client.inboxes.messages.get.call_args
+        actual_id = call_args[0][1]  # second positional arg
+        self.assertTrue(actual_id.startswith("<"), f"Expected <...> but got: {actual_id}")
+        self.assertTrue(actual_id.endswith(">"), f"Expected <...> but got: {actual_id}")
+
+    # ── SMTP tools error handling ────────────────────────────────
+
+    def test_smtp_send_email_missing_creds(self):
+        os.environ.pop("EMAIL_ADDRESS", None)
+        os.environ.pop("EMAIL_PASSWORD", None)
+        from praisonaiagents.tools.email_tools import smtp_send_email
+        result = smtp_send_email(to="x@y.z", subject="s", body="b")
+        self.assertIn("EMAIL_ADDRESS", result)
+        self.assertIn("EMAIL_PASSWORD", result)
+
+    def test_smtp_read_inbox_missing_creds(self):
+        os.environ.pop("EMAIL_ADDRESS", None)
+        os.environ.pop("EMAIL_PASSWORD", None)
+        from praisonaiagents.tools.email_tools import smtp_read_inbox
+        result = smtp_read_inbox()
+        self.assertIn("EMAIL_ADDRESS", result)
+        self.assertIn("EMAIL_PASSWORD", result)
+
+    # ── SMTP profile registration ────────────────────────────────
+
+    def test_smtp_email_profile_exists(self):
+        from praisonaiagents.tools.profiles import get_profile
+        profile = get_profile("smtp_email")
+        self.assertEqual(profile.name, "smtp_email")
+        self.assertIn("smtp_send_email", profile.tools)
+        self.assertIn("smtp_read_inbox", profile.tools)
+
+    # ── SMTP lazy import ─────────────────────────────────────────
+
+    def test_smtp_lazy_import_from_tools_package(self):
+        from praisonaiagents.tools import smtp_send_email
+        from praisonaiagents.tools.email_tools import smtp_send_email as direct
+        self.assertIs(smtp_send_email, direct)
+
 
 if __name__ == "__main__":
     unittest.main()
