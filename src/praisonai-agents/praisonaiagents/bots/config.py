@@ -29,8 +29,10 @@ class BotConfig:
     """
     
     token: str = ""
+    mode: str = "poll"  # poll | ws | webhook | hybrid
     webhook_url: Optional[str] = None
     webhook_path: str = "/webhook"
+    webhook_port: int = 8080
     polling_interval: float = 1.0
     allowed_users: List[str] = field(default_factory=list)
     allowed_channels: List[str] = field(default_factory=list)
@@ -77,8 +79,10 @@ class BotConfig:
         """Convert to dictionary (hides sensitive data)."""
         return {
             "token": "***" if self.token else None,
+            "mode": self.mode,
             "webhook_url": self.webhook_url,
             "webhook_path": self.webhook_path,
+            "webhook_port": self.webhook_port,
             "polling_interval": self.polling_interval,
             "allowed_users": self.allowed_users,
             "allowed_channels": self.allowed_channels,
@@ -102,7 +106,17 @@ class BotConfig:
     @property
     def is_webhook_mode(self) -> bool:
         """Whether bot is configured for webhook mode."""
-        return bool(self.webhook_url)
+        return self.mode == "webhook" or bool(self.webhook_url)
+    
+    @property
+    def is_ws_mode(self) -> bool:
+        """Whether bot is configured for WebSocket mode."""
+        return self.mode == "ws"
+    
+    @property
+    def is_hybrid_mode(self) -> bool:
+        """Whether bot is configured for hybrid mode (WS + slow poll)."""
+        return self.mode == "hybrid"
     
     def is_user_allowed(self, user_id: str) -> bool:
         """Check if a user is allowed to interact with the bot."""

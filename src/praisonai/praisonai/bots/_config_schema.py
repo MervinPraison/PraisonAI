@@ -24,10 +24,22 @@ class AgentConfigSchema(BaseModel):
 class ChannelConfigSchema(BaseModel):
     """Schema for a single channel configuration."""
     token: str = ""
+    mode: str = "poll"  # poll | ws | webhook | hybrid
     group_policy: str = "respond_all"  # respond_all, mention_only, command_only
     allowlist: List[str] = Field(default_factory=list)
     blocklist: List[str] = Field(default_factory=list)
     webhook_url: Optional[str] = None
+    webhook_port: int = 8080
+    
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, v: str) -> str:
+        allowed = {"poll", "ws", "webhook", "hybrid"}
+        if v not in allowed:
+            raise ValueError(
+                f"Invalid mode '{v}'. Must be one of: {', '.join(sorted(allowed))}"
+            )
+        return v
     
     @field_validator("token")
     @classmethod

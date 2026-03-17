@@ -3521,6 +3521,21 @@ class PraisonAI:
         
         return issues
 
+    @staticmethod
+    def _clean_commit_message(raw: str) -> str:
+        """Strip markdown code fences and excess whitespace from LLM-generated commit messages."""
+        msg = raw.strip()
+        # Remove wrapping ```...``` (with optional language tag like ```text)
+        if msg.startswith("```"):
+            lines = msg.split("\n")
+            # Remove first line (```<lang?>) and last line (```) if present
+            if len(lines) >= 2 and lines[-1].strip() == "```":
+                lines = lines[1:-1]
+            elif lines[0].strip().startswith("```"):
+                lines = lines[1:]
+            msg = "\n".join(lines).strip()
+        return msg
+
     def handle_commit_command(self, args: list):
         """
         Handle AI commit message generation.
@@ -3649,10 +3664,12 @@ Be specific about what changed and why.""",
 Detailed diff:
 {diff_content}
 
-Provide ONLY the commit message, no explanations."""
+Provide ONLY the raw commit message text.
+Do NOT wrap it in markdown code fences or backticks.
+Do NOT add any explanations or formatting."""
 
             response = agent.chat(prompt)
-            commit_message = response.strip()
+            commit_message = self._clean_commit_message(response)
             
             print("\n[bold green]Suggested commit message:[/bold green]")
             print(f"[cyan]{commit_message}[/cyan]")

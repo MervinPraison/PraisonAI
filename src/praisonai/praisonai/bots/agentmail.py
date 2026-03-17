@@ -69,6 +69,8 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
         inbox_id: Optional[str] = None,
         domain: Optional[str] = None,
         polling_interval: int = 10,
+        mode: Optional[str] = None,
+        webhook_port: Optional[int] = None,
         **kwargs,
     ):
         """Initialize AgentMailBot.
@@ -80,6 +82,8 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
             inbox_id: Existing inbox ID to reuse (optional)
             domain: Custom domain for new inbox (optional)
             polling_interval: Seconds between polling for new messages
+            mode: Event mode — poll (default), ws, webhook, or hybrid
+            webhook_port: Port for webhook server (default: 8080)
             **kwargs: Additional configuration
         """
         self._token = token or os.getenv("AGENTMAIL_API_KEY", "")
@@ -94,14 +98,31 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
         self._bot_user: Optional[BotUser] = None
         self._email_address: Optional[str] = None
         self._poll_task: Optional[asyncio.Task] = None
+        self._ws_task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
         
-        # AgentMail client (lazy loaded)
+        # AgentMail clients (lazy loaded)
         self._client: Any = None
+        self._async_client: Any = None
+        
+        # Webhook server state
+        self._webhook_runner: Any = None
+        self._webhook_site: Any = None
         
         # Session manager for conversation state
         self.config = config or BotConfig()
         self._session = BotSessionManager(self.config)
+        
+        # Resolve mode: explicit param > config > default
+        if mode:
+            self._mode = mode
+        elif self.config.mode != "poll":
+            self._mode = self.config.mode
+        else:
+            self._mode = "poll"
+        
+        # Resolve webhook port
+        self._webhook_port = webhook_port or self.config.webhook_port
         
         # Command and message handlers
         self._command_handlers: Dict[str, Callable] = {}
@@ -139,7 +160,7 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
         self._agent = agent
     
     def _get_client(self) -> Any:
-        """Lazy load AgentMail client."""
+        """Lazy load sync AgentMail client."""
         if self._client is None:
             try:
                 from agentmail import AgentMail
@@ -151,10 +172,24 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
                 )
         return self._client
     
+    def _get_async_client(self) -> Any:
+        """Lazy load async AgentMail client (for WS mode)."""
+        if self._async_client is None:
+            try:
+                from agentmail import AsyncAgentMail
+                self._async_client = AsyncAgentMail(api_key=self._token)
+            except ImportError:
+                raise ImportError(
+                    "AgentMail package not installed. "
+                    "Install with: pip install agentmail"
+                )
+        return self._async_client
+    
     async def start(self) -> None:
         """Start the AgentMail bot.
         
-        Creates or connects to an inbox and begins polling for messages.
+        Creates or connects to an inbox and begins receiving messages
+        using the configured mode (poll, ws, webhook, or hybrid).
         """
         if self._is_running:
             logger.warning("AgentMailBot is already running")
@@ -197,10 +232,23 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
         self._started_at = time.time()
         self._stop_event.clear()
         
-        # Start polling loop
-        self._poll_task = asyncio.create_task(self._poll_loop())
-        
-        logger.info(f"AgentMailBot started: {self._email_address}")
+        # Branch on mode
+        if self._mode == "ws":
+            self._ws_task = asyncio.create_task(self._ws_loop())
+            logger.info(f"AgentMailBot started (ws): {self._email_address}")
+        elif self._mode == "webhook":
+            await self._start_webhook_mode()
+            logger.info(f"AgentMailBot started (webhook): {self._email_address}")
+        elif self._mode == "hybrid":
+            self._ws_task = asyncio.create_task(self._ws_loop())
+            self._poll_task = asyncio.create_task(
+                self._poll_loop(interval_override=60)
+            )
+            logger.info(f"AgentMailBot started (hybrid): {self._email_address}")
+        else:
+            # Default: poll mode (existing behaviour — zero breaking change)
+            self._poll_task = asyncio.create_task(self._poll_loop())
+            logger.info(f"AgentMailBot started (poll): {self._email_address}")
     
     async def stop(self) -> None:
         """Stop the AgentMail bot."""
@@ -210,6 +258,7 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
         self._is_running = False
         self._stop_event.set()
         
+        # Cancel poll task
         if self._poll_task:
             self._poll_task.cancel()
             try:
@@ -218,10 +267,37 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
                 pass
             self._poll_task = None
         
+        # Cancel WS task
+        if self._ws_task:
+            self._ws_task.cancel()
+            try:
+                await self._ws_task
+            except asyncio.CancelledError:
+                pass
+            self._ws_task = None
+        
+        # Stop webhook server
+        if self._webhook_site:
+            await self._webhook_site.stop()
+            self._webhook_site = None
+        if self._webhook_runner:
+            await self._webhook_runner.cleanup()
+            self._webhook_runner = None
+        
         logger.info("AgentMailBot stopped")
     
-    async def _poll_loop(self) -> None:
-        """Poll for new messages."""
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Poll mode (existing behaviour)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
+    async def _poll_loop(self, interval_override: Optional[int] = None) -> None:
+        """Poll for new messages.
+        
+        Args:
+            interval_override: Override polling interval (used by hybrid mode 
+                              to set a slower 60s fallback poll).
+        """
+        interval = interval_override or self._polling_interval
         while self._is_running:
             try:
                 await self._check_new_messages()
@@ -232,11 +308,261 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
             try:
                 await asyncio.wait_for(
                     self._stop_event.wait(),
-                    timeout=self._polling_interval
+                    timeout=interval
                 )
                 break  # Stop event was set
             except asyncio.TimeoutError:
                 continue  # Normal timeout, continue polling
+    
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # WebSocket mode
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
+    async def _ws_loop(self) -> None:
+        """WebSocket event loop with auto-reconnect.
+        
+        Connects to AgentMail WebSocket API, subscribes to message.received
+        events for this inbox, and processes them via _handle_message.
+        Reconnects with exponential backoff on disconnection.
+        """
+        backoff = 1  # Start at 1s
+        max_backoff = 60
+        
+        while self._is_running:
+            try:
+                await self._ws_connect_and_listen()
+                # If we exit cleanly (stop called), break
+                if not self._is_running:
+                    break
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                if not self._is_running:
+                    break
+                logger.warning(
+                    f"WebSocket disconnected: {e}. "
+                    f"Reconnecting in {backoff}s..."
+                )
+                try:
+                    await asyncio.wait_for(
+                        self._stop_event.wait(),
+                        timeout=backoff
+                    )
+                    break  # Stop was requested during backoff
+                except asyncio.TimeoutError:
+                    pass
+                backoff = min(backoff * 2, max_backoff)
+            else:
+                # Reset backoff on clean disconnect
+                backoff = 1
+    
+    async def _ws_connect_and_listen(self) -> None:
+        """Single WebSocket connection session."""
+        try:
+            from agentmail import AsyncAgentMail, Subscribe, MessageReceivedEvent
+        except ImportError:
+            raise ImportError(
+                "AgentMail package not installed. "
+                "Install with: pip install agentmail"
+            )
+        
+        async_client = self._get_async_client()
+        
+        async with async_client.websockets.connect() as ws:
+            # Subscribe to message.received events for this inbox
+            await ws.send_subscribe(
+                Subscribe(
+                    event_types=["message.received"],
+                    inbox_ids=[self._inbox_id] if self._inbox_id else None,
+                )
+            )
+            logger.info(f"WebSocket connected, subscribed to {self._inbox_id}")
+            
+            async for event in ws:
+                if not self._is_running:
+                    break
+                
+                if isinstance(event, MessageReceivedEvent):
+                    await self._handle_ws_event(event)
+    
+    async def _handle_ws_event(self, event: Any) -> None:
+        """Convert a WebSocket MessageReceivedEvent to BotMessage and handle."""
+        try:
+            msg_id = getattr(event, 'message_id', None)
+            if not msg_id:
+                return
+            
+            # Dedup — shared with poll mode
+            if msg_id in self._processed_ids:
+                return
+            self._processed_ids.add(msg_id)
+            
+            sender_raw = getattr(event, 'from_', '') or ''
+            sender_email = extract_email_address(sender_raw)
+            
+            # Skip auto-replies and blocked senders
+            headers = getattr(event, 'headers', {}) or {}
+            if is_auto_reply(headers):
+                logger.debug(f"Skipping auto-reply from {sender_email}")
+                return
+            if is_blocked_sender(sender_email):
+                logger.debug(f"Skipping blocked sender: {sender_email}")
+                return
+            
+            body = getattr(event, 'extracted_text', '') or getattr(event, 'text', '') or ''
+            
+            message = BotMessage(
+                message_id=msg_id,
+                content=body,
+                message_type=MessageType.TEXT,
+                sender=BotUser(
+                    user_id=sender_email,
+                    username=sender_email,
+                    display_name=sender_email.split("@")[0] if sender_email else "unknown",
+                ),
+                channel=BotChannel(
+                    channel_id=self._inbox_id,
+                    name=self._email_address or self._inbox_id,
+                ),
+                thread_id=getattr(event, 'thread_id', None),
+                metadata={
+                    "subject": getattr(event, 'subject', ''),
+                    "message_id": msg_id,
+                    "in_reply_to": getattr(event, 'in_reply_to', ''),
+                    "source": "websocket",
+                },
+            )
+            
+            await self._handle_message(message)
+            
+        except Exception as e:
+            logger.error(f"Error handling WS event: {e}")
+    
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Webhook mode
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
+    async def _start_webhook_mode(self) -> None:
+        """Start an aiohttp webhook server to receive AgentMail events."""
+        try:
+            from aiohttp import web
+        except ImportError:
+            raise ImportError(
+                "aiohttp required for webhook mode. "
+                "Install with: pip install aiohttp"
+            )
+        
+        app = web.Application()
+        webhook_path = self.config.webhook_path or "/webhook"
+        app.router.add_post(webhook_path, self._handle_email_webhook)
+        app.router.add_get("/health", self._handle_health_check)
+        
+        self._webhook_runner = web.AppRunner(app)
+        await self._webhook_runner.setup()
+        self._webhook_site = web.TCPSite(
+            self._webhook_runner, "0.0.0.0", self._webhook_port
+        )
+        await self._webhook_site.start()
+        
+        logger.info(
+            f"Webhook server listening on 0.0.0.0:{self._webhook_port}{webhook_path}"
+        )
+        
+        # Register webhook with AgentMail API
+        if self.config.webhook_url:
+            try:
+                client = self._get_client()
+                webhook_url = self.config.webhook_url.rstrip("/") + webhook_path
+                client.webhooks.create(
+                    url=webhook_url,
+                    event_types=["message.received"],
+                    inbox_ids=[self._inbox_id] if self._inbox_id else None,
+                )
+                logger.info(f"Registered webhook: {webhook_url}")
+            except Exception as e:
+                logger.warning(f"Failed to register webhook with AgentMail: {e}")
+    
+    async def _handle_email_webhook(self, request: Any) -> Any:
+        """Handle incoming webhook POST from AgentMail."""
+        from aiohttp import web
+        
+        try:
+            body = await request.json()
+        except Exception:
+            return web.Response(status=400, text="Invalid JSON")
+        
+        # Extract event type
+        event_type = body.get("type", "")
+        if event_type != "message.received":
+            return web.Response(status=200, text="OK")
+        
+        # Process asynchronously — return 200 immediately
+        asyncio.create_task(self._process_webhook_payload(body))
+        return web.Response(status=200, text="OK")
+    
+    async def _process_webhook_payload(self, body: Dict[str, Any]) -> None:
+        """Process a webhook payload in the background."""
+        try:
+            data = body.get("data", body)
+            msg_id = data.get("message_id", "")
+            
+            if not msg_id:
+                return
+            
+            # Dedup
+            if msg_id in self._processed_ids:
+                return
+            self._processed_ids.add(msg_id)
+            
+            sender_raw = data.get("from", data.get("from_", ""))
+            sender_email = extract_email_address(sender_raw)
+            
+            headers = data.get("headers", {})
+            if is_auto_reply(headers):
+                return
+            if is_blocked_sender(sender_email):
+                return
+            
+            body_text = data.get("extracted_text", "") or data.get("text", "")
+            
+            message = BotMessage(
+                message_id=msg_id,
+                content=body_text,
+                message_type=MessageType.TEXT,
+                sender=BotUser(
+                    user_id=sender_email,
+                    username=sender_email,
+                    display_name=sender_email.split("@")[0] if sender_email else "unknown",
+                ),
+                channel=BotChannel(
+                    channel_id=self._inbox_id,
+                    name=self._email_address or self._inbox_id,
+                ),
+                thread_id=data.get("thread_id"),
+                metadata={
+                    "subject": data.get("subject", ""),
+                    "message_id": msg_id,
+                    "in_reply_to": data.get("in_reply_to", ""),
+                    "source": "webhook",
+                },
+            )
+            
+            await self._handle_message(message)
+            
+        except Exception as e:
+            logger.error(f"Error processing webhook payload: {e}")
+    
+    async def _handle_health_check(self, request: Any) -> Any:
+        """Health check endpoint for webhook server."""
+        from aiohttp import web
+        import json
+        
+        health = await self.health()
+        return web.Response(
+            status=200 if health.ok else 503,
+            text=json.dumps(health.to_dict()),
+            content_type="application/json",
+        )
     
     async def _check_new_messages(self) -> None:
         """Check for and process new messages."""
