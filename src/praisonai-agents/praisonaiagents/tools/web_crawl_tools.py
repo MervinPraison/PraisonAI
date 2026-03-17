@@ -206,7 +206,12 @@ def web_crawl(
     """
     # Normalize to list
     single_url = isinstance(urls, str)
-    url_list = [urls] if single_url else urls
+    if single_url and ',' in urls:
+        # LLM may pass comma-separated URLs as a single string
+        url_list = [u.strip() for u in urls.split(',') if u.strip()]
+        single_url = len(url_list) == 1
+    else:
+        url_list = [urls] if single_url else urls
     
     # Get available providers
     available = _get_available_crawl_providers()
