@@ -48,8 +48,8 @@ class ScheduleLoop:
             tick_seconds: Seconds between polls (default 30).
         """
         if store is None:
-            from .store import FileScheduleStore
-            store = FileScheduleStore()
+            from .config_store import ConfigYamlScheduleStore
+            store = ConfigYamlScheduleStore()
         self._on_trigger = on_trigger
         self._store = store
         self._runner = ScheduleRunner(self._store)

@@ -17,7 +17,8 @@ class ScheduleStoreProtocol(Protocol):
     """Protocol for schedule persistence backends.
 
     Implementations:
-        - ``FileScheduleStore`` — JSON file (``~/.praisonai/schedules/jobs.json``)
+        - ``ConfigYamlScheduleStore`` — YAML config (``~/.praisonai/config.yaml``) [default]
+        - ``FileScheduleStore`` — JSON file (``~/.praisonai/schedules/jobs.json``) [legacy]
         - ``_InMemoryScheduleStore`` (in PraisonAIUI) — YAML config.yaml
 
     Any store that implements these methods can be passed to

@@ -163,8 +163,11 @@ class BotOS:
         """Poll for due scheduled jobs and execute them.
 
         Runs alongside bot tasks so cron/interval schedules fire even
-        without the UI.  On trigger, the agent processes the message
+        without the UI. On trigger, the agent processes the message
         and results are delivered back to the originating platform.
+
+        When the UI scheduler is already running (PraisonAIUI started),
+        this loop defers to it to avoid double-firing jobs.
         """
         try:
             from praisonaiagents.tools.schedule_tools import _get_store
@@ -179,13 +182,24 @@ class BotOS:
 
         while True:
             try:
+                # Skip if the UI scheduler is already running (avoids double-fire)
+                ui_running = False
+                try:
+                    from praisonaiui.features.schedules import _scheduler_running
+                    ui_running = _scheduler_running
+                except ImportError:
+                    pass  # UI not installed — we're the only scheduler
+                if ui_running:
+                    await asyncio.sleep(30)
+                    continue
+
                 due = runner.get_due_jobs()
                 for job in due:
                     try:
                         await self._execute_schedule_job(job)
-                        runner.mark_run(job)
                     except Exception as e:
                         logger.warning(f"BotOS: schedule job {job.name} failed: {e}")
+                    runner.mark_run(job)
             except Exception as e:
                 logger.debug(f"BotOS: schedule tick error: {e}")
             await asyncio.sleep(30)

@@ -361,6 +361,16 @@ def get_project_prp_dir(project_path: Optional[Union[str, Path]] = None) -> Path
     return get_project_data_dir(project_path) / "prp"
 
 
+def get_config_path() -> Path:
+    """
+    Get path to the main config.yaml file.
+
+    Returns:
+        Path to ~/.praisonai/config.yaml
+    """
+    return get_data_dir() / "config.yaml"
+
+
 def get_schedules_dir() -> Path:
     """
     Get schedules directory.

@@ -37,11 +37,16 @@ def set_store(store):
 
 
 def _get_store():
-    """Return (or create) the global ``FileScheduleStore``."""
+    """Return (or create) the global schedule store.
+
+    Uses ``ConfigYamlScheduleStore`` (config.yaml) by default.
+    Automatically migrates any existing ``jobs.json`` data on first use.
+    """
     global _store_instance
     if _store_instance is None:
-        from ..scheduler.store import FileScheduleStore
-        _store_instance = FileScheduleStore()
+        from ..scheduler.config_store import ConfigYamlScheduleStore
+        _store_instance = ConfigYamlScheduleStore()
+        _store_instance.migrate_from_json()
     return _store_instance
 
 

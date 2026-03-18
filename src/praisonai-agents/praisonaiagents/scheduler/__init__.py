@@ -14,7 +14,7 @@ Usage:
     )
     agent.start("Remind me to check email every morning at 7am")
 
-Default storage: ~/.praisonai/schedules/jobs.json
+Default storage: ~/.praisonai/config.yaml (under ``schedules`` key)
 """
 
 from typing import TYPE_CHECKING
@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .models import Schedule, ScheduleJob, DeliveryTarget
     from .store import FileScheduleStore
+    from .config_store import ConfigYamlScheduleStore
     from .parser import parse_schedule
     from .runner import ScheduleRunner
     from .loop import ScheduleLoop
@@ -62,6 +63,11 @@ def __getattr__(name: str):
         _module_cache[name] = ScheduleLoop
         return ScheduleLoop
 
+    if name == "ConfigYamlScheduleStore":
+        from .config_store import ConfigYamlScheduleStore
+        _module_cache[name] = ConfigYamlScheduleStore
+        return ConfigYamlScheduleStore
+
     if name == "ScheduleStoreProtocol":
         from .protocols import ScheduleStoreProtocol
         _module_cache[name] = ScheduleStoreProtocol
@@ -75,6 +81,7 @@ __all__ = [
     "ScheduleJob",
     "DeliveryTarget",
     "FileScheduleStore",
+    "ConfigYamlScheduleStore",
     "parse_schedule",
     "ScheduleRunner",
     "ScheduleLoop",
