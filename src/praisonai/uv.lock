@@ -4811,6 +4811,7 @@ claw = [
     { name = "fastapi" },
     { name = "flask" },
     { name = "greenlet" },
+    { name = "playwright" },
     { name = "praisonaiagents", extra = ["all"] },
     { name = "psutil" },
     { name = "python-telegram-bot" },
@@ -4929,13 +4930,14 @@ requires-dist = [
     { name = "neonize", marker = "extra == 'bot-whatsapp-web'", specifier = ">=0.3.14" },
     { name = "playwright", marker = "extra == 'all'", specifier = ">=1.47.0" },
     { name = "playwright", marker = "extra == 'chat'", specifier = ">=1.47.0" },
+    { name = "playwright", marker = "extra == 'claw'", specifier = ">=1.47.0" },
     { name = "playwright", marker = "extra == 'code'", specifier = ">=1.47.0" },
     { name = "plotly", marker = "extra == 'all'", specifier = ">=5.24.0" },
     { name = "plotly", marker = "extra == 'realtime'", specifier = ">=5.24.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen-v4'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.1.0" },
-    { name = "praisonaiagents", specifier = ">=1.5.77" },
+    { name = "praisonaiagents", specifier = ">=1.5.78" },
     { name = "praisonaiagents", extras = ["all"], marker = "extra == 'claw'", specifier = ">=1.5.40" },
     { name = "psutil", marker = "extra == 'all'", specifier = ">=5.9.0" },
     { name = "psutil", marker = "extra == 'bot'", specifier = ">=5.9.0" },
@@ -5005,7 +5007,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.5.77"
+version = "1.5.78"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -5014,15 +5016,16 @@ dependencies = [
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ea/62/6f07c614e53003241337e2e8ef65b534c6c2d9887f3315626c232a12f045/praisonaiagents-1.5.77.tar.gz", hash = "sha256:f500fe1abc0e377645d8a11811ed968e2fa1c3110d121a57447b5a22c45ca94a", size = 1203700, upload-time = "2026-03-18T14:39:27.563Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ad/75/4ce96a936684adce488dea5003073947a97c6640f5fcffd35c5a6bfd0525/praisonaiagents-1.5.78.tar.gz", hash = "sha256:f6a3528ab48b64d4995e125bf33fe0709e2d438ad541af5935b3dfef535a96e7", size = 1204474, upload-time = "2026-03-18T15:26:33.344Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/05/c6/b621a6f15ff699e7e94fa81347d10db2db33b69bf014c6cb4b30a4830151/praisonaiagents-1.5.77-py3-none-any.whl", hash = "sha256:418fde99fb48cee57d352f00f4f35c15244fbc53b7db6a667e1c188ccc36a6bf", size = 1248318, upload-time = "2026-03-18T14:39:25.66Z" },
+    { url = "https://files.pythonhosted.org/packages/27/4b/cdb0dabdefdb11da8fecf8393cd009148475ad334bec56afa4da0588c336/praisonaiagents-1.5.78-py3-none-any.whl", hash = "sha256:e69848e7c26421a17e8dd6f453e3d2c4d12151bae21a310432cba75361edb524", size = 1248928, upload-time = "2026-03-18T15:26:31.363Z" },
 ]
 
 [package.optional-dependencies]
 all = [
     { name = "chonkie" },
     { name = "chromadb" },
+    { name = "crawl4ai" },
     { name = "ddgs" },
     { name = "fastapi" },
     { name = "litellm" },
@@ -5031,6 +5034,7 @@ all = [
     { name = "mem0ai", extra = ["graph"] },
     { name = "motor" },
     { name = "passlib", extra = ["bcrypt"] },
+    { name = "playwright" },
     { name = "posthog" },
     { name = "pydantic" },
     { name = "pyjwt" },
