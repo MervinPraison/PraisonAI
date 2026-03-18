@@ -42,26 +42,23 @@ def _check_crawl4ai_available() -> tuple[bool, Optional[str]]:
 
     # Check that Playwright browser binaries have been downloaded.
     # `playwright install` is a post-install OS step that pip never runs.
+    # We check the standard ms-playwright cache directory directly — no
+    # API calls, no process launches, no private internals.
     try:
-        from playwright.sync_api import sync_playwright  # noqa: F401 — import-only check
-        import subprocess, sys
-        result = subprocess.run(
-            [sys.executable, "-m", "playwright", "install", "--dry-run"],
-            capture_output=True, text=True, timeout=10
-        )
-        # If dry-run output mentions 'chromium' as needing install, browsers are missing
-        if "chromium" in result.stdout.lower() and "download" in result.stdout.lower():
+        import os, pathlib
+        ms_pw = pathlib.Path(os.environ.get(
+            "PLAYWRIGHT_BROWSERS_PATH",
+            pathlib.Path.home() / ".cache" / "ms-playwright"
+        ))
+        if ms_pw.exists() and not list(ms_pw.glob("chromium-*")):
             return False, (
                 "Playwright browsers are not installed.\n"
                 "Run this command once to download them:\n"
                 "  playwright install chromium\n"
                 "Or for Docker/CI: playwright install chromium --with-deps"
             )
-    except FileNotFoundError:
-        # playwright binary not found at all — package missing
-        pass
+        # If ms_pw doesn't exist yet, skip — _get_crawler will catch it.
     except Exception:
-        # dry-run failed for another reason; proceed and let _get_crawler catch it
         pass
 
     return True, None
@@ -612,7 +609,7 @@ def crawl4ai_sync(
     Returns:
         Dict with crawl results
     """
-    return asyncio.get_event_loop().run_until_complete(
+    return asyncio.run(
         crawl4ai(url, css_selector, js_code, wait_for)
     )
 
@@ -632,7 +629,7 @@ def crawl4ai_extract_sync(
     Returns:
         Dict with extracted data
     """
-    return asyncio.get_event_loop().run_until_complete(
+    return asyncio.run(
         crawl4ai_extract(url, schema, js_code)
     )
 
