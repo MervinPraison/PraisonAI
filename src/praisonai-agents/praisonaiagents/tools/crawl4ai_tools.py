@@ -29,15 +29,43 @@ from importlib import util
 
 
 def _check_crawl4ai_available() -> tuple[bool, Optional[str]]:
-    """Check if Crawl4AI is available.
-    
+    """Check if Crawl4AI and its Playwright browser binaries are available.
+
     Returns:
         Tuple of (is_available, error_message)
     """
     if util.find_spec("crawl4ai") is None:
-        return False, "crawl4ai package is not installed. Install it with: pip install crawl4ai && crawl4ai-setup"
-    
+        return False, (
+            "crawl4ai package is not installed. "
+            "Install it with: pip install 'praisonaiagents[crawl]'"
+        )
+
+    # Check that Playwright browser binaries have been downloaded.
+    # `playwright install` is a post-install OS step that pip never runs.
+    try:
+        from playwright.sync_api import sync_playwright  # noqa: F401 — import-only check
+        import subprocess, sys
+        result = subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "--dry-run"],
+            capture_output=True, text=True, timeout=10
+        )
+        # If dry-run output mentions 'chromium' as needing install, browsers are missing
+        if "chromium" in result.stdout.lower() and "download" in result.stdout.lower():
+            return False, (
+                "Playwright browsers are not installed.\n"
+                "Run this command once to download them:\n"
+                "  playwright install chromium\n"
+                "Or for Docker/CI: playwright install chromium --with-deps"
+            )
+    except FileNotFoundError:
+        # playwright binary not found at all — package missing
+        pass
+    except Exception:
+        # dry-run failed for another reason; proceed and let _get_crawler catch it
+        pass
+
     return True, None
+
 
 
 class Crawl4AITools:
@@ -81,9 +109,9 @@ class Crawl4AITools:
         is_available, error = _check_crawl4ai_available()
         if not is_available:
             raise ImportError(error)
-        
+
         from crawl4ai import AsyncWebCrawler, BrowserConfig
-        
+
         if self._crawler is None:
             browser_config = BrowserConfig(
                 headless=self.headless,
@@ -91,9 +119,22 @@ class Crawl4AITools:
                 browser_type=self.browser_type
             )
             self._crawler = AsyncWebCrawler(config=browser_config)
-            await self._crawler.start()
-        
+            try:
+                await self._crawler.start()
+            except Exception as e:
+                self._crawler = None
+                err_str = str(e)
+                if "Executable doesn't exist" in err_str or "playwright install" in err_str:
+                    raise RuntimeError(
+                        "Playwright browser not found. Run:\n"
+                        "  playwright install chromium\n"
+                        "Then retry. For Docker/CI use:\n"
+                        "  playwright install chromium --with-deps"
+                    ) from None
+                raise
+
         return self._crawler
+
     
     async def close(self):
         """Close the crawler and release resources."""

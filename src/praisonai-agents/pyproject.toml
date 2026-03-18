@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "praisonaiagents"
-version = "1.5.77"
+version = "1.5.78"
 description = "Praison AI agents for completing complex tasks with Self Reflection Agents"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -93,6 +93,13 @@ search = [
     "ddgs>=9.0.0",
 ]
 
+# Web crawling (Crawl4AI + Playwright browser)
+# NOTE: After installing this extra, run: playwright install chromium
+crawl = [
+    "crawl4ai>=0.4.0",
+    "playwright>=1.47.0",
+]
+
 # Combined features
 all = [
     "praisonaiagents[memory]",
@@ -104,7 +111,8 @@ all = [
     "praisonaiagents[telemetry]",
     "praisonaiagents[mongodb]",
     "praisonaiagents[auth]",
-    "praisonaiagents[search]"
+    "praisonaiagents[search]",
+    "praisonaiagents[crawl]"
 ]
 
 [tool.setuptools.packages.find]
