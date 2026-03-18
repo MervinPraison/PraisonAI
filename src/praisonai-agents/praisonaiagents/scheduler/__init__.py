@@ -20,7 +20,7 @@ Default storage: ~/.praisonai/config.yaml (under ``schedules`` key)
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .models import Schedule, ScheduleJob, DeliveryTarget
+    from .models import Schedule, ScheduleJob, DeliveryTarget, RunRecord
     from .store import FileScheduleStore
     from .config_store import ConfigYamlScheduleStore
     from .parser import parse_schedule
@@ -36,11 +36,12 @@ def __getattr__(name: str):
     if name in _module_cache:
         return _module_cache[name]
 
-    if name in ("Schedule", "ScheduleJob", "DeliveryTarget"):
-        from .models import Schedule, ScheduleJob, DeliveryTarget
+    if name in ("Schedule", "ScheduleJob", "DeliveryTarget", "RunRecord"):
+        from .models import Schedule, ScheduleJob, DeliveryTarget, RunRecord
         _module_cache["Schedule"] = Schedule
         _module_cache["ScheduleJob"] = ScheduleJob
         _module_cache["DeliveryTarget"] = DeliveryTarget
+        _module_cache["RunRecord"] = RunRecord
         return _module_cache[name]
 
     if name == "FileScheduleStore":
@@ -80,6 +81,7 @@ __all__ = [
     "Schedule",
     "ScheduleJob",
     "DeliveryTarget",
+    "RunRecord",
     "FileScheduleStore",
     "ConfigYamlScheduleStore",
     "parse_schedule",

@@ -9,15 +9,18 @@ import json
 import logging
 import os
 import threading
+import time
 from typing import Dict, List, Optional
 
-from .models import ScheduleJob
+from .models import ScheduleJob, RunRecord
 
 logger = logging.getLogger(__name__)
 
 from ..paths import get_schedules_dir as _get_schedules_dir
 _DEFAULT_DIR = str(_get_schedules_dir())
 _JOBS_FILE = "jobs.json"
+_HISTORY_FILE = "history.json"
+_MAX_HISTORY = 200
 
 
 class FileScheduleStore:
@@ -26,12 +29,16 @@ class FileScheduleStore:
     Thread-safe for multi-agent scenarios.
     """
 
-    def __init__(self, store_dir: Optional[str] = None):
+    def __init__(self, store_dir: Optional[str] = None, max_history: int = _MAX_HISTORY):
         self._dir = store_dir or _DEFAULT_DIR
         self._path = os.path.join(self._dir, _JOBS_FILE)
+        self._history_path = os.path.join(self._dir, _HISTORY_FILE)
+        self._max_history = max_history
         self._lock = threading.RLock()
         self._jobs: Dict[str, ScheduleJob] = {}
+        self._history: List[RunRecord] = []
         self._load()
+        self._load_history()
 
     # ── public API ───────────────────────────────────────────────────
 
@@ -83,6 +90,48 @@ class FileScheduleStore:
                     return True
             return False
 
+    # ── execution history ─────────────────────────────────────────────
+
+    def log_run(
+        self,
+        job_id: str,
+        status: str,
+        result: Optional[str] = None,
+        error: Optional[str] = None,
+        duration: float = 0.0,
+        delivered: bool = False,
+        job_name: str = "",
+    ) -> None:
+        """Log an execution run for a job."""
+        record = RunRecord(
+            job_id=job_id,
+            job_name=job_name,
+            status=status,
+            result=result[:2000] if result and len(result) > 2000 else result,
+            error=error,
+            duration=duration,
+            delivered=delivered,
+            timestamp=time.time(),
+        )
+        with self._lock:
+            self._history.insert(0, record)
+            # Prune to max_history
+            if len(self._history) > self._max_history:
+                self._history = self._history[:self._max_history]
+            self._save_history()
+
+    def get_history(
+        self,
+        job_id: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[RunRecord]:
+        """Get execution history records, newest first."""
+        with self._lock:
+            records = list(self._history)
+        if job_id is not None:
+            records = [r for r in records if r.job_id == job_id]
+        return records[:limit]
+
     # ── persistence ──────────────────────────────────────────────────
 
     def _load(self) -> None:
@@ -107,3 +156,28 @@ class FileScheduleStore:
             os.replace(tmp, self._path)
         except Exception as e:
             logger.warning("Failed to save schedule store to %s: %s", self._path, e)
+
+    def _load_history(self) -> None:
+        """Load execution history from history.json."""
+        if not os.path.exists(self._history_path):
+            return
+        try:
+            with open(self._history_path, "r") as f:
+                data = json.load(f)
+            for d in data:
+                record = RunRecord.from_dict(d)
+                self._history.append(record)
+        except Exception as e:
+            logger.warning("Failed to load history from %s: %s", self._history_path, e)
+
+    def _save_history(self) -> None:
+        """Save execution history to history.json."""
+        try:
+            os.makedirs(self._dir, exist_ok=True)
+            data = [r.to_dict() for r in self._history]
+            tmp = self._history_path + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(data, f, indent=2)
+            os.replace(tmp, self._history_path)
+        except Exception as e:
+            logger.warning("Failed to save history to %s: %s", self._history_path, e)

@@ -195,19 +195,39 @@ class BotOS:
 
                 due = runner.get_due_jobs()
                 for job in due:
+                    import time as _time
+                    _start = _time.time()
+                    _status = "succeeded"
+                    _result = None
+                    _error = None
+                    _delivered = False
                     try:
-                        await self._execute_schedule_job(job)
+                        _result, _delivered = await self._execute_schedule_job(job)
                     except Exception as e:
+                        _status = "failed"
+                        _error = str(e)
                         logger.warning(f"BotOS: schedule job {job.name} failed: {e}")
-                    runner.mark_run(job)
+                    _duration = _time.time() - _start
+                    runner.mark_run(
+                        job,
+                        status=_status,
+                        result=_result,
+                        error=_error,
+                        duration=_duration,
+                        delivered=_delivered,
+                    )
             except Exception as e:
                 logger.debug(f"BotOS: schedule tick error: {e}")
             await asyncio.sleep(30)
 
-    async def _execute_schedule_job(self, job) -> None:
-        """Execute a single due schedule job."""
+    async def _execute_schedule_job(self, job) -> tuple:
+        """Execute a single due schedule job.
+
+        Returns:
+            Tuple of (result_str, delivered_bool).
+        """
         if not job.message:
-            return
+            return (None, False)
 
         # Find the agent to execute with
         agent = None
@@ -227,22 +247,26 @@ class BotOS:
                     break
         if agent is None:
             logger.debug(f"BotOS: no agent for schedule job {job.name}")
-            return
+            return (None, False)
 
         # Run the agent
         result = await asyncio.to_thread(agent.chat, job.message)
+        result_str = str(result) if result else None
 
         # Deliver to originating platform if delivery target is set
+        delivered = False
         delivery = job.delivery
         if delivery and delivery.channel and delivery.channel_id:
             bot = self.get_bot(delivery.channel)
             if bot:
                 try:
                     await bot.send_message(delivery.channel_id, str(result))
+                    delivered = True
                 except Exception as e:
                     logger.warning(f"BotOS: delivery to {delivery.channel} failed: {e}")
 
         logger.info(f"BotOS: executed schedule job '{job.name}'")
+        return (result_str, delivered)
 
     async def stop(self) -> None:
         """Gracefully stop all running bots."""

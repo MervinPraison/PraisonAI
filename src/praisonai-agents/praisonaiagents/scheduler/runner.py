@@ -8,7 +8,7 @@ payload is the caller's responsibility (keeping the runner lightweight).
 import logging
 import time
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional
 
 from .models import ScheduleJob
 from .protocols import ScheduleStoreProtocol
@@ -39,9 +39,39 @@ class ScheduleRunner:
                 due.append(job)
         return due
 
-    def mark_run(self, job: ScheduleJob) -> None:
-        """Update ``last_run_at`` and optionally delete one-shot jobs."""
+    def mark_run(
+        self,
+        job: ScheduleJob,
+        status: str = "succeeded",
+        result: Optional[str] = None,
+        error: Optional[str] = None,
+        duration: float = 0.0,
+        delivered: bool = False,
+    ) -> None:
+        """Update ``last_run_at``, log history, and optionally delete one-shot jobs.
+
+        Args:
+            job: The job that was executed.
+            status: Execution status (``"succeeded"``, ``"failed"``, ``"skipped"``).
+            result: Agent response text.
+            error: Error message if status is ``"failed"``.
+            duration: Wall-clock seconds for execution.
+            delivered: Whether result was delivered to a channel bot.
+        """
         job.last_run_at = time.time()
+
+        # Log execution history if the store supports it
+        if hasattr(self._store, "log_run"):
+            self._store.log_run(
+                job_id=job.id,
+                status=status,
+                result=result,
+                error=error,
+                duration=duration,
+                delivered=delivered,
+                job_name=job.name,
+            )
+
         if job.delete_after_run:
             self._store.remove(job.id)
         else:

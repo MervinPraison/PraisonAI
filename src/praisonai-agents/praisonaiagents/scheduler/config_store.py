@@ -9,11 +9,15 @@ other config.yaml content.
 import logging
 import os
 import threading
+import time
 from typing import Dict, List, Optional
 
-from .models import ScheduleJob
+from .models import ScheduleJob, RunRecord
 
 logger = logging.getLogger(__name__)
+
+_HISTORY_FILE = "run_history.yaml"
+_MAX_HISTORY = 200
 
 
 class ConfigYamlScheduleStore:
@@ -25,14 +29,18 @@ class ConfigYamlScheduleStore:
     Thread-safe for multi-agent scenarios.
     """
 
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: Optional[str] = None, max_history: int = _MAX_HISTORY):
         if config_path is None:
             from ..paths import get_data_dir
             config_path = str(get_data_dir() / "config.yaml")
         self._path = config_path
+        self._history_path = os.path.join(os.path.dirname(config_path), _HISTORY_FILE)
+        self._max_history = max_history
         self._lock = threading.RLock()
         self._jobs: Dict[str, ScheduleJob] = {}
+        self._history: List[RunRecord] = []
         self._load()
+        self._load_history()
 
     # ── public API ───────────────────────────────────────────────────
 
@@ -84,6 +92,48 @@ class ConfigYamlScheduleStore:
                     return True
             return False
 
+    # ── execution history ─────────────────────────────────────────────
+
+    def log_run(
+        self,
+        job_id: str,
+        status: str,
+        result: Optional[str] = None,
+        error: Optional[str] = None,
+        duration: float = 0.0,
+        delivered: bool = False,
+        job_name: str = "",
+    ) -> None:
+        """Log an execution run for a job."""
+        record = RunRecord(
+            job_id=job_id,
+            job_name=job_name,
+            status=status,
+            result=result[:2000] if result and len(result) > 2000 else result,
+            error=error,
+            duration=duration,
+            delivered=delivered,
+            timestamp=time.time(),
+        )
+        with self._lock:
+            self._history.insert(0, record)
+            # Prune to max_history
+            if len(self._history) > self._max_history:
+                self._history = self._history[:self._max_history]
+            self._save_history()
+
+    def get_history(
+        self,
+        job_id: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[RunRecord]:
+        """Get execution history records, newest first."""
+        with self._lock:
+            records = list(self._history)
+        if job_id is not None:
+            records = [r for r in records if r.job_id == job_id]
+        return records[:limit]
+
     # ── persistence ──────────────────────────────────────────────────
 
     def _load(self) -> None:
@@ -132,6 +182,35 @@ class ConfigYamlScheduleStore:
             os.replace(tmp, self._path)
         except Exception as e:
             logger.warning("Failed to save schedules to %s: %s", self._path, e)
+
+    def _load_history(self) -> None:
+        """Load execution history from run_history.yaml."""
+        if not os.path.exists(self._history_path):
+            return
+        try:
+            import yaml
+            with open(self._history_path, "r") as f:
+                data = yaml.safe_load(f) or []
+            if isinstance(data, list):
+                for d in data:
+                    if isinstance(d, dict):
+                        record = RunRecord.from_dict(d)
+                        self._history.append(record)
+        except Exception as e:
+            logger.warning("Failed to load history from %s: %s", self._history_path, e)
+
+    def _save_history(self) -> None:
+        """Save execution history to run_history.yaml."""
+        try:
+            import yaml
+            os.makedirs(os.path.dirname(self._history_path), exist_ok=True)
+            data = [r.to_dict() for r in self._history]
+            tmp = self._history_path + ".tmp"
+            with open(tmp, "w") as f:
+                yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+            os.replace(tmp, self._history_path)
+        except Exception as e:
+            logger.warning("Failed to save history to %s: %s", self._history_path, e)
 
     # ── migration ────────────────────────────────────────────────────
 

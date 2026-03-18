@@ -91,6 +91,56 @@ class DeliveryTarget:
 
 
 @dataclass
+class RunRecord:
+    """A single execution record for a scheduled job.
+
+    Attributes:
+        job_id: ID of the job that was executed.
+        job_name: Human-readable name of the job.
+        status: Execution status (``"succeeded"``, ``"failed"``, ``"skipped"``).
+        result: Agent response text (truncated if very long).
+        error: Error message if status is ``"failed"``.
+        duration: Wall-clock seconds for execution.
+        delivered: Whether result was delivered to a channel bot.
+        timestamp: Epoch timestamp of execution.
+    """
+
+    job_id: str
+    job_name: str = ""
+    status: Literal["succeeded", "failed", "skipped"] = "succeeded"
+    result: Optional[str] = None
+    error: Optional[str] = None
+    duration: float = 0.0
+    delivered: bool = False
+    timestamp: float = field(default_factory=time.time)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "job_id": self.job_id,
+            "job_name": self.job_name,
+            "status": self.status,
+            "result": self.result,
+            "error": self.error,
+            "duration": self.duration,
+            "delivered": self.delivered,
+            "timestamp": self.timestamp,
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "RunRecord":
+        return cls(
+            job_id=d.get("job_id", ""),
+            job_name=d.get("job_name", ""),
+            status=d.get("status", "succeeded"),
+            result=d.get("result"),
+            error=d.get("error"),
+            duration=d.get("duration", 0.0),
+            delivered=d.get("delivered", False),
+            timestamp=d.get("timestamp", time.time()),
+        )
+
+
+@dataclass
 class ScheduleJob:
     """A persisted scheduled job.
 

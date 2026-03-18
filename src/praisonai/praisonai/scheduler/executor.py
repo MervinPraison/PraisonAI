@@ -173,12 +173,18 @@ class ScheduledAgentExecutor:
 
         # Skip jobs with no message
         if not message:
-            self._runner.mark_run(job)
+            duration = time.time() - started
+            self._runner.mark_run(
+                job,
+                status="skipped",
+                error="No message configured",
+                duration=duration,
+            )
             return JobResult(
                 job=job,
                 status="skipped",
                 error="No message configured",
-                duration=time.time() - started,
+                duration=duration,
             )
 
         # Resolve the agent
@@ -187,19 +193,23 @@ class ScheduledAgentExecutor:
         except Exception as e:
             logger.warning("Agent resolution failed for job '%s': %s", job.id, e)
             err = f"Agent resolution failed: {e}"
+            duration = time.time() - started
+            self._runner.mark_run(job, status="failed", error=err, duration=duration)
             if self._on_failure:
                 self._on_failure(job, err)
             return JobResult(
-                job=job, status="failed", error=err, duration=time.time() - started,
+                job=job, status="failed", error=err, duration=duration,
             )
 
         if agent is None:
             err = f"No agent found for agent_id={agent_id!r}"
             logger.warning("Skipping job '%s': %s", job.id, err)
+            duration = time.time() - started
+            self._runner.mark_run(job, status="failed", error=err, duration=duration)
             if self._on_failure:
                 self._on_failure(job, err)
             return JobResult(
-                job=job, status="failed", error=err, duration=time.time() - started,
+                job=job, status="failed", error=err, duration=duration,
             )
 
         # Execute via agent.chat() in a thread (sync-safe)
@@ -227,14 +237,15 @@ class ScheduledAgentExecutor:
         except Exception as e:
             logger.warning("Job '%s' execution failed: %s", job.id, e)
             err = str(e)
+            duration = time.time() - started
+            self._runner.mark_run(job, status="failed", error=err, duration=duration)
             if self._on_failure:
                 self._on_failure(job, err)
             return JobResult(
-                job=job, status="failed", error=err, duration=time.time() - started,
+                job=job, status="failed", error=err, duration=duration,
             )
 
-        # Success
-        self._runner.mark_run(job)
+        # Success - calculate duration before delivery
         duration = time.time() - started
 
         # Deliver to channel bot if delivery target exists
@@ -255,6 +266,15 @@ class ScheduledAgentExecutor:
                     "Delivery failed for job '%s' to %s:%s: %s",
                     job.id, delivery.channel, delivery.channel_id, e,
                 )
+
+        # Log history with execution results
+        self._runner.mark_run(
+            job,
+            status="succeeded",
+            result=result_str,
+            duration=duration,
+            delivered=delivered,
+        )
 
         if self._on_success:
             self._on_success(job, result_str)
