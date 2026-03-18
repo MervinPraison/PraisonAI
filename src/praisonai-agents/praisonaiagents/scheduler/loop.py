@@ -10,7 +10,7 @@ import time
 from typing import Callable, Optional
 
 from .runner import ScheduleRunner
-from .store import FileScheduleStore
+from .protocols import ScheduleStoreProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class ScheduleLoop:
     def __init__(
         self,
         on_trigger: Callable,
-        store: Optional[FileScheduleStore] = None,
+        store: Optional[ScheduleStoreProtocol] = None,
         tick_seconds: float = 30.0,
     ):
         """
@@ -47,8 +47,11 @@ class ScheduleLoop:
                    ``FileScheduleStore()``.
             tick_seconds: Seconds between polls (default 30).
         """
+        if store is None:
+            from .store import FileScheduleStore
+            store = FileScheduleStore()
         self._on_trigger = on_trigger
-        self._store = store or FileScheduleStore()
+        self._store = store
         self._runner = ScheduleRunner(self._store)
         self._tick = tick_seconds
         self._stop_event = threading.Event()

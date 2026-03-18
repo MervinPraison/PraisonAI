@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from .parser import parse_schedule
     from .runner import ScheduleRunner
     from .loop import ScheduleLoop
+    from .protocols import ScheduleStoreProtocol
 
 _module_cache = {}
 
@@ -61,6 +62,11 @@ def __getattr__(name: str):
         _module_cache[name] = ScheduleLoop
         return ScheduleLoop
 
+    if name == "ScheduleStoreProtocol":
+        from .protocols import ScheduleStoreProtocol
+        _module_cache[name] = ScheduleStoreProtocol
+        return ScheduleStoreProtocol
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -72,4 +78,5 @@ __all__ = [
     "parse_schedule",
     "ScheduleRunner",
     "ScheduleLoop",
+    "ScheduleStoreProtocol",
 ]

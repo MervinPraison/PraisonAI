@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import List
 
 from .models import ScheduleJob
-from .store import FileScheduleStore
+from .protocols import ScheduleStoreProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class ScheduleRunner:
     and when to call ``get_due_jobs()``.
     """
 
-    def __init__(self, store: FileScheduleStore):
+    def __init__(self, store: ScheduleStoreProtocol):
         self._store = store
 
     # ── public ───────────────────────────────────────────────────────
