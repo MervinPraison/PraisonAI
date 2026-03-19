@@ -44,54 +44,24 @@ class TestNovitaProviderConfig:
             )
         assert agent is not None
 
-    def test_agent_novita_kimi_model(self):
-        """Agent should accept Novita's Kimi model."""
+    @pytest.mark.parametrize(
+        "model_name",
+        [
+            "openai/moonshotai/kimi-k2.5",
+            "openai/deepseek/deepseek-v3.2",
+            "openai/zai-org/glm-5",
+        ],
+    )
+    def test_agent_novita_models(self, model_name):
+        """Agent should accept various Novita models and store them correctly."""
         from praisonaiagents import Agent
 
         agent = Agent(
-            name="KimiTest",
+            name=f"NovitaModelTest-{model_name.split('/')[-1]}",
             instructions="You are a helpful assistant",
-            llm="openai/moonshotai/kimi-k2.5",
+            llm=model_name,
             base_url="https://api.novita.ai/openai",
             api_key="test-key",
         )
         assert agent is not None
-
-    def test_agent_novita_deepseek_model(self):
-        """Agent should accept Novita's DeepSeek model."""
-        from praisonaiagents import Agent
-
-        agent = Agent(
-            name="DeepSeekNovitaTest",
-            instructions="You are a helpful assistant",
-            llm="openai/deepseek/deepseek-v3.2",
-            base_url="https://api.novita.ai/openai",
-            api_key="test-key",
-        )
-        assert agent is not None
-
-    def test_agent_novita_glm_model(self):
-        """Agent should accept Novita's GLM model."""
-        from praisonaiagents import Agent
-
-        agent = Agent(
-            name="GLMNovitaTest",
-            instructions="You are a helpful assistant",
-            llm="openai/zai-org/glm-5",
-            base_url="https://api.novita.ai/openai",
-            api_key="test-key",
-        )
-        assert agent is not None
-
-    def test_agent_novita_model_stored(self):
-        """Agent should store the Novita model name correctly."""
-        from praisonaiagents import Agent
-
-        agent = Agent(
-            name="ModelStoreTest",
-            instructions="You are a helpful assistant",
-            llm="openai/moonshotai/kimi-k2.5",
-            base_url="https://api.novita.ai/openai",
-            api_key="test-key",
-        )
-        assert "kimi-k2.5" in agent.llm or "moonshotai" in agent.llm
+        assert agent.llm == model_name
