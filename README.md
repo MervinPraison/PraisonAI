@@ -44,7 +44,7 @@ PraisonAI 🦞 — Automate and solve complex challenges with AI agent teams tha
 > - 📦 **Installing?** → [Installation](#-installation)
 > - 🐍 **Python SDK?** → [Python Examples](#-using-python-code)
 > - 🎯 **CLI user?** → [CLI Quick Reference](#cli-quick-reference)
-> - 🤝 **Contributing?** → [Development](#-development)
+> - 🤝 **Contributing?** → [Contributing](#-contributing)
 
 ---
 
