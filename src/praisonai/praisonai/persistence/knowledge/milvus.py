@@ -6,11 +6,24 @@ Install: pip install pymilvus
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from .base import KnowledgeStore, KnowledgeDocument
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_identifier(name: str) -> str:
+    """Sanitize a Milvus field name to prevent injection."""
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name):
+        raise ValueError(f"Invalid field name: {name}")
+    return name
+
+
+def _escape_value(val: str) -> str:
+    """Escape a string value for use in Milvus expressions."""
+    return str(val).replace('\\', '\\\\').replace('"', '\\"')
 
 
 class MilvusKnowledgeStore(KnowledgeStore):
@@ -180,9 +193,9 @@ class MilvusKnowledgeStore(KnowledgeStore):
         
         expr = None
         if filters:
-            conditions = [f'{k} == "{v}"' for k, v in filters.items()]
+            conditions = [f'{_sanitize_identifier(k)} == "{_escape_value(v)}"' for k, v in filters.items()]
             expr = " and ".join(conditions)
-        
+
         results = col.search(
             data=[query_embedding],
             anns_field="vector",
@@ -220,9 +233,9 @@ class MilvusKnowledgeStore(KnowledgeStore):
         col = Collection(collection)
         col.load()
         
-        id_list = ", ".join([f'"{i}"' for i in ids])
+        id_list = ", ".join([f'"{_escape_value(i)}"' for i in ids])
         expr = f"id in [{id_list}]"
-        
+
         results = col.query(
             expr=expr,
             output_fields=["id", "content", "content_hash", "created_at", "vector"],
@@ -254,12 +267,12 @@ class MilvusKnowledgeStore(KnowledgeStore):
         col.load()
         
         if ids:
-            id_list = ", ".join([f'"{i}"' for i in ids])
+            id_list = ", ".join([f'"{_escape_value(i)}"' for i in ids])
             expr = f"id in [{id_list}]"
             col.delete(expr)
             return len(ids)
         elif filters:
-            conditions = [f'{k} == "{v}"' for k, v in filters.items()]
+            conditions = [f'{_sanitize_identifier(k)} == "{_escape_value(v)}"' for k, v in filters.items()]
             expr = " and ".join(conditions)
             col.delete(expr)
             return -1

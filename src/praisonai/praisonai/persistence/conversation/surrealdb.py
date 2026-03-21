@@ -237,7 +237,7 @@ class SurrealDBConversationStore(ConversationStore):
             params["after"] = after
         
         where = "WHERE " + " AND ".join(conditions)
-        limit_clause = f"LIMIT {limit}" if limit else ""
+        limit_clause = f"LIMIT {int(limit)}" if limit else ""
         
         result = self._run_sync(
             self._client.query(

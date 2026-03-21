@@ -286,12 +286,26 @@ class FileTools:
             }
         
         try:
+            # Validate URL to prevent SSRF
+            from urllib.parse import urlparse
+            parsed_url = urlparse(url)
+            if parsed_url.scheme not in ("http", "https"):
+                return {"success": False, "path": "", "size": 0, "error": f"Unsupported URL scheme: {parsed_url.scheme}"}
+            import ipaddress, socket
+            try:
+                hostname = parsed_url.hostname or ""
+                ip = ipaddress.ip_address(socket.gethostbyname(hostname))
+                if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+                    return {"success": False, "path": "", "size": 0, "error": f"URL resolves to private/reserved IP: {ip}"}
+            except (socket.gaierror, ValueError):
+                pass  # Let the request handle DNS resolution errors
+
             # Validate destination path
             safe_path = FileTools._validate_path(destination)
-            
+
             # Create directory if needed
             os.makedirs(os.path.dirname(safe_path) or ".", exist_ok=True)
-            
+
             # Download file
             with httpx.stream("GET", url, timeout=timeout, follow_redirects=True) as response:
                 response.raise_for_status()

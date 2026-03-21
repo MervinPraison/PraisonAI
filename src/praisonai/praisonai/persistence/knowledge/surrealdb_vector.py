@@ -199,8 +199,9 @@ class SurrealDBVectorKnowledgeStore(KnowledgeStore):
         """Search for similar documents using vector search."""
         self._init_client()
         
-        # SurrealDB vector search query
-        embedding_str = str(query_embedding)
+        # SurrealDB vector search query - validate numeric inputs
+        embedding_str = "[" + ",".join(str(float(x)) for x in query_embedding) + "]"
+        limit = int(limit)
         query = f"""
             SELECT *, vector::similarity::cosine(embedding, {embedding_str}) AS score
             FROM {collection}

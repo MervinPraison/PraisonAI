@@ -6,11 +6,24 @@ Install: pip install lancedb
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from .base import KnowledgeStore, KnowledgeDocument
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_identifier(name: str) -> str:
+    """Sanitize a SQL identifier to prevent injection."""
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name):
+        raise ValueError(f"Invalid identifier: {name}")
+    return name
+
+
+def _escape_value(val: str) -> str:
+    """Escape a string value for use in LanceDB WHERE clauses."""
+    return str(val).replace("'", "''").replace("\\", "\\\\")
 
 
 class LanceDBKnowledgeStore(KnowledgeStore):
@@ -140,9 +153,9 @@ class LanceDBKnowledgeStore(KnowledgeStore):
         query = table.search(query_embedding).limit(limit)
         
         if filters:
-            where_clauses = [f"{k} = '{v}'" for k, v in filters.items()]
+            where_clauses = [f"{_sanitize_identifier(k)} = '{_escape_value(v)}'" for k, v in filters.items()]
             query = query.where(" AND ".join(where_clauses))
-        
+
         results = query.to_pandas()
         
         documents = []
@@ -170,7 +183,7 @@ class LanceDBKnowledgeStore(KnowledgeStore):
         """Get documents by IDs."""
         table = self._get_table(collection)
         
-        id_list = ", ".join([f"'{i}'" for i in ids])
+        id_list = ", ".join([f"'{_escape_value(i)}'" for i in ids])
         results = table.search().where(f"id IN ({id_list})").to_pandas()
         
         documents = []
@@ -197,11 +210,11 @@ class LanceDBKnowledgeStore(KnowledgeStore):
         table = self._get_table(collection)
         
         if ids:
-            id_list = ", ".join([f"'{i}'" for i in ids])
+            id_list = ", ".join([f"'{_escape_value(i)}'" for i in ids])
             table.delete(f"id IN ({id_list})")
             return len(ids)
         elif filters:
-            where_clauses = [f"{k} = '{v}'" for k, v in filters.items()]
+            where_clauses = [f"{_sanitize_identifier(k)} = '{_escape_value(v)}'" for k, v in filters.items()]
             table.delete(" AND ".join(where_clauses))
             return -1
         return 0

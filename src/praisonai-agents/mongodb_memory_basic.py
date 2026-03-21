@@ -1,3 +1,5 @@
+import os
+
 from praisonaiagents import Agent, Task, AgentTeam
 from praisonaiagents.memory import Memory
 from praisonaiagents.agent import ContextAgent
@@ -10,7 +12,7 @@ context_output = context_agent.start("https://github.com/MervinPraison/PraisonAI
 mongodb_memory_config = {
     "provider": "mongodb",
     "config": {
-        "connection_string": "mongodb+srv://username:password@cluster2.bofm7.mywebsite.net/?retryWrites=true&w=majority&appName=Cluster2",
+        "connection_string": os.environ.get("MONGODB_CONNECTION_STRING", "mongodb+srv://localhost:27017/?retryWrites=true&w=majority"),
         "database": "praisonai_memory",
         "use_vector_search": True,
         "max_pool_size": 50,
@@ -49,7 +51,7 @@ print("\n=== MEMORY VALIDATION ===")
 
 try:
     # Check MongoDB connection and collections
-    client = pymongo.MongoClient("mongodb+srv://username:password@cluster2.bofm7.mongodb.net/?retryWrites=true&w=majority&appName=Cluster2")
+    client = pymongo.MongoClient(os.environ.get("MONGODB_CONNECTION_STRING", "mongodb+srv://localhost:27017/?retryWrites=true&w=majority"))
     db = client["praisonai_memory"]
     collections = db.list_collection_names()
     print(f"Available collections: {collections}")

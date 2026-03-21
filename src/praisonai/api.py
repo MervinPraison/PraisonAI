@@ -1,4 +1,5 @@
 from flask import Flask
+from markupsafe import escape
 import markdown
 
 app = Flask(__name__)
@@ -11,7 +12,7 @@ def basic():
 @app.route('/')
 def home():
     output = basic()
-    html_output = markdown.markdown(output)
+    html_output = markdown.markdown(str(escape(output)))
     return f'<html><body>{html_output}</body></html>'
 
 if __name__ == "__main__":

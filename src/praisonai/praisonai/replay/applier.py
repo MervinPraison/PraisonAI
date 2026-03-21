@@ -56,7 +56,7 @@ class PlanApplier:
         # Try to use ruamel.yaml for comment preservation
         try:
             from ruamel.yaml import YAML
-            self._yaml = YAML()
+            self._yaml = YAML(typ='safe')
             self._yaml.preserve_quotes = True
             self._use_ruamel = True
         except ImportError:

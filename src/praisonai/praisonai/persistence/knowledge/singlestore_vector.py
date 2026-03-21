@@ -5,6 +5,7 @@ Requires: singlestoredb
 Install: pip install singlestoredb
 """
 
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -227,7 +228,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
                 documents.append(KnowledgeDocument(
                     id=row[0],
                     content=row[1],
-                    metadata=eval(row[2]) if row[2] else None,
+                    metadata=json.loads(row[2]) if row[2] else None,
                     content_hash=row[3],
                     created_at=row[4]
                 ))
@@ -256,7 +257,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
                 KnowledgeDocument(
                     id=row[0],
                     content=row[1],
-                    metadata=eval(row[2]) if row[2] else None,
+                    metadata=json.loads(row[2]) if row[2] else None,
                     content_hash=row[3],
                     created_at=row[4]
                 )

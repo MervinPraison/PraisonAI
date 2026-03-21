@@ -44,12 +44,20 @@ def main():
     
     def calculate(expression: str) -> str:
         """Calculate a math expression safely."""
+        import ast
         try:
             # Safe eval for basic math
             allowed = set("0123456789+-*/.() ")
-            if all(c in allowed for c in expression):
-                return str(eval(expression))
-            return "Error: Invalid expression"
+            if not all(c in allowed for c in expression):
+                return "Error: Invalid expression"
+            # Use ast.parse to validate expression safety
+            tree = ast.parse(expression, mode='eval')
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.Expression, ast.BinOp, ast.UnaryOp,
+                                        ast.Constant, ast.Add, ast.Sub, ast.Mult,
+                                        ast.Div, ast.USub, ast.UAdd)):
+                    return "Error: Only basic math operations are allowed"
+            return str(eval(compile(tree, '<expr>', 'eval'), {"__builtins__": {}}))
         except Exception as e:
             return f"Error: {e}"
     

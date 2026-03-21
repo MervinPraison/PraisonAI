@@ -312,13 +312,23 @@ class HybridWorkflowExecutor:
         return flags
 
     def _eval_condition(self, condition: str, flags: Dict) -> bool:
-        """Evaluate a simple condition expression."""
+        """Evaluate a simple condition expression safely."""
+        import ast
+
         condition = condition.strip()
         if condition.startswith("{{") and condition.endswith("}}"):
             condition = condition[2:-2].strip()
 
-        context = {"flags": type("Flags", (), flags)(), "env": os.environ}
+        # Handle simple attribute lookups like "flags.verbose" or "env.DEBUG"
+        context = {"flags": flags, "env": dict(os.environ)}
         try:
-            return bool(eval(condition, {"__builtins__": {}}, context))
-        except Exception:
+            # Only allow simple attribute access patterns: obj.attr
+            parts = condition.split(".")
+            if len(parts) == 2 and parts[0] in context:
+                obj = context[parts[0]]
+                if isinstance(obj, dict):
+                    return bool(obj.get(parts[1], False))
+            # Try literal eval for simple boolean/numeric expressions
+            return bool(ast.literal_eval(condition))
+        except (ValueError, KeyError, TypeError):
             return False

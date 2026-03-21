@@ -137,7 +137,7 @@ def main():
     # MCP endpoints
     mcp_tools = {
         "search": {"description": "Search the web", "func": lambda q: f"Results for: {q}"},
-        "calculate": {"description": "Calculate expression", "func": lambda e: str(eval(e)) if e.replace(" ", "").replace("+", "").replace("-", "").replace("*", "").replace("/", "").replace(".", "").isdigit() or True else "Error"},
+        "calculate": {"description": "Calculate expression", "func": lambda e: str(eval(e)) if e.replace(" ", "").replace("+", "").replace("-", "").replace("*", "").replace("/", "").replace(".", "").replace("(", "").replace(")", "").isdigit() else "Error: Invalid expression"},
     }
     
     @app.get("/mcp/tools")

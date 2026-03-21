@@ -271,6 +271,23 @@ class URLReader:
                 return []
         
         try:
+            # Validate URL to prevent SSRF
+            from urllib.parse import urlparse
+            parsed = urlparse(source)
+            if parsed.scheme not in ("http", "https"):
+                logger.error(f"Unsupported URL scheme: {parsed.scheme}")
+                return []
+            import ipaddress
+            try:
+                import socket
+                hostname = parsed.hostname or ""
+                ip = ipaddress.ip_address(socket.gethostbyname(hostname))
+                if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+                    logger.error(f"URL resolves to private/reserved IP: {ip}")
+                    return []
+            except (socket.gaierror, ValueError):
+                pass  # Let the request handle DNS resolution errors
+
             response = httpx.get(source, timeout=30, follow_redirects=True)
             response.raise_for_status()
             content = response.text

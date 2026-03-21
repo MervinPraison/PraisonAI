@@ -6,11 +6,19 @@ Install: pip install clickhouse-connect
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from .base import KnowledgeStore, KnowledgeDocument
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_identifier(name: str) -> str:
+    """Sanitize a SQL identifier (table/database name) to prevent injection."""
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_.]*$', name):
+        raise ValueError(f"Invalid identifier: {name}")
+    return name
 
 
 class ClickHouseKnowledgeStore(KnowledgeStore):
@@ -52,11 +60,11 @@ class ClickHouseKnowledgeStore(KnowledgeStore):
         self.database = database
         
         # Create database if not exists
-        self._client.command(f"CREATE DATABASE IF NOT EXISTS {database}")
+        self._client.command(f"CREATE DATABASE IF NOT EXISTS {_sanitize_identifier(database)}")
         logger.info(f"Connected to ClickHouse database: {database}")
     
     def _table_name(self, collection: str) -> str:
-        return f"{self.database}.praison_vec_{collection}"
+        return _sanitize_identifier(f"{self.database}.praison_vec_{collection}")
     
     def create_collection(
         self,
@@ -98,10 +106,11 @@ class ClickHouseKnowledgeStore(KnowledgeStore):
     
     def list_collections(self) -> List[str]:
         """List all collections."""
-        result = self._client.query(f"""
-            SELECT name FROM system.tables 
-            WHERE database = '{self.database}' AND name LIKE 'praison_vec_%'
-        """)
+        db = _sanitize_identifier(self.database)
+        result = self._client.query(
+            "SELECT name FROM system.tables WHERE database = %(db)s AND name LIKE 'praison_vec_%%'",
+            parameters={"db": db}
+        )
         return [row[0].replace("praison_vec_", "") for row in result.result_rows]
     
     def insert(
@@ -156,19 +165,20 @@ class ClickHouseKnowledgeStore(KnowledgeStore):
         """Search for similar documents using cosine distance."""
         table = self._table_name(collection)
         
-        # Convert embedding to string for query
-        embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
-        
+        # Convert embedding to validated float array for query
+        embedding_str = "[" + ",".join(str(float(x)) for x in query_embedding) + "]"
+        limit = int(limit)
+
         query = f"""
-            SELECT 
+            SELECT
                 id, content, content_hash, created_at,
                 1 - cosineDistance(embedding, {embedding_str}) as score
             FROM {table}
         """
-        
+
         if score_threshold:
-            query += f" WHERE 1 - cosineDistance(embedding, {embedding_str}) >= {score_threshold}"
-        
+            query += f" WHERE 1 - cosineDistance(embedding, {embedding_str}) >= {float(score_threshold)}"
+
         query += f" ORDER BY score DESC LIMIT {limit}"
         
         result = self._client.query(query)
@@ -195,11 +205,12 @@ class ClickHouseKnowledgeStore(KnowledgeStore):
         """Get documents by IDs."""
         table = self._table_name(collection)
         
-        id_list = ", ".join([f"'{i}'" for i in ids])
-        result = self._client.query(f"""
-            SELECT id, content, content_hash, created_at, embedding
-            FROM {table} WHERE id IN ({id_list})
-        """)
+        placeholders = ", ".join(["%(id_{})s".format(idx) for idx in range(len(ids))])
+        params = {"id_{}".format(idx): i for idx, i in enumerate(ids)}
+        result = self._client.query(
+            f"SELECT id, content, content_hash, created_at, embedding FROM {table} WHERE id IN ({placeholders})",
+            parameters=params
+        )
         
         documents = []
         for row in result.result_rows:
@@ -225,8 +236,12 @@ class ClickHouseKnowledgeStore(KnowledgeStore):
         table = self._table_name(collection)
         
         if ids:
-            id_list = ", ".join([f"'{i}'" for i in ids])
-            self._client.command(f"ALTER TABLE {table} DELETE WHERE id IN ({id_list})")
+            placeholders = ", ".join(["%(id_{})s".format(idx) for idx in range(len(ids))])
+            params = {"id_{}".format(idx): i for idx, i in enumerate(ids)}
+            self._client.command(
+                f"ALTER TABLE {table} DELETE WHERE id IN ({placeholders})",
+                parameters=params
+            )
             return len(ids)
         return 0
     
