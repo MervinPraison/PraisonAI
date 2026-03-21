@@ -5335,7 +5335,34 @@ Your Goal: {self.goal}"""
 
     def _chat_completion(self, messages, temperature=1.0, tools=None, stream=True, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None):
         start_time = time.time()
-        
+
+        # --- Context compaction (opt-in via ExecutionConfig.context_compaction) ---
+        # Compacts message history before sending to LLM. Zero overhead when disabled.
+        _execution_cfg = getattr(self, 'execution', None)
+        if _execution_cfg and getattr(_execution_cfg, 'context_compaction', False):
+            try:
+                from ..compaction import ContextCompactor
+                from ..hooks import HookEvent as _HookEvent
+                _max_tok = getattr(_execution_cfg, 'max_context_tokens', None) or 8000
+                _compactor = ContextCompactor(max_tokens=_max_tok)
+                if _compactor.needs_compaction(messages):
+                    try:
+                        self._hook_runner.execute_sync(_HookEvent.BEFORE_COMPACTION, None)
+                    except Exception:
+                        pass
+                    compacted_msgs, _cr = _compactor.compact(messages)
+                    messages[:] = compacted_msgs  # in-place update so callers see the change
+                    logging.info(
+                        f"[compaction] {self.name}: {_cr.original_tokens}→{_cr.compacted_tokens} tokens "
+                        f"({_cr.messages_removed} messages removed)"
+                    )
+                    try:
+                        self._hook_runner.execute_sync(_HookEvent.AFTER_COMPACTION, None)
+                    except Exception:
+                        pass
+            except Exception as _ce:
+                logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
+
         # Trigger BEFORE_LLM hook
         from ..hooks import HookEvent, BeforeLLMInput
         before_llm_input = BeforeLLMInput(
@@ -6553,7 +6580,33 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         self.chat_history[-1].get("content") == normalized_content):
                     # Add user message to chat history BEFORE LLM call so handoffs can access it
                     self.chat_history.append({"role": "user", "content": normalized_content})
-                
+
+                # --- Context compaction (async custom LLM path) ---
+                _exec_cfg = getattr(self, 'execution', None)
+                if _exec_cfg and getattr(_exec_cfg, 'context_compaction', False):
+                    try:
+                        from ..compaction import ContextCompactor
+                        from ..hooks import HookEvent as _HE
+                        _mtok = getattr(_exec_cfg, 'max_context_tokens', None) or 8000
+                        _cw = ContextCompactor(max_tokens=_mtok)
+                        if _cw.needs_compaction(self.chat_history):
+                            try:
+                                await self._hook_runner.execute(_HE.BEFORE_COMPACTION, None)
+                            except Exception:
+                                pass
+                            _ch, _cr = _cw.compact(self.chat_history)
+                            self.chat_history[:] = _ch
+                            logging.info(
+                                f"[compaction] {self.name}: {_cr.original_tokens}→{_cr.compacted_tokens} tokens "
+                                f"({_cr.messages_removed} messages removed)"
+                            )
+                            try:
+                                await self._hook_runner.execute(_HE.AFTER_COMPACTION, None)
+                            except Exception:
+                                pass
+                    except Exception as _ce:
+                        logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
+
                 try:
                     response_text = await self.llm_instance.get_response_async(
                         prompt=prompt,
@@ -6624,6 +6677,32 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     self.chat_history[-1].get("content") == normalized_content):
                 # Add user message to chat history BEFORE LLM call so handoffs can access it
                 self.chat_history.append({"role": "user", "content": normalized_content})
+
+            # --- Context compaction (async standard OpenAI path) ---
+            _exec_cfg2 = getattr(self, 'execution', None)
+            if _exec_cfg2 and getattr(_exec_cfg2, 'context_compaction', False):
+                try:
+                    from ..compaction import ContextCompactor
+                    from ..hooks import HookEvent as _HE2
+                    _mtok2 = getattr(_exec_cfg2, 'max_context_tokens', None) or 8000
+                    _cw2 = ContextCompactor(max_tokens=_mtok2)
+                    if _cw2.needs_compaction(messages):
+                        try:
+                            await self._hook_runner.execute(_HE2.BEFORE_COMPACTION, None)
+                        except Exception:
+                            pass
+                        _cm2, _cr2 = _cw2.compact(messages)
+                        messages[:] = _cm2
+                        logging.info(
+                            f"[compaction] {self.name}: {_cr2.original_tokens}→{_cr2.compacted_tokens} tokens "
+                            f"({_cr2.messages_removed} messages removed)"
+                        )
+                        try:
+                            await self._hook_runner.execute(_HE2.AFTER_COMPACTION, None)
+                        except Exception:
+                            pass
+                except Exception as _ce2:
+                    logging.debug(f"[compaction] skipped (non-fatal): {_ce2}")
 
             reflection_count = 0
             start_time = time.time()
@@ -6822,7 +6901,30 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if not tool:
                         _get_display_functions()['display_error'](f"Tool {function_name} not found")
                         continue
-                    
+
+                    # --- BEFORE_TOOL hook ---
+                    try:
+                        from ..hooks import HookEvent, BeforeToolInput
+                        _before_tool_input = BeforeToolInput(
+                            session_id=getattr(self, '_session_id', 'default'),
+                            cwd=os.getcwd(),
+                            event_name=HookEvent.BEFORE_TOOL,
+                            timestamp=str(time.time()),
+                            agent_name=self.name,
+                            tool_name=function_name,
+                            tool_input=arguments,
+                        )
+                        _before_results = await self._hook_runner.execute(HookEvent.BEFORE_TOOL, _before_tool_input)
+                        if self._hook_runner.is_blocked(_before_results):
+                            _block_reason = next(
+                                (r.output.get_reason() for r in _before_results if r.output and r.output.is_blocking()),
+                                "Blocked by hook"
+                            )
+                            results.append(f"[Tool blocked by hook: {_block_reason}]")
+                            continue
+                    except Exception as _hook_err:
+                        logging.debug(f"BEFORE_TOOL hook error (non-fatal): {_hook_err}")
+
                     # Check if the tool is async
                     if asyncio.iscoroutinefunction(tool):
                         result = await tool(**arguments)
@@ -6830,11 +6932,29 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # Run sync function in executor to avoid blocking
                         loop = asyncio.get_event_loop()
                         result = await loop.run_in_executor(None, lambda: tool(**arguments))
+
+                    # --- AFTER_TOOL hook ---
+                    try:
+                        from ..hooks import AfterToolInput
+                        _after_tool_input = AfterToolInput(
+                            session_id=getattr(self, '_session_id', 'default'),
+                            cwd=os.getcwd(),
+                            event_name=HookEvent.AFTER_TOOL,
+                            timestamp=str(time.time()),
+                            agent_name=self.name,
+                            tool_name=function_name,
+                            tool_input=arguments,
+                            tool_output=result,
+                        )
+                        await self._hook_runner.execute(HookEvent.AFTER_TOOL, _after_tool_input)
+                    except Exception as _hook_err:
+                        logging.debug(f"AFTER_TOOL hook error (non-fatal): {_hook_err}")
                     
                     results.append(result)
                 except Exception as e:
                     _get_display_functions()['display_error'](f"Error executing tool {function_name}: {e}")
                     results.append(None)
+
 
             # If we have results, format them into a response
             if results:
