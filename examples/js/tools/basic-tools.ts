@@ -19,7 +19,15 @@ async function main() {
     },
     execute: async ({ expression }) => {
       try {
-        const result = eval(expression);
+        // Only allow safe numeric math characters
+        if (!/^[0-9+\-*/.() ]+$/.test(expression)) {
+          return 'Error: Only basic math expressions are allowed';
+        }
+        // Use Function constructor scoped to math only, no globals
+        const result = new Function(`"use strict"; return (${expression})`)();
+        if (typeof result !== 'number' || !isFinite(result)) {
+          return 'Error: Invalid result';
+        }
         return `Result: ${result}`;
       } catch (e) {
         return 'Error: Invalid expression';

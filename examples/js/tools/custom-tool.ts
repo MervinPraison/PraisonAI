@@ -38,7 +38,13 @@ const calculatorTool = createTool({
   },
   run: (params: { expression: string }) => {
     try {
-      return eval(params.expression);
+      // Only allow safe numeric math characters
+      if (!/^[0-9+\-*/.() ]+$/.test(params.expression)) {
+        return 'Error: Only basic math expressions are allowed';
+      }
+      const result = new Function(`"use strict"; return (${params.expression})`)();
+      if (typeof result !== 'number' || !isFinite(result)) return 'Error: Invalid result';
+      return result;
     } catch {
       return 'Error: Invalid expression';
     }

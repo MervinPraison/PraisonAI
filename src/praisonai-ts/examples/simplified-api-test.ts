@@ -23,7 +23,9 @@ async function testAgentWithTools() {
   const getWeather = (city: string) => `Weather in ${city}: 22°C, sunny`;
   const calculate = (expr: string) => {
     try {
-      return String(eval(expr));
+      if (!/^[0-9+\-*/.() ]+$/.test(expr)) return 'Error: Invalid expression';
+      const result = new Function(`"use strict"; return (${expr})`)();
+      return typeof result === 'number' && isFinite(result) ? String(result) : 'Error';
     } catch {
       return 'Error';
     }

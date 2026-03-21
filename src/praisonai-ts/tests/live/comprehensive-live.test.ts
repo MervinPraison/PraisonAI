@@ -96,7 +96,13 @@ async function main() {
   });
 
   await runTest('Agent: With Custom Tool', async () => {
-    const calculator = (expression: string) => String(eval(expression));
+    const calculator = (expression: string) => {
+      try {
+        if (!/^[0-9+\-*/.() ]+$/.test(expression)) return 'Error: Invalid expression';
+        const result = new Function(`"use strict"; return (${expression})`)();
+        return typeof result === 'number' && isFinite(result) ? String(result) : 'Error';
+      } catch { return 'Error'; }
+    };
     const agent = new Agent({
       name: 'ToolAgent',
       instructions: 'Use the calculator tool for math.',

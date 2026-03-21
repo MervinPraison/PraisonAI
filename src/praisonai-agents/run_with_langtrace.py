@@ -24,9 +24,12 @@ if __name__ == "__main__":
     
     script_to_run = sys.argv[1]
     
-    # Execute the target script
-    with open(script_to_run, 'r') as f:
-        script_content = f.read()
-    
-    # Execute in the same namespace
-    exec(script_content, {'__name__': '__main__'})
+    # Execute the target script in a subprocess to avoid sharing the current namespace
+    import subprocess
+    result = subprocess.run(
+        [sys.executable, script_to_run],
+        stdin=sys.stdin,
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+    )
+    sys.exit(result.returncode)
