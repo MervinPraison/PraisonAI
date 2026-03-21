@@ -4939,7 +4939,7 @@ requires-dist = [
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen-v4'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.1.0" },
-    { name = "praisonaiagents", specifier = ">=1.5.81" },
+    { name = "praisonaiagents", specifier = ">=1.5.82" },
     { name = "praisonaiagents", extras = ["all"], marker = "extra == 'claw'", specifier = ">=1.5.40" },
     { name = "psutil", marker = "extra == 'all'", specifier = ">=5.9.0" },
     { name = "psutil", marker = "extra == 'bot'", specifier = ">=5.9.0" },
@@ -5009,7 +5009,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.5.81"
+version = "1.5.82"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -5018,9 +5018,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ea/c0/b7470dcaed1038e0e7016bae9f7d90fb6b12e297c06f7d5bd2a8a08fe839/praisonaiagents-1.5.81.tar.gz", hash = "sha256:a8a53514b2a8dbaa198877902c772f283b2bd77cd0636b50d7ae14e929d4960d", size = 1210524, upload-time = "2026-03-21T16:46:33.506Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f1/0f/dbb6dcc6a9836c5f3e2a291e219a6bf80ec1021a397b8d8a959fbb70e09b/praisonaiagents-1.5.82.tar.gz", hash = "sha256:3de6a5766827b63920b009fdb2c1f4ac3739dc4bec7d75df79c11a5d901dd65a", size = 1210478, upload-time = "2026-03-21T17:50:37.683Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/91/d7/289696cb680130a128b6f040d1b75ba25724c510d8a636a99929a2bb4f1f/praisonaiagents-1.5.81-py3-none-any.whl", hash = "sha256:3131622bfcf5c4eacad25f1323a2cdb335edf01ba91149204fbb14890e3edb12", size = 1255589, upload-time = "2026-03-21T16:46:31.885Z" },
+    { url = "https://files.pythonhosted.org/packages/1f/21/05c64a5bc9692add9d2298da050b5b35d342626c909772ccd059a91e9398/praisonaiagents-1.5.82-py3-none-any.whl", hash = "sha256:2f6e2b06f85a383b7a7e40fc987511a1d5c1f80dd84862d2120792f885cfc01d", size = 1255589, upload-time = "2026-03-21T17:50:35.691Z" },
 ]
 
 [package.optional-dependencies]
