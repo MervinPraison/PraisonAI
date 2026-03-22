@@ -6,11 +6,25 @@ Install: pip install cassandra-driver
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from .base import KnowledgeStore, KnowledgeDocument
 
 logger = logging.getLogger(__name__)
+
+_IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+def _sanitize_identifier(name: str) -> str:
+    """Validate that *name* is a safe CQL identifier (prevents SQL injection)."""
+    if not _IDENTIFIER_RE.match(name):
+        raise ValueError(
+            f"Invalid identifier: {name!r}. "
+            "Identifiers must start with a letter or underscore and contain only "
+            "alphanumeric characters and underscores."
+        )
+    return name
 
 
 class CassandraKnowledgeStore(KnowledgeStore):
@@ -61,8 +75,9 @@ class CassandraKnowledgeStore(KnowledgeStore):
             self._cluster = Cluster(hosts, port=port, auth_provider=auth)
         
         self._session = self._cluster.connect()
-        
+
         # Create keyspace if not exists
+        _sanitize_identifier(keyspace)
         self._session.execute(f"""
             CREATE KEYSPACE IF NOT EXISTS {keyspace}
             WITH replication = {{'class': 'SimpleStrategy', 'replication_factor': 1}}
@@ -78,8 +93,10 @@ class CassandraKnowledgeStore(KnowledgeStore):
         metadata: Optional[Dict[str, Any]] = None
     ) -> None:
         """Create a new table with vector column."""
+        _sanitize_identifier(name)
+        dimension = int(dimension)
         similarity_map = {"cosine": "COSINE", "euclidean": "EUCLIDEAN", "dot": "DOT_PRODUCT"}
-        
+
         self._session.execute(f"""
             CREATE TABLE IF NOT EXISTS {name} (
                 id text PRIMARY KEY,
@@ -100,6 +117,7 @@ class CassandraKnowledgeStore(KnowledgeStore):
     
     def delete_collection(self, name: str) -> bool:
         """Delete a table."""
+        _sanitize_identifier(name)
         try:
             self._session.execute(f"DROP TABLE IF EXISTS {name}")
             return True
@@ -128,11 +146,12 @@ class CassandraKnowledgeStore(KnowledgeStore):
         documents: List[KnowledgeDocument]
     ) -> List[str]:
         """Insert documents."""
+        _sanitize_identifier(collection)
         ids = []
         for doc in documents:
             if doc.embedding is None:
                 raise ValueError(f"Document {doc.id} has no embedding")
-            
+
             self._session.execute(f"""
                 INSERT INTO {collection} (id, content, content_hash, created_at, embedding)
                 VALUES (%s, %s, %s, %s, %s)
@@ -158,6 +177,7 @@ class CassandraKnowledgeStore(KnowledgeStore):
         score_threshold: Optional[float] = None
     ) -> List[KnowledgeDocument]:
         """Search for similar documents using ANN."""
+        _sanitize_identifier(collection)
         result = self._session.execute(f"""
             SELECT id, content, content_hash, created_at, similarity_cosine(embedding, %s) as score
             FROM {collection}
@@ -188,6 +208,7 @@ class CassandraKnowledgeStore(KnowledgeStore):
         ids: List[str]
     ) -> List[KnowledgeDocument]:
         """Get documents by IDs."""
+        _sanitize_identifier(collection)
         documents = []
         for doc_id in ids:
             result = self._session.execute(f"""
@@ -215,6 +236,7 @@ class CassandraKnowledgeStore(KnowledgeStore):
         filters: Optional[Dict[str, Any]] = None
     ) -> int:
         """Delete documents."""
+        _sanitize_identifier(collection)
         if ids:
             for doc_id in ids:
                 self._session.execute(f"DELETE FROM {collection} WHERE id = %s", (doc_id,))
@@ -223,6 +245,7 @@ class CassandraKnowledgeStore(KnowledgeStore):
     
     def count(self, collection: str) -> int:
         """Count documents."""
+        _sanitize_identifier(collection)
         result = self._session.execute(f"SELECT COUNT(*) FROM {collection}")
         return result.one()[0]
     

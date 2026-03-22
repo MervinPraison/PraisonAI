@@ -44,7 +44,7 @@ class AgentAppConfig:
     host: str = "0.0.0.0"
     port: int = 8000
     reload: bool = False
-    cors_origins: List[str] = field(default_factory=lambda: ["*"])
+    cors_origins: List[str] = field(default_factory=lambda: ["http://localhost:3000", "http://localhost:8000"])
     api_prefix: str = "/api"
     docs_url: str = "/docs"
     openapi_url: str = "/openapi.json"

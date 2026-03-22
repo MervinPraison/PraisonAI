@@ -7,6 +7,7 @@ Install: pip install singlestoredb
 
 import json
 import logging
+import re
 from typing import Any, List, Optional
 
 from .base import ConversationStore, ConversationSession, ConversationMessage
@@ -27,7 +28,28 @@ class SingleStoreConversationStore(ConversationStore):
     """
     
     SCHEMA_VERSION = "1.0.0"
-    
+
+    @staticmethod
+    def _sanitize_identifier(name: str) -> str:
+        """Validate a SQL identifier to prevent SQL injection.
+
+        Args:
+            name: The identifier to validate.
+
+        Returns:
+            The validated identifier.
+
+        Raises:
+            ValueError: If the identifier contains invalid characters.
+        """
+        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name):
+            raise ValueError(
+                f"Invalid SQL identifier: {name!r}. "
+                "Only letters, digits, and underscores are allowed, "
+                "and it must start with a letter or underscore."
+            )
+        return name
+
     def __init__(
         self,
         url: Optional[str] = None,
@@ -48,9 +70,12 @@ class SingleStoreConversationStore(ConversationStore):
             )
         
         self._s2 = s2
+        self._sanitize_identifier(table_prefix)
         self.table_prefix = table_prefix
         self.sessions_table = f"{table_prefix}sessions"
         self.messages_table = f"{table_prefix}messages"
+        self._sanitize_identifier(self.sessions_table)
+        self._sanitize_identifier(self.messages_table)
         
         if url:
             self._conn = s2.connect(url)
@@ -209,7 +234,11 @@ class SingleStoreConversationStore(ConversationStore):
             conditions.append("created_at > %s")
             params.append(after)
         where = "WHERE " + " AND ".join(conditions)
-        limit_clause = f"LIMIT {limit}" if limit else ""
+        if limit is not None:
+            limit_clause = "LIMIT %s"
+            params.append(limit)
+        else:
+            limit_clause = ""
         cur.execute(f"SELECT * FROM {self.messages_table} {where} ORDER BY created_at ASC {limit_clause}", params)
         cols = [d[0] for d in cur.description]
         return [ConversationMessage(

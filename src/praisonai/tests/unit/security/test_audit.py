@@ -17,7 +17,7 @@ class TestAuditLogHook:
     def _make(self, log_path=None):
         from praisonai.security.audit import AuditLogHook
         if log_path is None:
-            tmp = tempfile.mktemp(suffix=".jsonl")
+            tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False).name
             log_path = tmp
         return AuditLogHook(log_path=log_path), log_path
 

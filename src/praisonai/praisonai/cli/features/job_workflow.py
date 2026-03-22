@@ -231,10 +231,11 @@ class JobWorkflowExecutor:
 
     def _exec_shell(self, cmd: str, step: Dict) -> Dict:
         """Execute a shell command."""
+        import shlex
         cwd = step.get("cwd", self._cwd)
         env = self._build_env(step)
         result = subprocess.run(
-            cmd, shell=True, cwd=cwd, env=env,
+            shlex.split(cmd), shell=False, cwd=cwd, env=env,
             capture_output=True, text=True,
             timeout=step.get("timeout", 300),
         )
@@ -266,13 +267,21 @@ class JobWorkflowExecutor:
         return {"ok": True, "output": result.stdout.strip()}
 
     def _exec_inline_python(self, code: str, step: Dict, flags: Dict) -> Dict:
-        """Execute inline Python code in an isolated namespace."""
+        """Execute inline Python code in a restricted namespace."""
+        _SAFE_BUILTINS = {
+            "abs": abs, "all": all, "any": any, "bool": bool, "dict": dict,
+            "enumerate": enumerate, "float": float, "int": int, "isinstance": isinstance,
+            "len": len, "list": list, "map": map, "max": max, "min": min,
+            "print": print, "range": range, "round": round, "set": set,
+            "sorted": sorted, "str": str, "sum": sum, "tuple": tuple, "zip": zip,
+            "True": True, "False": False, "None": None,
+        }
         namespace = {
             "flags": flags,
             "vars": {k: self._resolve_var_value(v) for k, v in self._vars.items()},
             "env": os.environ.copy(),
             "cwd": self._cwd,
-            "__builtins__": __builtins__,
+            "__builtins__": _SAFE_BUILTINS,
         }
         try:
             exec(code, namespace)
@@ -719,15 +728,25 @@ class JobWorkflowExecutor:
     # ------------------------------------------------------------------
 
     def _eval_condition(self, condition: str, flags: Dict) -> bool:
-        """Evaluate a simple condition expression."""
-        # Strip {{ }} if present
+        """Evaluate a simple condition expression safely."""
         condition = condition.strip()
         if condition.startswith("{{") and condition.endswith("}}"):
             condition = condition[2:-2].strip()
 
-        # Build evaluation context
-        context = {"flags": type("Flags", (), flags)(), "env": os.environ}
+        # Only allow simple flag checks like "flags.verbose", "flags.dry_run"
+        # and basic boolean operators
+        context = {"flags": type("Flags", (), flags)()}
         try:
+            import ast
+            # Parse the expression to AST and validate it only contains safe operations
+            tree = ast.parse(condition, mode='eval')
+            for node in ast.walk(tree):
+                # Block dangerous node types
+                if isinstance(node, (ast.Call, ast.Import, ast.ImportFrom)):
+                    return False
+                # Block dunder attribute access
+                if isinstance(node, ast.Attribute) and node.attr.startswith('_'):
+                    return False
             return bool(eval(condition, {"__builtins__": {}}, context))
         except Exception:
             return False

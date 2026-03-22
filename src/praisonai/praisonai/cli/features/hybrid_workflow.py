@@ -312,13 +312,25 @@ class HybridWorkflowExecutor:
         return flags
 
     def _eval_condition(self, condition: str, flags: Dict) -> bool:
-        """Evaluate a simple condition expression."""
+        """Evaluate a simple condition expression safely."""
         condition = condition.strip()
         if condition.startswith("{{") and condition.endswith("}}"):
             condition = condition[2:-2].strip()
 
-        context = {"flags": type("Flags", (), flags)(), "env": os.environ}
+        # Only allow simple flag checks like "flags.verbose", "flags.dry_run"
+        # and basic boolean operators
+        context = {"flags": type("Flags", (), flags)()}
         try:
+            import ast
+            # Parse the expression to AST and validate it only contains safe operations
+            tree = ast.parse(condition, mode='eval')
+            for node in ast.walk(tree):
+                # Block dangerous node types
+                if isinstance(node, (ast.Call, ast.Import, ast.ImportFrom)):
+                    return False
+                # Block dunder attribute access
+                if isinstance(node, ast.Attribute) and node.attr.startswith('_'):
+                    return False
             return bool(eval(condition, {"__builtins__": {}}, context))
         except Exception:
             return False

@@ -10,8 +10,9 @@ try:
         return nh3.clean(html)
 except ImportError:
     def _sanitize_html(html: str) -> str:
-        """Fallback: no nh3, return as-is (install nh3 for XSS protection)."""
-        return html
+        """Fallback: strip HTML tags when nh3 is not available."""
+        import re
+        return re.sub(r'<[^>]+>', '', html)
 
 def basic():
     from praisonai import PraisonAI
@@ -25,4 +26,5 @@ def home():
     return f'<html><body>{html_output}</body></html>'
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    import os
+    app.run(debug=os.environ.get("FLASK_DEBUG", "false").lower() == "true")

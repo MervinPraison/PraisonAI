@@ -191,8 +191,8 @@ def safe_execute(
     try:
         # Execute command
         process = subprocess.Popen(
-            command,
-            shell=True,
+            shlex.split(command),
+            shell=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=cwd,

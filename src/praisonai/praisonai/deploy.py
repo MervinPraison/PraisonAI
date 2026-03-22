@@ -87,7 +87,7 @@ class CloudDeployer:
             file.write("    html_output = markdown.markdown(output)\n")
             file.write("    return f'<html><body>{html_output}</body></html>'\n\n")
             file.write("if __name__ == \"__main__\":\n")
-            file.write("    app.run(debug=True)\n")
+            file.write("    app.run(debug=False)\n")
     
     def set_environment_variables(self):
         """Sets environment variables with fallback to .env values or defaults."""

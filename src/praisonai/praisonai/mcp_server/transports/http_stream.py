@@ -71,7 +71,7 @@ class HTTPStreamTransport:
         self.host = host
         self.port = port
         self.endpoint = endpoint
-        self.cors_origins = cors_origins or ["*"]
+        self.cors_origins = cors_origins or ["http://localhost:3000", "http://localhost:8000"]
         self.api_key = api_key
         self.session_ttl = session_ttl
         self.allow_client_termination = allow_client_termination

@@ -7,6 +7,7 @@ Install: pip install pgvector psycopg2-binary
 
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from .base import KnowledgeStore, KnowledgeDocument
@@ -39,16 +40,18 @@ class PGVectorKnowledgeStore(KnowledgeStore):
     ):
         try:
             import psycopg2
-            from psycopg2 import pool as pg_pool
+            from psycopg2 import pool as pg_pool, sql
             from psycopg2.extras import RealDictCursor
         except ImportError:
             raise ImportError(
                 "psycopg2 is required for PGVector support. "
                 "Install with: pip install psycopg2-binary"
             )
-        
+
         self._psycopg2 = psycopg2
+        self._sql = sql
         self._RealDictCursor = RealDictCursor
+        self._sanitize_identifier(schema)
         self.schema = schema
         
         if url:
@@ -79,8 +82,29 @@ class PGVectorKnowledgeStore(KnowledgeStore):
         finally:
             self._put_conn(conn)
     
-    def _table_name(self, collection: str) -> str:
-        return f"{self.schema}.praison_vec_{collection}"
+    @staticmethod
+    def _sanitize_identifier(name: str) -> str:
+        """Validate that a name is a safe SQL identifier.
+
+        Raises ValueError if the name does not match ``^[a-zA-Z_][a-zA-Z0-9_]*$``.
+        Returns the name unchanged when valid.
+        """
+        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", name):
+            raise ValueError(
+                f"Invalid SQL identifier: {name!r}. "
+                "Only letters, digits and underscores are allowed, "
+                "and it must start with a letter or underscore."
+            )
+        return name
+
+    def _table_name(self, collection: str):
+        """Return a ``psycopg2.sql.Composed`` object for the fully-qualified table name."""
+        self._sanitize_identifier(collection)
+        sql = self._sql
+        return sql.SQL("{}.{}").format(
+            sql.Identifier(self.schema),
+            sql.Identifier(f"praison_vec_{collection}"),
+        )
     
     def create_collection(
         self,
@@ -90,45 +114,53 @@ class PGVectorKnowledgeStore(KnowledgeStore):
         metadata: Optional[Dict[str, Any]] = None
     ) -> None:
         """Create a new collection table."""
+        dimension = int(dimension)
         table = self._table_name(name)
+        sql = self._sql
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
-                cur.execute(f"""
-                    CREATE TABLE IF NOT EXISTS {table} (
-                        id VARCHAR(255) PRIMARY KEY,
-                        content TEXT,
-                        content_hash VARCHAR(64),
-                        created_at DOUBLE PRECISION,
-                        metadata JSONB,
-                        embedding vector({dimension})
-                    )
-                """)
-                
+                cur.execute(
+                    sql.SQL("""
+                        CREATE TABLE IF NOT EXISTS {} (
+                            id VARCHAR(255) PRIMARY KEY,
+                            content TEXT,
+                            content_hash VARCHAR(64),
+                            created_at DOUBLE PRECISION,
+                            metadata JSONB,
+                            embedding vector({})
+                        )
+                    """).format(table, sql.Literal(dimension))
+                )
+
                 # Create index based on distance metric
                 op_map = {"cosine": "vector_cosine_ops", "euclidean": "vector_l2_ops", "dot": "vector_ip_ops"}
                 ops = op_map.get(distance, "vector_cosine_ops")
-                
-                cur.execute(f"""
-                    CREATE INDEX IF NOT EXISTS idx_{name}_embedding 
-                    ON {table} USING hnsw (embedding {ops})
-                """)
+                self._sanitize_identifier(name)
+                index_name = sql.Identifier(f"idx_{name}_embedding")
+
+                cur.execute(
+                    sql.SQL(
+                        "CREATE INDEX IF NOT EXISTS {} ON {} USING hnsw (embedding {})"
+                    ).format(index_name, table, sql.SQL(ops))
+                )
                 conn.commit()
-            logger.info(f"Created PGVector table: {table}")
+            logger.info("Created PGVector table for collection: %s", name)
         finally:
             self._put_conn(conn)
     
     def delete_collection(self, name: str) -> bool:
         """Delete a collection table."""
         table = self._table_name(name)
+        sql = self._sql
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
-                cur.execute(f"DROP TABLE IF EXISTS {table}")
+                cur.execute(sql.SQL("DROP TABLE IF EXISTS {}").format(table))
                 conn.commit()
             return True
         except Exception as e:
-            logger.warning(f"Failed to delete table {table}: {e}")
+            logger.warning("Failed to delete table for collection %s: %s", name, e)
             return False
         finally:
             self._put_conn(conn)
@@ -169,16 +201,18 @@ class PGVectorKnowledgeStore(KnowledgeStore):
     ) -> List[str]:
         """Insert documents."""
         table = self._table_name(collection)
+        sql = self._sql
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
+                stmt = sql.SQL("""
+                    INSERT INTO {} (id, content, content_hash, created_at, metadata, embedding)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """).format(table)
                 for doc in documents:
                     if doc.embedding is None:
                         raise ValueError(f"Document {doc.id} has no embedding")
-                    cur.execute(f"""
-                        INSERT INTO {table} (id, content, content_hash, created_at, metadata, embedding)
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                    """, (
+                    cur.execute(stmt, (
                         doc.id, doc.content, doc.content_hash, doc.created_at,
                         json.dumps(doc.metadata) if doc.metadata else None,
                         doc.embedding,
@@ -195,22 +229,24 @@ class PGVectorKnowledgeStore(KnowledgeStore):
     ) -> List[str]:
         """Insert or update documents."""
         table = self._table_name(collection)
+        sql = self._sql
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
+                stmt = sql.SQL("""
+                    INSERT INTO {} (id, content, content_hash, created_at, metadata, embedding)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (id) DO UPDATE SET
+                        content = EXCLUDED.content,
+                        content_hash = EXCLUDED.content_hash,
+                        created_at = EXCLUDED.created_at,
+                        metadata = EXCLUDED.metadata,
+                        embedding = EXCLUDED.embedding
+                """).format(table)
                 for doc in documents:
                     if doc.embedding is None:
                         raise ValueError(f"Document {doc.id} has no embedding")
-                    cur.execute(f"""
-                        INSERT INTO {table} (id, content, content_hash, created_at, metadata, embedding)
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (id) DO UPDATE SET
-                            content = EXCLUDED.content,
-                            content_hash = EXCLUDED.content_hash,
-                            created_at = EXCLUDED.created_at,
-                            metadata = EXCLUDED.metadata,
-                            embedding = EXCLUDED.embedding
-                    """, (
+                    cur.execute(stmt, (
                         doc.id, doc.content, doc.content_hash, doc.created_at,
                         json.dumps(doc.metadata) if doc.metadata else None,
                         doc.embedding,
@@ -230,26 +266,29 @@ class PGVectorKnowledgeStore(KnowledgeStore):
     ) -> List[KnowledgeDocument]:
         """Search for similar documents."""
         table = self._table_name(collection)
+        sql = self._sql
         conn = self._get_conn()
         try:
             with conn.cursor(cursor_factory=self._RealDictCursor) as cur:
                 # Use cosine distance operator <=>
-                query = f"""
-                    SELECT id, content, content_hash, created_at, metadata,
-                           1 - (embedding <=> %s::vector) as score
-                    FROM {table}
-                """
-                params = [query_embedding]
-                
+                parts = [
+                    sql.SQL(
+                        "SELECT id, content, content_hash, created_at, metadata,"
+                        " 1 - (embedding <=> %s::vector) as score FROM "
+                    ),
+                    table,
+                ]
+                params: list = [query_embedding]
+
                 if score_threshold:
-                    query += " WHERE 1 - (embedding <=> %s::vector) >= %s"
+                    parts.append(sql.SQL(" WHERE 1 - (embedding <=> %s::vector) >= %s"))
                     params.extend([query_embedding, score_threshold])
-                
-                query += " ORDER BY embedding <=> %s::vector LIMIT %s"
+
+                parts.append(sql.SQL(" ORDER BY embedding <=> %s::vector LIMIT %s"))
                 params.extend([query_embedding, limit])
-                
-                cur.execute(query, params)
-                
+
+                cur.execute(sql.Composed(parts), params)
+
                 documents = []
                 for row in cur.fetchall():
                     doc = KnowledgeDocument(
@@ -272,15 +311,19 @@ class PGVectorKnowledgeStore(KnowledgeStore):
     ) -> List[KnowledgeDocument]:
         """Get documents by IDs."""
         table = self._table_name(collection)
+        sql = self._sql
         conn = self._get_conn()
         try:
             with conn.cursor(cursor_factory=self._RealDictCursor) as cur:
-                placeholders = ",".join(["%s"] * len(ids))
-                cur.execute(f"""
-                    SELECT id, content, content_hash, created_at, metadata, embedding::float[]
-                    FROM {table} WHERE id IN ({placeholders})
-                """, ids)
-                
+                placeholders = sql.SQL(",").join([sql.Placeholder()] * len(ids))
+                cur.execute(
+                    sql.SQL(
+                        "SELECT id, content, content_hash, created_at, metadata,"
+                        " embedding::float[] FROM {} WHERE id IN ({})"
+                    ).format(table, placeholders),
+                    ids,
+                )
+
                 documents = []
                 for row in cur.fetchall():
                     doc = KnowledgeDocument(
@@ -304,12 +347,16 @@ class PGVectorKnowledgeStore(KnowledgeStore):
     ) -> int:
         """Delete documents."""
         table = self._table_name(collection)
+        sql = self._sql
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
                 if ids:
-                    placeholders = ",".join(["%s"] * len(ids))
-                    cur.execute(f"DELETE FROM {table} WHERE id IN ({placeholders})", ids)
+                    placeholders = sql.SQL(",").join([sql.Placeholder()] * len(ids))
+                    cur.execute(
+                        sql.SQL("DELETE FROM {} WHERE id IN ({})").format(table, placeholders),
+                        ids,
+                    )
                     deleted = cur.rowcount
                 else:
                     deleted = 0
@@ -321,10 +368,11 @@ class PGVectorKnowledgeStore(KnowledgeStore):
     def count(self, collection: str) -> int:
         """Count documents."""
         table = self._table_name(collection)
+        sql = self._sql
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
-                cur.execute(f"SELECT COUNT(*) FROM {table}")
+                cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(table))
                 return cur.fetchone()[0]
         finally:
             self._put_conn(conn)
