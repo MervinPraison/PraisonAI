@@ -22,6 +22,7 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import time
 import uuid
@@ -141,7 +142,7 @@ class HTTPApproval:
             val_str = str(v)
             if len(val_str) > 200:
                 val_str = val_str[:197] + "..."
-            args_html += f"<tr><td><code>{k}</code></td><td><code>{val_str}</code></td></tr>"
+            args_html += f"<tr><td><code>{html.escape(str(k))}</code></td><td><code>{html.escape(val_str)}</code></td></tr>"
 
         risk_colors = {
             "critical": "#FF0000", "high": "#FF8C00",
@@ -162,9 +163,9 @@ td {{ padding: 8px; border-bottom: 1px solid #333; }} code {{ background: #2a2a4
 .done {{ text-align: center; margin-top: 24px; font-size: 18px; }}
 </style></head><body>
 <h1>🔒 Tool Approval Required</h1>
-<p><strong>Tool:</strong> <code>{tool_name}</code></p>
-<p><strong>Risk:</strong> <span class="risk">{risk_level.upper()}</span></p>
-{"<p><strong>Agent:</strong> " + agent_name + "</p>" if agent_name else ""}
+<p><strong>Tool:</strong> <code>{html.escape(tool_name)}</code></p>
+<p><strong>Risk:</strong> <span class="risk">{html.escape(risk_level.upper())}</span></p>
+{"<p><strong>Agent:</strong> " + html.escape(agent_name) + "</p>" if agent_name else ""}
 <h3>Arguments</h3>
 <table>{args_html if args_html else "<tr><td><em>none</em></td></tr>"}</table>
 <div class="buttons">

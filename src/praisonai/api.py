@@ -1,3 +1,6 @@
+import html as html_module
+import os
+
 from flask import Flask
 import markdown
 
@@ -5,13 +8,13 @@ app = Flask(__name__)
 
 try:
     import nh3
-    def _sanitize_html(html: str) -> str:
+    def _sanitize_html(raw_html: str) -> str:
         """Sanitize HTML to prevent XSS from markdown-generated content."""
-        return nh3.clean(html)
+        return nh3.clean(raw_html)
 except ImportError:
-    def _sanitize_html(html: str) -> str:
-        """Fallback: no nh3, return as-is (install nh3 for XSS protection)."""
-        return html
+    def _sanitize_html(raw_html: str) -> str:
+        """Fallback: no nh3, escape HTML to prevent XSS."""
+        return html_module.escape(raw_html)
 
 def basic():
     from praisonai import PraisonAI
@@ -25,4 +28,4 @@ def home():
     return f'<html><body>{html_output}</body></html>'
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=os.environ.get("DEBUG", "false").lower() == "true")

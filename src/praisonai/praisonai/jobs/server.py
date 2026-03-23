@@ -87,7 +87,14 @@ def create_app(
     )
     
     # Add CORS middleware
-    origins = cors_origins or ["*"]
+    if cors_origins:
+        origins = cors_origins
+    else:
+        origins = [
+            o.strip()
+            for o in os.environ.get("PRAISONAI_CORS_ORIGINS", "http://localhost:3000").split(",")
+            if o.strip()
+        ]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,

@@ -1167,6 +1167,7 @@ def cli_run_all(
         praisonai docs cli run-all --group cli --workers 8
         praisonai docs cli run-all --ci --timeout 5
     """
+    import shlex
     import subprocess
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from praisonai.suite_runner import CLIDocsSource, RunResult, RunReport, SuiteReporter
@@ -1262,8 +1263,8 @@ def cli_run_all(
         
         try:
             result = subprocess.run(
-                test_cmd,
-                shell=True,
+                shlex.split(test_cmd),
+                shell=False,
                 capture_output=True,
                 text=True,
                 timeout=timeout,

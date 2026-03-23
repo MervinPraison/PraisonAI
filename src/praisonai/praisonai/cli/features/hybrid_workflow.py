@@ -312,13 +312,23 @@ class HybridWorkflowExecutor:
         return flags
 
     def _eval_condition(self, condition: str, flags: Dict) -> bool:
-        """Evaluate a simple condition expression."""
+        """Evaluate a simple condition expression safely.
+
+        Supports attribute access on ``flags`` (e.g. ``flags.dry_run``),
+        environment variable lookups, boolean operators, and simple
+        comparisons.  Arbitrary code execution is **not** allowed.
+        """
         condition = condition.strip()
         if condition.startswith("{{") and condition.endswith("}}"):
             condition = condition[2:-2].strip()
 
         context = {"flags": type("Flags", (), flags)(), "env": os.environ}
+        _allowed_builtins = {
+            "True": True, "False": False, "None": None,
+            "bool": bool, "int": int, "float": float, "str": str,
+            "len": len, "hasattr": hasattr, "getattr": getattr,
+        }
         try:
-            return bool(eval(condition, {"__builtins__": {}}, context))
+            return bool(eval(condition, {"__builtins__": _allowed_builtins}, context))
         except Exception:
             return False

@@ -3,6 +3,7 @@ import os
 import sys
 import yaml
 import logging
+import secrets
 import inspect
 import chainlit as cl
 from praisonaiagents import Agent, Task, Agents, register_display_callback
@@ -586,10 +587,16 @@ with open(agent_file, 'r') as f:
 AUTH_PASSWORD_ENABLED = os.getenv("AUTH_PASSWORD_ENABLED", "true").lower() == "true"
 CHAINLIT_AUTH_SECRET = os.getenv("CHAINLIT_AUTH_SECRET")
 if not CHAINLIT_AUTH_SECRET:
-    os.environ["CHAINLIT_AUTH_SECRET"] = "p8BPhQChpg@J>jBz$wGxqLX2V>yTVgP*7Ky9H$aV:axW~ANNX-7_T:o@lnyCBu^U"
+    os.environ["CHAINLIT_AUTH_SECRET"] = secrets.token_hex(32)
+    logging.getLogger(__name__).warning("CHAINLIT_AUTH_SECRET not set; generated a random secret for this session.")
 
-username_env = os.getenv("CHAINLIT_USERNAME", "admin")
-password_env = os.getenv("CHAINLIT_PASSWORD", "admin")
+username_env = os.getenv("CHAINLIT_USERNAME")
+password_env = os.getenv("CHAINLIT_PASSWORD")
+if not username_env or not password_env:
+    logging.getLogger(__name__).warning(
+        "CHAINLIT_USERNAME and/or CHAINLIT_PASSWORD not set. "
+        "Authentication will fail until these environment variables are configured."
+    )
 
 def simple_auth_callback(u: str, p: str):
     if (u, p) == (username_env, password_env):

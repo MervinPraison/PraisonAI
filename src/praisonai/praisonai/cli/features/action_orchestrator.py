@@ -435,10 +435,11 @@ class ActionOrchestrator:
             return None
         
         elif step.action_type == ActionType.SHELL_COMMAND:
+            import shlex
             import subprocess
             result = subprocess.run(
-                step.target,
-                shell=True,
+                shlex.split(step.target),
+                shell=False,
                 capture_output=True,
                 text=True,
                 cwd=str(workspace),

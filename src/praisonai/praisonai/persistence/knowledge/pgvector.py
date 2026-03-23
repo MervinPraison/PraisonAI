@@ -7,11 +7,19 @@ Install: pip install pgvector psycopg2-binary
 
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from .base import KnowledgeStore, KnowledgeDocument
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_identifier(name: str) -> str:
+    """Validate a SQL identifier to prevent injection."""
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name):
+        raise ValueError(f"Invalid identifier: {name}")
+    return name
 
 
 class PGVectorKnowledgeStore(KnowledgeStore):
@@ -49,7 +57,7 @@ class PGVectorKnowledgeStore(KnowledgeStore):
         
         self._psycopg2 = psycopg2
         self._RealDictCursor = RealDictCursor
-        self.schema = schema
+        self.schema = _validate_identifier(schema)
         
         if url:
             self._pool = pg_pool.ThreadedConnectionPool(1, 5, url)
@@ -80,6 +88,7 @@ class PGVectorKnowledgeStore(KnowledgeStore):
             self._put_conn(conn)
     
     def _table_name(self, collection: str) -> str:
+        _validate_identifier(collection)
         return f"{self.schema}.praison_vec_{collection}"
     
     def create_collection(
@@ -91,6 +100,7 @@ class PGVectorKnowledgeStore(KnowledgeStore):
     ) -> None:
         """Create a new collection table."""
         table = self._table_name(name)
+        dimension = int(dimension)
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:

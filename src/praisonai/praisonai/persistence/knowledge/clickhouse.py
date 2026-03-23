@@ -6,11 +6,19 @@ Install: pip install clickhouse-connect
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from .base import KnowledgeStore, KnowledgeDocument
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_identifier(name: str) -> str:
+    """Validate a SQL identifier to prevent injection."""
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name):
+        raise ValueError(f"Invalid identifier: {name}")
+    return name
 
 
 class ClickHouseKnowledgeStore(KnowledgeStore):
@@ -49,13 +57,14 @@ class ClickHouseKnowledgeStore(KnowledgeStore):
             database=database,
             secure=secure,
         )
-        self.database = database
-        
+        self.database = _validate_identifier(database)
+
         # Create database if not exists
-        self._client.command(f"CREATE DATABASE IF NOT EXISTS {database}")
+        self._client.command(f"CREATE DATABASE IF NOT EXISTS {self.database}")
         logger.info(f"Connected to ClickHouse database: {database}")
     
     def _table_name(self, collection: str) -> str:
+        _validate_identifier(collection)
         return f"{self.database}.praison_vec_{collection}"
     
     def create_collection(
@@ -98,10 +107,10 @@ class ClickHouseKnowledgeStore(KnowledgeStore):
     
     def list_collections(self) -> List[str]:
         """List all collections."""
-        result = self._client.query(f"""
-            SELECT name FROM system.tables 
-            WHERE database = '{self.database}' AND name LIKE 'praison_vec_%'
-        """)
+        result = self._client.query(
+            "SELECT name FROM system.tables WHERE database = {db:String} AND name LIKE 'praison_vec_%'",
+            parameters={"db": self.database}
+        )
         return [row[0].replace("praison_vec_", "") for row in result.result_rows]
     
     def insert(
@@ -167,9 +176,9 @@ class ClickHouseKnowledgeStore(KnowledgeStore):
         """
         
         if score_threshold:
-            query += f" WHERE 1 - cosineDistance(embedding, {embedding_str}) >= {score_threshold}"
+            query += f" WHERE 1 - cosineDistance(embedding, {embedding_str}) >= {float(score_threshold)}"
         
-        query += f" ORDER BY score DESC LIMIT {limit}"
+        query += f" ORDER BY score DESC LIMIT {int(limit)}"
         
         result = self._client.query(query)
         
@@ -195,11 +204,12 @@ class ClickHouseKnowledgeStore(KnowledgeStore):
         """Get documents by IDs."""
         table = self._table_name(collection)
         
-        id_list = ", ".join([f"'{i}'" for i in ids])
+        placeholders = ", ".join(["{p" + str(i) + ":String}" for i in range(len(ids))])
+        params = {f"p{i}": id_val for i, id_val in enumerate(ids)}
         result = self._client.query(f"""
             SELECT id, content, content_hash, created_at, embedding
-            FROM {table} WHERE id IN ({id_list})
-        """)
+            FROM {table} WHERE id IN ({placeholders})
+        """, parameters=params)
         
         documents = []
         for row in result.result_rows:
@@ -225,8 +235,9 @@ class ClickHouseKnowledgeStore(KnowledgeStore):
         table = self._table_name(collection)
         
         if ids:
-            id_list = ", ".join([f"'{i}'" for i in ids])
-            self._client.command(f"ALTER TABLE {table} DELETE WHERE id IN ({id_list})")
+            placeholders = ", ".join(["{p" + str(i) + ":String}" for i in range(len(ids))])
+            params = {f"p{i}": id_val for i, id_val in enumerate(ids)}
+            self._client.command(f"ALTER TABLE {table} DELETE WHERE id IN ({placeholders})", parameters=params)
             return len(ids)
         return 0
     

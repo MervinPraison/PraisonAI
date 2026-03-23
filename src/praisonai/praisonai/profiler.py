@@ -54,6 +54,7 @@ Usage:
 
 import time
 import functools
+import html
 import threading
 import sys
 import os
@@ -846,19 +847,19 @@ class Profiler:
     <h2>Slowest Operations</h2>
     <table>
         <tr><th>Operation</th><th>Duration (ms)</th></tr>
-        {''.join(f"<tr><td>{name}</td><td>{dur:.2f}</td></tr>" for name, dur in summary['slowest_operations'])}
+        {''.join(f"<tr><td>{html.escape(str(name))}</td><td>{dur:.2f}</td></tr>" for name, dur in summary['slowest_operations'])}
     </table>
     
     <h2>API Calls</h2>
     <table>
         <tr><th>Endpoint</th><th>Method</th><th>Duration (ms)</th><th>Status</th></tr>
-        {''.join(f"<tr><td>{a.endpoint}</td><td>{a.method}</td><td>{a.duration_ms:.2f}</td><td>{a.status_code}</td></tr>" for a in cls._api_calls[:20])}
+        {''.join(f"<tr><td>{html.escape(str(a.endpoint))}</td><td>{html.escape(str(a.method))}</td><td>{a.duration_ms:.2f}</td><td>{html.escape(str(a.status_code))}</td></tr>" for a in cls._api_calls[:20])}
     </table>
     
     <h2>Streaming</h2>
     <table>
         <tr><th>Name</th><th>TTFT (ms)</th><th>Total (ms)</th><th>Chunks</th><th>Tokens</th></tr>
-        {''.join(f"<tr><td>{s.name}</td><td>{s.ttft_ms:.2f}</td><td>{s.total_ms:.2f}</td><td>{s.chunk_count}</td><td>{s.total_tokens}</td></tr>" for s in cls._streaming[:20])}
+        {''.join(f"<tr><td>{html.escape(str(s.name))}</td><td>{s.ttft_ms:.2f}</td><td>{s.total_ms:.2f}</td><td>{s.chunk_count}</td><td>{s.total_tokens}</td></tr>" for s in cls._streaming[:20])}
     </table>
 </body>
 </html>'''

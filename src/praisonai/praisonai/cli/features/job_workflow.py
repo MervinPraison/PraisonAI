@@ -21,8 +21,11 @@ Usage:
     praisonai workflow run publish-pypi.yaml --major
 """
 
+import ast
+import operator
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -234,7 +237,7 @@ class JobWorkflowExecutor:
         cwd = step.get("cwd", self._cwd)
         env = self._build_env(step)
         result = subprocess.run(
-            cmd, shell=True, cwd=cwd, env=env,
+            shlex.split(cmd), shell=False, cwd=cwd, env=env,
             capture_output=True, text=True,
             timeout=step.get("timeout", 300),
         )
@@ -267,12 +270,24 @@ class JobWorkflowExecutor:
 
     def _exec_inline_python(self, code: str, step: Dict, flags: Dict) -> Dict:
         """Execute inline Python code in an isolated namespace."""
+        _safe_builtins = {
+            "True": True, "False": False, "None": None,
+            "int": int, "float": float, "str": str, "bool": bool,
+            "list": list, "dict": dict, "tuple": tuple, "set": set,
+            "len": len, "range": range, "enumerate": enumerate,
+            "zip": zip, "map": map, "filter": filter,
+            "sorted": sorted, "reversed": reversed,
+            "min": min, "max": max, "sum": sum, "abs": abs, "round": round,
+            "isinstance": isinstance, "type": type,
+            "print": print, "repr": repr,
+            "hasattr": hasattr, "getattr": getattr, "setattr": setattr,
+        }
         namespace = {
             "flags": flags,
             "vars": {k: self._resolve_var_value(v) for k, v in self._vars.items()},
             "env": os.environ.copy(),
             "cwd": self._cwd,
-            "__builtins__": __builtins__,
+            "__builtins__": _safe_builtins,
         }
         try:
             exec(code, namespace)
@@ -719,16 +734,27 @@ class JobWorkflowExecutor:
     # ------------------------------------------------------------------
 
     def _eval_condition(self, condition: str, flags: Dict) -> bool:
-        """Evaluate a simple condition expression."""
+        """Evaluate a simple condition expression safely.
+
+        Supports attribute access on ``flags`` (e.g. ``flags.dry_run``),
+        environment variable lookups (e.g. ``env.get("KEY")``), boolean
+        operators (``and``, ``or``, ``not``), and simple comparisons.
+        Arbitrary code execution is **not** allowed.
+        """
         # Strip {{ }} if present
         condition = condition.strip()
         if condition.startswith("{{") and condition.endswith("}}"):
             condition = condition[2:-2].strip()
 
-        # Build evaluation context
+        # Build evaluation context with restricted builtins
         context = {"flags": type("Flags", (), flags)(), "env": os.environ}
+        _allowed_builtins = {
+            "True": True, "False": False, "None": None,
+            "bool": bool, "int": int, "float": float, "str": str,
+            "len": len, "hasattr": hasattr, "getattr": getattr,
+        }
         try:
-            return bool(eval(condition, {"__builtins__": {}}, context))
+            return bool(eval(condition, {"__builtins__": _allowed_builtins}, context))
         except Exception:
             return False
 

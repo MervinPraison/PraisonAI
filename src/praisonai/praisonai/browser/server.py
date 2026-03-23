@@ -5,6 +5,7 @@ Bridges the Chrome Extension to PraisonAI agents for browser automation.
 
 import asyncio
 import logging
+import os
 import signal
 import sys
 from typing import Dict, Optional, Set
@@ -83,9 +84,14 @@ class BrowserServer:
         )
         
         # Enable CORS for extension
+        cors_origins = [
+            o.strip()
+            for o in os.environ.get("PRAISONAI_CORS_ORIGINS", "http://localhost:3000").split(",")
+            if o.strip()
+        ]
         app.add_middleware(
             CORSMiddleware,
-            allow_origins=["*"],
+            allow_origins=cors_origins,
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],

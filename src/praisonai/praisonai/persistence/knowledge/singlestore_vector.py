@@ -5,12 +5,21 @@ Requires: singlestoredb
 Install: pip install singlestoredb
 """
 
+import json
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from .base import KnowledgeStore, KnowledgeDocument
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_identifier(name: str) -> str:
+    """Validate a SQL identifier to prevent injection."""
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name):
+        raise ValueError(f"Invalid identifier: {name}")
+    return name
 
 
 class SingleStoreVectorKnowledgeStore(KnowledgeStore):
@@ -55,9 +64,10 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
         self.database = database
         self.user = user
         self.password = password
+        _validate_identifier(table_prefix)
         self.table_prefix = table_prefix
         self.embedding_dim = embedding_dim
-        
+
         self._conn = None
         self._initialized = False
     
@@ -96,7 +106,8 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
     ) -> None:
         """Create a vector table."""
         self._init_client()
-        
+        _validate_identifier(name)
+        dimension = int(dimension)
         table_name = f"{self.table_prefix}{name}"
         
         with self._conn.cursor() as cur:
@@ -114,7 +125,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
     def delete_collection(self, name: str) -> bool:
         """Delete a vector table."""
         self._init_client()
-        
+        _validate_identifier(name)
         table_name = f"{self.table_prefix}{name}"
         try:
             with self._conn.cursor() as cur:
@@ -127,7 +138,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
     def collection_exists(self, name: str) -> bool:
         """Check if table exists."""
         self._init_client()
-        
+        _validate_identifier(name)
         table_name = f"{self.table_prefix}{name}"
         with self._conn.cursor() as cur:
             cur.execute(f"""
@@ -154,7 +165,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
     ) -> List[str]:
         """Insert documents."""
         self._init_client()
-        
+        _validate_identifier(collection)
         table_name = f"{self.table_prefix}{collection}"
         ids = []
         
@@ -178,7 +189,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
     ) -> List[str]:
         """Upsert documents."""
         self._init_client()
-        
+        _validate_identifier(collection)
         table_name = f"{self.table_prefix}{collection}"
         ids = []
         
@@ -205,7 +216,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
     ) -> List[KnowledgeDocument]:
         """Search for similar documents using vector search."""
         self._init_client()
-        
+        _validate_identifier(collection)
         table_name = f"{self.table_prefix}{collection}"
         embedding_str = str(query_embedding)
         
@@ -227,11 +238,11 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
                 documents.append(KnowledgeDocument(
                     id=row[0],
                     content=row[1],
-                    metadata=eval(row[2]) if row[2] else None,
+                    metadata=json.loads(row[2]) if row[2] else None,
                     content_hash=row[3],
                     created_at=row[4]
                 ))
-            
+
             return documents
     
     def get(
@@ -241,7 +252,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
     ) -> List[KnowledgeDocument]:
         """Get documents by IDs."""
         self._init_client()
-        
+        _validate_identifier(collection)
         table_name = f"{self.table_prefix}{collection}"
         placeholders = ','.join(['%s'] * len(ids))
         
@@ -256,7 +267,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
                 KnowledgeDocument(
                     id=row[0],
                     content=row[1],
-                    metadata=eval(row[2]) if row[2] else None,
+                    metadata=json.loads(row[2]) if row[2] else None,
                     content_hash=row[3],
                     created_at=row[4]
                 )
@@ -271,7 +282,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
     ) -> int:
         """Delete documents."""
         self._init_client()
-        
+        _validate_identifier(collection)
         table_name = f"{self.table_prefix}{collection}"
         
         with self._conn.cursor() as cur:
@@ -285,7 +296,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
     def count(self, collection: str) -> int:
         """Count documents."""
         self._init_client()
-        
+        _validate_identifier(collection)
         table_name = f"{self.table_prefix}{collection}"
         with self._conn.cursor() as cur:
             cur.execute(f"SELECT COUNT(*) FROM {table_name}")

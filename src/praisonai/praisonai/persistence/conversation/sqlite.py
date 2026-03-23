@@ -6,6 +6,7 @@ Zero external dependencies - uses built-in sqlite3 module.
 
 import json
 import logging
+import re
 import sqlite3
 import threading
 from typing import Any, List, Optional
@@ -13,6 +14,13 @@ from typing import Any, List, Optional
 from .base import ConversationStore, ConversationSession, ConversationMessage
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_identifier(name: str) -> str:
+    """Validate a SQL identifier to prevent injection."""
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name):
+        raise ValueError(f"Invalid identifier: {name}")
+    return name
 
 
 class SQLiteConversationStore(ConversationStore):
@@ -46,6 +54,7 @@ class SQLiteConversationStore(ConversationStore):
             check_same_thread: SQLite check_same_thread parameter
         """
         self.path = path
+        _validate_identifier(table_prefix)
         self.table_prefix = table_prefix
         self.sessions_table = f"{table_prefix}sessions"
         self.messages_table = f"{table_prefix}messages"
@@ -291,14 +300,17 @@ class SQLiteConversationStore(ConversationStore):
             params.append(after)
         
         where_clause = "WHERE " + " AND ".join(conditions)
-        limit_clause = f"LIMIT {limit}" if limit else ""
-        
-        cur.execute(f"""
+
+        query = f"""
             SELECT * FROM {self.messages_table}
             {where_clause}
             ORDER BY created_at ASC
-            {limit_clause}
-        """, params)
+        """
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(int(limit))
+
+        cur.execute(query, params)
         
         return [
             ConversationMessage(

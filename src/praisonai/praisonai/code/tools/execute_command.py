@@ -307,10 +307,9 @@ def run_python(
     import sys
     python_cmd = sys.executable
     
-    # Escape the code for command line
-    escaped_code = code.replace('\\', '\\\\').replace('"', '\\"')
-    command = f'{python_cmd} -c "{escaped_code}"'
-    
+    # Use shlex.quote for safe shell escaping
+    command = f'{python_cmd} -c {shlex.quote(code)}'
+
     return execute_command(
         command=command,
         cwd=cwd,

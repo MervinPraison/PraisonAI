@@ -6,11 +6,19 @@ Install: pip install surrealdb
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from .base import KnowledgeStore, KnowledgeDocument
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_identifier(name: str) -> str:
+    """Validate a SQL identifier to prevent injection."""
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name):
+        raise ValueError(f"Invalid identifier: {name}")
+    return name
 
 
 class SurrealDBVectorKnowledgeStore(KnowledgeStore):
@@ -104,6 +112,7 @@ class SurrealDBVectorKnowledgeStore(KnowledgeStore):
         """Delete a collection."""
         self._init_client()
         try:
+            _validate_identifier(name)
             self._run_async(self._client.query(f"REMOVE TABLE {name}"))
             return True
         except Exception as e:
@@ -114,6 +123,7 @@ class SurrealDBVectorKnowledgeStore(KnowledgeStore):
         """Check if collection exists."""
         self._init_client()
         try:
+            _validate_identifier(name)
             result = self._run_async(self._client.query(f"INFO FOR TABLE {name}"))
             return bool(result)
         except Exception:
@@ -139,7 +149,8 @@ class SurrealDBVectorKnowledgeStore(KnowledgeStore):
     ) -> List[str]:
         """Insert documents."""
         self._init_client()
-        
+        _validate_identifier(collection)
+
         ids = []
         for doc in documents:
             record = {
@@ -149,7 +160,7 @@ class SurrealDBVectorKnowledgeStore(KnowledgeStore):
                 "content_hash": doc.content_hash,
                 "created_at": doc.created_at,
             }
-            
+
             try:
                 result = self._run_async(
                     self._client.create(f"{collection}:{doc.id}", record)
@@ -167,7 +178,8 @@ class SurrealDBVectorKnowledgeStore(KnowledgeStore):
     ) -> List[str]:
         """Upsert documents."""
         self._init_client()
-        
+        _validate_identifier(collection)
+
         ids = []
         for doc in documents:
             record = {
@@ -177,7 +189,7 @@ class SurrealDBVectorKnowledgeStore(KnowledgeStore):
                 "content_hash": doc.content_hash,
                 "created_at": doc.created_at,
             }
-            
+
             try:
                 self._run_async(
                     self._client.update(f"{collection}:{doc.id}", record)
@@ -200,12 +212,13 @@ class SurrealDBVectorKnowledgeStore(KnowledgeStore):
         self._init_client()
         
         # SurrealDB vector search query
+        _validate_identifier(collection)
         embedding_str = str(query_embedding)
         query = f"""
             SELECT *, vector::similarity::cosine(embedding, {embedding_str}) AS score
             FROM {collection}
             ORDER BY score DESC
-            LIMIT {limit}
+            LIMIT {int(limit)}
         """
         
         try:
@@ -241,6 +254,7 @@ class SurrealDBVectorKnowledgeStore(KnowledgeStore):
         """Get documents by IDs."""
         self._init_client()
         
+        _validate_identifier(collection)
         documents = []
         for doc_id in ids:
             try:
@@ -269,6 +283,7 @@ class SurrealDBVectorKnowledgeStore(KnowledgeStore):
         """Delete documents."""
         self._init_client()
         
+        _validate_identifier(collection)
         count = 0
         if ids:
             for doc_id in ids:
@@ -291,6 +306,7 @@ class SurrealDBVectorKnowledgeStore(KnowledgeStore):
         self._init_client()
         
         try:
+            _validate_identifier(collection)
             result = self._run_async(
                 self._client.query(f"SELECT count() FROM {collection} GROUP ALL")
             )

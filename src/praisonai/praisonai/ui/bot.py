@@ -17,6 +17,7 @@ import asyncio
 import logging
 import os
 import queue
+import secrets
 
 import chainlit as cl
 from chainlit.input_widget import TextInput, Switch
@@ -27,7 +28,8 @@ logging.basicConfig(level=log_level, format="%(asctime)s - %(levelname)s - %(mes
 
 # Auth secret (required by Chainlit)
 if not os.getenv("CHAINLIT_AUTH_SECRET"):
-    os.environ["CHAINLIT_AUTH_SECRET"] = "p8BPhQChpg@J>jBz$wGxqLX2V>yTVgP*7Ky9H$aV:axW~ANNX-7_T:o@lnyCBu^U"
+    os.environ["CHAINLIT_AUTH_SECRET"] = secrets.token_hex(32)
+    logger.warning("CHAINLIT_AUTH_SECRET not set; generated a random secret for this session.")
 
 # ---------------------------------------------------------------------------
 # Lazy imports

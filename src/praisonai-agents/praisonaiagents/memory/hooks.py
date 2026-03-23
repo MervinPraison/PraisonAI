@@ -37,6 +37,7 @@ Hook Events:
 import os
 import json
 import logging
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable, Literal
@@ -303,8 +304,8 @@ class HooksManager:
             
             # Execute
             result = subprocess.run(
-                command,
-                shell=True,
+                shlex.split(command),
+                shell=False,
                 cwd=str(self.workspace_path),
                 env=env,
                 capture_output=True,

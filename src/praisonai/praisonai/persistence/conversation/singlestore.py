@@ -7,11 +7,19 @@ Install: pip install singlestoredb
 
 import json
 import logging
+import re
 from typing import Any, List, Optional
 
 from .base import ConversationStore, ConversationSession, ConversationMessage
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_identifier(name: str) -> str:
+    """Validate a SQL identifier to prevent injection."""
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name):
+        raise ValueError(f"Invalid identifier: {name}")
+    return name
 
 
 class SingleStoreConversationStore(ConversationStore):
@@ -48,6 +56,7 @@ class SingleStoreConversationStore(ConversationStore):
             )
         
         self._s2 = s2
+        _validate_identifier(table_prefix)
         self.table_prefix = table_prefix
         self.sessions_table = f"{table_prefix}sessions"
         self.messages_table = f"{table_prefix}messages"
@@ -209,8 +218,11 @@ class SingleStoreConversationStore(ConversationStore):
             conditions.append("created_at > %s")
             params.append(after)
         where = "WHERE " + " AND ".join(conditions)
-        limit_clause = f"LIMIT {limit}" if limit else ""
-        cur.execute(f"SELECT * FROM {self.messages_table} {where} ORDER BY created_at ASC {limit_clause}", params)
+        query = f"SELECT * FROM {self.messages_table} {where} ORDER BY created_at ASC"
+        if limit is not None:
+            query += " LIMIT %s"
+            params.append(int(limit))
+        cur.execute(query, params)
         cols = [d[0] for d in cur.description]
         return [ConversationMessage(
             id=dict(zip(cols, r))["id"],
