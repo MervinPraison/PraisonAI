@@ -40,6 +40,7 @@ trace_exporter: none      # none, otlp, jaeger, zipkin
 ```
 """
 
+import hmac
 import json
 import os
 import time
@@ -332,7 +333,7 @@ def create_auth_middleware(auth_type: str, api_key: Optional[str] = None, jwt_se
                 # No key configured, allow request
                 return await call_next(request)
             
-            if provided_key != expected_key:
+            if not provided_key or not hmac.compare_digest(provided_key, expected_key):
                 return JSONResponse(
                     {"error": {"code": "unauthorized", "message": "Invalid or missing API key"}},
                     status_code=401

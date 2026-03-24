@@ -583,10 +583,12 @@ print(f"[DEBUG] tools_dict: {tools_dict}")
 with open(agent_file, 'r') as f:
     config = yaml.safe_load(f)
 
+import secrets
 AUTH_PASSWORD_ENABLED = os.getenv("AUTH_PASSWORD_ENABLED", "true").lower() == "true"
 CHAINLIT_AUTH_SECRET = os.getenv("CHAINLIT_AUTH_SECRET")
 if not CHAINLIT_AUTH_SECRET:
-    os.environ["CHAINLIT_AUTH_SECRET"] = "p8BPhQChpg@J>jBz$wGxqLX2V>yTVgP*7Ky9H$aV:axW~ANNX-7_T:o@lnyCBu^U"
+    os.environ["CHAINLIT_AUTH_SECRET"] = secrets.token_hex(32)
+    logger.warning("CHAINLIT_AUTH_SECRET not set; generated a random secret for this session.")
 
 username_env = os.getenv("CHAINLIT_USERNAME", "admin")
 password_env = os.getenv("CHAINLIT_PASSWORD", "admin")

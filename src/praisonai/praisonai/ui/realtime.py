@@ -36,11 +36,13 @@ logger.addHandler(console_handler)
 logger.setLevel(log_level)
 
 # Set up CHAINLIT_AUTH_SECRET
+import secrets
 CHAINLIT_AUTH_SECRET = os.getenv("CHAINLIT_AUTH_SECRET")
-
 if not CHAINLIT_AUTH_SECRET:
-    os.environ["CHAINLIT_AUTH_SECRET"] = "p8BPhQChpg@J>jBz$wGxqLX2V>yTVgP*7Ky9H$aV:axW~ANNX-7_T:o@lnyCBu^U"
-    CHAINLIT_AUTH_SECRET = os.getenv("CHAINLIT_AUTH_SECRET")
+    CHAINLIT_AUTH_SECRET = secrets.token_hex(32)
+    os.environ["CHAINLIT_AUTH_SECRET"] = CHAINLIT_AUTH_SECRET
+    logger.warning("CHAINLIT_AUTH_SECRET not set; generated a random secret for this session.")
+
 
 # Database path
 DB_PATH = os.path.expanduser("~/.praison/database.sqlite")

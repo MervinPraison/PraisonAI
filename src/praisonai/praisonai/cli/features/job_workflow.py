@@ -267,12 +267,24 @@ class JobWorkflowExecutor:
 
     def _exec_inline_python(self, code: str, step: Dict, flags: Dict) -> Dict:
         """Execute inline Python code in an isolated namespace."""
+        _safe_builtins = {
+            "True": True, "False": False, "None": None,
+            "int": int, "float": float, "str": str, "bool": bool,
+            "list": list, "dict": dict, "tuple": tuple, "set": set,
+            "len": len, "range": range, "enumerate": enumerate,
+            "zip": zip, "map": map, "filter": filter,
+            "sorted": sorted, "reversed": reversed,
+            "min": min, "max": max, "sum": sum, "abs": abs, "round": round,
+            "isinstance": isinstance, "type": type,
+            "print": print, "repr": repr,
+            "hasattr": hasattr, "getattr": getattr, "setattr": setattr,
+        }
         namespace = {
             "flags": flags,
             "vars": {k: self._resolve_var_value(v) for k, v in self._vars.items()},
             "env": os.environ.copy(),
             "cwd": self._cwd,
-            "__builtins__": __builtins__,
+            "__builtins__": _safe_builtins,
         }
         try:
             exec(code, namespace)
