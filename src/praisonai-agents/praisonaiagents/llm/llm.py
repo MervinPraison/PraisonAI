@@ -4092,7 +4092,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 "LiteLLM is required but not installed. "
                 "Please install it with: pip install 'praisonaiagents[llm]'"
             )
-        except:
+        except Exception:
             return False
 
     def can_use_stop_words(self) -> bool:
@@ -4106,7 +4106,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 "LiteLLM is required but not installed. "
                 "Please install it with: pip install 'praisonaiagents[llm]'"
             )
-        except:
+        except Exception:
             return False
 
     def get_context_size(self) -> int:

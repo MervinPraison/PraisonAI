@@ -309,7 +309,7 @@ Follow best practices and coding standards."""
             # Clean up temp file
             try:
                 os.unlink(temp_file)
-            except:
+            except OSError:
                 pass
     
     async def aexecute(self, code: str, language: str = "python", **kwargs) -> Dict[str, Any]:

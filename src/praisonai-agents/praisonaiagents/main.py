@@ -2,6 +2,7 @@ import os
 import time
 import json
 import logging
+import threading
 from typing import List, Optional, Dict, Any, Union, Literal, Type
 from pydantic import BaseModel, ConfigDict
 from rich import print
@@ -24,8 +25,10 @@ except ImportError:
 error_logs = []
 
 # Separate registries for sync and async callbacks
+# Protected by _callback_lock for thread safety in multi-agent scenarios
 sync_display_callbacks = {}
 async_display_callbacks = {}
+_callback_lock = threading.Lock()
 
 # Global approval callback registry
 approval_callback = None
@@ -119,16 +122,17 @@ SUPPORTED_CALLBACK_TYPES = [
 
 def register_display_callback(display_type: str, callback_fn, is_async: bool = False):
     """Register a synchronous or asynchronous callback function for a specific display type.
-    
+
     Args:
         display_type (str): Type of display event ('interaction', 'self_reflection', etc.)
         callback_fn: The callback function to register
         is_async (bool): Whether the callback is asynchronous
     """
-    if is_async:
-        async_display_callbacks[display_type] = callback_fn
-    else:
-        sync_display_callbacks[display_type] = callback_fn
+    with _callback_lock:
+        if is_async:
+            async_display_callbacks[display_type] = callback_fn
+        else:
+            sync_display_callbacks[display_type] = callback_fn
 
 def register_approval_callback(callback_fn):
     """Register a global approval callback function for dangerous tool operations.
@@ -147,18 +151,19 @@ add_approval_callback = register_approval_callback
 
 def execute_sync_callback(display_type: str, **kwargs):
     """Execute synchronous callback for a given display type without displaying anything.
-    
+
     This function is used to trigger callbacks even when verbose=False.
-    
+
     Args:
         display_type (str): Type of display event
         **kwargs: Arguments to pass to the callback function
     """
-    if display_type in sync_display_callbacks:
-        callback = sync_display_callbacks[display_type]
+    with _callback_lock:
+        callback = sync_display_callbacks.get(display_type)
+    if callback is not None:
         import inspect
         sig = inspect.signature(callback)
-        
+
         # Filter kwargs to what the callback accepts to maintain backward compatibility
         if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
             # Callback accepts **kwargs, so pass all arguments
@@ -166,48 +171,47 @@ def execute_sync_callback(display_type: str, **kwargs):
         else:
             # Only pass arguments that the callback signature supports
             supported_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
-        
+
         callback(**supported_kwargs)
 
 async def execute_callback(display_type: str, **kwargs):
     """Execute both sync and async callbacks for a given display type.
-    
+
     Args:
         display_type (str): Type of display event
         **kwargs: Arguments to pass to the callback functions
     """
     import inspect
-    
+
+    # Snapshot callbacks under lock to avoid races
+    with _callback_lock:
+        sync_cb = sync_display_callbacks.get(display_type)
+        async_cb = async_display_callbacks.get(display_type)
+
     # Execute synchronous callback if registered
-    if display_type in sync_display_callbacks:
-        callback = sync_display_callbacks[display_type]
-        sig = inspect.signature(callback)
-        
+    if sync_cb is not None:
+        sig = inspect.signature(sync_cb)
+
         # Filter kwargs to what the callback accepts to maintain backward compatibility
         if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-            # Callback accepts **kwargs, so pass all arguments
             supported_kwargs = kwargs
         else:
-            # Only pass arguments that the callback signature supports
             supported_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
-        
+
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, lambda: callback(**supported_kwargs))
-    
+        await loop.run_in_executor(None, lambda: sync_cb(**supported_kwargs))
+
     # Execute asynchronous callback if registered
-    if display_type in async_display_callbacks:
-        callback = async_display_callbacks[display_type]
-        sig = inspect.signature(callback)
-        
+    if async_cb is not None:
+        sig = inspect.signature(async_cb)
+
         # Filter kwargs to what the callback accepts to maintain backward compatibility
         if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-            # Callback accepts **kwargs, so pass all arguments
             supported_kwargs = kwargs
         else:
-            # Only pass arguments that the callback signature supports
             supported_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
-        
-        await callback(**supported_kwargs)
+
+        await async_cb(**supported_kwargs)
 
 def _clean_display_content(content: str, max_length: int = 20000) -> str:
     """Helper function to clean and truncate content for display."""
