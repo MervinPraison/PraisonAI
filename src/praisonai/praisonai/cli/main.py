@@ -67,6 +67,45 @@ import importlib
 # REMOVED: from praisonai.inbuilt_tools import * - causes ~3200ms crewai import
 # REMOVED: from praisonai.inc.config import generate_config - causes ~3500ms langchain import
 
+
+# Security: blocklist of environment variable keys that must not be set from
+# untrusted YAML config files. These keys can alter code-loading behaviour
+# (LD_PRELOAD, PYTHONPATH, …) or redirect subprocesses (PATH) and are
+# therefore a vector for arbitrary code execution (CWE-78).
+_BLOCKED_ENV_KEYS = frozenset({
+    # Dynamic linker injection
+    "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT",
+    "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH",
+    "DYLD_FALLBACK_LIBRARY_PATH",
+    # Executable / module search paths
+    "PATH",
+    "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP",
+    "NODE_PATH", "NODE_OPTIONS",
+    "RUBYLIB", "PERL5LIB", "PERL5OPT",
+    "CLASSPATH",
+    # Proxy / redirect (could exfiltrate traffic)
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+    "http_proxy", "https_proxy", "all_proxy",
+    # Miscellaneous dangerous keys
+    "BASH_ENV", "ENV", "CDPATH",
+    "PROMPT_COMMAND",
+    "SHLVL",
+})
+
+
+def _validate_env_key(key: str) -> None:
+    """Raise ``ValueError`` if *key* is a blocked environment variable name.
+
+    The check is case-insensitive so that ``ld_preload`` is caught as well as
+    ``LD_PRELOAD``.
+    """
+    if key.upper() in {k.upper() for k in _BLOCKED_ENV_KEYS}:
+        raise ValueError(
+            f"Setting environment variable '{key}' is not allowed in schedule "
+            f"config files because it can be used to execute arbitrary code."
+        )
+
+
 # Lazy import helpers for inbuilt_tools and config
 def _get_inbuilt_tools():
     """Lazy import inbuilt_tools only when crewai/autogen features are used."""
@@ -454,6 +493,7 @@ class PraisonAI:
                         # Apply environment variables if specified
                         env_vars = file_config.get('environment', {})
                         for key, value in env_vars.items():
+                            _validate_env_key(key)
                             os.environ[key] = str(value)
                             
                     except FileNotFoundError:
