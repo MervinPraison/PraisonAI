@@ -32,6 +32,16 @@ try:
 except ImportError:
     pass
 
+AG2_AVAILABLE = False
+try:
+    import importlib.metadata as _importlib_metadata
+    _importlib_metadata.distribution('ag2')
+    from autogen import LLMConfig as _AG2LLMConfig  # noqa: F401 — AG2-exclusive class
+    AG2_AVAILABLE = True
+    del _AG2LLMConfig, _importlib_metadata
+except Exception:
+    pass
+
 try:
     from praisonai_tools import (
         CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool,
@@ -82,6 +92,11 @@ AutoGen is not installed. Please install with:
             raise ImportError("""
 Praisonai is not installed. Please install with:
     pip install praisonaiagents
+""")
+        elif framework == "ag2" and not AG2_AVAILABLE:
+            raise ImportError("""
+AG2 is not installed. Please install with:
+    pip install "praisonai[ag2]"
 """)
 
         # Only show tools message if using a framework and tools are needed

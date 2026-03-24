@@ -41,6 +41,16 @@ try:
 except ImportError:
     pass
 
+AG2_AVAILABLE = False
+try:
+    import importlib.metadata as _importlib_metadata
+    _importlib_metadata.distribution('ag2')
+    from autogen import LLMConfig as _AG2LLMConfig  # noqa: F401 — AG2-exclusive class
+    AG2_AVAILABLE = True
+    del _AG2LLMConfig, _importlib_metadata
+except Exception:
+    pass
+
 try:
     import agentops
     AGENTOPS_AVAILABLE = True
@@ -51,7 +61,7 @@ except ImportError:
     pass
 
 # Only try to import praisonai_tools if either CrewAI or AutoGen is available
-if CREWAI_AVAILABLE or AUTOGEN_AVAILABLE or PRAISONAI_AVAILABLE:
+if CREWAI_AVAILABLE or AUTOGEN_AVAILABLE or PRAISONAI_AVAILABLE or AG2_AVAILABLE:
     try:
         from praisonai_tools import (
             CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool, DirectoryReadTool,
@@ -127,6 +137,8 @@ class AgentsGenerator:
             raise ImportError("AutoGen is not installed. Please install it with 'pip install praisonai[autogen]'")
         elif framework == "praisonai" and not PRAISONAI_AVAILABLE:
             raise ImportError("PraisonAI is not installed. Please install it with 'pip install praisonaiagents'")
+        elif framework == "ag2" and not AG2_AVAILABLE:
+            raise ImportError("AG2 is not installed. Please install it with 'pip install praisonai[ag2]'")
 
     def is_function_or_decorated(self, obj):
         """
@@ -274,7 +286,7 @@ class AgentsGenerator:
         tools_dict = {}
         
         # Only try to use praisonai_tools if it's available and needed
-        if PRAISONAI_TOOLS_AVAILABLE and (CREWAI_AVAILABLE or AUTOGEN_AVAILABLE or PRAISONAI_AVAILABLE):
+        if PRAISONAI_TOOLS_AVAILABLE and (CREWAI_AVAILABLE or AUTOGEN_AVAILABLE or PRAISONAI_AVAILABLE or AG2_AVAILABLE):
             tools_dict = {
                 'CodeDocsSearchTool': CodeDocsSearchTool(),
                 'CSVSearchTool': CSVSearchTool(),
@@ -327,6 +339,12 @@ class AgentsGenerator:
             if AGENTOPS_AVAILABLE:
                 agentops.init(os.environ.get("AGENTOPS_API_KEY"), default_tags=["praisonai"])
             return self._run_praisonai(config, topic, tools_dict)
+        elif framework == "ag2":
+            if not AG2_AVAILABLE:
+                raise ImportError("AG2 is not installed. Please install it with 'pip install praisonai[ag2]'")
+            if AGENTOPS_AVAILABLE:
+                agentops.init(os.environ.get("AGENTOPS_API_KEY"), default_tags=["ag2"])
+            return self._run_ag2(config, topic, tools_dict)
         else:  # framework=crewai
             if not CREWAI_AVAILABLE:
                 raise ImportError("CrewAI is not installed. Please install it with 'pip install praisonai[crewai]'")
@@ -406,6 +424,130 @@ class AgentsGenerator:
             agentops.end_session("Success")
             
         return result
+
+    def _run_ag2(self, config, topic, tools_dict):
+        """
+        Run agents using the AG2 framework (community fork of AutoGen, PyPI: ag2).
+
+        AG2 installs under the 'autogen' namespace — there is no 'import ag2'.
+        Uses LLMConfig context manager + AssistantAgent + GroupChat pattern.
+
+        Args:
+            config (dict): Configuration dictionary parsed from YAML
+            topic (str): The topic/task to process
+            tools_dict (dict): Dictionary of available tools
+
+        Returns:
+            str: Result prefixed with '### AG2 Output ###'
+        """
+        import re
+        from autogen import (
+            AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager, LLMConfig
+        )
+
+        model_config = self.config_list[0] if self.config_list else {}
+        api_type = model_config.get("api_type", "openai").lower()
+        model_name = model_config.get("model", "gpt-4o-mini")
+        api_key = model_config.get("api_key") or os.environ.get("OPENAI_API_KEY")
+        base_url = model_config.get("base_url") or os.environ.get("OPENAI_BASE_URL")
+
+        # Build LLMConfig — pass a config dict; Bedrock needs no api_key
+        if api_type == "bedrock":
+            llm_config_entry = {"api_type": "bedrock", "model": model_name}
+        else:
+            llm_config_entry = {"model": model_name}
+            if api_key:
+                llm_config_entry["api_key"] = api_key
+            if base_url and base_url != "https://api.openai.com/v1":
+                llm_config_entry["base_url"] = base_url
+        llm_config = LLMConfig(llm_config_entry)
+
+        user_proxy = UserProxyAgent(
+            name="User",
+            human_input_mode="NEVER",
+            is_termination_msg=lambda x: "TERMINATE" in (x.get("content") or ""),
+            code_execution_config=False,
+        )
+
+        # Create one AssistantAgent per role, passing llm_config directly
+        ag2_agent_entries = []
+        for role, details in config["roles"].items():
+            agent_name = details.get("role", role).replace("{topic}", topic)
+            backstory = details.get("backstory", "").replace("{topic}", topic)
+            agent_name_safe = re.sub(r"[^a-zA-Z0-9_\-]", "_", agent_name)
+            assistant = AssistantAgent(
+                name=agent_name_safe,
+                system_message=backstory + "\nWhen the task is done, reply 'TERMINATE'.",
+                llm_config=llm_config,
+            )
+            ag2_agent_entries.append((role, details, assistant))
+
+        # Register tools via AG2 decorator pattern
+        for role, details, assistant in ag2_agent_entries:
+            for tool_name in details.get("tools", []):
+                tool = tools_dict.get(tool_name)
+                if tool is None:
+                    continue
+                func = tool if callable(tool) else getattr(tool, "run", None)
+                if func is None:
+                    continue
+
+                def make_tool_fn(f):
+                    def tool_fn(**kwargs):
+                        return f(**kwargs) if callable(f) else str(f)
+                    tool_fn.__name__ = tool_name
+                    return tool_fn
+
+                wrapped = make_tool_fn(func)
+                assistant.register_for_llm(description=f"Tool: {tool_name}")(wrapped)
+                user_proxy.register_for_execution()(wrapped)
+
+        all_assistants = [a for _, _, a in ag2_agent_entries]
+        if not all_assistants:
+            return "### AG2 Output ###\nNo agents created from configuration."
+
+        # Build initial message from all task descriptions
+        task_lines = []
+        for role, details, _ in ag2_agent_entries:
+            for task_name, task_details in details.get("tasks", {}).items():
+                desc = task_details.get("description", "").replace("{topic}", topic)
+                if desc:
+                    task_lines.append(desc)
+        initial_message = "\n".join(task_lines) if task_lines else topic
+
+        groupchat = GroupChat(
+            agents=[user_proxy] + all_assistants,
+            messages=[],
+            max_round=12,
+        )
+        manager = GroupChatManager(groupchat=groupchat, llm_config=llm_config)
+
+        try:
+            chat_result = user_proxy.initiate_chat(manager, message=initial_message)
+        except Exception as e:
+            return f"### AG2 Error ###\n{str(e)}"
+
+        # Prefer ChatResult.summary if available, otherwise scan messages
+        result_content = ""
+        summary = getattr(chat_result, "summary", None)
+        if summary and isinstance(summary, str) and summary.strip():
+            result_content = re.sub(r'[\s\.\,]*TERMINATE[\s\.\,]*$', '', summary, flags=re.IGNORECASE).strip().rstrip('.')
+
+        if not result_content:
+            for msg in reversed(groupchat.messages):
+                # Skip the initial user proxy message
+                if msg.get("name") == "User":
+                    continue
+                content = (msg.get("content") or "").strip()
+                if content:
+                    result_content = re.sub(r'[\s\.\,]*TERMINATE[\s\.\,]*$', '', content, flags=re.IGNORECASE).strip().rstrip('.')
+                    if result_content:
+                        break
+
+        if not result_content:
+            result_content = "Task completed."
+
+        return f"### AG2 Output ###\n{result_content}"
 
     def _run_crewai(self, config, topic, tools_dict):
         """
