@@ -4,6 +4,7 @@ import json
 import logging
 import asyncio
 import contextlib
+import threading
 from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Generator
 import inspect
 
@@ -139,7 +140,8 @@ from ..config.feature_configs import (
 # Applied even when context management is disabled to prevent runaway tool outputs
 DEFAULT_TOOL_OUTPUT_LIMIT = 16000
 
-# Global variables for API server
+# Global variables for API server (protected by _server_lock for thread safety)
+_server_lock = threading.Lock()
 _server_started = {}  # Dict of port -> started boolean
 _registered_agents = {}  # Dict of port -> Dict of path -> agent_id
 _shared_apps = {}  # Dict of port -> FastAPI app
@@ -155,6 +157,7 @@ if TYPE_CHECKING:
 class Agent:
     # Class-level counter for generating unique display names for nameless agents
     _agent_counter = 0
+    _agent_counter_lock = threading.Lock()
     # Class-level cache for environment variables (avoid repeated os.environ.get)
     _env_output_mode = None
     _env_output_checked = False
@@ -1251,8 +1254,9 @@ class Agent:
                 # Display logic will skip Agent Info panel when name is None
                 self.name = None
                 # Assign unique index for display_name
-                Agent._agent_counter += 1
-                self._agent_index = Agent._agent_counter
+                with Agent._agent_counter_lock:
+                    Agent._agent_counter += 1
+                    self._agent_index = Agent._agent_counter
             self.role = role or "Assistant"
             self.goal = goal or instructions
             self.backstory = backstory or instructions
@@ -4937,68 +4941,108 @@ Your Goal: {self.goal}"""
         tail = text[-tail_limit:] if tail_limit > 0 else ""
         return f"{head}\n...[{len(text):,} chars, showing first/last portions]...\n{tail}"
     
+    def _check_tool_approval_sync(self, function_name, arguments):
+        """Check tool approval synchronously. Returns (decision, arguments) or error dict."""
+        from ..approval import get_approval_registry
+        backend = getattr(self, '_approval_backend', None)
+        approve_all = getattr(self, '_approve_all_tools', False)
+        if backend is not None:
+            from ..approval.protocols import ApprovalRequest, ApprovalDecision
+            from ..approval.registry import DEFAULT_DANGEROUS_TOOLS
+            needs_approval = approve_all or function_name in DEFAULT_DANGEROUS_TOOLS
+            if needs_approval:
+                request = ApprovalRequest(
+                    tool_name=function_name,
+                    arguments=arguments,
+                    risk_level=DEFAULT_DANGEROUS_TOOLS.get(function_name, "medium"),
+                    agent_name=getattr(self, 'name', None),
+                )
+                cfg_timeout = getattr(self, '_approval_timeout', 0)
+                if cfg_timeout is None:
+                    orig_timeout = getattr(backend, '_timeout', None)
+                    if orig_timeout is not None:
+                        backend._timeout = 86400 * 365
+                elif cfg_timeout > 0:
+                    orig_timeout = getattr(backend, '_timeout', None)
+                    if orig_timeout is not None:
+                        backend._timeout = cfg_timeout
+                else:
+                    orig_timeout = None
+                try:
+                    if hasattr(backend, 'request_approval_sync'):
+                        decision = backend.request_approval_sync(request)
+                    else:
+                        decision = asyncio.run(backend.request_approval(request))
+                finally:
+                    if orig_timeout is not None and hasattr(backend, '_timeout'):
+                        backend._timeout = orig_timeout
+            else:
+                decision = ApprovalDecision(approved=True, reason="Not a dangerous tool")
+        else:
+            decision = get_approval_registry().approve_sync(
+                getattr(self, 'name', None), function_name, arguments,
+            )
+        if not decision.approved:
+            error_msg = f"Tool execution denied: {decision.reason}"
+            logging.warning(error_msg)
+            return {"error": error_msg, "approval_denied": True}
+        get_approval_registry().mark_approved(function_name)
+        if decision.modified_args:
+            arguments = decision.modified_args
+            logging.info(f"Using modified arguments: {arguments}")
+        return None, arguments
+
+    async def _check_tool_approval_async(self, function_name, arguments):
+        """Check tool approval asynchronously. Returns (decision, arguments) or error dict."""
+        from ..approval import get_approval_registry
+        backend = getattr(self, '_approval_backend', None)
+        approve_all = getattr(self, '_approve_all_tools', False)
+        if backend is not None:
+            from ..approval.protocols import ApprovalRequest, ApprovalDecision
+            from ..approval.registry import DEFAULT_DANGEROUS_TOOLS
+            needs_approval = approve_all or function_name in DEFAULT_DANGEROUS_TOOLS
+            if needs_approval:
+                request = ApprovalRequest(
+                    tool_name=function_name,
+                    arguments=arguments,
+                    risk_level=DEFAULT_DANGEROUS_TOOLS.get(function_name, "medium"),
+                    agent_name=getattr(self, 'name', None),
+                )
+                cfg_timeout = getattr(self, '_approval_timeout', 0)
+                if cfg_timeout is None:
+                    decision = await backend.request_approval(request)
+                elif cfg_timeout > 0:
+                    decision = await asyncio.wait_for(
+                        backend.request_approval(request),
+                        timeout=cfg_timeout,
+                    )
+                else:
+                    decision = await backend.request_approval(request)
+            else:
+                decision = ApprovalDecision(approved=True, reason="Not a dangerous tool")
+        else:
+            decision = await get_approval_registry().approve_async(
+                getattr(self, 'name', None), function_name, arguments,
+            )
+        if not decision.approved:
+            error_msg = f"Tool execution denied: {decision.reason}"
+            logging.warning(error_msg)
+            return {"error": error_msg, "approval_denied": True}
+        get_approval_registry().mark_approved(function_name)
+        if decision.modified_args:
+            arguments = decision.modified_args
+            logging.info(f"Using modified arguments: {arguments}")
+        return None, arguments
+
     def _execute_tool_impl(self, function_name, arguments):
         """Internal tool execution implementation."""
 
         # Check if approval is required for this tool (protocol-driven)
-        # Priority: self._approval_backend (agent param) > registry (global/per-agent)
-        from ..approval import get_approval_registry
         try:
-            backend = getattr(self, '_approval_backend', None)
-            approve_all = getattr(self, '_approve_all_tools', False)
-            if backend is not None:
-                from ..approval.protocols import ApprovalRequest
-                from ..approval.registry import DEFAULT_DANGEROUS_TOOLS
-                # Gate: only dangerous tools unless approve_all is True
-                needs_approval = approve_all or function_name in DEFAULT_DANGEROUS_TOOLS
-                if needs_approval:
-                    request = ApprovalRequest(
-                        tool_name=function_name,
-                        arguments=arguments,
-                        risk_level=DEFAULT_DANGEROUS_TOOLS.get(function_name, "medium"),
-                        agent_name=getattr(self, 'name', None),
-                    )
-                    # Apply timeout override from ApprovalConfig
-                    cfg_timeout = getattr(self, '_approval_timeout', 0)
-                    if cfg_timeout is None:
-                        # None = indefinite — set backend timeout temporarily
-                        orig_timeout = getattr(backend, '_timeout', None)
-                        if orig_timeout is not None:
-                            backend._timeout = 86400 * 365  # ~1 year as "indefinite"
-                    elif cfg_timeout > 0:
-                        orig_timeout = getattr(backend, '_timeout', None)
-                        if orig_timeout is not None:
-                            backend._timeout = cfg_timeout
-                    else:
-                        orig_timeout = None  # 0 = use backend default
-                    try:
-                        if hasattr(backend, 'request_approval_sync'):
-                            decision = backend.request_approval_sync(request)
-                        else:
-                            import asyncio
-                            decision = asyncio.run(backend.request_approval(request))
-                    finally:
-                        # Restore original timeout
-                        if orig_timeout is not None and hasattr(backend, '_timeout'):
-                            backend._timeout = orig_timeout
-                else:
-                    from ..approval.protocols import ApprovalDecision
-                    decision = ApprovalDecision(approved=True, reason="Not a dangerous tool")
-            else:
-                # Fallback to global registry
-                decision = get_approval_registry().approve_sync(
-                    getattr(self, 'name', None), function_name, arguments,
-                )
-            if not decision.approved:
-                error_msg = f"Tool execution denied: {decision.reason}"
-                logging.warning(error_msg)
-                return {"error": error_msg, "approval_denied": True}
-            # Bridge: mark tool as approved in global registry context so
-            # @require_approval decorator wrappers skip their own check.
-            get_approval_registry().mark_approved(function_name)
-            if decision.modified_args:
-                arguments = decision.modified_args
-                logging.info(f"Using modified arguments: {arguments}")
+            result = self._check_tool_approval_sync(function_name, arguments)
+            if isinstance(result, dict):
+                return result  # Error dict
+            _, arguments = result
         except Exception as e:
             error_msg = f"Error during approval process: {str(e)}"
             logging.error(error_msg)
@@ -8268,54 +8312,11 @@ Write the complete compiled report:"""
             logging.info(f"Executing async tool: {function_name} with arguments: {arguments}")
             
             # Check if approval is required for this tool (protocol-driven)
-            # Priority: self._approval_backend (agent param) > registry (global/per-agent)
-            from ..approval import get_approval_registry
             try:
-                backend = getattr(self, '_approval_backend', None)
-                approve_all = getattr(self, '_approve_all_tools', False)
-                if backend is not None:
-                    from ..approval.protocols import ApprovalRequest
-                    from ..approval.registry import DEFAULT_DANGEROUS_TOOLS
-                    # Gate: only dangerous tools unless approve_all is True
-                    needs_approval = approve_all or function_name in DEFAULT_DANGEROUS_TOOLS
-                    if needs_approval:
-                        request = ApprovalRequest(
-                            tool_name=function_name,
-                            arguments=arguments,
-                            risk_level=DEFAULT_DANGEROUS_TOOLS.get(function_name, "medium"),
-                            agent_name=getattr(self, 'name', None),
-                        )
-                        # Apply timeout override from ApprovalConfig
-                        cfg_timeout = getattr(self, '_approval_timeout', 0)
-                        if cfg_timeout is None:
-                            # None = indefinite wait
-                            decision = await backend.request_approval(request)
-                        elif cfg_timeout > 0:
-                            decision = await asyncio.wait_for(
-                                backend.request_approval(request),
-                                timeout=cfg_timeout,
-                            )
-                        else:
-                            # 0 = use backend default timeout
-                            decision = await backend.request_approval(request)
-                    else:
-                        from ..approval.protocols import ApprovalDecision
-                        decision = ApprovalDecision(approved=True, reason="Not a dangerous tool")
-                else:
-                    decision = await get_approval_registry().approve_async(
-                        getattr(self, 'name', None), function_name, arguments,
-                    )
-                if not decision.approved:
-                    error_msg = f"Tool execution denied: {decision.reason}"
-                    logging.warning(error_msg)
-                    return {"error": error_msg, "approval_denied": True}
-                # Bridge: mark tool as approved in global registry context so
-                # @require_approval decorator wrappers skip their own check.
-                from ..approval import get_approval_registry as _get_reg
-                _get_reg().mark_approved(function_name)
-                if decision.modified_args:
-                    arguments = decision.modified_args
-                    logging.info(f"Using modified arguments: {arguments}")
+                result = await self._check_tool_approval_async(function_name, arguments)
+                if isinstance(result, dict):
+                    return result  # Error dict
+                _, arguments = result
             except Exception as e:
                 error_msg = f"Error during approval process: {str(e)}"
                 logging.error(error_msg)
@@ -8375,8 +8376,8 @@ Write the complete compiled report:"""
             None
         """
         if protocol == "http":
-            global _server_started, _registered_agents, _shared_apps
-            
+            global _server_started, _registered_agents, _shared_apps, _server_lock
+
             # Try to import FastAPI dependencies - lazy loading
             try:
                 import uvicorn
@@ -8402,94 +8403,97 @@ Write the complete compiled report:"""
                 print("pip install 'praisonaiagents[api]'")
                 return None
                 
-            # Initialize port-specific collections if needed
-            if port not in _registered_agents:
-                _registered_agents[port] = {}
-                
-            # Initialize shared FastAPI app if not already created for this port
-            if _shared_apps.get(port) is None:
-                _shared_apps[port] = FastAPI(
-                    title=f"PraisonAI Agents API (Port {port})",
-                    description="API for interacting with PraisonAI Agents"
-                )
-                
-                # Add a root endpoint with a welcome message
-                @_shared_apps[port].get("/")
-                async def root():
-                    return {
-                        "message": f"Welcome to PraisonAI Agents API on port {port}. See /docs for usage.",
-                        "endpoints": list(_registered_agents[port].keys())
-                    }
-                
-                # Add healthcheck endpoint
-                @_shared_apps[port].get("/health")
-                async def healthcheck():
-                    return {
-                        "status": "ok", 
-                        "endpoints": list(_registered_agents[port].keys())
-                    }
-            
-            # Normalize path to ensure it starts with /
-            if not path.startswith('/'):
-                path = f'/{path}'
-                
-            # Check if path is already registered for this port
-            if path in _registered_agents[port]:
-                logging.warning(f"Path '{path}' is already registered on port {port}. Please use a different path.")
-                print(f"⚠️ Warning: Path '{path}' is already registered on port {port}.")
-                # Use a modified path to avoid conflicts
-                original_path = path
-                path = f"{path}_{self.agent_id[:6]}"
-                logging.warning(f"Using '{path}' instead of '{original_path}'")
-                print(f"🔄 Using '{path}' instead")
-            
-            # Register the agent to this path
-            _registered_agents[port][path] = self.agent_id
-            
-            # Define the endpoint handler
-            @_shared_apps[port].post(path)
-            async def handle_agent_query(request: Request, query_data: Optional[AgentQuery] = None):
-                # Handle both direct JSON with query field and form data
-                if query_data is None:
-                    try:
-                        request_data = await request.json()
-                        if "query" not in request_data:
-                            raise HTTPException(status_code=400, detail="Missing 'query' field in request")
-                        query = request_data["query"]
-                    except Exception:
-                        # Fallback to form data or query params
-                        form_data = await request.form()
-                        if "query" in form_data:
-                            query = form_data["query"]
-                        else:
-                            raise HTTPException(status_code=400, detail="Missing 'query' field in request")
-                else:
-                    query = query_data.query
-                    
-                try:
-                    # Use async version if available, otherwise use sync version
-                    if asyncio.iscoroutinefunction(self.chat):
-                        response = await self.achat(query, task_name=None, task_description=None, task_id=None)
-                    else:
-                        # Run sync function in a thread to avoid blocking
-                        loop = asyncio.get_event_loop()
-                        response = await loop.run_in_executor(None, lambda p=query: self.chat(p))
-                    
-                    return {"response": response}
-                except Exception as e:
-                    logging.error(f"Error processing query: {str(e)}", exc_info=True)
-                    return JSONResponse(
-                        status_code=500,
-                        content={"error": f"Error processing query: {str(e)}"}
+            with _server_lock:
+                # Initialize port-specific collections if needed
+                if port not in _registered_agents:
+                    _registered_agents[port] = {}
+
+                # Initialize shared FastAPI app if not already created for this port
+                if _shared_apps.get(port) is None:
+                    _shared_apps[port] = FastAPI(
+                        title=f"PraisonAI Agents API (Port {port})",
+                        description="API for interacting with PraisonAI Agents"
                     )
-            
-            print(f"🚀 Agent '{self.name}' available at http://{host}:{port}")
-            
-            # Start the server if it's not already running for this port
-            if not _server_started.get(port, False):
-                # Mark the server as started first to prevent duplicate starts
-                _server_started[port] = True
-                
+
+                    # Add a root endpoint with a welcome message
+                    @_shared_apps[port].get("/")
+                    async def root():
+                        return {
+                            "message": f"Welcome to PraisonAI Agents API on port {port}. See /docs for usage.",
+                            "endpoints": list(_registered_agents[port].keys())
+                        }
+
+                    # Add healthcheck endpoint
+                    @_shared_apps[port].get("/health")
+                    async def healthcheck():
+                        return {
+                            "status": "ok",
+                            "endpoints": list(_registered_agents[port].keys())
+                        }
+
+                # Normalize path to ensure it starts with /
+                if not path.startswith('/'):
+                    path = f'/{path}'
+
+                # Check if path is already registered for this port
+                if path in _registered_agents[port]:
+                    logging.warning(f"Path '{path}' is already registered on port {port}. Please use a different path.")
+                    print(f"⚠️ Warning: Path '{path}' is already registered on port {port}.")
+                    # Use a modified path to avoid conflicts
+                    original_path = path
+                    path = f"{path}_{self.agent_id[:6]}"
+                    logging.warning(f"Using '{path}' instead of '{original_path}'")
+                    print(f"🔄 Using '{path}' instead")
+
+                # Register the agent to this path
+                _registered_agents[port][path] = self.agent_id
+
+                # Define the endpoint handler
+                @_shared_apps[port].post(path)
+                async def handle_agent_query(request: Request, query_data: Optional[AgentQuery] = None):
+                    # Handle both direct JSON with query field and form data
+                    if query_data is None:
+                        try:
+                            request_data = await request.json()
+                            if "query" not in request_data:
+                                raise HTTPException(status_code=400, detail="Missing 'query' field in request")
+                            query = request_data["query"]
+                        except Exception:
+                            # Fallback to form data or query params
+                            form_data = await request.form()
+                            if "query" in form_data:
+                                query = form_data["query"]
+                            else:
+                                raise HTTPException(status_code=400, detail="Missing 'query' field in request")
+                    else:
+                        query = query_data.query
+
+                    try:
+                        # Use async version if available, otherwise use sync version
+                        if asyncio.iscoroutinefunction(self.chat):
+                            response = await self.achat(query, task_name=None, task_description=None, task_id=None)
+                        else:
+                            # Run sync function in a thread to avoid blocking
+                            loop = asyncio.get_event_loop()
+                            response = await loop.run_in_executor(None, lambda p=query: self.chat(p))
+
+                        return {"response": response}
+                    except Exception as e:
+                        logging.error(f"Error processing query: {str(e)}", exc_info=True)
+                        return JSONResponse(
+                            status_code=500,
+                            content={"error": f"Error processing query: {str(e)}"}
+                        )
+
+                print(f"🚀 Agent '{self.name}' available at http://{host}:{port}")
+
+                # Start the server if it's not already running for this port
+                should_start = not _server_started.get(port, False)
+                if should_start:
+                    _server_started[port] = True
+
+            # Server start/wait outside the lock to avoid holding it during sleep
+            if should_start:
                 # Start the server in a separate thread
                 def run_server():
                     try:
@@ -8500,11 +8504,11 @@ Write the complete compiled report:"""
                     except Exception as e:
                         logging.error(f"Error starting server: {str(e)}", exc_info=True)
                         print(f"❌ Error starting server: {str(e)}")
-                
+
                 # Run server in a background thread
                 server_thread = threading.Thread(target=run_server, daemon=True)
                 server_thread.start()
-                
+
                 # Wait for a moment to allow the server to start and register endpoints
                 time.sleep(0.5)
             else:
