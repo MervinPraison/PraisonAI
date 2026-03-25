@@ -85,21 +85,28 @@ _BLOCKED_ENV_KEYS = frozenset({
     "CLASSPATH",
     # Proxy / redirect (could exfiltrate traffic)
     "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
-    "http_proxy", "https_proxy", "all_proxy",
     # Miscellaneous dangerous keys
     "BASH_ENV", "ENV", "CDPATH",
     "PROMPT_COMMAND",
     "SHLVL",
 })
 
+# Pre-compute uppercase lookup set once at module load (avoids rebuilding per call)
+_BLOCKED_ENV_KEYS_UPPER = frozenset(k.upper() for k in _BLOCKED_ENV_KEYS)
 
-def _validate_env_key(key: str) -> None:
+
+def _validate_env_key(key) -> None:
     """Raise ``ValueError`` if *key* is a blocked environment variable name.
 
     The check is case-insensitive so that ``ld_preload`` is caught as well as
-    ``LD_PRELOAD``.
+    ``LD_PRELOAD``.  Non-string keys (e.g. YAML integer or null keys) are
+    rejected with a clear validation error.
     """
-    if key.upper() in {k.upper() for k in _BLOCKED_ENV_KEYS}:
+    if not isinstance(key, str):
+        raise ValueError(
+            f"Environment variable key must be a string, got {type(key).__name__}: {key!r}"
+        )
+    if key.upper() in _BLOCKED_ENV_KEYS_UPPER:
         raise ValueError(
             f"Setting environment variable '{key}' is not allowed in schedule "
             f"config files because it can be used to execute arbitrary code."
@@ -492,12 +499,20 @@ class PraisonAI:
                         
                         # Apply environment variables if specified
                         env_vars = file_config.get('environment', {})
+                        if not isinstance(env_vars, dict):
+                            raise ValueError("'environment' must be a mapping of KEY: value pairs")
+                        # Validate all keys first (fail-closed) before mutating os.environ
+                        validated_env = {}
                         for key, value in env_vars.items():
                             _validate_env_key(key)
-                            os.environ[key] = str(value)
+                            validated_env[key] = str(value)
+                        os.environ.update(validated_env)
                             
                     except FileNotFoundError:
                         print(f"Configuration file not found: {args.schedule_config}")
+                        sys.exit(1)
+                    except ValueError as e:
+                        print(f"Invalid schedule configuration: {e}")
                         sys.exit(1)
                     except yaml.YAMLError as e:
                         print(f"Error parsing configuration file: {e}")

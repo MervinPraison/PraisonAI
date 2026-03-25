@@ -18,9 +18,11 @@ import yaml
 DANGEROUS_KEYS = [
     "LD_PRELOAD",
     "LD_LIBRARY_PATH",
+    "LD_AUDIT",
     "DYLD_INSERT_LIBRARIES",
     "DYLD_LIBRARY_PATH",
     "DYLD_FRAMEWORK_PATH",
+    "DYLD_FALLBACK_LIBRARY_PATH",
     "PATH",
     "PYTHONPATH",
     "PYTHONSTARTUP",
@@ -29,7 +31,16 @@ DANGEROUS_KEYS = [
     "NODE_PATH",
     "RUBYLIB",
     "PERL5LIB",
+    "PERL5OPT",
     "CLASSPATH",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "BASH_ENV",
+    "ENV",
+    "CDPATH",
+    "PROMPT_COMMAND",
+    "SHLVL",
     "ld_preload",        # lowercase variant
     "Ld_Preload",        # mixed case variant
 ]
@@ -46,10 +57,16 @@ SAFE_KEYS = [
 
 @pytest.fixture(autouse=True)
 def _clean_env():
-    """Remove any test-set env vars after each test."""
+    """Snapshot env vars before each test and restore them afterwards."""
+    # Save original values (None means the key was not set)
+    _snapshot = {k: os.environ.get(k) for k in DANGEROUS_KEYS + SAFE_KEYS}
     yield
-    for key in DANGEROUS_KEYS + SAFE_KEYS:
-        os.environ.pop(key, None)
+    # Restore: reinstate original values or remove if they didn't exist
+    for key, original in _snapshot.items():
+        if original is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = original
 
 
 def _get_validate_env_key():
@@ -72,7 +89,7 @@ def test_dangerous_env_keys_are_blocked():
     for key in DANGEROUS_KEYS:
         with pytest.raises(
             ValueError,
-            match="[Nn]ot allowed|[Bb]locked|[Dd]angerous",
+            match=r"[Nn]ot allowed|[Bb]locked|[Dd]angerous",
         ):
             validate(key)
 
@@ -88,8 +105,22 @@ def test_safe_env_keys_are_allowed():
 
 
 @pytest.mark.unit
+def test_non_string_key_rejected():
+    """Non-string YAML keys (int, None) must produce a clear ValueError."""
+    validate = _get_validate_env_key()
+
+    for bad_key in [123, None, 3.14, True]:
+        with pytest.raises(ValueError, match=r"must be a string"):
+            validate(bad_key)
+
+
+@pytest.mark.unit
 def test_vulnerability_scenario_ld_preload():
-    """LD_PRELOAD in a YAML environment section must be blocked."""
+    """LD_PRELOAD in a YAML environment section must be blocked.
+
+    This test simulates the schedule-config loading path: parse the YAML,
+    then validate-all-then-apply (matching the fail-closed logic in main.py).
+    """
     validate = _get_validate_env_key()
 
     config_content = textwrap.dedent("""\
@@ -104,9 +135,17 @@ def test_vulnerability_scenario_ld_preload():
     file_config = yaml.safe_load(config_content)
     env_vars = file_config.get("environment", {})
 
+    # Simulate the validate-all-then-apply pattern from main.py
     with pytest.raises(ValueError):
-        for key in env_vars:
+        validated_env = {}
+        for key, value in env_vars.items():
             validate(key)
+            validated_env[key] = str(value)
+        # If we reach here, no key was blocked — the test fails via pytest.raises
+        os.environ.update(validated_env)
+
+    # LD_PRELOAD must NOT have been applied (fail-closed)
+    assert "LD_PRELOAD" not in os.environ or os.environ.get("LD_PRELOAD") != "/tmp/evil.so"
 
 
 if __name__ == "__main__":
