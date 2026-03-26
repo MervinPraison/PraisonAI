@@ -4960,47 +4960,26 @@ Your Goal: {self.goal}"""
         tail = text[-tail_limit:] if tail_limit > 0 else ""
         return f"{head}\n...[{len(text):,} chars, showing first/last portions]...\n{tail}"
     
-    def _check_tool_approval_sync(self, function_name, arguments):
-        """Check tool approval synchronously. Returns (decision, arguments) or error dict."""
-        from ..approval import get_approval_registry
+    def _build_approval_request(self, function_name, arguments):
+        """Build approval request and determine if approval is needed. Returns (backend, request_or_None, ApprovalDecision_class)."""
+        from ..approval.protocols import ApprovalRequest, ApprovalDecision
+        from ..approval.registry import DEFAULT_DANGEROUS_TOOLS
         backend = getattr(self, '_approval_backend', None)
         approve_all = getattr(self, '_approve_all_tools', False)
-        if backend is not None:
-            from ..approval.protocols import ApprovalRequest, ApprovalDecision
-            from ..approval.registry import DEFAULT_DANGEROUS_TOOLS
-            needs_approval = approve_all or function_name in DEFAULT_DANGEROUS_TOOLS
-            if needs_approval:
-                request = ApprovalRequest(
-                    tool_name=function_name,
-                    arguments=arguments,
-                    risk_level=DEFAULT_DANGEROUS_TOOLS.get(function_name, "medium"),
-                    agent_name=getattr(self, 'name', None),
-                )
-                cfg_timeout = getattr(self, '_approval_timeout', 0)
-                if cfg_timeout is None:
-                    orig_timeout = getattr(backend, '_timeout', None)
-                    if orig_timeout is not None:
-                        backend._timeout = 86400 * 365
-                elif cfg_timeout > 0:
-                    orig_timeout = getattr(backend, '_timeout', None)
-                    if orig_timeout is not None:
-                        backend._timeout = cfg_timeout
-                else:
-                    orig_timeout = None
-                try:
-                    if hasattr(backend, 'request_approval_sync'):
-                        decision = backend.request_approval_sync(request)
-                    else:
-                        decision = asyncio.run(backend.request_approval(request))
-                finally:
-                    if orig_timeout is not None and hasattr(backend, '_timeout'):
-                        backend._timeout = orig_timeout
-            else:
-                decision = ApprovalDecision(approved=True, reason="Not a dangerous tool")
-        else:
-            decision = get_approval_registry().approve_sync(
-                getattr(self, 'name', None), function_name, arguments,
+        needs_approval = approve_all or function_name in DEFAULT_DANGEROUS_TOOLS
+        request = None
+        if backend is not None and needs_approval:
+            request = ApprovalRequest(
+                tool_name=function_name,
+                arguments=arguments,
+                risk_level=DEFAULT_DANGEROUS_TOOLS.get(function_name, "medium"),
+                agent_name=getattr(self, 'name', None),
             )
+        return backend, request, ApprovalDecision
+
+    def _finalize_approval(self, decision, function_name, arguments):
+        """Process approval decision. Returns error dict or (None, arguments)."""
+        from ..approval import get_approval_registry
         if not decision.approved:
             error_msg = f"Tool execution denied: {decision.reason}"
             logging.warning(error_msg)
@@ -5011,47 +4990,60 @@ Your Goal: {self.goal}"""
             logging.info(f"Using modified arguments: {arguments}")
         return None, arguments
 
+    def _check_tool_approval_sync(self, function_name, arguments):
+        """Check tool approval synchronously. Returns (decision, arguments) or error dict."""
+        from ..approval import get_approval_registry
+        backend, request, ApprovalDecision = self._build_approval_request(function_name, arguments)
+        if backend is not None and request is not None:
+            cfg_timeout = getattr(self, '_approval_timeout', 0)
+            if cfg_timeout is None:
+                orig_timeout = getattr(backend, '_timeout', None)
+                if orig_timeout is not None:
+                    backend._timeout = 86400 * 365
+            elif cfg_timeout > 0:
+                orig_timeout = getattr(backend, '_timeout', None)
+                if orig_timeout is not None:
+                    backend._timeout = cfg_timeout
+            else:
+                orig_timeout = None
+            try:
+                if hasattr(backend, 'request_approval_sync'):
+                    decision = backend.request_approval_sync(request)
+                else:
+                    decision = asyncio.run(backend.request_approval(request))
+            finally:
+                if orig_timeout is not None and hasattr(backend, '_timeout'):
+                    backend._timeout = orig_timeout
+        elif backend is not None:
+            decision = ApprovalDecision(approved=True, reason="Not a dangerous tool")
+        else:
+            decision = get_approval_registry().approve_sync(
+                getattr(self, 'name', None), function_name, arguments,
+            )
+        return self._finalize_approval(decision, function_name, arguments)
+
     async def _check_tool_approval_async(self, function_name, arguments):
         """Check tool approval asynchronously. Returns (decision, arguments) or error dict."""
         from ..approval import get_approval_registry
-        backend = getattr(self, '_approval_backend', None)
-        approve_all = getattr(self, '_approve_all_tools', False)
-        if backend is not None:
-            from ..approval.protocols import ApprovalRequest, ApprovalDecision
-            from ..approval.registry import DEFAULT_DANGEROUS_TOOLS
-            needs_approval = approve_all or function_name in DEFAULT_DANGEROUS_TOOLS
-            if needs_approval:
-                request = ApprovalRequest(
-                    tool_name=function_name,
-                    arguments=arguments,
-                    risk_level=DEFAULT_DANGEROUS_TOOLS.get(function_name, "medium"),
-                    agent_name=getattr(self, 'name', None),
+        backend, request, ApprovalDecision = self._build_approval_request(function_name, arguments)
+        if backend is not None and request is not None:
+            cfg_timeout = getattr(self, '_approval_timeout', 0)
+            if cfg_timeout is None:
+                decision = await backend.request_approval(request)
+            elif cfg_timeout > 0:
+                decision = await asyncio.wait_for(
+                    backend.request_approval(request),
+                    timeout=cfg_timeout,
                 )
-                cfg_timeout = getattr(self, '_approval_timeout', 0)
-                if cfg_timeout is None:
-                    decision = await backend.request_approval(request)
-                elif cfg_timeout > 0:
-                    decision = await asyncio.wait_for(
-                        backend.request_approval(request),
-                        timeout=cfg_timeout,
-                    )
-                else:
-                    decision = await backend.request_approval(request)
             else:
-                decision = ApprovalDecision(approved=True, reason="Not a dangerous tool")
+                decision = await backend.request_approval(request)
+        elif backend is not None:
+            decision = ApprovalDecision(approved=True, reason="Not a dangerous tool")
         else:
             decision = await get_approval_registry().approve_async(
                 getattr(self, 'name', None), function_name, arguments,
             )
-        if not decision.approved:
-            error_msg = f"Tool execution denied: {decision.reason}"
-            logging.warning(error_msg)
-            return {"error": error_msg, "approval_denied": True}
-        get_approval_registry().mark_approved(function_name)
-        if decision.modified_args:
-            arguments = decision.modified_args
-            logging.info(f"Using modified arguments: {arguments}")
-        return None, arguments
+        return self._finalize_approval(decision, function_name, arguments)
 
     def _execute_tool_impl(self, function_name, arguments):
         """Internal tool execution implementation."""

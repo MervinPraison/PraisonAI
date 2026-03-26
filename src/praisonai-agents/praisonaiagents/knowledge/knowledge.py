@@ -3,7 +3,7 @@ import logging
 from datetime import datetime
 from .chunking import Chunking
 from functools import cached_property
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+# Rich progress is lazy-loaded where used (see _store method)
 
 logger = logging.getLogger(__name__)
 
@@ -785,7 +785,8 @@ class Knowledge:
                 # Treat as raw text content only if no file extension
                 memories = [self.normalize_content(input_path)]
 
-            # Create progress display
+            # Create progress display (lazy import)
+            from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
             progress = Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),

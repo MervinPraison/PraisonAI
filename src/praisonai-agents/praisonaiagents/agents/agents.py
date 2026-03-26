@@ -3,7 +3,6 @@ import time
 import json
 import logging
 from typing import Any, Dict, Optional, List
-from rich.console import Console
 from ..main import display_error, TaskOutput
 from ..agent.agent import Agent
 from ..task.task import Task
@@ -30,7 +29,9 @@ class TaskStatus(Enum):
 # Set up logger
 logger = logging.getLogger(__name__)
 
-# Global variables for managing the shared servers
+# Global variables for managing the shared servers (protected by _agents_server_lock)
+import threading
+_agents_server_lock = threading.Lock()
 _agents_server_started = {}  # Dict of port -> started boolean
 _agents_registered_endpoints = {}  # Dict of port -> Dict of path -> endpoint_id
 _agents_shared_apps = {}  # Dict of port -> FastAPI app
@@ -1286,6 +1287,7 @@ Context:
         # Verbose Mode: Show Rich panels for multi-agent workflow
         # ─────────────────────────────────────────────────────────────
         if show_verbose and is_tty:
+            from rich.console import Console
             from rich.panel import Panel
             console = Console()
             import time as time_module
@@ -1645,51 +1647,51 @@ Context:
                 print("pip install 'praisonaiagents[api]'")
                 return None
             
-            # Initialize port-specific collections if needed
-            if port not in _agents_registered_endpoints:
-                _agents_registered_endpoints[port] = {}
-                
-            # Initialize shared FastAPI app if not already created for this port
-            if _agents_shared_apps.get(port) is None:
-                _agents_shared_apps[port] = FastAPI(
-                    title=f"PraisonAI Agents API (Port {port})",
-                    description="API for interacting with multiple PraisonAI Agents"
-                )
-                
-                # Add a root endpoint with a welcome message
-                @_agents_shared_apps[port].get("/")
-                async def root():
-                    return {
-                        "message": f"Welcome to PraisonAI Agents API on port {port}. See /docs for usage.",
-                        "endpoints": list(_agents_registered_endpoints[port].keys())
-                    }
-                
-                # Add healthcheck endpoint
-                @_agents_shared_apps[port].get("/health")
-                async def healthcheck():
-                    return {
-                        "status": "ok", 
-                        "endpoints": list(_agents_registered_endpoints[port].keys())
-                    }
-            
+            # Initialize port-specific collections if needed (thread-safe)
+            with _agents_server_lock:
+                if port not in _agents_registered_endpoints:
+                    _agents_registered_endpoints[port] = {}
+                if _agents_shared_apps.get(port) is None:
+                    _agents_shared_apps[port] = FastAPI(
+                        title=f"PraisonAI Agents API (Port {port})",
+                        description="API for interacting with multiple PraisonAI Agents"
+                    )
+
+                    # Add a root endpoint with a welcome message
+                    @_agents_shared_apps[port].get("/")
+                    async def root():
+                        return {
+                            "message": f"Welcome to PraisonAI Agents API on port {port}. See /docs for usage.",
+                            "endpoints": list(_agents_registered_endpoints[port].keys())
+                        }
+
+                    # Add healthcheck endpoint
+                    @_agents_shared_apps[port].get("/health")
+                    async def healthcheck():
+                        return {
+                            "status": "ok",
+                            "endpoints": list(_agents_registered_endpoints[port].keys())
+                        }
+
             # Normalize path to ensure it starts with /
             if not path.startswith('/'):
                 path = f'/{path}'
-                
-            # Check if path is already registered for this port
-            if path in _agents_registered_endpoints[port]:
-                logging.warning(f"Path '{path}' is already registered on port {port}. Please use a different path.")
-                print(f"⚠️ Warning: Path '{path}' is already registered on port {port}.")
-                # Use a modified path to avoid conflicts
-                original_path = path
-                instance_id = str(uuid.uuid4())[:6]
-                path = f"{path}_{instance_id}"
-                logging.warning(f"Using '{path}' instead of '{original_path}'")
-                print(f"🔄 Using '{path}' instead")
-            
-            # Generate a unique ID for this agent group's endpoint
-            endpoint_id = str(uuid.uuid4())
-            _agents_registered_endpoints[port][path] = endpoint_id
+
+            # Check/register path (thread-safe)
+            with _agents_server_lock:
+                if path in _agents_registered_endpoints[port]:
+                    logging.warning(f"Path '{path}' is already registered on port {port}. Please use a different path.")
+                    print(f"⚠️ Warning: Path '{path}' is already registered on port {port}.")
+                    # Use a modified path to avoid conflicts
+                    original_path = path
+                    instance_id = str(uuid.uuid4())[:6]
+                    path = f"{path}_{instance_id}"
+                    logging.warning(f"Using '{path}' instead of '{original_path}'")
+                    print(f"🔄 Using '{path}' instead")
+
+                # Generate a unique ID for this agent group's endpoint
+                endpoint_id = str(uuid.uuid4())
+                _agents_registered_endpoints[port][path] = endpoint_id
             
             # Define the endpoint handler
             @_agents_shared_apps[port].post(path)
@@ -1817,17 +1819,20 @@ Context:
                             )
                     return handle_single_agent
                 
-                # Register the endpoint
-                _agents_shared_apps[port].post(agent_path)(create_agent_handler(agent_instance))
-                _agents_registered_endpoints[port][agent_path] = f"{endpoint_id}_{agent_id}"
+                # Register the endpoint (thread-safe)
+                with _agents_server_lock:
+                    _agents_shared_apps[port].post(agent_path)(create_agent_handler(agent_instance))
+                    _agents_registered_endpoints[port][agent_path] = f"{endpoint_id}_{agent_id}"
             
             print(f"🔗 Per-agent endpoints: {', '.join([f'{path}/{aid}' for aid in agents_dict.keys()])}")
             
-            # Start the server if it's not already running for this port
-            if not _agents_server_started.get(port, False):
-                # Mark the server as started first to prevent duplicate starts
-                _agents_server_started[port] = True
-                
+            # Start the server if it's not already running for this port (thread-safe)
+            with _agents_server_lock:
+                should_start = not _agents_server_started.get(port, False)
+                if should_start:
+                    _agents_server_started[port] = True
+
+            if should_start:
                 # Start the server in a separate thread
                 def run_server():
                     try:
@@ -1838,11 +1843,11 @@ Context:
                     except Exception as e:
                         logging.error(f"Error starting server: {str(e)}", exc_info=True)
                         print(f"❌ Error starting server: {str(e)}")
-                
+
                 # Run server in a background thread
                 server_thread = threading.Thread(target=run_server, daemon=True)
                 server_thread.start()
-                
+
                 # Wait for a moment to allow the server to start and register endpoints
                 time.sleep(0.5)
             else:
@@ -2250,7 +2255,7 @@ Context:
         from rich.panel import Panel
         from rich.markdown import Markdown
         from ..task import Task
-        
+
         console = Console()
         
         # Step 1: Create the plan

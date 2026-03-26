@@ -4094,7 +4094,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 "LiteLLM is required but not installed. "
                 "Please install it with: pip install 'praisonaiagents[llm]'"
             )
-        except:
+        except Exception:
+            logging.debug(f"Could not determine response_format support for model {self.model}", exc_info=True)
             return False
 
     def can_use_stop_words(self) -> bool:
@@ -4108,7 +4109,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 "LiteLLM is required but not installed. "
                 "Please install it with: pip install 'praisonaiagents[llm]'"
             )
-        except:
+        except Exception:
+            logging.debug(f"Could not determine stop words support for model {self.model}", exc_info=True)
             return False
 
     def get_context_size(self) -> int:
