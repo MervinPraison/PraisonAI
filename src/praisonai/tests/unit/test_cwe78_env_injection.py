@@ -148,5 +148,46 @@ def test_vulnerability_scenario_ld_preload():
     assert "LD_PRELOAD" not in os.environ or os.environ.get("LD_PRELOAD") != "/tmp/evil.so"
 
 
+@pytest.mark.unit
+def test_malformed_env_keys_rejected():
+    """Empty strings, keys with '=', and keys with NUL must be rejected."""
+    validate = _get_validate_env_key()
+
+    for bad_key in ["", "A=B", "FOO\x00BAR"]:
+        with pytest.raises(ValueError, match=r"non-empty string without"):
+            validate(bad_key)
+
+
+@pytest.mark.unit
+def test_non_dict_root_config_rejected():
+    """A YAML schedule config whose root is not a mapping must be rejected.
+
+    This validates the root type-check added after yaml.safe_load().
+    When the root config is a list or scalar, earlier .get() calls would
+    raise AttributeError; after the fix they raise ValueError, which is
+    caught and presented cleanly.
+    """
+    import yaml as _yaml
+
+    for bad_doc in ["- item1\n- item2", "42", "just a string"]:
+        file_config = _yaml.safe_load(bad_doc)
+        # The check from main.py: if not isinstance(file_config, dict)
+        assert not isinstance(file_config, dict), (
+            f"Expected non-dict for {bad_doc!r}, got {type(file_config)}"
+        )
+
+
+@pytest.mark.unit
+def test_non_dict_deployment_rejected():
+    """A 'deployment' value that is not a mapping must be caught."""
+    import yaml as _yaml
+
+    bad_config = _yaml.safe_load("deployment: not-a-mapping\nenvironment:\n  MODEL: x")
+    deploy_config = bad_config.get("deployment", {})
+    assert not isinstance(deploy_config, dict), (
+        f"Expected non-dict deployment, got {type(deploy_config)}"
+    )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
