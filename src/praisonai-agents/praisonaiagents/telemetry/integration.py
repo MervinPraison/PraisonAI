@@ -39,7 +39,7 @@ def _atexit_cleanup():
     if _telemetry_executor is not None:
         try:
             _telemetry_executor.shutdown(wait=False)
-        except:
+        except Exception:
             pass
         _telemetry_executor = None
     
@@ -96,7 +96,7 @@ def _process_telemetry_queue():
                 import sys
                 if hasattr(sys, 'is_finalizing') and sys.is_finalizing():
                     break
-            except:
+            except Exception:
                 break
                 
             events = []
@@ -112,7 +112,7 @@ def _process_telemetry_queue():
                     _telemetry_queue.task_done()
                 except queue.Empty:
                     continue
-                except:
+                except Exception:
                     break
             
             # Process batch if we have events
@@ -169,17 +169,15 @@ def _process_event_batch(events):
 @contextmanager
 def _performance_mode_context():
     """Context manager for performance-critical operations that minimizes telemetry overhead."""
-    # Store current performance mode state
     global _performance_mode_enabled
-    original_state = _performance_mode_enabled
-    
-    try:
-        # Temporarily enable performance mode for minimal overhead
+    with _queue_lock:
+        original_state = _performance_mode_enabled
         _performance_mode_enabled = True
+    try:
         yield
     finally:
-        # Restore original state
-        _performance_mode_enabled = original_state
+        with _queue_lock:
+            _performance_mode_enabled = original_state
 
 
 def _queue_telemetry_event(event_data):

@@ -453,9 +453,9 @@ class MinimalTelemetry:
                     properties=event_properties
                 )
                 # Don't flush here - let PostHog handle it asynchronously
-            except:
+            except Exception:
                 pass
-        
+
         # Reset counters
         with self._metrics_lock:
             for key in self._metrics:
