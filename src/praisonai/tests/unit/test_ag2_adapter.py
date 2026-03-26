@@ -178,11 +178,11 @@ class TestRunAG2LLMConfig:
         mock_manager = MagicMock()
 
         with patch("praisonai.agents_generator.AG2_AVAILABLE", True), \
-             patch("autogen.LLMConfig", return_value=mock_llm_config) as mock_llmcfg, \
-             patch("autogen.AssistantAgent", return_value=mock_assistant), \
-             patch("autogen.UserProxyAgent", return_value=mock_user_proxy), \
-             patch("autogen.GroupChat", return_value=mock_groupchat), \
-             patch("autogen.GroupChatManager", return_value=mock_manager):
+             patch("autogen.LLMConfig", create=True, return_value=mock_llm_config) as mock_llmcfg, \
+             patch("autogen.AssistantAgent", create=True, return_value=mock_assistant), \
+             patch("autogen.UserProxyAgent", create=True, return_value=mock_user_proxy), \
+             patch("autogen.GroupChat", create=True, return_value=mock_groupchat), \
+             patch("autogen.GroupChatManager", create=True, return_value=mock_manager):
 
             config = _make_config()
             gen._run_ag2(config, "Test topic", {})
@@ -213,11 +213,11 @@ class TestRunAG2LLMConfig:
         mock_groupchat.messages = [{"name": "Agent", "content": "Report ready. TERMINATE", "role": "assistant"}]
         mock_manager = MagicMock()
 
-        with patch("autogen.LLMConfig", return_value=mock_llm_config) as mock_llmcfg, \
-             patch("autogen.AssistantAgent", return_value=mock_assistant), \
-             patch("autogen.UserProxyAgent", return_value=mock_user_proxy), \
-             patch("autogen.GroupChat", return_value=mock_groupchat), \
-             patch("autogen.GroupChatManager", return_value=mock_manager):
+        with patch("autogen.LLMConfig", create=True, return_value=mock_llm_config) as mock_llmcfg, \
+             patch("autogen.AssistantAgent", create=True, return_value=mock_assistant), \
+             patch("autogen.UserProxyAgent", create=True, return_value=mock_user_proxy), \
+             patch("autogen.GroupChat", create=True, return_value=mock_groupchat), \
+             patch("autogen.GroupChatManager", create=True, return_value=mock_manager):
 
             config = _make_config()
             gen._run_ag2(config, "AWS deployment", {})
@@ -280,11 +280,11 @@ class TestRunAG2AgentCreation:
         mock_groupchat.messages = [{"name": "Agent A", "content": "Done. TERMINATE", "role": "assistant"}]
         mock_manager = MagicMock()
 
-        with patch("autogen.LLMConfig", return_value=mock_llm_config), \
-             patch("autogen.AssistantAgent", side_effect=fake_assistant), \
-             patch("autogen.UserProxyAgent", return_value=mock_user_proxy), \
-             patch("autogen.GroupChat", return_value=mock_groupchat), \
-             patch("autogen.GroupChatManager", return_value=mock_manager):
+        with patch("autogen.LLMConfig", create=True, return_value=mock_llm_config), \
+             patch("autogen.AssistantAgent", create=True, side_effect=fake_assistant), \
+             patch("autogen.UserProxyAgent", create=True, return_value=mock_user_proxy), \
+             patch("autogen.GroupChat", create=True, return_value=mock_groupchat), \
+             patch("autogen.GroupChatManager", create=True, return_value=mock_manager):
 
             gen._run_ag2(config, "Test", {})
 
@@ -313,11 +313,11 @@ class TestRunAG2AgentCreation:
             groupchat_call_args.update(kwargs)
             return mock_groupchat
 
-        with patch("autogen.LLMConfig", return_value=mock_llm_config), \
-             patch("autogen.AssistantAgent", return_value=mock_assistant), \
-             patch("autogen.UserProxyAgent", return_value=mock_user_proxy), \
-             patch("autogen.GroupChat", side_effect=capture_groupchat), \
-             patch("autogen.GroupChatManager", return_value=mock_manager):
+        with patch("autogen.LLMConfig", create=True, return_value=mock_llm_config), \
+             patch("autogen.AssistantAgent", create=True, return_value=mock_assistant), \
+             patch("autogen.UserProxyAgent", create=True, return_value=mock_user_proxy), \
+             patch("autogen.GroupChat", create=True, side_effect=capture_groupchat), \
+             patch("autogen.GroupChatManager", create=True, return_value=mock_manager):
 
             gen._run_ag2(config, "Test", {})
 
@@ -335,9 +335,9 @@ class TestRunAG2AgentCreation:
         mock_llm_config.__exit__ = MagicMock(return_value=False)
         mock_user_proxy = MagicMock()
 
-        with patch("autogen.LLMConfig", return_value=mock_llm_config), \
+        with patch("autogen.LLMConfig", create=True, return_value=mock_llm_config), \
              patch("autogen.AssistantAgent"), \
-             patch("autogen.UserProxyAgent", return_value=mock_user_proxy):
+             patch("autogen.UserProxyAgent", create=True, return_value=mock_user_proxy):
 
             result = gen._run_ag2(config, "Test", {})
 
@@ -391,11 +391,11 @@ class TestRunAG2SystemMessage:
             m.name = kwargs.get("name", "agent")
             return m
 
-        with patch("autogen.LLMConfig", return_value=mock_llm_config), \
-             patch("autogen.AssistantAgent", side_effect=capture_assistant), \
-             patch("autogen.UserProxyAgent", return_value=mock_user_proxy), \
-             patch("autogen.GroupChat", return_value=mock_groupchat), \
-             patch("autogen.GroupChatManager", return_value=mock_manager):
+        with patch("autogen.LLMConfig", create=True, return_value=mock_llm_config), \
+             patch("autogen.AssistantAgent", create=True, side_effect=capture_assistant), \
+             patch("autogen.UserProxyAgent", create=True, return_value=mock_user_proxy), \
+             patch("autogen.GroupChat", create=True, return_value=mock_groupchat), \
+             patch("autogen.GroupChatManager", create=True, return_value=mock_manager):
 
             gen._run_ag2(config, "Test", {})
 
@@ -430,11 +430,11 @@ class TestRunAG2SystemMessage:
             m.name = created_name["name"]
             return m
 
-        with patch("autogen.LLMConfig", return_value=mock_llm_config), \
-             patch("autogen.AssistantAgent", side_effect=capture_assistant), \
-             patch("autogen.UserProxyAgent", return_value=mock_user_proxy), \
-             patch("autogen.GroupChat", return_value=mock_groupchat), \
-             patch("autogen.GroupChatManager", return_value=mock_manager):
+        with patch("autogen.LLMConfig", create=True, return_value=mock_llm_config), \
+             patch("autogen.AssistantAgent", create=True, side_effect=capture_assistant), \
+             patch("autogen.UserProxyAgent", create=True, return_value=mock_user_proxy), \
+             patch("autogen.GroupChat", create=True, return_value=mock_groupchat), \
+             patch("autogen.GroupChatManager", create=True, return_value=mock_manager):
 
             gen._run_ag2(config, "Test", {})
 
@@ -478,11 +478,11 @@ class TestRunAG2OutputExtraction:
         mock_groupchat.messages = messages
         mock_manager = MagicMock()
 
-        with patch("autogen.LLMConfig", return_value=mock_llm_config), \
-             patch("autogen.AssistantAgent", return_value=mock_assistant), \
-             patch("autogen.UserProxyAgent", return_value=mock_user_proxy), \
-             patch("autogen.GroupChat", return_value=mock_groupchat), \
-             patch("autogen.GroupChatManager", return_value=mock_manager):
+        with patch("autogen.LLMConfig", create=True, return_value=mock_llm_config), \
+             patch("autogen.AssistantAgent", create=True, return_value=mock_assistant), \
+             patch("autogen.UserProxyAgent", create=True, return_value=mock_user_proxy), \
+             patch("autogen.GroupChat", create=True, return_value=mock_groupchat), \
+             patch("autogen.GroupChatManager", create=True, return_value=mock_manager):
 
             return gen._run_ag2(config, "Test", {})
 
@@ -526,11 +526,11 @@ class TestRunAG2OutputExtraction:
         mock_groupchat.messages = []
         mock_manager = MagicMock()
 
-        with patch("autogen.LLMConfig", return_value=mock_llm_config), \
-             patch("autogen.AssistantAgent", return_value=mock_assistant), \
-             patch("autogen.UserProxyAgent", return_value=mock_user_proxy), \
-             patch("autogen.GroupChat", return_value=mock_groupchat), \
-             patch("autogen.GroupChatManager", return_value=mock_manager):
+        with patch("autogen.LLMConfig", create=True, return_value=mock_llm_config), \
+             patch("autogen.AssistantAgent", create=True, return_value=mock_assistant), \
+             patch("autogen.UserProxyAgent", create=True, return_value=mock_user_proxy), \
+             patch("autogen.GroupChat", create=True, return_value=mock_groupchat), \
+             patch("autogen.GroupChatManager", create=True, return_value=mock_manager):
 
             result = gen._run_ag2(config, "Test", {})
 

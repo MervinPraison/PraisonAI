@@ -446,10 +446,30 @@ class AgentsGenerator:
         )
 
         model_config = self.config_list[0] if self.config_list else {}
-        api_type = model_config.get("api_type", "openai").lower()
-        model_name = model_config.get("model", "gpt-4o-mini")
-        api_key = model_config.get("api_key") or os.environ.get("OPENAI_API_KEY")
-        base_url = model_config.get("base_url") or os.environ.get("OPENAI_BASE_URL")
+
+        # Allow YAML top-level llm block to override config_list values
+        yaml_llm = config.get("llm", {}) or {}
+        # Also check first role's llm block as a fallback
+        first_role_llm = {}
+        for role_details in config.get("roles", {}).values():
+            first_role_llm = role_details.get("llm", {}) or {}
+            break
+
+        # Priority: YAML top-level llm > first role llm > config_list > env vars
+        def _resolve(key, env_var=None, default=None):
+            return (yaml_llm.get(key) or first_role_llm.get(key)
+                    or model_config.get(key)
+                    or (os.environ.get(env_var) if env_var else None)
+                    or default)
+
+        api_type = _resolve("api_type", default="openai").lower()
+        model_name = _resolve("model", default="gpt-4o-mini")
+        api_key = _resolve("api_key", env_var="OPENAI_API_KEY")
+        # Fix #3: also check OPENAI_API_BASE for consistency with rest of codebase
+        base_url = (model_config.get("base_url")
+                    or yaml_llm.get("base_url")
+                    or os.environ.get("OPENAI_BASE_URL")
+                    or os.environ.get("OPENAI_API_BASE"))
 
         # Build LLMConfig — pass a config dict; Bedrock needs no api_key
         if api_type == "bedrock":
@@ -458,7 +478,7 @@ class AgentsGenerator:
             llm_config_entry = {"model": model_name}
             if api_key:
                 llm_config_entry["api_key"] = api_key
-            if base_url and base_url != "https://api.openai.com/v1":
+            if base_url and base_url not in ("https://api.openai.com/v1", "https://api.openai.com/v1/"):
                 llm_config_entry["base_url"] = base_url
         llm_config = LLMConfig(llm_config_entry)
 

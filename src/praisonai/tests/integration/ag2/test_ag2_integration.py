@@ -208,11 +208,11 @@ class TestAG2SingleAgentFlow:
                 config_list=[{"model": "gpt-4o-mini", "api_key": "sk-test"}],
             )
 
-            with patch("autogen.LLMConfig", return_value=m["llm_config"]), \
-                 patch("autogen.AssistantAgent", return_value=m["assistant"]), \
-                 patch("autogen.UserProxyAgent", return_value=m["user_proxy"]), \
-                 patch("autogen.GroupChat", return_value=m["groupchat"]), \
-                 patch("autogen.GroupChatManager", return_value=m["manager"]):
+            with patch("autogen.LLMConfig", create=True, return_value=m["llm_config"]), \
+                 patch("autogen.AssistantAgent", create=True, return_value=m["assistant"]), \
+                 patch("autogen.UserProxyAgent", create=True, return_value=m["user_proxy"]), \
+                 patch("autogen.GroupChat", create=True, return_value=m["groupchat"]), \
+                 patch("autogen.GroupChatManager", create=True, return_value=m["manager"]):
 
                 result = gen._run_ag2(config, "Write a poem", {})
 
@@ -254,11 +254,11 @@ class TestAG2SingleAgentFlow:
                 config_list=[{"model": "gpt-4o-mini", "api_key": "sk-test"}],
             )
 
-            with patch("autogen.LLMConfig", return_value=m["llm_config"]), \
-                 patch("autogen.AssistantAgent", return_value=m["assistant"]), \
-                 patch("autogen.UserProxyAgent", return_value=m["user_proxy"]), \
-                 patch("autogen.GroupChat", return_value=m["groupchat"]), \
-                 patch("autogen.GroupChatManager", return_value=m["manager"]):
+            with patch("autogen.LLMConfig", create=True, return_value=m["llm_config"]), \
+                 patch("autogen.AssistantAgent", create=True, return_value=m["assistant"]), \
+                 patch("autogen.UserProxyAgent", create=True, return_value=m["user_proxy"]), \
+                 patch("autogen.GroupChat", create=True, return_value=m["groupchat"]), \
+                 patch("autogen.GroupChatManager", create=True, return_value=m["manager"]):
 
                 gen._run_ag2(config, "Test topic", {})
 
@@ -321,11 +321,11 @@ class TestAG2MultiAgentGroupChatFlow:
                 config_list=[{"model": "gpt-4o-mini", "api_key": "sk-test"}],
             )
 
-            with patch("autogen.LLMConfig", return_value=m["llm_config"]), \
-                 patch("autogen.AssistantAgent", side_effect=count_assistant), \
-                 patch("autogen.UserProxyAgent", return_value=m["user_proxy"]), \
-                 patch("autogen.GroupChat", return_value=m["groupchat"]), \
-                 patch("autogen.GroupChatManager", return_value=m["manager"]):
+            with patch("autogen.LLMConfig", create=True, return_value=m["llm_config"]), \
+                 patch("autogen.AssistantAgent", create=True, side_effect=count_assistant), \
+                 patch("autogen.UserProxyAgent", create=True, return_value=m["user_proxy"]), \
+                 patch("autogen.GroupChat", create=True, return_value=m["groupchat"]), \
+                 patch("autogen.GroupChatManager", create=True, return_value=m["manager"]):
 
                 gen._run_ag2(config, "Explain open-source AI", {})
 
@@ -368,11 +368,11 @@ class TestAG2MultiAgentGroupChatFlow:
                 config_list=[{"model": "gpt-4o-mini", "api_key": "sk-test"}],
             )
 
-            with patch("autogen.LLMConfig", return_value=m["llm_config"]), \
-                 patch("autogen.AssistantAgent", return_value=m["assistant"]), \
-                 patch("autogen.UserProxyAgent", return_value=m["user_proxy"]), \
-                 patch("autogen.GroupChat", side_effect=capture_groupchat), \
-                 patch("autogen.GroupChatManager", return_value=m["manager"]):
+            with patch("autogen.LLMConfig", create=True, return_value=m["llm_config"]), \
+                 patch("autogen.AssistantAgent", create=True, return_value=m["assistant"]), \
+                 patch("autogen.UserProxyAgent", create=True, return_value=m["user_proxy"]), \
+                 patch("autogen.GroupChat", create=True, side_effect=capture_groupchat), \
+                 patch("autogen.GroupChatManager", create=True, return_value=m["manager"]):
 
                 gen._run_ag2(config, "Test", {})
 
@@ -461,11 +461,11 @@ class TestAG2BackwardCompatibility:
             })
 
             with patch.object(gen, "_run_autogen") as mock_autogen, \
-                 patch("autogen.LLMConfig", return_value=m["llm_config"]), \
-                 patch("autogen.AssistantAgent", return_value=m["assistant"]), \
-                 patch("autogen.UserProxyAgent", return_value=m["user_proxy"]), \
-                 patch("autogen.GroupChat", return_value=m["groupchat"]), \
-                 patch("autogen.GroupChatManager", return_value=m["manager"]):
+                 patch("autogen.LLMConfig", create=True, return_value=m["llm_config"]), \
+                 patch("autogen.AssistantAgent", create=True, return_value=m["assistant"]), \
+                 patch("autogen.UserProxyAgent", create=True, return_value=m["user_proxy"]), \
+                 patch("autogen.GroupChat", create=True, return_value=m["groupchat"]), \
+                 patch("autogen.GroupChatManager", create=True, return_value=m["manager"]):
 
                 result = gen.generate_crew_and_kickoff()
 
