@@ -14,7 +14,8 @@ import inspect
 # This reduces import time from ~420ms to ~20ms for silent mode
 # ============================================================================
 
-# Lazy-loaded modules (populated on first use)
+# Lazy-loaded modules (populated on first use, protected by _lazy_import_lock)
+_lazy_import_lock = threading.Lock()
 _rich_console = None
 _rich_live = None
 _llm_module = None
@@ -23,75 +24,87 @@ _hooks_module = None
 _stream_emitter_class = None
 
 def _get_console():
-    """Lazy load rich.console.Console."""
+    """Lazy load rich.console.Console (thread-safe)."""
     global _rich_console
     if _rich_console is None:
-        from rich.console import Console
-        _rich_console = Console
+        with _lazy_import_lock:
+            if _rich_console is None:
+                from rich.console import Console
+                _rich_console = Console
     return _rich_console
 
 def _get_live():
-    """Lazy load rich.live.Live."""
+    """Lazy load rich.live.Live (thread-safe)."""
     global _rich_live
     if _rich_live is None:
-        from rich.live import Live
-        _rich_live = Live
+        with _lazy_import_lock:
+            if _rich_live is None:
+                from rich.live import Live
+                _rich_live = Live
     return _rich_live
 
 def _get_llm_functions():
-    """Lazy load LLM functions."""
+    """Lazy load LLM functions (thread-safe)."""
     global _llm_module
     if _llm_module is None:
-        from ..llm import get_openai_client, process_stream_chunks
-        _llm_module = {
-            'get_openai_client': get_openai_client,
-            'process_stream_chunks': process_stream_chunks,
-        }
+        with _lazy_import_lock:
+            if _llm_module is None:
+                from ..llm import get_openai_client, process_stream_chunks
+                _llm_module = {
+                    'get_openai_client': get_openai_client,
+                    'process_stream_chunks': process_stream_chunks,
+                }
     return _llm_module
 
 def _get_display_functions():
-    """Lazy load display functions from main module."""
+    """Lazy load display functions from main module (thread-safe)."""
     global _main_module
     if _main_module is None:
-        from ..main import (
-            display_error,
-            display_instruction,
-            display_interaction,
-            display_generating,
-            display_self_reflection,
-            ReflectionOutput,
-            adisplay_instruction,
-            execute_sync_callback
-        )
-        _main_module = {
-            'display_error': display_error,
-            'display_instruction': display_instruction,
-            'display_interaction': display_interaction,
-            'display_generating': display_generating,
-            'display_self_reflection': display_self_reflection,
-            'ReflectionOutput': ReflectionOutput,
-            'adisplay_instruction': adisplay_instruction,
-            'execute_sync_callback': execute_sync_callback,
-        }
+        with _lazy_import_lock:
+            if _main_module is None:
+                from ..main import (
+                    display_error,
+                    display_instruction,
+                    display_interaction,
+                    display_generating,
+                    display_self_reflection,
+                    ReflectionOutput,
+                    adisplay_instruction,
+                    execute_sync_callback
+                )
+                _main_module = {
+                    'display_error': display_error,
+                    'display_instruction': display_instruction,
+                    'display_interaction': display_interaction,
+                    'display_generating': display_generating,
+                    'display_self_reflection': display_self_reflection,
+                    'ReflectionOutput': ReflectionOutput,
+                    'adisplay_instruction': adisplay_instruction,
+                    'execute_sync_callback': execute_sync_callback,
+                }
     return _main_module
 
 def _get_hooks_module():
-    """Lazy load hooks module for HookRunner and HookRegistry."""
+    """Lazy load hooks module for HookRunner and HookRegistry (thread-safe)."""
     global _hooks_module
     if _hooks_module is None:
-        from ..hooks import HookRunner, HookRegistry
-        _hooks_module = {
-            'HookRunner': HookRunner,
-            'HookRegistry': HookRegistry,
-        }
+        with _lazy_import_lock:
+            if _hooks_module is None:
+                from ..hooks import HookRunner, HookRegistry
+                _hooks_module = {
+                    'HookRunner': HookRunner,
+                    'HookRegistry': HookRegistry,
+                }
     return _hooks_module
 
 def _get_stream_emitter():
-    """Lazy load StreamEventEmitter class."""
+    """Lazy load StreamEventEmitter class (thread-safe)."""
     global _stream_emitter_class
     if _stream_emitter_class is None:
-        from ..streaming.events import StreamEventEmitter
-        _stream_emitter_class = StreamEventEmitter
+        with _lazy_import_lock:
+            if _stream_emitter_class is None:
+                from ..streaming.events import StreamEventEmitter
+                _stream_emitter_class = StreamEventEmitter
     return _stream_emitter_class
 
 # File extensions that indicate a file path (for output parameter detection)
@@ -159,6 +172,8 @@ class Agent:
     _agent_counter = 0
     _agent_counter_lock = threading.Lock()
     # Class-level cache for environment variables (avoid repeated os.environ.get)
+    # Protected by _env_cache_lock for thread safety
+    _env_cache_lock = threading.Lock()
     _env_output_mode = None
     _env_output_checked = False
     _default_model = None
@@ -189,18 +204,22 @@ class Agent:
     
     @classmethod
     def _get_env_output_mode(cls):
-        """Get cached PRAISONAI_OUTPUT env var value."""
+        """Get cached PRAISONAI_OUTPUT env var value (thread-safe)."""
         if not cls._env_output_checked:
-            cls._env_output_mode = os.environ.get('PRAISONAI_OUTPUT', '').lower()
-            cls._env_output_checked = True
+            with cls._env_cache_lock:
+                if not cls._env_output_checked:
+                    cls._env_output_mode = os.environ.get('PRAISONAI_OUTPUT', '').lower()
+                    cls._env_output_checked = True
         return cls._env_output_mode
     
     @classmethod
     def _get_default_model(cls):
-        """Get cached default model name from OPENAI_MODEL_NAME env var."""
+        """Get cached default model name from OPENAI_MODEL_NAME env var (thread-safe)."""
         if not cls._default_model_checked:
-            cls._default_model = os.getenv('OPENAI_MODEL_NAME', 'gpt-4o-mini')
-            cls._default_model_checked = True
+            with cls._env_cache_lock:
+                if not cls._default_model_checked:
+                    cls._default_model = os.getenv('OPENAI_MODEL_NAME', 'gpt-4o-mini')
+                    cls._default_model_checked = True
         return cls._default_model
     
     @classmethod
