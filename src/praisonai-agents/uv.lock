@@ -2951,7 +2951,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.5.83"
+version = "1.5.84"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -3054,8 +3054,8 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115.0" },
     { name = "fastapi", marker = "extra == 'mcp'", specifier = ">=0.115.0" },
     { name = "fastapi", marker = "extra == 'os'", specifier = ">=0.115.0" },
-    { name = "litellm", marker = "extra == 'llm'", specifier = ">=1.81.0" },
-    { name = "litellm", marker = "extra == 'memory'", specifier = ">=1.81.0" },
+    { name = "litellm", marker = "extra == 'llm'", specifier = ">=1.81.0,<=1.82.6" },
+    { name = "litellm", marker = "extra == 'memory'", specifier = ">=1.81.0,<=1.82.6" },
     { name = "markitdown", extras = ["all"], marker = "extra == 'knowledge'", specifier = ">=0.1.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.20.0" },
     { name = "mem0ai", marker = "extra == 'knowledge'", specifier = ">=0.1.0" },
