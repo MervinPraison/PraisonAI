@@ -167,6 +167,25 @@ if TYPE_CHECKING:
     from ..rag.models import RAGResult, ContextPack
     from ..eval.results import EvaluationLoopResult
 
+class BudgetExceededError(Exception):
+    """Raised when an agent exceeds its max_budget.
+
+    Usage:
+        try:
+            agent.start("...")
+        except BudgetExceededError as e:
+            print(f"Agent '{e.agent_name}' spent ${e.total_cost:.4f} of ${e.max_budget:.4f}")
+    """
+    def __init__(self, agent_name: str, total_cost: float, max_budget: float):
+        self.agent_name = agent_name
+        self.total_cost = total_cost
+        self.max_budget = max_budget
+        super().__init__(
+            f"Agent '{agent_name}' exceeded budget: "
+            f"${total_cost:.4f} >= ${max_budget:.4f}"
+        )
+
+
 class Agent:
     # Class-level counter for generating unique display names for nameless agents
     _agent_counter = 0
@@ -826,8 +845,13 @@ class Agent:
                 allow_code_execution = True
             if _exec_config.code_mode != "safe":
                 code_execution_mode = _exec_config.code_mode
+            # Budget guard extraction
+            _max_budget = getattr(_exec_config, 'max_budget', None)
+            _on_budget_exceeded = getattr(_exec_config, 'on_budget_exceeded', 'stop') or 'stop'
         else:
             max_iter, max_rpm, max_execution_time, max_retry_limit = 20, None, None, 2
+            _max_budget = None
+            _on_budget_exceeded = 'stop'
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve TEMPLATES param - FAST PATH
@@ -1470,6 +1494,13 @@ class Agent:
         self._has_explicit_output_config = _has_explicit_output  # Track if user set output mode
         self.allow_delegation = allow_delegation
         self.step_callback = step_callback
+        # Token budget guard (zero overhead when _max_budget is None)
+        self._max_budget = _max_budget
+        self._on_budget_exceeded = _on_budget_exceeded
+        self._total_cost = 0.0
+        self._total_tokens_in = 0
+        self._total_tokens_out = 0
+        self._llm_call_count = 0
         self.cache = cache
         self.system_template = system_template
         self.prompt_template = prompt_template
@@ -1551,8 +1582,25 @@ Your Goal: {self.goal}
         # True = AutoApproveBackend, False/None = registry fallback,
         # object = custom backend (dangerous tools only),
         # ApprovalConfig = full control (all_tools, timeout, etc.)
+        # str = permission preset ("safe", "read_only", "full")
         from ..approval.protocols import ApprovalConfig
-        if approval is True:
+        self._perm_deny = frozenset()  # Permission tier deny set (empty = no denials)
+        self._perm_allow = None        # Permission tier allow set (None = allow all)
+        if isinstance(approval, str) and approval not in ('True', 'False'):
+            # Permission preset: "safe", "read_only", "full"
+            from ..approval.registry import PERMISSION_PRESETS
+            preset_deny = PERMISSION_PRESETS.get(approval)
+            if preset_deny is not None:
+                self._perm_deny = preset_deny
+                self._approval_backend = None
+                self._approve_all_tools = False
+                self._approval_timeout = 0
+            else:
+                # Unknown string — treat as no approval
+                self._approval_backend = None
+                self._approve_all_tools = False
+                self._approval_timeout = 0
+        elif approval is True:
             from ..approval.backends import AutoApproveBackend
             self._approval_backend = AutoApproveBackend()
             self._approve_all_tools = False
@@ -1766,6 +1814,25 @@ Your Goal: {self.goal}
     @thinking_budget.setter
     def thinking_budget(self, value):
         self._thinking_budget = value
+
+    @property
+    def total_cost(self) -> float:
+        """Cumulative USD cost of all LLM calls in this agent run."""
+        return self._total_cost
+
+    @property
+    def cost_summary(self) -> dict:
+        """Summary of cost and token usage.
+
+        Returns:
+            dict with keys: tokens_in, tokens_out, cost, llm_calls
+        """
+        return {
+            "tokens_in": self._total_tokens_in,
+            "tokens_out": self._total_tokens_out,
+            "cost": self._total_cost,
+            "llm_calls": self._llm_call_count,
+        }
 
     @property
     def context_manager(self):
@@ -4962,6 +5029,12 @@ Your Goal: {self.goal}"""
     
     def _check_tool_approval_sync(self, function_name, arguments):
         """Check tool approval synchronously. Returns (decision, arguments) or error dict."""
+        # Permission tier fast-path (O(1) frozenset lookup, resolved at __init__)
+        if self._perm_deny and function_name in self._perm_deny:
+            return {"error": f"Tool '{function_name}' blocked by permission policy", "permission_denied": True}
+        if self._perm_allow is not None and function_name not in self._perm_allow:
+            return {"error": f"Tool '{function_name}' not in allowed tools list", "permission_denied": True}
+
         from ..approval import get_approval_registry
         backend = getattr(self, '_approval_backend', None)
         approve_all = getattr(self, '_approve_all_tools', False)
@@ -5580,6 +5653,22 @@ Your Goal: {self.goal}"""
                 completion_tokens=_completion_tokens,
                 cost_usd=_cost_usd,
             )
+
+            # Budget tracking & enforcement (zero overhead when _max_budget is None)
+            self._total_cost += _cost_usd
+            self._total_tokens_in += _prompt_tokens
+            self._total_tokens_out += _completion_tokens
+            self._llm_call_count += 1
+            if self._max_budget and self._total_cost >= self._max_budget:
+                if self._on_budget_exceeded == "stop":
+                    raise BudgetExceededError(self.name, self._total_cost, self._max_budget)
+                elif self._on_budget_exceeded == "warn":
+                    logging.warning(
+                        f"[budget] {self.name}: ${self._total_cost:.4f} exceeded "
+                        f"${self._max_budget:.4f} budget"
+                    )
+                elif callable(self._on_budget_exceeded):
+                    self._on_budget_exceeded(self._total_cost, self._max_budget)
             
             # Trigger AFTER_LLM hook
             from ..hooks import HookEvent, AfterLLMInput

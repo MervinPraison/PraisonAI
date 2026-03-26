@@ -679,6 +679,12 @@ class ExecutionConfig:
             code_mode="safe",
             rate_limiter=my_limiter,
         ))
+        
+        # With token budget guard
+        Agent(execution=ExecutionConfig(
+            max_budget=0.50,              # Hard USD limit per agent run
+            on_budget_exceeded="stop",    # "stop" | "warn" | callable
+        ))
     """
     # Iteration limits
     max_iter: int = 20
@@ -707,6 +713,14 @@ class ExecutionConfig:
     # Token limit before compaction triggers. None = auto-detect from model metadata.
     max_context_tokens: Optional[int] = None
 
+    # Token budget guard — hard dollar limit per agent run.
+    # None = disabled (zero overhead). Float = max USD spend.
+    max_budget: Optional[float] = None
+
+    # Action when budget exceeded: "stop" (default) raises BudgetExceededError,
+    # "warn" logs warning but continues, or callable(total_cost, max_budget).
+    on_budget_exceeded: Any = "stop"
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -718,6 +732,7 @@ class ExecutionConfig:
             "code_mode": self.code_mode,
             "context_compaction": self.context_compaction,
             "max_context_tokens": self.max_context_tokens,
+            "max_budget": self.max_budget,
         }
 
 

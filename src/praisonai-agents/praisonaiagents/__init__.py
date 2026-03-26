@@ -203,6 +203,9 @@ _LAZY_IMPORTS = {
     
     # Agent classes
     'Agent': ('praisonaiagents.agent.agent', 'Agent'),
+    'BudgetExceededError': ('praisonaiagents.agent.agent', 'BudgetExceededError'),
+    'Heartbeat': ('praisonaiagents.agent.heartbeat', 'Heartbeat'),
+    'HeartbeatConfig': ('praisonaiagents.agent.heartbeat', 'HeartbeatConfig'),
     'ImageAgent': ('praisonaiagents.agent.image_agent', 'ImageAgent'),
     'VideoAgent': ('praisonaiagents.agent.video_agent', 'VideoAgent'),
     'VideoConfig': ('praisonaiagents.agent.video_agent', 'VideoConfig'),

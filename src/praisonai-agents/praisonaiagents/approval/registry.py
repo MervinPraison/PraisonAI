@@ -45,6 +45,19 @@ DEFAULT_DANGEROUS_TOOLS: Dict[str, str] = {
     "scrape_page": "medium",
 }
 
+# Permission presets — resolved to deny frozensets at Agent.__init__ time.
+# Usage: Agent(approval="safe")
+PERMISSION_PRESETS = {
+    # "safe" — blocks all dangerous tools (file writes, shell exec, etc.)
+    "safe": frozenset(DEFAULT_DANGEROUS_TOOLS.keys()),
+    # "read_only" — blocks dangerous tools + write operations
+    "read_only": frozenset(DEFAULT_DANGEROUS_TOOLS.keys()) | frozenset({
+        "write_file", "copy_file", "move_file",
+    }),
+    # "full" — no restrictions
+    "full": frozenset(),
+}
+
 
 class ApprovalRegistry:
     """Per-agent approval configuration.

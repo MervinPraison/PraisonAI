@@ -13,6 +13,18 @@ def __getattr__(name):
         from .agent import Agent
         _lazy_cache[name] = Agent
         return Agent
+    if name == 'BudgetExceededError':
+        from .agent import BudgetExceededError
+        _lazy_cache[name] = BudgetExceededError
+        return BudgetExceededError
+    if name == 'Heartbeat':
+        from .heartbeat import Heartbeat
+        _lazy_cache[name] = Heartbeat
+        return Heartbeat
+    if name == 'HeartbeatConfig':
+        from .heartbeat import HeartbeatConfig
+        _lazy_cache[name] = HeartbeatConfig
+        return HeartbeatConfig
     
     # Specialized agents - lazy loaded (import rich)
     if name == 'ImageAgent':
@@ -145,6 +157,9 @@ def __getattr__(name):
 
 __all__ = [
     'Agent',
+    'BudgetExceededError',
+    'Heartbeat',
+    'HeartbeatConfig',
     'ImageAgent',
     'VideoAgent',
     'VideoConfig',
