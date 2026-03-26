@@ -106,6 +106,10 @@ def _validate_env_key(key) -> None:
         raise ValueError(
             f"Environment variable key must be a string, got {type(key).__name__}: {key!r}"
         )
+    if not key or "=" in key or "\x00" in key:
+        raise ValueError(
+            "Environment variable key must be a non-empty string without '=' or NUL characters."
+        )
     if key.upper() in _BLOCKED_ENV_KEYS_UPPER:
         raise ValueError(
             f"Setting environment variable '{key}' is not allowed in schedule "
@@ -490,9 +494,17 @@ class PraisonAI:
                     try:
                         with open(args.schedule_config, 'r') as f:
                             file_config = yaml.safe_load(f)
+                        if file_config is None:
+                            file_config = {}
+                        if not isinstance(file_config, dict):
+                            raise ValueError("Schedule config must be a YAML mapping")
                         
                         # Extract deployment config
                         deploy_config = file_config.get('deployment', {})
+                        if deploy_config is None:
+                            deploy_config = {}
+                        if not isinstance(deploy_config, dict):
+                            raise ValueError("'deployment' must be a mapping")
                         schedule_expr = schedule_expr or deploy_config.get('schedule')
                         provider = deploy_config.get('provider', provider)
                         config['max_retries'] = deploy_config.get('max_retries', config['max_retries'])
