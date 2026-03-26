@@ -14,15 +14,15 @@ import pytest
 
 
 class _SandboxHarness:
-    """Directly exercises PythonTools sandbox without installing black/pylint."""
+    """Directly exercises execute_code sandbox without installing black/pylint."""
 
     def __init__(self):
-        # Import the class but bypass _check_dependencies
-        from praisonaiagents.tools.python_tools import PythonTools
-        self._pt = PythonTools.__new__(PythonTools)
+        # Import the standalone execute_code function (no optional deps needed)
+        from praisonaiagents.tools.python_tools import execute_code
+        self._execute_code = execute_code
 
     def run(self, code: str) -> dict:
-        return self._pt.execute_code.__wrapped__(self._pt, code)
+        return self._execute_code.__wrapped__(code)
 
 
 @pytest.fixture
