@@ -91,6 +91,7 @@ call = [
 train = []
 crewai = ["crewai>=0.157.0", "praisonai-tools>=0.1.0"]
 autogen = ["pyautogen==0.2.29", "praisonai-tools>=0.1.0", "crewai"]
+ag2 = ["ag2>=0.11.0", "praisonai-tools>=0.1.0"]
 autogen-v4 = [
     "autogen-agentchat>=0.4.0", 
     "autogen-ext[openai]>=0.4.0", 
