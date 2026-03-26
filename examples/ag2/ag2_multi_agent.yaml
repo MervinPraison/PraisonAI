@@ -1,0 +1,54 @@
+framework: ag2
+topic: "The impact of open-source AI on enterprise software development"
+
+# Install: pip install "praisonai[ag2]"
+# Run:     praisonai --framework ag2 examples/ag2/ag2_multi_agent.yaml
+#       or praisonai run examples/ag2/ag2_multi_agent.yaml --framework ag2
+#
+# This example demonstrates AG2's GroupChat multi-agent coordination.
+# Both agents participate in a collaborative conversation managed by
+# a GroupChatManager until the task is complete.
+
+roles:
+  researcher:
+    role: "Research Specialist"
+    goal: "Gather and analyse information on the given topic"
+    backstory: |
+      You are a meticulous researcher who excels at finding relevant
+      information, analysing trends, and presenting data-backed insights.
+      You always cite your reasoning and structure your findings clearly.
+    tasks:
+      research_task:
+        description: |
+          Research the topic: {topic}
+
+          Investigate:
+          1. Current state and adoption rates
+          2. Key players and projects driving the trend
+          3. Technical advantages and challenges
+          4. Business impact and cost implications
+        expected_output: |
+          A structured research briefing with findings on the topic,
+          including key data points, trends, and technical observations.
+
+  writer:
+    role: "Technical Content Writer"
+    goal: "Transform research findings into clear, engaging written content"
+    backstory: |
+      You are a skilled technical writer who turns complex research into
+      accessible, well-structured articles. You focus on clarity, logical
+      flow, and actionable takeaways for a professional audience.
+    tasks:
+      writing_task:
+        description: |
+          Using the research findings provided by the Research Specialist,
+          write a concise article on: {topic}
+
+          The article should:
+          1. Open with a compelling hook
+          2. Present key findings logically
+          3. Include practical implications for developers
+          4. Close with a forward-looking conclusion
+        expected_output: |
+          A 400-500 word article suitable for a technical blog,
+          with clear sections, professional tone, and concrete takeaways.

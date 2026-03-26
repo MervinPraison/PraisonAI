@@ -1,0 +1,42 @@
+framework: ag2
+topic: "Cloud-native AI deployment strategies on AWS"
+
+# AG2 exclusive feature: native AWS Bedrock support via LLMConfig(api_type="bedrock")
+#
+# Prerequisites:
+#   pip install "praisonai[ag2]"
+#   aws configure  (or set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION)
+#
+# Run:
+#   praisonai --framework ag2 examples/ag2/ag2_bedrock.yaml
+#
+# The AG2 adapter detects api_type="bedrock" from the llm config and uses
+# LLMConfig(api_type="bedrock", model=...) — no OPENAI_API_KEY required.
+# AWS credentials are sourced from boto3 (env vars, ~/.aws/credentials, IAM role).
+
+roles:
+  cloud_architect:
+    role: "AWS Cloud Architect"
+    goal: "Design and explain cloud-native AI deployment strategies on AWS"
+    backstory: |
+      You are an AWS Solutions Architect specialising in AI/ML workloads.
+      You have deep expertise in Amazon Bedrock, SageMaker, ECS, and Lambda,
+      and you help organisations deploy AI agents at scale securely and cost-effectively.
+    llm:
+      model: "bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0"
+      api_type: "bedrock"
+      aws_region: "us-east-1"
+    tasks:
+      architecture_task:
+        description: |
+          Design a cloud-native deployment strategy for AI agents on AWS for: {topic}
+
+          Cover:
+          1. Recommended AWS services (Bedrock, ECS, Lambda, etc.)
+          2. Scalability and cost optimisation patterns
+          3. Security and compliance considerations
+          4. A simple reference architecture overview
+        expected_output: |
+          A concise architecture guide with service recommendations,
+          a high-level deployment diagram description, and key
+          best practices for production AI agent deployments on AWS.
