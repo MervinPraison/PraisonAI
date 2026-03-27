@@ -20,7 +20,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '@copilot Triage this issue:\n\n1. Is this a valid bug, feature request, or question?\n2. What area of the codebase is affected?\n3. What is the severity and priority?\n4. Suggest a quick assessment of effort needed'
+              body: '@copilot Do a thorough triage and analysis of this issue:\n\n1. **Classification**: Is this a bug, feature request, question, or documentation gap?\n2. **Severity**: Critical / High / Medium / Low — explain why\n3. **Affected area**: Which modules/files in the codebase are relevant?\n4. **Root cause analysis**: Search the codebase and identify the likely root cause\n5. **Impact assessment**: What else could be affected? Any related issues?\n6. **Suggested fix**: Propose a concrete solution approach with file paths\n7. **Effort estimate**: Small (hours) / Medium (day) / Large (days+)'
             })
 
   # Phase 2: Claude analyzes and implements fix (final, strong reviewer)
