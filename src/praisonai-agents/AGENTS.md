@@ -96,22 +96,22 @@ Easy and user friendly
 
 | Module | Size | Purpose |
 |--------|------|---------|
-| `agent/` | 1.4M | Agent class, protocols, handoff, autonomy |
-| `memory/` | 984K | Memory protocols, adapters, file memory |
-| `context/` | 960K | Context management, artifacts, fast context |
-| `tools/` | 732K | Tool SDK, decorators, registry, protocols |
-| `llm/` | 620K | LLM client, model router |
-| `workflows/` | 456K | Workflow engine, patterns (Route, Parallel, Loop) |
-| `knowledge/` | 436K | Knowledge/RAG protocols, vector stores |
-| `hooks/` | 260K | Hook system, middleware, events |
-| `eval/` | 240K | Evaluation framework |
+| `agent/` | 1.7M | Agent class, protocols, handoff, autonomy |
+| `memory/` | 784K | Memory protocols, adapters, file memory |
+| `context/` | 840K | Context management, artifacts, fast context |
+| `tools/` | 816K | Tool SDK, decorators, registry, protocols |
+| `llm/` | 756K | LLM client, model router |
+| `workflows/` | 472K | Workflow engine, patterns (Route, Parallel, Loop) |
+| `knowledge/` | 300K | Knowledge/RAG protocols, vector stores |
+| `eval/` | 384K | Evaluation framework |
 | `rag/` | 264K | RAG protocols, retriever, reranker |
-| `plugins/` | 56K | Plugin manager, registry |
-| `policy/` | 64K | Policy engine |
+| `plugins/` | 204K | Plugin manager, registry |
+| `hooks/` | 184K | Hook system, middleware, events |
+| `trace/` | 116K | Trace protocols, context events |
+| `scheduler/` | 132K | Schedule models, store, parser, runner |
+| `policy/` | 76K | Policy engine |
 | `bus/` | 48K | Event bus |
-| `streaming/` | 56K | Streaming events, callbacks |
-| `trace/` | 152K | Trace protocols, context events |
-| `scheduler/` | 48K | Schedule models, store, parser, runner |
+| `streaming/` | 44K | Streaming events, callbacks |
 
 ### 3.2 Protocol-First Design
 
