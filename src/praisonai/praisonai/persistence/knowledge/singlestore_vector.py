@@ -5,6 +5,8 @@ Requires: singlestoredb
 Install: pip install singlestoredb
 """
 
+import ast
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -165,7 +167,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
                     INSERT INTO {table_name} (id, content, embedding, metadata, content_hash, created_at)
                     VALUES (%s, %s, %s, %s, %s, %s)
                 """, (doc.id, doc.content, embedding_str,
-                      str(doc.metadata) if doc.metadata else None,
+                      json.dumps(doc.metadata) if doc.metadata else None,
                       doc.content_hash, doc.created_at))
                 ids.append(doc.id)
         
@@ -189,7 +191,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
                     REPLACE INTO {table_name} (id, content, embedding, metadata, content_hash, created_at)
                     VALUES (%s, %s, %s, %s, %s, %s)
                 """, (doc.id, doc.content, embedding_str,
-                      str(doc.metadata) if doc.metadata else None,
+                      json.dumps(doc.metadata) if doc.metadata else None,
                       doc.content_hash, doc.created_at))
                 ids.append(doc.id)
         
@@ -227,7 +229,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
                 documents.append(KnowledgeDocument(
                     id=row[0],
                     content=row[1],
-                    metadata=eval(row[2]) if row[2] else None,
+                    metadata=self._deserialize_metadata(row[2]),
                     content_hash=row[3],
                     created_at=row[4]
                 ))
@@ -256,12 +258,52 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
                 KnowledgeDocument(
                     id=row[0],
                     content=row[1],
-                    metadata=eval(row[2]) if row[2] else None,
+                    metadata=self._deserialize_metadata(row[2]),
                     content_hash=row[3],
                     created_at=row[4]
                 )
                 for row in cur.fetchall()
             ]
+
+    @staticmethod
+    def _deserialize_metadata(value: Any) -> Optional[Dict[str, Any]]:
+        """Safely deserialize metadata from JSON/legacy literal formats."""
+        if not value:
+            return None
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                try:
+                    parsed = ast.literal_eval(value)
+                    if not isinstance(parsed, dict):
+                        return None
+                    if SingleStoreVectorKnowledgeStore._is_json_compatible(parsed):
+                        return parsed
+                    return None
+                except (ValueError, SyntaxError) as exc:
+                    logging.getLogger(__name__).warning(
+                        "Failed to parse metadata value from SingleStore: %s",
+                        type(exc).__name__,
+                    )
+                    return None
+        return None
+
+    @staticmethod
+    def _is_json_compatible(value: Any) -> bool:
+        """Ensure legacy metadata uses JSON-compatible value types only."""
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return True
+        if isinstance(value, list):
+            return all(SingleStoreVectorKnowledgeStore._is_json_compatible(item) for item in value)
+        if isinstance(value, dict):
+            return all(
+                isinstance(key, str) and SingleStoreVectorKnowledgeStore._is_json_compatible(item)
+                for key, item in value.items()
+            )
+        return False
     
     def delete(
         self,

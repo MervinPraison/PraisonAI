@@ -853,7 +853,13 @@ from praisonaiagents import Agent
 # Define a simple tool
 def calculator(expression: str) -> str:
     """Calculate a math expression."""
-    return str(eval(expression))
+    import ast
+    node = ast.parse(expression.strip(), mode='eval')
+    allowed = (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Constant, ast.operator, ast.unaryop)
+    for child in ast.walk(node):
+        if not isinstance(child, allowed):
+            return "Error: unsupported expression"
+    return str(eval(compile(node, '<expr>', 'eval'), {"__builtins__": {}}))
 
 # Create agent with tool
 agent = Agent(

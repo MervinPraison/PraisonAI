@@ -16,8 +16,6 @@ import asyncio
 import warnings
 from dataclasses import dataclass, field
 from typing import Optional, Any, Dict, Union, List, Generator
-from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
 
 # Filter out Pydantic warning about fields
 warnings.filterwarnings("ignore", "Valid config keys have changed in V2", UserWarning)
@@ -212,9 +210,10 @@ class VideoAgent:
             return VideoConfig()
     
     @property
-    def console(self) -> Console:
+    def console(self):
         """Lazily initialize Rich Console."""
         if self._console is None:
+            from rich.console import Console
             self._console = Console()
         return self._console
     
@@ -342,6 +341,7 @@ class VideoAgent:
         params.pop("poll_interval", None)
         params.pop("max_wait_time", None)
         
+        from rich.progress import Progress, SpinnerColumn, TextColumn
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -491,7 +491,8 @@ class VideoAgent:
         max_wait_time = max_wait_time or self._video_config.max_wait_time
         
         start_time = time.time()
-        
+
+        from rich.progress import Progress, SpinnerColumn, TextColumn
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),

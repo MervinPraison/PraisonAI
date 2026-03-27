@@ -10,9 +10,6 @@ import logging
 import warnings
 # Filter out Pydantic warning about fields
 warnings.filterwarnings("ignore", "Valid config keys have changed in V2", UserWarning)
-from rich.console import Console
-from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn
 class ImageGenerationConfig(BaseModel):
     """Configuration for image generation settings."""
     style: str = Field(default="natural", description="Style of the generated image")
@@ -155,6 +152,7 @@ class ImageAgent(Agent):
             # Gemini provider doesn't support response_format parameter
             # Apply this filter if provider is explicitly 'gemini' or as fallback for gemini models
             config.pop('response_format', None)
+        from rich.progress import Progress, SpinnerColumn, TextColumn
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
