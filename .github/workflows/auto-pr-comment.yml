@@ -5,12 +5,16 @@ on:
     types: [opened]
 
 jobs:
-  add-comment:
+  # Phase 1: Copilot reviews at T+6min (after Qodo/Coderabbit finish)
+  copilot-review:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
     steps:
-      - name: Add automated comment
+      - name: Wait for Qodo and Coderabbit to complete (~5 min)
+        run: sleep 360
+
+      - name: Post Copilot review request
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -19,10 +23,20 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '@claude Review this PR against AGENTS.md standards:\n\n1. Verify backward compatibility — no features removed\n2. Check for performance impact — no unnecessary overhead\n3. Validate code follows protocol-driven, DRY principles\n4. If issues found, suggest fixes directly on the PR\n5. Run relevant tests if needed'
+              body: '@copilot Review this PR for bloat and necessity:\n\n1. Are these changes minimal and focused?\n2. Is any code added that isn\'t strictly needed?\n3. Could this be achieved with less complexity?\n4. Are there unnecessary refactors or scope creep?\n5. Check other reviewer comments above for context'
             })
 
-      - name: Add Copilot review comment
+  # Phase 2: Claude reviews at T+17min (after Copilot finishes — final strong reviewer)
+  claude-review:
+    runs-on: ubuntu-latest
+    needs: copilot-review
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Wait for Copilot to complete (~10 min)
+        run: sleep 600
+
+      - name: Post Claude review request (final reviewer)
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -31,5 +45,5 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '@copilot indepth review and validate if its a right change and not bloating for the sake of it'
+              body: '@claude You are the final reviewer. Read ALL comments above from Qodo, Coderabbit, and Copilot first.\n\nReview this PR as architecture lead per AGENTS.md:\n1. Protocol-driven: heavy code in wrapper, not core SDK?\n2. Backward compatible: no public API removed without deprecation?\n3. Performance: no hot-path regressions, lazy imports for optional deps?\n4. DRY: no duplication, reuses existing abstractions?\n5. Async-safe and multi-agent safe?\n6. Address any unresolved issues from other reviewers\n7. If fixes needed, push them directly to this branch'
             })

@@ -1,19 +1,17 @@
-name: Auto Issue Comment with PR Creation
+name: Auto Issue Comment
 
 on:
   issues:
     types: [opened]
 
 jobs:
-  add-comment:
+  # Phase 1: Copilot triages immediately
+  copilot-triage:
     runs-on: ubuntu-latest
     permissions:
       issues: write
-      contents: write
-      pull-requests: write
-      actions: read
     steps:
-      - name: Add automated comment
+      - name: Post Copilot triage request
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -22,5 +20,29 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '@claude Analyze this issue and implement a fix following AGENTS.md guidelines.\n\nRequirements:\n1. Ensure backward compatibility — no existing features removed\n2. Zero performance regression on hot paths\n3. Minimal, focused changes only\n4. Run tests to verify the fix\n5. Create a PR with your changes using gh'
+              body: '@copilot Triage this issue:\n\n1. Is this a valid bug, feature request, or question?\n2. What area of the codebase is affected?\n3. What is the severity and priority?\n4. Suggest a quick assessment of effort needed'
+            })
+
+  # Phase 2: Claude analyzes and implements fix (final, strong reviewer)
+  claude-fix:
+    runs-on: ubuntu-latest
+    needs: copilot-triage
+    permissions:
+      issues: write
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Wait for Copilot triage (~10 min)
+        run: sleep 600
+
+      - name: Post Claude analysis request (final reviewer)
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '@claude You are the lead engineer. Read Copilot\'s triage above first.\n\nAnalyze this issue and implement a fix following AGENTS.md:\n1. Ensure backward compatibility — no features removed\n2. Zero performance regression on hot paths\n3. Minimal, focused changes only\n4. Run tests to verify the fix\n5. Create a PR with your changes using gh'
             })
