@@ -21,9 +21,11 @@ Simpler than competitors • More extensible • Faster • Agent-centric
 | **Minimal API** | Fewer parameters, sensible defaults, explicit overrides |
 | **Performance-First** | Lazy loading, optional dependencies, no hot-path regressions |
 | **Production-Ready** | Safe by default, multi-agent safe, async-safe |
-Powerful, lightweight, highly reliable and robust
-Easy and developer frienldy for non developers
-Easy and user friendly
+| **Open Core** | Core free and open source; clear paid upgrade path (support/cloud/services) |
+
+Powerful, lightweight, highly reliable and robust.
+Easy and developer-friendly for non-developers.
+Each feature runs 3 ways: **CLI, YAML, Python**.
 ---
 
 ## 2. Repository Structure
@@ -102,16 +104,27 @@ Easy and user friendly
 | `tools/` | 816K | Tool SDK, decorators, registry, protocols |
 | `llm/` | 756K | LLM client, model router |
 | `workflows/` | 472K | Workflow engine, patterns (Route, Parallel, Loop) |
-| `knowledge/` | 300K | Knowledge/RAG protocols, vector stores |
+| `mcp/` | 404K | Model Context Protocol integration |
 | `eval/` | 384K | Evaluation framework |
+| `agents/` | 376K | Multi-agent orchestration (AgentTeam, AgentFlow) |
+| `knowledge/` | 300K | Knowledge/RAG protocols, vector stores |
 | `rag/` | 264K | RAG protocols, retriever, reranker |
+| `config/` | 252K | Feature configs (ExecutionConfig, OutputConfig, etc.) |
+| `session/` | 224K | Session management, persistence |
 | `plugins/` | 204K | Plugin manager, registry |
 | `hooks/` | 184K | Hook system, middleware, events |
-| `trace/` | 116K | Trace protocols, context events |
+| `storage/` | 136K | Storage protocols, adapters |
 | `scheduler/` | 132K | Schedule models, store, parser, runner |
+| `trace/` | 116K | Trace protocols, context events |
+| `approval/` | 92K | Human-in-the-loop approval protocols |
+| `bots/` | 80K | BotOS protocols, config |
 | `policy/` | 76K | Policy engine |
+| `gateway/` | 60K | Gateway protocols |
+| `sandbox/` | 56K | Code execution sandbox |
 | `bus/` | 48K | Event bus |
 | `streaming/` | 44K | Streaming events, callbacks |
+| `conditions/` | 40K | Conditional logic protocols |
+| `db/` | 32K | Database adapter protocols |
 
 ### 3.2 Protocol-First Design
 
@@ -512,9 +525,9 @@ class MyDbAdapter(DbAdapter):
 
 ---
 
-## 7. CLI Representation
+## 7. CLI & YAML Representation
 
-Every feature must have CLI parity:
+Every feature must run 3 ways: **Python, CLI, and YAML**.
 
 ```bash
 # Basic agent
@@ -636,6 +649,30 @@ pytest tests/unit/
 pytest --cov=praisonaiagents tests/
 ```
 
+### 9.4 Real Agentic Test (MANDATORY)
+
+Every feature MUST include a real agentic test — not just smoke tests.
+
+A **real agentic test** means the agent actually runs and calls the LLM:
+
+```python
+# ✅ REAL agentic test — agent runs end-to-end
+from praisonaiagents import Agent
+agent = Agent(name="test", instructions="You are a helpful assistant")
+result = agent.start("Say hello in one sentence")
+print(result)  # Must produce actual LLM output
+
+# ❌ SMOKE test only — NOT sufficient alone
+agent = Agent(name="test")  # Just object construction
+assert agent.name == "test"  # No LLM call
+```
+
+**Rules:**
+- Both smoke AND real agentic tests are required
+- Agent MUST call `agent.start()` with a real prompt
+- Agent MUST call the LLM and produce a text response
+- Print full output so developers can verify end-to-end behavior
+
 ---
 
 ## 10. Implementation Checklist
@@ -646,8 +683,10 @@ For every feature/change:
 - [ ] **No new deps**: Use optional dependencies only
 - [ ] **Lazy imports**: Heavy deps imported inside functions
 - [ ] **Naming**: Follow conventions (add_*, get_*, XConfig)
-- [ ] **Tests**: TDD - write failing tests first
+- [ ] **Tests**: TDD — write failing tests first
+- [ ] **Real agentic test**: Agent must call LLM end-to-end (§9.4)
 - [ ] **CLI**: Add corresponding CLI command/option
+- [ ] **YAML**: Ensure YAML config parity with Python API
 - [ ] **Docs**: Update Mintlify documentation
 - [ ] **Examples**: Add to examples/ directory
 - [ ] **Multi-agent safe**: No shared mutable state
@@ -853,7 +892,7 @@ platforms:
 
 ---
 
-## 13. Paid Value Path
+## 14. Paid Value Path
 
 The core remains **free and open source**. Clear upgrade paths to paid value:
 
