@@ -278,11 +278,32 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
             except json.JSONDecodeError:
                 try:
                     parsed = ast.literal_eval(value)
-                    return parsed if isinstance(parsed, dict) else None
-                except (ValueError, SyntaxError):
-                    logger.warning("Failed to parse metadata value from SingleStore")
+                    if not isinstance(parsed, dict):
+                        return None
+                    if SingleStoreVectorKnowledgeStore._is_json_compatible(parsed):
+                        return parsed
+                    return None
+                except (ValueError, SyntaxError) as exc:
+                    logging.getLogger(__name__).warning(
+                        "Failed to parse metadata value from SingleStore: %s",
+                        type(exc).__name__,
+                    )
                     return None
         return None
+
+    @staticmethod
+    def _is_json_compatible(value: Any) -> bool:
+        """Ensure legacy metadata uses JSON-compatible value types only."""
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return True
+        if isinstance(value, list):
+            return all(SingleStoreVectorKnowledgeStore._is_json_compatible(item) for item in value)
+        if isinstance(value, dict):
+            return all(
+                isinstance(key, str) and SingleStoreVectorKnowledgeStore._is_json_compatible(item)
+                for key, item in value.items()
+            )
+        return False
     
     def delete(
         self,
