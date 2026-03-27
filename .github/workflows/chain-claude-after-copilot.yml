@@ -1,0 +1,51 @@
+name: Chain Claude After Copilot
+
+# Event-driven: triggers when copilot-swe-agent posts a comment
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  trigger-claude:
+    # Only trigger when Copilot finishes (copilot-swe-agent posts a comment)
+    if: |
+      github.event.comment.user.login == 'copilot-swe-agent'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Determine if PR or Issue
+        id: context
+        run: |
+          if [ -n "${{ github.event.issue.pull_request }}" ]; then
+            echo "type=pr" >> "$GITHUB_OUTPUT"
+          else
+            echo "type=issue" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post Claude review request on PR
+        if: steps.context.outputs.type == 'pr'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '@claude You are the final reviewer. Read ALL comments above from Qodo, Coderabbit, and Copilot first.\n\nReview this PR as architecture lead per AGENTS.md:\n1. Protocol-driven: heavy code in wrapper, not core SDK?\n2. Backward compatible: no public API removed without deprecation?\n3. Performance: no hot-path regressions, lazy imports for optional deps?\n4. DRY: no duplication, reuses existing abstractions?\n5. Async-safe and multi-agent safe?\n6. Address any unresolved issues from other reviewers\n7. If fixes needed, push them directly to this branch'
+            })
+
+      - name: Post Claude analysis request on Issue
+        if: steps.context.outputs.type == 'issue'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '@claude You are the lead engineer. Read Copilot\'s triage above first.\n\nAnalyze this issue and implement a fix following AGENTS.md:\n1. Ensure backward compatibility — no features removed\n2. Zero performance regression on hot paths\n3. Minimal, focused changes only\n4. Run tests to verify the fix\n5. Create a PR with your changes using gh'
+            })
