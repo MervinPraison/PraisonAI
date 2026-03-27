@@ -3,7 +3,6 @@ import time
 import json
 import logging
 from typing import Any, Dict, Optional, List
-from rich.console import Console
 from ..main import display_error, TaskOutput
 from ..agent.agent import Agent
 from ..task.task import Task
@@ -1287,6 +1286,7 @@ Context:
         # ─────────────────────────────────────────────────────────────
         if show_verbose and is_tty:
             from rich.panel import Panel
+            from rich.console import Console
             console = Console()
             import time as time_module
             

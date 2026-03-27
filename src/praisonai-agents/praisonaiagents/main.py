@@ -4,13 +4,16 @@ import json
 import logging
 from typing import List, Optional, Dict, Any, Union, Literal, Type
 from pydantic import BaseModel, ConfigDict
-from rich import print
-from rich.console import Console
-from rich.panel import Panel
-from rich.text import Text
-from rich.markdown import Markdown
-from rich.live import Live
 import asyncio
+
+
+def _rich():
+    """Lazy-load Rich display classes (cached by sys.modules after first call)."""
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.text import Text
+    from rich.markdown import Markdown
+    return Console, Panel, Text, Markdown
 
 # Import token metrics if available
 try:
@@ -239,16 +242,17 @@ def display_interaction(message, response, markdown=True, generation_time=None, 
     Args:
         metrics: Optional dict with token_in, token_out, cost, model for footer display
     """
+    Console, Panel, Text, Markdown = _rich()
     if console is None:
         console = Console()
-    
+
     if isinstance(message, list):
         text_content = next((item["text"] for item in message if item["type"] == "text"), "")
         message = text_content
 
     message = _clean_display_content(str(message))
     response = _clean_display_content(str(response))
-    
+
     # Skip display if response is empty (common with Gemini tool calls)
     if not response or not response.strip():
         return
@@ -268,12 +272,12 @@ def display_interaction(message, response, markdown=True, generation_time=None, 
         task_id=task_id,
         metrics=metrics
     )
-    
+
     # Build response title with time
     response_title = "Response"
     if generation_time:
         response_title = f"Response ({generation_time:.1f}s)"
-    
+
     # Build response content with optional metrics footer
     response_content = response
     if metrics and isinstance(metrics, dict):
@@ -282,7 +286,7 @@ def display_interaction(message, response, markdown=True, generation_time=None, 
         tokens_out = metrics.get('tokens_out', 0)
         cost = metrics.get('cost', 0)
         model = metrics.get('model', '')
-        
+
         metrics_line = f"\n\n─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─\n📊 {tokens_in} tokens in · {tokens_out} out"
         if cost > 0:
             metrics_line += f" · ${cost:.4f}"
@@ -303,25 +307,27 @@ def display_interaction(message, response, markdown=True, generation_time=None, 
 def display_self_reflection(message: str, console=None):
     if not message or not message.strip():
         return
+    Console, Panel, Text, _Md = _rich()
     if console is None:
         console = Console()
     message = _clean_display_content(str(message))
-    
+
     # Execute synchronous callbacks
     execute_sync_callback('self_reflection', message=message)
-    
+
     console.print(Panel.fit(Text(message, style="bold yellow"), title="Self Reflection", border_style="magenta"))
 
 def display_instruction(message: str, console=None, agent_name: str = None, agent_role: str = None, agent_tools: List[str] = None):
     if not message or not message.strip():
         return
+    Console, Panel, Text, _Md = _rich()
     if console is None:
         console = Console()
     message = _clean_display_content(str(message))
-    
+
     # Execute synchronous callbacks
     execute_sync_callback('instruction', message=message, agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools)
-    
+
     # Display agent info if available
     if agent_name:
         agent_info = f"[bold #FF9B9B]👤 Agent:[/] [#FFE5E5]{agent_name}[/]"
@@ -331,7 +337,7 @@ def display_instruction(message: str, console=None, agent_name: str = None, agen
             tools_str = ", ".join(f"[italic #B4D4FF]{tool}[/]" for tool in agent_tools)
             agent_info += f"\n[bold #86A789]Tools:[/] {tools_str}"
         console.print(Panel(agent_info, border_style="#D2E3C8", title="[bold]Agent Info[/]", title_align="left", padding=(1, 2)))
-    
+
     # Only print if log level is DEBUG
     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
         console.print(Panel.fit(Text(message, style="bold blue"), title="Instruction", border_style="cyan"))
@@ -400,17 +406,18 @@ def display_tool_call(message: str, console=None, tool_name: str = None, tool_in
 def display_error(message: str, console=None):
     if not message or not message.strip():
         return
+    Console, Panel, Text, _Md = _rich()
     if console is None:
         console = Console()
     message = _clean_display_content(str(message))
-    
+
     # Execute synchronous callbacks
     execute_sync_callback('error', message=message)
-    
+
     # Use semantic error color
     console.print(Panel.fit(
-        Text(message, style=f"bold {PRAISON_COLORS['error_text']}"), 
-        title="⚠ Error", 
+        Text(message, style=f"bold {PRAISON_COLORS['error_text']}"),
+        title="⚠ Error",
         border_style=PRAISON_COLORS["error"]
     ))
     error_logs.append(message)
@@ -419,32 +426,33 @@ def display_generating(content: str = "", start_time: Optional[float] = None):
     if not content or not str(content).strip():
         logging.debug("Empty content in display_generating, returning early")
         return None
-    
+
     elapsed_str = ""
     if start_time is not None:
         elapsed = time.time() - start_time
         elapsed_str = f" {elapsed:.1f}s"
-    
+
     content = _clean_display_content(str(content))
-    
+
     # Execute synchronous callbacks
     execute_sync_callback('generating', content=content, elapsed_time=elapsed_str.strip() if elapsed_str else None)
-    
-    # Use semantic response color
+
+    _Console, Panel, _Text, Markdown = _rich()
     return Panel(Markdown(content), title=f"Generating...{elapsed_str}", border_style=PRAISON_COLORS["response"])
 
 def display_reasoning_steps(steps: List[str], console=None):
     """Display reasoning steps with unique numbered circles.
-    
+
     Uses ①②③ numbered circles for a distinctive, scannable format
     that shows the agent's thought process.
-    
+
     Args:
         steps: List of reasoning step descriptions
         console: Rich console for output
     """
     if not steps:
         return
+    Console, Panel, Text, _Md = _rich()
     if console is None:
         console = Console()
     
@@ -470,18 +478,19 @@ def display_reasoning_steps(steps: List[str], console=None):
 
 def display_working_status(phase: int = 0, status_text: str = None, console=None):
     """Display animated working status with pulsing dots.
-    
+
     Shows a unique "Working ●○○" indicator with phase-specific status.
     This is PraisonAI's distinctive approach to showing processing status.
-    
+
     Args:
         phase: Current animation phase (0-3)
         status_text: Optional status description
         console: Rich console for output
-    
+
     Returns:
         Panel object for use with Rich.Live
     """
+    Console, Panel, Text, _Md = _rich()
     if console is None:
         console = Console()
     
@@ -501,6 +510,7 @@ def display_working_status(phase: int = 0, status_text: str = None, console=None
 # Async versions with 'a' prefix
 async def adisplay_interaction(message, response, markdown=True, generation_time=None, console=None, agent_name=None, agent_role=None, agent_tools=None, task_name=None, task_description=None, task_id=None):
     """Async version of display_interaction."""
+    Console, Panel, Text, Markdown = _rich()
     if console is None:
         console = Console()
     
@@ -541,6 +551,7 @@ async def adisplay_self_reflection(message: str, console=None):
     """Async version of display_self_reflection."""
     if not message or not message.strip():
         return
+    Console, Panel, Text, _Md = _rich()
     if console is None:
         console = Console()
     message = _clean_display_content(str(message))
@@ -554,6 +565,7 @@ async def adisplay_instruction(message: str, console=None, agent_name: str = Non
     """Async version of display_instruction."""
     if not message or not message.strip():
         return
+    Console, Panel, Text, _Md = _rich()
     if console is None:
         console = Console()
     message = _clean_display_content(str(message))
@@ -581,6 +593,7 @@ async def adisplay_tool_call(message: str, console=None):
     if not message or not message.strip():
         logging.debug("Empty message in adisplay_tool_call, returning early")
         return
+    Console, Panel, Text, _Md = _rich()
     if console is None:
         console = Console()
     message = _clean_display_content(str(message))
@@ -595,6 +608,7 @@ async def adisplay_error(message: str, console=None):
     """Async version of display_error."""
     if not message or not message.strip():
         return
+    Console, Panel, Text, _Md = _rich()
     if console is None:
         console = Console()
     message = _clean_display_content(str(message))
@@ -610,17 +624,18 @@ async def adisplay_generating(content: str = "", start_time: Optional[float] = N
     if not content or not str(content).strip():
         logging.debug("Empty content in adisplay_generating, returning early")
         return None
-    
+
     elapsed_str = ""
     if start_time is not None:
         elapsed = time.time() - start_time
         elapsed_str = f" {elapsed:.1f}s"
-    
+
     content = _clean_display_content(str(content))
-    
+
     # Execute callbacks
     await execute_callback('generating', content=content, elapsed_time=elapsed_str.strip() if elapsed_str else None)
-    
+
+    _Console, Panel, _Text, Markdown = _rich()
     return Panel(Markdown(content), title=f"Generating...{elapsed_str}", border_style="green")
 
 def clean_triple_backticks(text: str) -> str:

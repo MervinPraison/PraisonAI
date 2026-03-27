@@ -312,13 +312,31 @@ class HybridWorkflowExecutor:
         return flags
 
     def _eval_condition(self, condition: str, flags: Dict) -> bool:
-        """Evaluate a simple condition expression."""
+        """Evaluate a simple condition expression safely using AST whitelisting."""
+        import ast
+
         condition = condition.strip()
         if condition.startswith("{{") and condition.endswith("}}"):
             condition = condition[2:-2].strip()
 
+        # Validate AST - only allow safe node types
+        try:
+            tree = ast.parse(condition, mode='eval')
+        except SyntaxError:
+            return False
+
+        _safe_nodes = (
+            ast.Expression, ast.Compare, ast.BoolOp, ast.UnaryOp, ast.BinOp,
+            ast.Constant, ast.Name, ast.Attribute, ast.Load,
+            ast.And, ast.Or, ast.Not, ast.Eq, ast.NotEq, ast.Lt, ast.LtE,
+            ast.Gt, ast.GtE, ast.Is, ast.IsNot, ast.In, ast.NotIn,
+        )
+        for node in ast.walk(tree):
+            if not isinstance(node, _safe_nodes):
+                return False
+
         context = {"flags": type("Flags", (), flags)(), "env": os.environ}
         try:
-            return bool(eval(condition, {"__builtins__": {}}, context))
+            return bool(eval(compile(tree, '<condition>', 'eval'), {"__builtins__": {}}, context))
         except Exception:
             return False
