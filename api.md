@@ -813,6 +813,8 @@ Methods:
 * <code title="cli">praisonai completion completion-callback <a href="./src/praisonai/praisonai/cli/commands/completion.py">--help</a></code>
 * <code title="cli">praisonai completion fish <a href="./src/praisonai/praisonai/cli/commands/completion.py">--help</a></code>
 * <code title="cli">praisonai completion zsh <a href="./src/praisonai/praisonai/cli/commands/completion.py">--help</a></code>
+* <code title="cli">praisonai config doctor <a href="./src/praisonai/praisonai/cli/commands/config.py">--help</a></code>
+* <code title="cli">praisonai config env <a href="./src/praisonai/praisonai/cli/commands/config.py">--help</a></code>
 * <code title="cli">praisonai config get <a href="./src/praisonai/praisonai/cli/commands/config.py">--help</a></code>
 * <code title="cli">praisonai config list <a href="./src/praisonai/praisonai/cli/commands/config.py">--help</a></code>
 * <code title="cli">praisonai config path <a href="./src/praisonai/praisonai/cli/commands/config.py">--help</a></code>
@@ -1201,7 +1203,7 @@ export { // Python parity additions
 export { // Subagent Tool (agent-as-tool pattern)
   SubagentTool, BaseTool, FunctionTool, ToolRegistry, ToolResult, ToolValidationError, createDelegator, createSubagentTool, createSubagentTools, createTool, getRegistry, getTool, registerTool, tool, validateTool } from "./tools";
 export { airweaveSearch, bedrockBrowserClick, bedrockBrowserFill, bedrockBrowserNavigate, bedrockCodeInterpreter, codeExecution, codeMode, createCustomTool, exaSearch, firecrawlCrawl, firecrawlScrape, parallelSearch, perplexitySearch, registerCustomTool, registerLocalTool, registerNpmTool, superagentGuard, superagentRedact, superagentVerify, tavilyCrawl, tavilyExtract, tavilySearch, valyuBioSearch, valyuCompanyResearch, valyuEconomicsSearch, valyuFinanceSearch, valyuPaperSearch, valyuPatentSearch, valyuSecSearch, valyuWebSearch } from "./tools/builtins";
-export { MissingDependencyError, MissingEnvVarError, ToolsRegistry, composeMiddleware, createLoggingMiddleware, createRateLimitMiddleware, createRedactionMiddleware, createRetryMiddleware, createTimeoutMiddleware, createToolsRegistry, createTracingMiddleware, createValidationMiddleware, getToolsRegistry, resetToolsRegistry } from "./tools/registry";
+export { BudgetExceededError, MissingDependencyError, MissingEnvVarError, ToolsRegistry, composeMiddleware, createLoggingMiddleware, createRateLimitMiddleware, createRedactionMiddleware, createRetryMiddleware, createTimeoutMiddleware, createToolsRegistry, createTracingMiddleware, createValidationMiddleware, getRegistry, getTool, getToolsRegistry, get_registry, get_tool, registerTool, register_tool, resetToolsRegistry, validateTool, validate_tool } from "./tools/registry";
 export type { InstallHints, PraisonTool, RedactionHooks, RegisteredTool, ToolCapabilities, ToolExecutionContext, ToolExecutionResult, ToolFactory, ToolHooks, ToolInstallStatus, ToolLimits, ToolLogger, ToolMetadata, ToolMiddleware, ToolParameterProperty, ToolParameterSchema } from "./tools/registry";
 export { registerBuiltinTools, tools } from "./tools/tools";
 export { // Classes
