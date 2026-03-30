@@ -40,8 +40,8 @@ jobs:
 
       - name: Set up Git
         run: |
-          git config --local user.email "gemini-bot@github.com"
-          git config --local user.name "Gemini Bot"
+          git config --local user.email "praison.ms@gmail.com"
+          git config --local user.name "MervinPraison"
 
       - name: Get issue data
         id: issue_data

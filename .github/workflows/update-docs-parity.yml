@@ -65,16 +65,16 @@ jobs:
       with:
         commit_message: "docs: auto-update documentation parity trackers [skip ci]"
         file_pattern: 'src/praisonai-agents/DOCS_PARITY.md src/praisonai-ts/DOCS_PARITY.md src/praisonai-rust/DOCS_PARITY.md'
-        commit_user_name: "github-actions[bot]"
-        commit_user_email: "41898282+github-actions[bot]@users.noreply.github.com"
-        commit_author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+        commit_user_name: "MervinPraison"
+        commit_user_email: "praison.ms@gmail.com"
+        commit_author: "MervinPraison <praison.ms@gmail.com>"
 
     - name: Commit and push changes to PraisonAIDocs
       if: steps.check_changes.outputs.changes == 'true'
       run: |
         cd PraisonAIDocs
-        git config user.name "github-actions[bot]"
-        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git config user.name "MervinPraison"
+        git config user.email "praison.ms@gmail.com"
         git add docs/features/DOCS_PARITY.md docs/js/DOCS_PARITY.md docs/rust/DOCS_PARITY.md
         git diff --staged --quiet || git commit -m "docs: auto-update documentation parity trackers [skip ci]"
         git push

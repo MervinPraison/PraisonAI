@@ -52,7 +52,7 @@ jobs:
       with:
         commit_message: "docs: auto-update feature parity trackers [skip ci]"
         file_pattern: 'src/praisonai-ts/FEATURE_PARITY_TRACKER.json src/praisonai-ts/PARITY.md src/praisonai-rust/FEATURE_PARITY_TRACKER.json src/praisonai-rust/PARITY.md'
-        commit_user_name: "github-actions[bot]"
-        commit_user_email: "41898282+github-actions[bot]@users.noreply.github.com"
-        commit_author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+        commit_user_name: "MervinPraison"
+        commit_user_email: "praison.ms@gmail.com"
+        commit_author: "MervinPraison <praison.ms@gmail.com>"
 
