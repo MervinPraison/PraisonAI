@@ -76,16 +76,16 @@ jobs:
           echo "ADDITIONAL_INSTRUCTIONS=$ADDITIONAL_INSTRUCTIONS" >> $GITHUB_OUTPUT
 
       - name: Run Gemini CLI
-        uses: ./.github/actions/gemini
+        uses: google-github-actions/run-gemini-cli@v0
         env:
+          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
           GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
           ISSUE_NUMBER: ${{ steps.issue_data.outputs.ISSUE_NUMBER }}
           ADDITIONAL_INSTRUCTIONS: ${{ steps.issue_data.outputs.ADDITIONAL_INSTRUCTIONS }}
           REPOSITORY: ${{ github.repository }}
         with:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          OTLP_GCP_WIF_PROVIDER: ${{ secrets.OTLP_GCP_WIF_PROVIDER }}
-          OTLP_GOOGLE_CLOUD_PROJECT: ${{ secrets.OTLP_GOOGLE_CLOUD_PROJECT }}
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          gemini_model: 'gemini-3.1-flash-lite-preview'
           prompt: |
             You are a helpful GitHub issue assistant. Your task is to analyze and help with GitHub issues.
             
