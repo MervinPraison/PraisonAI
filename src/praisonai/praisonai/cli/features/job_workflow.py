@@ -21,6 +21,8 @@ Usage:
     praisonai workflow run publish-pypi.yaml --major
 """
 
+import ast
+import operator
 import os
 import re
 import subprocess
@@ -731,36 +733,82 @@ class JobWorkflowExecutor:
     # ------------------------------------------------------------------
 
     def _eval_condition(self, condition: str, flags: Dict) -> bool:
-        """Evaluate a simple condition expression safely using AST whitelisting."""
-        import ast
-
+        """Evaluate a simple condition expression safely using AST evaluation."""
         # Strip {{ }} if present
         condition = condition.strip()
         if condition.startswith("{{") and condition.endswith("}}"):
             condition = condition[2:-2].strip()
 
-        # Validate AST - only allow safe node types
+        # Parse and validate AST - only allow safe node types
         try:
             tree = ast.parse(condition, mode='eval')
         except SyntaxError:
             return False
 
-        _safe_nodes = (
-            ast.Expression, ast.Compare, ast.BoolOp, ast.UnaryOp, ast.BinOp,
-            ast.Constant, ast.Name, ast.Attribute, ast.Load,
-            ast.And, ast.Or, ast.Not, ast.Eq, ast.NotEq, ast.Lt, ast.LtE,
-            ast.Gt, ast.GtE, ast.Is, ast.IsNot, ast.In, ast.NotIn,
-        )
-        for node in ast.walk(tree):
-            if not isinstance(node, _safe_nodes):
-                return False
-
         # Build evaluation context
         context = {"flags": type("Flags", (), flags)(), "env": os.environ}
+        
         try:
-            return bool(eval(compile(tree, '<condition>', 'eval'), {"__builtins__": {}}, context))
+            return bool(self._safe_eval_ast(tree.body, context))
         except Exception:
             return False
+    
+    def _safe_eval_ast(self, node, context):
+        """Safely evaluate AST node without using eval()."""
+        # Map of safe binary/unary/comparison operations
+        ops = {
+            ast.Add: operator.add, ast.Sub: operator.sub,
+            ast.Mult: operator.mul, ast.Div: operator.truediv,
+            ast.Mod: operator.mod, ast.Pow: operator.pow,
+            ast.Eq: operator.eq, ast.NotEq: operator.ne,
+            ast.Lt: operator.lt, ast.LtE: operator.le,
+            ast.Gt: operator.gt, ast.GtE: operator.ge,
+            ast.Is: operator.is_, ast.IsNot: operator.is_not,
+            ast.In: lambda a, b: a in b, ast.NotIn: lambda a, b: a not in b,
+            ast.Not: operator.not_,
+        }
+        
+        if isinstance(node, ast.Constant):
+            return node.value
+        elif isinstance(node, ast.Name):
+            if node.id in context:
+                return context[node.id]
+            raise NameError(f"name '{node.id}' is not defined")
+        elif isinstance(node, ast.Attribute):
+            if node.attr.startswith('__'):
+                raise AttributeError(f"access to attribute '{node.attr}' is not allowed")
+            value = self._safe_eval_ast(node.value, context)
+            return getattr(value, node.attr)
+        elif isinstance(node, ast.BinOp):
+            left = self._safe_eval_ast(node.left, context)
+            right = self._safe_eval_ast(node.right, context)
+            return ops[type(node.op)](left, right)
+        elif isinstance(node, ast.UnaryOp):
+            operand = self._safe_eval_ast(node.operand, context)
+            return ops[type(node.op)](operand)
+        elif isinstance(node, ast.Compare):
+            left = self._safe_eval_ast(node.left, context)
+            for op, comparator in zip(node.ops, node.comparators):
+                right = self._safe_eval_ast(comparator, context)
+                if not ops[type(op)](left, right):
+                    return False
+                left = right
+            return True
+        elif isinstance(node, ast.BoolOp):
+            if isinstance(node.op, ast.And):
+                for value in node.values:
+                    if not self._safe_eval_ast(value, context):
+                        return False
+                return True
+            elif isinstance(node.op, ast.Or):
+                for value in node.values:
+                    if self._safe_eval_ast(value, context):
+                        return True
+                return False
+            else:
+                raise TypeError(f"unsupported boolean operator: {type(node.op)}")
+        else:
+            raise TypeError(f"unsupported node type: {type(node)}")
 
     # ------------------------------------------------------------------
     # Helpers
