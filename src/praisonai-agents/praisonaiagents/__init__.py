@@ -59,18 +59,7 @@ _logging.configure_root_logger()
 # Import configuration (lightweight, no heavy deps)
 from . import _config
 
-# Lightweight imports that don't trigger heavy dependency chains
-from .tools.tools import Tools
-from .tools.base import BaseTool, ToolResult, ToolValidationError, validate_tool
-from .tools.decorator import tool, FunctionTool
-from .tools.registry import get_registry, register_tool, get_tool, ToolRegistry
-# db and obs are lazy-loaded via __getattr__ for performance
-
-# Sub-packages for organized imports (pa.config, pa.tools, etc.)
-# These enable: import praisonaiagents as pa; pa.config.MemoryConfig
-from . import config
-from . import tools
-# Note: db, obs, knowledge and mcp are lazy-loaded via __getattr__ due to heavy deps
+# Note: tools, config, memory, workflows, db, obs, knowledge and mcp are lazy-loaded via __getattr__ due to heavy deps
 
 # Embedding API - LAZY LOADED via __getattr__ for performance
 # Supports: embedding, embeddings, aembedding, aembeddings, EmbeddingResult, get_dimensions
@@ -125,6 +114,19 @@ def _get_lazy_cache():
 # ============================================================================
 
 _LAZY_IMPORTS = {
+    # Tools (moved from eager imports for lazy loading)
+    'Tools': ('praisonaiagents.tools.tools', 'Tools'),
+    'BaseTool': ('praisonaiagents.tools.base', 'BaseTool'),
+    'ToolResult': ('praisonaiagents.tools.base', 'ToolResult'),
+    'ToolValidationError': ('praisonaiagents.tools.base', 'ToolValidationError'),
+    'validate_tool': ('praisonaiagents.tools.base', 'validate_tool'),
+    'tool': ('praisonaiagents.tools.decorator', 'tool'),
+    'FunctionTool': ('praisonaiagents.tools.decorator', 'FunctionTool'),
+    'get_registry': ('praisonaiagents.tools.registry', 'get_registry'),
+    'register_tool': ('praisonaiagents.tools.registry', 'register_tool'),
+    'get_tool': ('praisonaiagents.tools.registry', 'get_tool'),
+    'ToolRegistry': ('praisonaiagents.tools.registry', 'ToolRegistry'),
+    
     # Main display utilities (imports rich)
     'TaskOutput': ('praisonaiagents.main', 'TaskOutput'),
     'ReflectionOutput': ('praisonaiagents.main', 'ReflectionOutput'),
@@ -179,9 +181,7 @@ _LAZY_IMPORTS = {
     'HandoffDepthError': ('praisonaiagents.agent.handoff', 'HandoffDepthError'),
     'HandoffTimeoutError': ('praisonaiagents.agent.handoff', 'HandoffTimeoutError'),
     
-    # Embedding API
-    'embedding': ('praisonaiagents.embedding.embed', 'embedding'),
-    'embeddings': ('praisonaiagents.embedding.embed', 'embedding'),
+    # Embedding API (Note: embedding/embeddings handled in custom_handler to override subpackage)
     'aembedding': ('praisonaiagents.embedding.embed', 'aembedding'),
     'aembeddings': ('praisonaiagents.embedding.embed', 'aembedding'),
     'embed': ('praisonaiagents.embedding.embed', 'embed'),
@@ -506,21 +506,27 @@ def _custom_handler(name, cache):
         cache['Agents'] = value
         return value
     
-    # Task removed in v4.0.0 - use Task instead
-    if name == "Task":
-        raise ImportError(
-            "Task has been removed in v4.0.0. Use Task instead.\n"
-            "Migration: Replace 'from praisonaiagents import Task' with 'from praisonaiagents import Task'\n"
-            "Task supports all Task features including action, handler, loop_over, etc."
-        )
-    
     # Module imports (return the module itself)
+    if name == 'tools':
+        import importlib
+        mod = importlib.import_module('.tools', 'praisonaiagents')
+        cache['tools'] = mod
+        return mod
+    if name == 'config':
+        import importlib
+        mod = importlib.import_module('.config', 'praisonaiagents')
+        cache['config'] = mod
+        return mod
     if name == 'memory':
         import importlib
-        return importlib.import_module('.memory', 'praisonaiagents')
+        mod = importlib.import_module('.memory', 'praisonaiagents')
+        cache['memory'] = mod
+        return mod
     if name == 'workflows':
         import importlib
-        return importlib.import_module('.workflows', 'praisonaiagents')
+        mod = importlib.import_module('.workflows', 'praisonaiagents')
+        cache['workflows'] = mod
+        return mod
     
     raise AttributeError(f"Not handled by custom_handler: {name}")
 
@@ -532,12 +538,49 @@ def _custom_handler(name, cache):
 # Override them here to return the function instead of the module.
 # ============================================================================
 
-# Override 'embedding' to return the function, not the subpackage
-from .embedding.embed import embedding as _embedding_func
-embedding = _embedding_func
+# Override 'embedding' and 'embeddings' at module level to prevent subpackage import
+# These need to be set after _LAZY_IMPORTS is defined but before __getattr__ is created
+def _get_embedding_func():
+    """Lazy getter for embedding function."""
+    # Import with alias to avoid overwriting the module proxy
+    from .embedding.embed import embedding as _embedding_func
+    return _embedding_func
 
-# Also provide embeddings alias
-embeddings = _embedding_func
+# Create lazy properties that override the submodule
+class _EmbeddingProxy:
+    """Proxy object that loads embedding function on first access."""
+    def __init__(self):
+        self._func = None
+    
+    def _load(self):
+        """Load the actual embedding function if not already loaded."""
+        if self._func is None:
+            self._func = _get_embedding_func()
+        return self._func
+    
+    def __call__(self, *args, **kwargs):
+        return self._load()(*args, **kwargs)
+    
+    def __getattr__(self, name):
+        return getattr(self._load(), name)
+    
+    @property
+    def __wrapped__(self):
+        """Support for inspect.signature() and functools.wraps."""
+        return self._load()
+    
+    @property
+    def __signature__(self):
+        """Support for inspect.signature()."""
+        import inspect
+        return inspect.signature(self._load())
+    
+    def __repr__(self):
+        return f"<lazy proxy for {self._load()!r}>"
+
+# Override the submodule with our function proxy
+embedding = _EmbeddingProxy()
+embeddings = embedding  # embeddings is an alias
 
 
 # Create the __getattr__ function using centralized utility
@@ -545,7 +588,7 @@ __getattr__ = create_lazy_getattr_with_fallback(
     mapping=_LAZY_IMPORTS,
     module_name=__name__,
     cache=_lazy_cache,
-    fallback_modules=['tools', 'memory', 'config', 'workflows'],
+    fallback_modules=[],  # Note: 'embedding' excluded to avoid conflict with embedding() function
     custom_handler=_custom_handler
 )
 
