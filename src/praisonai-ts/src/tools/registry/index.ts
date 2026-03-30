@@ -34,9 +34,13 @@ export {
   createToolsRegistry,
   resetToolsRegistry,
   get_registry,
+  getRegistry,
   get_tool,
+  getTool,
   register_tool,
+  registerTool,
   validate_tool,
+  validateTool,
 } from './registry';
 
 // Middleware

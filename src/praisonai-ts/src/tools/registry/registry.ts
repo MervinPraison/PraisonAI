@@ -293,6 +293,9 @@ export function get_registry(): ToolsRegistry {
   return getToolsRegistry();
 }
 
+/** camelCase alias for get_registry — idiomatic TypeScript */
+export const getRegistry = get_registry;
+
 /**
  * Get a single tool by name from the global registry
  * For Python SDK parity: get_tool()
@@ -309,6 +312,9 @@ export function get_tool<TConfig = unknown, TInput = unknown, TOutput = unknown>
   }
 }
 
+/** camelCase alias for get_tool — idiomatic TypeScript */
+export const getTool = get_tool;
+
 /**
  * Register a tool with the global registry
  * For Python SDK parity: register_tool()
@@ -317,6 +323,9 @@ export function register_tool(metadata: ToolMetadata, factory: ToolFactory): voi
   const registry = getToolsRegistry();
   registry.register(metadata, factory);
 }
+
+/** camelCase alias for register_tool — idiomatic TypeScript */
+export const registerTool = register_tool;
 
 /**
  * Validate a tool's configuration and dependencies
@@ -352,7 +361,8 @@ export async function validate_tool(id: string): Promise<{
   const errors: string[] = [];
   
   if (!status.installed) {
-    errors.push(`Package dependency not installed: ${status.installCommand}`);
+    const installCmd = status.installCommand ?? `npm install ${registry.getMetadata(id)?.packageName ?? id}`;
+    errors.push(`Package dependency not installed. Run: ${installCmd}`);
   }
 
   if (status.missingEnvVars.length > 0) {
@@ -366,3 +376,6 @@ export async function validate_tool(id: string): Promise<{
     errors
   };
 }
+
+/** camelCase alias for validate_tool — idiomatic TypeScript */
+export const validateTool = validate_tool;

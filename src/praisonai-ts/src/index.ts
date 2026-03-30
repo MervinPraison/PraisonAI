@@ -91,7 +91,7 @@ export * from './tools/mcpSse';
 
 // AI SDK Tools Registry
 export { tools, registerBuiltinTools } from './tools/tools';
-export { getToolsRegistry, createToolsRegistry, resetToolsRegistry, ToolsRegistry, get_registry, get_tool, register_tool, validate_tool } from './tools/registry';
+export { getToolsRegistry, createToolsRegistry, resetToolsRegistry, ToolsRegistry, get_registry, getRegistry, get_tool, getTool, register_tool, registerTool, validate_tool, validateTool } from './tools/registry';
 export type {
   ToolExecutionContext, ToolLimits, RedactionHooks, ToolLogger,
   ToolCapabilities, InstallHints, ToolMetadata, ToolExecutionResult,
