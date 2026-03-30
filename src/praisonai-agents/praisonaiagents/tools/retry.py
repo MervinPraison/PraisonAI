@@ -1,7 +1,10 @@
 """Retry policy and fallback configuration for tools."""
 import random
 from dataclasses import dataclass, field
-from typing import List, Optional, Set
+from typing import List, Optional, Set, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .circuit_breaker import CircuitBreakerConfig
 
 
 @dataclass
@@ -84,6 +87,7 @@ class ToolExecutionConfig:
     retry_policy: Optional[RetryPolicy] = None
     fallback_chain: Optional[FallbackChain] = None
     timeout_ms: Optional[int] = None
+    circuit_breaker_config: Optional["CircuitBreakerConfig"] = None
     
     @classmethod
     def default(cls) -> "ToolExecutionConfig":
