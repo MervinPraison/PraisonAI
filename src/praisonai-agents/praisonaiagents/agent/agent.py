@@ -5038,10 +5038,12 @@ Your Goal: {self.goal}"""
         from ..approval import get_approval_registry
         backend = getattr(self, '_approval_backend', None)
         approve_all = getattr(self, '_approve_all_tools', False)
+        
         if backend is not None:
             from ..approval.protocols import ApprovalRequest, ApprovalDecision
             from ..approval.registry import DEFAULT_DANGEROUS_TOOLS
             needs_approval = approve_all or function_name in DEFAULT_DANGEROUS_TOOLS
+            
             if needs_approval:
                 request = ApprovalRequest(
                     tool_name=function_name,
@@ -5049,6 +5051,7 @@ Your Goal: {self.goal}"""
                     risk_level=DEFAULT_DANGEROUS_TOOLS.get(function_name, "medium"),
                     agent_name=getattr(self, 'name', None),
                 )
+                
                 cfg_timeout = getattr(self, '_approval_timeout', 0)
                 if cfg_timeout is None:
                     orig_timeout = getattr(backend, '_timeout', None)
@@ -5060,11 +5063,27 @@ Your Goal: {self.goal}"""
                         backend._timeout = cfg_timeout
                 else:
                     orig_timeout = None
+                    
                 try:
                     if hasattr(backend, 'request_approval_sync'):
                         decision = backend.request_approval_sync(request)
                     else:
-                        decision = asyncio.run(backend.request_approval(request))
+                        import asyncio
+                        import concurrent.futures
+                        
+                        try:
+                            loop = asyncio.get_running_loop()
+                        except RuntimeError:
+                            loop = None
+
+                        if loop is None:
+                            # No running loop, safe to block the main thread
+                            decision = asyncio.run(backend.request_approval(request))
+                        else:
+                            # Inside an active async loop, offload to prevent RuntimeError
+                            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                                future = pool.submit(lambda: asyncio.run(backend.request_approval(request)))
+                                decision = future.result()
                 finally:
                     if orig_timeout is not None and hasattr(backend, '_timeout'):
                         backend._timeout = orig_timeout
@@ -5074,14 +5093,20 @@ Your Goal: {self.goal}"""
             decision = get_approval_registry().approve_sync(
                 getattr(self, 'name', None), function_name, arguments,
             )
+            
         if not decision.approved:
             error_msg = f"Tool execution denied: {decision.reason}"
+            import logging
             logging.warning(error_msg)
             return {"error": error_msg, "approval_denied": True}
+            
         get_approval_registry().mark_approved(function_name)
+        
         if decision.modified_args:
             arguments = decision.modified_args
+            import logging
             logging.info(f"Using modified arguments: {arguments}")
+            
         return None, arguments
 
     async def _check_tool_approval_async(self, function_name, arguments):

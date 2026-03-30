@@ -189,15 +189,29 @@ def require_approval(risk_level: RiskLevel = "high"):
             if is_env_auto_approve():
                 mark_approved(tool_name)
                 return func(*args, **kwargs)
+            
             try:
+                import asyncio
+                import concurrent.futures
+
                 try:
-                    asyncio.get_running_loop()
-                    raise RuntimeError("Use sync fallback in async context")
+                    loop = asyncio.get_running_loop()
                 except RuntimeError:
+                    loop = None
+
+                if loop is None:
+                    # No running loop, safe to block the main thread
                     decision = asyncio.run(request_approval(tool_name, kwargs))
+                else:
+                    # Inside an active async loop, offload to prevent RuntimeError
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                        future = pool.submit(lambda: asyncio.run(request_approval(tool_name, kwargs)))
+                        decision = future.result()
             except Exception as e:
+                import logging
                 logging.warning(f"Async approval failed, using sync fallback: {e}")
                 decision = console_approval_callback(tool_name, kwargs, risk_level)
+                
             if not decision.approved:
                 raise PermissionError(f"Execution of {tool_name} denied: {decision.reason}")
             mark_approved(tool_name)
@@ -214,13 +228,16 @@ def require_approval(risk_level: RiskLevel = "high"):
             if is_env_auto_approve():
                 mark_approved(tool_name)
                 return await func(*args, **kwargs)
+            
             decision = await request_approval(tool_name, kwargs)
+            
             if not decision.approved:
                 raise PermissionError(f"Execution of {tool_name} denied: {decision.reason}")
             mark_approved(tool_name)
             kwargs.update(decision.modified_args)
             return await func(*args, **kwargs)
 
+        import asyncio
         if asyncio.iscoroutinefunction(func):
             return async_wrapper
         else:

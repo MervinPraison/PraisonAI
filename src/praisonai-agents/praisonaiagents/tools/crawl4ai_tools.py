@@ -609,9 +609,20 @@ def crawl4ai_sync(
     Returns:
         Dict with crawl results
     """
-    return asyncio.run(
-        crawl4ai(url, css_selector, js_code, wait_for)
-    )
+    import asyncio
+    import concurrent.futures
+    
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop is None:
+        return asyncio.run(crawl4ai(url, css_selector, js_code, wait_for))
+    else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(lambda: asyncio.run(crawl4ai(url, css_selector, js_code, wait_for)))
+            return future.result()
 
 
 def crawl4ai_extract_sync(
@@ -629,9 +640,20 @@ def crawl4ai_extract_sync(
     Returns:
         Dict with extracted data
     """
-    return asyncio.run(
-        crawl4ai_extract(url, schema, js_code)
-    )
+    import asyncio
+    import concurrent.futures
+    
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop is None:
+        return asyncio.run(crawl4ai_extract(url, schema, js_code))
+    else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(lambda: asyncio.run(crawl4ai_extract(url, schema, js_code)))
+            return future.result()
 
 
 if __name__ == "__main__":
