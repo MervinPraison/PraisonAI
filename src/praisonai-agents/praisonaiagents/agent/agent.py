@@ -1762,12 +1762,12 @@ Your Goal: {self.goal}
         return self.__cache_lock
 
     @property
-    def auto_memory(self) -> bool:
+    def auto_memory(self) -> Optional[bool]:
         """AutoMemory instance for automatic memory extraction."""
         return self._auto_memory
     
     @auto_memory.setter
-    def auto_memory(self, value: bool) -> None:
+    def auto_memory(self, value: Optional[bool]) -> None:
         self._auto_memory = value
 
     @property
@@ -1780,21 +1780,21 @@ Your Goal: {self.goal}
         self._policy = value
 
     @property
-    def background(self) -> bool:
+    def background(self) -> Optional[bool]:
         """BackgroundRunner instance for async task execution."""
         return self._background
     
     @background.setter
-    def background(self, value: bool) -> None:
+    def background(self, value: Optional[bool]) -> None:
         self._background = value
 
     @property
-    def checkpoints(self) -> bool:
+    def checkpoints(self) -> Optional[bool]:
         """CheckpointService instance for file-level undo/restore."""
         return self._checkpoints
     
     @checkpoints.setter
-    def checkpoints(self, value: bool) -> None:
+    def checkpoints(self, value: Optional[bool]) -> None:
         self._checkpoints = value
 
     @property
@@ -5362,7 +5362,7 @@ Your Goal: {self.goal}"""
         return len(self.chat_history)
     
     @contextlib.contextmanager
-    def ephemeral(self) -> bool:
+    def ephemeral(self) -> Generator[None, None, None]:
         """
         Context manager for ephemeral conversations.
         
@@ -6085,7 +6085,7 @@ Your Goal: {self.goal}"""
             config=HandoffConfig(context_policy=ContextPolicy.NONE),
         )
 
-    def chat(self, prompt: str, temperature: float = 1.0, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None) -> Union[str, Generator[str, None, None]]:
+    def chat(self, prompt: str, temperature: float = 1.0, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None) -> Optional[str]:
         """
         Chat with the agent.
         
@@ -7251,7 +7251,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         kwargs['stream'] = stream_requested
         return await self.achat(prompt, **kwargs)
 
-    def run(self, prompt: str, **kwargs) -> str:
+    def run(self, prompt: str, **kwargs: Any) -> Optional[str]:
         """Execute agent silently and return structured result.
         
         Production-friendly execution. Always uses silent mode with no streaming
@@ -8390,7 +8390,7 @@ Write the complete compiled report:"""
         """Number of approval requests still waiting."""
         return len(self._pending_approvals)
 
-    def execute(self, task: Any, context: Optional[Any] = None) -> Union[str, Generator[str, None, None]]:
+    def execute(self, task: Any, context: Optional[Any] = None) -> Optional[str]:
         """Execute a task synchronously - backward compatibility method"""
         if hasattr(task, 'description'):
             prompt = task.description
@@ -8400,7 +8400,7 @@ Write the complete compiled report:"""
             prompt = str(task)
         return self.chat(prompt)
 
-    async def aexecute(self, task: Any, context: Optional[Any] = None) -> Union[str, Generator[str, None, None]]:
+    async def aexecute(self, task: Any, context: Optional[Any] = None) -> Optional[str]:
         """Execute a task asynchronously - backward compatibility method"""
         if hasattr(task, 'description'):
             prompt = task.description
