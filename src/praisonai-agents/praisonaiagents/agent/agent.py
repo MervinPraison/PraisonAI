@@ -5133,6 +5133,101 @@ Your Goal: {self.goal}"""
         tail = text[-tail_limit:] if tail_limit > 0 else ""
         return f"{head}\n...[{len(text):,} chars, showing first/last portions]...\n{tail}"
     
+    def _resolve_approval_decision(self, tool_name: str, tool_args: dict, is_async: bool = False):
+        """Shared approval logic for both sync and async paths.
+        
+        Args:
+            tool_name: Name of the tool to check approval for
+            tool_args: Arguments to pass to the tool
+            is_async: Whether this is called from async context
+            
+        Returns:
+            ApprovalDecision or coroutine: The approval decision (sync) or coroutine (async)
+        """
+        from ..approval import get_approval_registry
+        from ..approval.protocols import ApprovalRequest, ApprovalDecision
+        from ..approval.registry import DEFAULT_DANGEROUS_TOOLS
+        
+        backend = getattr(self, '_approval_backend', None)
+        approve_all = getattr(self, '_approve_all_tools', False)
+        
+        if backend is not None:
+            needs_approval = approve_all or tool_name in DEFAULT_DANGEROUS_TOOLS
+            if needs_approval:
+                request = ApprovalRequest(
+                    tool_name=tool_name,
+                    arguments=tool_args,
+                    risk_level=DEFAULT_DANGEROUS_TOOLS.get(tool_name, "medium"),
+                    agent_name=getattr(self, 'name', None),
+                )
+                
+                if is_async:
+                    # Async path - return the coroutine for caller to await
+                    cfg_timeout = getattr(self, '_approval_timeout', 0)
+                    if cfg_timeout is None:
+                        return backend.request_approval(request)
+                    elif cfg_timeout > 0:
+                        import asyncio
+                        return asyncio.wait_for(
+                            backend.request_approval(request),
+                            timeout=cfg_timeout,
+                        )
+                    else:
+                        return backend.request_approval(request)
+                else:
+                    # Sync path - handle timeout and sync/async backend compatibility
+                    cfg_timeout = getattr(self, '_approval_timeout', 0)
+                    orig_timeout = None
+                    if cfg_timeout is None:
+                        orig_timeout = getattr(backend, '_timeout', None)
+                        if orig_timeout is not None:
+                            backend._timeout = 86400 * 365
+                    elif cfg_timeout > 0:
+                        orig_timeout = getattr(backend, '_timeout', None)
+                        if orig_timeout is not None:
+                            backend._timeout = cfg_timeout
+                    
+                    try:
+                        if hasattr(backend, 'request_approval_sync'):
+                            return backend.request_approval_sync(request)
+                        else:
+                            # Use the shared utility to avoid code duplication and handle timeout correctly
+                            from ..approval.utils import run_coroutine_safely
+                            
+                            # Compute effective timeout from agent configuration
+                            if cfg_timeout is None:
+                                effective_timeout = None  # indefinite wait
+                            elif cfg_timeout > 0:
+                                effective_timeout = cfg_timeout
+                            else:
+                                # cfg_timeout == 0: use backend default or fallback
+                                effective_timeout = getattr(backend, '_timeout', 60)
+                            
+                            return run_coroutine_safely(
+                                backend.request_approval(request),
+                                timeout=effective_timeout
+                            )
+                    finally:
+                        if orig_timeout is not None and hasattr(backend, '_timeout'):
+                            backend._timeout = orig_timeout
+            else:
+                if is_async:
+                    # For async, wrap the decision in a coroutine
+                    async def _async_approval():
+                        return ApprovalDecision(approved=True, reason="Not a dangerous tool")
+                    return _async_approval()
+                else:
+                    return ApprovalDecision(approved=True, reason="Not a dangerous tool")
+        else:
+            if is_async:
+                return get_approval_registry().approve_async(
+                    getattr(self, 'name', None), tool_name, tool_args,
+                )
+            else:
+                return get_approval_registry().approve_sync(
+                    getattr(self, 'name', None), tool_name, tool_args,
+                )
+
     def _check_tool_approval_sync(self, function_name, arguments):
         """Check tool approval synchronously. Returns (decision, arguments) or error dict."""
         # Permission tier fast-path (O(1) frozenset lookup, resolved at __init__)
@@ -5141,65 +5236,16 @@ Your Goal: {self.goal}"""
         if self._perm_allow is not None and function_name not in self._perm_allow:
             return {"error": f"Tool '{function_name}' not in allowed tools list", "permission_denied": True}
 
-        from ..approval import get_approval_registry
-        backend = getattr(self, '_approval_backend', None)
-        approve_all = getattr(self, '_approve_all_tools', False)
-        if backend is not None:
-            from ..approval.protocols import ApprovalRequest, ApprovalDecision
-            from ..approval.registry import DEFAULT_DANGEROUS_TOOLS
-            needs_approval = approve_all or function_name in DEFAULT_DANGEROUS_TOOLS
-            if needs_approval:
-                request = ApprovalRequest(
-                    tool_name=function_name,
-                    arguments=arguments,
-                    risk_level=DEFAULT_DANGEROUS_TOOLS.get(function_name, "medium"),
-                    agent_name=getattr(self, 'name', None),
-                )
-                cfg_timeout = getattr(self, '_approval_timeout', 0)
-                if cfg_timeout is None:
-                    orig_timeout = getattr(backend, '_timeout', None)
-                    if orig_timeout is not None:
-                        backend._timeout = 86400 * 365
-                elif cfg_timeout > 0:
-                    orig_timeout = getattr(backend, '_timeout', None)
-                    if orig_timeout is not None:
-                        backend._timeout = cfg_timeout
-                else:
-                    orig_timeout = None
-                try:
-                    if hasattr(backend, 'request_approval_sync'):
-                        decision = backend.request_approval_sync(request)
-                    else:
-                        # Use the shared utility to avoid code duplication and handle timeout correctly
-                        from ..approval.utils import run_coroutine_safely
-                        
-                        # Compute effective timeout from agent configuration
-                        if cfg_timeout is None:
-                            effective_timeout = None  # indefinite wait
-                        elif cfg_timeout > 0:
-                            effective_timeout = cfg_timeout
-                        else:
-                            # cfg_timeout == 0: use backend default or fallback
-                            effective_timeout = getattr(backend, '_timeout', 60)
-                        
-                        decision = run_coroutine_safely(
-                            backend.request_approval(request),
-                            timeout=effective_timeout
-                        )
-                finally:
-                    if orig_timeout is not None and hasattr(backend, '_timeout'):
-                        backend._timeout = orig_timeout
-            else:
-                decision = ApprovalDecision(approved=True, reason="Not a dangerous tool")
-        else:
-            decision = get_approval_registry().approve_sync(
-                getattr(self, 'name', None), function_name, arguments,
-            )
+        decision = self._resolve_approval_decision(function_name, arguments, is_async=False)
+        
         if not decision.approved:
             error_msg = f"Tool execution denied: {decision.reason}"
             logging.warning(error_msg)
             return {"error": error_msg, "approval_denied": True}
+        
+        from ..approval import get_approval_registry
         get_approval_registry().mark_approved(function_name)
+        
         if decision.modified_args:
             arguments = decision.modified_args
             logging.info(f"Using modified arguments: {arguments}")
@@ -5207,41 +5253,23 @@ Your Goal: {self.goal}"""
 
     async def _check_tool_approval_async(self, function_name, arguments):
         """Check tool approval asynchronously. Returns (decision, arguments) or error dict."""
-        from ..approval import get_approval_registry
-        backend = getattr(self, '_approval_backend', None)
-        approve_all = getattr(self, '_approve_all_tools', False)
-        if backend is not None:
-            from ..approval.protocols import ApprovalRequest, ApprovalDecision
-            from ..approval.registry import DEFAULT_DANGEROUS_TOOLS
-            needs_approval = approve_all or function_name in DEFAULT_DANGEROUS_TOOLS
-            if needs_approval:
-                request = ApprovalRequest(
-                    tool_name=function_name,
-                    arguments=arguments,
-                    risk_level=DEFAULT_DANGEROUS_TOOLS.get(function_name, "medium"),
-                    agent_name=getattr(self, 'name', None),
-                )
-                cfg_timeout = getattr(self, '_approval_timeout', 0)
-                if cfg_timeout is None:
-                    decision = await backend.request_approval(request)
-                elif cfg_timeout > 0:
-                    decision = await asyncio.wait_for(
-                        backend.request_approval(request),
-                        timeout=cfg_timeout,
-                    )
-                else:
-                    decision = await backend.request_approval(request)
-            else:
-                decision = ApprovalDecision(approved=True, reason="Not a dangerous tool")
-        else:
-            decision = await get_approval_registry().approve_async(
-                getattr(self, 'name', None), function_name, arguments,
-            )
+        # Permission tier fast-path (O(1) frozenset lookup, resolved at __init__)
+        if self._perm_deny and function_name in self._perm_deny:
+            return {"error": f"Tool '{function_name}' blocked by permission policy", "permission_denied": True}
+        if self._perm_allow is not None and function_name not in self._perm_allow:
+            return {"error": f"Tool '{function_name}' not in allowed tools list", "permission_denied": True}
+
+        decision_coro = self._resolve_approval_decision(function_name, arguments, is_async=True)
+        decision = await decision_coro
+        
         if not decision.approved:
             error_msg = f"Tool execution denied: {decision.reason}"
             logging.warning(error_msg)
             return {"error": error_msg, "approval_denied": True}
+        
+        from ..approval import get_approval_registry
         get_approval_registry().mark_approved(function_name)
+        
         if decision.modified_args:
             arguments = decision.modified_args
             logging.info(f"Using modified arguments: {arguments}")
