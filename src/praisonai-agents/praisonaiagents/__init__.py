@@ -59,9 +59,7 @@ _logging.configure_root_logger()
 # Import configuration (lightweight, no heavy deps)
 from . import _config
 
-# Import configuration (lightweight, no heavy deps)
-from . import config
-# Note: tools, db, obs, knowledge and mcp are lazy-loaded via __getattr__ due to heavy deps
+# Note: config, tools, db, obs, knowledge and mcp are lazy-loaded via __getattr__ due to heavy deps
 
 # Embedding API - LAZY LOADED via __getattr__ for performance
 # Supports: embedding, embeddings, aembedding, aembeddings, EmbeddingResult, get_dimensions
@@ -508,33 +506,31 @@ def _custom_handler(name, cache):
         cache['Agents'] = value
         return value
     
-    # Task removed in v4.0.0 - use Task instead
-    if name == "Task":
-        raise ImportError(
-            "Task has been removed in v4.0.0. Use Task instead.\n"
-            "Migration: Replace 'from praisonaiagents import Task' with 'from praisonaiagents import Task'\n"
-            "Task supports all Task features including action, handler, loop_over, etc."
-        )
+    # This handler would be for deprecated symbols - Task is already in _LAZY_IMPORTS
+    # No deprecated task symbols to handle currently
     
-    # Override 'embedding' and 'embeddings' to return the function, not the subpackage
-    if name == 'embedding':
-        value = lazy_import('praisonaiagents.embedding.embed', 'embedding', cache)
-        cache['embedding'] = value
-        return value
-    if name == 'embeddings':
-        # embeddings is an alias for embedding function
-        value = lazy_import('praisonaiagents.embedding.embed', 'embedding', cache)
-        cache['embedding'] = value
-        cache['embeddings'] = value
-        return value
     
     # Module imports (return the module itself)
+    if name == 'tools':
+        import importlib
+        mod = importlib.import_module('.tools', 'praisonaiagents')
+        cache['tools'] = mod
+        return mod
+    if name == 'config':
+        import importlib
+        mod = importlib.import_module('.config', 'praisonaiagents')
+        cache['config'] = mod
+        return mod
     if name == 'memory':
         import importlib
-        return importlib.import_module('.memory', 'praisonaiagents')
+        mod = importlib.import_module('.memory', 'praisonaiagents')
+        cache['memory'] = mod
+        return mod
     if name == 'workflows':
         import importlib
-        return importlib.import_module('.workflows', 'praisonaiagents')
+        mod = importlib.import_module('.workflows', 'praisonaiagents')
+        cache['workflows'] = mod
+        return mod
     
     raise AttributeError(f"Not handled by custom_handler: {name}")
 
@@ -559,15 +555,31 @@ class _EmbeddingProxy:
     def __init__(self):
         self._func = None
     
-    def __call__(self, *args, **kwargs):
+    def _load(self):
+        """Load the actual embedding function if not already loaded."""
         if self._func is None:
             self._func = _get_embedding_func()
-        return self._func(*args, **kwargs)
+        return self._func
+    
+    def __call__(self, *args, **kwargs):
+        return self._load()(*args, **kwargs)
     
     def __getattr__(self, name):
-        if self._func is None:
-            self._func = _get_embedding_func()
-        return getattr(self._func, name)
+        return getattr(self._load(), name)
+    
+    @property
+    def __wrapped__(self):
+        """Support for inspect.signature() and functools.wraps."""
+        return self._load()
+    
+    @property
+    def __signature__(self):
+        """Support for inspect.signature()."""
+        import inspect
+        return inspect.signature(self._load())
+    
+    def __repr__(self):
+        return f"<lazy proxy for {self._load()!r}>"
 
 # Override the submodule with our function proxy
 embedding = _EmbeddingProxy()
@@ -579,7 +591,7 @@ __getattr__ = create_lazy_getattr_with_fallback(
     mapping=_LAZY_IMPORTS,
     module_name=__name__,
     cache=_lazy_cache,
-    fallback_modules=['tools', 'memory', 'config', 'workflows'],  # Note: 'embedding' excluded to avoid conflict with embedding() function
+    fallback_modules=[],  # Removed heavy modules to prevent imports on typos - all access via _LAZY_IMPORTS or _custom_handler
     custom_handler=_custom_handler
 )
 
