@@ -183,6 +183,16 @@ TOOL_MAPPINGS = {
     'smtp_send_email': ('.email_tools', None),
     'smtp_read_inbox': ('.email_tools', None),
     'email_tools': ('.email_tools', None),
+    
+    # HeyGen Tools (requires HEYGEN_API_KEY)
+    'heygen': ('.heygen_tool', None),
+    'heygen_list_avatars': ('.heygen_tool', None),
+    'heygen_list_voices': ('.heygen_tool', None),
+    'heygen_generate_video': ('.heygen_tool', None),
+    'heygen_video_status': ('.heygen_tool', None),
+    'heygen_wait_for_completion': ('.heygen_tool', None),
+    'HeyGenTools': ('.heygen_tool', 'HeyGenTools'),
+    'heygen_tools': ('.heygen_tool', None),
 }
 
 _instances = {}  # Cache for class instances
@@ -218,8 +228,8 @@ def __getattr__(name: str) -> Any:
     
     module_path, class_name = TOOL_MAPPINGS[name]
     
-    # Return class itself (not instance) for TavilyTools, YouTools, ExaTools, Crawl4AITools
-    if name in ('TavilyTools', 'YouTools', 'ExaTools', 'Crawl4AITools'):
+    # Return class itself (not instance) for TavilyTools, YouTools, ExaTools, Crawl4AITools, HeyGenTools
+    if name in ('TavilyTools', 'YouTools', 'ExaTools', 'Crawl4AITools', 'HeyGenTools'):
         module = import_module(module_path, __package__)
         return getattr(module, class_name)
     
@@ -245,10 +255,12 @@ def __getattr__(name: str) -> Any:
             'store_memory', 'search_memory',
             'store_learning', 'search_learning',
             'send_email', 'list_emails', 'read_email', 'reply_email', 'list_inboxes', 'create_inbox',
-            'smtp_send_email', 'smtp_read_inbox'
+            'smtp_send_email', 'smtp_read_inbox',
+            'heygen', 'heygen_list_avatars', 'heygen_list_voices', 'heygen_generate_video', 
+            'heygen_video_status', 'heygen_wait_for_completion'
         ]:
             return getattr(module, name)
-        if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools', 'schedule_tools', 'ast_grep_tools', 'email_tools']:
+        if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools', 'schedule_tools', 'ast_grep_tools', 'email_tools', 'heygen_tools']:
             return module  # Returns the callable module
         return getattr(module, name)
     else:
