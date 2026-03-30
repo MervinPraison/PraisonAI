@@ -1,17 +1,24 @@
 name: Auto PR Comment
 
+# Sequential chain: Wait for Coderabbit to finish, THEN trigger Copilot
+# Flow: PR opened → Qodo/Coderabbit auto-review → Copilot reads their reviews
 on:
-  pull_request:
-    types: [opened]
+  issue_comment:
+    types: [created]
 
 jobs:
-  # Phase 1: Post @copilot immediately (Qodo/Coderabbit already auto-trigger)
-  copilot-review:
+  # Trigger @copilot AFTER Coderabbit posts its review summary
+  # This ensures Copilot can read Qodo + Coderabbit feedback first
+  copilot-after-coderabbit:
+    if: |
+      github.event.issue.pull_request &&
+      github.event.comment.user.login == 'coderabbitai[bot]' &&
+      contains(github.event.comment.body, 'summary by coderabbit')
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
     steps:
-      - name: Post Copilot review request
+      - name: Post Copilot review request (after Coderabbit)
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -20,5 +27,5 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '@copilot Do a thorough review of this PR. Check other reviewer comments above from Qodo and Coderabbit for context.\n\nReview areas:\n1. **Bloat check**: Are changes minimal and focused? Any unnecessary code or scope creep?\n2. **Security**: Any hardcoded secrets, unsafe eval/exec, missing input validation?\n3. **Performance**: Any module-level heavy imports? Hot-path regressions?\n4. **Tests**: Are tests included? Do they cover the changes adequately?\n5. **Backward compat**: Any public API changes without deprecation?\n6. **Code quality**: DRY violations, naming conventions, error handling?\n7. Suggest specific improvements with code examples where possible'
+              body: '@copilot Do a thorough review of this PR. Read ALL existing reviewer comments above from Qodo and Coderabbit first — incorporate their findings.\n\nReview areas:\n1. **Bloat check**: Are changes minimal and focused? Any unnecessary code or scope creep?\n2. **Security**: Any hardcoded secrets, unsafe eval/exec, missing input validation?\n3. **Performance**: Any module-level heavy imports? Hot-path regressions?\n4. **Tests**: Are tests included? Do they cover the changes adequately?\n5. **Backward compat**: Any public API changes without deprecation?\n6. **Code quality**: DRY violations, naming conventions, error handling?\n7. **Address reviewer feedback**: If Qodo or Coderabbit flagged valid issues, include them in your review\n8. Suggest specific improvements with code examples where possible'
             })

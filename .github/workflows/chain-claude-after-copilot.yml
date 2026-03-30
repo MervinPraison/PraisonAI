@@ -1,7 +1,6 @@
 name: Chain Claude After Reviewers
 
-# Event-driven: triggers when a bot reviewer finishes on a PR
-# - Copilot posts PR reviews (pull_request_review event)
+# Event-driven: triggers when Copilot finishes reviewing a PR
 on:
   pull_request_review:
     types: [submitted]
@@ -11,8 +10,9 @@ on:
   #   types: [created]
 
 jobs:
-  # Trigger Claude after Copilot finishes on a PR
-  claude-after-copilot-on-pr:
+  # Trigger Claude after Copilot finishes on a PR — Claude is the FINAL reviewer
+  # Claude reads ALL previous reviews (Qodo, Coderabbit, Copilot) and fixes any valid issues
+  claude-final-review:
     if: |
       github.event_name == 'pull_request_review' &&
       github.event.review.user.login == 'copilot-swe-agent'
@@ -20,7 +20,7 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - name: Post Claude review request (final reviewer)
+      - name: Post Claude final review + fix request
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -29,7 +29,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '@claude You are the final reviewer. Read ALL comments above from Qodo, Coderabbit, and Copilot first.\n\nReview this PR as architecture lead per AGENTS.md:\n1. Protocol-driven: heavy code in wrapper, not core SDK?\n2. Backward compatible: no public API removed without deprecation?\n3. Performance: no hot-path regressions, lazy imports for optional deps?\n4. DRY: no duplication, reuses existing abstractions?\n5. Async-safe and multi-agent safe?\n6. Address any unresolved issues from other reviewers\n7. If fixes needed, push them directly to this branch'
+              body: '@claude You are the FINAL architecture reviewer. Read ALL comments above from Qodo, Coderabbit, and Copilot carefully before responding.\n\n**Phase 1: Review per AGENTS.md**\n1. Protocol-driven: heavy code in wrapper, not core SDK?\n2. Backward compatible: no public API removed without deprecation?\n3. Performance: no hot-path regressions, lazy imports for optional deps?\n4. DRY: no duplication, reuses existing abstractions?\n5. Async-safe and multi-agent safe?\n\n**Phase 2: Fix valid issues from other reviewers**\n6. Read Qodo, Coderabbit, and Copilot reviews above\n7. For each VALID suggestion they raised: implement the fix\n8. Push all fixes to THIS branch (do NOT create a new PR)\n9. Comment a summary of what you fixed and what you intentionally skipped (with reasoning)\n\n**Phase 3: Final verdict**\n10. If all issues are resolved and tests pass, approve the PR\n11. If blocking issues remain, request changes with clear action items'
             })
 
   # Future: Trigger Claude after Gemini finishes on an Issue (commented out)
