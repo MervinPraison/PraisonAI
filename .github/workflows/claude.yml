@@ -12,12 +12,16 @@ on:
 
 jobs:
   claude-response:
-    # Prevent certain bots from triggering this action (but allow github-actions[bot] for auto-comments)
+    # Allow: human users, github-actions[bot] (auto-comments/labels)
+    # Block: dependabot, cursor, renovate, other bots
     if: |
+      (
+        !contains(github.actor, '[bot]') ||
+        github.actor == 'github-actions[bot]'
+      ) &&
       github.actor != 'dependabot[bot]' &&
       github.actor != 'cursor[bot]' &&
-      github.actor != 'renovate[bot]' &&
-      !(contains(github.actor, '[bot]') && github.actor != 'github-actions[bot]')
+      github.actor != 'renovate[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -35,6 +39,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           trigger_phrase: "@claude"
+          label_trigger: "claude"
           allowed_tools: |
             Bash(git:*)
             Bash(python:*)
