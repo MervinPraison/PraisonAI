@@ -135,9 +135,30 @@ def main():
             return {"error": str(e)}
     
     # MCP endpoints
+    def safe_calculate(expression: str) -> str:
+        """Safely evaluate a mathematical expression using AST."""
+        import ast
+        try:
+            # Only allow safe math characters
+            allowed = set("0123456789+-*/.() ")
+            if not all(c in allowed for c in expression):
+                return "Error: Invalid characters in expression"
+            # Use ast.parse for safe evaluation
+            tree = ast.parse(expression, mode='eval')
+            # Only allow numeric literals and basic math operators
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.Expression, ast.BinOp, ast.UnaryOp,
+                                        ast.Constant, ast.Add, ast.Sub, ast.Mult,
+                                        ast.Div, ast.USub, ast.UAdd)):
+                    return "Error: Only basic math operations are allowed"
+            result = eval(compile(tree, '<expr>', 'eval'), {"__builtins__": {}})
+            return str(result)
+        except Exception as e:
+            return f"Error: {e}"
+    
     mcp_tools = {
         "search": {"description": "Search the web", "func": lambda q: f"Results for: {q}"},
-        "calculate": {"description": "Calculate expression", "func": lambda e: str(eval(e)) if e.replace(" ", "").replace("+", "").replace("-", "").replace("*", "").replace("/", "").replace(".", "").replace("(", "").replace(")", "").isdigit() else "Error: Invalid expression"},
+        "calculate": {"description": "Calculate expression", "func": safe_calculate},
     }
     
     @app.get("/mcp/tools")
