@@ -168,7 +168,7 @@ class ParallelExecutor:
         if not tasks:
             return []
         
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         
         # Create semaphore to limit concurrency
         semaphore = asyncio.Semaphore(self.max_parallel)
@@ -203,18 +203,21 @@ class ParallelExecutor:
             List of results
         """
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If already in async context, create new loop
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(asyncio.run, self.execute(tasks))
-                    return future.result()
-            else:
-                return loop.run_until_complete(self.execute(tasks))
+            # Try to get the running loop - if this succeeds, we're in async context
+            loop = asyncio.get_running_loop()
+            # If already in async context, create new loop
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, self.execute(tasks))
+                return future.result()
         except RuntimeError:
-            # No event loop, create one
-            return asyncio.run(self.execute(tasks))
+            # No running loop, safe to create/get one and run
+            try:
+                loop = asyncio.get_event_loop()
+                return loop.run_until_complete(self.execute(tasks))
+            except RuntimeError:
+                # No event loop, create one
+                return asyncio.run(self.execute(tasks))
     
     def close(self) -> None:
         """Close the executor and release resources."""
@@ -309,16 +312,19 @@ class ParallelSearchCoordinator:
             List of results
         """
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(asyncio.run, self.execute_turn(batch))
-                    return future.result()
-            else:
-                return loop.run_until_complete(self.execute_turn(batch))
+            # Try to get the running loop - if this succeeds, we're in async context
+            loop = asyncio.get_running_loop()
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, self.execute_turn(batch))
+                return future.result()
         except RuntimeError:
-            return asyncio.run(self.execute_turn(batch))
+            # No running loop, safe to create/get one and run
+            try:
+                loop = asyncio.get_event_loop()
+                return loop.run_until_complete(self.execute_turn(batch))
+            except RuntimeError:
+                return asyncio.run(self.execute_turn(batch))
     
     def close(self) -> None:
         """Close resources."""

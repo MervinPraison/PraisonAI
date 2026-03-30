@@ -2445,7 +2445,7 @@ This PRP provides:
         """
         asyncio = _get_asyncio()
         # Run sync method in executor for now (subprocess calls are blocking)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None,
             self.analyze_codebase_with_gitingest,
@@ -2461,7 +2461,7 @@ This PRP provides:
         Async version of generate_prp.
         """
         asyncio = _get_asyncio()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None,
             lambda: self.generate_comprehensive_prp(feature_request, context_analysis)
@@ -2476,7 +2476,7 @@ This PRP provides:
         Async version of create_implementation_blueprint.
         """
         asyncio = _get_asyncio()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None,
             lambda: self.build_implementation_blueprint(feature_request, context_analysis)

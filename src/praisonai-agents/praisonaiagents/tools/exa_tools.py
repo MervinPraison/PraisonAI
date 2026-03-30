@@ -655,7 +655,7 @@ async def exa_search_async(
         Dict with search results
     """
     import asyncio
-    return await asyncio.get_event_loop().run_in_executor(
+    return await asyncio.get_running_loop().run_in_executor(
         None,
         lambda: exa_search(query, num_results, type, category)
     )
@@ -679,7 +679,7 @@ async def exa_search_contents_async(
         Dict with results containing content
     """
     import asyncio
-    return await asyncio.get_event_loop().run_in_executor(
+    return await asyncio.get_running_loop().run_in_executor(
         None,
         lambda: exa_search_contents(query, text, highlights, num_results)
     )
@@ -699,7 +699,7 @@ async def exa_answer_async(
         Dict with answer and citations
     """
     import asyncio
-    return await asyncio.get_event_loop().run_in_executor(
+    return await asyncio.get_running_loop().run_in_executor(
         None,
         lambda: exa_answer(query, text)
     )

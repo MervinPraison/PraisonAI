@@ -619,7 +619,7 @@ Return empty arrays if nothing is found for a category."""
             llm_instance = LLM(model=model)
             
             # Run sync LLM call in executor for async compatibility
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             response = await loop.run_in_executor(
                 None,
                 lambda: llm_instance.get_response(
