@@ -262,9 +262,8 @@ def __getattr__(name: str) -> Any:
                     class_ = getattr(module, class_name)
                     _instances[class_name] = class_()
         
-        # Get the method and bind it to the instance
-        with _instances_lock:
-            method = getattr(_instances[class_name], name)
+        # Get the method and bind it to the instance (instance already confirmed present above)
+        method = getattr(_instances[class_name], name)
         return method
 
 __all__ = list(TOOL_MAPPINGS.keys()) + [

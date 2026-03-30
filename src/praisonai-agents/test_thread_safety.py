@@ -9,8 +9,8 @@ import time
 import sys
 import os
 
-# Add the package to the path
-sys.path.insert(0, '/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents')
+# Add the package to the path if running directly
+sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 
 def test_context_agent_lazy_loaders():
     """Test thread safety of lazy loaders in context_agent.py"""

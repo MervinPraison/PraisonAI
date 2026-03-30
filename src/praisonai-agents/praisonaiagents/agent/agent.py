@@ -8725,13 +8725,11 @@ Write the complete compiled report:"""
                     try:
                         print(f"✅ FastAPI server started at http://{host}:{port}")
                         print(f"📚 API documentation available at http://{host}:{port}/docs")
-                        # Get endpoints safely under lock
+                        # Get endpoints and app atomically under a single lock acquisition
                         with _server_lock:
                             endpoints = list(_registered_agents[port].keys())
-                        print(f"🔌 Available endpoints: {', '.join(endpoints)}")
-                        # Get app safely under lock
-                        with _server_lock:
                             app = _shared_apps[port]
+                        print(f"🔌 Available endpoints: {', '.join(endpoints)}")
                         uvicorn.run(app, host=host, port=port, log_level="debug" if debug else "info")
                     except Exception as e:
                         logging.error(f"Error starting server: {str(e)}", exc_info=True)
