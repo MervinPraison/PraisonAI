@@ -1,26 +1,17 @@
 {
-  "version": "1.5.5",
-  "lastUpdated": "2026-02-05",
+  "version": "1.5.87",
+  "lastUpdated": "2026-03-30",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 282,
-    "pythonWrapperFeatures": 94,
-<<<<<<< Updated upstream
-    "typescriptFeatures": 1118,
-    "gapCount": 97,
-    "priorityP0": 21,
-    "priorityP1": 8,
-    "priorityP2": 19,
-    "priorityP3": 49
-=======
+    "pythonCoreFeatures": 311,
+    "pythonWrapperFeatures": 99,
     "typescriptFeatures": 1183,
-    "gapCount": 0,
-    "priorityP0": 0,
+    "gapCount": 23,
+    "priorityP0": 5,
     "priorityP1": 0,
     "priorityP2": 0,
-    "priorityP3": 0
->>>>>>> Stashed changes
+    "priorityP3": 18
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -40,19 +31,25 @@
       "Agents",
       "ApprovalCallback",
       "ArrayMode",
+      "AsyncLearnProtocol",
       "AudioAgent",
       "AudioConfig",
       "AuthProfile",
       "AutoAgents",
+      "AutoApproveBackend",
       "AutoRagAgent",
       "AutoRagConfig",
       "AutonomyConfig",
       "AutonomyLevel",
+      "BaseTool",
       "BotChannel",
       "BotConfig",
       "BotMessage",
+      "BotOSConfig",
+      "BotOSProtocol",
       "BotProtocol",
       "BotUser",
+      "BudgetExceededError",
       "CACHING_PRESETS",
       "CONTEXT_PRESETS",
       "CachingConfig",
@@ -65,6 +62,7 @@
       "CodeExecutionStep",
       "ConditionProtocol",
       "ConfigValidationError",
+      "ConsoleBackend",
       "ContextAgent",
       "ContextConfig",
       "ContextEvent",
@@ -81,10 +79,13 @@
       "DeepResearchResponse",
       "DefaultsConfig",
       "DictCondition",
+      "DoomLoopDetector",
       "EXECUTION_PRESETS",
       "EmbeddingAgent",
       "EmbeddingConfig",
       "EmbeddingResult",
+      "EscalationPipeline",
+      "EscalationStage",
       "EventType",
       "ExecutionConfig",
       "ExecutionPreset",
@@ -99,6 +100,7 @@
       "FileSearchCall",
       "FlowDisplay",
       "FunctionPlugin",
+      "FunctionTool",
       "GUARDRAIL_PRESETS",
       "GatewayClientProtocol",
       "GatewayConfig",
@@ -117,6 +119,8 @@
       "HandoffInputData",
       "HandoffResult",
       "HandoffTimeoutError",
+      "Heartbeat",
+      "HeartbeatConfig",
       "HookPluginProtocol",
       "HooksConfig",
       "If",
@@ -126,6 +130,13 @@
       "KnowledgeConfig",
       "LLMGuardrail",
       "LLMPluginProtocol",
+      "LearnBackend",
+      "LearnConfig",
+      "LearnManager",
+      "LearnManagerProtocol",
+      "LearnMode",
+      "LearnProtocol",
+      "LearnScope",
       "LineRange",
       "Loop",
       "MCP",
@@ -148,6 +159,8 @@
       "OCRAgent",
       "OCRConfig",
       "OUTPUT_PRESETS",
+      "ObservabilityEventType",
+      "ObservabilityHooks",
       "OptimizerStrategy",
       "OutputConfig",
       "OutputPreset",
@@ -214,6 +227,9 @@
       "TodoItem",
       "TodoList",
       "ToolPluginProtocol",
+      "ToolRegistry",
+      "ToolResult",
+      "ToolValidationError",
       "Tools",
       "TraceSink",
       "TraceSinkProtocol",
@@ -265,7 +281,9 @@
       "get_plugin_manager",
       "get_plugin_template",
       "get_plugins_config",
+      "get_registry",
       "get_telemetry",
+      "get_tool",
       "handoff",
       "handoff_filters",
       "is_path_like",
@@ -280,6 +298,7 @@
       "parse_policy_string",
       "prompt_with_handoff_instructions",
       "register_display_callback",
+      "register_tool",
       "repeat",
       "resolve",
       "resolve_autonomy",
@@ -305,6 +324,7 @@
       "trace_context",
       "track_workflow",
       "validate_config",
+      "validate_tool",
       "when",
       "workflows"
     ],
@@ -313,6 +333,7 @@
         "Agent",
         "AudioAgent",
         "AudioConfig",
+        "BudgetExceededError",
         "CodeAgent",
         "CodeConfig",
         "CodeExecutionStep",
@@ -368,12 +389,16 @@
         "AgentAppConfig",
         "AgentAppProtocol",
         "AgentOSConfig",
-        "AgentOSProtocol"
+        "AgentOSProtocol",
+        "AutoApproveBackend",
+        "ConsoleBackend"
       ],
       "bots": [
         "BotChannel",
         "BotConfig",
         "BotMessage",
+        "BotOSConfig",
+        "BotOSProtocol",
         "BotProtocol",
         "BotUser",
         "MessageType"
@@ -388,7 +413,6 @@
       "config": [
         "AUTONOMY_PRESETS",
         "ArrayMode",
-        "AutonomyConfig",
         "AutonomyLevel",
         "CACHING_PRESETS",
         "CONTEXT_PRESETS",
@@ -405,6 +429,10 @@
         "HooksConfig",
         "KNOWLEDGE_PRESETS",
         "KnowledgeConfig",
+        "LearnBackend",
+        "LearnConfig",
+        "LearnMode",
+        "LearnScope",
         "MEMORY_PRESETS",
         "MEMORY_URL_SCHEMES",
         "MULTI_AGENT_EXECUTION_PRESETS",
@@ -478,8 +506,6 @@
         "aembedding",
         "aembeddings",
         "embed",
-        "embedding",
-        "embeddings",
         "get_dimensions"
       ],
       "flow_display": [
@@ -536,10 +562,22 @@
       ],
       "other": [
         "Agents",
-        "Tools",
+        "AsyncLearnProtocol",
+        "AutonomyConfig",
+        "DoomLoopDetector",
+        "EscalationPipeline",
+        "EscalationStage",
+        "Heartbeat",
+        "HeartbeatConfig",
+        "LearnManager",
+        "LearnManagerProtocol",
+        "LearnProtocol",
+        "ObservabilityEventType",
+        "ObservabilityHooks",
         "config",
+        "embedding",
+        "embeddings",
         "memory",
-        "tool",
         "tools",
         "workflows"
       ],
@@ -618,6 +656,19 @@
         "enable_telemetry",
         "get_telemetry"
       ],
+      "tools": [
+        "BaseTool",
+        "FunctionTool",
+        "ToolRegistry",
+        "ToolResult",
+        "ToolValidationError",
+        "Tools",
+        "get_registry",
+        "get_tool",
+        "register_tool",
+        "tool",
+        "validate_tool"
+      ],
       "trace": [
         "ContextEvent",
         "ContextEventType",
@@ -661,6 +712,7 @@
       "agent_scheduler",
       "agent_tools",
       "agents",
+      "approval",
       "at_mentions",
       "audit_cli",
       "auto_memory",
@@ -683,6 +735,7 @@
       "debug",
       "deploy",
       "diag",
+      "display_jsonl",
       "endpoints",
       "eval",
       "examples",
@@ -696,12 +749,14 @@
       "guardrail",
       "handoff",
       "hooks",
+      "hybrid_workflow",
       "image",
       "interactive_core_headless",
       "interactive_runtime",
       "interactive_test_harness",
       "interactive_tools",
       "interactive_tui",
+      "job_workflow",
       "jobs",
       "knowledge",
       "knowledge_cli",
@@ -718,6 +773,7 @@
       "n8n",
       "observability",
       "ollama",
+      "onboard",
       "output_modes",
       "output_style",
       "package",
@@ -755,92 +811,9 @@
   "typescriptSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-ts/src",
     "exports": [
-<<<<<<< Updated upstream
-      "// A2A Protocol\n  A2ATaskState",
-      "// AGUI Protocol\n  AGUI",
-      "// Adapters\n  NoopObservabilityAdapter",
-      "// Agent loop\n  createAgentLoop",
-      "// AgentManager alias type\n  type AgentManager",
-      "// Autonomy Mode\n  AutonomyManager",
-      "// Background Jobs\n  JobQueue",
-      "// Bot types\n  type BotConfig",
-      "// Checkpoints\n  CheckpointManager",
-      "// Classes\n  DictCondition",
-      "// Classes\n  FailoverManager",
-      "// Classes\n  Plugin",
-      "// Classes\n  TraceSink",
-      "// Computer Use\n  createComputerUse",
-      "// Constants\n  OBSERVABILITY_TOOLS",
-      "// Core classes\n  Plan",
-      "// Cost Tracker\n  CostTracker",
-      "// DevTools\n  enableDevTools",
-      "// Enums\n  ContextEventType",
-      "// Enums\n  MemoryBackend",
-      "// Enums\n  PluginHook",
-      "// Enums\n  SandboxStatus",
-      "// Errors\n  ConfigValidationError",
-      "// External Agents\n  BaseExternalAgent",
-      "// Fast Context (Python parity with praisonaiagents/context/fast)\n  FastContext",
-      "// Flow Display\n  FlowDisplay",
-      "// Functions\n  createContextEvent",
-      "// Functions\n  embed",
-      "// Functions\n  evaluateCondition",
-      "// Functions\n  getPluginManager",
-      "// Gateway types\n  type GatewayConfig",
-      "// Git Integration\n  GitManager",
-      "// Global adapter management\n  setObservabilityAdapter",
-      "// Global singletons\n  config",
-      "// Guardrail policies\n  type GuardrailPolicy",
-      "// Interactive TUI\n  InteractiveTUI",
-      "// Interfaces\n  type PluginMetadata",
-      "// LLM-as-Judge\n  Judge",
-      "// MCP\n  createMCP",
-      "// Middleware (renamed to avoid conflicts)\n  createCachingMiddleware",
-      "// Models\n  createModel",
-      "// Multimodal\n  createImagePart",
-      "// N8N Integration\n  N8NIntegration",
-      "// Natural Language Postgres\n  createNLPostgres",
-      "// New: Python-parity Loop and Repeat classes\n  Loop",
-      "// Next.js\n  createRouteHandler",
-      "// OAuth for MCP\n  type OAuthClientProvider",
-      "// Other types\n  type ProviderStatus",
-      "// Parse utilities\n  detect_url_scheme",
-      "// Presets\n  MEMORY_PRESETS",
-      "// Provider classes\n  OpenAIProvider",
-      "// Provider factory and utilities\n  createProvider",
-      "// Provider registry (extensibility API)\n  ProviderRegistry",
-      "// Python parity additions\n  ApprovalCallback",
-      "// Python parity additions\n  MinimalTelemetry",
-      "// Python parity additions\n  SkillLoader",
-      "// Python parity additions\n  type LineRange",
-      "// Repo Map\n  RepoMap",
-      "// Resolver functions\n  resolve",
-      "// Sandbox Executor\n  SandboxExecutor",
-      "// Scheduler\n  Scheduler",
-      "// Server adapters\n  createHttpHandler",
-      "// Slack\n  createSlackBot",
-      "// Slash Commands\n  SlashCommandHandler",
-      "// Speech & Transcription\n  generateSpeech",
-      "// Subagent Tool (agent-as-tool pattern)\n  SubagentTool",
-      "// Task class\n  Task",
-      "// Telemetry (AI SDK v6 parity)\n  configureTelemetry",
-      "// Tool Approval (AI SDK v6 parity)\n  ApprovalManager",
-      "// Tools\n  defineTool",
-      "// Tools class\n  type ToolDefinition",
-      "// Types\n  type ConditionProtocol",
-      "// Types\n  type ContextEvent",
-      "// Types\n  type DisplayCallback",
-      "// Types\n  type EmbeddingResult",
-      "// Types\n  type LLMProvider",
-      "// Types\n  type SpanKind",
-      "// UI Message (AI SDK v6 parity)\n  convertToModelMessages",
-      "A2A",
-      "A2ARole",
-=======
       "A2A",
       "A2ARole",
       "A2ATaskState",
->>>>>>> Stashed changes
       "ADAPTERS",
       "AGUI",
       "AIAgentStep",
@@ -892,11 +865,8 @@
       "Agents",
       "AiderAgent",
       "AnthropicProvider",
-<<<<<<< Updated upstream
-=======
       "ApprovalCallback",
       "ApprovalManager",
->>>>>>> Stashed changes
       "ArrayMode",
       "AudioAgent",
       "AutoAgents",
@@ -907,10 +877,7 @@
       "AutoRetrievalPolicy",
       "AutoTaskConfig",
       "AutonomyLevel",
-<<<<<<< Updated upstream
-=======
       "AutonomyManager",
->>>>>>> Stashed changes
       "BaseCache",
       "BaseExternalAgent",
       "BaseObservabilityProvider",
@@ -924,13 +891,9 @@
       "CLI_SPEC_VERSION",
       "COMMUNITY_PROVIDERS",
       "CONTEXT_PRESETS",
-<<<<<<< Updated upstream
-      "ChromaVectorStore",
-=======
       "CheckpointManager",
       "ChromaVectorStore",
       "Chunking",
->>>>>>> Stashed changes
       "ChunkingStrategy",
       "CitationsMode",
       "ClaudeCodeAgent",
@@ -943,13 +906,9 @@
       "ConsoleObservabilityAdapter",
       "ConsoleObservabilityProvider",
       "ContextAgent",
-<<<<<<< Updated upstream
-      "ContextListSink",
-=======
       "ContextEventType",
       "ContextListSink",
       "ContextManager",
->>>>>>> Stashed changes
       "ContextNoOpSink",
       "ContextPolicy",
       "ContextTraceEmitter",
@@ -983,20 +942,14 @@
       "EventType",
       "ExecutionPreset",
       "ExpressionCondition",
-<<<<<<< Updated upstream
-=======
       "FailoverManager",
       "FastContext",
->>>>>>> Stashed changes
       "FeatureMemoryConfig",
       "FileCache",
       "FileCheckpointStorage",
       "FileJobStorage",
       "FileMemory",
-<<<<<<< Updated upstream
-=======
       "FlowDisplay",
->>>>>>> Stashed changes
       "FunctionCondition",
       "FunctionPlugin",
       "FunctionTool",
@@ -1018,15 +971,11 @@
       "HooksManager",
       "If",
       "ImageAgent",
-<<<<<<< Updated upstream
-      "KNOWLEDGE_PRESETS",
-=======
       "InteractiveTUI",
       "JobQueue",
       "Judge",
       "KNOWLEDGE_PRESETS",
       "Knowledge",
->>>>>>> Stashed changes
       "LLMGuardrail",
       "LLMReranker",
       "LangfuseObservabilityProvider",
@@ -1037,10 +986,7 @@
       "MCPSecurity",
       "MCPServer",
       "MCPSessionManager",
-<<<<<<< Updated upstream
-=======
       "MEMORY_PRESETS",
->>>>>>> Stashed changes
       "MEMORY_URL_SCHEMES",
       "MODEL_ALIASES",
       "MODEL_PRICING",
@@ -1059,22 +1005,16 @@
       "MemoryRedisAdapter",
       "MemoryVectorStore",
       "MessageType",
-<<<<<<< Updated upstream
-=======
       "MinimalTelemetry",
->>>>>>> Stashed changes
       "MissingDependencyError",
       "MissingEnvVarError",
       "N8NIntegration",
       "NLPostgresClient",
       "NLPostgresConfig",
       "NeonPostgresAdapter",
-<<<<<<< Updated upstream
-=======
       "NoopObservabilityAdapter",
       "OBSERVABILITY_TOOLS",
       "OCRAgent",
->>>>>>> Stashed changes
       "OUTPUT_PRESETS",
       "ObservabilityTraceContext",
       "OpenAIProvider",
@@ -1086,14 +1026,12 @@
       "PerformanceMonitor",
       "PineconeVectorStore",
       "Pipeline",
+      "Plan",
       "PlanStep",
       "PlanStorage",
       "PlanningAgent",
-<<<<<<< Updated upstream
-=======
       "Plugin",
       "PluginHook",
->>>>>>> Stashed changes
       "PluginManager",
       "PluginParseError",
       "PluginType",
@@ -1115,12 +1053,6 @@
       "RESEARCH_TOOLS",
       "RESTRICTED_TOOLS",
       "RagRetrievalPolicy",
-<<<<<<< Updated upstream
-      "RecipeJudge",
-      "Repeat",
-      "RetrievalPolicy",
-      "RetrievalStrategy",
-=======
       "RealtimeAgent",
       "RecipeJudge",
       "Repeat",
@@ -1128,7 +1060,6 @@
       "RetrievalPolicy",
       "RetrievalStrategy",
       "Route",
->>>>>>> Stashed changes
       "Router",
       "RouterAgent",
       "RulesManager",
@@ -1159,16 +1090,11 @@
       "Tools",
       "ToolsRegistry",
       "TraceCtx",
-<<<<<<< Updated upstream
-      "UpstashRedisAdapter",
-      "VectorQueryResult",
-=======
       "TraceSink",
       "UpstashRedisAdapter",
       "VectorQueryResult",
       "VideoAgent",
       "VisionAgent",
->>>>>>> Stashed changes
       "WEB_PRESETS",
       "WeaviateVectorStore",
       "WebSearchProvider",
@@ -1193,10 +1119,7 @@
       "applyMiddleware",
       "apply_config_defaults",
       "asyncDisplayCallbacks",
-<<<<<<< Updated upstream
-=======
       "async_display_callbacks",
->>>>>>> Stashed changes
       "autoEnableDevTools",
       "base64ToUint8Array",
       "bedrockBrowserClick",
@@ -1206,10 +1129,7 @@
       "clean_triple_backticks",
       "cleanupTelemetry",
       "cleanupTelemetryResources",
-<<<<<<< Updated upstream
-=======
       "cleanup_telemetry_resources",
->>>>>>> Stashed changes
       "clearAICache",
       "clearAdapterCache",
       "clearAllCallbacks",
@@ -1253,10 +1173,7 @@
       "createConsoleObservability",
       "createConsoleSink",
       "createContextAgent",
-<<<<<<< Updated upstream
-=======
       "createContextEvent",
->>>>>>> Stashed changes
       "createContextPack",
       "createCostTracker",
       "createCrossEncoderReranker",
@@ -1361,10 +1278,7 @@
       "createSkillLoader",
       "createSkillManager",
       "createSkillProperties",
-<<<<<<< Updated upstream
-=======
       "createSlackBot",
->>>>>>> Stashed changes
       "createSlashCommandHandler",
       "createSmartRetrievalConfig",
       "createStatusDisplay",
@@ -1402,35 +1316,18 @@
       "disablePerformanceMode",
       "disablePlugins",
       "disableTelemetry",
-<<<<<<< Updated upstream
-      "discoverAndLoadPlugins",
-      "discoverPlugins",
-=======
       "disable_performance_mode",
       "disable_telemetry",
       "discoverAndLoadPlugins",
       "discoverPlugins",
       "discover_and_load_plugins",
       "discover_plugins",
->>>>>>> Stashed changes
       "displayError",
       "displayGenerating",
       "displayInstruction",
       "displayInteraction",
       "displaySelfReflection",
       "displayToolCall",
-<<<<<<< Updated upstream
-      "embedding",
-      "embeddings",
-      "enableAITelemetry",
-      "enablePerformanceMode",
-      "enablePlugins",
-      "enableTelemetry",
-      "ensurePluginDir",
-      "errorLogs",
-      "estimateTokens",
-      "euclideanDistance",
-=======
       "display_error",
       "display_generating",
       "display_instruction",
@@ -1455,7 +1352,6 @@
       "euclideanDistance",
       "evaluateCondition",
       "evaluate_condition",
->>>>>>> Stashed changes
       "exaSearch",
       "executeCallback",
       "executeCommand",
@@ -1491,10 +1387,7 @@
       "getObservabilityAdapter",
       "getObservabilityToolInfo",
       "getOptimizationRule",
-<<<<<<< Updated upstream
-=======
       "getPluginManager",
->>>>>>> Stashed changes
       "getPluginTemplate",
       "getQuickContext",
       "getRegisteredDisplayTypes",
@@ -1510,10 +1403,6 @@
       "get_config",
       "get_config_path",
       "get_default",
-<<<<<<< Updated upstream
-      "get_defaults_config",
-      "get_plugins_config",
-=======
       "get_default_plugin_dirs",
       "get_defaults_config",
       "get_dimensions",
@@ -1521,7 +1410,6 @@
       "get_plugin_template",
       "get_plugins_config",
       "get_telemetry",
->>>>>>> Stashed changes
       "handoff",
       "handoffFilters",
       "handoff_filters",
@@ -1551,10 +1439,7 @@
       "listProviders",
       "loadPlugin",
       "loadWorkflowFromFile",
-<<<<<<< Updated upstream
-=======
       "load_plugin",
->>>>>>> Stashed changes
       "logError",
       "loop",
       "loopPattern",
@@ -1580,20 +1465,14 @@
       "parseSlackMessage",
       "parseSlashCommand",
       "parseYAMLWorkflow",
-<<<<<<< Updated upstream
-=======
       "parse_plugin_header",
       "parse_plugin_header_from_file",
->>>>>>> Stashed changes
       "parse_policy_string",
       "performanceEval",
       "perplexitySearch",
       "pipeUIMessageStreamToResponse",
       "promptWithHandoffInstructions",
-<<<<<<< Updated upstream
-=======
       "prompt_with_handoff_instructions",
->>>>>>> Stashed changes
       "rangesOverlap",
       "recordEvent",
       "registerApprovalCallback",
@@ -1618,20 +1497,14 @@
       "requestApproval",
       "resetObservabilityAdapter",
       "resetToolsRegistry",
-<<<<<<< Updated upstream
-=======
       "resolve",
->>>>>>> Stashed changes
       "resolveGuardrailPolicies",
       "resolveModelAlias",
       "resolve_autonomy",
       "resolve_caching",
       "resolve_context",
       "resolve_execution",
-<<<<<<< Updated upstream
-=======
       "resolve_guardrail_policies",
->>>>>>> Stashed changes
       "resolve_guardrails",
       "resolve_hooks",
       "resolve_knowledge",
@@ -1649,10 +1522,7 @@
       "setApprovalManager",
       "setDefaultDbAdapter",
       "setEmbeddingConfig",
-<<<<<<< Updated upstream
-=======
       "setObservabilityAdapter",
->>>>>>> Stashed changes
       "stopAfterSteps",
       "stopWhen",
       "stopWhenNoToolCalls",
@@ -1661,10 +1531,7 @@
       "superagentRedact",
       "superagentVerify",
       "syncDisplayCallbacks",
-<<<<<<< Updated upstream
-=======
       "sync_display_callbacks",
->>>>>>> Stashed changes
       "tavilyCrawl",
       "tavilyExtract",
       "tavilySearch",
@@ -1674,13 +1541,9 @@
       "tools",
       "trace",
       "traceContext",
-<<<<<<< Updated upstream
-      "trackWorkflow",
-=======
       "trace_context",
       "trackWorkflow",
       "track_workflow",
->>>>>>> Stashed changes
       "transcribe",
       "triggerN8NWebhook",
       "uint8ArrayToBase64",
@@ -1958,24 +1821,6 @@
         "createMemoryCache"
       ],
       "cli": [
-<<<<<<< Updated upstream
-        "// Autonomy Mode\n  AutonomyManager",
-        "// Background Jobs\n  JobQueue",
-        "// Checkpoints\n  CheckpointManager",
-        "// Cost Tracker\n  CostTracker",
-        "// External Agents\n  BaseExternalAgent",
-        "// Fast Context (Python parity with praisonaiagents/context/fast)\n  FastContext",
-        "// Flow Display\n  FlowDisplay",
-        "// Git Integration\n  GitManager",
-        "// Interactive TUI\n  InteractiveTUI",
-        "// N8N Integration\n  N8NIntegration",
-        "// Python parity additions\n  LineRange",
-        "// Repo Map\n  RepoMap",
-        "// Sandbox Executor\n  SandboxExecutor",
-        "// Scheduler\n  Scheduler",
-        "// Slash Commands\n  SlashCommandHandler",
-=======
->>>>>>> Stashed changes
         "ActionDecision",
         "ActionRequest",
         "ActionType",
@@ -2010,10 +1855,7 @@
         "FileInfo",
         "FileJobStorage",
         "FileMatch",
-<<<<<<< Updated upstream
-=======
         "FlowDisplay",
->>>>>>> Stashed changes
         "FlowDisplayConfig",
         "FlowGraph",
         "FlowNode",
@@ -2468,73 +2310,16 @@
         "mergeConfig"
       ],
       "other": [
-<<<<<<< Updated upstream
-        "// A2A Protocol\n  A2ATaskState",
-        "// AGUI Protocol\n  AGUI",
-        "// AgentManager alias type\n  AgentManager",
-        "// Bot types\n  BotConfig",
-        "// Classes\n  DictCondition",
-        "// Classes\n  FailoverManager",
-        "// Classes\n  Plugin",
-        "// Classes\n  TraceSink",
-        "// Enums\n  ContextEventType",
-        "// Enums\n  MemoryBackend",
-        "// Enums\n  PluginHook",
-        "// Enums\n  SandboxStatus",
-        "// Errors\n  ConfigValidationError",
-        "// Functions\n  createContextEvent",
-        "// Functions\n  embed",
-        "// Functions\n  evaluateCondition",
-        "// Functions\n  getPluginManager",
-        "// Gateway types\n  GatewayConfig",
-        "// Global singletons\n  config",
-        "// Guardrail policies\n  GuardrailPolicy",
-        "// Interfaces\n  PluginMetadata",
-        "// Other types\n  ProviderStatus",
-        "// Parse utilities\n  detect_url_scheme",
-        "// Presets\n  MEMORY_PRESETS",
-        "// Resolver functions\n  resolve",
-        "// Tools class\n  ToolDefinition",
-        "// Types\n  ConditionProtocol",
-        "// Types\n  ContextEvent",
-        "// Types\n  DisplayCallback",
-        "// Types\n  EmbeddingResult",
-        "A2A",
-        "A2AAgentCapabilities",
-        "A2AAgentCard",
-        "A2AAgentSkill",
-        "A2AArtifact",
-        "A2ADataPart",
-        "A2AFilePart",
-        "A2AMessage",
-        "A2APart",
-        "A2ARole",
-        "A2ASendMessageRequest",
-        "A2ATask",
-        "A2ATaskStatus",
-        "A2ATextPart",
-=======
->>>>>>> Stashed changes
         "AUTONOMY_PRESETS",
         "AgentPluginProtocol",
         "ArrayMode",
         "AsyncDisplayCallback",
         "AuthProfile",
-<<<<<<< Updated upstream
-        "AutoRagAgent",
-        "AutoRagAgentConfig",
-        "AutoRagConfig",
-        "AutoRetrievalPolicy",
-        "AutonomyLevel",
-        "BatchEmbeddingResult",
-        "BotChannel",
-=======
         "AutoRagConfig",
         "AutonomyLevel",
         "BatchEmbeddingResult",
         "BotChannel",
         "BotConfig",
->>>>>>> Stashed changes
         "BotMessage",
         "BotProtocol",
         "BotUser",
@@ -2544,50 +2329,30 @@
         "ChunkingStrategy",
         "CitationsMode",
         "CitationsModeType",
-<<<<<<< Updated upstream
-=======
         "ConditionProtocol",
         "ConfigValidationError",
         "ContextEvent",
         "ContextEventType",
->>>>>>> Stashed changes
         "ContextListSink",
         "ContextNoOpSink",
         "ContextTraceEmitter",
         "ContextTraceSink",
         "ContextTraceSinkProtocol",
-<<<<<<< Updated upstream
-        "DEFAULT_AUTO_KEYWORDS",
-        "DEFAULT_RAG_TEMPLATE",
-        "DefaultsConfig",
-=======
         "DEFAULT_RAG_TEMPLATE",
         "DefaultsConfig",
         "DictCondition",
         "DisplayCallback",
->>>>>>> Stashed changes
         "DisplayContext",
         "DisplayFlow",
         "DisplayFlowConfig",
         "EXECUTION_PRESETS",
         "EmbeddingConfig",
-<<<<<<< Updated upstream
-=======
         "EmbeddingResult",
->>>>>>> Stashed changes
         "EventType",
         "ExecutionConfig",
         "ExecutionPreset",
         "ExpressionCondition",
         "FailoverConfig",
-<<<<<<< Updated upstream
-        "FeatureMemoryConfig",
-        "FunctionCondition",
-        "FunctionPlugin",
-        "GUARDRAIL_POLICY_PRESETS",
-        "GUARDRAIL_PRESETS",
-        "GatewayClientProtocol",
-=======
         "FailoverManager",
         "FeatureMemoryConfig",
         "FunctionCondition",
@@ -2595,7 +2360,6 @@
         "GUARDRAIL_PRESETS",
         "GatewayClientProtocol",
         "GatewayConfig",
->>>>>>> Stashed changes
         "GatewayEvent",
         "GatewayMessage",
         "GatewayProtocol",
@@ -2608,17 +2372,11 @@
         "KnowledgeConfig",
         "LLMPluginProtocol",
         "LearnConfig",
-<<<<<<< Updated upstream
-        "MEMORY_URL_SCHEMES",
-        "MULTI_AGENT_EXECUTION_PRESETS",
-        "MULTI_AGENT_OUTPUT_PRESETS",
-=======
         "MEMORY_PRESETS",
         "MEMORY_URL_SCHEMES",
         "MULTI_AGENT_EXECUTION_PRESETS",
         "MULTI_AGENT_OUTPUT_PRESETS",
         "MemoryBackend",
->>>>>>> Stashed changes
         "MessageType",
         "MultiAgentExecutionConfig",
         "MultiAgentHooksConfig",
@@ -2630,25 +2388,17 @@
         "OutputPreset",
         "PLANNING_PRESETS",
         "PlanningConfig",
-<<<<<<< Updated upstream
-        "PluginInfo",
-        "PluginManager",
-=======
         "Plugin",
         "PluginHook",
         "PluginInfo",
         "PluginManager",
         "PluginMetadata",
->>>>>>> Stashed changes
         "PluginParseError",
         "PluginProtocol",
         "PluginType",
         "PluginsConfig",
         "PraisonConfig",
-<<<<<<< Updated upstream
-=======
         "ProviderStatus",
->>>>>>> Stashed changes
         "RAG",
         "RAGCitation",
         "RAGConfig",
@@ -2667,21 +2417,13 @@
         "RoutingConditionProtocol",
         "SandboxProtocol",
         "SandboxResult",
-<<<<<<< Updated upstream
-=======
         "SandboxStatus",
->>>>>>> Stashed changes
         "SessionConfig",
         "SkillsConfig",
         "TemplateConfig",
         "ToolPluginProtocol",
-<<<<<<< Updated upstream
-        "Tools",
-        "TraceCtx",
-=======
         "TraceCtx",
         "TraceSink",
->>>>>>> Stashed changes
         "TraceSinkProtocol",
         "WEB_PRESETS",
         "WebConfig",
@@ -2698,10 +2440,7 @@
         "cosineSimilarity",
         "createCitation",
         "createCondition",
-<<<<<<< Updated upstream
-=======
         "createContextEvent",
->>>>>>> Stashed changes
         "createContextPack",
         "createRAG",
         "createRAGConfig",
@@ -2709,10 +2448,7 @@
         "createRetrievalConfig",
         "createSimpleRetrievalConfig",
         "createSmartRetrievalConfig",
-<<<<<<< Updated upstream
-=======
         "detect_url_scheme",
->>>>>>> Stashed changes
         "disablePlugins",
         "discoverAndLoadPlugins",
         "discoverPlugins",
@@ -2722,29 +2458,20 @@
         "displayInteraction",
         "displaySelfReflection",
         "displayToolCall",
-<<<<<<< Updated upstream
-=======
         "embed",
->>>>>>> Stashed changes
         "embedding",
         "embeddings",
         "enablePlugins",
         "ensurePluginDir",
         "errorLogs",
         "euclideanDistance",
-<<<<<<< Updated upstream
-=======
         "evaluateCondition",
->>>>>>> Stashed changes
         "formatAnswerWithCitations",
         "formatCitation",
         "formatContextPackForPrompt",
         "getDefaultPluginDirs",
         "getDimensions",
-<<<<<<< Updated upstream
-=======
         "getPluginManager",
->>>>>>> Stashed changes
         "getPluginTemplate",
         "get_config",
         "get_config_path",
@@ -2758,25 +2485,14 @@
         "listPlugins",
         "loadPlugin",
         "logError",
-<<<<<<< Updated upstream
-        "memory",
         "normalizeEmbedding",
         "notCondition",
-        "obs",
-=======
-        "normalizeEmbedding",
-        "notCondition",
->>>>>>> Stashed changes
         "orConditions",
         "parsePluginHeader",
         "parsePluginHeaderFromFile",
         "parse_policy_string",
         "registerDisplay",
-<<<<<<< Updated upstream
-        "resolveGuardrailPolicies",
-=======
         "resolve",
->>>>>>> Stashed changes
         "resolve_autonomy",
         "resolve_caching",
         "resolve_context",
@@ -2796,15 +2512,6 @@
         "syncDisplayCallbacks",
         "traceContext",
         "trackWorkflow",
-<<<<<<< Updated upstream
-        "validate_config",
-        "workflows"
-      ],
-      "planning": [
-        "// Core classes\n  Plan",
-        "// Python parity additions\n  ApprovalCallback",
-        "ApprovalCallbackConfig",
-=======
         "validate_config"
       ],
       "parity": [
@@ -2878,7 +2585,6 @@
         "ApprovalCallback",
         "ApprovalCallbackConfig",
         "Plan",
->>>>>>> Stashed changes
         "PlanConfig",
         "PlanResult",
         "PlanStatus",
@@ -2935,7 +2641,6 @@
         "workflows"
       ],
       "skills": [
-        "// Python parity additions\n  SkillLoader",
         "Skill",
         "SkillDiscoveryOptions",
         "SkillLoader",
@@ -2955,7 +2660,6 @@
         "createTaskOutput"
       ],
       "telemetry": [
-        "// Python parity additions\n  MinimalTelemetry",
         "AgentStats",
         "AgentTelemetry",
         "MetricEntry",
@@ -3132,6 +2836,24 @@
         "category": "agent"
       },
       {
+        "feature": "BaseTool",
+        "python": true,
+        "typescript": true,
+        "priority": "P0",
+        "effort": "high",
+        "status": "DONE",
+        "category": "tools"
+      },
+      {
+        "feature": "BudgetExceededError",
+        "python": true,
+        "typescript": false,
+        "priority": "P0",
+        "effort": "low",
+        "status": "TODO",
+        "category": "agent"
+      },
+      {
         "feature": "CodeAgent",
         "python": true,
         "typescript": true,
@@ -3238,6 +2960,15 @@
         "effort": "high",
         "status": "DONE",
         "category": "agent"
+      },
+      {
+        "feature": "FunctionTool",
+        "python": true,
+        "typescript": true,
+        "priority": "P0",
+        "effort": "high",
+        "status": "DONE",
+        "category": "tools"
       },
       {
         "feature": "Handoff",
@@ -3429,6 +3160,42 @@
         "category": "agent"
       },
       {
+        "feature": "ToolRegistry",
+        "python": true,
+        "typescript": true,
+        "priority": "P0",
+        "effort": "high",
+        "status": "DONE",
+        "category": "tools"
+      },
+      {
+        "feature": "ToolResult",
+        "python": true,
+        "typescript": true,
+        "priority": "P0",
+        "effort": "low",
+        "status": "DONE",
+        "category": "tools"
+      },
+      {
+        "feature": "ToolValidationError",
+        "python": true,
+        "typescript": true,
+        "priority": "P0",
+        "effort": "low",
+        "status": "DONE",
+        "category": "tools"
+      },
+      {
+        "feature": "Tools",
+        "python": true,
+        "typescript": true,
+        "priority": "P0",
+        "effort": "high",
+        "status": "DONE",
+        "category": "tools"
+      },
+      {
         "feature": "VideoAgent",
         "python": true,
         "typescript": true,
@@ -3483,6 +3250,24 @@
         "category": "agent"
       },
       {
+        "feature": "get_registry",
+        "python": true,
+        "typescript": false,
+        "priority": "P0",
+        "effort": "low",
+        "status": "TODO",
+        "category": "tools"
+      },
+      {
+        "feature": "get_tool",
+        "python": true,
+        "typescript": false,
+        "priority": "P0",
+        "effort": "low",
+        "status": "TODO",
+        "category": "tools"
+      },
+      {
         "feature": "handoff",
         "python": true,
         "typescript": true,
@@ -3508,6 +3293,33 @@
         "effort": "low",
         "status": "DONE",
         "category": "agent"
+      },
+      {
+        "feature": "register_tool",
+        "python": true,
+        "typescript": false,
+        "priority": "P0",
+        "effort": "low",
+        "status": "TODO",
+        "category": "tools"
+      },
+      {
+        "feature": "tool",
+        "python": true,
+        "typescript": true,
+        "priority": "P0",
+        "effort": "low",
+        "status": "DONE",
+        "category": "tools"
+      },
+      {
+        "feature": "validate_tool",
+        "python": true,
+        "typescript": false,
+        "priority": "P0",
+        "effort": "low",
+        "status": "TODO",
+        "category": "tools"
       }
     ],
     "P1_Persistence": [
@@ -3840,10 +3652,10 @@
       {
         "feature": "Plan",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P2",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "planning"
       },
       {
@@ -4173,6 +3985,15 @@
         "category": "config"
       },
       {
+        "feature": "AsyncLearnProtocol",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "medium",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "AuthProfile",
         "python": true,
         "typescript": true,
@@ -4189,6 +4010,15 @@
         "effort": "high",
         "status": "DONE",
         "category": "agents"
+      },
+      {
+        "feature": "AutoApproveBackend",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "app"
       },
       {
         "feature": "AutoRagAgent",
@@ -4215,7 +4045,7 @@
         "priority": "P3",
         "effort": "low",
         "status": "DONE",
-        "category": "config"
+        "category": "other"
       },
       {
         "feature": "AutonomyLevel",
@@ -4251,6 +4081,24 @@
         "priority": "P3",
         "effort": "high",
         "status": "DONE",
+        "category": "bots"
+      },
+      {
+        "feature": "BotOSConfig",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "bots"
+      },
+      {
+        "feature": "BotOSProtocol",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "medium",
+        "status": "TODO",
         "category": "bots"
       },
       {
@@ -4324,6 +4172,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "ConsoleBackend",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "app"
       },
       {
         "feature": "ContextEvent",
@@ -4407,6 +4264,15 @@
         "category": "conditions"
       },
       {
+        "feature": "DoomLoopDetector",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "EXECUTION_PRESETS",
         "python": true,
         "typescript": true,
@@ -4423,6 +4289,24 @@
         "effort": "low",
         "status": "DONE",
         "category": "embedding"
+      },
+      {
+        "feature": "EscalationPipeline",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "EscalationStage",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "EventType",
@@ -4578,6 +4462,24 @@
         "category": "config"
       },
       {
+        "feature": "Heartbeat",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "HeartbeatConfig",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "HookPluginProtocol",
         "python": true,
         "typescript": true,
@@ -4621,6 +4523,69 @@
         "effort": "medium",
         "status": "DONE",
         "category": "plugins"
+      },
+      {
+        "feature": "LearnBackend",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "config"
+      },
+      {
+        "feature": "LearnConfig",
+        "python": true,
+        "typescript": true,
+        "priority": "P3",
+        "effort": "low",
+        "status": "DONE",
+        "category": "config"
+      },
+      {
+        "feature": "LearnManager",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "LearnManagerProtocol",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "medium",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "LearnMode",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "config"
+      },
+      {
+        "feature": "LearnProtocol",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "medium",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "LearnScope",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "config"
       },
       {
         "feature": "MEMORY_PRESETS",
@@ -4738,6 +4703,24 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "ObservabilityEventType",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "ObservabilityHooks",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "OutputConfig",
@@ -5019,15 +5002,6 @@
         "category": "plugins"
       },
       {
-        "feature": "Tools",
-        "python": true,
-        "typescript": true,
-        "priority": "P3",
-        "effort": "high",
-        "status": "DONE",
-        "category": "other"
-      },
-      {
         "feature": "TraceSink",
         "python": true,
         "typescript": true,
@@ -5232,7 +5206,7 @@
         "priority": "P3",
         "effort": "low",
         "status": "DONE",
-        "category": "embedding"
+        "category": "other"
       },
       {
         "feature": "embeddings",
@@ -5241,7 +5215,7 @@
         "priority": "P3",
         "effort": "low",
         "status": "DONE",
-        "category": "embedding"
+        "category": "other"
       },
       {
         "feature": "ensure_plugin_dir",
@@ -5593,15 +5567,6 @@
         "effort": "low",
         "status": "DONE",
         "category": "main"
-      },
-      {
-        "feature": "tool",
-        "python": true,
-        "typescript": true,
-        "priority": "P3",
-        "effort": "low",
-        "status": "DONE",
-        "category": "other"
       },
       {
         "feature": "tools",

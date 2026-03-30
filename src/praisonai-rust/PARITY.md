@@ -1,16 +1,16 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 282 | **Rust Features:** 666 | **Parity:** 100.0%
+> **Python Features:** 311 | **Rust Features:** 667 | **Parity:** 91.6%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 282 |
-| Rust Features | 666 |
-| **Actual Gap Count** | **0** |
+| Python Core Features | 311 |
+| Rust Features | 667 |
+| **Actual Gap Count** | **26** |
 | Language Limitations (N/A) | 6 |
-| **Parity** | **100.0%** |
+| **Parity** | **91.6%** |
 
 ## Implemented Features
 
@@ -471,6 +471,7 @@
 - ✅ `Tool`
 - ✅ `ToolCall`
 - ✅ `ToolCallData`
+- ✅ `ToolCallFunction`
 - ✅ `ToolCallResult`
 - ✅ `ToolDefinition`
 - ✅ `ToolPluginProtocol`
@@ -691,6 +692,35 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ⚠️ `obs` → Use `parity_obs` instead
 - ⚠️ `tools` (Rust reserved/module conflict)
 - ⚠️ `workflows` (Rust reserved/module conflict)
+
+## Missing Features
+
+- ❌ `AsyncLearnProtocol`
+- ❌ `AutoApproveBackend`
+- ❌ `BaseTool`
+- ❌ `BotOSConfig`
+- ❌ `BotOSProtocol`
+- ❌ `BudgetExceededError`
+- ❌ `ConsoleBackend`
+- ❌ `DoomLoopDetector`
+- ❌ `EscalationPipeline`
+- ❌ `EscalationStage`
+- ❌ `Heartbeat`
+- ❌ `HeartbeatConfig`
+- ❌ `LearnBackend`
+- ❌ `LearnConfig`
+- ❌ `LearnManager`
+- ❌ `LearnManagerProtocol`
+- ❌ `LearnMode`
+- ❌ `LearnProtocol`
+- ❌ `LearnScope`
+- ❌ `ObservabilityEventType`
+- ❌ `ObservabilityHooks`
+- ❌ `ToolValidationError`
+- ❌ `get_registry`
+- ❌ `get_tool`
+- ❌ `register_tool`
+- ❌ `validate_tool`
 
 ---
 
