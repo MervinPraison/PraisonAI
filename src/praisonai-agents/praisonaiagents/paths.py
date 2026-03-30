@@ -90,11 +90,14 @@ def get_data_dir() -> Path:
     # Check legacy location (backward compat)
     legacy_path = home / LEGACY_DIR_NAME
     if legacy_path.exists():
-        warnings.warn(
-            f"Using legacy data directory {legacy_path}. "
-            f"Run 'praisonai migrate-data' to migrate to {new_path}.",
-            DeprecationWarning,
-            stacklevel=2
+        from .utils.deprecation import warn_deprecated_param
+        warn_deprecated_param(
+            "legacy data directory",
+            since="1.0.0",
+            removal="2.0.0",
+            alternative=f"run 'praisonai migrate-data' to migrate to {new_path}",
+            details=f"Using legacy directory {legacy_path}",
+            stacklevel=3
         )
         _data_dir_cache = legacy_path
         return legacy_path

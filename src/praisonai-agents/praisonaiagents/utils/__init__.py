@@ -28,6 +28,13 @@ from .variables import (
     substitute_variables,
 )
 
+from .deprecation import (
+    deprecated,
+    warn_deprecated_param,
+    DeprecationConfig,
+    check_expired_deprecations,
+)
+
 __all__ = [
     # Protocol
     "DynamicVariableProvider",
@@ -46,4 +53,9 @@ __all__ = [
     "resolve_dynamic_variable",
     # Shared utility
     "substitute_variables",
+    # Deprecation utilities
+    "deprecated",
+    "warn_deprecated_param", 
+    "DeprecationConfig",
+    "check_expired_deprecations",
 ]
