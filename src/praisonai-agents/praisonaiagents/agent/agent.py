@@ -5064,7 +5064,20 @@ Your Goal: {self.goal}"""
                     if hasattr(backend, 'request_approval_sync'):
                         decision = backend.request_approval_sync(request)
                     else:
-                        decision = asyncio.run(backend.request_approval(request))
+                        # Detect running event loop to avoid RuntimeError
+                        try:
+                            loop = asyncio.get_running_loop()
+                        except RuntimeError:
+                            loop = None
+                        
+                        if loop and loop.is_running():
+                            # We're in an async context - use thread pool to avoid RuntimeError
+                            import concurrent.futures
+                            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                                future = pool.submit(asyncio.run, backend.request_approval(request))
+                                decision = future.result(timeout=getattr(backend, '_timeout', 60))
+                        else:
+                            decision = asyncio.run(backend.request_approval(request))
                 finally:
                     if orig_timeout is not None and hasattr(backend, '_timeout'):
                         backend._timeout = orig_timeout
