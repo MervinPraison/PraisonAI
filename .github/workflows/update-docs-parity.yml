@@ -31,7 +31,7 @@ jobs:
       with:
         repository: MervinPraison/PraisonAIDocs
         path: PraisonAIDocs
-        token: ${{ secrets.DOCS_PAT }}
+        token: ${{ secrets.DOCS_PAT || secrets.PAT_TOKEN }}
 
     - name: Set up Python
       uses: actions/setup-python@v5

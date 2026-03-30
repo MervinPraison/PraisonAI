@@ -29,6 +29,9 @@ jobs:
       with:
         python-version: '3.11'
 
+    - name: Install dependencies
+      run: pip install pyyaml
+
     - name: Generate parity trackers
       run: |
         cd $GITHUB_WORKSPACE
