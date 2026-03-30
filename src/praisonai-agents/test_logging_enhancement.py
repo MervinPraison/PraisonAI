@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 # Add praisonai-agents to path
-sys.path.insert(0, str(Path(__file__).parent / "src/praisonai-agents"))
+sys.path.insert(0, str(Path(__file__).parent))
 
 def test_basic_logging():
     """Test basic logging functionality."""
