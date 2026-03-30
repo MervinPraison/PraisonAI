@@ -6,7 +6,11 @@ import asyncio
 import contextlib
 import threading
 from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Generator
+from collections import OrderedDict
 import inspect
+
+# Module-level logger for thread safety errors and debugging
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # Performance: Lazy imports for heavy dependencies
@@ -1514,6 +1518,9 @@ class Agent:
         # Thread-safe chat_history with eager lock initialization
         self.chat_history = []
         self.__history_lock = threading.Lock()  # Eager initialization to prevent race conditions
+        
+        # Thread-safe snapshot/redo stack lock - always available even when autonomy is disabled
+        self.__snapshot_lock = threading.Lock()
         self.markdown = markdown
         self.stream = stream
         self.metrics = metrics
@@ -1634,7 +1641,6 @@ Your Goal: {self.goal}
         
         # Cache for system prompts and formatted tools with eager thread-safe lock
         # Use OrderedDict for LRU behavior
-        from collections import OrderedDict
         self._system_prompt_cache = OrderedDict()
         self._formatted_tools_cache = OrderedDict()
         self.__cache_lock = threading.RLock()  # Eager initialization to prevent race conditions
@@ -1791,6 +1797,29 @@ Your Goal: {self.goal}
         """
         with self._history_lock:
             self.chat_history.append({"role": role, "content": content})
+    
+    def _add_to_chat_history_if_not_duplicate(self, role, content):
+        """Thread-safe method to add messages to chat history only if not duplicate.
+        
+        Atomically checks for duplicate and adds message under the same lock to prevent TOCTOU races.
+        
+        Args:
+            role: Message role ("user", "assistant", "system") 
+            content: Message content
+            
+        Returns:
+            bool: True if message was added, False if duplicate was detected
+        """
+        with self._history_lock:
+            # Check for duplicate within the same critical section
+            if (self.chat_history and 
+                self.chat_history[-1].get("role") == role and 
+                self.chat_history[-1].get("content") == content):
+                return False
+            
+            # Not a duplicate, add the message
+            self.chat_history.append({"role": role, "content": content})
+            return True
     
     def _get_chat_history_length(self):
         """Thread-safe method to get chat history length."""
@@ -2245,7 +2274,6 @@ Summary:"""
         self._file_snapshot = None
         self._snapshot_stack = []  # Stack of snapshot hashes for undo/redo
         self._redo_stack = []  # Redo stack
-        self.__snapshot_lock = threading.Lock()  # Protect snapshot/redo stacks from TOCTOU race conditions
         if config.effective_track_changes:
             try:
                 from ..snapshot import FileSnapshot
@@ -2353,8 +2381,11 @@ Summary:"""
             return []
         try:
             base = from_hash
-            if base is None and self._snapshot_stack:
-                base = self._snapshot_stack[0]
+            if base is None:
+                # Protect snapshot stack read with lock to prevent TOCTOU with undo/redo
+                with self._snapshot_lock:
+                    if self._snapshot_stack:
+                        base = self._snapshot_stack[0]
             if base is None:
                 return []
             return self._file_snapshot.diff(base)
@@ -6354,12 +6385,9 @@ Your Goal: {self.goal}"""
                     # Extract text from multimodal prompts
                     normalized_content = next((item["text"] for item in prompt if item.get("type") == "text"), "")
                 
-                # Prevent duplicate messages
-                if not (self.chat_history and 
-                        self.chat_history[-1].get("role") == "user" and 
-                        self.chat_history[-1].get("content") == normalized_content):
-                    # Add user message to chat history BEFORE LLM call so handoffs can access it
-                    self._add_to_chat_history("user", normalized_content)
+                # Add user message to chat history BEFORE LLM call so handoffs can access it
+                # Use atomic check-then-act to prevent TOCTOU race conditions
+                if self._add_to_chat_history_if_not_duplicate("user", normalized_content):
                     # Persist user message to DB
                     self._persist_message("user", normalized_content)
                 
