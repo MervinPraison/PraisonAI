@@ -22,6 +22,7 @@ jobs:
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL_NAME: gpt-4o-mini
+      PYTHONUTF8: 1
     
     steps:
     - uses: actions/checkout@v4
