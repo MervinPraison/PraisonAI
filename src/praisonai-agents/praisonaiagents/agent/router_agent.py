@@ -10,7 +10,8 @@ import logging
 from typing import Dict, List, Optional, Any, Union
 from .agent import Agent
 from ..llm.model_router import ModelRouter
-from ..llm import LLM
+from ..llm import LLM, TokenUsage
+from ..trace.protocol import get_default_emitter
 
 logger = logging.getLogger(__name__)
 
@@ -213,8 +214,8 @@ class RouterAgent(Agent):
             full_prompt = f"{context}\n\n{prompt}"
         
         try:
-            # Execute with the selected model
-            response = llm_instance.get_response(
+            # Execute with the selected model, requesting token usage tracking
+            result = llm_instance.get_response(
                 prompt=full_prompt,
                 system_prompt=self._build_system_prompt(),
                 tools=tools,
@@ -225,16 +226,45 @@ class RouterAgent(Agent):
                 agent_role=self.role,
                 agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools or [])],
                 execute_tool_fn=self.execute_tool if tools else None,
+                return_token_usage=True,  # Request token usage information
                 **kwargs
             )
             
+            # Extract response and token usage
+            if isinstance(result, tuple):
+                response, token_usage = result
+            else:
+                # Fallback for backward compatibility
+                response = result
+                token_usage = TokenUsage()
+            
             # Update usage statistics
             self.model_usage_stats[model_name]['calls'] += 1
+            self.model_usage_stats[model_name]['tokens'] += token_usage.total_tokens
             
-            # TODO: Implement token tracking when LLM.get_response() is updated to return token usage
-            # The LLM response currently returns only text, but litellm provides usage info in:
-            # response.get("usage") with prompt_tokens, completion_tokens, and total_tokens
-            # This would require modifying the LLM class to return both text and metadata
+            # Calculate and store cost estimate
+            model_info = self.model_router.get_model_info(model_name)
+            if model_info and token_usage.total_tokens > 0:
+                cost = self.model_router.estimate_cost(model_name, token_usage.total_tokens)
+                self.model_usage_stats[model_name]['cost'] += cost
+            
+            # Emit token usage via trace system for observability
+            try:
+                trace_emitter = get_default_emitter()
+                trace_emitter.output(
+                    content=f"RouterAgent routing decision completed",
+                    agent_name=self.name,
+                    metadata={
+                        'selected_model': model_name,
+                        'routing_strategy': self.routing_strategy,
+                        'token_usage': token_usage.to_dict(),
+                        'estimated_cost': self.model_usage_stats[model_name]['cost'],
+                        'total_calls': self.model_usage_stats[model_name]['calls'],
+                    }
+                )
+            except Exception as trace_error:
+                # Don't fail the request if tracing fails
+                logger.debug(f"Failed to emit trace event: {trace_error}")
             
             return response
             

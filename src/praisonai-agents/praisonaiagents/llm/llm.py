@@ -4,6 +4,7 @@ import warnings
 import re
 import inspect
 import asyncio
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union, Literal, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -89,6 +90,36 @@ class LLMContextLengthExceededException(Exception):
             "context_length_exceeded"
         ]
         return any(phrase in error_message.lower() for phrase in context_limit_phrases)
+
+
+@dataclass
+class TokenUsage:
+    """
+    Token usage information from LLM response.
+    
+    This class provides structured access to token consumption data
+    returned by language models, enabling cost tracking and observability.
+    """
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    cached_tokens: int = 0
+    reasoning_tokens: int = 0
+    audio_input_tokens: int = 0
+    audio_output_tokens: int = 0
+    
+    def to_dict(self) -> Dict[str, int]:
+        """Convert to dictionary format."""
+        return {
+            'prompt_tokens': self.prompt_tokens,
+            'completion_tokens': self.completion_tokens,
+            'total_tokens': self.total_tokens,
+            'cached_tokens': self.cached_tokens,
+            'reasoning_tokens': self.reasoning_tokens,
+            'audio_input_tokens': self.audio_input_tokens,
+            'audio_output_tokens': self.audio_output_tokens,
+        }
+
 
 class LLM:
     """
@@ -1109,7 +1140,7 @@ Now provide your final answer using this result. Summarize the information natur
                 if tc.function.arguments:
                     tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
         
-        return response_text, tool_calls
+        return _prepare_return_value(response_text), tool_calls
 
     def _parse_tool_call_arguments(self, tool_call: Dict, is_ollama: bool = False) -> tuple:
         """
@@ -1566,10 +1597,15 @@ Now provide your final answer using this result. Summarize the information natur
         stream: bool = True,
         stream_callback: Optional[Callable] = None,
         emit_events: bool = False,
+        return_token_usage: bool = False,
         **kwargs
-    ) -> str:
+    ) -> Union[str, tuple[str, TokenUsage]]:
         """Enhanced get_response with all OpenAI-like features"""
         logging.debug(f"Getting response from {self.model}")
+        
+        # Variable to store final response for token usage extraction
+        _final_llm_response = None
+        
         # Log all self values when in debug mode
         self._log_llm_config(
             'LLM instance',
@@ -1864,6 +1900,7 @@ Now provide your final answer using this result. Summarize the information natur
                         reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
                         response_text = resp["choices"][0]["message"]["content"]
                         final_response = resp
+                        _final_llm_response = resp  # Store for token usage extraction
                         
                         # Emit StreamEvent for reasoning content if callback provided
                         if _emit and reasoning_content:
@@ -2094,6 +2131,7 @@ Now provide your final answer using this result. Summarize the information natur
                                                     **kwargs
                                                 )
                                             )
+                                            _final_llm_response = final_response  # Store for token usage extraction
                                             # Handle None content from Gemini
                                             response_content = final_response["choices"][0]["message"].get("content")
                                             response_text = response_content if response_content is not None else ""
@@ -2285,6 +2323,7 @@ Now provide your final answer using this result. Summarize the information natur
                                             **kwargs
                                         )
                                     )
+                                    _final_llm_response = final_response  # Store for token usage extraction
                                 # Handle None content from Gemini
                                 response_content = final_response["choices"][0]["message"].get("content")
                                 response_text = response_content if response_content is not None else ""
@@ -2698,7 +2737,7 @@ Now provide your final answer using this result. Summarize the information natur
                         task_id=task_id
                     )
                     callback_executed = True
-                return final_response_text
+                return _prepare_return_value(final_response_text)
             
             # No tool calls were made in this iteration, return the response
             generation_time_val = time.time() - start_time
@@ -2787,7 +2826,7 @@ Now provide your final answer using this result. Summarize the information natur
                         task_id=task_id
                     )
                     callback_executed = True
-                return response_text
+                return _prepare_return_value(response_text)
 
             if not self_reflect:
                 if verbose and not interaction_displayed:
@@ -2816,8 +2855,8 @@ Now provide your final answer using this result. Summarize the information natur
                 
                 # Return reasoning content if reasoning_steps is True
                 if reasoning_steps and stored_reasoning_content:
-                    return stored_reasoning_content
-                return response_text
+                    return _prepare_return_value(stored_reasoning_content)
+                return _prepare_return_value(response_text)
 
             # Handle self-reflection loop
             while reflection_count < max_reflect:
@@ -2933,7 +2972,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
-                        return response_text
+                        return _prepare_return_value(response_text)
 
                     if reflection_count >= max_reflect - 1:
                         if verbose and not interaction_displayed:
@@ -2942,7 +2981,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
-                        return response_text
+                        return _prepare_return_value(response_text)
 
                     reflection_count += 1
                     messages.extend([
@@ -2999,7 +3038,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
-                        return response_text
+                        return _prepare_return_value(response_text)
                     continue
                 except Exception as e:
                     _get_display_functions()['display_error'](f"Error in LLM response: {str(e)}")
@@ -3010,12 +3049,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 _get_display_functions()['display_interaction'](prompt, response_text, markdown=markdown,
                                  generation_time=time.time() - start_time, console=self.console)
                 interaction_displayed = True
-            return response_text
+            return _prepare_return_value(response_text)
 
         except Exception as error:
             _get_display_functions()['display_error'](f"Error in get_response: {str(error)}")
             raise
         
+        # Helper function to return appropriate format based on return_token_usage
+        def _prepare_return_value(response_text: str) -> Union[str, tuple[str, TokenUsage]]:
+            if not return_token_usage:
+                return _prepare_return_value(response_text)
+            
+            token_usage = self._extract_token_usage(_final_llm_response) if _final_llm_response else None
+            if token_usage is None:
+                token_usage = TokenUsage()  # Return empty TokenUsage if extraction fails
+            
+            return _prepare_return_value(response_text), token_usage
+
         # Log completion time if in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             total_time = time.time() - start_time
@@ -3899,7 +3949,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                      agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                      task_name=task_name, task_description=task_description, task_id=task_id)
                     interaction_displayed = True
-                return response_text
+                return _prepare_return_value(response_text)
 
             if not self_reflect:
                 # Use final_response_text if we went through tool iterations
@@ -3930,7 +3980,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
                 # Return reasoning content if reasoning_steps is True and we have it
                 if reasoning_steps and stored_reasoning_content:
-                    return stored_reasoning_content
+                    return _prepare_return_value(stored_reasoning_content)
                 return display_text
 
             # Handle self-reflection
@@ -4046,7 +4096,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
-                        return response_text
+                        return _prepare_return_value(response_text)
 
                     if reflection_count >= max_reflect - 1:
                         if verbose and not interaction_displayed:
@@ -4055,7 +4105,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
-                        return response_text
+                        return _prepare_return_value(response_text)
 
                     reflection_count += 1
                     messages.extend([
@@ -4069,7 +4119,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 except json.JSONDecodeError:
                     reflection_count += 1
                     if reflection_count >= max_reflect:
-                        return response_text
+                        return _prepare_return_value(response_text)
                     continue  # Now properly in a loop
             
         except Exception as error:
@@ -4190,6 +4240,49 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except Exception as e:
             if self.verbose:
                 logging.warning(f"Failed to track token usage: {e}")
+            return None
+    
+    def _extract_token_usage(self, response: Union[Dict[str, Any], Any]) -> Optional[TokenUsage]:
+        """Extract token usage from LiteLLM response for public API."""
+        try:
+            usage = None
+            
+            # Handle both dict and ModelResponse object formats
+            if isinstance(response, dict):
+                usage = response.get("usage", {})
+            else:
+                # ModelResponse object
+                usage = getattr(response, 'usage', None)
+            
+            if not usage:
+                return None
+            
+            # Extract token counts with support for both dict and object access
+            if isinstance(usage, dict):
+                return TokenUsage(
+                    prompt_tokens=usage.get("prompt_tokens", 0),
+                    completion_tokens=usage.get("completion_tokens", 0),
+                    total_tokens=usage.get("total_tokens", 0),
+                    cached_tokens=usage.get("cached_tokens", 0),
+                    reasoning_tokens=usage.get("reasoning_tokens", 0),
+                    audio_input_tokens=usage.get("audio_input_tokens", 0),
+                    audio_output_tokens=usage.get("audio_output_tokens", 0),
+                )
+            else:
+                # Object-style access
+                return TokenUsage(
+                    prompt_tokens=getattr(usage, 'prompt_tokens', 0) or 0,
+                    completion_tokens=getattr(usage, 'completion_tokens', 0) or 0,
+                    total_tokens=getattr(usage, 'total_tokens', 0) or 0,
+                    cached_tokens=getattr(usage, 'cached_tokens', 0) or 0,
+                    reasoning_tokens=getattr(usage, 'reasoning_tokens', 0) or 0,
+                    audio_input_tokens=getattr(usage, 'audio_input_tokens', 0) or 0,
+                    audio_output_tokens=getattr(usage, 'audio_output_tokens', 0) or 0,
+                )
+                
+        except Exception as e:
+            if self.verbose:
+                logging.warning(f"Failed to extract token usage: {e}")
             return None
     
     def set_current_agent(self, agent_name: Optional[str]):
@@ -4667,7 +4760,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 if reasoning_text:
                     reasoning_content = (reasoning_content or "") + str(reasoning_text)
 
-        return response_text, tool_calls if tool_calls else None, reasoning_content
+        return _prepare_return_value(response_text), tool_calls if tool_calls else None, reasoning_content
 
     def _stream_responses_api(
         self,
@@ -4792,7 +4885,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 },
             })
 
-        return response_text, tool_calls if tool_calls else None
+        return _prepare_return_value(response_text), tool_calls if tool_calls else None
 
     async def _stream_responses_api_async(
         self,
@@ -4883,7 +4976,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 "function": {"name": tc["name"], "arguments": tc["arguments"]},
             })
 
-        return response_text, tool_calls if tool_calls else None
+        return _prepare_return_value(response_text), tool_calls if tool_calls else None
 
     def _prepare_response_logging(self, temperature: float, stream: bool, verbose: bool, markdown: bool, **kwargs) -> Optional[Dict[str, Any]]:
         """Prepare debug logging information for response methods"""
@@ -5059,7 +5152,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     task_id=task_id
                 )
             
-            return response_text.strip() if response_text else ""
+            return _prepare_return_value(response_text).strip() if response_text else ""
 
         except Exception as error:
             _get_display_functions()['display_error'](f"Error in response: {str(error)}")
@@ -5156,7 +5249,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     task_id=task_id
                 )
             
-            return response_text.strip() if response_text else ""
+            return _prepare_return_value(response_text).strip() if response_text else ""
 
         except Exception as error:
             _get_display_functions()['display_error'](f"Error in response_async: {str(error)}")
