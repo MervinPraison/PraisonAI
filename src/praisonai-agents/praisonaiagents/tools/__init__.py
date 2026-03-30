@@ -1,8 +1,10 @@
 """Tools package for PraisonAI Agents - uses lazy loading for performance"""
 from importlib import import_module
 from typing import Any
+import threading
 
-# Lazy loading cache
+# Thread-safe lazy loading cache
+_tools_lock = threading.Lock()
 _tools_lazy_cache = {}
 
 # Export core tool items for organized imports (lightweight)
@@ -185,7 +187,7 @@ TOOL_MAPPINGS = {
     'email_tools': ('.email_tools', None),
 }
 
-_instances = {}  # Cache for class instances
+_instances = {}  # Cache for class instances (protected by _tools_lock)
 
 # Profile exports (lazy loaded)
 _PROFILE_EXPORTS = frozenset({
@@ -252,11 +254,14 @@ def __getattr__(name: str) -> Any:
             return module  # Returns the callable module
         return getattr(module, name)
     else:
-        # Class method import
+        # Class method import (thread-safe)
         if class_name not in _instances:
-            module = import_module(module_path, __package__)
-            class_ = getattr(module, class_name)
-            _instances[class_name] = class_()
+            with _tools_lock:
+                # Double-check pattern to avoid race conditions
+                if class_name not in _instances:
+                    module = import_module(module_path, __package__)
+                    class_ = getattr(module, class_name)
+                    _instances[class_name] = class_()
         
         # Get the method and bind it to the instance
         method = getattr(_instances[class_name], name)

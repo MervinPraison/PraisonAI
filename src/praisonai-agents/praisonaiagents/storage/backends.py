@@ -209,6 +209,10 @@ class SQLiteBackend:
                 check_same_thread=False
             )
             self._local.conn.row_factory = sqlite3.Row
+            # Enable WAL mode for better concurrent write safety
+            self._local.conn.execute("PRAGMA journal_mode=WAL")
+            self._local.conn.execute("PRAGMA synchronous=NORMAL")
+            self._local.conn.commit()
         return self._local.conn
     
     def _create_table(self) -> None:
