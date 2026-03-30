@@ -4142,7 +4142,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 "LiteLLM is required but not installed. "
                 "Please install it with: pip install 'praisonaiagents[llm]'"
             )
-        except:
+        except Exception as e:
+            # Model capability check failed - assume not supported
+            logger.debug(f"Model capability check failed for {self.model}: {e}")
             return False
 
     def can_use_stop_words(self) -> bool:
@@ -4156,7 +4158,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 "LiteLLM is required but not installed. "
                 "Please install it with: pip install 'praisonaiagents[llm]'"
             )
-        except:
+        except Exception as e:
+            # Model capability check failed - assume not supported
+            logger.debug(f"Model capability check failed for {self.model}: {e}")
             return False
 
     def get_context_size(self) -> int:

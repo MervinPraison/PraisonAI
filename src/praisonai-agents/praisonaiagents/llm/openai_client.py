@@ -1625,8 +1625,9 @@ class OpenAIClient:
             try:
                 from ._cost import calculate_cost
                 cost = calculate_cost(final_response, model=model)
-            except Exception:
-                pass  # Cost calculation is optional
+            except Exception as e:
+                # Cost calculation is optional - log for debugging
+                logging.getLogger(__name__).debug(f"Cost calculation failed: {e}")
             
             execute_sync_callback(
                 'llm_end',
@@ -1650,8 +1651,9 @@ class OpenAIClient:
                         content=response_content.strip(),
                         agent_name=None,
                     )
-                except Exception:
-                    pass  # Narrative display is optional
+                except Exception as e:
+                    # Narrative display is optional - log for debugging
+                    logging.getLogger(__name__).debug(f"Narrative display failed: {e}")
             
             if tool_calls and execute_tool_fn:
                 # Convert ToolCall dataclass objects to dict for JSON serialization
@@ -1849,8 +1851,9 @@ class OpenAIClient:
                         content=response_content.strip(),
                         agent_name=None,
                     )
-                except Exception:
-                    pass  # Narrative display is optional
+                except Exception as e:
+                    # Narrative display is optional - log for debugging
+                    logging.getLogger(__name__).debug(f"Narrative display failed: {e}")
             
             if tool_calls and execute_tool_fn:
                 # Convert ToolCall dataclass objects to dict for JSON serialization

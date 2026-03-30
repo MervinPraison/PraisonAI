@@ -358,9 +358,9 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
                 if self.llm and supports_structured_outputs(self.llm):
                     client = get_openai_client()
                     use_openai_structured = True
-            except:
+            except Exception as e:
                 # If OpenAI client is not available, we'll use the LLM class
-                pass
+                logging.getLogger(__name__).debug(f"OpenAI client not available, falling back to LLM class: {e}")
             
             try:
                 if use_openai_structured and client:

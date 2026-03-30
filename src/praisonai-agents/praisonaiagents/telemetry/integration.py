@@ -39,7 +39,8 @@ def _atexit_cleanup():
     if _telemetry_executor is not None:
         try:
             _telemetry_executor.shutdown(wait=False)
-        except:
+        except Exception:
+            # Shutdown may fail during interpreter exit - this is expected
             pass
         _telemetry_executor = None
     
@@ -96,7 +97,8 @@ def _process_telemetry_queue():
                 import sys
                 if hasattr(sys, 'is_finalizing') and sys.is_finalizing():
                     break
-            except:
+            except Exception:
+                # Background thread encountered error - exit gracefully
                 break
                 
             events = []
@@ -112,7 +114,8 @@ def _process_telemetry_queue():
                     _telemetry_queue.task_done()
                 except queue.Empty:
                     continue
-                except:
+                except Exception:
+                    # Queue operation failed - exit gracefully
                     break
             
             # Process batch if we have events
