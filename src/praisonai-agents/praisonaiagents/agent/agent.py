@@ -7200,7 +7200,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         result = await tool(**arguments)
                     else:
                         # Run sync function in executor to avoid blocking
-                        loop = asyncio.get_event_loop()
+                        loop = asyncio.get_running_loop()
                         result = await loop.run_in_executor(None, lambda: tool(**arguments))
 
                     # --- AFTER_TOOL hook ---
@@ -8565,7 +8565,7 @@ Write the complete compiled report:"""
                     result = await func(**arguments)
                 else:
                     logging.debug(f"Executing sync function in executor: {function_name}")
-                    loop = asyncio.get_event_loop()
+                    loop = asyncio.get_running_loop()
                     result = await loop.run_in_executor(None, lambda: func(**arguments))
                 
                 # Ensure result is JSON serializable
@@ -8700,7 +8700,7 @@ Write the complete compiled report:"""
                             response = await self.achat(query, task_name=None, task_description=None, task_id=None)
                         else:
                             # Run sync function in a thread to avoid blocking
-                            loop = asyncio.get_event_loop()
+                            loop = asyncio.get_running_loop()
                             response = await loop.run_in_executor(None, lambda p=query: self.chat(p))
 
                         return {"response": response}
@@ -8824,7 +8824,7 @@ Write the complete compiled report:"""
                     elif hasattr(self, 'chat'): # Fallback for synchronous chat
                         # Use copy_context_to_callable to propagate contextvars (needed for trace emission)
                         from ..trace.context_events import copy_context_to_callable
-                        loop = asyncio.get_event_loop()
+                        loop = asyncio.get_running_loop()
                         response = await loop.run_in_executor(None, copy_context_to_callable(lambda p=prompt: self.chat(p, tools=self.tools)))
                     else:
                         logging.error(f"Agent {self.name} has no suitable chat or achat method for MCP tool.")

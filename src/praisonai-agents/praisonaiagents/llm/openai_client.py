@@ -1895,7 +1895,7 @@ class OpenAIClient:
                         tool_result = await execute_tool_fn(function_name, arguments, tool_call_id=_tool_call_id)
                     else:
                         # Run sync function in executor
-                        loop = asyncio.get_event_loop()
+                        loop = asyncio.get_running_loop()
                         tool_result = await loop.run_in_executor(
                             None, 
                             lambda fn=function_name, args=arguments, tcid=_tool_call_id: execute_tool_fn(fn, args, tool_call_id=tcid)
