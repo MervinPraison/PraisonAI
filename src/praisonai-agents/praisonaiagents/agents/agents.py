@@ -29,7 +29,9 @@ class TaskStatus(Enum):
 # Set up logger
 logger = logging.getLogger(__name__)
 
-# Global variables for managing the shared servers
+# Global variables for managing the shared servers with thread-safety
+import threading
+_agents_server_lock = threading.Lock()  # Protect all global server state mutations
 _agents_server_started = {}  # Dict of port -> started boolean
 _agents_registered_endpoints = {}  # Dict of port -> Dict of path -> endpoint_id
 _agents_shared_apps = {}  # Dict of port -> FastAPI app
@@ -430,6 +432,8 @@ class AgentTeam:
             _max_retries = 3
         self.completion_checker = _completion_checker if _completion_checker else self.default_completion_checker
         self.task_id_counter = 0
+        self._task_id_lock = threading.Lock()  # Thread-safe task ID assignment
+        self._state_lock = threading.Lock()  # Thread-safe state mutations
         self.verbose = _verbose
         self.max_retries = _max_retries
         self.process = process
@@ -558,11 +562,12 @@ class AgentTeam:
             self._telemetry = None
 
     def add_task(self, task):
-        task_id = self.task_id_counter
-        task.id = task_id
-        self.tasks[task_id] = task
-        self.task_id_counter += 1
-        return task_id
+        with self._task_id_lock:
+            task_id = self.task_id_counter
+            task.id = task_id
+            self.tasks[task_id] = task
+            self.task_id_counter += 1
+            return task_id
 
     def clean_json_output(self, output: str) -> str:
         cleaned = output.strip()
@@ -1413,7 +1418,8 @@ Context:
 
     def set_state(self, key: str, value: Any) -> None:
         """Set a state value"""
-        self._state[key] = value
+        with self._state_lock:
+            self._state[key] = value
 
     def get_state(self, key: str, default: Any = None) -> Any:
         """Get a state value"""
@@ -1421,11 +1427,13 @@ Context:
 
     def update_state(self, updates: Dict) -> None:
         """Update multiple state values"""
-        self._state.update(updates)
+        with self._state_lock:
+            self._state.update(updates)
 
     def clear_state(self) -> None:
         """Clear all state values"""
-        self._state.clear()
+        with self._state_lock:
+            self._state.clear()
     
     # Convenience methods for enhanced state management
     def has_state(self, key: str) -> bool:
@@ -1438,19 +1446,21 @@ Context:
     
     def delete_state(self, key: str) -> bool:
         """Delete a state key if it exists. Returns True if deleted, False if key didn't exist."""
-        if key in self._state:
-            del self._state[key]
-            return True
-        return False
+        with self._state_lock:
+            if key in self._state:
+                del self._state[key]
+                return True
+            return False
     
     def increment_state(self, key: str, amount: float = 1, default: float = 0) -> float:
         """Increment a numeric state value. Creates the key with default if it doesn't exist."""
-        current = self._state.get(key, default)
-        if not isinstance(current, (int, float)):
-            raise TypeError(f"Cannot increment non-numeric value at key '{key}': {type(current).__name__}")
-        new_value = current + amount
-        self._state[key] = new_value
-        return new_value
+        with self._state_lock:
+            current = self._state.get(key, default)
+            if not isinstance(current, (int, float)):
+                raise TypeError(f"Cannot increment non-numeric value at key '{key}': {type(current).__name__}")
+            new_value = current + amount
+            self._state[key] = new_value
+            return new_value
     
     def append_to_state(self, key: str, value: Any, max_length: Optional[int] = None) -> List[Any]:
         """Append a value to a list state. Creates the list if it doesn't exist.
@@ -1466,20 +1476,21 @@ Context:
         Raises:
             TypeError: If the existing value is not a list and convert_to_list=False
         """
-        if key not in self._state:
-            self._state[key] = []
-        elif not isinstance(self._state[key], list):
-            # Be explicit about type conversion for better user experience
-            current_value = self._state[key]
-            self._state[key] = [current_value]
-        
-        self._state[key].append(value)
-        
-        # Trim list if max_length is specified
-        if max_length and len(self._state[key]) > max_length:
-            self._state[key] = self._state[key][-max_length:]
-        
-        return self._state[key]
+        with self._state_lock:
+            if key not in self._state:
+                self._state[key] = []
+            elif not isinstance(self._state[key], list):
+                # Be explicit about type conversion for better user experience
+                current_value = self._state[key]
+                self._state[key] = [current_value]
+            
+            self._state[key].append(value)
+            
+            # Trim list if max_length is specified
+            if max_length and len(self._state[key]) > max_length:
+                self._state[key] = self._state[key][-max_length:]
+            
+            return self._state[key]
     
     def save_session_state(self, session_id: str, include_memory: bool = True) -> None:
         """Save current state to memory for session persistence"""
@@ -1521,7 +1532,8 @@ Context:
                 state_data = metadata.get("state_data", {})
                 if "state" in state_data:
                     # Merge with existing state instead of replacing
-                    self._state.update(state_data["state"])
+                    with self._state_lock:
+                        self._state.update(state_data["state"])
                     return True
         
         return False
@@ -1645,16 +1657,18 @@ Context:
                 print("pip install 'praisonaiagents[api]'")
                 return None
             
-            # Initialize port-specific collections if needed
-            if port not in _agents_registered_endpoints:
-                _agents_registered_endpoints[port] = {}
-                
-            # Initialize shared FastAPI app if not already created for this port
-            if _agents_shared_apps.get(port) is None:
-                _agents_shared_apps[port] = FastAPI(
-                    title=f"PraisonAI Agents API (Port {port})",
-                    description="API for interacting with multiple PraisonAI Agents"
-                )
+            # Thread-safe initialization of port-specific collections
+            with _agents_server_lock:
+                # Initialize port-specific collections if needed
+                if port not in _agents_registered_endpoints:
+                    _agents_registered_endpoints[port] = {}
+                    
+                # Initialize shared FastAPI app if not already created for this port
+                if _agents_shared_apps.get(port) is None:
+                    _agents_shared_apps[port] = FastAPI(
+                        title=f"PraisonAI Agents API (Port {port})",
+                        description="API for interacting with multiple PraisonAI Agents"
+                    )
                 
                 # Add a root endpoint with a welcome message
                 @_agents_shared_apps[port].get("/")
@@ -1676,20 +1690,22 @@ Context:
             if not path.startswith('/'):
                 path = f'/{path}'
                 
-            # Check if path is already registered for this port
-            if path in _agents_registered_endpoints[port]:
-                logging.warning(f"Path '{path}' is already registered on port {port}. Please use a different path.")
-                print(f"⚠️ Warning: Path '{path}' is already registered on port {port}.")
-                # Use a modified path to avoid conflicts
-                original_path = path
-                instance_id = str(uuid.uuid4())[:6]
-                path = f"{path}_{instance_id}"
-                logging.warning(f"Using '{path}' instead of '{original_path}'")
-                print(f"🔄 Using '{path}' instead")
-            
-            # Generate a unique ID for this agent group's endpoint
-            endpoint_id = str(uuid.uuid4())
-            _agents_registered_endpoints[port][path] = endpoint_id
+            # Thread-safe path registration 
+            with _agents_server_lock:
+                # Check if path is already registered for this port
+                if path in _agents_registered_endpoints[port]:
+                    logging.warning(f"Path '{path}' is already registered on port {port}. Please use a different path.")
+                    print(f"⚠️ Warning: Path '{path}' is already registered on port {port}.")
+                    # Use a modified path to avoid conflicts
+                    original_path = path
+                    instance_id = str(uuid.uuid4())[:6]
+                    path = f"{path}_{instance_id}"
+                    logging.warning(f"Using '{path}' instead of '{original_path}'")
+                    print(f"🔄 Using '{path}' instead")
+                
+                # Generate a unique ID for this agent group's endpoint
+                endpoint_id = str(uuid.uuid4())
+                _agents_registered_endpoints[port][path] = endpoint_id
             
             # Define the endpoint handler
             @_agents_shared_apps[port].post(path)
@@ -1817,16 +1833,23 @@ Context:
                             )
                     return handle_single_agent
                 
-                # Register the endpoint
+                # Register the endpoint with thread safety
                 _agents_shared_apps[port].post(agent_path)(create_agent_handler(agent_instance))
-                _agents_registered_endpoints[port][agent_path] = f"{endpoint_id}_{agent_id}"
+                with _agents_server_lock:
+                    _agents_registered_endpoints[port][agent_path] = f"{endpoint_id}_{agent_id}"
             
             print(f"🔗 Per-agent endpoints: {', '.join([f'{path}/{aid}' for aid in agents_dict.keys()])}")
             
             # Start the server if it's not already running for this port
-            if not _agents_server_started.get(port, False):
-                # Mark the server as started first to prevent duplicate starts
-                _agents_server_started[port] = True
+            with _agents_server_lock:
+                if not _agents_server_started.get(port, False):
+                    # Mark the server as started first to prevent duplicate starts
+                    _agents_server_started[port] = True
+                    should_start_server = True
+                else:
+                    should_start_server = False
+            
+            if should_start_server:
                 
                 # Start the server in a separate thread
                 def run_server():
@@ -2305,7 +2328,8 @@ Context:
         # Store original tasks and create new tasks from plan
         original_tasks = self.tasks.copy()
         self.tasks = {}
-        self.task_id_counter = 0
+        with self._task_id_lock:
+            self.task_id_counter = 0
         
         # Create Task objects from plan steps
         plan_tasks = []
