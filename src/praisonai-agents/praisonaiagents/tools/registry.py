@@ -249,15 +249,20 @@ class ToolRegistry:
         return f"ToolRegistry(tools={len(self._tools)}, functions={len(self._functions)})"
 
 
-# Global registry instance
+# Global registry instance (protected by _registry_lock for thread safety)
+import threading
+_registry_lock = threading.Lock()
 _global_registry: Optional[ToolRegistry] = None
 
 
 def get_registry() -> ToolRegistry:
-    """Get the global tool registry instance."""
+    """Get the global tool registry instance (thread-safe singleton)."""
     global _global_registry
     if _global_registry is None:
-        _global_registry = ToolRegistry()
+        with _registry_lock:
+            # Double-checked locking pattern
+            if _global_registry is None:
+                _global_registry = ToolRegistry()
     return _global_registry
 
 

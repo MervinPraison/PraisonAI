@@ -1626,8 +1626,9 @@ Your Goal: {self.goal}
         if autonomy_level == "full_auto" and (approval is False or approval is None):
             from ..approval.backends import AutoApproveBackend
             self._approval_backend = AutoApproveBackend()
-        # Pending approvals for async (non-blocking) mode
+        # Pending approvals for async (non-blocking) mode (protected by lock for thread safety)
         self._pending_approvals = {}
+        self._pending_approvals_lock = asyncio.Lock()
         
         # P8/G11: Tool timeout - prevent slow tools from blocking
         self._tool_timeout = tool_timeout
@@ -5064,7 +5065,19 @@ Your Goal: {self.goal}"""
                     if hasattr(backend, 'request_approval_sync'):
                         decision = backend.request_approval_sync(request)
                     else:
-                        decision = asyncio.run(backend.request_approval(request))
+                        # Handle async context properly - don't use asyncio.run() in running loop
+                        try:
+                            # Check if we're already in an event loop
+                            loop = asyncio.get_running_loop()
+                            # If we're here, we're in an async context - can't use asyncio.run()
+                            # Create a task and run it synchronously (this is a sync method)
+                            import concurrent.futures
+                            with concurrent.futures.ThreadPoolExecutor() as executor:
+                                future = executor.submit(asyncio.run, backend.request_approval(request))
+                                decision = future.result()
+                        except RuntimeError:
+                            # No running loop, safe to use asyncio.run()
+                            decision = asyncio.run(backend.request_approval(request))
                 finally:
                     if orig_timeout is not None and hasattr(backend, '_timeout'):
                         backend._timeout = orig_timeout
@@ -8331,12 +8344,16 @@ Write the complete compiled report:"""
 
         tracking_id = str(uuid.uuid4())[:8]
         task = asyncio.ensure_future(backend.request_approval(request))
-        self._pending_approvals[tracking_id] = {
-            "task": task,
-            "function_name": function_name,
-            "arguments": arguments,
-            "request": request,
-        }
+        
+        # Thread-safe access to pending approvals dict
+        async with self._pending_approvals_lock:
+            self._pending_approvals[tracking_id] = {
+                "task": task,
+                "function_name": function_name,
+                "arguments": arguments,
+                "request": request,
+            }
+        
         logging.info(f"Approval request submitted: {tracking_id} for {function_name}")
         return tracking_id
 
@@ -8348,47 +8365,76 @@ Write the complete compiled report:"""
         and their results included.
         """
         results = {}
-        completed_ids = []
-
-        for tid, info in self._pending_approvals.items():
-            task = info["task"]
-            if task.done():
-                completed_ids.append(tid)
-                try:
-                    decision = task.result()
-                    if decision.approved:
-                        # Auto-execute the approved tool
-                        tool_result = await self.execute_tool_async(
-                            info["function_name"], info["arguments"],
-                        )
+        approved_for_execution = []
+        
+        # Thread-safe access to pending approvals dict - first pass: collect completed items
+        async with self._pending_approvals_lock:
+            completed_ids = []
+            
+            # Create a copy of items() to avoid dict changed size during iteration
+            pending_items = list(self._pending_approvals.items())
+            
+            for tid, info in pending_items:
+                task = info["task"]
+                if task.done():
+                    completed_ids.append(tid)
+                    try:
+                        decision = task.result()
+                        if decision.approved:
+                            # Schedule for execution outside the lock
+                            approved_for_execution.append((tid, info, decision))
+                        else:
+                            results[tid] = {
+                                "status": "denied",
+                                "tool_name": info["function_name"],
+                                "decision": decision,
+                            }
+                    except Exception as e:
                         results[tid] = {
-                            "status": "approved_and_executed",
+                            "status": "error",
                             "tool_name": info["function_name"],
-                            "decision": decision,
-                            "result": tool_result,
+                            "error": str(e),
                         }
-                    else:
-                        results[tid] = {
-                            "status": "denied",
-                            "tool_name": info["function_name"],
-                            "decision": decision,
-                        }
-                except Exception as e:
-                    results[tid] = {
-                        "status": "error",
-                        "tool_name": info["function_name"],
-                        "error": str(e),
-                    }
-
-        for tid in completed_ids:
-            del self._pending_approvals[tid]
+            
+            # Remove completed items
+            for tid in completed_ids:
+                if tid in self._pending_approvals:  # Check still exists in case of concurrent modification
+                    del self._pending_approvals[tid]
+        
+        # Execute approved tools outside the lock to prevent deadlock
+        for tid, info, decision in approved_for_execution:
+            try:
+                tool_result = await self.execute_tool_async(
+                    info["function_name"], info["arguments"],
+                )
+                results[tid] = {
+                    "status": "approved_and_executed",
+                    "tool_name": info["function_name"],
+                    "decision": decision,
+                    "result": tool_result,
+                }
+            except Exception as e:
+                results[tid] = {
+                    "status": "execution_error",
+                    "tool_name": info["function_name"],
+                    "decision": decision,
+                    "error": str(e),
+                }
 
         return results
 
     @property
     def pending_approval_count(self) -> int:
-        """Number of approval requests still waiting."""
+        """Number of approval requests still waiting.
+        
+        Note: This is not thread-safe. Use pending_approval_count_async() for thread-safe access.
+        """
         return len(self._pending_approvals)
+    
+    async def pending_approval_count_async(self) -> int:
+        """Thread-safe version of pending_approval_count."""
+        async with self._pending_approvals_lock:
+            return len(self._pending_approvals)
 
     def execute(self, task, context=None):
         """Execute a task synchronously - backward compatibility method"""
