@@ -3,6 +3,9 @@ name: Auto PR Comment
 # Review chain: CodeRabbit/Qodo/Gemini review first → THEN trigger Copilot
 # For human PRs: CodeRabbit/Qodo auto-review → this workflow triggers Copilot
 # For bot PRs: CodeRabbit/Qodo skip bots, so we trigger them explicitly first
+#
+# IMPORTANT: @copilot ignores bot comments. All @copilot mentions must use
+# PAT_TOKEN so the comment posts as MervinPraison (a real user).
 on:
   issue_comment:
     types: [created]
@@ -25,18 +28,20 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - name: Post Copilot review request
+      - name: Post Copilot review request (as user via PAT)
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.PAT_TOKEN }}
           script: |
             const comments = await github.rest.issues.listComments({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo
             });
-            const alreadyPosted = comments.data.some(c => 
-              c.user.login === 'github-actions[bot]' && c.body.includes('@copilot')
+            // Check for duplicates — posted by MervinPraison (PAT) or github-actions[bot] (legacy)
+            const alreadyPosted = comments.data.some(c =>
+              c.body.includes('@copilot') &&
+              (c.user.login === 'MervinPraison' || c.user.login === 'github-actions[bot]')
             );
             if (alreadyPosted) {
               console.log('Copilot already triggered, skipping');
@@ -58,18 +63,19 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - name: Post Copilot review request (fallback via Qodo)
+      - name: Post Copilot review request (as user via PAT)
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.PAT_TOKEN }}
           script: |
             const comments = await github.rest.issues.listComments({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo
             });
-            const alreadyPosted = comments.data.some(c => 
-              c.user.login === 'github-actions[bot]' && c.body.includes('@copilot')
+            const alreadyPosted = comments.data.some(c =>
+              c.body.includes('@copilot') &&
+              (c.user.login === 'MervinPraison' || c.user.login === 'github-actions[bot]')
             );
             if (alreadyPosted) {
               console.log('Copilot already triggered, skipping');
@@ -86,7 +92,6 @@ jobs:
   # BOT PRs: CodeRabbit/Qodo skip bot-authored PRs by default.
   # Trigger them explicitly. Do NOT trigger Copilot here — it will
   # be triggered by copilot-after-coderabbit/qodo when they finish.
-  # Chain: trigger reviews → CodeRabbit/Qodo post → Copilot triggered → Claude chains
   # ================================================================
   bot-pr-trigger-reviews:
     if: |
@@ -100,7 +105,7 @@ jobs:
       - name: Trigger CodeRabbit, Qodo, and Gemini reviews
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.PAT_TOKEN }}
           script: |
             const pr = context.payload.pull_request.number;
             const owner = context.repo.owner;
@@ -128,7 +133,6 @@ jobs:
             console.log(`Triggered Gemini for bot PR #${pr}`);
 
             // NOTE: @copilot is NOT triggered here.
-            // It will be triggered automatically by copilot-after-coderabbit
-            // or copilot-after-qodo when those bots finish their reviews.
-            // This ensures Copilot always reviews AFTER all other reviewers.
+            // It will be triggered by copilot-after-coderabbit or copilot-after-qodo
+            // once those bots finish, ensuring Copilot always reviews LAST.
             console.log('Copilot will be triggered after CodeRabbit/Qodo complete.');
