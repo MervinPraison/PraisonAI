@@ -609,7 +609,8 @@ def crawl4ai_sync(
     Returns:
         Dict with crawl results
     """
-    return asyncio.run(
+    from ..approval.utils import run_coroutine_safely
+    return run_coroutine_safely(
         crawl4ai(url, css_selector, js_code, wait_for)
     )
 
@@ -629,7 +630,8 @@ def crawl4ai_extract_sync(
     Returns:
         Dict with extracted data
     """
-    return asyncio.run(
+    from ..approval.utils import run_coroutine_safely
+    return run_coroutine_safely(
         crawl4ai_extract(url, schema, js_code)
     )
 
