@@ -265,3 +265,27 @@ export class MissingEnvVarError extends Error {
     this.name = 'MissingEnvVarError';
   }
 }
+
+/**
+ * Error thrown when an agent exceeds its budget/cost limit.
+ * Mirrors Python SDK: BudgetExceededError(agent_name, total_cost, max_budget)
+ *
+ * Usage:
+ *   try { await agent.start("..."); }
+ *   catch (e) {
+ *     if (e instanceof BudgetExceededError)
+ *       console.log(`Agent '${e.agentName}' spent $${e.totalCost} of $${e.maxBudget}`);
+ *   }
+ */
+export class BudgetExceededError extends Error {
+  constructor(
+    public readonly agentName: string,
+    public readonly totalCost: number,
+    public readonly maxBudget: number
+  ) {
+    super(
+      `Agent '${agentName}' exceeded budget: $${totalCost.toFixed(4)} >= $${maxBudget.toFixed(4)}`
+    );
+    this.name = 'BudgetExceededError';
+  }
+}

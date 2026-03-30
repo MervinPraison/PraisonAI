@@ -7,6 +7,14 @@ import {
   getToolsRegistry,
   createToolsRegistry,
   resetToolsRegistry,
+  get_registry,
+  getRegistry,
+  get_tool,
+  getTool,
+  register_tool,
+  registerTool,
+  validate_tool,
+  validateTool,
 } from '../../src/tools/registry/registry';
 import {
   createLoggingMiddleware,
@@ -16,7 +24,7 @@ import {
   composeMiddleware,
 } from '../../src/tools/registry/middleware';
 import type { ToolMetadata, PraisonTool, ToolExecutionContext } from '../../src/tools/registry/types';
-import { MissingDependencyError, MissingEnvVarError } from '../../src/tools/registry/types';
+import { MissingDependencyError, MissingEnvVarError, BudgetExceededError } from '../../src/tools/registry/types';
 
 describe('ToolsRegistry', () => {
   let registry: ToolsRegistry;
@@ -417,6 +425,155 @@ describe('Error Classes', () => {
       expect(error.message).toContain('API_KEY');
       expect(error.message).toContain('test-tool');
       expect(error.name).toBe('MissingEnvVarError');
+    });
+  });
+
+  describe('BudgetExceededError', () => {
+    it('should include agentName, totalCost and maxBudget', () => {
+      const error = new BudgetExceededError('my-agent', 1.2345, 1.0);
+
+      expect(error.agentName).toBe('my-agent');
+      expect(error.totalCost).toBe(1.2345);
+      expect(error.maxBudget).toBe(1.0);
+      expect(error.name).toBe('BudgetExceededError');
+      expect(error.message).toContain('my-agent');
+      expect(error.message).toContain('1.2345');
+      expect(error.message).toContain('1.0000');
+    });
+
+    it('should be an instance of Error', () => {
+      const error = new BudgetExceededError('agent', 5, 3);
+      expect(error).toBeInstanceOf(Error);
+      expect(error).toBeInstanceOf(BudgetExceededError);
+    });
+  });
+});
+
+// ─── Python SDK parity helpers ──────────────────────────────────────────────
+
+const parityMetadata: ToolMetadata = {
+  id: 'parity-tool',
+  displayName: 'Parity Tool',
+  description: 'Tool used in parity tests',
+  tags: ['parity'],
+  requiredEnv: [],
+  optionalEnv: [],
+  install: {
+    npm: 'npm install parity-tool',
+    pnpm: 'pnpm add parity-tool',
+    yarn: 'yarn add parity-tool',
+    bun: 'bun add parity-tool',
+  },
+  docsSlug: 'tools/parity',
+  capabilities: {},
+  packageName: 'parity-tool',
+};
+
+const parityFactory = () => ({
+  name: 'parityTool',
+  description: 'Parity tool instance',
+  parameters: { type: 'object' as const, properties: {} },
+  execute: async () => ({ ok: true }),
+});
+
+describe('Python SDK parity functions', () => {
+  beforeEach(() => {
+    resetToolsRegistry();
+  });
+
+  describe('get_registry / getRegistry', () => {
+    it('should return the global singleton', () => {
+      const r1 = get_registry();
+      const r2 = get_registry();
+      expect(r1).toBe(r2);
+      expect(r1).toBeInstanceOf(ToolsRegistry);
+    });
+
+    it('getRegistry is an alias for get_registry', () => {
+      expect(getRegistry()).toBe(get_registry());
+    });
+  });
+
+  describe('register_tool / registerTool', () => {
+    it('should register a tool in the global registry', () => {
+      register_tool(parityMetadata, parityFactory);
+      expect(get_registry().has('parity-tool')).toBe(true);
+    });
+
+    it('registerTool is an alias for register_tool', () => {
+      registerTool(parityMetadata, parityFactory);
+      expect(get_registry().has('parity-tool')).toBe(true);
+    });
+  });
+
+  describe('get_tool / getTool', () => {
+    it('should return a tool instance for a registered tool', () => {
+      register_tool(parityMetadata, parityFactory);
+      const tool = get_tool('parity-tool');
+      expect(tool).not.toBeNull();
+      expect(tool?.name).toBe('parityTool');
+    });
+
+    it('should return null for an unregistered tool', () => {
+      expect(get_tool('nonexistent')).toBeNull();
+    });
+
+    it('getTool is an alias for get_tool', () => {
+      register_tool(parityMetadata, parityFactory);
+      expect(getTool('parity-tool')).not.toBeNull();
+    });
+  });
+
+  describe('validate_tool / validateTool', () => {
+    it('should return invalid result for unregistered tool', async () => {
+      const result = await validate_tool('nonexistent');
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('Tool "nonexistent" is not registered');
+    });
+
+    it('should report missing env vars', async () => {
+      const metaWithEnv: ToolMetadata = {
+        ...parityMetadata,
+        id: 'env-tool',
+        requiredEnv: ['REQUIRED_API_KEY_XYZ_NOT_SET'],
+        packageName: 'nonexistent-package-xyz',
+      };
+      register_tool(metaWithEnv, parityFactory);
+
+      const result = await validate_tool('env-tool');
+      expect(result.missingEnvVars).toContain('REQUIRED_API_KEY_XYZ_NOT_SET');
+      expect(result.errors.some(e => e.includes('REQUIRED_API_KEY_XYZ_NOT_SET'))).toBe(true);
+    });
+
+    it('validateTool is an alias for validate_tool', async () => {
+      const result = await validateTool('nonexistent');
+      expect(result.valid).toBe(false);
+    });
+
+    it('error message for uninstalled package should not contain "undefined"', async () => {
+      register_tool(parityMetadata, parityFactory);
+      const result = await validate_tool('parity-tool');
+      // installed may be false since 'parity-tool' npm package doesn't exist
+      for (const e of result.errors) {
+        expect(e).not.toContain('undefined');
+      }
+    });
+
+    it('should return valid: true for a tool with no missing deps or env vars', async () => {
+      // Use a built-in Node.js module as packageName so checkInstalled succeeds
+      const builtinMeta: ToolMetadata = {
+        ...parityMetadata,
+        id: 'builtin-tool',
+        packageName: 'path',   // Node built-in, always resolvable
+        requiredEnv: [],
+      };
+      register_tool(builtinMeta, parityFactory);
+
+      const result = await validate_tool('builtin-tool');
+      expect(result.valid).toBe(true);
+      expect(result.installed).toBe(true);
+      expect(result.missingEnvVars).toHaveLength(0);
+      expect(result.errors).toHaveLength(0);
     });
   });
 });

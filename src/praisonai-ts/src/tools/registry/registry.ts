@@ -284,3 +284,98 @@ export function resetToolsRegistry(): void {
   }
   globalRegistry = null;
 }
+
+/**
+ * Get the global registry instance (alias for getToolsRegistry)
+ * For Python SDK parity: get_registry()
+ */
+export function get_registry(): ToolsRegistry {
+  return getToolsRegistry();
+}
+
+/** camelCase alias for get_registry — idiomatic TypeScript */
+export const getRegistry = get_registry;
+
+/**
+ * Get a single tool by name from the global registry
+ * For Python SDK parity: get_tool()
+ */
+export function get_tool<TConfig = unknown, TInput = unknown, TOutput = unknown>(
+  id: string,
+  config?: TConfig
+): PraisonTool<TInput, TOutput> | null {
+  try {
+    const registry = getToolsRegistry();
+    return registry.create<TConfig, TInput, TOutput>(id, config);
+  } catch {
+    return null;
+  }
+}
+
+/** camelCase alias for get_tool — idiomatic TypeScript */
+export const getTool = get_tool;
+
+/**
+ * Register a tool with the global registry
+ * For Python SDK parity: register_tool()
+ */
+export function register_tool(metadata: ToolMetadata, factory: ToolFactory): void {
+  const registry = getToolsRegistry();
+  registry.register(metadata, factory);
+}
+
+/** camelCase alias for register_tool — idiomatic TypeScript */
+export const registerTool = register_tool;
+
+/**
+ * Validate a tool's configuration and dependencies
+ * For Python SDK parity: validate_tool()
+ */
+export async function validate_tool(id: string): Promise<{
+  valid: boolean;
+  installed: boolean;
+  missingEnvVars: string[];
+  errors: string[];
+}> {
+  const registry = getToolsRegistry();
+  
+  if (!registry.has(id)) {
+    return {
+      valid: false,
+      installed: false,
+      missingEnvVars: [],
+      errors: [`Tool "${id}" is not registered`]
+    };
+  }
+
+  const status = await registry.getInstallStatus(id);
+  if (!status) {
+    return {
+      valid: false,
+      installed: false,
+      missingEnvVars: [],
+      errors: [`Failed to get status for tool "${id}"`]
+    };
+  }
+
+  const errors: string[] = [];
+  
+  if (!status.installed) {
+    const installCmd = status.installCommand ?? `npm install ${registry.getMetadata(id)?.packageName ?? id}`;
+    errors.push(`Package dependency not installed. Run: ${installCmd}`);
+  }
+
+  if (status.missingEnvVars.length > 0) {
+    errors.push(`Missing environment variables: ${status.missingEnvVars.join(', ')}`);
+  }
+
+  return {
+    valid: status.installed && status.missingEnvVars.length === 0,
+    installed: status.installed,
+    missingEnvVars: status.missingEnvVars,
+    errors
+  };
+}
+
+/** camelCase alias for validate_tool — idiomatic TypeScript */
+export const validateTool = validate_tool;
