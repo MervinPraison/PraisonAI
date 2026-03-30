@@ -94,6 +94,10 @@ def __getattr__(name):
         from .rate_limiter import RateLimiter
         _lazy_cache[name] = RateLimiter
         return RateLimiter
+    elif name == "TokenUsage":
+        from .llm import TokenUsage
+        _lazy_cache[name] = TokenUsage
+        return TokenUsage
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -117,5 +121,6 @@ __all__ = [
     "ModelProfile",
     "TaskComplexity",
     "create_routing_agent",
-    "RateLimiter"
+    "RateLimiter",
+    "TokenUsage"
 ]
