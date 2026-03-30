@@ -5,14 +5,13 @@ on:
     types: [opened]
 
 jobs:
-  # Post @gemini immediately for thorough triage (free via API key)
-  # Note: @copilot does NOT respond on issues, only on PRs
-  gemini-triage:
+  # Default: Claude handles issue analysis and fix
+  claude-fix:
     runs-on: ubuntu-latest
     permissions:
       issues: write
     steps:
-      - name: Post Gemini triage request
+      - name: Post Claude analysis request
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -21,5 +20,23 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '@gemini Do a thorough analysis of this issue:\n\n1. **Classification**: Is this a bug, feature request, question, or documentation gap?\n2. **Severity**: Critical / High / Medium / Low — explain why\n3. **Affected area**: Which modules/files in the codebase are relevant?\n4. **Root cause analysis**: Search the codebase and identify the likely root cause\n5. **Impact assessment**: What else could be affected? Any related issues?\n6. **Suggested fix**: Propose a concrete solution approach with file paths\n7. **Effort estimate**: Small (hours) / Medium (day) / Large (days+)'
+              body: '@claude Analyze this issue and implement a fix following AGENTS.md:\n\n1. **Classification**: Bug, feature request, question, or documentation gap?\n2. **Root cause**: Search the codebase and identify the likely root cause\n3. **Fix**: Implement a minimal, focused fix\n4. Ensure backward compatibility — no features removed\n5. Zero performance regression on hot paths\n6. Run tests to verify the fix\n7. Create a PR with your changes using gh'
             })
+
+  # Future: Gemini triage (commented out — can re-enable for dual-agent pipeline)
+  # gemini-triage:
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     issues: write
+  #   steps:
+  #     - name: Post Gemini analysis request
+  #       uses: actions/github-script@v7
+  #       with:
+  #         github-token: ${{ secrets.GITHUB_TOKEN }}
+  #         script: |
+  #           github.rest.issues.createComment({
+  #             issue_number: context.issue.number,
+  #             owner: context.repo.owner,
+  #             repo: context.repo.repo,
+  #             body: '@gemini Do a thorough analysis of this issue:\n\n1. **Classification**: Is this a bug, feature request, question, or documentation gap?\n2. **Severity**: Critical / High / Medium / Low — explain why\n3. **Affected area**: Which modules/files in the codebase are relevant?\n4. **Root cause analysis**: Search the codebase and identify the likely root cause\n5. **Impact assessment**: What else could be affected? Any related issues?\n6. **Suggested fix**: Propose a concrete solution approach with file paths\n7. **Effort estimate**: Small (hours) / Medium (day) / Large (days+)'
+  #           })

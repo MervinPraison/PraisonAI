@@ -1,37 +1,16 @@
 name: Chain Claude After Reviewers
 
-# Event-driven: triggers when a bot reviewer finishes
+# Event-driven: triggers when a bot reviewer finishes on a PR
 # - Copilot posts PR reviews (pull_request_review event)
-# - Gemini posts issue comments (issue_comment event)
 on:
-  issue_comment:
-    types: [created]
   pull_request_review:
     types: [submitted]
 
-jobs:
-  # Trigger Claude after Gemini finishes on an Issue
-  claude-after-gemini-on-issue:
-    if: |
-      github.event_name == 'issue_comment' &&
-      !github.event.issue.pull_request &&
-      github.event.comment.user.login == 'gemini-code-assist[bot]'
-    runs-on: ubuntu-latest
-    permissions:
-      issues: write
-    steps:
-      - name: Post Claude analysis request (final reviewer)
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: '@claude You are the lead engineer. Read Gemini\'s triage above first.\n\nAnalyze this issue and implement a fix following AGENTS.md:\n1. Ensure backward compatibility — no features removed\n2. Zero performance regression on hot paths\n3. Minimal, focused changes only\n4. Run tests to verify the fix\n5. Create a PR with your changes using gh'
-            })
+  # Future: re-enable issue_comment trigger for Gemini→Claude chain
+  # issue_comment:
+  #   types: [created]
 
+jobs:
   # Trigger Claude after Copilot finishes on a PR
   claude-after-copilot-on-pr:
     if: |
@@ -52,3 +31,25 @@ jobs:
               repo: context.repo.repo,
               body: '@claude You are the final reviewer. Read ALL comments above from Qodo, Coderabbit, and Copilot first.\n\nReview this PR as architecture lead per AGENTS.md:\n1. Protocol-driven: heavy code in wrapper, not core SDK?\n2. Backward compatible: no public API removed without deprecation?\n3. Performance: no hot-path regressions, lazy imports for optional deps?\n4. DRY: no duplication, reuses existing abstractions?\n5. Async-safe and multi-agent safe?\n6. Address any unresolved issues from other reviewers\n7. If fixes needed, push them directly to this branch'
             })
+
+  # Future: Trigger Claude after Gemini finishes on an Issue (commented out)
+  # claude-after-gemini-on-issue:
+  #   if: |
+  #     github.event_name == 'issue_comment' &&
+  #     !github.event.issue.pull_request &&
+  #     github.event.comment.user.login == 'gemini-code-assist[bot]'
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     issues: write
+  #   steps:
+  #     - name: Post Claude analysis request (final reviewer)
+  #       uses: actions/github-script@v7
+  #       with:
+  #         github-token: ${{ secrets.GITHUB_TOKEN }}
+  #         script: |
+  #           github.rest.issues.createComment({
+  #             issue_number: context.issue.number,
+  #             owner: context.repo.owner,
+  #             repo: context.repo.repo,
+  #             body: '@claude You are the lead engineer. Read Gemini\'s analysis above first.\n\nAnalyze this issue and implement a fix following AGENTS.md:\n1. Ensure backward compatibility — no features removed\n2. Zero performance regression on hot paths\n3. Minimal, focused changes only\n4. Run tests to verify the fix\n5. Create a PR with your changes using gh'
+  #           })
