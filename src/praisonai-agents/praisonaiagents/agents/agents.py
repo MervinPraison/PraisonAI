@@ -29,10 +29,8 @@ class TaskStatus(Enum):
 # Set up logger
 logger = logging.getLogger(__name__)
 
-# Global variables for managing the shared servers
-_agents_server_started = {}  # Dict of port -> started boolean
-_agents_registered_endpoints = {}  # Dict of port -> Dict of path -> endpoint_id
-_agents_shared_apps = {}  # Dict of port -> FastAPI app
+# Use centralized server registry for thread-safe server state management
+from .._server_registry import get_server_registry
 
 def encode_file_to_base64(file_path: str) -> str:
     """Base64-encode a file."""
@@ -1614,7 +1612,8 @@ Context:
             None
         """
         if protocol == "http":
-            global _agents_server_started, _agents_registered_endpoints, _agents_shared_apps
+            # Get centralized server registry  
+            registry = get_server_registry()
             
             if not self.agents:
                 logging.warning("No agents to launch for HTTP mode. Add agents to the Agents instance first.")
@@ -1646,53 +1645,55 @@ Context:
                 return None
             
             # Initialize port-specific collections if needed
-            if port not in _agents_registered_endpoints:
-                _agents_registered_endpoints[port] = {}
+            registry.initialize_port(port)
                 
             # Initialize shared FastAPI app if not already created for this port
-            if _agents_shared_apps.get(port) is None:
-                _agents_shared_apps[port] = FastAPI(
+            if registry.get_shared_app(port) is None:
+                app = FastAPI(
                     title=f"PraisonAI Agents API (Port {port})",
                     description="API for interacting with multiple PraisonAI Agents"
                 )
+                registry.set_shared_app(port, app)
                 
                 # Add a root endpoint with a welcome message
-                @_agents_shared_apps[port].get("/")
+                @registry.get_shared_app(port).get("/")
                 async def root():
                     return {
                         "message": f"Welcome to PraisonAI Agents API on port {port}. See /docs for usage.",
-                        "endpoints": list(_agents_registered_endpoints[port].keys())
+                        "endpoints": list(registry.get_registered_endpoints(port).keys())
                     }
                 
                 # Add healthcheck endpoint
-                @_agents_shared_apps[port].get("/health")
+                @registry.get_shared_app(port).get("/health")
                 async def healthcheck():
                     return {
                         "status": "ok", 
-                        "endpoints": list(_agents_registered_endpoints[port].keys())
+                        "endpoints": list(registry.get_registered_endpoints(port).keys())
                     }
             
             # Normalize path to ensure it starts with /
             if not path.startswith('/'):
                 path = f'/{path}'
                 
-            # Check if path is already registered for this port
-            if path in _agents_registered_endpoints[port]:
-                logging.warning(f"Path '{path}' is already registered on port {port}. Please use a different path.")
+            # Generate a unique ID for this agent group's endpoint
+            endpoint_id = str(uuid.uuid4())
+            
+            # Check if path is already registered for this port and register
+            if not registry.register_endpoint(port, path, endpoint_id):
                 print(f"⚠️ Warning: Path '{path}' is already registered on port {port}.")
                 # Use a modified path to avoid conflicts
                 original_path = path
                 instance_id = str(uuid.uuid4())[:6]
                 path = f"{path}_{instance_id}"
-                logging.warning(f"Using '{path}' instead of '{original_path}'")
-                print(f"🔄 Using '{path}' instead")
-            
-            # Generate a unique ID for this agent group's endpoint
-            endpoint_id = str(uuid.uuid4())
-            _agents_registered_endpoints[port][path] = endpoint_id
+                if not registry.register_endpoint(port, path, endpoint_id):
+                    logging.error(f"Failed to register any path for agents on port {port}")
+                    return
+                else:
+                    logging.warning(f"Using '{path}' instead of '{original_path}'")
+                    print(f"🔄 Using '{path}' instead")
             
             # Define the endpoint handler
-            @_agents_shared_apps[port].post(path)
+            @registry.get_shared_app(port).post(path)
             async def handle_query(request: Request, query_data: Optional[AgentQuery] = None):
                 # Handle both direct JSON with query field and form data
                 if query_data is None:
@@ -1771,7 +1772,7 @@ Context:
             agents_dict = {agent.display_name.lower().replace(' ', '_'): agent for agent in self.agents}
             
             # Add GET endpoint to list available agents
-            @_agents_shared_apps[port].get(f"{path}/list")
+            @registry.get_shared_app(port).get(f"{path}/list")
             async def list_agents():
                 return {
                     "agents": [
@@ -1818,23 +1819,23 @@ Context:
                     return handle_single_agent
                 
                 # Register the endpoint
-                _agents_shared_apps[port].post(agent_path)(create_agent_handler(agent_instance))
-                _agents_registered_endpoints[port][agent_path] = f"{endpoint_id}_{agent_id}"
+                registry.get_shared_app(port).post(agent_path)(create_agent_handler(agent_instance))
+                registry.register_endpoint(port, agent_path, f"{endpoint_id}_{agent_id}")
             
             print(f"🔗 Per-agent endpoints: {', '.join([f'{path}/{aid}' for aid in agents_dict.keys()])}")
             
             # Start the server if it's not already running for this port
-            if not _agents_server_started.get(port, False):
+            if not registry.is_server_started(port):
                 # Mark the server as started first to prevent duplicate starts
-                _agents_server_started[port] = True
+                registry.mark_server_started(port)
                 
                 # Start the server in a separate thread
                 def run_server():
                     try:
                         print(f"✅ FastAPI server started at http://{host}:{port}")
                         print(f"📚 API documentation available at http://{host}:{port}/docs")
-                        print(f"🔌 Registered HTTP endpoints on port {port}: {', '.join(list(_agents_registered_endpoints[port].keys()))}")
-                        uvicorn.run(_agents_shared_apps[port], host=host, port=port, log_level="debug" if debug else "info")
+                        print(f"🔌 Registered HTTP endpoints on port {port}: {', '.join(list(registry.get_registered_endpoints(port).keys()))}")
+                        uvicorn.run(registry.get_shared_app(port), host=host, port=port, log_level="debug" if debug else "info")
                     except Exception as e:
                         logging.error(f"Error starting server: {str(e)}", exc_info=True)
                         print(f"❌ Error starting server: {str(e)}")
@@ -1848,7 +1849,7 @@ Context:
             else:
                 # If server is already running, wait a moment to make sure the endpoint is registered
                 time.sleep(0.1)
-                print(f"🔌 Registered HTTP endpoints on port {port}: {', '.join(list(_agents_registered_endpoints[port].keys()))}")
+                print(f"🔌 Registered HTTP endpoints on port {port}: {', '.join(list(registry.get_registered_endpoints(port).keys()))}")
             
             # Get the stack frame to check if this is the last launch() call in the script
             import inspect

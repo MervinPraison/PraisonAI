@@ -1,30 +1,33 @@
 """Agent module for AI agents - uses lazy loading for performance"""
+import threading
 
-# Lazy loading cache
+# Thread-safe lazy loading cache
 _lazy_cache = {}
+_cache_lock = threading.Lock()
 
 def __getattr__(name):
     """Lazy load agent classes to avoid importing rich at startup."""
-    if name in _lazy_cache:
-        return _lazy_cache[name]
-    
-    # Core Agent - always needed
-    if name == 'Agent':
-        from .agent import Agent
-        _lazy_cache[name] = Agent
-        return Agent
-    if name == 'BudgetExceededError':
-        from .agent import BudgetExceededError
-        _lazy_cache[name] = BudgetExceededError
-        return BudgetExceededError
-    if name == 'Heartbeat':
-        from .heartbeat import Heartbeat
-        _lazy_cache[name] = Heartbeat
-        return Heartbeat
-    if name == 'HeartbeatConfig':
-        from .heartbeat import HeartbeatConfig
-        _lazy_cache[name] = HeartbeatConfig
-        return HeartbeatConfig
+    with _cache_lock:
+        if name in _lazy_cache:
+            return _lazy_cache[name]
+        
+        # Core Agent - always needed
+        if name == 'Agent':
+            from .agent import Agent
+            _lazy_cache[name] = Agent
+            return Agent
+        if name == 'BudgetExceededError':
+            from .agent import BudgetExceededError
+            _lazy_cache[name] = BudgetExceededError
+            return BudgetExceededError
+        if name == 'Heartbeat':
+            from .heartbeat import Heartbeat
+            _lazy_cache[name] = Heartbeat
+            return Heartbeat
+        if name == 'HeartbeatConfig':
+            from .heartbeat import HeartbeatConfig
+            _lazy_cache[name] = HeartbeatConfig
+            return HeartbeatConfig
     
     # Specialized agents - lazy loaded (import rich)
     if name == 'ImageAgent':

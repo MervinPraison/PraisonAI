@@ -2,6 +2,8 @@ import os
 import time
 import json
 import logging
+import threading
+import contextvars
 from typing import List, Optional, Dict, Any, Union, Literal, Type
 from pydantic import BaseModel, ConfigDict
 import asyncio
@@ -23,15 +25,53 @@ except ImportError:
 
 # Logging is already configured in _logging.py via __init__.py
 
-# Global list to store error logs
-error_logs = []
+# Thread-safe global state using contextvars for multi-agent safety
+# Each context (agent session) gets its own isolated state
+_error_logs_ctx: contextvars.ContextVar[List] = contextvars.ContextVar('error_logs', default=[])
+_sync_display_callbacks_ctx: contextvars.ContextVar[Dict] = contextvars.ContextVar('sync_display_callbacks', default={})
+_async_display_callbacks_ctx: contextvars.ContextVar[Dict] = contextvars.ContextVar('async_display_callbacks', default={})
+_approval_callback_ctx: contextvars.ContextVar[Optional[Any]] = contextvars.ContextVar('approval_callback', default=None)
 
-# Separate registries for sync and async callbacks
-sync_display_callbacks = {}
-async_display_callbacks = {}
+# Backward compatibility accessors with thread safety
+_global_lock = threading.Lock()
 
-# Global approval callback registry
-approval_callback = None
+def get_error_logs() -> List:
+    """Get error logs for current context (thread-safe)."""
+    return _error_logs_ctx.get()
+
+def add_error_log(error: Any) -> None:
+    """Add error to current context's error log (thread-safe)."""
+    current_logs = _error_logs_ctx.get()
+    current_logs.append(error)
+    _error_logs_ctx.set(current_logs)
+
+def get_sync_display_callbacks() -> Dict:
+    """Get sync display callbacks for current context (thread-safe)."""
+    return _sync_display_callbacks_ctx.get()
+
+def set_sync_display_callback(key: str, callback: Any) -> None:
+    """Set sync display callback for current context (thread-safe)."""
+    current_callbacks = _sync_display_callbacks_ctx.get().copy()
+    current_callbacks[key] = callback
+    _sync_display_callbacks_ctx.set(current_callbacks)
+
+def get_async_display_callbacks() -> Dict:
+    """Get async display callbacks for current context (thread-safe)."""
+    return _async_display_callbacks_ctx.get()
+
+def set_async_display_callback(key: str, callback: Any) -> None:
+    """Set async display callback for current context (thread-safe)."""
+    current_callbacks = _async_display_callbacks_ctx.get().copy()
+    current_callbacks[key] = callback
+    _async_display_callbacks_ctx.set(current_callbacks)
+
+def get_approval_callback() -> Optional[Any]:
+    """Get approval callback for current context (thread-safe)."""
+    return _approval_callback_ctx.get()
+
+def set_approval_callback(callback: Optional[Any]) -> None:
+    """Set approval callback for current context (thread-safe)."""
+    _approval_callback_ctx.set(callback)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PraisonAI Unique Color Palette: "Elegant Intelligence"
@@ -129,9 +169,9 @@ def register_display_callback(display_type: str, callback_fn, is_async: bool = F
         is_async (bool): Whether the callback is asynchronous
     """
     if is_async:
-        async_display_callbacks[display_type] = callback_fn
+        set_async_display_callback(display_type, callback_fn)
     else:
-        sync_display_callbacks[display_type] = callback_fn
+        set_sync_display_callback(display_type, callback_fn)
 
 def register_approval_callback(callback_fn):
     """Register a global approval callback function for dangerous tool operations.
@@ -139,8 +179,7 @@ def register_approval_callback(callback_fn):
     Args:
         callback_fn: Function that takes (function_name, arguments, risk_level) and returns ApprovalDecision
     """
-    global approval_callback
-    approval_callback = callback_fn
+    set_approval_callback(callback_fn)
 
 
 # Simplified aliases (consistent naming convention)
@@ -157,8 +196,9 @@ def execute_sync_callback(display_type: str, **kwargs):
         display_type (str): Type of display event
         **kwargs: Arguments to pass to the callback function
     """
-    if display_type in sync_display_callbacks:
-        callback = sync_display_callbacks[display_type]
+    sync_callbacks = get_sync_display_callbacks()
+    if display_type in sync_callbacks:
+        callback = sync_callbacks[display_type]
         import inspect
         sig = inspect.signature(callback)
         
@@ -182,8 +222,9 @@ async def execute_callback(display_type: str, **kwargs):
     import inspect
     
     # Execute synchronous callback if registered
-    if display_type in sync_display_callbacks:
-        callback = sync_display_callbacks[display_type]
+    sync_callbacks = get_sync_display_callbacks()
+    if display_type in sync_callbacks:
+        callback = sync_callbacks[display_type]
         sig = inspect.signature(callback)
         
         # Filter kwargs to what the callback accepts to maintain backward compatibility
@@ -198,8 +239,9 @@ async def execute_callback(display_type: str, **kwargs):
         await loop.run_in_executor(None, lambda: callback(**supported_kwargs))
     
     # Execute asynchronous callback if registered
-    if display_type in async_display_callbacks:
-        callback = async_display_callbacks[display_type]
+    async_callbacks = get_async_display_callbacks()
+    if display_type in async_callbacks:
+        callback = async_callbacks[display_type]
         sig = inspect.signature(callback)
         
         # Filter kwargs to what the callback accepts to maintain backward compatibility
@@ -420,7 +462,7 @@ def display_error(message: str, console=None):
         title="⚠ Error",
         border_style=PRAISON_COLORS["error"]
     ))
-    error_logs.append(message)
+    add_error_log(message)
 
 def display_generating(content: str = "", start_time: Optional[float] = None):
     if not content or not str(content).strip():
@@ -617,7 +659,7 @@ async def adisplay_error(message: str, console=None):
     await execute_callback('error', message=message)
     
     console.print(Panel.fit(Text(message, style="bold red"), title="Error", border_style="red"))
-    error_logs.append(message)
+    add_error_log(message)
 
 async def adisplay_generating(content: str = "", start_time: Optional[float] = None):
     """Async version of display_generating."""
@@ -684,4 +726,104 @@ class TaskOutput(BaseModel):
         elif self.json_dict:
             return json.dumps(self.json_dict)
         else:
-            return self.raw 
+            return self.raw
+
+
+# ============================================================================
+# Backward Compatibility Exports
+# ============================================================================
+
+# For backward compatibility, expose the old global variable names that
+# delegate to the thread-safe context variables.
+# This ensures existing code importing these globals continues to work.
+
+class _CompatibilityDict(dict):
+    """Dict-like object that delegates to context variables for backward compatibility."""
+    
+    def __init__(self, get_func, set_func):
+        super().__init__()
+        self._get_func = get_func
+        self._set_func = set_func
+    
+    def __getitem__(self, key):
+        current_dict = self._get_func()
+        return current_dict[key]
+    
+    def __setitem__(self, key, value):
+        self._set_func(key, value)
+    
+    def __contains__(self, key):
+        current_dict = self._get_func()
+        return key in current_dict
+    
+    def get(self, key, default=None):
+        current_dict = self._get_func()
+        return current_dict.get(key, default)
+    
+    def keys(self):
+        current_dict = self._get_func()
+        return current_dict.keys()
+    
+    def values(self):
+        current_dict = self._get_func()
+        return current_dict.values()
+    
+    def items(self):
+        current_dict = self._get_func()
+        return current_dict.items()
+
+
+class _CompatibilityList(list):
+    """List-like object that delegates to context variables for backward compatibility."""
+    
+    def __init__(self, get_func, add_func):
+        super().__init__()
+        self._get_func = get_func
+        self._add_func = add_func
+    
+    def append(self, item):
+        self._add_func(item)
+    
+    def __getitem__(self, index):
+        current_list = self._get_func()
+        return current_list[index]
+    
+    def __len__(self):
+        current_list = self._get_func()
+        return len(current_list)
+    
+    def __iter__(self):
+        current_list = self._get_func()
+        return iter(current_list)
+
+
+class _CompatibilityCallbackVar:
+    """Variable-like object that delegates to context variables for backward compatibility."""
+    
+    def __init__(self, get_func, set_func):
+        self._get_func = get_func
+        self._set_func = set_func
+    
+    def __call__(self, *args, **kwargs):
+        callback = self._get_func()
+        if callback:
+            return callback(*args, **kwargs)
+        return None
+    
+    def __bool__(self):
+        callback = self._get_func()
+        return callback is not None
+    
+    def __eq__(self, other):
+        callback = self._get_func()
+        return callback == other
+    
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+
+# Backward compatibility exports - these look like the old globals but delegate to context vars
+error_logs = _CompatibilityList(get_error_logs, add_error_log)
+sync_display_callbacks = _CompatibilityDict(get_sync_display_callbacks, set_sync_display_callback)
+async_display_callbacks = _CompatibilityDict(get_async_display_callbacks, set_async_display_callback)
+approval_callback = _CompatibilityCallbackVar(get_approval_callback, set_approval_callback) 
