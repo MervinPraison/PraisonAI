@@ -18,6 +18,27 @@ overrides = [
 ]
 
 [[package]]
+name = "ag2"
+version = "0.11.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "diskcache" },
+    { name = "docker" },
+    { name = "fast-depends", extra = ["pydantic"] },
+    { name = "httpx" },
+    { name = "packaging" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "termcolor" },
+    { name = "tiktoken" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/77/20/46159b56f9c6069ea2bc174f3ce3597febc4f4bbf467c2c1e003c84f0da7/ag2-0.11.4.tar.gz", hash = "sha256:1949d27e889a908a258ad4bcda4bfb33770763a2e8f9ea2da13eec342da8f493", size = 3818369, upload-time = "2026-03-17T23:47:50.308Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a6/14/0d226e5fbb02949ae1ded5bcaa695a1ca11bb9535c71b53dfbc6ff2c4b5e/ag2-0.11.4-py3-none-any.whl", hash = "sha256:182805d940271bd9cfea2a40f5dc1f3db351745b07135efdb015a7f0c0681fd4", size = 1080405, upload-time = "2026-03-17T23:47:48.15Z" },
+]
+
+[[package]]
 name = "agent-client-protocol"
 version = "0.7.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1337,6 +1358,24 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/41/43/948d10bf42735709edb5ae51e23297d034086f17fc7279fef385a7acb473/fake_useragent-2.2.0.tar.gz", hash = "sha256:4e6ab6571e40cc086d788523cf9e018f618d07f9050f822ff409a4dfe17c16b2", size = 158898, upload-time = "2025-04-14T15:32:19.238Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/51/37/b3ea9cd5558ff4cb51957caca2193981c6b0ff30bd0d2630ac62505d99d0/fake_useragent-2.2.0-py3-none-any.whl", hash = "sha256:67f35ca4d847b0d298187443aaf020413746e56acd985a611908c73dba2daa24", size = 161695, upload-time = "2025-04-14T15:32:17.732Z" },
+]
+
+[[package]]
+name = "fast-depends"
+version = "3.0.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f8/6d/787a21ca8043a8fdb737cf28f645e94a46fc30b44a31de54573299156bad/fast_depends-3.0.8.tar.gz", hash = "sha256:896b16f79a512b6ea1df721b0aa1708a192a06f964be6597e01fcf5412559101", size = 18382, upload-time = "2026-03-02T19:54:28.649Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1d/1d/e4843e4eeb65f51447b8c22d200d12d8f94f27c97e77bb7162515cc8d61f/fast_depends-3.0.8-py3-none-any.whl", hash = "sha256:4c52c8a3907bca46d43e70e4364d6d016872d9a3aae4bc0c1c85e72e0a6a21c7", size = 25507, upload-time = "2026-03-02T19:54:27.594Z" },
+]
+
+[package.optional-dependencies]
+pydantic = [
+    { name = "pydantic" },
 ]
 
 [[package]]
@@ -4726,6 +4765,10 @@ dependencies = [
 acp = [
     { name = "agent-client-protocol" },
 ]
+ag2 = [
+    { name = "ag2" },
+    { name = "praisonai-tools" },
+]
 agentops = [
     { name = "agentops" },
 ]
@@ -4872,6 +4915,7 @@ ui = [
 
 [package.metadata]
 requires-dist = [
+    { name = "ag2", marker = "extra == 'ag2'", specifier = ">=0.11.0" },
     { name = "agent-client-protocol", marker = "extra == 'acp'", specifier = ">=0.7.0" },
     { name = "agentops", marker = "extra == 'agentops'", specifier = ">=0.3.12" },
     { name = "aiohttp", marker = "extra == 'bot'", specifier = ">=3.8.0" },
@@ -4936,10 +4980,11 @@ requires-dist = [
     { name = "playwright", marker = "extra == 'realtime'", specifier = ">=1.47.0" },
     { name = "plotly", marker = "extra == 'all'", specifier = ">=5.24.0" },
     { name = "plotly", marker = "extra == 'realtime'", specifier = ">=5.24.0" },
+    { name = "praisonai-tools", marker = "extra == 'ag2'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen-v4'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.1.0" },
-    { name = "praisonaiagents", specifier = ">=1.5.85" },
+    { name = "praisonaiagents", specifier = ">=1.5.87" },
     { name = "praisonaiagents", extras = ["all"], marker = "extra == 'claw'", specifier = ">=1.5.40" },
     { name = "psutil", marker = "extra == 'all'", specifier = ">=5.9.0" },
     { name = "psutil", marker = "extra == 'bot'", specifier = ">=5.9.0" },
@@ -4993,7 +5038,7 @@ requires-dist = [
     { name = "yfinance", marker = "extra == 'all'", specifier = ">=0.2.44" },
     { name = "yfinance", marker = "extra == 'realtime'", specifier = ">=0.2.44" },
 ]
-provides-extras = ["ui", "gradio", "api", "os", "agentops", "chat", "code", "realtime", "call", "train", "crewai", "autogen", "autogen-v4", "acp", "lite", "all", "bot", "bot-whatsapp-web", "claw", "dev"]
+provides-extras = ["ui", "gradio", "api", "os", "agentops", "chat", "code", "realtime", "call", "train", "crewai", "autogen", "ag2", "autogen-v4", "acp", "lite", "all", "bot", "bot-whatsapp-web", "claw", "dev"]
 
 [[package]]
 name = "praisonai-tools"
@@ -5009,7 +5054,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.5.85"
+version = "1.5.87"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -5018,9 +5063,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/da/cd/5a13bd53998fd20cf3bba2ed435cb4626382cef92c0b99cfc0b79a1e4fc7/praisonaiagents-1.5.85.tar.gz", hash = "sha256:e7677b9a480a5ae6a3405d82e4968df38c78c02c36acb820ba2a8edf2d25da24", size = 1207471, upload-time = "2026-03-26T03:12:29.383Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f5/d1/78933b4dd5529a7b7e9b15d5b2f012d550cd6b29071b94a6145347373fdf/praisonaiagents-1.5.87.tar.gz", hash = "sha256:3ef6aaa1b1e2af54e2c7ffbcff00dd49674426393f3ead26f6cf983a99456966", size = 1216498, upload-time = "2026-03-30T20:16:07.46Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c8/34/41275a9a85806bae7ad6ac8fa629034d28b4724bd6e27a882a64fa0e17e0/praisonaiagents-1.5.85-py3-none-any.whl", hash = "sha256:6549edd10dc6f1924d04c7f41c100b7f85bf3fcb449286a0ba07fb48c1c15986", size = 1255763, upload-time = "2026-03-26T03:12:27.162Z" },
+    { url = "https://files.pythonhosted.org/packages/e1/b2/9f10d17d5d6f6e3ddf1ff7cd562d75afd2e4158feb376760028f62da9ea6/praisonaiagents-1.5.87-py3-none-any.whl", hash = "sha256:8bb315fbd0f92a64236eb31b82c78630f4dbc3066dca4c06fdd62619122760da", size = 1264793, upload-time = "2026-03-30T20:16:05.8Z" },
 ]
 
 [package.optional-dependencies]
