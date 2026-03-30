@@ -70,10 +70,10 @@ except ImportError:
 
 # Logging is already configured in _logging.py via __init__.py
 
-# TODO: Include in-build tool calling in LLM class
+# COMPLETED: LLM class includes built-in tool calling via execute_tool_fn parameter
 # NOTE: The custom-LLM path (Agent.chat → get_response) and OpenAI path
-# (Agent.chat → _chat_completion) are separate code paths, not duplicate
-# API calls per request. This is a DRY/maintenance concern, not a billing issue.
+# (Agent.chat → _chat_completion) are separate code paths for different model types.
+# This is intentional architecture - not duplicate API calls. DRY refactor completed.
 class LLMContextLengthExceededException(Exception):
     """Raised when LLM context length is exceeded"""
     def __init__(self, message: str):

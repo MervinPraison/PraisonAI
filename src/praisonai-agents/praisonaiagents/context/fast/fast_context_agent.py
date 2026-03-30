@@ -377,9 +377,135 @@ Be efficient - use parallel tool calls to explore multiple paths at once."""
         Returns:
             FastContextResult with matching files and lines
         """
-        # For now, wrap sync version
-        # TODO: Implement true async with async LLM calls
-        return self.search(query, include_patterns, exclude_patterns)
+        # True async implementation with async LLM calls
+        import asyncio
+        import json
+        from ..tools import ToolCallBatch
+        
+        result = FastContextResult()
+        if not self.enabled:
+            return result
+            
+        logger.info(f"Starting async search for: {query}")
+        
+        # Get available tools and ensure they're loaded
+        tools = self.get_tools()
+        llm = self.get_llm()
+        
+        system_prompt = f"""You are a code search assistant. Use the provided tools to find relevant code.
+
+Your goal: Find files, functions, classes, and specific lines that relate to the query.
+
+Available tools:
+- list_files: List files in a directory with optional pattern matching
+- grep_search: Search for patterns in files (supports regex and multi-line)
+- read_file: Read file contents to understand context
+
+Search strategy:
+1. Use list_files to explore the codebase structure
+2. Use grep_search to find specific patterns
+3. Use read_file to get detailed context for relevant files
+4. Execute up to {self.max_parallel} tool calls in parallel per turn
+5. Complete search in {self.max_turns} turns or less
+
+Return files and line ranges that are relevant to the query.
+Be efficient - use parallel tool calls to explore multiple paths at once."""
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Find code relevant to: {query}"}
+        ]
+        
+        # Add file pattern constraints if provided
+        if include_patterns:
+            messages[1]["content"] += f"\nOnly search in files matching: {include_patterns}"
+        if exclude_patterns:
+            messages[1]["content"] += f"\nExclude files matching: {exclude_patterns}"
+        
+        try:
+            # Multi-turn search loop with async LLM calls
+            for turn in range(self.max_turns):
+                if self.verbose:
+                    logger.info(f"Async search turn {turn + 1}/{self.max_turns}")
+                
+                # Use async LLM completion instead of sync
+                response = await llm.client.chat.completions.acreate(
+                    model=self.model,
+                    messages=messages,
+                    tools=[{"type": "function", "function": t} for t in tools],
+                    tool_choice="auto"
+                )
+                
+                message = response.choices[0].message
+                
+                # Check if we have tool calls
+                if not message.tool_calls:
+                    # No more tool calls, search complete
+                    break
+                
+                # Execute tool calls in parallel using asyncio
+                tool_tasks = []
+                tool_call_map = {}
+                
+                for i, tool_call in enumerate(message.tool_calls[:self.max_parallel]):
+                    try:
+                        args = json.loads(tool_call.function.arguments)
+                        # Create async task for each tool call
+                        task = asyncio.create_task(
+                            self._execute_tool_async(tool_call.function.name, args)
+                        )
+                        tool_tasks.append(task)
+                        tool_call_map[tool_call.id] = i
+                    except json.JSONDecodeError:
+                        if self.verbose:
+                            logger.warning(f"Invalid JSON in tool call: {tool_call.function.arguments}")
+                
+                # Wait for all tool calls to complete
+                if tool_tasks:
+                    tool_results = await asyncio.gather(*tool_tasks, return_exceptions=True)
+                    
+                    # Add tool results to messages
+                    messages.append({"role": "assistant", "content": None, "tool_calls": message.tool_calls})
+                    
+                    for i, tool_call in enumerate(message.tool_calls[:self.max_parallel]):
+                        if i < len(tool_results):
+                            tool_result = tool_results[i]
+                            if isinstance(tool_result, Exception):
+                                content = f"Error: {str(tool_result)}"
+                            else:
+                                content = str(tool_result)
+                                # Collect results for final output
+                                result.add_content(tool_call.function.name, content)
+                            
+                            messages.append({
+                                "role": "tool",
+                                "content": content,
+                                "tool_call_id": tool_call.id
+                            })
+        
+        except Exception as e:
+            logger.error(f"Async search error: {e}")
+            # Fallback to sync version if async fails
+            return self.search(query, include_patterns, exclude_patterns)
+        
+        # Sort results by relevance
+        result.sort_by_relevance()
+        
+        return result
+    
+    async def _execute_tool_async(self, tool_name: str, args: dict):
+        """Execute a tool call asynchronously."""
+        # Run tool execution in thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._execute_tool_sync, tool_name, args)
+    
+    def _execute_tool_sync(self, tool_name: str, args: dict):
+        """Execute a tool call synchronously."""
+        tool_function = self.coordinator.get_tool_by_name(tool_name)
+        if tool_function:
+            return tool_function(**args)
+        else:
+            raise ValueError(f"Tool '{tool_name}' not found")
     
     def close(self) -> None:
         """Close resources."""

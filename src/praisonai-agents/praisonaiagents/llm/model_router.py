@@ -340,8 +340,8 @@ def create_routing_agent(
         **agent_kwargs
     )
     
-    # TODO: Consider creating a proper RoutingAgent subclass instead of setting private attributes
-    # For now, store the router on the agent for use in execution
+    # NOTE: RoutingAgent subclass exists in agent.router_agent - consider using it instead
+    # For now, store the router on the agent for use in execution (minimal approach)
     routing_agent._model_router = router
     routing_agent._available_models = models or [m.name for m in router.models]
     

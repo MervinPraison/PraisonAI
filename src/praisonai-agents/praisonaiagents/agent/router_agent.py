@@ -75,9 +75,19 @@ class RouterAgent(Agent):
         self._llm_instances: Dict[str, LLM] = {}
         self._initialize_llm_instances()
         
-        # Track usage statistics
-        self.model_usage_stats = {model: {'calls': 0, 'tokens': 0, 'cost': 0.0} 
-                                  for model in self.available_models}
+        # Track usage statistics (enhanced with detailed token tracking)
+        self.model_usage_stats = {
+            model: {
+                'calls': 0, 
+                'tokens': 0,  # Legacy total tokens field 
+                'input_tokens': 0,  # Detailed token tracking
+                'output_tokens': 0,
+                'total_tokens': 0,
+                'cost': 0.0,
+                'total_cost': 0.0
+            } 
+            for model in self.available_models
+        }
     
     def _process_models_config(self, models: Optional[Union[List[str], Dict[str, Any]]]) -> Dict[str, Any]:
         """Process the models configuration into a standardized format."""
@@ -231,10 +241,23 @@ class RouterAgent(Agent):
             # Update usage statistics
             self.model_usage_stats[model_name]['calls'] += 1
             
-            # TODO: Implement token tracking when LLM.get_response() is updated to return token usage
-            # The LLM response currently returns only text, but litellm provides usage info in:
-            # response.get("usage") with prompt_tokens, completion_tokens, and total_tokens
-            # This would require modifying the LLM class to return both text and metadata
+            # Track token usage from LLM's built-in token tracking
+            if hasattr(self.llm_instance, 'last_token_metrics') and self.llm_instance.last_token_metrics:
+                metrics = self.llm_instance.last_token_metrics
+                total_call_tokens = metrics.input_tokens + metrics.output_tokens
+                
+                # Update detailed token tracking
+                self.model_usage_stats[model_name]['input_tokens'] += metrics.input_tokens
+                self.model_usage_stats[model_name]['output_tokens'] += metrics.output_tokens
+                self.model_usage_stats[model_name]['total_tokens'] += total_call_tokens
+                
+                # Update legacy 'tokens' field for backward compatibility
+                self.model_usage_stats[model_name]['tokens'] += total_call_tokens
+                
+                # Track cost if available
+                if hasattr(metrics, 'cost') and metrics.cost:
+                    self.model_usage_stats[model_name]['total_cost'] += metrics.cost
+                    self.model_usage_stats[model_name]['cost'] += metrics.cost  # Legacy field
             
             return response
             

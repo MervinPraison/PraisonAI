@@ -494,8 +494,9 @@ class RAG:
         
         Currently wraps sync version. Can be extended for true async.
         """
-        # For now, wrap sync version
-        # TODO: Implement true async when Knowledge supports it
+        # Use thread pool executor until Knowledge class adds async support
+        # DEPENDENCY: Requires Knowledge class async methods (search_async, etc.)
+        # For now, run sync operations in thread pool to avoid blocking event loop
         import asyncio
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(

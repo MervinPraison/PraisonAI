@@ -405,11 +405,20 @@ class Process:
             start_task = list(self.tasks.values())[0]
             logging.debug(f"No start task marked, using first task: {start_task.name}")
 
+        # COMPLETED: Basic loop task support added to async workflow
+        # Handle start task with loop feature
+        if start_task and start_task.task_type == "loop" and not start_task.input_file:
+            start_task.input_file = "tasks.csv"
+
+        # If loop + input_file, read file & create tasks
+        if start_task and start_task.task_type == "loop" and getattr(start_task, "input_file", None):
+            self._create_loop_subtasks(start_task)
+            start_task._subtasks_created = True
+            logging.debug(f"Created subtasks from {start_task.input_file} for async workflow")
+
         current_task = start_task
         visited_tasks = set()
         loop_data = {}  # Store loop-specific data
-
-        # TODO: start task with loop feature is not available in aworkflow method
 
         while current_task:
             current_iter += 1
