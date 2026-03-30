@@ -228,6 +228,54 @@ class ContextEngineerProtocol(Protocol):
         ...
 
 
+@runtime_checkable
+class ServerManagerProtocol(Protocol):
+    """
+    Protocol for server management functionality.
+    
+    Defines the interface for launching and managing HTTP/MCP servers
+    for agent API endpoints. This separates server concerns from the
+    core agent logic.
+    
+    Example:
+        ```python
+        class MockServerManager:
+            def launch(self, agent, path="/", port=8000, host="0.0.0.0", 
+                      debug=False, protocol="http") -> None:
+                print(f"Mock server launched for {agent.name}")
+            
+            def stop_server(self, port=8000) -> None:
+                print(f"Mock server stopped on port {port}")
+        ```
+    """
+    
+    def launch(
+        self,
+        agent: 'Agent',
+        path: str = "/",
+        port: int = 8000,
+        host: str = "0.0.0.0",
+        debug: bool = False,
+        protocol: str = "http"
+    ) -> None:
+        """
+        Launch agent as HTTP API endpoint or MCP server.
+        
+        Args:
+            agent: Agent instance to serve
+            path: API endpoint path (default: '/')
+            port: Server port (default: 8000)
+            host: Server host (default: '0.0.0.0')
+            debug: Enable debug mode
+            protocol: "http" for FastAPI or "mcp" for MCP server
+        """
+        ...
+    
+    def stop_server(self, port: int = 8000) -> None:
+        """Stop server on specified port."""
+        ...
+
+
 __all__ = [
     'AgentProtocol',
     'RunnableAgentProtocol', 
@@ -235,4 +283,5 @@ __all__ = [
     'MemoryAwareAgentProtocol',
     'FullAgentProtocol',
     'ContextEngineerProtocol',
+    'ServerManagerProtocol',
 ]
