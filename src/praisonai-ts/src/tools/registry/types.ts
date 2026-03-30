@@ -265,3 +265,19 @@ export class MissingEnvVarError extends Error {
     this.name = 'MissingEnvVarError';
   }
 }
+
+/**
+ * Error thrown when budget/cost limits are exceeded
+ */
+export class BudgetExceededError extends Error {
+  constructor(
+    public readonly currentCost: number,
+    public readonly budgetLimit: number,
+    public readonly currency: string = 'USD'
+  ) {
+    super(
+      `Budget exceeded: Current cost ${currentCost} ${currency} exceeds limit of ${budgetLimit} ${currency}`
+    );
+    this.name = 'BudgetExceededError';
+  }
+}

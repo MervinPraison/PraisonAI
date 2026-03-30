@@ -91,14 +91,14 @@ export * from './tools/mcpSse';
 
 // AI SDK Tools Registry
 export { tools, registerBuiltinTools } from './tools/tools';
-export { getToolsRegistry, createToolsRegistry, resetToolsRegistry, ToolsRegistry } from './tools/registry';
+export { getToolsRegistry, createToolsRegistry, resetToolsRegistry, ToolsRegistry, get_registry, get_tool, register_tool, validate_tool } from './tools/registry';
 export type {
   ToolExecutionContext, ToolLimits, RedactionHooks, ToolLogger,
   ToolCapabilities, InstallHints, ToolMetadata, ToolExecutionResult,
   PraisonTool, ToolParameterSchema, ToolParameterProperty,
   ToolMiddleware, ToolHooks, ToolFactory, RegisteredTool, ToolInstallStatus
 } from './tools/registry';
-export { MissingDependencyError, MissingEnvVarError } from './tools/registry';
+export { MissingDependencyError, MissingEnvVarError, BudgetExceededError } from './tools/registry';
 export {
   createLoggingMiddleware, createTimeoutMiddleware, createRedactionMiddleware,
   createRateLimitMiddleware, createRetryMiddleware, createTracingMiddleware,

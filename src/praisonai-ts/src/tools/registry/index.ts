@@ -25,7 +25,7 @@ export type {
 } from './types';
 
 // Errors
-export { MissingDependencyError, MissingEnvVarError } from './types';
+export { MissingDependencyError, MissingEnvVarError, BudgetExceededError } from './types';
 
 // Registry
 export {
@@ -33,6 +33,10 @@ export {
   getToolsRegistry,
   createToolsRegistry,
   resetToolsRegistry,
+  get_registry,
+  get_tool,
+  register_tool,
+  validate_tool,
 } from './registry';
 
 // Middleware

@@ -10,23 +10,23 @@
 | Python Core Features | 311 |
 | Python Wrapper Features | 99 |
 | TypeScript Features | 1183 |
-| **Gap Count** | **23** |
-| P0 (Critical) | 5 |
+| **Gap Count** | **18** |
+| P0 (Critical) | 0 |
 | P1 (High) | 0 |
 | P2 (Medium) | 0 |
 | P3 (Low) | 18 |
 
 ## Gap Matrix
 
-### P0_CoreParity (52 done, 5 todo)
+### P0_CoreParity (57 done, 0 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
-| `BudgetExceededError` | ✅ | ❌ | low | ⏳ TODO |
-| `get\_registry` | ✅ | ❌ | low | ⏳ TODO |
-| `get\_tool` | ✅ | ❌ | low | ⏳ TODO |
-| `register\_tool` | ✅ | ❌ | low | ⏳ TODO |
-| `validate\_tool` | ✅ | ❌ | low | ⏳ TODO |
+| `BudgetExceededError` | ✅ | ✅ | low | ✅ DONE |
+| `get\_registry` | ✅ | ✅ | low | ✅ DONE |
+| `get\_tool` | ✅ | ✅ | low | ✅ DONE |
+| `register\_tool` | ✅ | ✅ | low | ✅ DONE |
+| `validate\_tool` | ✅ | ✅ | low | ✅ DONE |
 | `Agent` | ✅ | ✅ | high | ✅ DONE |
 | `AudioAgent` | ✅ | ✅ | high | ✅ DONE |
 | `AudioConfig` | ✅ | ✅ | low | ✅ DONE |
