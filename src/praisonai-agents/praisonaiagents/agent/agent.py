@@ -8725,8 +8725,14 @@ Write the complete compiled report:"""
                     try:
                         print(f"✅ FastAPI server started at http://{host}:{port}")
                         print(f"📚 API documentation available at http://{host}:{port}/docs")
-                        print(f"🔌 Available endpoints: {', '.join(list(_registered_agents[port].keys()))}")
-                        uvicorn.run(_shared_apps[port], host=host, port=port, log_level="debug" if debug else "info")
+                        # Get endpoints safely under lock
+                        with _server_lock:
+                            endpoints = list(_registered_agents[port].keys())
+                        print(f"🔌 Available endpoints: {', '.join(endpoints)}")
+                        # Get app safely under lock
+                        with _server_lock:
+                            app = _shared_apps[port]
+                        uvicorn.run(app, host=host, port=port, log_level="debug" if debug else "info")
                     except Exception as e:
                         logging.error(f"Error starting server: {str(e)}", exc_info=True)
                         print(f"❌ Error starting server: {str(e)}")
@@ -8740,7 +8746,10 @@ Write the complete compiled report:"""
             else:
                 # If server is already running, wait a moment to make sure the endpoint is registered
                 time.sleep(0.1)
-                print(f"🔌 Available endpoints on port {port}: {', '.join(list(_registered_agents[port].keys()))}")
+                # Get endpoints safely under lock
+                with _server_lock:
+                    endpoints = list(_registered_agents[port].keys())
+                print(f"🔌 Available endpoints on port {port}: {', '.join(endpoints)}")
             
             # Get the stack frame to check if this is the last launch() call in the script
             import inspect

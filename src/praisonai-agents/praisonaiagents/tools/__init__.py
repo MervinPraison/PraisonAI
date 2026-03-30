@@ -1,4 +1,5 @@
 """Tools package for PraisonAI Agents - uses lazy loading for performance"""
+import threading
 from importlib import import_module
 from typing import Any
 
@@ -186,6 +187,7 @@ TOOL_MAPPINGS = {
 }
 
 _instances = {}  # Cache for class instances
+_instances_lock = threading.Lock()  # Thread-safe access to _instances
 
 # Profile exports (lazy loaded)
 _PROFILE_EXPORTS = frozenset({
@@ -252,14 +254,17 @@ def __getattr__(name: str) -> Any:
             return module  # Returns the callable module
         return getattr(module, name)
     else:
-        # Class method import
+        # Class method import (thread-safe)
         if class_name not in _instances:
-            module = import_module(module_path, __package__)
-            class_ = getattr(module, class_name)
-            _instances[class_name] = class_()
+            with _instances_lock:
+                if class_name not in _instances:
+                    module = import_module(module_path, __package__)
+                    class_ = getattr(module, class_name)
+                    _instances[class_name] = class_()
         
         # Get the method and bind it to the instance
-        method = getattr(_instances[class_name], name)
+        with _instances_lock:
+            method = getattr(_instances[class_name], name)
         return method
 
 __all__ = list(TOOL_MAPPINGS.keys()) + [
