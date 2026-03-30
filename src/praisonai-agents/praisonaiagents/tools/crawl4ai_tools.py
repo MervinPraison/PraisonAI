@@ -58,8 +58,9 @@ def _check_crawl4ai_available() -> tuple[bool, Optional[str]]:
                 "Or for Docker/CI: playwright install chromium --with-deps"
             )
         # If ms_pw doesn't exist yet, skip — _get_crawler will catch it.
-    except Exception:
-        pass
+    except Exception as e:
+        # Browser check failed - not critical, _get_crawler will handle it
+        logging.getLogger(__name__).debug(f"Browser availability check failed: {e}")
 
     return True, None
 

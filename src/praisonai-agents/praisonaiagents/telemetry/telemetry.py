@@ -453,8 +453,11 @@ class MinimalTelemetry:
                     properties=event_properties
                 )
                 # Don't flush here - let PostHog handle it asynchronously
-            except:
-                pass
+            except Exception as e:
+                # Silent fail - telemetry should never break user operations
+                # But log at debug level for troubleshooting
+                logger = logging.getLogger(__name__)
+                logger.debug(f"Telemetry capture failed: {e}")
         
         # Reset counters
         with self._metrics_lock:

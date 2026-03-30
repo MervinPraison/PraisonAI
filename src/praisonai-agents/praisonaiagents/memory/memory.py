@@ -367,8 +367,10 @@ class Memory:
                 emitter.memory_store(agent_name, memory_type, content_length, metadata)
             elif event_type == "search":
                 emitter.memory_search(agent_name, query, result_count, memory_type, top_score)
-        except Exception:
-            pass  # Silent fail - tracing should never break memory operations
+        except Exception as e:
+            # Silent fail - tracing should never break memory operations
+            # But log at debug level for troubleshooting
+            logger.debug(f"Memory trace emit failed: {e}")
 
     # -------------------------------------------------------------------------
     #                          Initialization
@@ -2018,6 +2020,6 @@ class Memory:
         """
         try:
             self.close_connections()
-        except Exception:
+        except Exception as e:
             # Best-effort cleanup during garbage collection
-            pass
+            logger.debug(f"Memory cleanup failed: {e}")

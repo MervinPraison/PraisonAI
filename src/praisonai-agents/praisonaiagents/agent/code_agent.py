@@ -309,8 +309,9 @@ Follow best practices and coding standards."""
             # Clean up temp file
             try:
                 os.unlink(temp_file)
-            except:
-                pass
+            except Exception as e:
+                # Temp file cleanup failed - not critical
+                logging.getLogger(__name__).debug(f"Failed to clean up temp file {temp_file}: {e}")
     
     async def aexecute(self, code: str, language: str = "python", **kwargs) -> Dict[str, Any]:
         """Execute code asynchronously.
