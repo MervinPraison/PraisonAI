@@ -1,16 +1,16 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 311 | **Rust Features:** 667 | **Parity:** 91.6%
+> **Python Features:** 314 | **Rust Features:** 667 | **Parity:** 90.8%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 311 |
+| Python Core Features | 314 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **26** |
+| **Actual Gap Count** | **29** |
 | Language Limitations (N/A) | 6 |
-| **Parity** | **91.6%** |
+| **Parity** | **90.8%** |
 
 ## Implemented Features
 
@@ -716,7 +716,10 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `LearnScope`
 - ❌ `ObservabilityEventType`
 - ❌ `ObservabilityHooks`
+- ❌ `StructuredFormatter`
 - ❌ `ToolValidationError`
+- ❌ `configure_structured_logging`
+- ❌ `get_logger`
 - ❌ `get_registry`
 - ❌ `get_tool`
 - ❌ `register_tool`

@@ -4,14 +4,14 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 311,
+    "pythonCoreFeatures": 314,
     "pythonWrapperFeatures": 99,
     "typescriptFeatures": 1192,
-    "gapCount": 18,
+    "gapCount": 21,
     "priorityP0": 0,
     "priorityP1": 0,
     "priorityP2": 0,
-    "priorityP3": 18
+    "priorityP3": 21
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -220,6 +220,7 @@
       "SkillProperties",
       "SkillsConfig",
       "StepResult",
+      "StructuredFormatter",
       "Task",
       "TaskOutput",
       "TelemetryCollector",
@@ -251,6 +252,7 @@
       "clean_triple_backticks",
       "cleanup_telemetry_resources",
       "config",
+      "configure_structured_logging",
       "create_context_agent",
       "db",
       "detect_url_scheme",
@@ -278,6 +280,7 @@
       "get_default_plugin_dirs",
       "get_defaults_config",
       "get_dimensions",
+      "get_logger",
       "get_plugin_manager",
       "get_plugin_template",
       "get_plugins_config",
@@ -574,9 +577,12 @@
         "LearnProtocol",
         "ObservabilityEventType",
         "ObservabilityHooks",
+        "StructuredFormatter",
         "config",
+        "configure_structured_logging",
         "embedding",
         "embeddings",
+        "get_logger",
         "memory",
         "tools",
         "workflows"
@@ -4984,6 +4990,15 @@
         "category": "config"
       },
       {
+        "feature": "StructuredFormatter",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "Task",
         "python": true,
         "typescript": true,
@@ -5125,6 +5140,15 @@
         "priority": "P3",
         "effort": "low",
         "status": "DONE",
+        "category": "other"
+      },
+      {
+        "feature": "configure_structured_logging",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
         "category": "other"
       },
       {
@@ -5315,6 +5339,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "embedding"
+      },
+      {
+        "feature": "get_logger",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "get_plugin_manager",

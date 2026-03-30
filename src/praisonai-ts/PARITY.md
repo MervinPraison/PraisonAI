@@ -7,14 +7,14 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 311 |
+| Python Core Features | 314 |
 | Python Wrapper Features | 99 |
 | TypeScript Features | 1192 |
-| **Gap Count** | **18** |
+| **Gap Count** | **21** |
 | P0 (Critical) | 0 |
 | P1 (High) | 0 |
 | P2 (Medium) | 0 |
-| P3 (Low) | 18 |
+| P3 (Low) | 21 |
 
 ## Gap Matrix
 
@@ -151,7 +151,7 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (175 done, 18 todo)
+### P3_Advanced (175 done, 21 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -173,6 +173,9 @@
 | `LearnScope` | ✅ | ❌ | high | ⏳ TODO |
 | `ObservabilityEventType` | ✅ | ❌ | high | ⏳ TODO |
 | `ObservabilityHooks` | ✅ | ❌ | high | ⏳ TODO |
+| `StructuredFormatter` | ✅ | ❌ | high | ⏳ TODO |
+| `configure\_structured\_logging` | ✅ | ❌ | low | ⏳ TODO |
+| `get\_logger` | ✅ | ❌ | low | ⏳ TODO |
 | `A2A` | ✅ | ✅ | low | ✅ DONE |
 | `AGUI` | ✅ | ✅ | low | ✅ DONE |
 | `AUTONOMY\_PRESETS` | ✅ | ✅ | low | ✅ DONE |
@@ -516,7 +519,7 @@ from praisonaiagents import obs
 </details>
 
 <details>
-<summary><strong>other</strong> (19 exports)</summary>
+<summary><strong>other</strong> (22 exports)</summary>
 
 ```python
 from praisonaiagents import Agents, AsyncLearnProtocol, AutonomyConfig, DoomLoopDetector, EscalationPipeline, EscalationStage, Heartbeat, HeartbeatConfig, LearnManager, LearnManagerProtocol...

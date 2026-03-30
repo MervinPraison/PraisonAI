@@ -5,10 +5,10 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 311,
+    "pythonCoreFeatures": 314,
     "rustFeatures": 667,
-    "gapCount": 33,
-    "parityPercentage": 214.5
+    "gapCount": 36,
+    "parityPercentage": 212.4
   },
   "pythonCoreSDK": {
     "exports": [
@@ -216,6 +216,7 @@
       "SkillProperties",
       "SkillsConfig",
       "StepResult",
+      "StructuredFormatter",
       "Task",
       "TaskOutput",
       "TelemetryCollector",
@@ -247,6 +248,7 @@
       "clean_triple_backticks",
       "cleanup_telemetry_resources",
       "config",
+      "configure_structured_logging",
       "create_context_agent",
       "db",
       "detect_url_scheme",
@@ -274,6 +276,7 @@
       "get_default_plugin_dirs",
       "get_defaults_config",
       "get_dimensions",
+      "get_logger",
       "get_plugin_manager",
       "get_plugin_template",
       "get_plugins_config",
@@ -3915,6 +3918,15 @@
         "category": "config"
       },
       {
+        "feature": "StructuredFormatter",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "Task",
         "python": true,
         "rust": true,
@@ -4051,6 +4063,15 @@
       },
       {
         "feature": "config",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "configure_structured_logging",
         "python": true,
         "rust": false,
         "priority": "P3",
@@ -4246,6 +4267,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "embedding"
+      },
+      {
+        "feature": "get_logger",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "get_plugin_manager",
