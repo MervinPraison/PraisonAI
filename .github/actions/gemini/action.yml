@@ -27,7 +27,7 @@ inputs:
       The Gemini model to use. Options: gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-lite.
       Use flash-lite for highest free-tier quota (1,000 RPD).
     required: false
-    default: 'gemini-2.5-flash'
+    default: 'gemini-3.1-flash-lite-preview'
   version:
     description: |
       The version of @google/gemini-cli to execute.
