@@ -85,7 +85,8 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         with:
           gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
-          gemini_model: 'gemini-3.1-flash-lite-preview'
+          gemini_model: 'gemini-2.5-flash'
+          gemini_debug: 'true'
           prompt: |
             You are a helpful GitHub issue assistant. Your task is to analyze and help with GitHub issues.
             
@@ -162,7 +163,7 @@ jobs:
             
             Please proceed with helping resolve this issue following this exact workflow.
 
-          settings_json: |
+          settings: |
             {
               "coreTools": [
                 "run_shell_command(echo)",
@@ -194,10 +195,5 @@ jobs:
                 "web_fetch",
                 "google_web_search",
                 "save_memory"
-              ],
-              "telemetry": {
-                "enabled": false,
-                "otlpGcpWifProvider": "${{ secrets.OTLP_GCP_WIF_PROVIDER }}",
-                "googleCloudProject": "${{ secrets.OTLP_GOOGLE_CLOUD_PROJECT }}"
-              }
+              ]
             }
