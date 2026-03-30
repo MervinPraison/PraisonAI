@@ -8,6 +8,11 @@ from typing import Any, Dict, List, Optional, Union, Literal
 import logging
 from datetime import datetime
 
+# Decomposed memory functionality - imported as mixins for backward compatibility
+from .storage import StorageMixin
+from .search import SearchMixin
+from .core import MemoryCoreMixin
+
 # Disable litellm telemetry before any imports
 os.environ["LITELLM_TELEMETRY"] = "False"
 
@@ -171,7 +176,7 @@ def _get_pymongo():
 
 
 
-class Memory:
+class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
     """
     A single-file memory manager covering:
     - Short-term memory (STM) for ephemeral context
