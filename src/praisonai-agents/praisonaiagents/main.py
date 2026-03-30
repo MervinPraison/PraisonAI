@@ -2,6 +2,7 @@ import os
 import time
 import json
 import logging
+import threading
 from typing import List, Optional, Dict, Any, Union, Literal, Type
 from pydantic import BaseModel, ConfigDict
 import asyncio
@@ -26,12 +27,14 @@ except ImportError:
 # Global list to store error logs
 error_logs = []
 
-# Separate registries for sync and async callbacks
+# Separate registries for sync and async callbacks with thread safety
 sync_display_callbacks = {}
 async_display_callbacks = {}
+_callbacks_lock = threading.RLock()
 
 # Global approval callback registry
 approval_callback = None
+_approval_lock = threading.Lock()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PraisonAI Unique Color Palette: "Elegant Intelligence"
@@ -128,10 +131,11 @@ def register_display_callback(display_type: str, callback_fn, is_async: bool = F
         callback_fn: The callback function to register
         is_async (bool): Whether the callback is asynchronous
     """
-    if is_async:
-        async_display_callbacks[display_type] = callback_fn
-    else:
-        sync_display_callbacks[display_type] = callback_fn
+    with _callbacks_lock:
+        if is_async:
+            async_display_callbacks[display_type] = callback_fn
+        else:
+            sync_display_callbacks[display_type] = callback_fn
 
 def register_approval_callback(callback_fn):
     """Register a global approval callback function for dangerous tool operations.
@@ -140,7 +144,8 @@ def register_approval_callback(callback_fn):
         callback_fn: Function that takes (function_name, arguments, risk_level) and returns ApprovalDecision
     """
     global approval_callback
-    approval_callback = callback_fn
+    with _approval_lock:
+        approval_callback = callback_fn
 
 
 # Simplified aliases (consistent naming convention)
@@ -157,8 +162,10 @@ def execute_sync_callback(display_type: str, **kwargs):
         display_type (str): Type of display event
         **kwargs: Arguments to pass to the callback function
     """
-    if display_type in sync_display_callbacks:
-        callback = sync_display_callbacks[display_type]
+    with _callbacks_lock:
+        callback = sync_display_callbacks.get(display_type)
+    
+    if callback is not None:
         import inspect
         sig = inspect.signature(callback)
         
@@ -181,10 +188,14 @@ async def execute_callback(display_type: str, **kwargs):
     """
     import inspect
     
+    # Get callbacks safely
+    with _callbacks_lock:
+        sync_callback = sync_display_callbacks.get(display_type)
+        async_callback = async_display_callbacks.get(display_type)
+    
     # Execute synchronous callback if registered
-    if display_type in sync_display_callbacks:
-        callback = sync_display_callbacks[display_type]
-        sig = inspect.signature(callback)
+    if sync_callback is not None:
+        sig = inspect.signature(sync_callback)
         
         # Filter kwargs to what the callback accepts to maintain backward compatibility
         if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
@@ -195,12 +206,11 @@ async def execute_callback(display_type: str, **kwargs):
             supported_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
         
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, lambda: callback(**supported_kwargs))
+        await loop.run_in_executor(None, lambda: sync_callback(**supported_kwargs))
     
     # Execute asynchronous callback if registered
-    if display_type in async_display_callbacks:
-        callback = async_display_callbacks[display_type]
-        sig = inspect.signature(callback)
+    if async_callback is not None:
+        sig = inspect.signature(async_callback)
         
         # Filter kwargs to what the callback accepts to maintain backward compatibility
         if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
@@ -210,7 +220,7 @@ async def execute_callback(display_type: str, **kwargs):
             # Only pass arguments that the callback signature supports
             supported_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
         
-        await callback(**supported_kwargs)
+        await async_callback(**supported_kwargs)
 
 def _clean_display_content(content: str, max_length: int = 20000) -> str:
     """Helper function to clean and truncate content for display."""

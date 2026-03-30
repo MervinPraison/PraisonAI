@@ -27,6 +27,7 @@ Backward Compatibility:
 """
 
 import os
+import threading
 import warnings
 from pathlib import Path
 from typing import Dict, Optional, Union
@@ -42,12 +43,14 @@ LEGACY_DIR_NAME = ".praison"
 
 # Cache for data dir to avoid repeated filesystem checks
 _data_dir_cache: Optional[Path] = None
+_cache_lock = threading.Lock()
 
 
 def _clear_cache() -> None:
     """Clear the data dir cache. Used for testing."""
     global _data_dir_cache
-    _data_dir_cache = None
+    with _cache_lock:
+        _data_dir_cache = None
 
 
 def get_data_dir() -> Path:
@@ -75,33 +78,39 @@ def get_data_dir() -> Path:
     if env_path:
         return Path(env_path).expanduser()
     
-    # Return cached value if available
+    # Fast path: check cache without lock
     if _data_dir_cache is not None:
         return _data_dir_cache
     
-    home = Path.home()
-    
-    # Check new location first
-    new_path = home / DEFAULT_DIR_NAME
-    if new_path.exists():
+    # Slow path: acquire lock and determine directory
+    with _cache_lock:
+        # Double-check after acquiring lock
+        if _data_dir_cache is not None:
+            return _data_dir_cache
+        
+        home = Path.home()
+        
+        # Check new location first
+        new_path = home / DEFAULT_DIR_NAME
+        if new_path.exists():
+            _data_dir_cache = new_path
+            return new_path
+        
+        # Check legacy location (backward compat)
+        legacy_path = home / LEGACY_DIR_NAME
+        if legacy_path.exists():
+            warnings.warn(
+                f"Using legacy data directory {legacy_path}. "
+                f"Run 'praisonai migrate-data' to migrate to {new_path}.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+            _data_dir_cache = legacy_path
+            return legacy_path
+        
+        # Default to new location (will be created when needed)
         _data_dir_cache = new_path
         return new_path
-    
-    # Check legacy location (backward compat)
-    legacy_path = home / LEGACY_DIR_NAME
-    if legacy_path.exists():
-        warnings.warn(
-            f"Using legacy data directory {legacy_path}. "
-            f"Run 'praisonai migrate-data' to migrate to {new_path}.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        _data_dir_cache = legacy_path
-        return legacy_path
-    
-    # Default to new location (will be created when needed)
-    _data_dir_cache = new_path
-    return new_path
 
 
 def get_sessions_dir() -> Path:

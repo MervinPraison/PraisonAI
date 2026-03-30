@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 # Performance mode flag for auto-instrumentation (define early to avoid NameError)
 _performance_mode_enabled = False
+_performance_mode_lock = threading.Lock()
 
 # Shared thread pool for telemetry operations to avoid creating threads per call
 _telemetry_executor = None
@@ -66,11 +67,17 @@ def _get_telemetry_executor():
 def _get_telemetry_queue():
     """Get or create the shared telemetry event queue."""
     global _telemetry_queue, _queue_processor_running
-    if _telemetry_queue is None:
-        _telemetry_queue = queue.Queue(maxsize=1000)  # Limit queue size to prevent memory issues
-        
-    # Start queue processor if not running (with proper thread safety)
+    
+    # Fast path: check if queue exists without lock
+    if _telemetry_queue is not None:
+        return _telemetry_queue
+    
+    # Slow path: create queue and start processor with proper thread safety
     with _queue_lock:
+        # Double-check after acquiring lock
+        if _telemetry_queue is None:
+            _telemetry_queue = queue.Queue(maxsize=1000)  # Limit queue size to prevent memory issues
+        
         if not _queue_processor_running:
             _queue_processor_running = True
             # Use a daemon thread directly instead of executor to prevent hang
@@ -171,15 +178,17 @@ def _performance_mode_context():
     """Context manager for performance-critical operations that minimizes telemetry overhead."""
     # Store current performance mode state
     global _performance_mode_enabled
-    original_state = _performance_mode_enabled
-    
-    try:
+    with _performance_mode_lock:
+        original_state = _performance_mode_enabled
         # Temporarily enable performance mode for minimal overhead
         _performance_mode_enabled = True
+    
+    try:
         yield
     finally:
         # Restore original state
-        _performance_mode_enabled = original_state
+        with _performance_mode_lock:
+            _performance_mode_enabled = original_state
 
 
 def _queue_telemetry_event(event_data):
@@ -597,13 +606,15 @@ def auto_instrument_all(telemetry: Optional['MinimalTelemetry'] = None, performa
 def enable_performance_mode():
     """Enable performance mode for all new telemetry instrumentation."""
     global _performance_mode_enabled
-    _performance_mode_enabled = True
+    with _performance_mode_lock:
+        _performance_mode_enabled = True
 
 
 def disable_performance_mode():
     """Disable performance mode for all new telemetry instrumentation."""
     global _performance_mode_enabled
-    _performance_mode_enabled = False
+    with _performance_mode_lock:
+        _performance_mode_enabled = False
 
 
 def cleanup_telemetry_resources():
