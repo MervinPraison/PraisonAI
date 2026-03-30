@@ -52,9 +52,13 @@ def test_memory_config():
             }
         }
         
-        # Patch the chromadb cache to indicate it's available
-        original_chromadb_cache = memory_module._chromadb_cache.copy()
-        memory_module._chromadb_cache["available"] = True
+        # Patch the module cache to indicate chromadb is available
+        original_module_cache = memory_module._module_cache.copy()
+        memory_module._module_cache["chromadb"] = {
+            "available": True,
+            "module": MagicMock(),
+            "settings": MagicMock()
+        }
         
         try:
             with patch('chromadb.PersistentClient') as mock_chroma:
@@ -71,7 +75,8 @@ def test_memory_config():
                     memory = Memory(config=basic_config, verbose=1)
                     print("✅ Basic memory configuration works")
         finally:
-            memory_module._chromadb_cache.update(original_chromadb_cache)
+            memory_module._module_cache.clear()
+            memory_module._module_cache.update(original_module_cache)
         
         # Test mem0 configuration with mocking
         # Skip this test as it requires network access to mem0 API

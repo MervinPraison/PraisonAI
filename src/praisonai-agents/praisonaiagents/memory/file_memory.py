@@ -21,6 +21,7 @@ import time
 import sys
 import hashlib
 import logging
+import threading
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -160,7 +161,8 @@ class FileMemory:
         # Load or create config
         self.config = self._load_config(config)
         
-        # Initialize memory stores
+        # Initialize thread-safe memory stores with lock for in-memory data protection
+        self._lock = threading.RLock()  # Reentrant lock for nested operations
         self._short_term: List[MemoryItem] = []
         self._long_term: List[MemoryItem] = []
         self._entities: Dict[str, EntityItem] = {}
@@ -318,42 +320,45 @@ class FileMemory:
         Returns:
             The generated memory ID
         """
-        item = MemoryItem(
-            id=self._generate_id(content),
-            content=content,
-            metadata=metadata or {},
-            importance=importance
-        )
-        
-        self._short_term.append(item)
-        
-        # Enforce limit (rolling buffer)
-        limit = self.config["short_term_limit"]
-        if len(self._short_term) > limit:
-            # Before removing, check if should promote to long-term
-            if self.config["auto_promote"]:
-                self._auto_promote_to_long_term()
+        with self._lock:
+            item = MemoryItem(
+                id=self._generate_id(content),
+                content=content,
+                metadata=metadata or {},
+                importance=importance
+            )
             
-            # Remove oldest items
-            self._short_term = self._short_term[-limit:]
-        
-        self._save_short_term()
-        self._log(f"Added short-term memory: {content[:50]}...")
-        
-        # Emit trace event
-        self._emit_memory_event("store", "short_term", len(content), metadata=metadata)
-        
-        return item.id
+            self._short_term.append(item)
+            
+            # Enforce limit (rolling buffer)
+            limit = self.config["short_term_limit"]
+            if len(self._short_term) > limit:
+                # Before removing, check if should promote to long-term
+                if self.config["auto_promote"]:
+                    self._auto_promote_to_long_term()
+                
+                # Remove oldest items
+                self._short_term = self._short_term[-limit:]
+            
+            self._save_short_term()
+            self._log(f"Added short-term memory: {content[:50]}...")
+            
+            # Emit trace event
+            self._emit_memory_event("store", "short_term", len(content), metadata=metadata)
+            
+            return item.id
     
     def get_short_term(self, limit: Optional[int] = None) -> List[MemoryItem]:
         """Get short-term memories, most recent first."""
-        items = list(reversed(self._short_term))
-        if limit:
-            items = items[:limit]
-        return items
+        with self._lock:
+            items = list(reversed(self._short_term))
+            if limit:
+                items = items[:limit]
+            return items
     
     def _auto_promote_to_long_term(self):
         """Promote high-importance short-term memories to long-term."""
+        # Note: This method is called within _lock context from add_short_term
         threshold = self.config["importance_threshold"]
         promoted = []
         
@@ -390,36 +395,38 @@ class FileMemory:
         Returns:
             The generated memory ID
         """
-        item = MemoryItem(
-            id=self._generate_id(content),
-            content=content,
-            metadata=metadata or {},
-            importance=importance
-        )
-        
-        self._long_term.append(item)
-        
-        # Enforce limit
-        limit = self.config["long_term_limit"]
-        if len(self._long_term) > limit:
-            # Remove lowest importance items
-            self._long_term.sort(key=lambda x: x.importance, reverse=True)
-            self._long_term = self._long_term[:limit]
-        
-        self._save_long_term()
-        self._log(f"Added long-term memory: {content[:50]}...")
-        
-        # Emit trace event
-        self._emit_memory_event("store", "long_term", len(content), metadata=metadata)
-        
-        return item.id
+        with self._lock:
+            item = MemoryItem(
+                id=self._generate_id(content),
+                content=content,
+                metadata=metadata or {},
+                importance=importance
+            )
+            
+            self._long_term.append(item)
+            
+            # Enforce limit
+            limit = self.config["long_term_limit"]
+            if len(self._long_term) > limit:
+                # Remove lowest importance items
+                self._long_term.sort(key=lambda x: x.importance, reverse=True)
+                self._long_term = self._long_term[:limit]
+            
+            self._save_long_term()
+            self._log(f"Added long-term memory: {content[:50]}...")
+            
+            # Emit trace event
+            self._emit_memory_event("store", "long_term", len(content), metadata=metadata)
+            
+            return item.id
     
     def get_long_term(self, limit: Optional[int] = None) -> List[MemoryItem]:
         """Get long-term memories, sorted by importance."""
-        items = sorted(self._long_term, key=lambda x: x.importance, reverse=True)
-        if limit:
-            items = items[:limit]
-        return items
+        with self._lock:
+            items = sorted(self._long_term, key=lambda x: x.importance, reverse=True)
+            if limit:
+                items = items[:limit]
+            return items
     
     # -------------------------------------------------------------------------
     #                          Entity Memory
@@ -444,43 +451,46 @@ class FileMemory:
         Returns:
             The entity ID
         """
-        entity_id = self._generate_id(f"{name}:{entity_type}")
-        
-        # Check if entity exists
-        existing = self._find_entity_by_name(name, entity_type)
-        if existing:
-            # Update existing entity
-            existing.attributes.update(attributes or {})
-            if relationships:
-                existing.relationships.extend(relationships)
-            existing.updated_at = time.time()
-            entity_id = existing.id
-        else:
-            # Create new entity
-            entity = EntityItem(
-                id=entity_id,
-                name=name,
-                entity_type=entity_type,
-                attributes=attributes or {},
-                relationships=relationships or []
-            )
-            self._entities[entity_id] = entity
-        
-        self._save_entities()
-        self._log(f"Added/updated entity: {name} ({entity_type})")
-        
-        return entity_id
+        with self._lock:
+            entity_id = self._generate_id(f"{name}:{entity_type}")
+            
+            # Check if entity exists
+            existing = self._find_entity_by_name(name, entity_type)
+            if existing:
+                # Update existing entity
+                existing.attributes.update(attributes or {})
+                if relationships:
+                    existing.relationships.extend(relationships)
+                existing.updated_at = time.time()
+                entity_id = existing.id
+            else:
+                # Create new entity
+                entity = EntityItem(
+                    id=entity_id,
+                    name=name,
+                    entity_type=entity_type,
+                    attributes=attributes or {},
+                    relationships=relationships or []
+                )
+                self._entities[entity_id] = entity
+            
+            self._save_entities()
+            self._log(f"Added/updated entity: {name} ({entity_type})")
+            
+            return entity_id
     
     def get_entity(self, name: str, entity_type: Optional[str] = None) -> Optional[EntityItem]:
         """Get entity by name and optionally type."""
-        return self._find_entity_by_name(name, entity_type)
+        with self._lock:
+            return self._find_entity_by_name(name, entity_type)
     
     def get_all_entities(self, entity_type: Optional[str] = None) -> List[EntityItem]:
         """Get all entities, optionally filtered by type."""
-        entities = list(self._entities.values())
-        if entity_type:
-            entities = [e for e in entities if e.entity_type == entity_type]
-        return entities
+        with self._lock:
+            entities = list(self._entities.values())
+            if entity_type:
+                entities = [e for e in entities if e.entity_type == entity_type]
+            return entities
     
     def _find_entity_by_name(self, name: str, entity_type: Optional[str] = None) -> Optional[EntityItem]:
         """Find entity by name."""
@@ -631,7 +641,9 @@ class FileMemory:
         
         # Search short-term
         if "short_term" in memory_types:
-            for item in self._short_term:
+            with self._lock:
+                short_term_items = list(self._short_term)  # Create snapshot
+            for item in short_term_items:
                 score = score_match(item.content)
                 if score > 0:
                     results.append({
@@ -642,7 +654,9 @@ class FileMemory:
         
         # Search long-term
         if "long_term" in memory_types:
-            for item in self._long_term:
+            with self._lock:
+                long_term_items = list(self._long_term)  # Create snapshot
+            for item in long_term_items:
                 score = score_match(item.content)
                 if score > 0:
                     results.append({
@@ -653,7 +667,9 @@ class FileMemory:
         
         # Search entities
         if "entity" in memory_types:
-            for entity in self._entities.values():
+            with self._lock:
+                entity_items = list(self._entities.values())  # Create snapshot
+            for entity in entity_items:
                 score = max(
                     score_match(entity.name),
                     score_match(str(entity.attributes))
@@ -794,21 +810,23 @@ class FileMemory:
             source_count: Number of items summarized
             metadata: Optional metadata
         """
-        self._summaries.append({
-            "id": self._generate_id(summary),
-            "summary": summary,
-            "source_type": source_type,
-            "source_count": source_count,
-            "metadata": metadata or {},
-            "created_at": time.time()
-        })
-        
-        self._save_summaries()
-        self._log(f"Added summary for {source_count} {source_type} items")
+        with self._lock:
+            self._summaries.append({
+                "id": self._generate_id(summary),
+                "summary": summary,
+                "source_type": source_type,
+                "source_count": source_count,
+                "metadata": metadata or {},
+                "created_at": time.time()
+            })
+            
+            self._save_summaries()
+            self._log(f"Added summary for {source_count} {source_type} items")
     
     def get_summaries(self, limit: int = 5) -> List[Dict[str, Any]]:
         """Get recent summaries."""
-        return list(reversed(self._summaries))[:limit]
+        with self._lock:
+            return list(reversed(self._summaries))[:limit]
     
     # -------------------------------------------------------------------------
     #                          Utility Methods
@@ -816,27 +834,29 @@ class FileMemory:
     
     def clear_short_term(self):
         """Clear all short-term memory."""
-        self._short_term = []
-        self._save_short_term()
-        self._log("Cleared short-term memory")
+        with self._lock:
+            self._short_term = []
+            self._save_short_term()
+            self._log("Cleared short-term memory")
     
     def clear_all(self):
         """Clear all memory for this user."""
-        self._short_term = []
-        self._long_term = []
-        self._entities = {}
-        self._summaries = []
-        
-        self._save_short_term()
-        self._save_long_term()
-        self._save_entities()
-        self._save_summaries()
-        
-        # Clear episodic
-        for f in self.episodic_path.glob("*.json"):
-            f.unlink()
-        
-        self._log("Cleared all memory")
+        with self._lock:
+            self._short_term = []
+            self._long_term = []
+            self._entities = {}
+            self._summaries = []
+            
+            self._save_short_term()
+            self._save_long_term()
+            self._save_entities()
+            self._save_summaries()
+            
+            # Clear episodic
+            for f in self.episodic_path.glob("*.json"):
+                f.unlink()
+            
+            self._log("Cleared all memory")
     
     # -------------------------------------------------------------------------
     #                          Selective Deletion
@@ -852,13 +872,14 @@ class FileMemory:
         Returns:
             True if memory was found and deleted, False otherwise
         """
-        for i, item in enumerate(self._short_term):
-            if item.id == memory_id:
-                del self._short_term[i]
-                self._save_short_term()
-                self._log(f"Deleted short-term memory: {memory_id}")
-                return True
-        return False
+        with self._lock:
+            for i, item in enumerate(self._short_term):
+                if item.id == memory_id:
+                    del self._short_term[i]
+                    self._save_short_term()
+                    self._log(f"Deleted short-term memory: {memory_id}")
+                    return True
+            return False
     
     def delete_long_term(self, memory_id: str) -> bool:
         """
@@ -870,13 +891,14 @@ class FileMemory:
         Returns:
             True if memory was found and deleted, False otherwise
         """
-        for i, item in enumerate(self._long_term):
-            if item.id == memory_id:
-                del self._long_term[i]
-                self._save_long_term()
-                self._log(f"Deleted long-term memory: {memory_id}")
-                return True
-        return False
+        with self._lock:
+            for i, item in enumerate(self._long_term):
+                if item.id == memory_id:
+                    del self._long_term[i]
+                    self._save_long_term()
+                    self._log(f"Deleted long-term memory: {memory_id}")
+                    return True
+            return False
     
     def delete_entity(self, name: str) -> bool:
         """
@@ -888,24 +910,25 @@ class FileMemory:
         Returns:
             True if entity was found and deleted, False otherwise
         """
-        # Find entity by name using existing helper
-        entity = self._find_entity_by_name(name)
-        if entity:
-            # Delete by entity's ID (which is the dict key)
-            if entity.id in self._entities:
-                del self._entities[entity.id]
+        with self._lock:
+            # Find entity by name using existing helper
+            entity = self._find_entity_by_name(name)
+            if entity:
+                # Delete by entity's ID (which is the dict key)
+                if entity.id in self._entities:
+                    del self._entities[entity.id]
+                    self._save_entities()
+                    self._log(f"Deleted entity: {name}")
+                    return True
+            
+            # Try direct ID match as fallback (in case name IS the ID)
+            if name in self._entities:
+                del self._entities[name]
                 self._save_entities()
-                self._log(f"Deleted entity: {name}")
+                self._log(f"Deleted entity by ID: {name}")
                 return True
-        
-        # Try direct ID match as fallback (in case name IS the ID)
-        if name in self._entities:
-            del self._entities[name]
-            self._save_entities()
-            self._log(f"Deleted entity by ID: {name}")
-            return True
-        
-        return False
+            
+            return False
     
     def delete_episodic(self, memory_id: str, date: Optional[str] = None) -> bool:
         """
@@ -1056,15 +1079,16 @@ class FileMemory:
         """Get memory statistics."""
         episodic_count = sum(1 for _ in self.episodic_path.glob("*.json"))
         
-        return {
-            "user_id": self.user_id,
-            "short_term_count": len(self._short_term),
-            "long_term_count": len(self._long_term),
-            "entity_count": len(self._entities),
-            "episodic_days": episodic_count,
-            "summary_count": len(self._summaries),
-            "storage_path": str(self.user_path)
-        }
+        with self._lock:
+            return {
+                "user_id": self.user_id,
+                "short_term_count": len(self._short_term),
+                "long_term_count": len(self._long_term),
+                "entity_count": len(self._entities),
+                "episodic_days": episodic_count,
+                "summary_count": len(self._summaries),
+                "storage_path": str(self.user_path)
+            }
     
     # -------------------------------------------------------------------------
     #                    MemoryProtocol Compliance Aliases
@@ -1108,44 +1132,47 @@ class FileMemory:
     
     def get_all_memories(self, **kwargs) -> List[Dict[str, Any]]:
         """Get all memories from short-term and long-term stores."""
-        all_memories = []
-        for item in self._short_term:
-            all_memories.append({"type": "short_term", **item.to_dict()})
-        for item in self._long_term:
-            all_memories.append({"type": "long_term", **item.to_dict()})
-        return all_memories
+        with self._lock:
+            all_memories = []
+            for item in self._short_term:
+                all_memories.append({"type": "short_term", **item.to_dict()})
+            for item in self._long_term:
+                all_memories.append({"type": "long_term", **item.to_dict()})
+            return all_memories
     
     def export(self) -> Dict[str, Any]:
         """Export all memory data."""
-        return {
-            "user_id": self.user_id,
-            "config": self.config,
-            "short_term": [item.to_dict() for item in self._short_term],
-            "long_term": [item.to_dict() for item in self._long_term],
-            "entities": {k: v.to_dict() for k, v in self._entities.items()},
-            "summaries": self._summaries,
-            "exported_at": time.time()
-        }
+        with self._lock:
+            return {
+                "user_id": self.user_id,
+                "config": self.config,
+                "short_term": [item.to_dict() for item in self._short_term],
+                "long_term": [item.to_dict() for item in self._long_term],
+                "entities": {k: v.to_dict() for k, v in self._entities.items()},
+                "summaries": list(self._summaries),
+                "exported_at": time.time()
+            }
     
     def import_data(self, data: Dict[str, Any]):
         """Import memory data from export."""
-        if "short_term" in data:
-            self._short_term = [MemoryItem.from_dict(item) for item in data["short_term"]]
-            self._save_short_term()
-        
-        if "long_term" in data:
-            self._long_term = [MemoryItem.from_dict(item) for item in data["long_term"]]
-            self._save_long_term()
-        
-        if "entities" in data:
-            self._entities = {k: EntityItem.from_dict(v) for k, v in data["entities"].items()}
-            self._save_entities()
-        
-        if "summaries" in data:
-            self._summaries = data["summaries"]
-            self._save_summaries()
-        
-        self._log("Imported memory data")
+        with self._lock:
+            if "short_term" in data:
+                self._short_term = [MemoryItem.from_dict(item) for item in data["short_term"]]
+                self._save_short_term()
+            
+            if "long_term" in data:
+                self._long_term = [MemoryItem.from_dict(item) for item in data["long_term"]]
+                self._save_long_term()
+            
+            if "entities" in data:
+                self._entities = {k: EntityItem.from_dict(v) for k, v in data["entities"].items()}
+                self._save_entities()
+            
+            if "summaries" in data:
+                self._summaries = data["summaries"]
+                self._save_summaries()
+            
+            self._log("Imported memory data")
     
     # -------------------------------------------------------------------------
     #                          Session Management
@@ -1175,14 +1202,20 @@ class FileMemory:
         
         session_file = sessions_path / f"{name}.json"
         
+        # Take snapshots under lock for consistent session data
+        with self._lock:
+            short_term_data = [item.to_dict() for item in self._short_term]
+            long_term_snapshot = [item.to_dict() for item in self._long_term[-50:]]  # Last 50
+            entity_ids = list(self._entities.keys())
+        
         session_data = {
             "name": name,
             "user_id": self.user_id,
             "saved_at": time.time(),
             "saved_at_iso": datetime.now().isoformat(),
-            "short_term": [item.to_dict() for item in self._short_term],
-            "long_term_snapshot": [item.to_dict() for item in self._long_term[-50:]],  # Last 50
-            "entity_ids": list(self._entities.keys()),
+            "short_term": short_term_data,
+            "long_term_snapshot": long_term_snapshot,
+            "entity_ids": entity_ids,
             "conversation_history": conversation_history or [],
             "metadata": metadata or {},
             "config": self.config
@@ -1215,8 +1248,9 @@ class FileMemory:
         
         # Restore short-term memory from session
         if "short_term" in session_data:
-            self._short_term = [MemoryItem.from_dict(item) for item in session_data["short_term"]]
-            self._save_short_term()
+            with self._lock:
+                self._short_term = [MemoryItem.from_dict(item) for item in session_data["short_term"]]
+                self._save_short_term()
         
         self._log(f"Resumed session '{name}'")
         
@@ -1287,14 +1321,16 @@ class FileMemory:
         Returns:
             The generated summary
         """
-        if len(self._short_term) <= max_items:
-            return ""  # No compression needed
+        # Check length and gather content under lock
+        with self._lock:
+            if len(self._short_term) <= max_items:
+                return ""  # No compression needed
+            
+            # Gather content to compress while holding lock
+            items_to_compress = self._short_term[:-max_items]
+            content_list = [item.content for item in items_to_compress]
         
-        # Gather content to compress
-        items_to_compress = self._short_term[:-max_items]
-        content_list = [item.content for item in items_to_compress]
-        
-        # Generate summary
+        # Generate summary OUTSIDE lock (LLM call may be slow)
         if llm_func:
             prompt = f"""Summarize the following conversation context into key points.
 Preserve important facts, decisions, and context.
@@ -1309,16 +1345,17 @@ Summary:"""
             # Simple concatenation if no LLM
             summary = "Compressed context: " + " | ".join(content_list[:5]) + "..."
         
-        # Add summary as a high-importance long-term memory
+        # Add summary as a high-importance long-term memory (add_long_term has its own lock)
         self.add_long_term(
             content=f"[Session Summary] {summary}",
             metadata={"type": "compression_summary", "items_compressed": len(items_to_compress)},
             importance=0.9
         )
         
-        # Keep only recent items
-        self._short_term = self._short_term[-max_items:]
-        self._save_short_term()
+        # Keep only recent items under lock
+        with self._lock:
+            self._short_term = self._short_term[-max_items:]
+            self._save_short_term()
         
         self._log(f"Compressed {len(items_to_compress)} items into summary")
         
@@ -1567,7 +1604,9 @@ Summary:"""
                     })
             
             if memory_type in ("all", "entity", "entities"):
-                for name, entity in self._entities.items():
+                with self._lock:
+                    entities_snapshot = dict(self._entities)
+                for name, entity in entities_snapshot.items():
                     items.append({
                         "type": "entity",
                         "id": name,

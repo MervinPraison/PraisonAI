@@ -23,102 +23,147 @@ def trace(self, message, *args, **kwargs):
 
 logging.Logger.trace = trace
 
-# Lazy availability flags and cached imports
-_chromadb_cache = {"available": None, "module": None, "settings": None}
-_mem0_cache = {"available": None, "module": None}
-_openai_cache = {"available": None, "module": None}
-_litellm_cache = {"available": None, "module": None}
-_pymongo_cache = {"available": None, "module": None, "client": None}
+# Thread-safe lazy imports using proper thread synchronization
+import threading
+
+# Thread-safe import cache
+_import_lock = threading.Lock()
+_module_cache = {}
 
 def _check_chromadb():
-    """Lazily check chromadb availability and cache."""
-    if _chromadb_cache["available"] is None:
+    """Thread-safe lazy check for chromadb availability."""
+    if "chromadb" in _module_cache:
+        return _module_cache["chromadb"]["available"]
+    
+    with _import_lock:
+        if "chromadb" in _module_cache:
+            return _module_cache["chromadb"]["available"]
+        
         try:
             import chromadb
             from chromadb.config import Settings as ChromaSettings
-            _chromadb_cache["available"] = True
-            _chromadb_cache["module"] = chromadb
-            _chromadb_cache["settings"] = ChromaSettings
+            _module_cache["chromadb"] = {
+                "available": True,
+                "module": chromadb,
+                "settings": ChromaSettings
+            }
         except ImportError:
-            _chromadb_cache["available"] = False
-    return _chromadb_cache["available"]
+            _module_cache["chromadb"] = {"available": False}
+        
+        return _module_cache["chromadb"]["available"]
 
 def _get_chromadb():
-    """Get chromadb module (lazy load)."""
+    """Get chromadb module and settings (thread-safe lazy load)."""
     if not _check_chromadb():
         raise ImportError("chromadb is required. Install with: pip install chromadb")
-    return _chromadb_cache["module"], _chromadb_cache["settings"]
+    return _module_cache["chromadb"]["module"], _module_cache["chromadb"]["settings"]
 
 def _check_mem0():
-    """Lazily check mem0 availability."""
-    if _mem0_cache["available"] is None:
+    """Thread-safe lazy check for mem0 availability."""
+    if "mem0" in _module_cache:
+        return _module_cache["mem0"]["available"]
+    
+    with _import_lock:
+        if "mem0" in _module_cache:
+            return _module_cache["mem0"]["available"]
+        
         try:
             import mem0
-            _mem0_cache["available"] = True
-            _mem0_cache["module"] = mem0
+            _module_cache["mem0"] = {
+                "available": True,
+                "module": mem0
+            }
         except ImportError:
-            _mem0_cache["available"] = False
-    return _mem0_cache["available"]
+            _module_cache["mem0"] = {"available": False}
+        
+        return _module_cache["mem0"]["available"]
 
 def _get_mem0():
-    """Get mem0 module (lazy load)."""
+    """Get mem0 module (thread-safe lazy load)."""
     if not _check_mem0():
         raise ImportError("mem0 is required. Install with: pip install mem0ai")
-    return _mem0_cache["module"]
+    return _module_cache["mem0"]["module"]
 
 def _check_openai():
-    """Lazily check openai availability."""
-    if _openai_cache["available"] is None:
+    """Thread-safe lazy check for openai availability."""
+    if "openai" in _module_cache:
+        return _module_cache["openai"]["available"]
+    
+    with _import_lock:
+        if "openai" in _module_cache:
+            return _module_cache["openai"]["available"]
+        
         try:
             import openai
-            _openai_cache["available"] = True
-            _openai_cache["module"] = openai
+            _module_cache["openai"] = {
+                "available": True,
+                "module": openai
+            }
         except ImportError:
-            _openai_cache["available"] = False
-    return _openai_cache["available"]
+            _module_cache["openai"] = {"available": False}
+        
+        return _module_cache["openai"]["available"]
 
 def _get_openai():
-    """Get openai module (lazy load)."""
+    """Get openai module (thread-safe lazy load)."""
     if not _check_openai():
         raise ImportError("openai is required. Install with: pip install openai")
-    return _openai_cache["module"]
+    return _module_cache["openai"]["module"]
 
 def _check_litellm():
-    """Lazily check litellm availability."""
-    if _litellm_cache["available"] is None:
+    """Thread-safe lazy check for litellm availability."""
+    if "litellm" in _module_cache:
+        return _module_cache["litellm"]["available"]
+    
+    with _import_lock:
+        if "litellm" in _module_cache:
+            return _module_cache["litellm"]["available"]
+        
         try:
             import litellm
             litellm.telemetry = False
-            _litellm_cache["available"] = True
-            _litellm_cache["module"] = litellm
+            _module_cache["litellm"] = {
+                "available": True,
+                "module": litellm
+            }
         except ImportError:
-            _litellm_cache["available"] = False
-    return _litellm_cache["available"]
+            _module_cache["litellm"] = {"available": False}
+        
+        return _module_cache["litellm"]["available"]
 
 def _get_litellm():
-    """Get litellm module (lazy load)."""
+    """Get litellm module (thread-safe lazy load)."""
     if not _check_litellm():
         raise ImportError("litellm is required. Install with: pip install litellm")
-    return _litellm_cache["module"]
+    return _module_cache["litellm"]["module"]
 
 def _check_pymongo():
-    """Lazily check pymongo availability."""
-    if _pymongo_cache["available"] is None:
+    """Thread-safe lazy check for pymongo availability."""
+    if "pymongo" in _module_cache:
+        return _module_cache["pymongo"]["available"]
+    
+    with _import_lock:
+        if "pymongo" in _module_cache:
+            return _module_cache["pymongo"]["available"]
+        
         try:
             import pymongo
             from pymongo import MongoClient
-            _pymongo_cache["available"] = True
-            _pymongo_cache["module"] = pymongo
-            _pymongo_cache["client"] = MongoClient
+            _module_cache["pymongo"] = {
+                "available": True,
+                "module": pymongo,
+                "client": MongoClient
+            }
         except ImportError:
-            _pymongo_cache["available"] = False
-    return _pymongo_cache["available"]
+            _module_cache["pymongo"] = {"available": False}
+        
+        return _module_cache["pymongo"]["available"]
 
 def _get_pymongo():
-    """Get pymongo module and MongoClient (lazy load)."""
+    """Get pymongo module and MongoClient (thread-safe lazy load)."""
     if not _check_pymongo():
         raise ImportError("pymongo is required. Install with: pip install pymongo")
-    return _pymongo_cache["module"], _pymongo_cache["client"]
+    return _module_cache["pymongo"]["module"], _module_cache["pymongo"]["client"]
 
 
 
