@@ -21,5 +21,5 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '@gemini Do a thorough triage and analysis of this issue:\n\n1. **Classification**: Is this a bug, feature request, question, or documentation gap?\n2. **Severity**: Critical / High / Medium / Low — explain why\n3. **Affected area**: Which modules/files in the codebase are relevant?\n4. **Root cause analysis**: Search the codebase and identify the likely root cause\n5. **Impact assessment**: What else could be affected? Any related issues?\n6. **Suggested fix**: Propose a concrete solution approach with file paths\n7. **Effort estimate**: Small (hours) / Medium (day) / Large (days+)'
+              body: '@gemini Do a thorough analysis of this issue:\n\n1. **Classification**: Is this a bug, feature request, question, or documentation gap?\n2. **Severity**: Critical / High / Medium / Low — explain why\n3. **Affected area**: Which modules/files in the codebase are relevant?\n4. **Root cause analysis**: Search the codebase and identify the likely root cause\n5. **Impact assessment**: What else could be affected? Any related issues?\n6. **Suggested fix**: Propose a concrete solution approach with file paths\n7. **Effort estimate**: Small (hours) / Medium (day) / Large (days+)'
             })
