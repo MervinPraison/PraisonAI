@@ -215,14 +215,14 @@ class Agent:
         return self.__hook_runner
     
     @property
-    def stream_emitter(self):
+    def stream_emitter(self) -> Optional[Any]:
         """Lazy-loaded StreamEventEmitter for real-time events (zero overhead when not used)."""
         if self.__stream_emitter is None:
             self.__stream_emitter = _get_stream_emitter()()
         return self.__stream_emitter
     
     @stream_emitter.setter
-    def stream_emitter(self, value):
+    def stream_emitter(self, value: Optional[Any]) -> None:
         """Allow setting stream_emitter directly."""
         self.__stream_emitter = value
     
@@ -1857,57 +1857,57 @@ Your Goal: {self.goal}
             return value
 
     @property
-    def auto_memory(self):
+    def auto_memory(self) -> Optional[bool]:
         """AutoMemory instance for automatic memory extraction."""
         return self._auto_memory
     
     @auto_memory.setter
-    def auto_memory(self, value):
+    def auto_memory(self, value: Optional[bool]) -> None:
         self._auto_memory = value
 
     @property
-    def policy(self):
+    def policy(self) -> Optional[Any]:
         """PolicyEngine instance for execution control."""
         return self._policy
     
     @policy.setter
-    def policy(self, value):
+    def policy(self, value: Optional[Any]) -> None:
         self._policy = value
 
     @property
-    def background(self):
+    def background(self) -> Optional[bool]:
         """BackgroundRunner instance for async task execution."""
         return self._background
     
     @background.setter
-    def background(self, value):
+    def background(self, value: Optional[bool]) -> None:
         self._background = value
 
     @property
-    def checkpoints(self):
+    def checkpoints(self) -> Optional[bool]:
         """CheckpointService instance for file-level undo/restore."""
         return self._checkpoints
     
     @checkpoints.setter
-    def checkpoints(self, value):
+    def checkpoints(self, value: Optional[bool]) -> None:
         self._checkpoints = value
 
     @property
-    def output_style(self):
+    def output_style(self) -> Optional[str]:
         """OutputStyle instance for response formatting."""
         return self._output_style
     
     @output_style.setter
-    def output_style(self, value):
+    def output_style(self, value: Optional[str]) -> None:
         self._output_style = value
 
     @property
-    def thinking_budget(self):
+    def thinking_budget(self) -> Optional[int]:
         """ThinkingBudget instance for extended thinking control."""
         return self._thinking_budget
     
     @thinking_budget.setter
-    def thinking_budget(self, value):
+    def thinking_budget(self, value: Optional[int]) -> None:
         self._thinking_budget = value
 
     @property
@@ -1930,7 +1930,7 @@ Your Goal: {self.goal}
         }
 
     @property
-    def context_manager(self):
+    def context_manager(self) -> Optional[Any]:
         """
         ContextManager instance for unified context management.
         
@@ -2073,7 +2073,7 @@ Summary:"""
         return llm_summarize
 
     @property
-    def console(self):
+    def console(self) -> Optional[Any]:
         """Lazily initialize Rich Console only when needed AND verbose is True."""
         # Only return console if verbose mode is enabled
         # This prevents panels from being shown in status/silent modes
@@ -2085,7 +2085,7 @@ Summary:"""
         return self._console
     
     @property
-    def skill_manager(self):
+    def skill_manager(self) -> Optional[Any]:
         """Lazily initialize SkillManager only when skills are accessed."""
         if self._skill_manager is None and (self._skills or self._skills_dirs):
             from ..skills import SkillManager
@@ -2169,7 +2169,7 @@ Summary:"""
         return self.__openai_client
 
     @property
-    def agent_id(self):
+    def agent_id(self) -> str:
         """Lazily generate agent ID when first accessed."""
         if self._agent_id is None:
             import uuid
@@ -3606,7 +3606,7 @@ Summary:"""
         return supports_prompt_caching(model_name)
     
     @property
-    def rules_manager(self):
+    def rules_manager(self) -> Optional[Any]:
         """
         Lazy-initialized RulesManager for persistent rules/instructions.
         
@@ -3787,7 +3787,7 @@ Summary:"""
         
         return ""
     
-    def store_memory(self, content: str, memory_type: str = "short_term", **kwargs):
+    def store_memory(self, content: str, memory_type: str = "short_term", **kwargs: Any) -> None:
         """
         Store content in memory.
         
@@ -3859,7 +3859,7 @@ Summary:"""
             ))
     
     @property
-    def llm_model(self):
+    def llm_model(self) -> Optional[str]:
         """Unified property to get the LLM model regardless of configuration type.
         
         Returns:
@@ -3895,12 +3895,12 @@ Summary:"""
             self._knowledge_processed = True
     
     @property
-    def retrieval_config(self):
+    def retrieval_config(self) -> Optional[Any]:
         """Get the unified retrieval configuration."""
         return self._retrieval_config
     
     @property
-    def rag(self):
+    def rag(self) -> Optional[Any]:
         """
         Lazy-loaded RAG instance for advanced retrieval with citations.
         
@@ -4828,7 +4828,7 @@ Your Goal: {self.goal}"""
             logging.debug(f"Type casting failed for {getattr(func, '__name__', 'unknown function')}: {e}")
             return arguments
 
-    def execute_tool(self, function_name, arguments, tool_call_id=None):
+    def execute_tool(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None) -> Any:
         """
         Execute a tool dynamically based on the function name and arguments.
         Injects agent state for tools with Injected[T] parameters.
@@ -5483,7 +5483,7 @@ Your Goal: {self.goal}"""
         return len(self.chat_history)
     
     @contextlib.contextmanager
-    def ephemeral(self):
+    def ephemeral(self) -> Generator[None, None, None]:
         """
         Context manager for ephemeral conversations.
         
@@ -6206,7 +6206,7 @@ Your Goal: {self.goal}"""
             config=HandoffConfig(context_policy=ContextPolicy.NONE),
         )
 
-    def chat(self, prompt, temperature=1.0, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=None, task_name=None, task_description=None, task_id=None, config=None, force_retrieval=False, skip_retrieval=False, attachments=None, tool_choice=None):
+    def chat(self, prompt: str, temperature: float = 1.0, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None) -> Optional[str]:
         """
         Chat with the agent.
         
@@ -7369,7 +7369,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         kwargs['stream'] = stream_requested
         return await self.achat(prompt, **kwargs)
 
-    def run(self, prompt: str, **kwargs):
+    def run(self, prompt: str, **kwargs: Any) -> Optional[str]:
         """Execute agent silently and return structured result.
         
         Production-friendly execution. Always uses silent mode with no streaming
@@ -7555,7 +7555,7 @@ Write the complete compiled report:"""
         
         # Chat history is preserved in self.chat_history (no action needed)
 
-    def start(self, prompt: str = None, **kwargs):
+    def start(self, prompt: Optional[str] = None, **kwargs: Any) -> Union[str, Generator[str, None, None], None]:
         """Start the agent interactively with verbose output.
         
         Beginner-friendly execution. Defaults to verbose output with streaming
@@ -8508,7 +8508,7 @@ Write the complete compiled report:"""
         """Number of approval requests still waiting."""
         return len(self._pending_approvals)
 
-    def execute(self, task, context=None):
+    def execute(self, task: Any, context: Optional[Any] = None) -> Optional[str]:
         """Execute a task synchronously - backward compatibility method"""
         if hasattr(task, 'description'):
             prompt = task.description
