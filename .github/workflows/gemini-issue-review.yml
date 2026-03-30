@@ -86,7 +86,6 @@ jobs:
         with:
           gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
           gemini_model: 'gemini-2.5-flash'
-          gemini_debug: 'true'
           prompt: |
             You are a helpful GitHub issue assistant. Your task is to analyze and help with GitHub issues.
             
