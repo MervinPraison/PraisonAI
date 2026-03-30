@@ -25,7 +25,6 @@ logging.Logger.trace = trace
 
 # Thread-safe lazy imports using proper thread synchronization
 import threading
-import importlib
 
 # Thread-safe import cache
 _import_lock = threading.Lock()

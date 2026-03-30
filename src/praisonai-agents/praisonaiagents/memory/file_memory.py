@@ -1079,15 +1079,16 @@ class FileMemory:
         """Get memory statistics."""
         episodic_count = sum(1 for _ in self.episodic_path.glob("*.json"))
         
-        return {
-            "user_id": self.user_id,
-            "short_term_count": len(self._short_term),
-            "long_term_count": len(self._long_term),
-            "entity_count": len(self._entities),
-            "episodic_days": episodic_count,
-            "summary_count": len(self._summaries),
-            "storage_path": str(self.user_path)
-        }
+        with self._lock:
+            return {
+                "user_id": self.user_id,
+                "short_term_count": len(self._short_term),
+                "long_term_count": len(self._long_term),
+                "entity_count": len(self._entities),
+                "episodic_days": episodic_count,
+                "summary_count": len(self._summaries),
+                "storage_path": str(self.user_path)
+            }
     
     # -------------------------------------------------------------------------
     #                    MemoryProtocol Compliance Aliases
@@ -1131,44 +1132,47 @@ class FileMemory:
     
     def get_all_memories(self, **kwargs) -> List[Dict[str, Any]]:
         """Get all memories from short-term and long-term stores."""
-        all_memories = []
-        for item in self._short_term:
-            all_memories.append({"type": "short_term", **item.to_dict()})
-        for item in self._long_term:
-            all_memories.append({"type": "long_term", **item.to_dict()})
-        return all_memories
+        with self._lock:
+            all_memories = []
+            for item in self._short_term:
+                all_memories.append({"type": "short_term", **item.to_dict()})
+            for item in self._long_term:
+                all_memories.append({"type": "long_term", **item.to_dict()})
+            return all_memories
     
     def export(self) -> Dict[str, Any]:
         """Export all memory data."""
-        return {
-            "user_id": self.user_id,
-            "config": self.config,
-            "short_term": [item.to_dict() for item in self._short_term],
-            "long_term": [item.to_dict() for item in self._long_term],
-            "entities": {k: v.to_dict() for k, v in self._entities.items()},
-            "summaries": self._summaries,
-            "exported_at": time.time()
-        }
+        with self._lock:
+            return {
+                "user_id": self.user_id,
+                "config": self.config,
+                "short_term": [item.to_dict() for item in self._short_term],
+                "long_term": [item.to_dict() for item in self._long_term],
+                "entities": {k: v.to_dict() for k, v in self._entities.items()},
+                "summaries": list(self._summaries),
+                "exported_at": time.time()
+            }
     
     def import_data(self, data: Dict[str, Any]):
         """Import memory data from export."""
-        if "short_term" in data:
-            self._short_term = [MemoryItem.from_dict(item) for item in data["short_term"]]
-            self._save_short_term()
-        
-        if "long_term" in data:
-            self._long_term = [MemoryItem.from_dict(item) for item in data["long_term"]]
-            self._save_long_term()
-        
-        if "entities" in data:
-            self._entities = {k: EntityItem.from_dict(v) for k, v in data["entities"].items()}
-            self._save_entities()
-        
-        if "summaries" in data:
-            self._summaries = data["summaries"]
-            self._save_summaries()
-        
-        self._log("Imported memory data")
+        with self._lock:
+            if "short_term" in data:
+                self._short_term = [MemoryItem.from_dict(item) for item in data["short_term"]]
+                self._save_short_term()
+            
+            if "long_term" in data:
+                self._long_term = [MemoryItem.from_dict(item) for item in data["long_term"]]
+                self._save_long_term()
+            
+            if "entities" in data:
+                self._entities = {k: EntityItem.from_dict(v) for k, v in data["entities"].items()}
+                self._save_entities()
+            
+            if "summaries" in data:
+                self._summaries = data["summaries"]
+                self._save_summaries()
+            
+            self._log("Imported memory data")
     
     # -------------------------------------------------------------------------
     #                          Session Management
@@ -1198,14 +1202,20 @@ class FileMemory:
         
         session_file = sessions_path / f"{name}.json"
         
+        # Take snapshots under lock for consistent session data
+        with self._lock:
+            short_term_data = [item.to_dict() for item in self._short_term]
+            long_term_snapshot = [item.to_dict() for item in self._long_term[-50:]]  # Last 50
+            entity_ids = list(self._entities.keys())
+        
         session_data = {
             "name": name,
             "user_id": self.user_id,
             "saved_at": time.time(),
             "saved_at_iso": datetime.now().isoformat(),
-            "short_term": [item.to_dict() for item in self._short_term],
-            "long_term_snapshot": [item.to_dict() for item in self._long_term[-50:]],  # Last 50
-            "entity_ids": list(self._entities.keys()),
+            "short_term": short_term_data,
+            "long_term_snapshot": long_term_snapshot,
+            "entity_ids": entity_ids,
             "conversation_history": conversation_history or [],
             "metadata": metadata or {},
             "config": self.config
@@ -1238,8 +1248,9 @@ class FileMemory:
         
         # Restore short-term memory from session
         if "short_term" in session_data:
-            self._short_term = [MemoryItem.from_dict(item) for item in session_data["short_term"]]
-            self._save_short_term()
+            with self._lock:
+                self._short_term = [MemoryItem.from_dict(item) for item in session_data["short_term"]]
+                self._save_short_term()
         
         self._log(f"Resumed session '{name}'")
         
@@ -1310,14 +1321,16 @@ class FileMemory:
         Returns:
             The generated summary
         """
-        if len(self._short_term) <= max_items:
-            return ""  # No compression needed
+        # Check length and gather content under lock
+        with self._lock:
+            if len(self._short_term) <= max_items:
+                return ""  # No compression needed
+            
+            # Gather content to compress while holding lock
+            items_to_compress = self._short_term[:-max_items]
+            content_list = [item.content for item in items_to_compress]
         
-        # Gather content to compress
-        items_to_compress = self._short_term[:-max_items]
-        content_list = [item.content for item in items_to_compress]
-        
-        # Generate summary
+        # Generate summary OUTSIDE lock (LLM call may be slow)
         if llm_func:
             prompt = f"""Summarize the following conversation context into key points.
 Preserve important facts, decisions, and context.
@@ -1332,16 +1345,17 @@ Summary:"""
             # Simple concatenation if no LLM
             summary = "Compressed context: " + " | ".join(content_list[:5]) + "..."
         
-        # Add summary as a high-importance long-term memory
+        # Add summary as a high-importance long-term memory (add_long_term has its own lock)
         self.add_long_term(
             content=f"[Session Summary] {summary}",
             metadata={"type": "compression_summary", "items_compressed": len(items_to_compress)},
             importance=0.9
         )
         
-        # Keep only recent items
-        self._short_term = self._short_term[-max_items:]
-        self._save_short_term()
+        # Keep only recent items under lock
+        with self._lock:
+            self._short_term = self._short_term[-max_items:]
+            self._save_short_term()
         
         self._log(f"Compressed {len(items_to_compress)} items into summary")
         
@@ -1590,7 +1604,9 @@ Summary:"""
                     })
             
             if memory_type in ("all", "entity", "entities"):
-                for name, entity in self._entities.items():
+                with self._lock:
+                    entities_snapshot = dict(self._entities)
+                for name, entity in entities_snapshot.items():
                     items.append({
                         "type": "entity",
                         "id": name,
