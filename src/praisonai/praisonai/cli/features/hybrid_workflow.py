@@ -13,6 +13,8 @@ Usage:
     praisonai workflow run hybrid-workflow.yaml --dry-run
 """
 
+import ast
+import operator
 import os
 import time
 from pathlib import Path
@@ -313,8 +315,6 @@ class HybridWorkflowExecutor:
 
     def _eval_condition(self, condition: str, flags: Dict) -> bool:
         """Evaluate a simple condition expression safely using AST evaluation."""
-        import ast
-
         condition = condition.strip()
         if condition.startswith("{{") and condition.endswith("}}"):
             condition = condition[2:-2].strip()
@@ -335,10 +335,7 @@ class HybridWorkflowExecutor:
     
     def _safe_eval_ast(self, node, context):
         """Safely evaluate AST node without using eval()."""
-        import ast
-        import operator
-        
-        # Map of safe operations
+        # Map of safe binary/unary/comparison operations
         ops = {
             ast.Add: operator.add, ast.Sub: operator.sub,
             ast.Mult: operator.mul, ast.Div: operator.truediv,
@@ -348,7 +345,6 @@ class HybridWorkflowExecutor:
             ast.Gt: operator.gt, ast.GtE: operator.ge,
             ast.Is: operator.is_, ast.IsNot: operator.is_not,
             ast.In: lambda a, b: a in b, ast.NotIn: lambda a, b: a not in b,
-            ast.And: lambda a, b: a and b, ast.Or: lambda a, b: a or b,
             ast.Not: operator.not_,
         }
         
@@ -359,6 +355,8 @@ class HybridWorkflowExecutor:
                 return context[node.id]
             raise NameError(f"name '{node.id}' is not defined")
         elif isinstance(node, ast.Attribute):
+            if node.attr.startswith('__'):
+                raise AttributeError(f"access to attribute '{node.attr}' is not allowed")
             value = self._safe_eval_ast(node.value, context)
             return getattr(value, node.attr)
         elif isinstance(node, ast.BinOp):
@@ -377,10 +375,17 @@ class HybridWorkflowExecutor:
                 left = right
             return True
         elif isinstance(node, ast.BoolOp):
-            values = [self._safe_eval_ast(value, context) for value in node.values]
             if isinstance(node.op, ast.And):
-                return all(values)
+                for value in node.values:
+                    if not self._safe_eval_ast(value, context):
+                        return False
+                return True
             elif isinstance(node.op, ast.Or):
-                return any(values)
+                for value in node.values:
+                    if self._safe_eval_ast(value, context):
+                        return True
+                return False
+            else:
+                raise TypeError(f"unsupported boolean operator: {type(node.op)}")
         else:
             raise TypeError(f"unsupported node type: {type(node)}")

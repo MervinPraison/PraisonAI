@@ -881,7 +881,7 @@ def calculator(expression: str) -> str:
         tree = ast.parse(expression.strip(), mode='eval')
         result = _eval_node(tree.body)
         return str(result)
-    except (ValueError, SyntaxError, TypeError, ZeroDivisionError) as e:
+    except (ValueError, SyntaxError, TypeError, ZeroDivisionError, KeyError) as e:
         return f"Error: {e}"
 
 # Create agent with tool
