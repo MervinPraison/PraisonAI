@@ -2,11 +2,14 @@ name: Auto PR Comment
 
 # Sequential chain: Wait for first reviewer to finish, THEN trigger Copilot
 # Triggers when Coderabbit OR Qodo posts their review (whichever first)
+# Also triggers directly for bot-authored PRs (CodeRabbit/Qodo skip bot PRs)
 on:
   issue_comment:
     types: [created]
   pull_request_review:
     types: [submitted]
+  pull_request:
+    types: [opened]
 
 jobs:
   # Trigger @copilot AFTER Coderabbit posts its review summary
@@ -78,3 +81,43 @@ jobs:
               repo: context.repo.repo,
               body: '@copilot Do a thorough review of this PR. Read ALL existing reviewer comments above first.\n\nReview areas:\n1. **Bloat check**: Are changes minimal and focused?\n2. **Security**: Any hardcoded secrets, unsafe eval/exec, missing input validation?\n3. **Performance**: Any module-level heavy imports? Hot-path regressions?\n4. **Tests**: Are tests included? Do they cover the changes adequately?\n5. **Backward compat**: Any public API changes without deprecation?\n6. **Code quality**: DRY violations, naming conventions, error handling?\n7. Suggest specific improvements with code examples where possible'
             })
+
+  # Direct trigger for bot-authored PRs (CodeRabbit/Qodo skip bot PRs by default)
+  # Triggers @coderabbitai, Qodo /review, AND @copilot directly
+  bot-pr-review-chain:
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.action == 'opened' &&
+      github.event.pull_request.user.login == 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Trigger full review chain for bot PR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request.number;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            // Trigger CodeRabbit
+            await github.rest.issues.createComment({
+              issue_number: pr, owner, repo,
+              body: '@coderabbitai review'
+            });
+
+            // Trigger Qodo
+            await github.rest.issues.createComment({
+              issue_number: pr, owner, repo,
+              body: '/review'
+            });
+
+            // Trigger Copilot directly (don't wait for CodeRabbit/Qodo)
+            await github.rest.issues.createComment({
+              issue_number: pr, owner, repo,
+              body: '@copilot Do a thorough review of this PR.\n\nReview areas:\n1. **Bloat check**: Are changes minimal and focused?\n2. **Security**: Any hardcoded secrets, unsafe eval/exec, missing input validation?\n3. **Performance**: Any module-level heavy imports? Hot-path regressions?\n4. **Tests**: Are tests included? Do they cover the changes adequately?\n5. **Backward compat**: Any public API changes without deprecation?\n6. **Code quality**: DRY violations, naming conventions, error handling?\n7. Suggest specific improvements with code examples where possible'
+            });
+
+            console.log(`Triggered CodeRabbit, Qodo, and Copilot for bot PR #${pr}`);
