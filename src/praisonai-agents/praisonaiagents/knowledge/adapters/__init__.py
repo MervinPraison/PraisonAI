@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 # Lazy loading for adapters
 _LAZY_IMPORTS = {
     "Mem0Adapter": ("praisonaiagents.knowledge.adapters.mem0_adapter", "Mem0Adapter"),
+    "MongoDBKnowledgeAdapter": ("praisonaiagents.knowledge.adapters.mongodb_adapter", "MongoDBKnowledgeAdapter"),
 }
 
 
@@ -35,4 +36,5 @@ def __dir__():
 
 __all__ = [
     "Mem0Adapter",
+    "MongoDBKnowledgeAdapter",
 ]

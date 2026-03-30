@@ -228,6 +228,80 @@ class ContextEngineerProtocol(Protocol):
         ...
 
 
+@runtime_checkable
+class HttpLauncherProtocol(Protocol):
+    """
+    Protocol for HTTP server launchers.
+    
+    This defines the interface for launching HTTP servers for agents.
+    The core SDK defines the protocol, while heavy implementations
+    (FastAPI, uvicorn) live in the wrapper layer.
+    
+    Example:
+        ```python
+        class FastAPILauncher:
+            def launch(self, agent, path="/", port=8000, host="0.0.0.0", debug=False):
+                # FastAPI implementation
+                pass
+        
+        # In Agent class
+        launcher: HttpLauncherProtocol = get_http_launcher()
+        launcher.launch(self, path, port, host, debug)
+        ```
+    """
+    
+    def launch(
+        self,
+        agent: Any,
+        path: str = "/",
+        port: int = 8000,
+        host: str = "0.0.0.0",
+        debug: bool = False
+    ) -> None:
+        """
+        Launch HTTP server for the agent.
+        
+        Args:
+            agent: The agent instance to serve
+            path: API endpoint path (default: '/')
+            port: Server port (default: 8000)
+            host: Server host (default: '0.0.0.0')
+            debug: Enable debug mode (default: False)
+        """
+        ...
+
+
+@runtime_checkable
+class McpLauncherProtocol(Protocol):
+    """
+    Protocol for MCP (Model Context Protocol) server launchers.
+    
+    This defines the interface for launching MCP servers for agents.
+    The core SDK defines the protocol, while heavy implementations
+    (FastMCP, uvicorn) live in the wrapper layer.
+    """
+    
+    def launch(
+        self,
+        agent: Any,
+        path: str = "/",
+        port: int = 8000,
+        host: str = "0.0.0.0",
+        debug: bool = False
+    ) -> None:
+        """
+        Launch MCP server for the agent.
+        
+        Args:
+            agent: The agent instance to serve
+            path: Base path for MCP endpoints
+            port: Server port (default: 8000)
+            host: Server host (default: '0.0.0.0')
+            debug: Enable debug mode (default: False)
+        """
+        ...
+
+
 __all__ = [
     'AgentProtocol',
     'RunnableAgentProtocol', 
@@ -235,4 +309,6 @@ __all__ = [
     'MemoryAwareAgentProtocol',
     'FullAgentProtocol',
     'ContextEngineerProtocol',
+    'HttpLauncherProtocol',
+    'McpLauncherProtocol',
 ]
