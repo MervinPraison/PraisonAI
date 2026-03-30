@@ -22,6 +22,12 @@ inputs:
       To enable observability with Google Cloud, include:
       {"telemetry": {"enabled": true, "target": "gcp"}, "sandbox": false}
     required: false
+  model:
+    description: |
+      The Gemini model to use. Options: gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-lite.
+      Use flash-lite for highest free-tier quota (1,000 RPD).
+    required: false
+    default: 'gemini-2.5-flash'
   version:
     description: |
       The version of @google/gemini-cli to execute.
@@ -70,10 +76,11 @@ runs:
 
     - name: Run Gemini CLI
       run: |
-        gemini --yolo --prompt "$PROMPT"
+        gemini --yolo --model "$GEMINI_MODEL" --prompt "$PROMPT"
       shell: bash
       env:
         GEMINI_API_KEY: ${{ inputs.GEMINI_API_KEY }}
+        GEMINI_MODEL: ${{ inputs.model }}
         PROMPT: ${{ inputs.prompt }}
 
 branding:
