@@ -78,6 +78,18 @@ __all__ = [
     "CONTEXT_PRESETS",
     "AUTONOMY_PRESETS",
     "CACHING_PRESETS",
+    # Unified config resolver
+    "get_config",
+    "set_config", 
+    "has_config",
+    "list_config_keys",
+    "validate_config",
+    "ConfigRegistry",
+    "ConfigScope",
+    "ConfigType",
+    "ConfigEntry",
+    "getenv_cached",
+    "clear_env_cache",
 ]
 
 # Module mapping for lazy loading
@@ -139,6 +151,18 @@ _MODULE_MAP = {
     "CONTEXT_PRESETS": "presets",
     "AUTONOMY_PRESETS": "presets",
     "CACHING_PRESETS": "presets",
+    # resolver
+    "get_config": "resolver",
+    "set_config": "resolver", 
+    "has_config": "resolver",
+    "list_config_keys": "resolver",
+    "validate_config": "resolver",
+    "ConfigRegistry": "resolver",
+    "ConfigScope": "resolver",
+    "ConfigType": "resolver",
+    "ConfigEntry": "resolver",
+    "getenv_cached": "resolver",
+    "clear_env_cache": "resolver",
 }
 
 
