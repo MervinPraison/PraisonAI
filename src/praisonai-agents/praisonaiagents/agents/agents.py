@@ -1616,7 +1616,7 @@ Context:
             None
         """
         if protocol == "http":
-            global _agents_server_started, _agents_registered_endpoints, _agents_shared_apps, _agents_lock
+            global _agents_server_started, _agents_registered_endpoints, _agents_shared_apps
             
             if not self.agents:
                 logging.warning("No agents to launch for HTTP mode. Add agents to the Agents instance first.")
@@ -1663,20 +1663,32 @@ Context:
                     # Add a root endpoint with a welcome message
                     @_agents_shared_apps[port].get("/")
                     async def root():
-                        with _agents_lock:
-                            return {
-                                "message": f"Welcome to PraisonAI Agents API on port {port}. See /docs for usage.",
-                                "endpoints": list(_agents_registered_endpoints[port].keys())
-                            }
+                        # Read endpoints in executor to avoid blocking the event loop
+                        import concurrent.futures
+                        loop = asyncio.get_event_loop()
+                        endpoints = await loop.run_in_executor(
+                            None,
+                            lambda: list(_agents_registered_endpoints[port].keys())
+                        )
+                        return {
+                            "message": f"Welcome to PraisonAI Agents API on port {port}. See /docs for usage.",
+                            "endpoints": endpoints
+                        }
                     
                     # Add healthcheck endpoint
                     @_agents_shared_apps[port].get("/health")
                     async def healthcheck():
-                        with _agents_lock:
-                            return {
-                                "status": "ok", 
-                                "endpoints": list(_agents_registered_endpoints[port].keys())
-                            }
+                        # Read endpoints in executor to avoid blocking the event loop
+                        import concurrent.futures
+                        loop = asyncio.get_event_loop()
+                        endpoints = await loop.run_in_executor(
+                            None,
+                            lambda: list(_agents_registered_endpoints[port].keys())
+                        )
+                        return {
+                            "status": "ok", 
+                            "endpoints": endpoints
+                        }
             
             # Normalize path to ensure it starts with /
             if not path.startswith('/'):

@@ -1626,7 +1626,7 @@ Your Goal: {self.goal}
         if autonomy_level == "full_auto" and (approval is False or approval is None):
             from ..approval.backends import AutoApproveBackend
             self._approval_backend = AutoApproveBackend()
-        # Pending approvals for async (non-blocking) mode (protected by lock for thread safety)
+        # Pending approvals for async (non-blocking) mode (protected by asyncio.Lock for event-loop safety)
         self._pending_approvals = {}
         self._pending_approvals_lock = asyncio.Lock()
         
@@ -5067,17 +5067,24 @@ Your Goal: {self.goal}"""
                     else:
                         # Handle async context properly - don't use asyncio.run() in running loop
                         try:
-                            # Check if we're already in an event loop
-                            loop = asyncio.get_running_loop()
-                            # If we're here, we're in an async context - can't use asyncio.run()
-                            # Create a task and run it synchronously (this is a sync method)
-                            import concurrent.futures
-                            with concurrent.futures.ThreadPoolExecutor() as executor:
-                                future = executor.submit(asyncio.run, backend.request_approval(request))
-                                decision = future.result()
+                            asyncio.get_running_loop()
                         except RuntimeError:
                             # No running loop, safe to use asyncio.run()
                             decision = asyncio.run(backend.request_approval(request))
+                        else:
+                            # We're in an async context - can't use asyncio.run()
+                            # Create a task and run it synchronously (this is a sync method)
+                            import concurrent.futures
+                            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                                future = executor.submit(
+                                    lambda: asyncio.run(backend.request_approval(request))
+                                )
+                                # Apply timeout if configured
+                                timeout = cfg_timeout if cfg_timeout and cfg_timeout > 0 else None
+                                try:
+                                    decision = future.result(timeout=timeout)
+                                except concurrent.futures.TimeoutError:
+                                    raise TimeoutError(f"Tool approval timed out after {timeout}s")
                 finally:
                     if orig_timeout is not None and hasattr(backend, '_timeout'):
                         backend._timeout = orig_timeout
@@ -8404,8 +8411,10 @@ Write the complete compiled report:"""
         # Execute approved tools outside the lock to prevent deadlock
         for tid, info, decision in approved_for_execution:
             try:
-                tool_result = await self.execute_tool_async(
-                    info["function_name"], info["arguments"],
+                # Use approved arguments and bypass re-approval
+                approved_args = decision.modified_args or info["arguments"]
+                tool_result = await self._execute_tool_async_impl(
+                    info["function_name"], approved_args, skip_approval=True
                 )
                 results[tid] = {
                     "status": "approved_and_executed",
@@ -8432,7 +8441,7 @@ Write the complete compiled report:"""
         return len(self._pending_approvals)
     
     async def pending_approval_count_async(self) -> int:
-        """Thread-safe version of pending_approval_count."""
+        """Event-loop-safe version of pending_approval_count. Only safe when called from the same event loop."""
         async with self._pending_approvals_lock:
             return len(self._pending_approvals)
 
@@ -8462,19 +8471,24 @@ Write the complete compiled report:"""
 
     async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any]) -> Any:
         """Async version of execute_tool"""
+        return await self._execute_tool_async_impl(function_name, arguments, skip_approval=False)
+
+    async def _execute_tool_async_impl(self, function_name: str, arguments: Dict[str, Any], skip_approval: bool = False) -> Any:
+        """Internal async tool execution implementation with optional approval bypass."""
         try:
             logging.info(f"Executing async tool: {function_name} with arguments: {arguments}")
             
             # Check if approval is required for this tool (protocol-driven)
-            try:
-                result = await self._check_tool_approval_async(function_name, arguments)
-                if isinstance(result, dict):
-                    return result  # Error dict
-                _, arguments = result
-            except Exception as e:
-                error_msg = f"Error during approval process: {str(e)}"
-                logging.error(error_msg)
-                return {"error": error_msg, "approval_error": True}
+            if not skip_approval:
+                try:
+                    result = await self._check_tool_approval_async(function_name, arguments)
+                    if isinstance(result, dict):
+                        return result  # Error dict
+                    _, arguments = result
+                except Exception as e:
+                    error_msg = f"Error during approval process: {str(e)}"
+                    logging.error(error_msg)
+                    return {"error": error_msg, "approval_error": True}
             
             # Try to find the function in the agent's tools list first
             func = None

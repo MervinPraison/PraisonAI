@@ -250,7 +250,6 @@ class ToolRegistry:
 
 
 # Global registry instance (protected by _registry_lock for thread safety)
-import threading
 _registry_lock = threading.Lock()
 _global_registry: Optional[ToolRegistry] = None
 
@@ -314,14 +313,7 @@ def remove_tool(name: str) -> bool:
     Returns:
         True if tool was found and removed, False otherwise
     """
-    registry = get_registry()
-    if name in registry._tools:
-        del registry._tools[name]
-        return True
-    if name in registry._functions:
-        del registry._functions[name]
-        return True
-    return False
+    return get_registry().unregister(name)
 
 
 def list_tools() -> List[str]:
@@ -330,8 +322,7 @@ def list_tools() -> List[str]:
     Returns:
         List of tool names
     """
-    registry = get_registry()
-    return list(registry._tools.keys()) + list(registry._functions.keys())
+    return get_registry().list_tools()
 
 
 def discover_plugins() -> int:
