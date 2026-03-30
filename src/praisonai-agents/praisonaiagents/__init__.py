@@ -59,7 +59,7 @@ _logging.configure_root_logger()
 # Import configuration (lightweight, no heavy deps)
 from . import _config
 
-# Note: config, tools, db, obs, knowledge and mcp are lazy-loaded via __getattr__ due to heavy deps
+# Note: tools, config, memory, workflows, db, obs, knowledge and mcp are lazy-loaded via __getattr__ due to heavy deps
 
 # Embedding API - LAZY LOADED via __getattr__ for performance
 # Supports: embedding, embeddings, aembedding, aembeddings, EmbeddingResult, get_dimensions
@@ -506,10 +506,6 @@ def _custom_handler(name, cache):
         cache['Agents'] = value
         return value
     
-    # This handler would be for deprecated symbols - Task is already in _LAZY_IMPORTS
-    # No deprecated task symbols to handle currently
-    
-    
     # Module imports (return the module itself)
     if name == 'tools':
         import importlib
@@ -546,8 +542,9 @@ def _custom_handler(name, cache):
 # These need to be set after _LAZY_IMPORTS is defined but before __getattr__ is created
 def _get_embedding_func():
     """Lazy getter for embedding function."""
-    from .embedding.embed import embedding
-    return embedding
+    # Import with alias to avoid overwriting the module proxy
+    from .embedding.embed import embedding as _embedding_func
+    return _embedding_func
 
 # Create lazy properties that override the submodule
 class _EmbeddingProxy:
@@ -591,7 +588,7 @@ __getattr__ = create_lazy_getattr_with_fallback(
     mapping=_LAZY_IMPORTS,
     module_name=__name__,
     cache=_lazy_cache,
-    fallback_modules=[],  # Removed heavy modules to prevent imports on typos - all access via _LAZY_IMPORTS or _custom_handler
+    fallback_modules=[],  # Note: 'embedding' excluded to avoid conflict with embedding() function
     custom_handler=_custom_handler
 )
 
