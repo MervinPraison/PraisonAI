@@ -702,6 +702,10 @@ class ExecutionConfig:
     code_execution: bool = False
     code_mode: str = "safe"  # "safe" or "unsafe"
     
+    # Code execution sandbox mode - "sandbox" (default) uses subprocess isolation
+    # "direct" runs in current process (legacy, less secure)
+    code_sandbox_mode: str = "sandbox"  # "sandbox" or "direct"
+    
     # Rate limiter instance (consolidated from standalone rate_limiter param)
     rate_limiter: Optional[Any] = None
 
@@ -730,6 +734,7 @@ class ExecutionConfig:
             "max_retry_limit": self.max_retry_limit,
             "code_execution": self.code_execution,
             "code_mode": self.code_mode,
+            "code_sandbox_mode": self.code_sandbox_mode,
             "context_compaction": self.context_compaction,
             "max_context_tokens": self.max_context_tokens,
             "max_budget": self.max_budget,
