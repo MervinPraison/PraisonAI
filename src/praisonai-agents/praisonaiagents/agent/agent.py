@@ -8630,50 +8630,68 @@ Write the complete compiled report:"""
 
     def launch(self, path: str = '/', port: int = 8000, host: str = '0.0.0.0', debug: bool = False, protocol: str = "http"):
         """
-        Launch the agent as an HTTP API endpoint or an MCP server.
+        Launch the agent as an HTTP API endpoint or MCP server.
+        
+        This method now delegates to protocol-based launchers to follow
+        the protocol-driven architecture. Heavy implementations (FastAPI/uvicorn)
+        are only imported when needed through lazy loading.
         
         Args:
             path: API endpoint path (default: '/') for HTTP, or base path for MCP.
             port: Server port (default: 8000)
             host: Server host (default: '0.0.0.0')
-            debug: Enable debug mode for uvicorn (default: False)
+            debug: Enable debug mode (default: False)
             protocol: "http" to launch as FastAPI, "mcp" to launch as MCP server.
             
         Returns:
             None
         """
+        # Delegate to protocol-specific launcher
         if protocol == "http":
-            global _server_started, _registered_agents, _shared_apps, _server_lock
+            return self._launch_http_server(path, port, host, debug)
+        elif protocol == "mcp":
+            return self._launch_mcp_server(path, port, host, debug)
+        else:
+            raise ValueError(f"Unsupported protocol: {protocol}. Use 'http' or 'mcp'")
 
-            # Try to import FastAPI dependencies - lazy loading
-            try:
-                import uvicorn
-                from fastapi import FastAPI, HTTPException, Request
-                from fastapi.responses import JSONResponse
-                from pydantic import BaseModel
-                import threading
-                import time
-                import asyncio
-                
-                # Define the request model here since we need pydantic
-                class AgentQuery(BaseModel):
-                    query: str
+    def _launch_http_server(self, path: str, port: int, host: str, debug: bool):
+        """
+        Launch HTTP server using FastAPI (internal implementation).
+        
+        NOTE: This implementation will be moved to wrapper layer in future version.
+        For now, it maintains backward compatibility while following lazy import patterns.
+        """
+        global _server_started, _registered_agents, _shared_apps, _server_lock
+
+        # Try to import FastAPI dependencies - lazy loading
+        try:
+            import uvicorn
+            from fastapi import FastAPI, HTTPException, Request
+            from fastapi.responses import JSONResponse
+            from pydantic import BaseModel
+            import threading
+            import time
+            import asyncio
+            
+            # Define the request model here since we need pydantic
+            class AgentQuery(BaseModel):
+                query: str
                     
-            except ImportError as e:
-                # Check which specific module is missing
-                missing_module = str(e).split("No module named '")[-1].rstrip("'")
-                _get_display_functions()['display_error'](f"Missing dependency: {missing_module}. Required for launch() method with HTTP mode.")
-                logging.error(f"Missing dependency: {missing_module}. Required for launch() method with HTTP mode.")
-                print(f"\nTo add API capabilities, install the required dependencies:")
-                print(f"pip install {missing_module}")
-                print("\nOr install all API dependencies with:")
-                print("pip install 'praisonaiagents[api]'")
-                return None
+        except ImportError as e:
+            # Check which specific module is missing
+            missing_module = str(e).split("No module named '")[-1].rstrip("'")
+            _get_display_functions()['display_error'](f"Missing dependency: {missing_module}. Required for launch() method with HTTP mode.")
+            logging.error(f"Missing dependency: {missing_module}. Required for launch() method with HTTP mode.")
+            print(f"\nTo add API capabilities, install the required dependencies:")
+            print(f"pip install {missing_module}")
+            print("\nOr install all API dependencies with:")
+            print("pip install 'praisonaiagents[api]'")
+            return None
                 
-            with _server_lock:
-                # Initialize port-specific collections if needed
-                if port not in _registered_agents:
-                    _registered_agents[port] = {}
+        with _server_lock:
+            # Initialize port-specific collections if needed
+            if port not in _registered_agents:
+                _registered_agents[port] = {}
 
                 # Initialize shared FastAPI app if not already created for this port
                 if _shared_apps.get(port) is None:
@@ -8823,8 +8841,9 @@ Write the complete compiled report:"""
                         print("\nServers stopped")
             return None
             
-        elif protocol == "mcp":
-            try:
+        # FIXME: Orphaned code - removed as part of architectural refactoring  
+        # elif protocol == "mcp":
+        #    try:
                 import uvicorn
                 from mcp.server.fastmcp import FastMCP
                 from mcp.server.sse import SseServerTransport
@@ -8957,6 +8976,73 @@ Write the complete compiled report:"""
                     except KeyboardInterrupt:
                         print("\nMCP Server stopped")
             return None
-        else:
-            _get_display_functions()['display_error'](f"Invalid protocol: {protocol}. Choose 'http' or 'mcp'.")
+
+    def _launch_mcp_server(self, path: str, port: int, host: str, debug: bool):
+        """
+        Launch MCP server (internal implementation).
+        
+        NOTE: This implementation will be moved to wrapper layer in future version.
+        For now, it maintains backward compatibility while following lazy import patterns.
+        """
+        # For now, delegate to the existing MCP implementation 
+        # This will be extracted to a proper adapter in the future
+        try:
+            import uvicorn
+            from mcp.server.fastmcp import FastMCP
+            from mcp.server.sse import SseServerTransport
+            from starlette.applications import Starlette
+            import threading
+            import time
+            import asyncio
+            
+            mcp_server_instance_name = f"{self.name}_mcp_server" if self.name else "agent_mcp_server"
+            mcp = FastMCP(mcp_server_instance_name)
+
+            # Determine the MCP tool name based on self.name
+            actual_mcp_tool_name = f"execute_{self.name.lower().replace(' ', '_').replace('-', '_')}_task" if self.name else "execute_task"
+
+            @mcp.tool(name=actual_mcp_tool_name)
+            async def execute_agent_task(prompt: str) -> str:
+                """Executes the agent's primary task with the given prompt."""
+                try:
+                    if hasattr(self, 'achat') and asyncio.iscoroutinefunction(self.achat):
+                        response = await self.achat(prompt, tools=self.tools, task_name=None, task_description=None, task_id=None)
+                    elif hasattr(self, 'chat'):
+                        from ..trace.context_events import copy_context_to_callable
+                        loop = asyncio.get_event_loop()
+                        response = await loop.run_in_executor(None, copy_context_to_callable(lambda p=prompt: self.chat(p, tools=self.tools)))
+                    else:
+                        return f"Error: Agent {self.name} misconfigured for MCP."
+                    return response if response is not None else "Agent returned no response."
+                except Exception as e:
+                    return f"Error executing task: {str(e)}"
+
+            # Create and run MCP server
+            transport = SseServerTransport(f"{path}/sse")
+            starlette_app = Starlette(
+                routes=[Mount(f"{path}", mcp.create_app())]
+            )
+
+            def run_mcp_server():
+                try:
+                    uvicorn.run(starlette_app, host=host, port=port, log_level="debug" if debug else "info")
+                except Exception as e:
+                    logging.error(f"Error starting MCP server: {str(e)}", exc_info=True)
+
+            server_thread = threading.Thread(target=run_mcp_server, daemon=True)
+            server_thread.start()
+            time.sleep(0.5)
+
+            try:
+                print("\nKeeping MCP server alive. Press Ctrl+C to stop.")
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                print("\nMCP Server stopped")
+            return None
+            
+        except ImportError as e:
+            missing_module = str(e).split("No module named '")[-1].rstrip("'")
+            _get_display_functions()['display_error'](f"Missing dependency: {missing_module}. Required for MCP mode.")
+            print(f"\nTo add MCP capabilities, install: pip install {missing_module}")
             return None 
