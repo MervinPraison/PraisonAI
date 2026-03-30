@@ -27,6 +27,8 @@ jobs:
         fetch-depth: 0
 
     - name: Checkout PraisonAIDocs
+      id: checkout_docs
+      continue-on-error: true
       uses: actions/checkout@v4
       with:
         repository: MervinPraison/PraisonAIDocs
@@ -43,6 +45,7 @@ jobs:
         pip install pyyaml
 
     - name: Generate docs parity trackers
+      if: steps.checkout_docs.outcome == 'success'
       run: |
         cd $GITHUB_WORKSPACE
         python3 src/praisonai/scripts/generate_docs_parity.py --docs-root PraisonAIDocs/docs --copy-docs
@@ -70,7 +73,7 @@ jobs:
         commit_author: "MervinPraison <praison.ms@gmail.com>"
 
     - name: Commit and push changes to PraisonAIDocs
-      if: steps.check_changes.outputs.changes == 'true'
+      if: steps.check_changes.outputs.changes == 'true' && steps.checkout_docs.outcome == 'success'
       run: |
         cd PraisonAIDocs
         git config user.name "MervinPraison"
