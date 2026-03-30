@@ -648,42 +648,55 @@ class Agent:
         # DEPRECATION WARNINGS for params consolidated into configs
         # Old params still work but emit warnings pointing to new API
         # ============================================================
-        import warnings as _warnings
+        from ..utils.deprecation import warn_deprecated_param
         
         if allow_delegation:
-            _warnings.warn(
-                "Parameter 'allow_delegation' is deprecated. Use 'handoffs=[other_agent]' instead.",
-                DeprecationWarning, stacklevel=2,
+            warn_deprecated_param(
+                "allow_delegation",
+                since="1.0.0",
+                removal="2.0.0",
+                alternative="use 'handoffs=[other_agent]' instead",
+                stacklevel=3
             )
         if allow_code_execution:
-            _warnings.warn(
-                "Parameter 'allow_code_execution' is deprecated. "
-                "Use 'execution=ExecutionConfig(code_execution=True)' instead.",
-                DeprecationWarning, stacklevel=2,
+            warn_deprecated_param(
+                "allow_code_execution", 
+                since="1.0.0",
+                removal="2.0.0",
+                alternative="use 'execution=ExecutionConfig(code_execution=True)' instead",
+                stacklevel=3
             )
         if code_execution_mode != "safe":
-            _warnings.warn(
-                "Parameter 'code_execution_mode' is deprecated. "
-                "Use 'execution=ExecutionConfig(code_mode=\"unsafe\")' instead.",
-                DeprecationWarning, stacklevel=2,
+            warn_deprecated_param(
+                "code_execution_mode",
+                since="1.0.0", 
+                removal="2.0.0",
+                alternative='use \'execution=ExecutionConfig(code_mode="unsafe")\' instead',
+                stacklevel=3
             )
         if auto_save is not None:
-            _warnings.warn(
-                "Parameter 'auto_save' is deprecated. "
-                "Use 'memory=MemoryConfig(auto_save=\"name\")' instead.",
-                DeprecationWarning, stacklevel=2,
+            warn_deprecated_param(
+                "auto_save",
+                since="1.0.0",
+                removal="2.0.0", 
+                alternative='use \'memory=MemoryConfig(auto_save="name")\' instead',
+                stacklevel=3
             )
         if rate_limiter is not None:
-            _warnings.warn(
-                "Parameter 'rate_limiter' is deprecated. "
-                "Use 'execution=ExecutionConfig(rate_limiter=obj)' instead.",
-                DeprecationWarning, stacklevel=2,
+            warn_deprecated_param(
+                "rate_limiter",
+                since="1.0.0",
+                removal="2.0.0",
+                alternative="use 'execution=ExecutionConfig(rate_limiter=obj)' instead",
+                stacklevel=3
             )
         if verification_hooks is not None:
-            _warnings.warn(
-                "Parameter 'verification_hooks' is deprecated. "
-                "Use 'autonomy=AutonomyConfig(verification_hooks=[...])' instead.",
-                DeprecationWarning, stacklevel=2,
+            warn_deprecated_param(
+                "verification_hooks",
+                since="1.0.0", 
+                removal="2.0.0",
+                alternative="use 'autonomy=AutonomyConfig(verification_hooks=[...])' instead",
+                stacklevel=3
             )
 
         # ============================================================
@@ -1338,12 +1351,12 @@ class Agent:
         # Handle llm= deprecation: model= is the preferred parameter name
         # llm= still works but shows deprecation warning
         if llm is not None and model is None:
-            import warnings
-            warnings.warn(
-                "Parameter 'llm' is deprecated, use 'model' instead. "
-                "Example: Agent(model='gpt-4o-mini') instead of Agent(llm='gpt-4o-mini')",
-                DeprecationWarning,
-                stacklevel=2
+            warn_deprecated_param(
+                "llm",
+                since="1.0.0",
+                removal="2.0.0", 
+                alternative="use 'model' instead. Example: Agent(model='gpt-4o-mini')",
+                stacklevel=3
             )
         # model= is the preferred parameter (no warning)
         if model is not None:

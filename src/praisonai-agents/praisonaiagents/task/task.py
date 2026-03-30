@@ -167,12 +167,13 @@ class Task:
         self.output_pydantic = output_pydantic
         # Handle callback/on_task_complete: on_task_complete is canonical, callback is deprecated
         if callback is not None and on_task_complete is None:
-            import warnings
-            warnings.warn(
-                "Parameter 'callback' is deprecated, use 'on_task_complete' instead. "
-                "Example: Task(on_task_complete=my_fn) instead of Task(callback=my_fn)",
-                DeprecationWarning,
-                stacklevel=2
+            from ..utils.deprecation import warn_deprecated_param
+            warn_deprecated_param(
+                "callback",
+                since="1.0.0",
+                removal="2.0.0",
+                alternative="use 'on_task_complete' instead. Example: Task(on_task_complete=my_fn)",
+                stacklevel=3
             )
             self.callback = callback
         elif callback is not None and on_task_complete is not None:
@@ -198,12 +199,13 @@ class Task:
         self.retain_full_context = retain_full_context
         # Handle guardrail/guardrails: guardrails (plural) is canonical, guardrail (singular) is deprecated
         if guardrail is not None and guardrails is None:
-            import warnings
-            warnings.warn(
-                "Parameter 'guardrail' is deprecated, use 'guardrails' instead. "
-                "Example: Task(guardrails=my_fn) instead of Task(guardrail=my_fn)",
-                DeprecationWarning,
-                stacklevel=2
+            from ..utils.deprecation import warn_deprecated_param
+            warn_deprecated_param(
+                "guardrail",
+                since="1.0.0", 
+                removal="2.0.0",
+                alternative="use 'guardrails' instead. Example: Task(guardrails=my_fn)",
+                stacklevel=3
             )
         # guardrails takes precedence over guardrail
         self.guardrail = guardrails if guardrails is not None else guardrail

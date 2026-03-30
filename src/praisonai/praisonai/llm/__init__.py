@@ -98,14 +98,24 @@ def embedding(text, model="text-embedding-3-small", **kwargs):
     Note:
         Requires litellm. Install with: pip install praisonai[llm]
     """
-    import warnings
-    warnings.warn(
-        "praisonai.llm.embedding() is deprecated. "
-        "Use 'from praisonai import embed' or 'from praisonai.capabilities import embed' instead. "
-        "The new embed() returns EmbeddingResult with metadata.",
-        DeprecationWarning,
-        stacklevel=2
-    )
+    try:
+        from praisonaiagents.utils.deprecation import warn_deprecated_param
+        warn_deprecated_param(
+            "praisonai.llm.embedding()",
+            since="1.0.0",
+            removal="2.0.0",
+            alternative="use 'from praisonai import embed' or 'from praisonai.capabilities import embed' instead",
+            details="The new embed() returns EmbeddingResult with metadata",
+            stacklevel=3
+        )
+    except ImportError:
+        # Fallback if deprecation module not available
+        import warnings
+        warnings.warn(
+            "praisonai.llm.embedding() is deprecated. Use 'from praisonai import embed' instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
     
     try:
         import litellm

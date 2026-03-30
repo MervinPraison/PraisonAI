@@ -11,13 +11,23 @@ import asyncio
 import logging
 
 # Module-level deprecation warning
-import warnings as _deprecation_warnings
-_deprecation_warnings.warn(
-    "BotApprovalBackend is deprecated. Use platform-specific approval backends "
-    "(SlackApproval, TelegramApproval, DiscordApproval, WebhookApproval, HTTPApproval) instead.",
-    DeprecationWarning,
-    stacklevel=2
-)
+try:
+    from praisonaiagents.utils.deprecation import warn_deprecated_param
+    warn_deprecated_param(
+        "BotApprovalBackend module",
+        since="1.0.0",
+        removal="2.0.0",
+        alternative="use platform-specific approval backends (SlackApproval, TelegramApproval, DiscordApproval, WebhookApproval, HTTPApproval) instead",
+        stacklevel=2
+    )
+except ImportError:
+    # Fallback if deprecation module not available
+    import warnings as _deprecation_warnings
+    _deprecation_warnings.warn(
+        "BotApprovalBackend is deprecated. Use platform-specific approval backends instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
 import time
 from typing import Any, Dict
 

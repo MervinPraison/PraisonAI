@@ -867,12 +867,13 @@ Provide a JSON with the structure:
         - Guardrails with validation feedback
         - Status tracking
         """
-        import warnings
-        warnings.warn(
-            "process='workflow' is deprecated. Use the Workflow class instead: "
-            "from praisonaiagents import Workflow; workflow = Workflow(steps=[...]); workflow.start()",
-            DeprecationWarning,
-            stacklevel=2
+        from ..utils.deprecation import warn_deprecated_param
+        warn_deprecated_param(
+            "process='workflow'",
+            since="1.0.0",
+            removal="2.0.0", 
+            alternative="use the Workflow class instead: from praisonaiagents import Workflow; workflow = Workflow(steps=[...]); workflow.start()",
+            stacklevel=3
         )
         current_iter = 0  # Track how many times we've looped
         # Build workflow relationships first

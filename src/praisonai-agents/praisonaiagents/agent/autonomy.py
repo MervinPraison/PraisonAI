@@ -215,23 +215,26 @@ class AutonomySignal(str, Enum):
     COMPLEX_KEYWORDS = "complex_keywords"
     
     def __init_subclass__(cls, **kwargs):
-        import warnings
-        warnings.warn(
-            "AutonomySignal is deprecated. Use EscalationSignal instead.",
-            DeprecationWarning,
-            stacklevel=2,
+        from ..utils.deprecation import warn_deprecated_param
+        warn_deprecated_param(
+            "AutonomySignal class",
+            since="1.0.0",
+            removal="2.0.0", 
+            alternative="use EscalationSignal from praisonaiagents.escalation.types instead",
+            stacklevel=3
         )
         super().__init_subclass__(**kwargs)
 
 
 def _warn_autonomy_signal():
     """Emit deprecation warning when AutonomySignal is accessed."""
-    import warnings
-    warnings.warn(
-        "AutonomySignal is deprecated. Use EscalationSignal from "
-        "praisonaiagents.escalation.types instead.",
-        DeprecationWarning,
-        stacklevel=3,
+    from ..utils.deprecation import warn_deprecated_param
+    warn_deprecated_param(
+        "AutonomySignal",
+        since="1.0.0",
+        removal="2.0.0",
+        alternative="use EscalationSignal from praisonaiagents.escalation.types instead",
+        stacklevel=4
     )
 
 
