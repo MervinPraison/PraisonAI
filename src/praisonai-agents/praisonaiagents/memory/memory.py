@@ -193,6 +193,13 @@ class Memory:
         # Thread-local storage for SQLite connections (thread-safe)
         self._local = threading.local()
         
+        # Write lock for serializing database modifications (thread-safe)
+        self._write_lock = threading.Lock()
+        
+        # Connection registry for cleanup across threads (use regular set with careful cleanup)
+        self._all_connections = set()
+        self._connection_lock = threading.Lock()  # Protect the connection registry
+        
         # Set logger level based on verbose
         if verbose >= 5:
             logger.setLevel(logging.INFO)
@@ -256,11 +263,21 @@ class Memory:
         if not hasattr(self._local, 'stm_conn') or self._local.stm_conn is None:
             self._local.stm_conn = sqlite3.connect(
                 self.short_db,
-                check_same_thread=False
+                check_same_thread=False,  # Allow cross-thread cleanup
+                timeout=30.0  # 30 second timeout for lock contention
             )
+            # Configure busy timeout for better contention handling
+            self._local.stm_conn.execute("PRAGMA busy_timeout=30000")  # 30 seconds
+            
             # Enable WAL mode for concurrent read/write without blocking
-            self._local.stm_conn.execute("PRAGMA journal_mode=WAL")
+            result = self._local.stm_conn.execute("PRAGMA journal_mode=WAL").fetchone()
+            if result and result[0].upper() != 'WAL':
+                logger.warning(f"WAL mode not enabled for STM, got: {result[0]}")
             self._local.stm_conn.commit()
+            
+            # Register connection for cleanup
+            with self._connection_lock:
+                self._all_connections.add(self._local.stm_conn)
         return self._local.stm_conn
 
     def _get_ltm_conn(self):
@@ -268,11 +285,21 @@ class Memory:
         if not hasattr(self._local, 'ltm_conn') or self._local.ltm_conn is None:
             self._local.ltm_conn = sqlite3.connect(
                 self.long_db,
-                check_same_thread=False
+                check_same_thread=False,  # Allow cross-thread cleanup
+                timeout=30.0  # 30 second timeout for lock contention
             )
+            # Configure busy timeout for better contention handling
+            self._local.ltm_conn.execute("PRAGMA busy_timeout=30000")  # 30 seconds
+            
             # Enable WAL mode for concurrent read/write without blocking
-            self._local.ltm_conn.execute("PRAGMA journal_mode=WAL")
+            result = self._local.ltm_conn.execute("PRAGMA journal_mode=WAL").fetchone()
+            if result and result[0].upper() != 'WAL':
+                logger.warning(f"WAL mode not enabled for LTM, got: {result[0]}")
             self._local.ltm_conn.commit()
+            
+            # Register connection for cleanup
+            with self._connection_lock:
+                self._all_connections.add(self._local.ltm_conn)
         return self._local.ltm_conn
 
     def _log_verbose(self, msg: str, level: int = logging.INFO):
@@ -605,14 +632,15 @@ class Memory:
                 logger.error(f"Failed to store in MongoDB short-term memory: {e}")
                 raise
 
-        # Existing SQLite store logic
+        # Existing SQLite store logic (with write lock for concurrency safety)
         try:
             conn = self._get_stm_conn()
-            conn.execute(
-                "INSERT INTO short_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
-                (ident, text, json.dumps(metadata), created_at)
-            )
-            conn.commit()
+            with self._write_lock:  # Serialize write operations
+                conn.execute(
+                    "INSERT INTO short_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
+                    (ident, text, json.dumps(metadata), created_at)
+                )
+                conn.commit()
             logger.info(f"Successfully stored in SQLite short-term memory with ID: {ident}")
         except Exception as e:
             logger.error(f"Failed to store in SQLite short-term memory: {e}")
@@ -764,8 +792,9 @@ class Memory:
     def reset_short_term(self):
         """Completely clears short-term memory."""
         conn = self._get_stm_conn()
-        conn.execute("DELETE FROM short_mem")
-        conn.commit()
+        with self._write_lock:  # Serialize write operations
+            conn.execute("DELETE FROM short_mem")
+            conn.commit()
 
     # -------------------------------------------------------------------------
     #                           Long-Term Methods
@@ -836,14 +865,15 @@ class Memory:
                 logger.error(f"Failed to store in MongoDB long-term memory: {e}")
                 # Continue to SQLite fallback
         
-        # Store in SQLite
+        # Store in SQLite (with write lock for concurrency safety)
         try:
             conn = self._get_ltm_conn()
-            conn.execute(
-                "INSERT INTO long_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
-                (ident, text, json.dumps(metadata), created)
-            )
-            conn.commit()
+            with self._write_lock:  # Serialize write operations
+                conn.execute(
+                    "INSERT INTO long_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
+                    (ident, text, json.dumps(metadata), created)
+                )
+                conn.commit()
             logger.info(f"Successfully stored in SQLite with ID: {ident}")
         except Exception as e:
             logger.error(f"Error storing in SQLite: {e}")
@@ -1073,8 +1103,9 @@ class Memory:
     def reset_long_term(self):
         """Clear local LTM DB, plus Chroma, MongoDB, or mem0 if in use."""
         conn = self._get_ltm_conn()
-        conn.execute("DELETE FROM long_mem")
-        conn.commit()
+        with self._write_lock:  # Serialize write operations
+            conn.execute("DELETE FROM long_mem")
+            conn.commit()
 
         if self.use_mem0 and hasattr(self, "mem0_client"):
             # Mem0 has no universal reset API. Could implement partial or no-op.
@@ -1105,15 +1136,16 @@ class Memory:
         """
         deleted = False
         
-        # Delete from SQLite
+        # Delete from SQLite (with write lock for concurrency safety)
         try:
             conn = self._get_stm_conn()
-            cursor = conn.execute(
-                "DELETE FROM short_mem WHERE id = ?", (memory_id,)
-            )
-            if cursor.rowcount > 0:
-                deleted = True
-            conn.commit()
+            with self._write_lock:  # Serialize write operations
+                cursor = conn.execute(
+                    "DELETE FROM short_mem WHERE id = ?", (memory_id,)
+                )
+                if cursor.rowcount > 0:
+                    deleted = True
+                conn.commit()
         except Exception as e:
             self._log_verbose(f"Error deleting from SQLite short-term: {e}", logging.ERROR)
         
@@ -1145,15 +1177,16 @@ class Memory:
         """
         deleted = False
         
-        # Delete from SQLite
+        # Delete from SQLite (with write lock for concurrency safety)
         try:
             conn = self._get_ltm_conn()
-            cursor = conn.execute(
-                "DELETE FROM long_mem WHERE id = ?", (memory_id,)
-            )
-            if cursor.rowcount > 0:
-                deleted = True
-            conn.commit()
+            with self._write_lock:  # Serialize write operations
+                cursor = conn.execute(
+                    "DELETE FROM long_mem WHERE id = ?", (memory_id,)
+                )
+                if cursor.rowcount > 0:
+                    deleted = True
+                conn.commit()
         except Exception as e:
             self._log_verbose(f"Error deleting from SQLite long-term: {e}", logging.ERROR)
         
@@ -1892,21 +1925,54 @@ class Memory:
 
     def close_connections(self):
         """
-        Close all thread-local database connections.
+        Close database connections.
         
-        This method should be called when the Memory instance is no longer needed,
-        especially in multi-threaded environments, to ensure proper cleanup.
+        Closes the current thread's connections and attempts to close all known
+        connections from other threads. Each thread should call this method before
+        terminating to ensure proper cleanup.
         """
+        # Close current thread's connections
         if hasattr(self._local, 'stm_conn') and self._local.stm_conn:
             try:
                 self._local.stm_conn.close()
                 self._local.stm_conn = None
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Error closing current thread's STM connection: {e}")
         
         if hasattr(self._local, 'ltm_conn') and self._local.ltm_conn:
             try:
                 self._local.ltm_conn.close()
                 self._local.ltm_conn = None
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Error closing current thread's LTM connection: {e}")
+        
+        # Close all known connections from the registry
+        with self._connection_lock:  # Ensure thread safety during cleanup
+            connections_to_close = list(self._all_connections)
+            for conn in connections_to_close:
+                try:
+                    conn.close()
+                except Exception as e:
+                    logger.debug(f"Error closing registered connection: {e}")
+            # Clear the registry
+            self._all_connections.clear()
+    
+    def __enter__(self):
+        """Allow Memory to be used as a context manager."""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Ensure connections are closed when leaving a context manager block."""
+        self.close_connections()
+    
+    def __del__(self):
+        """
+        Attempt to clean up any open SQLite connections when this instance
+        is garbage-collected. Errors are suppressed to avoid issues during
+        interpreter shutdown.
+        """
+        try:
+            self.close_connections()
+        except Exception:
+            # Best-effort cleanup during garbage collection
+            pass
