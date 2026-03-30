@@ -3,6 +3,7 @@ import sqlite3
 import json
 import time
 import shutil
+import threading
 from typing import Any, Dict, List, Optional, Union, Literal
 import logging
 from datetime import datetime
@@ -189,6 +190,9 @@ class Memory:
         self.cfg = config or {}
         self.verbose = verbose
         
+        # Thread-local storage for SQLite connections (thread-safe)
+        self._local = threading.local()
+        
         # Set logger level based on verbose
         if verbose >= 5:
             logger.setLevel(logging.INFO)
@@ -247,6 +251,30 @@ class Memory:
         elif self.use_rag:
             self._init_chroma()
 
+    def _get_stm_conn(self):
+        """Get thread-local short-term memory SQLite connection."""
+        if not hasattr(self._local, 'stm_conn') or self._local.stm_conn is None:
+            self._local.stm_conn = sqlite3.connect(
+                self.short_db,
+                check_same_thread=False
+            )
+            # Enable WAL mode for concurrent read/write without blocking
+            self._local.stm_conn.execute("PRAGMA journal_mode=WAL")
+            self._local.stm_conn.commit()
+        return self._local.stm_conn
+
+    def _get_ltm_conn(self):
+        """Get thread-local long-term memory SQLite connection."""
+        if not hasattr(self._local, 'ltm_conn') or self._local.ltm_conn is None:
+            self._local.ltm_conn = sqlite3.connect(
+                self.long_db,
+                check_same_thread=False
+            )
+            # Enable WAL mode for concurrent read/write without blocking
+            self._local.ltm_conn.execute("PRAGMA journal_mode=WAL")
+            self._local.ltm_conn.commit()
+        return self._local.ltm_conn
+
     def _log_verbose(self, msg: str, level: int = logging.INFO):
         """Only log if verbose >= 5"""
         if self.verbose >= 5:
@@ -276,7 +304,7 @@ class Memory:
     def _init_stm(self):
         """Creates or verifies short-term memory table."""
         os.makedirs(os.path.dirname(self.short_db) or ".", exist_ok=True)
-        conn = sqlite3.connect(self.short_db)
+        conn = self._get_stm_conn()
         c = conn.cursor()
         c.execute("""
         CREATE TABLE IF NOT EXISTS short_mem (
@@ -287,12 +315,11 @@ class Memory:
         )
         """)
         conn.commit()
-        conn.close()
 
     def _init_ltm(self):
         """Creates or verifies long-term memory table."""
         os.makedirs(os.path.dirname(self.long_db) or ".", exist_ok=True)
-        conn = sqlite3.connect(self.long_db)
+        conn = self._get_ltm_conn()
         c = conn.cursor()
         c.execute("""
         CREATE TABLE IF NOT EXISTS long_mem (
@@ -303,7 +330,6 @@ class Memory:
         )
         """)
         conn.commit()
-        conn.close()
 
     def _init_mem0(self):
         """Initialize Mem0 client for agent or user memory with optional graph support."""
@@ -581,13 +607,12 @@ class Memory:
 
         # Existing SQLite store logic
         try:
-            conn = sqlite3.connect(self.short_db)
+            conn = self._get_stm_conn()
             conn.execute(
                 "INSERT INTO short_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
                 (ident, text, json.dumps(metadata), created_at)
             )
             conn.commit()
-            conn.close()
             logger.info(f"Successfully stored in SQLite short-term memory with ID: {ident}")
         except Exception as e:
             logger.error(f"Failed to store in SQLite short-term memory: {e}")
@@ -713,13 +738,12 @@ class Memory:
         
         else:
             # Local fallback
-            conn = sqlite3.connect(self.short_db)
+            conn = self._get_stm_conn()
             c = conn.cursor()
             rows = c.execute(
                 "SELECT id, content, meta FROM short_mem WHERE content LIKE ? LIMIT ?",
                 (f"%{query}%", limit)
             ).fetchall()
-            conn.close()
 
             results = []
             for row in rows:
@@ -739,10 +763,9 @@ class Memory:
 
     def reset_short_term(self):
         """Completely clears short-term memory."""
-        conn = sqlite3.connect(self.short_db)
+        conn = self._get_stm_conn()
         conn.execute("DELETE FROM short_mem")
         conn.commit()
-        conn.close()
 
     # -------------------------------------------------------------------------
     #                           Long-Term Methods
@@ -815,13 +838,12 @@ class Memory:
         
         # Store in SQLite
         try:
-            conn = sqlite3.connect(self.long_db)
+            conn = self._get_ltm_conn()
             conn.execute(
                 "INSERT INTO long_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
                 (ident, text, json.dumps(metadata), created)
             )
             conn.commit()
-            conn.close()
             logger.info(f"Successfully stored in SQLite with ID: {ident}")
         except Exception as e:
             logger.error(f"Error storing in SQLite: {e}")
@@ -1002,13 +1024,12 @@ class Memory:
                 self._log_verbose(f"Error searching ChromaDB: {e}", logging.ERROR)
 
         # Always try SQLite as fallback or additional source
-        conn = sqlite3.connect(self.long_db)
+        conn = self._get_ltm_conn()
         c = conn.cursor()
         rows = c.execute(
             "SELECT id, content, meta, created_at FROM long_mem WHERE content LIKE ? LIMIT ?",
             (f"%{query}%", limit)
         ).fetchall()
-        conn.close()
 
         for row in rows:
             meta = json.loads(row[2] or "{}")
@@ -1051,10 +1072,9 @@ class Memory:
 
     def reset_long_term(self):
         """Clear local LTM DB, plus Chroma, MongoDB, or mem0 if in use."""
-        conn = sqlite3.connect(self.long_db)
+        conn = self._get_ltm_conn()
         conn.execute("DELETE FROM long_mem")
         conn.commit()
-        conn.close()
 
         if self.use_mem0 and hasattr(self, "mem0_client"):
             # Mem0 has no universal reset API. Could implement partial or no-op.
@@ -1087,14 +1107,13 @@ class Memory:
         
         # Delete from SQLite
         try:
-            conn = sqlite3.connect(self.short_db)
+            conn = self._get_stm_conn()
             cursor = conn.execute(
                 "DELETE FROM short_mem WHERE id = ?", (memory_id,)
             )
             if cursor.rowcount > 0:
                 deleted = True
             conn.commit()
-            conn.close()
         except Exception as e:
             self._log_verbose(f"Error deleting from SQLite short-term: {e}", logging.ERROR)
         
@@ -1128,14 +1147,13 @@ class Memory:
         
         # Delete from SQLite
         try:
-            conn = sqlite3.connect(self.long_db)
+            conn = self._get_ltm_conn()
             cursor = conn.execute(
                 "DELETE FROM long_mem WHERE id = ?", (memory_id,)
             )
             if cursor.rowcount > 0:
                 deleted = True
             conn.commit()
-            conn.close()
         except Exception as e:
             self._log_verbose(f"Error deleting from SQLite long-term: {e}", logging.ERROR)
         
@@ -1790,10 +1808,9 @@ class Memory:
         
         try:
             # Get short-term memories
-            conn = sqlite3.connect(self.short_db)
+            conn = self._get_stm_conn()
             c = conn.cursor()
             rows = c.execute("SELECT id, content, meta, created_at FROM short_mem").fetchall()
-            conn.close()
             
             for row in rows:
                 meta = json.loads(row[2] or "{}")
@@ -1806,10 +1823,9 @@ class Memory:
                 })
             
             # Get long-term memories
-            conn = sqlite3.connect(self.long_db)
+            conn = self._get_ltm_conn()
             c = conn.cursor()
             rows = c.execute("SELECT id, content, meta, created_at FROM long_mem").fetchall()
-            conn.close()
             
             for row in rows:
                 meta = json.loads(row[2] or "{}")
@@ -1873,3 +1889,24 @@ class Memory:
         if self.learn is None:
             return ""
         return self.learn.to_system_prompt_context()
+
+    def close_connections(self):
+        """
+        Close all thread-local database connections.
+        
+        This method should be called when the Memory instance is no longer needed,
+        especially in multi-threaded environments, to ensure proper cleanup.
+        """
+        if hasattr(self._local, 'stm_conn') and self._local.stm_conn:
+            try:
+                self._local.stm_conn.close()
+                self._local.stm_conn = None
+            except Exception:
+                pass
+        
+        if hasattr(self._local, 'ltm_conn') and self._local.ltm_conn:
+            try:
+                self._local.ltm_conn.close()
+                self._local.ltm_conn = None
+            except Exception:
+                pass
