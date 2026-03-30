@@ -1,14 +1,9 @@
 name: Extended Tests
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
   schedule:
-    # Run nightly at 2 AM UTC
     - cron: '0 2 * * *'
-  workflow_dispatch:  # Allow manual triggering
+  workflow_dispatch:
 
 jobs:
   test-examples:

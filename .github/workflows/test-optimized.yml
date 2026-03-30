@@ -3,8 +3,16 @@ name: Optimized Test Suite
 on: 
   push:
     branches: [ main, develop ]
+    paths:
+      - 'src/**'
+      - 'pyproject.toml'
+      - '.github/workflows/test-optimized.yml'
   pull_request:
     branches: [ main, develop ]
+    paths:
+      - 'src/**'
+      - 'pyproject.toml'
+      - '.github/workflows/test-optimized.yml'
   schedule:
     # Nightly extended tests at 3 AM UTC
     - cron: '0 3 * * *'
