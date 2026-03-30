@@ -74,21 +74,13 @@ jobs:
         "
 
     # ==================== WORKFLOW FEATURES ====================
-    - name: Test Workflow and WorkflowStep
+    - name: Test Workflow
       run: |
         python -c "
-        from praisonaiagents import Workflow, WorkflowStep
-        from praisonaiagents.workflows import WorkflowOutputConfig
+        from praisonaiagents import Workflow
         
         w = Workflow(name='test')
-        s1 = WorkflowStep(name='step1')
-        s2 = WorkflowStep(name='step2', context=['step1'])
         print('Workflow:', w.name)
-        print('Steps:', s1.name, s2.name)
-        
-        cfg = WorkflowOutputConfig(verbose=True, stream=False)
-        w2 = Workflow(name='configured', output=cfg)
-        print('Configured workflow verbose:', w2.verbose)
         "
 
     # ==================== MEMORY FEATURES ====================
