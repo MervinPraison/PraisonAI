@@ -1140,7 +1140,7 @@ Now provide your final answer using this result. Summarize the information natur
                 if tc.function.arguments:
                     tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
         
-        return _prepare_return_value(response_text), tool_calls
+        return response_text, tool_calls
 
     def _parse_tool_call_arguments(self, tool_call: Dict, is_ollama: bool = False) -> tuple:
         """
@@ -1605,7 +1605,16 @@ Now provide your final answer using this result. Summarize the information natur
         
         # Variable to store final response for token usage extraction
         _final_llm_response = None
-        
+
+        # Helper closure to return appropriate format based on return_token_usage
+        def _prepare_return_value(text: str) -> Union[str, tuple]:
+            if not return_token_usage:
+                return text
+            token_usage = self._extract_token_usage(_final_llm_response) if _final_llm_response else None
+            if token_usage is None:
+                token_usage = TokenUsage()
+            return text, token_usage
+
         # Log all self values when in debug mode
         self._log_llm_config(
             'LLM instance',
@@ -2972,7 +2981,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
-                        return _prepare_return_value(response_text)
+                        return response_text
 
                     if reflection_count >= max_reflect - 1:
                         if verbose and not interaction_displayed:
@@ -2981,7 +2990,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
-                        return _prepare_return_value(response_text)
+                        return response_text
 
                     reflection_count += 1
                     messages.extend([
@@ -3054,17 +3063,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except Exception as error:
             _get_display_functions()['display_error'](f"Error in get_response: {str(error)}")
             raise
-        
-        # Helper function to return appropriate format based on return_token_usage
-        def _prepare_return_value(response_text: str) -> Union[str, tuple[str, TokenUsage]]:
-            if not return_token_usage:
-                return _prepare_return_value(response_text)
-            
-            token_usage = self._extract_token_usage(_final_llm_response) if _final_llm_response else None
-            if token_usage is None:
-                token_usage = TokenUsage()  # Return empty TokenUsage if extraction fails
-            
-            return _prepare_return_value(response_text), token_usage
 
         # Log completion time if in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
@@ -3949,7 +3947,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                      agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                      task_name=task_name, task_description=task_description, task_id=task_id)
                     interaction_displayed = True
-                return _prepare_return_value(response_text)
+                return response_text
 
             if not self_reflect:
                 # Use final_response_text if we went through tool iterations
@@ -3980,7 +3978,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
                 # Return reasoning content if reasoning_steps is True and we have it
                 if reasoning_steps and stored_reasoning_content:
-                    return _prepare_return_value(stored_reasoning_content)
+                    return stored_reasoning_content
                 return display_text
 
             # Handle self-reflection
@@ -4096,7 +4094,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
-                        return _prepare_return_value(response_text)
+                        return response_text
 
                     if reflection_count >= max_reflect - 1:
                         if verbose and not interaction_displayed:
@@ -4105,7 +4103,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                              agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
                                              task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
-                        return _prepare_return_value(response_text)
+                        return response_text
 
                     reflection_count += 1
                     messages.extend([
@@ -4119,7 +4117,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 except json.JSONDecodeError:
                     reflection_count += 1
                     if reflection_count >= max_reflect:
-                        return _prepare_return_value(response_text)
+                        return response_text
                     continue  # Now properly in a loop
             
         except Exception as error:
@@ -4760,7 +4758,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 if reasoning_text:
                     reasoning_content = (reasoning_content or "") + str(reasoning_text)
 
-        return _prepare_return_value(response_text), tool_calls if tool_calls else None, reasoning_content
+        return response_text, tool_calls if tool_calls else None, reasoning_content
 
     def _stream_responses_api(
         self,
@@ -4885,7 +4883,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 },
             })
 
-        return _prepare_return_value(response_text), tool_calls if tool_calls else None
+        return response_text, tool_calls if tool_calls else None
 
     async def _stream_responses_api_async(
         self,
@@ -4976,7 +4974,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 "function": {"name": tc["name"], "arguments": tc["arguments"]},
             })
 
-        return _prepare_return_value(response_text), tool_calls if tool_calls else None
+        return response_text, tool_calls if tool_calls else None
 
     def _prepare_response_logging(self, temperature: float, stream: bool, verbose: bool, markdown: bool, **kwargs) -> Optional[Dict[str, Any]]:
         """Prepare debug logging information for response methods"""
@@ -5152,7 +5150,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     task_id=task_id
                 )
             
-            return _prepare_return_value(response_text).strip() if response_text else ""
+            return response_text.strip() if response_text else ""
 
         except Exception as error:
             _get_display_functions()['display_error'](f"Error in response: {str(error)}")
@@ -5249,7 +5247,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     task_id=task_id
                 )
             
-            return _prepare_return_value(response_text).strip() if response_text else ""
+            return response_text.strip() if response_text else ""
 
         except Exception as error:
             _get_display_functions()['display_error'](f"Error in response_async: {str(error)}")
