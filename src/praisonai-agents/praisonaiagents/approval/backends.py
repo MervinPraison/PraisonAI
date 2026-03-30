@@ -237,18 +237,8 @@ class AgentApproval:
 
     def request_approval_sync(self, request: ApprovalRequest) -> ApprovalDecision:
         """Synchronous wrapper."""
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop and loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(asyncio.run, self.request_approval(request))
-                return future.result(timeout=60)
-        else:
-            return asyncio.run(self.request_approval(request))
+        from .utils import run_coroutine_safely
+        return run_coroutine_safely(self.request_approval(request), timeout=60)
 
 
 class CallbackBackend:
