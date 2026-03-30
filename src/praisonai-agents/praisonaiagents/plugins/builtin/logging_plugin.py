@@ -8,8 +8,10 @@ import logging
 from typing import Any, Dict, List
 
 from ..plugin import Plugin, PluginInfo, PluginHook
+from ..._logging import get_logger
 
-logger = logging.getLogger("praisonaiagents.plugins.logging")
+# Use the new centralized logging utility
+logger = get_logger(extra_data={"component": "logging_plugin"})
 
 
 class LoggingPlugin(Plugin):

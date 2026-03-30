@@ -11,8 +11,10 @@ from datetime import datetime
 # Disable litellm telemetry before any imports
 os.environ["LITELLM_TELEMETRY"] = "False"
 
-# Set up logger with custom TRACE level
-logger = logging.getLogger(__name__)
+# Set up logger using centralized logging utility
+# Keep existing custom TRACE level functionality for this module
+from .._logging import get_logger
+logger = get_logger(__name__, extra_data={"subsystem": "memory"})
 
 # Add custom TRACE level (below DEBUG)
 TRACE_LEVEL = 5
