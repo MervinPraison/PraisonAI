@@ -1,4 +1,12 @@
-"""Agent module for AI agents - uses lazy loading for performance"""
+"""Agent module for AI agents - uses lazy loading for performance
+
+The Agent class has been decomposed into focused modules for better maintainability:
+- tool_execution: Tool calling and execution functionality  
+- chat_handler: Chat and conversation management
+- session_manager: Session persistence and state management
+
+Backward compatibility is maintained via mixins in the main Agent class.
+"""
 
 # Lazy loading cache
 _lazy_cache = {}
@@ -153,6 +161,20 @@ def __getattr__(name):
         _lazy_cache[name] = value
         return value
     
+    # Decomposed mixins - for advanced use cases
+    if name == 'ToolExecutionMixin':
+        from .tool_execution import ToolExecutionMixin
+        _lazy_cache[name] = ToolExecutionMixin
+        return ToolExecutionMixin
+    elif name == 'ChatHandlerMixin':
+        from .chat_handler import ChatHandlerMixin
+        _lazy_cache[name] = ChatHandlerMixin
+        return ChatHandlerMixin
+    elif name == 'SessionManagerMixin':
+        from .session_manager import SessionManagerMixin
+        _lazy_cache[name] = SessionManagerMixin
+        return SessionManagerMixin
+    
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
@@ -213,4 +235,8 @@ __all__ = [
     'MemoryAwareAgentProtocol',
     'FullAgentProtocol',
     'ContextEngineerProtocol',
+    # Decomposed mixins (for advanced use cases)
+    'ToolExecutionMixin',
+    'ChatHandlerMixin',
+    'SessionManagerMixin',
 ]

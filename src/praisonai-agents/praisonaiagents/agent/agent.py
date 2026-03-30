@@ -10,6 +10,11 @@ from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Cal
 from collections import OrderedDict
 import inspect
 
+# Decomposed agent functionality - imported as mixins for backward compatibility
+from .tool_execution import ToolExecutionMixin
+from .chat_handler import ChatHandlerMixin  
+from .session_manager import SessionManagerMixin
+
 # Module-level logger for thread safety errors and debugging
 logger = logging.getLogger(__name__)
 
@@ -191,7 +196,7 @@ class BudgetExceededError(Exception):
         )
 
 
-class Agent:
+class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin):
     # Class-level counter for generating unique display names for nameless agents
     _agent_counter = 0
     _agent_counter_lock = threading.Lock()
