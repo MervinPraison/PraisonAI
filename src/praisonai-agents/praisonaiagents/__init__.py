@@ -733,6 +733,7 @@ __all__ = [
     'tools',
     'memory',
     'workflows',
+    'adapters',
 ]
 
 

@@ -94,6 +94,31 @@ def __getattr__(name):
         from .rate_limiter import RateLimiter
         _lazy_cache[name] = RateLimiter
         return RateLimiter
+    # LLM Protocols (lightweight, always available)
+    elif name == "LLMProtocol":
+        from .protocols import LLMProtocol
+        _lazy_cache[name] = LLMProtocol
+        return LLMProtocol
+    elif name == "AsyncLLMProtocol":
+        from .protocols import AsyncLLMProtocol
+        _lazy_cache[name] = AsyncLLMProtocol
+        return AsyncLLMProtocol
+    elif name == "EmbeddingProtocol":
+        from .protocols import EmbeddingProtocol
+        _lazy_cache[name] = EmbeddingProtocol
+        return EmbeddingProtocol
+    elif name == "LLMConfigProtocol":
+        from .protocols import LLMConfigProtocol
+        _lazy_cache[name] = LLMConfigProtocol
+        return LLMConfigProtocol
+    elif name == "ModelCapabilitiesProtocol":
+        from .protocols import ModelCapabilitiesProtocol
+        _lazy_cache[name] = ModelCapabilitiesProtocol
+        return ModelCapabilitiesProtocol
+    elif name == "LLMRouterProtocol":
+        from .protocols import LLMRouterProtocol
+        _lazy_cache[name] = LLMRouterProtocol
+        return LLMRouterProtocol
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -117,5 +142,12 @@ __all__ = [
     "ModelProfile",
     "TaskComplexity",
     "create_routing_agent",
-    "RateLimiter"
+    "RateLimiter",
+    # LLM Protocols
+    "LLMProtocol",
+    "AsyncLLMProtocol",
+    "EmbeddingProtocol", 
+    "LLMConfigProtocol",
+    "ModelCapabilitiesProtocol",
+    "LLMRouterProtocol"
 ]
