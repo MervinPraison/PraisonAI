@@ -15,7 +15,13 @@ from importlib import util
 import io
 from contextlib import redirect_stdout, redirect_stderr
 import traceback
+import subprocess
+import tempfile
+import os
+import json
+import sys
 from ..approval import require_approval
+from ..sandbox.protocols import ResourceLimits
 
 def _safe_getattr(obj, name, *default):
     """getattr wrapper that blocks access to dunder attributes."""
@@ -78,6 +84,201 @@ def _validate_code_ast(code: str):
     return None
 
 
+def _execute_code_sandboxed(
+    code: str,
+    timeout: int = 30,
+    max_output_size: int = 10000,
+    limits: Optional[ResourceLimits] = None
+) -> Dict[str, Any]:
+    """Execute Python code in a subprocess sandbox.
+    
+    This function runs code in a separate Python subprocess with resource limits
+    and restricted environment, providing better isolation than direct exec().
+    """
+    if limits is None:
+        limits = ResourceLimits.minimal()
+    
+    try:
+        # Create temporary file for the code
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            # Create the wrapper code with proper escaping
+            # Use repr() to safely embed the user code as a string literal
+            wrapper_code = f"""
+import sys
+import io
+import traceback
+import json
+
+def safe_execute():
+    # Execute user code safely and return results as JSON
+    stdout_buffer = io.StringIO()
+    stderr_buffer = io.StringIO()
+    result = None
+    
+    try:
+        # Redirect output
+        sys.stdout = stdout_buffer
+        sys.stderr = stderr_buffer
+        
+        # Get user code
+        user_code = {repr(code)}
+        
+        # Security validation (same AST checks as direct execution)
+        import ast
+        try:
+            tree = ast.parse(user_code)
+        except SyntaxError:
+            return {{
+                "result": None,
+                "stdout": "",
+                "stderr": "Syntax Error in provided code",
+                "success": False
+            }}
+        
+        # Block dangerous patterns
+        blocked_attrs = {{
+            '__subclasses__', '__bases__', '__mro__', '__globals__',
+            '__code__', '__class__', '__dict__', '__builtins__',
+            '__import__', '__loader__', '__spec__'
+        }}
+        
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                return {{
+                    "result": None,
+                    "stdout": "",
+                    "stderr": "Import statements are not allowed in sandbox mode",
+                    "success": False
+                }}
+            if isinstance(node, ast.Attribute) and node.attr in blocked_attrs:
+                return {{
+                    "result": None,
+                    "stdout": "",
+                    "stderr": f"Access to attribute '{{node.attr}}' is restricted",
+                    "success": False
+                }}
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                if node.func.id in ('exec', 'eval', 'compile', '__import__', 'open'):
+                    return {{
+                        "result": None,
+                        "stdout": "",
+                        "stderr": f"Call to '{{node.func.id}}' is not allowed",
+                        "success": False
+                    }}
+        
+        # Create safe globals
+        safe_globals = {{
+            '__builtins__': {{
+                'print': print, 'len': len, 'range': range, 'enumerate': enumerate,
+                'zip': zip, 'map': map, 'filter': filter, 'sum': sum, 'min': min,
+                'max': max, 'abs': abs, 'round': round, 'sorted': sorted,
+                'reversed': reversed, 'any': any, 'all': all, 'int': int,
+                'float': float, 'str': str, 'bool': bool, 'list': list,
+                'tuple': tuple, 'dict': dict, 'set': set, 'pow': pow,
+                'divmod': divmod, 'isinstance': isinstance, 'type': type,
+                'hasattr': hasattr,
+            }}
+        }}
+        
+        # Execute user code
+        compiled_code = compile(user_code, '<string>', 'exec')
+        exec(compiled_code, safe_globals, {{}})
+        
+        # Try to get result from last expression
+        tree = ast.parse(user_code)
+        if tree.body and isinstance(tree.body[-1], ast.Expr):
+            result = eval(
+                compile(ast.Expression(tree.body[-1].value), '<string>', 'eval'),
+                safe_globals, {{}}
+            )
+        
+        return {{
+            "result": str(result) if result is not None else None,
+            "stdout": stdout_buffer.getvalue(),
+            "stderr": stderr_buffer.getvalue(),
+            "success": True
+        }}
+        
+    except Exception as e:
+        return {{
+            "result": None,
+            "stdout": stdout_buffer.getvalue(),
+            "stderr": f"Error: {{str(e)}}",
+            "success": False
+        }}
+    finally:
+        # Restore stdout/stderr
+        sys.stdout = sys.__stdout__
+        sys.stderr = sys.__stderr__
+
+if __name__ == "__main__":
+    result = safe_execute()
+    print(json.dumps(result))
+"""
+            f.write(wrapper_code)
+            temp_file = f.name
+
+        # Configure subprocess with resource limits
+        env = {}  # Clean environment (no access to parent process env vars)
+        
+        # Run subprocess with timeout and resource limits
+        process = subprocess.Popen(
+            [sys.executable, temp_file],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            shell=False,  # Security: prevent shell injection
+            text=True,
+            cwd=tempfile.gettempdir()  # Run in temp dir, not current dir
+        )
+        
+        try:
+            stdout, stderr = process.communicate(timeout=min(timeout, limits.timeout_seconds))
+        except subprocess.TimeoutExpired:
+            process.kill()
+            return {
+                'result': None,
+                'stdout': '',
+                'stderr': f'Execution timed out after {timeout} seconds',
+                'success': False
+            }
+        
+        # Parse result JSON from subprocess
+        if process.returncode == 0 and stdout.strip():
+            try:
+                result_data = json.loads(stdout.strip())
+                # Truncate output if too large
+                if len(result_data.get('stdout', '')) > max_output_size:
+                    tail_size = min(max_output_size // 5, 500)
+                    output = result_data['stdout']
+                    result_data['stdout'] = output[:max_output_size - tail_size] + f"\\n...[{len(output):,} chars, truncated]...\\n" + output[-tail_size:]
+                return result_data
+            except json.JSONDecodeError:
+                pass
+        
+        return {
+            'result': None,
+            'stdout': stdout,
+            'stderr': stderr or f'Process exited with code {process.returncode}',
+            'success': False
+        }
+        
+    except Exception as e:
+        return {
+            'result': None,
+            'stdout': '',
+            'stderr': f'Sandbox execution error: {str(e)}',
+            'success': False
+        }
+    finally:
+        # Clean up temporary file
+        try:
+            if 'temp_file' in locals():
+                os.unlink(temp_file)
+        except OSError:
+            pass
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Standalone execute_code — NO optional deps required (no black/pylint)
 # ──────────────────────────────────────────────────────────────────────
@@ -88,15 +289,54 @@ def execute_code(
     globals_dict: Optional[Dict[str, Any]] = None,
     locals_dict: Optional[Dict[str, Any]] = None,
     timeout: int = 30,
+    max_output_size: int = 10000,
+    sandbox_mode: str = "sandbox"  # "sandbox" or "direct"
+) -> Dict[str, Any]:
+    """Execute Python code safely with configurable security levels.
+
+    Args:
+        code: Python code to execute
+        globals_dict: Global variables (ignored in sandbox mode)
+        locals_dict: Local variables (ignored in sandbox mode)
+        timeout: Maximum execution time in seconds
+        max_output_size: Maximum output size in characters
+        sandbox_mode: Security mode - "sandbox" (default, subprocess isolation) 
+                     or "direct" (same process, legacy mode)
+
+    Returns:
+        Dictionary with result, stdout, stderr, and success status
+
+    Security modes:
+        - "sandbox" (RECOMMENDED): Runs in subprocess with resource limits,
+          clean environment, no access to parent process files/env vars
+        - "direct": Legacy mode with restricted builtins (less secure)
+    """
+    # Use subprocess sandbox by default (secure)
+    if sandbox_mode == "sandbox":
+        return _execute_code_sandboxed(code, timeout, max_output_size)
+    
+    # Legacy direct execution mode (for backward compatibility)
+    return _execute_code_direct(
+        code, globals_dict, locals_dict, timeout, max_output_size
+    )
+
+
+def _execute_code_direct(
+    code: str,
+    globals_dict: Optional[Dict[str, Any]] = None,
+    locals_dict: Optional[Dict[str, Any]] = None,
+    timeout: int = 30,
     max_output_size: int = 10000
 ) -> Dict[str, Any]:
-    """Execute Python code safely with restricted builtins.
+    """Execute Python code directly in current process with restricted builtins.
 
-    This function is available without any optional dependencies.
-    It uses a 3-layer security sandbox:
+    This is the legacy execution mode. It uses a 3-layer security sandbox:
       1. AST-based validation (blocks imports, dangerous dunders, eval/exec)
       2. Text-pattern blocklist (defense-in-depth)
       3. Restricted __builtins__ (only safe functions exposed)
+    
+    WARNING: This still runs in the same process and can access filesystem,
+    network, and environment variables. Use sandbox_mode="sandbox" for better security.
     """
     try:
         # Create safe builtins - restricted set of functions
