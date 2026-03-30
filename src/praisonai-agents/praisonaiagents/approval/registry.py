@@ -210,15 +210,12 @@ class ApprovalRegistry:
         if hasattr(backend, "request_approval_sync"):
             decision = backend.request_approval_sync(request)
         else:
-            # Fallback: run async method
-            try:
-                decision = asyncio.run(backend.request_approval(request))
-            except RuntimeError:
-                # Already in an event loop — fall back to thread
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    future = pool.submit(asyncio.run, backend.request_approval(request))
-                    decision = future.result(timeout=self.timeout)
+            # Use shared utility for consistent async-to-sync bridging
+            from .utils import run_coroutine_safely
+            decision = run_coroutine_safely(
+                backend.request_approval(request),
+                timeout=self.timeout
+            )
 
         if decision.approved:
             self.mark_approved(tool_name)

@@ -5,6 +5,7 @@ import logging
 import asyncio
 import contextlib
 import threading
+import concurrent.futures
 from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Generator
 from collections import OrderedDict
 import inspect
@@ -4918,7 +4919,6 @@ Your Goal: {self.goal}"""
                 # P8/G11: Apply tool timeout if configured
                 tool_timeout = getattr(self, '_tool_timeout', None)
                 if tool_timeout and tool_timeout > 0:
-                    import concurrent.futures
                     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                         future = executor.submit(self._execute_tool_impl, function_name, arguments)
                         try:
@@ -5170,7 +5170,22 @@ Your Goal: {self.goal}"""
                     if hasattr(backend, 'request_approval_sync'):
                         decision = backend.request_approval_sync(request)
                     else:
-                        decision = asyncio.run(backend.request_approval(request))
+                        # Use the shared utility to avoid code duplication and handle timeout correctly
+                        from ..approval.utils import run_coroutine_safely
+                        
+                        # Compute effective timeout from agent configuration
+                        if cfg_timeout is None:
+                            effective_timeout = None  # indefinite wait
+                        elif cfg_timeout > 0:
+                            effective_timeout = cfg_timeout
+                        else:
+                            # cfg_timeout == 0: use backend default or fallback
+                            effective_timeout = getattr(backend, '_timeout', 60)
+                        
+                        decision = run_coroutine_safely(
+                            backend.request_approval(request),
+                            timeout=effective_timeout
+                        )
                 finally:
                     if orig_timeout is not None and hasattr(backend, '_timeout'):
                         backend._timeout = orig_timeout
