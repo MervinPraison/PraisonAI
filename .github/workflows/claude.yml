@@ -40,6 +40,14 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           trigger_phrase: "@claude"
           label_trigger: "claude"
+          direct_prompt: |
+            Analyze this issue and implement a fix following AGENTS.md:
+            1. Read AGENTS.md for repo guidelines
+            2. Search the codebase and identify the root cause
+            3. Create a fix branch and implement a minimal, focused fix
+            4. Run tests to verify
+            5. Commit, push, and create a PR using `gh pr create`
+            CRITICAL: You MUST create the PR automatically using `gh pr create`. Do NOT just provide a link.
           allowed_tools: |
             Bash(git:*)
             Bash(python:*)
