@@ -5,10 +5,13 @@ on:
     types: [opened]
 
 jobs:
-  # Trigger Claude by adding the 'claude' label
+  # Trigger Claude by adding the 'claude' label (only if not already labeled)
   # Note: @claude in comments only works from human users (not bots)
   # The claude.yml workflow listens for issues:labeled event with 'claude' label
   trigger-claude:
+    # Skip if issue was already created with 'claude' label to avoid double-trigger
+    if: |
+      !contains(toJSON(github.event.issue.labels), 'claude')
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -18,6 +21,13 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            // Check if 'claude' label already exists on this issue
+            const labels = context.payload.issue.labels.map(l => l.name);
+            if (labels.includes('claude')) {
+              console.log('Issue already has claude label, skipping');
+              return;
+            }
+
             // Add label to trigger claude.yml via issues:labeled event
             await github.rest.issues.addLabels({
               issue_number: context.issue.number,
@@ -33,21 +43,3 @@ jobs:
               repo: context.repo.repo,
               body: '🤖 Auto-triaging with Claude. Analyzing issue and implementing a fix...\n\nClaude will:\n1. Classify this issue\n2. Search codebase for root cause\n3. Implement a minimal fix following AGENTS.md\n4. Create a PR with the changes'
             });
-
-  # Future: Gemini triage (commented out — can re-enable for dual-agent pipeline)
-  # gemini-triage:
-  #   runs-on: ubuntu-latest
-  #   permissions:
-  #     issues: write
-  #   steps:
-  #     - name: Post Gemini analysis request
-  #       uses: actions/github-script@v7
-  #       with:
-  #         github-token: ${{ secrets.GITHUB_TOKEN }}
-  #         script: |
-  #           github.rest.issues.createComment({
-  #             issue_number: context.issue.number,
-  #             owner: context.repo.owner,
-  #             repo: context.repo.repo,
-  #             body: '@gemini Do a thorough analysis of this issue:\n\n1. **Classification**: Is this a bug, feature request, question, or documentation gap?\n2. **Severity**: Critical / High / Medium / Low — explain why\n3. **Affected area**: Which modules/files in the codebase are relevant?\n4. **Root cause analysis**: Search the codebase and identify the likely root cause\n5. **Impact assessment**: What else could be affected? Any related issues?\n6. **Suggested fix**: Propose a concrete solution approach with file paths\n7. **Effort estimate**: Small (hours) / Medium (day) / Large (days+)'
-  #           })
