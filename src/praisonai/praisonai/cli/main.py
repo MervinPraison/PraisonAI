@@ -702,7 +702,9 @@ class PraisonAI:
             generator = AutoGenerator(topic=self.topic, framework=self.framework, agent_file=self.agent_file)
             self.agent_file = generator.generate(merge=getattr(args, 'merge', False))
             AgentsGenerator = _get_agents_generator()
-            agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
+            # Extract CLI configuration for YAML CLI parity
+            cli_config = self._extract_cli_config_for_yaml()
+            agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list, cli_config=cli_config)
             result = agents_generator.generate_crew_and_kickoff()
             print(result)
             return result
@@ -727,12 +729,15 @@ class PraisonAI:
             else:
                 # Modify code to allow default UI
                 AgentsGenerator = _get_agents_generator()
+                # Extract CLI configuration for YAML CLI parity
+                cli_config = self._extract_cli_config_for_yaml()
                 agents_generator = AgentsGenerator(
                     self.agent_file,
                     self.framework,
                     self.config_list,
                     agent_yaml=self.agent_yaml,
-                    tools=self.tools
+                    tools=self.tools,
+                    cli_config=cli_config
                 )
                 result = agents_generator.generate_crew_and_kickoff()
                 print(result)
@@ -795,12 +800,15 @@ class PraisonAI:
             
             try:
                 AgentsGenerator = _get_agents_generator()
+                # Extract CLI configuration for YAML CLI parity 
+                cli_config = self._extract_cli_config_for_yaml()
                 agents_generator = AgentsGenerator(
                     self.agent_file,
                     self.framework,
                     self.config_list,
                     agent_yaml=self.agent_yaml,
-                    tools=self.tools
+                    tools=self.tools,
+                    cli_config=cli_config
                 )
                 result = agents_generator.generate_crew_and_kickoff()
                 print(result)
@@ -3948,6 +3956,42 @@ Do NOT add any explanations or formatting."""
         
         return results[-1].get("output", "") if results else ""
 
+    def _extract_cli_config_for_yaml(self):
+        """
+        Extract CLI configuration that should be passed to YAML processing.
+        
+        Returns:
+            dict: CLI configuration for the missing CLI parity features
+        """
+        if not hasattr(self, 'args'):
+            return {}
+            
+        cli_config = {}
+        
+        # Extract --trust flag
+        if getattr(self.args, 'trust', False):
+            cli_config['trust'] = True
+            
+        # Extract --tool-timeout flag  
+        tool_timeout = getattr(self.args, 'tool_timeout', None)
+        if tool_timeout is not None:
+            cli_config['tool_timeout'] = tool_timeout
+            
+        # Extract --planning-tools flag
+        planning_tools = getattr(self.args, 'planning_tools', None)
+        if planning_tools:
+            cli_config['planning_tools'] = planning_tools
+            
+        # Extract --acp flag
+        if getattr(self.args, 'acp', False):
+            cli_config['acp'] = True
+            
+        # Extract --lsp flag
+        if getattr(self.args, 'lsp', False):
+            cli_config['lsp'] = True
+            
+        return cli_config
+
     def handle_direct_prompt(self, prompt):
         """
         Handle direct prompt by creating a single agent and running it.
@@ -5046,7 +5090,9 @@ Now, {final_instruction.lower()}:"""
                 generator = AutoGenerator(topic=auto_args, framework=self.framework)
                 self.agent_file = generator.generate()
                 AgentsGenerator = _get_agents_generator()
-                agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
+                # Extract CLI configuration for YAML CLI parity
+                cli_config = self._extract_cli_config_for_yaml()
+                agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list, cli_config=cli_config)
                 result = agents_generator.generate_crew_and_kickoff()
                 return result
 
