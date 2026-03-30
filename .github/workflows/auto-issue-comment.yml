@@ -5,23 +5,34 @@ on:
     types: [opened]
 
 jobs:
-  # Default: Claude handles issue analysis and fix
-  claude-fix:
+  # Trigger Claude by adding the 'claude' label
+  # Note: @claude in comments only works from human users (not bots)
+  # The claude.yml workflow listens for issues:labeled event with 'claude' label
+  trigger-claude:
     runs-on: ubuntu-latest
     permissions:
       issues: write
     steps:
-      - name: Post Claude analysis request
+      - name: Add claude label to trigger analysis
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            github.rest.issues.createComment({
+            // Add label to trigger claude.yml via issues:labeled event
+            await github.rest.issues.addLabels({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '@claude Analyze this issue and implement a fix following AGENTS.md:\n\n1. **Classification**: Bug, feature request, question, or documentation gap?\n2. **Root cause**: Search the codebase and identify the likely root cause\n3. **Fix**: Implement a minimal, focused fix\n4. Ensure backward compatibility — no features removed\n5. Zero performance regression on hot paths\n6. Run tests to verify the fix\n7. Create a PR with your changes using gh'
-            })
+              labels: ['claude']
+            });
+
+            // Also post instructions as a comment for context
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '🤖 Auto-triaging with Claude. Analyzing issue and implementing a fix...\n\nClaude will:\n1. Classify this issue\n2. Search codebase for root cause\n3. Implement a minimal fix following AGENTS.md\n4. Create a PR with the changes'
+            });
 
   # Future: Gemini triage (commented out — can re-enable for dual-agent pipeline)
   # gemini-triage:
