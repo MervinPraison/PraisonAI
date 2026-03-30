@@ -9,7 +9,7 @@
 |--------|-------|
 | Python Core Features | 311 |
 | Python Wrapper Features | 99 |
-| TypeScript Features | 1183 |
+| TypeScript Features | 1192 |
 | **Gap Count** | **18** |
 | P0 (Critical) | 0 |
 | P1 (High) | 0 |
@@ -22,15 +22,11 @@
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
-| `BudgetExceededError` | ✅ | ✅ | low | ✅ DONE |
-| `get\_registry` | ✅ | ✅ | low | ✅ DONE |
-| `get\_tool` | ✅ | ✅ | low | ✅ DONE |
-| `register\_tool` | ✅ | ✅ | low | ✅ DONE |
-| `validate\_tool` | ✅ | ✅ | low | ✅ DONE |
 | `Agent` | ✅ | ✅ | high | ✅ DONE |
 | `AudioAgent` | ✅ | ✅ | high | ✅ DONE |
 | `AudioConfig` | ✅ | ✅ | low | ✅ DONE |
 | `BaseTool` | ✅ | ✅ | high | ✅ DONE |
+| `BudgetExceededError` | ✅ | ✅ | low | ✅ DONE |
 | `CodeAgent` | ✅ | ✅ | high | ✅ DONE |
 | `CodeConfig` | ✅ | ✅ | low | ✅ DONE |
 | `CodeExecutionStep` | ✅ | ✅ | high | ✅ DONE |
@@ -75,10 +71,14 @@
 | `VisionConfig` | ✅ | ✅ | low | ✅ DONE |
 | `WebSearchCall` | ✅ | ✅ | high | ✅ DONE |
 | `create\_context\_agent` | ✅ | ✅ | low | ✅ DONE |
+| `get\_registry` | ✅ | ✅ | low | ✅ DONE |
+| `get\_tool` | ✅ | ✅ | low | ✅ DONE |
 | `handoff` | ✅ | ✅ | low | ✅ DONE |
 | `handoff\_filters` | ✅ | ✅ | low | ✅ DONE |
 | `prompt\_with\_handoff\_instructions` | ✅ | ✅ | low | ✅ DONE |
+| `register\_tool` | ✅ | ✅ | low | ✅ DONE |
 | `tool` | ✅ | ✅ | low | ✅ DONE |
+| `validate\_tool` | ✅ | ✅ | low | ✅ DONE |
 
 ### P1_Persistence (20 done, 0 todo)
 
@@ -853,10 +853,10 @@ import { AgentStats, AgentTelemetry, MetricEntry, MinimalTelemetry, PerformanceM
 </details>
 
 <details>
-<summary><strong>tools</strong> (82 exports)</summary>
+<summary><strong>tools</strong> (91 exports)</summary>
 
 ```typescript
-import { BaseTool, DelegatorConfig, FunctionTool, InstallHints, MissingDependencyError, MissingEnvVarError, PraisonTool, RedactionHooks, RegisteredTool, SubagentTool... } from 'praisonai';
+import { BaseTool, BudgetExceededError, DelegatorConfig, FunctionTool, InstallHints, MissingDependencyError, MissingEnvVarError, PraisonTool, RedactionHooks, RegisteredTool... } from 'praisonai';
 ```
 
 </details>
