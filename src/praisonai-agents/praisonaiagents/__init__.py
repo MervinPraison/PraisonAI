@@ -492,6 +492,11 @@ _LAZY_IMPORTS = {
     'PraisonConfig': ('praisonaiagents.config.loader', 'PraisonConfig'),
     'PluginsConfig': ('praisonaiagents.config.loader', 'PluginsConfig'),
     'DefaultsConfig': ('praisonaiagents.config.loader', 'DefaultsConfig'),
+    
+    # Centralized Logging Utilities
+    'get_logger': ('praisonaiagents._logging', 'get_logger'),
+    'configure_structured_logging': ('praisonaiagents._logging', 'configure_structured_logging'),
+    'StructuredFormatter': ('praisonaiagents._logging', 'StructuredFormatter'),
 }
 
 

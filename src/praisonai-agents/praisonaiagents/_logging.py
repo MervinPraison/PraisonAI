@@ -4,8 +4,9 @@ This module consolidates all logging configuration in one place to avoid duplica
 """
 
 import os
+import json
 import logging
-from typing import List
+from typing import List, Optional, Any, Dict
 
 # ========================================================================
 # ENVIRONMENT CONFIGURATION
@@ -159,6 +160,129 @@ def initialize_logging():
     _configure_loggers()
     # NOTE: _configure_litellm() is NOT called here to avoid importing litellm
     # It will be called lazily when LLM class is instantiated
+
+
+# ========================================================================
+# STRUCTURED LOGGING SUPPORT
+# ========================================================================
+class StructuredFormatter(logging.Formatter):
+    """JSON formatter for structured logging in production environments."""
+    
+    def format(self, record: logging.LogRecord) -> str:
+        """Format log record as structured JSON."""
+        log_data = {
+            "timestamp": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "module": record.module,
+            "function": record.funcName,
+            "line": record.lineno
+        }
+        
+        # Include extra fields if present
+        if hasattr(record, 'extra_data'):
+            log_data.update(record.extra_data)
+            
+        return json.dumps(log_data)
+
+
+def configure_structured_logging():
+    """Configure structured JSON logging for production environments.
+    
+    Call this function to enable structured logging across all PraisonAI modules.
+    Useful for log aggregation systems like ELK, Splunk, or CloudWatch.
+    
+    Example:
+        import os
+        from praisonaiagents._logging import configure_structured_logging
+        
+        # Enable structured logging
+        os.environ['PRAISONAI_STRUCTURED_LOGS'] = 'true'
+        configure_structured_logging()
+    """
+    if os.environ.get('PRAISONAI_STRUCTURED_LOGS', '').lower() == 'true':
+        # Configure all praisonaiagents loggers to use structured format
+        for logger_name in logging.Logger.manager.loggerDict:
+            if logger_name.startswith('praisonaiagents.'):
+                logger = logging.getLogger(logger_name)
+                if logger.handlers:
+                    for handler in logger.handlers:
+                        handler.setFormatter(StructuredFormatter())
+
+
+# ========================================================================
+# CONSISTENT LOGGER NAMING
+# ========================================================================
+def get_logger(name: Optional[str] = None, *, extra_data: Optional[Dict[str, Any]] = None) -> logging.Logger:
+    """Get a logger with consistent naming convention for PraisonAI modules.
+    
+    This function ensures all loggers follow the 'praisonaiagents.<module>' pattern
+    and provides optional structured logging support.
+    
+    Args:
+        name: Logger name. If None, uses the calling module's __name__.
+              If it doesn't start with 'praisonaiagents.', the prefix is added.
+        extra_data: Optional dict of extra data to include in all log records.
+        
+    Returns:
+        Logger instance with consistent naming and optional structured data.
+        
+    Example:
+        # In any module file:
+        from praisonaiagents._logging import get_logger
+        logger = get_logger(__name__)
+        
+        # Or with automatic detection:
+        logger = get_logger()
+        
+        # With extra structured data:
+        logger = get_logger(extra_data={"agent_id": "assistant", "session": "123"})
+    """
+    import inspect
+    
+    # Auto-detect module name if not provided
+    if name is None:
+        frame = inspect.currentframe()
+        try:
+            caller_frame = frame.f_back
+            caller_module = caller_frame.f_globals.get('__name__', 'unknown')
+            name = caller_module
+        finally:
+            del frame
+    
+    # Ensure consistent naming convention
+    if not name.startswith('praisonaiagents.'):
+        if name == '__main__':
+            name = 'praisonaiagents.main'
+        elif name.startswith('praisonai'):
+            # Handle cases like 'praisonai.something' -> 'praisonaiagents.something'
+            name = name.replace('praisonai', 'praisonaiagents', 1)
+        else:
+            # Add prefix for non-praisonai modules
+            name = f'praisonaiagents.{name}'
+    
+    logger = logging.getLogger(name)
+    
+    # Add extra data to logger if provided
+    if extra_data:
+        class ExtraDataAdapter(logging.LoggerAdapter):
+            def process(self, msg, kwargs):
+                kwargs.setdefault('extra', {})
+                kwargs['extra']['extra_data'] = extra_data
+                return msg, kwargs
+        
+        return ExtraDataAdapter(logger, extra_data)
+    
+    return logger
+
+
+# ========================================================================
+# BACKWARD COMPATIBILITY ALIASES
+# ========================================================================
+# These maintain compatibility with existing code
+getLogger = get_logger  # Snake case alias
+get_praisonai_logger = get_logger  # Descriptive alias
 
 
 # Auto-initialize on import (but NOT litellm)
