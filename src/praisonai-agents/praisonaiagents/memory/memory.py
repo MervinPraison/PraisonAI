@@ -12,6 +12,8 @@ os.environ["LITELLM_TELEMETRY"] = "False"
 
 # Set up logger with custom TRACE level
 logger = logging.getLogger(__name__)
+import logging
+import threading
 
 # Add custom TRACE level (below DEBUG)
 TRACE_LEVEL = 5
@@ -22,7 +24,6 @@ def trace(self, message, *args, **kwargs):
         self._log(TRACE_LEVEL, message, args, **kwargs)
 
 logging.Logger.trace = trace
-
 # Lazy availability flags and cached imports
 _chromadb_cache = {"available": None, "module": None, "settings": None}
 _mem0_cache = {"available": None, "module": None}
@@ -212,6 +213,10 @@ class Memory:
         self._learn_manager = None  # Lazy-loaded LearnManager
         self._learn_config = self.cfg.get("learn", None)  # Learn configuration
         
+        # SQLite thread-safe components
+        self._sqlite_lock = threading.Lock()
+        self._sqlite_local = threading.local()
+        
         # Extract embedding model from config
         self.embedder_config = self.cfg.get("embedder", {})
         if isinstance(self.embedder_config, dict):
@@ -270,40 +275,60 @@ class Memory:
         except Exception:
             pass  # Silent fail - tracing should never break memory operations
 
+    def _get_sqlite_conn(self, db_path: str):
+        """Get thread-local SQLite connection, ensuring thread safety and WAL mode."""
+        if not hasattr(self._sqlite_local, "conns"):
+            self._sqlite_local.conns = {}
+        
+        if db_path not in self._sqlite_local.conns or self._sqlite_local.conns[db_path] is None:
+            conn = sqlite3.connect(
+                db_path,
+                check_same_thread=False  # Allow cross-thread usage (with care)
+            )
+            conn.row_factory = sqlite3.Row
+            
+            # Enable WAL mode for better concurrency
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.commit()
+            
+            self._sqlite_local.conns[db_path] = conn
+            
+        return self._sqlite_local.conns[db_path]
+
     # -------------------------------------------------------------------------
     #                          Initialization
     # -------------------------------------------------------------------------
     def _init_stm(self):
         """Creates or verifies short-term memory table."""
         os.makedirs(os.path.dirname(self.short_db) or ".", exist_ok=True)
-        conn = sqlite3.connect(self.short_db)
-        c = conn.cursor()
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS short_mem (
-            id TEXT PRIMARY KEY,
-            content TEXT,
-            meta TEXT,
-            created_at REAL
-        )
-        """)
-        conn.commit()
-        conn.close()
+        with self._sqlite_lock:
+            conn = self._get_sqlite_conn(self.short_db)
+            c = conn.cursor()
+            c.execute("""
+            CREATE TABLE IF NOT EXISTS short_mem (
+                id TEXT PRIMARY KEY,
+                content TEXT,
+                meta TEXT,
+                created_at REAL
+            )
+            """)
+            conn.commit()
 
     def _init_ltm(self):
         """Creates or verifies long-term memory table."""
         os.makedirs(os.path.dirname(self.long_db) or ".", exist_ok=True)
-        conn = sqlite3.connect(self.long_db)
-        c = conn.cursor()
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS long_mem (
-            id TEXT PRIMARY KEY,
-            content TEXT,
-            meta TEXT,
-            created_at REAL
-        )
-        """)
-        conn.commit()
-        conn.close()
+        with self._sqlite_lock:
+            conn = self._get_sqlite_conn(self.long_db)
+            c = conn.cursor()
+            c.execute("""
+            CREATE TABLE IF NOT EXISTS long_mem (
+                id TEXT PRIMARY KEY,
+                content TEXT,
+                meta TEXT,
+                created_at REAL
+            )
+            """)
+            conn.commit()
 
     def _init_mem0(self):
         """Initialize Mem0 client for agent or user memory with optional graph support."""
@@ -580,19 +605,19 @@ class Memory:
                 raise
 
         # Existing SQLite store logic
-        try:
-            conn = sqlite3.connect(self.short_db)
-            conn.execute(
-                "INSERT INTO short_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
-                (ident, text, json.dumps(metadata), created_at)
-            )
-            conn.commit()
-            conn.close()
-            logger.info(f"Successfully stored in SQLite short-term memory with ID: {ident}")
-        except Exception as e:
-            logger.error(f"Failed to store in SQLite short-term memory: {e}")
-            if not self.use_mongodb:  # Only raise if we're not using MongoDB as fallback
-                raise
+        with self._sqlite_lock:
+            try:
+                conn = self._get_sqlite_conn(self.short_db)
+                conn.execute(
+                    "INSERT INTO short_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
+                    (ident, text, json.dumps(metadata), created_at)
+                )
+                conn.commit()
+                logger.info(f"Successfully stored in SQLite short-term memory with ID: {ident}")
+            except Exception as e:
+                logger.error(f"Failed to store in SQLite short-term memory: {e}")
+                if not self.use_mongodb:  # Only raise if we're not using MongoDB as fallback
+                    raise
         
         # Emit trace event for memory store
         self._emit_memory_event("store", "short_term", len(text), metadata=metadata)
@@ -713,13 +738,12 @@ class Memory:
         
         else:
             # Local fallback
-            conn = sqlite3.connect(self.short_db)
+            conn = self._get_sqlite_conn(self.short_db)
             c = conn.cursor()
             rows = c.execute(
                 "SELECT id, content, meta FROM short_mem WHERE content LIKE ? LIMIT ?",
                 (f"%{query}%", limit)
             ).fetchall()
-            conn.close()
 
             results = []
             for row in rows:
@@ -739,10 +763,10 @@ class Memory:
 
     def reset_short_term(self):
         """Completely clears short-term memory."""
-        conn = sqlite3.connect(self.short_db)
-        conn.execute("DELETE FROM short_mem")
-        conn.commit()
-        conn.close()
+        with self._sqlite_lock:
+            conn = self._get_sqlite_conn(self.short_db)
+            conn.execute("DELETE FROM short_mem")
+            conn.commit()
 
     # -------------------------------------------------------------------------
     #                           Long-Term Methods
@@ -814,20 +838,20 @@ class Memory:
                 # Continue to SQLite fallback
         
         # Store in SQLite
-        try:
-            conn = sqlite3.connect(self.long_db)
-            conn.execute(
-                "INSERT INTO long_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
-                (ident, text, json.dumps(metadata), created)
-            )
-            conn.commit()
-            conn.close()
-            logger.info(f"Successfully stored in SQLite with ID: {ident}")
-        except Exception as e:
-            logger.error(f"Error storing in SQLite: {e}")
-            if not (self.use_mongodb and hasattr(self, "mongo_long_term")):
-                # Only raise if MongoDB is not available as fallback
-                return
+        with self._sqlite_lock:
+            try:
+                conn = self._get_sqlite_conn(self.long_db)
+                conn.execute(
+                    "INSERT INTO long_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
+                    (ident, text, json.dumps(metadata), created)
+                )
+                conn.commit()
+                logger.info(f"Successfully stored in SQLite with ID: {ident}")
+            except Exception as e:
+                logger.error(f"Error storing in SQLite: {e}")
+                if not (self.use_mongodb and hasattr(self, "mongo_long_term")):
+                    # Only raise if MongoDB is not available as fallback
+                    return
 
         # Store in vector database if enabled
         if self.use_rag and hasattr(self, "chroma_col"):
@@ -1002,13 +1026,12 @@ class Memory:
                 self._log_verbose(f"Error searching ChromaDB: {e}", logging.ERROR)
 
         # Always try SQLite as fallback or additional source
-        conn = sqlite3.connect(self.long_db)
+        conn = self._get_sqlite_conn(self.long_db)
         c = conn.cursor()
         rows = c.execute(
             "SELECT id, content, meta, created_at FROM long_mem WHERE content LIKE ? LIMIT ?",
             (f"%{query}%", limit)
         ).fetchall()
-        conn.close()
 
         for row in rows:
             meta = json.loads(row[2] or "{}")
@@ -1051,10 +1074,10 @@ class Memory:
 
     def reset_long_term(self):
         """Clear local LTM DB, plus Chroma, MongoDB, or mem0 if in use."""
-        conn = sqlite3.connect(self.long_db)
-        conn.execute("DELETE FROM long_mem")
-        conn.commit()
-        conn.close()
+        with self._sqlite_lock:
+            conn = self._get_sqlite_conn(self.long_db)
+            conn.execute("DELETE FROM long_mem")
+            conn.commit()
 
         if self.use_mem0 and hasattr(self, "mem0_client"):
             # Mem0 has no universal reset API. Could implement partial or no-op.
@@ -1086,17 +1109,17 @@ class Memory:
         deleted = False
         
         # Delete from SQLite
-        try:
-            conn = sqlite3.connect(self.short_db)
-            cursor = conn.execute(
-                "DELETE FROM short_mem WHERE id = ?", (memory_id,)
-            )
-            if cursor.rowcount > 0:
-                deleted = True
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            self._log_verbose(f"Error deleting from SQLite short-term: {e}", logging.ERROR)
+        with self._sqlite_lock:
+            try:
+                conn = self._get_sqlite_conn(self.short_db)
+                cursor = conn.execute(
+                    "DELETE FROM short_mem WHERE id = ?", (memory_id,)
+                )
+                if cursor.rowcount > 0:
+                    deleted = True
+                conn.commit()
+            except Exception as e:
+                self._log_verbose(f"Error deleting from SQLite short-term: {e}", logging.ERROR)
         
         # Delete from MongoDB if enabled
         if self.use_mongodb and hasattr(self, "mongo_short_term"):
@@ -1127,17 +1150,17 @@ class Memory:
         deleted = False
         
         # Delete from SQLite
-        try:
-            conn = sqlite3.connect(self.long_db)
-            cursor = conn.execute(
-                "DELETE FROM long_mem WHERE id = ?", (memory_id,)
-            )
-            if cursor.rowcount > 0:
-                deleted = True
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            self._log_verbose(f"Error deleting from SQLite long-term: {e}", logging.ERROR)
+        with self._sqlite_lock:
+            try:
+                conn = self._get_sqlite_conn(self.long_db)
+                cursor = conn.execute(
+                    "DELETE FROM long_mem WHERE id = ?", (memory_id,)
+                )
+                if cursor.rowcount > 0:
+                    deleted = True
+                conn.commit()
+            except Exception as e:
+                self._log_verbose(f"Error deleting from SQLite long-term: {e}", logging.ERROR)
         
         # Delete from ChromaDB if enabled
         if self.use_rag and hasattr(self, "chroma_col"):
@@ -1790,10 +1813,9 @@ class Memory:
         
         try:
             # Get short-term memories
-            conn = sqlite3.connect(self.short_db)
+            conn = self._get_sqlite_conn(self.short_db)
             c = conn.cursor()
             rows = c.execute("SELECT id, content, meta, created_at FROM short_mem").fetchall()
-            conn.close()
             
             for row in rows:
                 meta = json.loads(row[2] or "{}")
@@ -1806,10 +1828,9 @@ class Memory:
                 })
             
             # Get long-term memories
-            conn = sqlite3.connect(self.long_db)
+            conn = self._get_sqlite_conn(self.long_db)
             c = conn.cursor()
             rows = c.execute("SELECT id, content, meta, created_at FROM long_mem").fetchall()
-            conn.close()
             
             for row in rows:
                 meta = json.loads(row[2] or "{}")
