@@ -1,6 +1,7 @@
 """Integration tests for jobs router."""
 
 import pytest
+fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
 from praisonai.jobs.server import create_app

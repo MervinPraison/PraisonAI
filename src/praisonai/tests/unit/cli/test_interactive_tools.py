@@ -55,6 +55,7 @@ class TestToolGroups:
             "list_files",
             "execute_command",
             "internet_search",
+            "web_crawl",
         }
         assert set(TOOL_GROUPS["basic"]) == expected
     

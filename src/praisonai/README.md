@@ -335,6 +335,19 @@ Open **http://localhost:8082** — the dashboard comes with 13 built-in pages: C
 
 > 📖 [Full Claw docs](https://docs.praison.ai/docs/concepts/claw) — platform tokens, CLI options, Docker, and YAML agent mode
 
+### 7. Langflow Integration 🔗 (Visual Flow Builder)
+
+Build multi-agent workflows visually with **drag-and-drop** components in Langflow.
+
+```bash
+pip install "praisonai[flow]"
+praisonai flow
+```
+
+Open **http://localhost:7861** — use the **Agent** and **Agent Team** components to create sequential or parallel workflows. Connect Chat Input → Agent Team → Chat Output for instant multi-agent pipelines.
+
+> 📖 [Full Flow docs](https://docs.praison.ai/docs/concepts/flow) — visual agent building, component reference, and deployment
+
 ---
 
 ## 📄 Using YAML (No Code)

@@ -358,31 +358,7 @@ class TestSessionManager:
         assert data["name"] == "Test Session"
 
 
-class TestLegacyCompatibility:
-    """Tests for legacy compatibility."""
-    
-    def test_is_legacy_invocation(self):
-        """Test legacy invocation detection."""
-        from praisonai.cli.legacy import is_legacy_invocation
-        
-        # Legacy patterns (flags that trigger legacy mode)
-        assert is_legacy_invocation(["--framework", "crewai"])
-        assert is_legacy_invocation(["--auto", "test"])
-        
-        # Typer patterns (commands now in TYPER_COMMANDS)
-        assert not is_legacy_invocation(["chat"])  # Now a Typer command
-        assert not is_legacy_invocation(["config", "list"])
-        assert not is_legacy_invocation(["version", "show"])
-    
-    def test_typer_commands_set(self):
-        """Test TYPER_COMMANDS contains expected commands."""
-        from praisonai.cli.legacy import TYPER_COMMANDS
-        
-        expected = {'config', 'traces', 'env', 'session', 'completion', 'version',
-                    'debug', 'lsp', 'diag', 'doctor', 'acp', 'mcp', 'serve', 'schedule', 'run'}
-        
-        for cmd in expected:
-            assert cmd in TYPER_COMMANDS
+# TestLegacyCompatibility removed as routing logic moved to __main__.py
 
 
 class TestGlobalOptions:

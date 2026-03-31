@@ -8,6 +8,7 @@ command handlers, and wires debouncer/ack support.
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
+import pytest
 
 
 class TestGatewayTelegramSession:
@@ -56,7 +57,8 @@ class TestGatewayTelegramSession:
         update.message.reply_text = AsyncMock()
         return update
 
-    def test_handle_message_uses_session_chat(self):
+    @pytest.mark.asyncio
+    async def test_handle_message_uses_session_chat(self):
         """G1: handle_message must call bot._session.chat(agent, user_id, text)."""
         bot = self._make_bot()
         update = self._make_update(text="Hello", user_id=42)
@@ -106,7 +108,7 @@ class TestGatewayTelegramSession:
             bot._session.chat.assert_called_once_with(agent, "42", "Hello")
             assert response == "Hello!"
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        await _run()
 
     def test_user_id_extracted_from_update(self):
         """G2: user_id must be extracted from update.message.from_user.id."""
@@ -121,7 +123,8 @@ class TestGatewayTelegramSession:
         user_id = str(update.message.from_user.id) if update.message.from_user else "unknown"
         assert user_id == "unknown"
 
-    def test_new_command_resets_session(self):
+    @pytest.mark.asyncio
+    async def test_new_command_resets_session(self):
         """G3: /new command must call bot._session.reset(user_id)."""
         bot = self._make_bot()
         update = self._make_update(user_id=42)
@@ -136,9 +139,10 @@ class TestGatewayTelegramSession:
                 "Session reset. Starting fresh conversation."
             )
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        await _run()
 
-    def test_status_command_calls_format_status(self):
+    @pytest.mark.asyncio
+    async def test_status_command_calls_format_status(self):
         """G3: /status command must call bot._format_status()."""
         bot = self._make_bot()
         update = self._make_update()
@@ -148,9 +152,10 @@ class TestGatewayTelegramSession:
             bot._format_status.assert_called_once()
             update.message.reply_text.assert_called_once_with("Bot is running")
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        await _run()
 
-    def test_help_command_calls_format_help(self):
+    @pytest.mark.asyncio
+    async def test_help_command_calls_format_help(self):
         """G3: /help command must call bot._format_help()."""
         bot = self._make_bot()
         update = self._make_update()
@@ -160,9 +165,10 @@ class TestGatewayTelegramSession:
             bot._format_help.assert_called_once()
             update.message.reply_text.assert_called_once_with("Help text here")
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        await _run()
 
-    def test_debouncer_called_before_session(self):
+    @pytest.mark.asyncio
+    async def test_debouncer_called_before_session(self):
         """G4: debouncer.debounce(user_id, text) must be called before session.chat."""
         bot = self._make_bot()
         call_order = []
@@ -180,7 +186,7 @@ class TestGatewayTelegramSession:
             await bot._session.chat(bot._agent, user_id, text)
             assert call_order == ["debounce", "session"]
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        await _run()
 
 
 class TestGatewayHandlerRegistration:
@@ -196,7 +202,8 @@ class TestGatewayHandlerRegistration:
             import pytest
             pytest.skip("python-telegram-bot not installed")
 
-    def test_session_manager_handles_routing_agent(self):
+    @pytest.mark.asyncio
+    async def test_session_manager_handles_routing_agent(self):
         """BotSessionManager.chat() should work with any agent, not just bot._agent."""
         from praisonai.bots._session import BotSessionManager
 
@@ -215,4 +222,4 @@ class TestGatewayHandlerRegistration:
             assert r1 == "from agent1"
             assert r2 == "from agent2"
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        await _run()

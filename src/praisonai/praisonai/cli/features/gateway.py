@@ -128,7 +128,7 @@ class GatewayHandler:
 
 
 def handle_gateway_command(args) -> int:
-    """Handle gateway CLI command.
+    """Handle gateway CLI command. [DEPRECATED]
     
     Args:
         args: List of CLI arguments (from main.py unknown_args) or argparse Namespace.

@@ -10,6 +10,8 @@ Tests for:
 import os
 import tempfile
 import time
+import pytest
+prompt_toolkit = pytest.importorskip("prompt_toolkit")
 
 
 # ============================================================================

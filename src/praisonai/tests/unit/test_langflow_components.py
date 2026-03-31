@@ -1,4 +1,5 @@
 import pytest
+pytest.importorskip("langflow")
 from praisonai.flow.components.PraisonAI.praisonai_agent import PraisonAIAgentComponent
 from praisonai.flow.components.PraisonAI.praisonai_task import PraisonAITaskComponent
 from praisonai.flow.components.PraisonAI.praisonai_agents import PraisonAIAgentsComponent
