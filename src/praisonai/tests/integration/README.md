@@ -145,7 +145,7 @@ python -m pytest tests/integration/autogen/test_autogen_basic.py::TestAutoGenInt
 
 ### Required for AutoGen Tests:
 ```bash
-pip install pyautogen
+pip install ag2
 ```
 
 ### Required for CrewAI Tests:
@@ -251,7 +251,7 @@ To add tests for a new framework (e.g., `langchain`):
 ```
 ImportError: No module named 'autogen'
 ```
-**Solution:** Install the framework: `pip install pyautogen`
+**Solution:** Install the framework: `pip install ag2`
 
 **Path Issues:**
 ```

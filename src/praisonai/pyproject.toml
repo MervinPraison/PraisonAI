@@ -90,7 +90,7 @@ call = [
 ]
 train = []
 crewai = ["crewai>=0.157.0", "praisonai-tools>=0.1.0"]
-autogen = ["pyautogen==0.2.29", "praisonai-tools>=0.1.0", "crewai"]
+autogen = ["ag2==0.2.29", "praisonai-tools>=0.1.0", "crewai"]
 ag2 = ["ag2>=0.11.0", "praisonai-tools>=0.1.0"]
 autogen-v4 = [
     "autogen-agentchat>=0.4.0", 
@@ -187,7 +187,7 @@ Repository = "https://github.com/mervinpraison/PraisonAI"
 # Exclude from lock resolution — these cause cross-extra conflicts that
 # never occur at install time (nobody installs [claw]+[autogen]+[crewai] together):
 #   neonize:        conflicts with autogen-core (protobuf version)
-#   magika:         numpy>=2.1 (via markitdown) vs pyautogen numpy<2
+#   magika:         numpy>=2.1 (via markitdown) vs ag2 numpy<2
 #   neo4j-graphrag: json-repair tight pins vs crewai transitive deps
 override-dependencies = [
     "neonize ; sys_platform == 'never'",
