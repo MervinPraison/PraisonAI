@@ -40,8 +40,8 @@ TYPER_COMMANDS = {
     'replay',
     # Standardisation commands
     'standardise', 'standardize',
-    # Moltbot-inspired commands (bots, browser, plugins, sandbox)
-    'bot', 'browser', 'plugins', 'sandbox', 'loop', 'tracker',
+    # Moltbot-inspired commands (bots, browser, plugins, sandbox, flow, claw)
+    'bot', 'browser', 'plugins', 'sandbox', 'loop', 'tracker', 'flow', 'claw', 'gateway',
     # RAG commands
     'rag', 'index', 'query', 'search',
 }
