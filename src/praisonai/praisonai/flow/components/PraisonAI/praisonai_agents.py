@@ -180,6 +180,7 @@ class PraisonAIAgentsComponent(Component):
             display_name="Agents Instance",
             name="agents_instance",
             method="build_agents",
+            types=["Agents"]
         ),
     ]
 
@@ -191,7 +192,7 @@ class PraisonAIAgentsComponent(Component):
             msg = "PraisonAI Agents is not installed. Install with: pip install praisonaiagents"
             raise ImportError(msg) from e
         else:
-            return Agents
+            return AgentTeam
 
     def build_agents(self) -> Any:
         """Build and return the PraisonAI Agents instance."""
@@ -229,7 +230,8 @@ class PraisonAIAgentsComponent(Component):
 
         # Add memory configuration
         if self.memory:
-            kwargs["memory"] = True
+            session_id = getattr(self.graph, "session_id", None) if hasattr(self, "graph") else None
+            kwargs["memory"] = {"auto_save": session_id} if session_id else True
 
         # Add manager for hierarchical
         if self.process == "hierarchical":

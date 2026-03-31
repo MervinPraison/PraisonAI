@@ -264,6 +264,7 @@ class PraisonAIAgentComponent(Component):
             display_name="Agent",
             name="agent",
             method="build_agent",
+            types=["Agent"]
         ),
     ]
 
@@ -318,6 +319,20 @@ class PraisonAIAgentComponent(Component):
 
         # Build knowledge configuration
         knowledge = self._build_knowledge_config()
+        
+        # If knowledge is enabled, PraisonAI SDK relies on memory for RAG ingestion
+        if knowledge and not memory_cfg:
+            memory_cfg = True
+
+        # Inject session_id natively into PraisonAI memory auto_save to persist conversation
+        if memory_cfg:
+            session_id = getattr(self.graph, "session_id", None) if hasattr(self, "graph") else None
+            # Default to tracking session natively if graph session exists
+            if session_id:
+                if isinstance(memory_cfg, bool):
+                    memory_cfg = {"auto_save": session_id}
+                elif isinstance(memory_cfg, dict) and "auto_save" not in memory_cfg:
+                    memory_cfg["auto_save"] = session_id
 
         # Build handoffs list (filter None)
         handoffs = None

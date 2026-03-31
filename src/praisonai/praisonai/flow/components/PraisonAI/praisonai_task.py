@@ -221,6 +221,7 @@ class PraisonAITaskComponent(Component):
             display_name="Task",
             name="task",
             method="build_task",
+            types=["Task"]
         ),
     ]
 
