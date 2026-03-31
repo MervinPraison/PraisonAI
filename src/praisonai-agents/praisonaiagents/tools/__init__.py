@@ -25,6 +25,16 @@ from .validators import (
 )
 from .retry import RetryPolicy, FallbackChain, ToolExecutionConfig
 
+# Export advanced tools functionality (direct imports for performance)
+from .advanced import (
+    advanced_tool,
+    Priority, ToolContext, Hook, CacheConfig, ExternalConfig,
+    Field, InputGroup, Choice, Range, Pattern,
+    cache, external, user_input,
+    set_global_hooks, clear_global_hooks, register_external_handler,
+    invalidate_cache, clear_all_caches, get_cache_stats
+)
+
 # Circuit breaker functionality (lazy loaded)
 _CIRCUIT_BREAKER_EXPORTS = frozenset({
     'CircuitBreaker', 'CircuitBreakerProtocol', 'CircuitBreakerConfig', 'CircuitBreakerException',
@@ -347,6 +357,13 @@ __all__ = list(TOOL_MAPPINGS.keys()) + [
     # Validation and retry protocols
     'ValidationResult', 'ToolValidatorProtocol', 'AsyncToolValidatorProtocol', 'PassthroughValidator',
     'RetryPolicy', 'FallbackChain', 'ToolExecutionConfig',
+    # Advanced tools functionality
+    'advanced_tool',
+    'Priority', 'ToolContext', 'Hook', 'CacheConfig', 'ExternalConfig',
+    'Field', 'InputGroup', 'Choice', 'Range', 'Pattern',
+    'cache', 'external', 'user_input',
+    'set_global_hooks', 'clear_global_hooks', 'register_external_handler',
+    'invalidate_cache', 'clear_all_caches', 'get_cache_stats',
     # Circuit breaker functionality
     'CircuitBreaker', 'CircuitBreakerProtocol', 'CircuitBreakerConfig', 'CircuitBreakerException',
     'CircuitBreakerStats', 'CircuitState', 'HealthCheckProtocol', 'CircuitBreakerRegistry',
