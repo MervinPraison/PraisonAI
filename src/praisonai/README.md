@@ -244,6 +244,13 @@ pip install "praisonai[flow]"
 praisonai flow
 ```
 
+🤖 **PraisonAI UI** — Clean chat interface:
+
+```bash
+pip install "praisonai[ui]"
+praisonai ui
+```
+
 ### JavaScript SDK
 
 ```bash
@@ -365,6 +372,15 @@ praisonai flow
 Open **http://localhost:7861** — use the **Agent** and **Agent Team** components to create sequential or parallel workflows. Connect Chat Input → Agent Team → Chat Output for instant multi-agent pipelines.
 
 > 📖 [Full Flow docs](https://docs.praison.ai/docs/concepts/flow) — visual agent building, component reference, and deployment
+
+### 8. PraisonAI UI 🤖 (Clean Chat)
+
+Lightweight chat interface for your AI agents.
+
+```bash
+pip install "praisonai[ui]"
+praisonai ui
+```
 
 ---
 
