@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="src/praisonai/praisonai/public/logo_dark.png" />
-    <source media="(prefers-color-scheme: light)" srcset="src/praisonai/praisonai/public/logo_light.png" />
-    <img alt="PraisonAI Logo" src="src/praisonai/praisonai/public/logo_light.png" width="250" />
+    <source media="(prefers-color-scheme: dark)" srcset=".github/images/logo_dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset=".github/images/logo_light.png" />
+    <img alt="PraisonAI Logo" src=".github/images/logo_light.png" width="250" />
   </picture>
 </p>
 
@@ -26,7 +26,11 @@
 PraisonAI 🦞 — Automate and solve complex challenges with AI agent teams that plan, research, code, and deliver results to Telegram, Discord, and WhatsApp — running 24/7. A low-code, production-ready multi-agent framework with handoffs, guardrails, memory, RAG, and 100+ LLM providers, built around simplicity, customisation, and effective human-agent collaboration.
 
 <p align="center">
-  <img src="src/praisonai/praisonai/public/dashboard.png" alt="PraisonAI Dashboard" width="800" />
+  <img src=".github/images/dashboard.png" alt="PraisonAI Dashboard" width="800" />
+</p>
+
+<p align="center">
+  <img src=".github/images/latest_ai_news_and_crawl_each_url_to_find_info.gif" alt="PraisonAI command execution" width="800" />
 </p>
 
 <div align="center">
