@@ -28,7 +28,7 @@ praisonai-call = "praisonai.api.call:main"
 
 [project.optional-dependencies]
 ui = [
-    "aiui>=0.3.60",
+    "aiui>=0.3.100",
 ]
 gradio = ["gradio>=4.26.0"]
 api = [
@@ -142,7 +142,7 @@ bot-whatsapp-web = [
 claw = [
     # PraisonAI 🦞 — Full dashboard + bots + memory + knowledge + gateway
     # Install: pip install "praisonai[claw]"
-    "aiui[all]>=0.3.60",
+    "aiui[all]>=0.3.100",
     "praisonaiagents[all]>=1.5.40",
     # UI + persistence
     "chainlit>=2.8.5,<=2.9.4",
