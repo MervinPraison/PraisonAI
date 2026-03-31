@@ -6,6 +6,7 @@ Evaluates agent output accuracy by comparing against expected output using LLM-a
 
 import os
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Callable, Optional, Union, TYPE_CHECKING
 
 from .base import BaseEvaluator
@@ -16,8 +17,7 @@ if TYPE_CHECKING:
     from ..agent.agent import Agent
     from ..agents.agents import AgentManager
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class AccuracyEvaluator(BaseEvaluator):
     """

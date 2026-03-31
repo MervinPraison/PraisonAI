@@ -33,12 +33,12 @@ Doc File Format (YAML frontmatter + Markdown):
 
 import os
 import logging
+from praisonaiagents._logging import get_logger
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Literal
 from dataclasses import dataclass, field
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class Doc:
@@ -67,7 +67,6 @@ class Doc:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Doc':
         return cls(**data)
-
 
 class DocsManager:
     """

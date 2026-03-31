@@ -37,12 +37,13 @@ Hook Events:
 import os
 import json
 import logging
+from praisonaiagents._logging import get_logger
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable, Literal
 from dataclasses import dataclass
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Hook event types
 HookEvent = Literal[
@@ -58,7 +59,6 @@ HookEvent = Literal[
     "post_mcp_tool_use"
 ]
 
-
 @dataclass
 class HookResult:
     """Result of a hook execution."""
@@ -69,7 +69,6 @@ class HookResult:
     blocked: bool = False  # If True, the operation should be blocked
     modified_input: Optional[str] = None  # Modified input if applicable
 
-
 @dataclass
 class HookConfig:
     """Configuration for a single hook."""
@@ -79,7 +78,6 @@ class HookConfig:
     enabled: bool = True
     block_on_failure: bool = False
     pass_input: bool = True
-
 
 class HooksManager:
     """
@@ -400,7 +398,6 @@ class HooksManager:
         
         self._log(f"Created hooks config at {config_path}")
         self.reload()
-
 
 def create_hooks_manager(
     workspace_path: Optional[str] = None,

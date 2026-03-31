@@ -6,10 +6,10 @@ using natural language descriptions, similar to CrewAI's implementation.
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Any, Tuple, Union, Optional
 from pydantic import BaseModel
 from ..output.models import TaskOutput
-
 
 class LLMGuardrail:
     """An LLM-powered guardrail that validates task outputs using natural language."""
@@ -23,7 +23,7 @@ class LLMGuardrail:
         """
         self.description = description
         self.llm = self._initialize_llm(llm)
-        self.logger = logging.getLogger(__name__)
+        self.logger = get_logger(__name__)
     
     def _initialize_llm(self, llm: Any) -> Any:
         """Initialize the LLM instance from string identifier or existing instance.

@@ -64,9 +64,10 @@ jobs:
           || echo "Some integration tests failed"
 
     - name: Upload coverage to Codecov
+      if: always()
       uses: codecov/codecov-action@v5
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        file: src/praisonai/coverage.xml
+        token: ${{ secrets.CODECOV_TOKEN || '' }}
+        files: src/praisonai/coverage.xml
         flags: core-tests
         fail_ci_if_error: false

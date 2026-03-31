@@ -12,17 +12,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Any
 
 from .protocols import ApprovalDecision, ApprovalRequest
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Lazy Rich imports (same pattern as old approval.py)
 _rich_console = None
 _rich_panel = None
 _rich_confirm = None
-
 
 def _get_rich_console():
     global _rich_console
@@ -31,7 +31,6 @@ def _get_rich_console():
         _rich_console = Console
     return _rich_console
 
-
 def _get_rich_panel():
     global _rich_panel
     if _rich_panel is None:
@@ -39,14 +38,12 @@ def _get_rich_panel():
         _rich_panel = Panel
     return _rich_panel
 
-
 def _get_rich_confirm():
     global _rich_confirm
     if _rich_confirm is None:
         from rich.prompt import Confirm
         _rich_confirm = Confirm
     return _rich_confirm
-
 
 class AutoApproveBackend:
     """Always approves.  Use for bots or trusted unattended environments."""
@@ -56,7 +53,6 @@ class AutoApproveBackend:
 
     def request_approval_sync(self, request: ApprovalRequest) -> ApprovalDecision:
         return ApprovalDecision(approved=True, reason="auto-approved", approver="system")
-
 
 class ConsoleBackend:
     """Interactive Rich terminal prompt.  Default for CLI usage."""
@@ -118,7 +114,6 @@ class ConsoleBackend:
         """Async wrapper — runs the sync prompt in an executor."""
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self.request_approval_sync, request)
-
 
 class AgentApproval:
     """Delegates approval decisions to another AI agent.
@@ -239,7 +234,6 @@ class AgentApproval:
         """Synchronous wrapper."""
         from .utils import run_coroutine_safely
         return run_coroutine_safely(self.request_approval(request), timeout=60)
-
 
 class CallbackBackend:
     """Wraps a legacy ``(function_name, arguments, risk_level) -> ApprovalDecision`` callback

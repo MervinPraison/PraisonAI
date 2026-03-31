@@ -10,10 +10,10 @@ These utilities eliminate code duplication between sync and async execution path
 
 import json
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Any, Dict, List, Optional, Callable
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 def build_task_prompt(
     description: str,
@@ -65,7 +65,6 @@ Context:
     prompt += "Please provide only the final result of your work. Do not add any conversation or extra explanation."
     
     return prompt
-
 
 def parse_task_output(
     agent_output: str,
@@ -121,7 +120,6 @@ def parse_task_output(
     
     return result
 
-
 def check_multimodal_dependencies() -> bool:
     """
     Check if multimodal dependencies are available.
@@ -136,7 +134,6 @@ def check_multimodal_dependencies() -> bool:
         return True
     except ImportError:
         return False
-
 
 def get_multimodal_error_message() -> str:
     """Get error message for missing multimodal dependencies."""

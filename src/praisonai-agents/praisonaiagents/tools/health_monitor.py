@@ -9,6 +9,7 @@ Following the protocol-driven architecture from AGENTS.md.
 import asyncio
 import json
 import logging
+from praisonaiagents._logging import get_logger
 import threading
 import time
 from dataclasses import dataclass, field
@@ -17,8 +18,7 @@ from datetime import datetime, timedelta
 
 from .circuit_breaker import CircuitBreaker, CircuitState, CircuitBreakerStats, get_all_circuit_breaker_stats
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class HealthMetrics:
@@ -45,7 +45,6 @@ class HealthMetrics:
             "total_checks": self.total_checks,
         }
 
-
 @dataclass
 class ServiceHealthConfig:
     """Configuration for service health monitoring."""
@@ -65,7 +64,6 @@ class ServiceHealthConfig:
             "enable_metrics": self.enable_metrics,
         }
 
-
 @runtime_checkable
 class HealthCheckProtocol(Protocol):
     """Protocol for health check implementations."""
@@ -78,7 +76,6 @@ class HealthCheckProtocol(Protocol):
         """Perform asynchronous health check."""
         ...
 
-
 @runtime_checkable
 class TelemetryProtocol(Protocol):
     """Protocol for telemetry implementations."""
@@ -90,7 +87,6 @@ class TelemetryProtocol(Protocol):
     def emit_circuit_breaker_event(self, service_name: str, event_type: str, data: Dict[str, Any]) -> None:
         """Emit circuit breaker events."""
         ...
-
 
 class HealthMonitor:
     """Health monitor for external services with circuit breaker integration.
@@ -376,7 +372,6 @@ class HealthMonitor:
         """Run monitoring loop in a background thread."""
         asyncio.run(self._monitor_loop())
 
-
 class ConsoleTelemetry:
     """Simple console-based telemetry implementation."""
     
@@ -389,7 +384,6 @@ class ConsoleTelemetry:
     def emit_circuit_breaker_event(self, service_name: str, event_type: str, data: Dict[str, Any]) -> None:
         """Emit circuit breaker events to console."""
         logger.info(f"Circuit breaker event: {service_name} - {event_type} - {data}")
-
 
 class JsonFileTelemetry:
     """JSON file-based telemetry implementation."""
@@ -432,7 +426,6 @@ class JsonFileTelemetry:
             except Exception as e:
                 logger.error(f"Failed to write telemetry to {self.file_path}: {e}")
 
-
 def get_circuit_breaker_dashboard_data() -> Dict[str, Any]:
     """Get comprehensive dashboard data for circuit breakers and health monitoring.
     
@@ -462,10 +455,8 @@ def get_circuit_breaker_dashboard_data() -> Dict[str, Any]:
     
     return dashboard_data
 
-
 # Global health monitor instance for convenience
 _global_health_monitor = HealthMonitor()
-
 
 def get_health_monitor() -> HealthMonitor:
     """Get the global health monitor instance."""

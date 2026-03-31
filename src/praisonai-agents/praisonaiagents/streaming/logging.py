@@ -17,11 +17,11 @@ Usage:
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 import time
 from typing import Optional, Dict, Any
 
 from .events import StreamMetrics, StreamEvent, StreamEventType
-
 
 class StreamLogger:
     """
@@ -43,7 +43,7 @@ class StreamLogger:
     ):
         self.verbose = verbose
         self.metrics = metrics
-        self._logger = logger or logging.getLogger(__name__)
+        self._logger = logger or get_logger(__name__)
         self._metrics = StreamMetrics() if metrics else None
         self._enabled = verbose or metrics
     
@@ -168,7 +168,6 @@ class StreamLogger:
                 self.log_stream_end()
             elif event.type == StreamEventType.ERROR:
                 self.log_error(event.error or "Unknown error")
-
 
 def create_logging_callback(
     verbose: bool = False,

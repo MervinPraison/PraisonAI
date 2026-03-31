@@ -18,6 +18,7 @@ import json
 import sys
 from typing import Optional
 import logging
+from praisonaiagents._logging import get_logger
 
 try:
     from .performance_monitor import performance_monitor, get_performance_report
@@ -29,8 +30,7 @@ try:
 except ImportError:
     PERFORMANCE_TOOLS_AVAILABLE = False
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class PerformanceCLI:
     """Command-line interface for performance monitoring."""
@@ -283,7 +283,6 @@ class PerformanceCLI:
         performance_monitor.clear_statistics()
         print("✅ All performance monitoring data cleared")
 
-
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -391,7 +390,6 @@ Examples:
     except Exception as e:
         print(f"❌ Error: {e}")
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()

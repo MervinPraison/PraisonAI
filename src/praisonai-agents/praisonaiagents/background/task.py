@@ -7,13 +7,13 @@ Represents a task running in the background.
 import uuid
 import asyncio
 import logging
+from praisonaiagents._logging import get_logger
 from enum import Enum
 from dataclasses import dataclass, field
 from typing import Optional, Any, Callable, Dict
 from datetime import datetime
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class TaskStatus(str, Enum):
     """Status of a background task."""
@@ -22,7 +22,6 @@ class TaskStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
-
 
 @dataclass
 class BackgroundTask:

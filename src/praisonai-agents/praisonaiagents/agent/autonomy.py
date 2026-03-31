@@ -35,8 +35,9 @@ from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List, Set
 from enum import Enum
 import logging
+from praisonaiagents._logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # ============================================================================
 # Unified Stage Enum (G-DUP-1 fix: single source of truth)
@@ -72,7 +73,6 @@ _ESCALATION_TO_AUTONOMY_SIGNAL = {
 # Reverse map for converting autonomy signal strings back to EscalationSignal values
 _AUTONOMY_TO_ESCALATION_SIGNAL = {v: k for k, v in _ESCALATION_TO_AUTONOMY_SIGNAL.items()}
 
-
 # Valid autonomy modes
 VALID_AUTONOMY_MODES = {"caller", "iterative"}
 
@@ -82,7 +82,6 @@ _LEVEL_TO_DEFAULT_MODE = {
     "auto_edit": "caller",
     "full_auto": "iterative",
 }
-
 
 @dataclass
 class AutonomyConfig:
@@ -196,7 +195,6 @@ class AutonomyConfig:
             default_tools=data.get("default_tools"),
         )
 
-
 class AutonomySignal(str, Enum):
     """Signals detected from prompts for autonomy decisions.
     
@@ -225,7 +223,6 @@ class AutonomySignal(str, Enum):
         )
         super().__init_subclass__(**kwargs)
 
-
 def _warn_autonomy_signal():
     """Emit deprecation warning when AutonomySignal is accessed."""
     from ..utils.deprecation import warn_deprecated_param
@@ -236,7 +233,6 @@ def _warn_autonomy_signal():
         alternative="use EscalationSignal from praisonaiagents.escalation.types instead",
         stacklevel=4
     )
-
 
 class AutonomyTrigger:
     """Detects signals from prompts for autonomy decisions.
@@ -283,7 +279,6 @@ class AutonomyTrigger:
                 pass
         return self._delegate.recommend_stage(esc_signals)
 
-
 @dataclass
 class AutonomyResult:
     """Result of an autonomous execution.
@@ -317,7 +312,6 @@ class AutonomyResult:
         Use repr() for debugging details.
         """
         return self.output or ""
-
 
 class DoomLoopTracker:
     """Tracks actions to detect doom loops with graduated recovery.
@@ -420,7 +414,6 @@ class DoomLoopTracker:
         """Reset the tracker completely."""
         self._delegate.start_session()
         self._recovery_attempts = 0
-
 
 class AutonomyMixin:
     """Helper-only trait for autonomy utilities.

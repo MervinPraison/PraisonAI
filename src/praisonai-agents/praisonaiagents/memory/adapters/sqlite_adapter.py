@@ -11,14 +11,14 @@ import os
 import sqlite3
 import json
 import logging
+from praisonaiagents._logging import get_logger
 import threading
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
 from ..protocols import MemoryProtocol
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class SqliteMemoryAdapter:
     """
@@ -68,10 +68,10 @@ class SqliteMemoryAdapter:
         
         # Set logger level based on verbose
         if verbose >= 5:
-            logger.setLevel(logging.INFO)
+            logger.setLevel(10)  # DEBUG
         else:
-            logger.setLevel(logging.WARNING)
-    
+            logger.setLevel(30)  # WARNING
+
     def _get_stm_conn(self):
         """Get thread-local short-term memory connection."""
         if not hasattr(self._local, 'stm_conn'):

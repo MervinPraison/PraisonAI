@@ -10,9 +10,9 @@ Implementations are provided by praisonai-tools or wrapper layer.
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 import logging
+from praisonaiagents._logging import get_logger
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class VectorRecord:
@@ -52,7 +52,6 @@ class VectorRecord:
             metadata=data.get("metadata", {}),
             score=data.get("score")
         )
-
 
 @runtime_checkable
 class VectorStoreProtocol(Protocol):
@@ -162,7 +161,6 @@ class VectorStoreProtocol(Protocol):
         """
         ...
 
-
 class VectorStoreRegistry:
     """
     Registry for vector stores.
@@ -234,11 +232,9 @@ class VectorStoreRegistry:
         self._stores.clear()
         self._initialized_stores.clear()
 
-
 def get_vector_store_registry() -> VectorStoreRegistry:
     """Get the global vector store registry instance."""
     return VectorStoreRegistry()
-
 
 class InMemoryVectorStore:
     """
@@ -411,12 +407,10 @@ class InMemoryVectorStore:
         
         return dot_product / (norm_a * norm_b)
 
-
 # Register the in-memory store by default
 def _register_default_stores():
     """Register default vector stores."""
     registry = get_vector_store_registry()
     registry.register("memory", InMemoryVectorStore)
-
 
 _register_default_stores()

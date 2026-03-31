@@ -23,6 +23,7 @@ import os
 import re
 import json
 import logging
+from praisonaiagents._logging import get_logger
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable, Tuple, Union
 from dataclasses import dataclass, field
@@ -33,8 +34,7 @@ from .workflow_configs import (
 )
 from ..task.task import Task
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 def _parse_json_output(output: Any, step_name: str = "step") -> Any:
     """
@@ -92,7 +92,6 @@ def _parse_json_output(output: Any, step_name: str = "step") -> Any:
     logger.debug(f"Could not parse JSON from step '{step_name}' output")
     return output
 
-
 def _extract_from_schema_echo(data: dict) -> Any:
     """
     Extract actual data when LLM echoes the JSON schema structure.
@@ -137,7 +136,6 @@ def _extract_from_schema_echo(data: dict) -> Any:
     # Not a schema echo, return as-is
     return data
 
-
 @dataclass
 class WorkflowContext:
     """Context passed to step handlers. Contains all information about the current workflow state."""
@@ -156,7 +154,6 @@ class StepResult:
 # Aliases for backward compatibility
 StepInput = WorkflowContext
 StepOutput = StepResult
-
 
 # =============================================================================
 # Workflow Pattern Helpers
@@ -184,7 +181,6 @@ class Route:
         self.routes = routes
         self.default = default or routes.get("default", [])
 
-
 @dataclass  
 class Parallel:
     """
@@ -200,7 +196,6 @@ class Parallel:
     
     def __init__(self, steps: List):
         self.steps = steps
-
 
 @dataclass
 class Loop:
@@ -284,7 +279,6 @@ class Loop:
         self.max_workers = max_workers
         self.output_variable = output_variable
 
-
 @dataclass
 class Repeat:
     """
@@ -312,7 +306,6 @@ class Repeat:
         self.step = step
         self.until = until
         self.max_iterations = max_iterations
-
 
 # Convenience functions for cleaner API
 def route(routes: Dict[str, List], default: Optional[List] = None) -> Route:
@@ -348,12 +341,10 @@ def loop(step: Any = None, steps: Optional[List[Any]] = None,
                 var_name=var_name, parallel=parallel, max_workers=max_workers,
                 output_variable=output_variable)
 
-
 def repeat(step: Any, until: Optional[Callable[[WorkflowContext], bool]] = None,
            max_iterations: int = 10) -> Repeat:
     """Repeat step until condition is met."""
     return Repeat(step=step, until=until, max_iterations=max_iterations)
-
 
 @dataclass
 class Include:
@@ -390,7 +381,6 @@ class Include:
         self.workflow = workflow
         self.input = input
 
-
 def include(recipe: Optional[str] = None, workflow: Optional[Any] = None, input: Optional[str] = None) -> Include:
     """Include another recipe or workflow as a workflow step.
     
@@ -404,10 +394,8 @@ def include(recipe: Optional[str] = None, workflow: Optional[Any] = None, input:
     """
     return Include(recipe=recipe, workflow=workflow, input=input)
 
-
 # Maximum nesting depth for patterns (prevents stack overflow)
 MAX_NESTING_DEPTH = 5
-
 
 @dataclass
 class If:
@@ -454,7 +442,6 @@ class If:
         self.then_steps = then_steps
         self.else_steps = else_steps or []
 
-
 def when(
     condition: str,
     then_steps: List[Any],
@@ -482,7 +469,6 @@ def when(
     """
     return If(condition=condition, then_steps=then_steps, else_steps=else_steps)
 
-
 def if_(
     condition: str,
     then_steps: List[Any],
@@ -502,7 +488,6 @@ def if_(
         If object for conditional execution
     """
     return If(condition=condition, then_steps=then_steps, else_steps=else_steps)
-
 
 
 @dataclass
@@ -2922,13 +2907,11 @@ CONCISE SUMMARY:"""
         """Alias for run() for consistency with Agents."""
         return self.run(input, **kwargs)
 
-
 # Backward compatibility aliases (silent - no deprecation warnings)
 # AgentFlow is the primary name (v1.0+)
 # Workflow and Pipeline are silent aliases
 Workflow = AgentFlow
 Pipeline = AgentFlow
-
 
 class WorkflowManager:
     """
@@ -4394,7 +4377,6 @@ class WorkflowManager:
             self._log(f"Deleted checkpoint '{name}'")
             return True
         return False
-
 
 def create_workflow_manager(
     workspace_path: Optional[str] = None,

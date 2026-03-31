@@ -11,6 +11,7 @@ This agent is designed for fast context retrieval using:
 import os
 import json
 import logging
+from praisonaiagents._logging import get_logger
 from typing import List, Dict, Any, Optional
 
 from praisonaiagents.context.fast.result import (
@@ -30,8 +31,7 @@ from praisonaiagents.context.fast.parallel_executor import (
     ParallelSearchCoordinator
 )
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class FastContextAgent:
     """Specialized agent for fast parallel code search.

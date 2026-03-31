@@ -2,10 +2,10 @@ import os
 import time
 import json
 import logging
+from praisonaiagents._logging import get_logger
 from typing import List, Optional, Dict, Any, Union, Literal, Type
 from pydantic import BaseModel, ConfigDict
 import asyncio
-
 
 def _rich():
     """Lazy-load Rich display classes (cached by sys.modules after first call)."""
@@ -142,11 +142,9 @@ def register_approval_callback(callback_fn):
     global approval_callback
     approval_callback = callback_fn
 
-
 # Simplified aliases (consistent naming convention)
 add_display_callback = register_display_callback
 add_approval_callback = register_approval_callback
-
 
 def execute_sync_callback(display_type: str, **kwargs):
     """Execute synchronous callback for a given display type without displaying anything.
@@ -339,7 +337,7 @@ def display_instruction(message: str, console=None, agent_name: str = None, agen
         console.print(Panel(agent_info, border_style="#D2E3C8", title="[bold]Agent Info[/]", title_align="left", padding=(1, 2)))
 
     # Only print if log level is DEBUG
-    if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+    if get_logger().getEffectiveLevel() == logging.DEBUG:
         console.print(Panel.fit(Text(message, style="bold blue"), title="Instruction", border_style="cyan"))
 
 def display_tool_call(message: str, console=None, tool_name: str = None, tool_input: dict = None, tool_output: str = None, elapsed_time: float = None, success: bool = True):
@@ -584,7 +582,7 @@ async def adisplay_instruction(message: str, console=None, agent_name: str = Non
         console.print(Panel(agent_info, border_style="#D2E3C8", title="[bold]Agent Info[/]", title_align="left", padding=(1, 2)))
     
     # Only print if log level is DEBUG
-    if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+    if get_logger().getEffectiveLevel() == logging.DEBUG:
         console.print(Panel.fit(Text(message, style="bold blue"), title="Instruction", border_style="cyan"))
 
 async def adisplay_tool_call(message: str, console=None):
@@ -652,7 +650,6 @@ def clean_triple_backticks(text: str) -> str:
 class ReflectionOutput(BaseModel):
     reflection: str
     satisfactory: Literal["yes", "no"]
-
 
 class TaskOutput(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)

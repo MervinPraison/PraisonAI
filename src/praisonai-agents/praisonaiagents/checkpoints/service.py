@@ -7,6 +7,7 @@ Implements shadow git repository for file-level checkpointing.
 import os
 import asyncio
 import logging
+from praisonaiagents._logging import get_logger
 import shutil
 from typing import Optional, List, Dict, Any, Callable
 from datetime import datetime
@@ -17,8 +18,7 @@ from .types import (
     CheckpointResult, CheckpointEvent
 )
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 def _parse_iso_timestamp(timestamp: str) -> datetime:
     """Parse ISO format timestamp, handling 'Z' suffix for Python 3.9 compatibility."""
@@ -38,7 +38,6 @@ PROTECTED_PATHS = [
     "/var",
     "/etc",
 ]
-
 
 class CheckpointService:
     """

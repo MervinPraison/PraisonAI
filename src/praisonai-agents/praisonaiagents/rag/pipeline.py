@@ -6,14 +6,14 @@ Provides citations, streaming, and async support.
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 import time
 from typing import Any, AsyncIterator, Dict, Iterator, List, Optional
 
 from .models import Citation, ContextPack, RAGConfig, RAGResult
 from .context import build_context, DefaultContextBuilder
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class DefaultCitationFormatter:
     """
@@ -55,7 +55,6 @@ class DefaultCitationFormatter:
             citations.append(citation)
         
         return citations
-
 
 class RAG:
     """

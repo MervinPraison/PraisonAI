@@ -10,6 +10,7 @@ from ..agent.agent import Agent
 from ..task.task import Task
 from typing import List, Any, Optional, Dict, Tuple
 import logging
+from praisonaiagents._logging import get_logger
 import os
 from pydantic import BaseModel, ConfigDict
 from ..main import display_instruction, display_tool_call, display_interaction
@@ -360,7 +361,7 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
                     use_openai_structured = True
             except Exception as e:
                 # If OpenAI client is not available, we'll use the LLM class
-                logging.getLogger(__name__).debug(f"OpenAI client not available, falling back to LLM class: {e}")
+                get_logger(__name__).debug(f"OpenAI client not available, falling back to LLM class: {e}")
             
             try:
                 if use_openai_structured and client:

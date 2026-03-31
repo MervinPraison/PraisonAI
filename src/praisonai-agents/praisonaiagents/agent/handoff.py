@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 import inspect
 import logging
+from praisonaiagents._logging import get_logger
 import asyncio
 import threading
 import time
@@ -22,8 +23,7 @@ import time
 if TYPE_CHECKING:
     from .agent import Agent
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class ContextPolicy(Enum):
     """Policy for context sharing during handoff."""
@@ -31,7 +31,6 @@ class ContextPolicy(Enum):
     SUMMARY = "summary" # Share summarized context (default - safe)
     NONE = "none"       # No context sharing
     LAST_N = "last_n"   # Share last N messages
-
 
 @dataclass
 class HandoffConfig:
@@ -98,18 +97,15 @@ class HandoffConfig:
             data["context_policy"] = ContextPolicy(data["context_policy"])
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
-
 class HandoffError(Exception):
     """Base exception for handoff errors."""
     pass
-
 
 class HandoffCycleError(HandoffError):
     """Raised when a cycle is detected in handoff chain."""
     def __init__(self, chain: List[str]):
         self.chain = chain
         super().__init__(f"Handoff cycle detected: {' -> '.join(chain)}")
-
 
 class HandoffDepthError(HandoffError):
     """Raised when max handoff depth is exceeded."""
@@ -118,7 +114,6 @@ class HandoffDepthError(HandoffError):
         self.max_depth = max_depth
         super().__init__(f"Max handoff depth exceeded: {depth} > {max_depth}")
 
-
 class HandoffTimeoutError(HandoffError):
     """Raised when handoff times out."""
     def __init__(self, timeout: float, agent_name: str):
@@ -126,10 +121,8 @@ class HandoffTimeoutError(HandoffError):
         self.agent_name = agent_name
         super().__init__(f"Handoff to {agent_name} timed out after {timeout}s")
 
-
 # Thread-local storage for tracking handoff chains
 _handoff_context = threading.local()
-
 
 def _get_handoff_chain() -> List[str]:
     """Get current handoff chain from thread-local storage."""
@@ -137,29 +130,24 @@ def _get_handoff_chain() -> List[str]:
         _handoff_context.chain = []
     return _handoff_context.chain
 
-
 def _get_handoff_depth() -> int:
     """Get current handoff depth."""
     return len(_get_handoff_chain())
-
 
 def _push_handoff(agent_name: str) -> None:
     """Push agent to handoff chain."""
     chain = _get_handoff_chain()
     chain.append(agent_name)
 
-
 def _pop_handoff() -> Optional[str]:
     """Pop agent from handoff chain."""
     chain = _get_handoff_chain()
     return chain.pop() if chain else None
 
-
 def _clear_handoff_chain() -> None:
     """Clear the handoff chain."""
     if hasattr(_handoff_context, 'chain'):
         _handoff_context.chain = []
-
 
 @dataclass
 class HandoffInputData:
@@ -169,7 +157,6 @@ class HandoffInputData:
     source_agent: Optional[str] = None
     handoff_depth: int = 0
     handoff_chain: List[str] = field(default_factory=list)
-
 
 @dataclass 
 class HandoffResult:
@@ -671,7 +658,6 @@ class Handoff:
         
         return handoff_tool
 
-
 def handoff(
     agent: 'Agent',
     tool_name_override: Optional[str] = None,
@@ -760,7 +746,6 @@ def handoff(
         config=config,
     )
 
-
 # Handoff filters - common patterns for filtering handoff data
 class handoff_filters:
     """Common handoff input filters."""
@@ -827,13 +812,11 @@ class handoff_filters:
         
         return data
 
-
 # Recommended prompt prefix for agents that use handoffs
 RECOMMENDED_PROMPT_PREFIX = """You have the ability to transfer tasks to specialized agents when appropriate. 
 When you determine that a task would be better handled by another agent with specific expertise, 
 use the transfer tool to hand off the task. The receiving agent will have the full context of 
 the conversation and will continue helping the user."""
-
 
 def prompt_with_handoff_instructions(base_prompt: str, agent: 'Agent') -> str:
     """

@@ -12,6 +12,7 @@ Follows the Agent() class patterns:
 import os
 import time
 import logging
+from praisonaiagents._logging import get_logger
 import asyncio
 import warnings
 from dataclasses import dataclass, field
@@ -19,7 +20,6 @@ from typing import Optional, Any, Dict, Union, List, Generator
 
 # Filter out Pydantic warning about fields
 warnings.filterwarnings("ignore", "Valid config keys have changed in V2", UserWarning)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # VideoConfig - Configuration dataclass following feature_configs.py patterns
@@ -78,7 +78,6 @@ class VideoConfig:
             "api_key": self.api_key,
             "api_version": self.api_version,
         }
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # VideoAgent Class - Agent-centric video generation
@@ -265,12 +264,12 @@ class VideoAgent:
         """Configure logging levels based on verbose setting."""
         if isinstance(verbose, int) and verbose >= 10:
             # Debug mode
-            logging.getLogger("litellm").setLevel(logging.DEBUG)
+            get_logger("litellm").setLevel(logging.DEBUG)
         else:
             # Suppress debug logging
-            logging.getLogger("litellm").setLevel(logging.WARNING)
-            logging.getLogger("httpx").setLevel(logging.WARNING)
-            logging.getLogger("httpcore").setLevel(logging.WARNING)
+            get_logger("litellm").setLevel(logging.WARNING)
+            get_logger("httpx").setLevel(logging.WARNING)
+            get_logger("httpcore").setLevel(logging.WARNING)
     
     def _get_model_params(self) -> Dict[str, Any]:
         """Build parameters for LiteLLM video calls."""

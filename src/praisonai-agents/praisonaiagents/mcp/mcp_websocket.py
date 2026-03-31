@@ -19,16 +19,16 @@ Protocol Revision: 2025-11-25
 import asyncio
 import json
 import logging
+from praisonaiagents._logging import get_logger
 import threading
 import inspect
 import re
 from typing import Any, Dict, Optional, List
 
-logger = logging.getLogger("mcp-websocket")
+logger = get_logger("mcp-websocket")
 
 # Import shared utilities for thread-safe event loop and schema fixing
 from .mcp_schema_utils import ThreadLocalEventLoop, fix_array_schemas
-
 
 def is_websocket_url(url: str) -> bool:
     """
@@ -43,7 +43,6 @@ def is_websocket_url(url: str) -> bool:
     if not isinstance(url, str):
         return False
     return bool(re.match(r'^wss?://', url, re.IGNORECASE))
-
 
 def calculate_backoff(attempt: int, base_delay: float = 1.0, max_delay: float = 60.0) -> float:
     """
@@ -60,15 +59,12 @@ def calculate_backoff(attempt: int, base_delay: float = 1.0, max_delay: float = 
     delay = base_delay * (2 ** attempt)
     return min(delay, max_delay)
 
-
 # Thread-local event loop for WebSocket operations (thread-safe)
 _event_loop_manager = ThreadLocalEventLoop()
-
 
 def get_event_loop():
     """Get or create a thread-local event loop for WebSocket operations."""
     return _event_loop_manager.get_loop()
-
 
 class WebSocketTransport:
     """
@@ -246,7 +242,6 @@ class WebSocketTransport:
         
         logger.debug("WebSocket connection closed")
 
-
 class WebSocketMCPTool:
     """
     A wrapper for an MCP tool that can be used with praisonaiagents.
@@ -371,7 +366,6 @@ class WebSocketMCPTool:
             }
         }
 
-
 class WebSocketMCPClient:
     """
     High-level client for connecting to MCP servers over WebSocket.
@@ -423,10 +417,10 @@ class WebSocketMCPClient:
         
         # Configure logging
         if debug:
-            logger.setLevel(logging.DEBUG)
+            logger.setLevel(10)  # DEBUG
         else:
-            logger.setLevel(logging.WARNING)
-        
+            logger.setLevel(30)  # WARNING
+
         # Initialize connection
         self._initialize()
     

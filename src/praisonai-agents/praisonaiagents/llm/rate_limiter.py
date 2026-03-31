@@ -24,11 +24,11 @@ Usage:
 import time
 import asyncio
 import logging
+from praisonaiagents._logging import get_logger
 from dataclasses import dataclass, field
 from typing import Optional, Callable
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class RateLimiter:

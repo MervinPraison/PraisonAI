@@ -106,10 +106,10 @@ def run_single_task(task: Dict[str, Any], max_iterations: int = 15) -> TaskResul
     from praisonai.cli.commands.tracker import (
         _run_tracked_task,
         _get_tools,
-        DEFAULT_TOOLS,
+        AUTONOMY_DEFAULT_TOOLS,
     )
     
-    tools = _get_tools(DEFAULT_TOOLS)
+    tools = _get_tools(AUTONOMY_DEFAULT_TOOLS)
     
     result = _run_tracked_task(
         task=task["description"],

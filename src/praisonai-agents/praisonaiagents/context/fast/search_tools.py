@@ -16,9 +16,9 @@ import fnmatch
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
 import logging
+from praisonaiagents._logging import get_logger
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 def _load_gitignore_patterns(root_path: str) -> Set[str]:
     """Load patterns from .gitignore file.
@@ -56,7 +56,6 @@ def _load_gitignore_patterns(root_path: str) -> Set[str]:
             pass
     
     return patterns
-
 
 def _should_ignore(path: str, root_path: str, patterns: Set[str]) -> bool:
     """Check if a path should be ignored based on gitignore patterns.
@@ -101,7 +100,6 @@ def _should_ignore(path: str, root_path: str, patterns: Set[str]) -> bool:
     
     return False
 
-
 def _is_binary_file(filepath: str) -> bool:
     """Check if a file is binary.
     
@@ -125,7 +123,6 @@ def _is_binary_file(filepath: str) -> bool:
     except Exception:
         return True
     return False
-
 
 def grep_search(
     search_path: str,
@@ -249,7 +246,6 @@ def grep_search(
     
     return results
 
-
 def glob_search(
     search_path: str,
     pattern: str,
@@ -312,7 +308,6 @@ def glob_search(
         logger.debug(f"Error in glob search: {e}")
     
     return results
-
 
 def read_file(
     filepath: str,
@@ -395,7 +390,6 @@ def read_file(
             "error": str(e),
             "path": filepath
         }
-
 
 def list_directory(
     dir_path: str,
@@ -491,7 +485,6 @@ def list_directory(
         "total_entries": len(entries),
         "truncated": len(entries) >= max_entries
     }
-
 
 # Tool definitions for LLM function calling
 FAST_CONTEXT_TOOLS = [
@@ -608,7 +601,6 @@ FAST_CONTEXT_TOOLS = [
         }
     }
 ]
-
 
 def execute_tool(tool_name: str, **kwargs) -> Dict[str, Any]:
     """Execute a search tool by name.

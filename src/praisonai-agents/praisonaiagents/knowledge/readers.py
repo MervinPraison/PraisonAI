@@ -11,9 +11,9 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 import os
 import logging
+from praisonaiagents._logging import get_logger
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class Document:
@@ -54,7 +54,6 @@ class Document:
             doc_id=data.get("doc_id"),
             embedding=data.get("embedding")
         )
-
 
 @runtime_checkable
 class ReaderProtocol(Protocol):
@@ -99,7 +98,6 @@ class ReaderProtocol(Protocol):
             True if this reader can handle the source
         """
         ...
-
 
 class ReaderRegistry:
     """
@@ -205,11 +203,9 @@ class ReaderRegistry:
         self._extension_map.clear()
         self._initialized_readers.clear()
 
-
 def get_reader_registry() -> ReaderRegistry:
     """Get the global reader registry instance."""
     return ReaderRegistry()
-
 
 def detect_source_kind(source: str) -> str:
     """
@@ -248,7 +244,6 @@ def detect_source_kind(source: str) -> str:
     
     return "unknown"
 
-
 def get_file_extension(source: str) -> str:
     """
     Get the file extension from a source path.
@@ -266,7 +261,6 @@ def get_file_extension(source: str) -> str:
         return os.path.splitext(path)[1].lower().lstrip(".")
     
     return os.path.splitext(source)[1].lower().lstrip(".")
-
 
 # Default extension mappings (reader name -> extensions)
 DEFAULT_EXTENSION_MAPPINGS = {

@@ -16,14 +16,14 @@ Usage::
 
 import ast
 import logging
+from praisonaiagents._logging import get_logger
 import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class SkillInfo:
@@ -37,7 +37,6 @@ class SkillInfo:
     compatible: bool = True
     error: Optional[str] = None
 
-
 # Security patterns to flag during import
 _SECURITY_PATTERNS = [
     (r"subprocess\.(call|run|Popen|check_output)", "Subprocess execution detected"),
@@ -48,7 +47,6 @@ _SECURITY_PATTERNS = [
     (r"pickle\.loads?\s*\(", "Pickle deserialization detected"),
     (r"shutil\.rmtree\s*\(", "Recursive directory deletion detected"),
 ]
-
 
 def scan_skills(skills_dir: str) -> List[SkillInfo]:
     """Scan a directory of skills and return metadata for each.
@@ -71,7 +69,6 @@ def scan_skills(skills_dir: str) -> List[SkillInfo]:
             results.append(info)
 
     return results
-
 
 def import_skill(skill_path: str) -> List[Any]:
     """Import a skill directory and return PraisonAI-compatible tool functions.
@@ -109,7 +106,6 @@ def import_skill(skill_path: str) -> List[Any]:
 
     return tools
 
-
 def format_scan_report(skills: List[SkillInfo]) -> str:
     """Format scan results for terminal display.
 
@@ -141,7 +137,6 @@ def format_scan_report(skills: List[SkillInfo]) -> str:
     lines.append("")
     lines.append(f"Total: {total} skills, {compat_count} compatible, {warns} security warnings")
     return "\n".join(lines)
-
 
 # ── internals ────────────────────────────────────────────────────
 
@@ -198,7 +193,6 @@ def _parse_skill_dir(skill_dir: Path) -> SkillInfo:
 
     return info
 
-
 def _extract_description(content: str) -> str:
     """Extract description from SKILL.md content.
 
@@ -220,7 +214,6 @@ def _extract_description(content: str) -> str:
             return stripped[:200]
 
     return ""
-
 
 def _extract_tool_functions(py_file: Path) -> list:
     """Extract functions from a Python file and wrap them as simple callables.

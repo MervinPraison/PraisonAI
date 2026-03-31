@@ -13,15 +13,15 @@ Usage::
 
 import json
 import logging
+from praisonaiagents._logging import get_logger
 import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 COST_DIR = Path.home() / ".praisonai" / "costs"
-
 
 def save_cost_report(
     agent,
@@ -65,7 +65,6 @@ def save_cost_report(
     logger.info(f"[costs] Saved cost report to {filepath}")
     return str(filepath)
 
-
 def load_cost_report(session_name: str) -> Optional[Dict[str, Any]]:
     """Load a cost report by session name.
 
@@ -81,7 +80,6 @@ def load_cost_report(session_name: str) -> Optional[Dict[str, Any]]:
         with open(filepath) as f:
             return json.load(f)
     return None
-
 
 def list_cost_reports(limit: int = 20) -> List[Dict[str, Any]]:
     """List recent cost reports, sorted by timestamp (newest first).
@@ -105,7 +103,6 @@ def list_cost_reports(limit: int = 20) -> List[Dict[str, Any]]:
         if len(reports) >= limit:
             break
     return reports
-
 
 def format_cost_table(reports: List[Dict[str, Any]], as_json: bool = False) -> str:
     """Format cost reports for terminal display.

@@ -18,6 +18,32 @@ from importlib import util
 MAX_RETRIES = 3
 RETRY_DELAY = 1.0  # seconds
 
+from praisonaiagents.utils.resilience import retry_with_backoff
+
+@retry_with_backoff(retries=3, backoff_in_seconds=1.0, exceptions=(Exception,), jitter_factor=0.25)
+def _do_duckduckgo_search(query: str, max_results: int) -> List[Dict]:
+    """Inner core logic wrapped by resilience decorator."""
+    from ddgs import DDGS
+    results = []
+    ddgs = DDGS()
+    
+    # Try text search (use positional 'query' for v8+ compatibility)
+    search_results = list(ddgs.text(query, max_results=max_results))
+    
+    for result in search_results:
+        results.append({
+            "title": result.get("title", ""),
+            "url": result.get("href", ""),
+            "snippet": result.get("body", "")
+        })
+    
+    # If we got results, return them
+    if results:
+        return results
+        
+    raise Exception("DuckDuckGo returned empty results")
+
+
 def internet_search(query: str, max_results: int = 5, retries: int = MAX_RETRIES) -> List[Dict]:
     """Perform an internet search using DuckDuckGo with retry logic.
     
@@ -35,46 +61,12 @@ def internet_search(query: str, max_results: int = 5, retries: int = MAX_RETRIES
         logging.error(error_msg)
         return [{"error": error_msg}]
 
-    last_error = None
-    for attempt in range(retries):
-        try:
-            # Import only when needed
-            from ddgs import DDGS
-            results = []
-            ddgs = DDGS()
-            
-            # Try text search (use positional 'query' for v8+ compatibility)
-            search_results = list(ddgs.text(query, max_results=max_results))
-            
-            for result in search_results:
-                results.append({
-                    "title": result.get("title", ""),
-                    "url": result.get("href", ""),
-                    "snippet": result.get("body", "")
-                })
-            
-            # If we got results, return them
-            if results:
-                return results
-            
-            # Empty results - retry with backoff
-            if attempt < retries - 1:
-                logging.debug(f"DuckDuckGo returned empty results, retrying ({attempt + 1}/{retries})...")
-                time.sleep(RETRY_DELAY * (attempt + 1))  # Exponential backoff
-                
-        except Exception as e:
-            last_error = e
-            logging.debug(f"DuckDuckGo search attempt {attempt + 1} failed: {e}")
-            if attempt < retries - 1:
-                time.sleep(RETRY_DELAY * (attempt + 1))
-    
-    # All retries exhausted
-    if last_error:
-        error_msg = f"DuckDuckGo search failed after {retries} attempts: {last_error}"
-    else:
-        error_msg = f"DuckDuckGo search returned no results after {retries} attempts"
-    logging.warning(error_msg)
-    return [{"error": error_msg}]
+    try:
+        return _do_duckduckgo_search(query, max_results)
+    except Exception as e:
+        error_msg = f"DuckDuckGo search failed: {str(e)}"
+        logging.warning(error_msg)
+        return [{"error": error_msg}]
 
 def duckduckgo(query: str) -> List[Dict]:
     """Alias for internet_search function."""

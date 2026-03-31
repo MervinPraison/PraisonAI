@@ -8,6 +8,7 @@ Zero dependencies beyond stdlib.
 import fcntl
 import json
 import logging
+from praisonaiagents._logging import get_logger
 import os
 import sys
 import tempfile
@@ -19,7 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from ..paths import get_sessions_dir
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Default session directory (uses centralized paths - DRY)
 DEFAULT_SESSION_DIR = str(get_sessions_dir())
@@ -27,7 +28,6 @@ DEFAULT_SESSION_DIR = str(get_sessions_dir())
 # Default limits
 DEFAULT_MAX_MESSAGES = 100
 DEFAULT_LOCK_TIMEOUT = 5.0  # seconds
-
 
 @dataclass
 class SessionMessage:
@@ -55,7 +55,6 @@ class SessionMessage:
             timestamp=data.get("timestamp", time.time()),
             metadata=data.get("metadata", {}),
         )
-
 
 @dataclass
 class SessionData:
@@ -114,7 +113,6 @@ class SessionData:
         if max_messages and len(messages) > max_messages:
             messages = messages[-max_messages:]
         return [{"role": m.role, "content": m.content} for m in messages]
-
 
 class FileLock:
     """
@@ -181,7 +179,6 @@ class FileLock:
                 self._lock_file = None
                 # Note: We don't remove the lock file to avoid race conditions
                 # where another process has opened but not yet locked the file
-
 
 class DefaultSessionStore:
     """
@@ -680,11 +677,9 @@ class DefaultSessionStore:
             else:
                 self._cache.clear()
 
-
 # Global session store instance (lazy initialized)
 _default_store: Optional[DefaultSessionStore] = None
 _store_lock = threading.Lock()
-
 
 def get_default_session_store() -> DefaultSessionStore:
     """Get the global default session store instance."""

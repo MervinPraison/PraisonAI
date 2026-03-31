@@ -19,13 +19,13 @@ Usage:
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Singleton RulesManager instance
 _rules_manager = None
-
 
 def _get_rules_manager():
     """Get or create the RulesManager singleton."""
@@ -34,7 +34,6 @@ def _get_rules_manager():
         from praisonaiagents.memory.rules_manager import RulesManager
         _rules_manager = RulesManager()
     return _rules_manager
-
 
 def create_rule_tool(
     name: str,
@@ -117,7 +116,6 @@ The rule will be applied according to its activation mode."""
         logger.error(f"Error creating rule: {e}")
         return f"Error creating rule: {str(e)}"
 
-
 def list_rules_tool() -> str:
     """
     List all available rules.
@@ -154,7 +152,6 @@ def list_rules_tool() -> str:
         logger.error(f"Error listing rules: {e}")
         return f"Error listing rules: {str(e)}"
 
-
 def get_rule_tool(name: str) -> str:
     """
     Get the content of a specific rule.
@@ -188,7 +185,6 @@ def get_rule_tool(name: str) -> str:
         logger.error(f"Error getting rule: {e}")
         return f"Error getting rule: {str(e)}"
 
-
 def delete_rule_tool(name: str, scope: Optional[str] = None) -> str:
     """
     Delete a rule.
@@ -216,7 +212,6 @@ def delete_rule_tool(name: str, scope: Optional[str] = None) -> str:
     except Exception as e:
         logger.error(f"Error deleting rule: {e}")
         return f"Error deleting rule: {str(e)}"
-
 
 def get_active_rules_tool(file_path: Optional[str] = None) -> str:
     """
@@ -253,7 +248,6 @@ def get_active_rules_tool(file_path: Optional[str] = None) -> str:
     except Exception as e:
         logger.error(f"Error getting active rules: {e}")
         return f"Error getting active rules: {str(e)}"
-
 
 # Export all tools
 __all__ = [

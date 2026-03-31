@@ -6,6 +6,7 @@ Opt-in only - no overhead when not enabled.
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Callable
@@ -13,8 +14,7 @@ from enum import Enum
 
 from .types import EscalationStage
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class EventType(Enum):
     """Types of observable events."""
@@ -47,7 +47,6 @@ class EventType(Enum):
     BUDGET_WARNING = "budget_warning"
     BUDGET_EXCEEDED = "budget_exceeded"
 
-
 @dataclass
 class ObservabilityEvent:
     """An observable event from the escalation pipeline."""
@@ -74,7 +73,6 @@ class ObservabilityEvent:
             "step_number": self.step_number,
             "duration_ms": self.duration_ms,
         }
-
 
 @dataclass
 class ExecutionMetrics:
@@ -115,7 +113,6 @@ class ExecutionMetrics:
             "doom_loops_detected": self.doom_loops_detected,
             "recovery_attempts": self.recovery_attempts,
         }
-
 
 class ObservabilityHooks:
     """
@@ -294,15 +291,12 @@ class ObservabilityHooks:
             "final_stage": self._current_stage.name if self._current_stage else None,
         }
 
-
 # Global hooks instance (opt-in)
 _global_hooks: Optional[ObservabilityHooks] = None
-
 
 def get_hooks() -> Optional[ObservabilityHooks]:
     """Get global observability hooks."""
     return _global_hooks
-
 
 def enable_observability() -> ObservabilityHooks:
     """Enable global observability."""
@@ -310,7 +304,6 @@ def enable_observability() -> ObservabilityHooks:
     if _global_hooks is None:
         _global_hooks = ObservabilityHooks(enabled=True)
     return _global_hooks
-
 
 def disable_observability():
     """Disable global observability."""

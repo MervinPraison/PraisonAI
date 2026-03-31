@@ -12,10 +12,10 @@ Design principles:
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Protocol, List, Dict, Any, Optional, runtime_checkable
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @runtime_checkable
 class SearchBackend(Protocol):
@@ -79,7 +79,6 @@ class SearchBackend(Protocol):
         """
         ...
 
-
 class PythonSearchBackend:
     """Pure Python search backend using existing search_tools.
     
@@ -130,7 +129,6 @@ class PythonSearchBackend:
             pattern=pattern,
             max_results=max_results
         )
-
 
 class RipgrepBackend:
     """Optional ripgrep backend using subprocess.
@@ -263,7 +261,6 @@ class RipgrepBackend:
         """Glob is not well-supported by ripgrep, use Python."""
         return self._get_fallback().glob(path, pattern, max_results)
 
-
 def _count_files_fast(path: str, limit: int = 1000) -> int:
     """Quickly count files in a directory (stops at limit).
     
@@ -291,11 +288,9 @@ def _count_files_fast(path: str, limit: int = 1000) -> int:
         pass
     return count
 
-
 # Threshold for switching from Python to Ripgrep
 # Based on profiling: Python is faster for <500 files due to subprocess overhead
 RIPGREP_FILE_THRESHOLD = 500
-
 
 class SmartBackend:
     """Smart backend that auto-selects Python or Ripgrep based on codebase size.
@@ -373,7 +368,6 @@ class SmartBackend:
     ) -> List[Dict[str, Any]]:
         """Glob always uses Python (ripgrep doesn't support glob well)."""
         return self._python.glob(path, pattern, max_results)
-
 
 def get_search_backend(
     backend_type: str = "auto",

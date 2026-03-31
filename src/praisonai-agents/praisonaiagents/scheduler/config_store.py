@@ -7,6 +7,7 @@ other config.yaml content.
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 import os
 import threading
 import time
@@ -14,11 +15,10 @@ from typing import Dict, List, Optional
 
 from .models import ScheduleJob, RunRecord
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _HISTORY_FILE = "run_history.yaml"
 _MAX_HISTORY = 200
-
 
 class ConfigYamlScheduleStore:
     """CRUD store backed by ``config.yaml``.

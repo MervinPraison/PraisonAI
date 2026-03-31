@@ -12,10 +12,10 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any, Optional, Callable
 import logging
+from praisonaiagents._logging import get_logger
 import time
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class ToolCallBatch:
     """Batch of tool calls to execute in parallel.
@@ -61,7 +61,6 @@ class ToolCallBatch:
     def clear(self) -> None:
         """Clear all tasks from batch."""
         self.tasks.clear()
-
 
 class ParallelExecutor:
     """Executes search tools in parallel.
@@ -230,7 +229,6 @@ class ParallelExecutor:
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
-
 
 class ParallelSearchCoordinator:
     """Coordinates parallel search operations across multiple turns.

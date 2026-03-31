@@ -9,11 +9,11 @@ LAZY IMPORT: pymongo is only imported when this adapter is instantiated.
 
 import os
 import logging
+from praisonaiagents._logging import get_logger
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class MongoDBKnowledgeAdapter:
     """

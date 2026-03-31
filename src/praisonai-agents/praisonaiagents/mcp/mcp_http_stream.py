@@ -7,6 +7,7 @@ over HTTP Stream transport, implementing the Streamable HTTP transport protocol.
 import asyncio
 import atexit
 import logging
+from praisonaiagents._logging import get_logger
 import threading
 import inspect
 import json
@@ -28,7 +29,7 @@ try:
 except ImportError:
     aiohttp = None
 
-logger = logging.getLogger("mcp-http-stream")
+logger = get_logger("mcp-http-stream")
 
 # Import shared utilities for thread-safe event loop and schema fixing
 from .mcp_schema_utils import ThreadLocalEventLoop, fix_array_schemas
@@ -43,7 +44,6 @@ _cleanup_registered = False
 def get_event_loop():
     """Get or create a thread-local event loop."""
     return _event_loop_manager.get_loop()
-
 
 def _cleanup_all_clients():
     """Clean up all active clients at program exit."""
@@ -61,14 +61,12 @@ def _cleanup_all_clients():
             # Ignore exceptions during cleanup
             pass
 
-
 def _register_cleanup():
     """Register the cleanup function to run at program exit."""
     global _cleanup_registered
     if not _cleanup_registered:
         atexit.register(_cleanup_all_clients)
         _cleanup_registered = True
-
 
 class HTTPStreamMCPTool:
     """A wrapper for an MCP tool that can be used with praisonaiagents."""
@@ -160,7 +158,6 @@ class HTTPStreamMCPTool:
                 "parameters": fixed_schema
             }
         }
-
 
 class HTTPStreamTransport:
     """
@@ -461,7 +458,6 @@ class HTTPStreamTransport:
             return response
         return _write
 
-
 class HTTPStreamMCPClient:
     """A client for connecting to an MCP server over HTTP Stream transport."""
     
@@ -509,11 +505,11 @@ class HTTPStreamMCPClient:
         
         # Set up logging
         if debug:
-            logger.setLevel(logging.DEBUG)
+            logger.setLevel(10)  # DEBUG
         else:
             # Set to WARNING by default to hide INFO messages
-            logger.setLevel(logging.WARNING)
-        
+            logger.setLevel(30)  # WARNING
+
         # Register this client for cleanup and setup exit handler
         _active_clients.add(self)
         _register_cleanup()

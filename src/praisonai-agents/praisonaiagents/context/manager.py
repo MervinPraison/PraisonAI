@@ -15,6 +15,9 @@ This is the main entry point for context management in both SDK and CLI.
 
 import hashlib
 import json
+from praisonaiagents._logging import get_logger
+
+logger = get_logger(__name__)
 import threading
 import atexit
 from typing import Dict, List, Any, Optional, Literal, Callable, Tuple
@@ -32,7 +35,6 @@ from .budgeter import ContextBudgeter
 from .ledger import ContextLedgerManager, MultiAgentLedger
 from .optimizer import get_optimizer
 from .monitor import ContextMonitor, MultiAgentMonitor
-
 
 class SessionDeduplicationCache:
     """
@@ -91,7 +93,6 @@ class SessionDeduplicationCache:
         with self._lock:
             self._cache.clear()
             self._stats = {"duplicates_prevented": 0, "tokens_saved": 0}
-
 
 def deduplicate_topics(topics: list, key: str = "title", similarity_threshold: float = 0.8) -> list:
     """
@@ -153,13 +154,11 @@ def deduplicate_topics(topics: list, key: str = "title", similarity_threshold: f
     
     return unique_topics
 
-
 class EstimationMode(str, Enum):
     """Token estimation modes."""
     HEURISTIC = "heuristic"
     ACCURATE = "accurate"
     VALIDATED = "validated"
-
 
 class ContextShareMode(str, Enum):
     """How context is shared between agents."""
@@ -167,13 +166,11 @@ class ContextShareMode(str, Enum):
     SUMMARY = "summary"
     FULL = "full"
 
-
 class ToolShareMode(str, Enum):
     """How tools are shared between agents."""
     NONE = "none"
     SAFE = "safe"
     FULL = "full"
-
 
 class OptimizationEventType(str, Enum):
     """Types of optimization events."""
@@ -187,7 +184,6 @@ class OptimizationEventType(str, Enum):
     SNAPSHOT = "snapshot"
     OVERFLOW_DETECTED = "overflow_detected"
     AUTO_COMPACT = "auto_compact"
-
 
 @dataclass
 class ContextPolicy:
@@ -213,7 +209,6 @@ class ContextPolicy:
             "preserve_recent_turns": self.preserve_recent_turns,
         }
 
-
 @dataclass
 class OptimizationEvent:
     """Record of an optimization event."""
@@ -238,7 +233,6 @@ class OptimizationEvent:
             "details": self.details,
         }
 
-
 @dataclass
 class EstimationMetrics:
     """Metrics for token estimation accuracy."""
@@ -255,7 +249,6 @@ class EstimationMetrics:
             "estimator_used": self.estimator_used.value,
         }
 
-
 @dataclass
 class PerToolBudget:
     """Per-tool token budget configuration."""
@@ -265,7 +258,6 @@ class PerToolBudget:
     
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
-
 
 @dataclass
 class SnapshotHookData:
@@ -602,8 +594,7 @@ class ContextManager:
                 
                 # Check local seen hashes first
                 if content_hash in seen_hashes:
-                    import logging
-                    logging.debug(f"[Context] Dedup: skipping local duplicate (hash={content_hash[:8]}, agent={self.agent_name})")
+                    logger.debug(f"[Context] Dedup: skipping local duplicate (hash={content_hash[:8]}, agent={self.agent_name})")
                     continue
                 
                 # Check session-level cache for cross-agent deduplication
@@ -611,8 +602,7 @@ class ContextManager:
                     tokens = estimate_message_tokens(msg)
                     if self._session_cache.check_and_add(content_hash, self.agent_name, tokens):
                         # Duplicate found in session cache - skip
-                        import logging
-                        logging.debug(f"[Context] Dedup: skipping session duplicate (hash={content_hash[:8]}, agent={self.agent_name}, tokens={tokens})")
+                        logger.debug(f"[Context] Dedup: skipping session duplicate (hash={content_hash[:8]}, agent={self.agent_name}, tokens={tokens})")
                         continue
                 
                 seen_hashes.add(content_hash)
@@ -746,7 +736,7 @@ class ContextManager:
                 # Log if mismatch exceeds threshold
                 if self.config.log_estimation_mismatch and error_pct > self.config.mismatch_threshold_pct:
                     import logging
-                    logging.getLogger(__name__).warning(
+                    get_logger(__name__).warning(
                         f"Token estimation mismatch: heuristic={heuristic}, accurate={accurate}, error={error_pct:.1f}%"
                     )
                 
@@ -970,7 +960,6 @@ class ContextManager:
         self._estimation_cache.clear()
         self._last_snapshot_hook = None
 
-
 class MultiAgentContextManager:
     """
     Context manager for multi-agent orchestration.
@@ -1126,7 +1115,6 @@ class MultiAgentContextManager:
             "session_dedup": self._session_cache.get_stats() if self._session_cache else {},
         }
 
-
 # Convenience function for creating manager with config precedence
 def create_context_manager(
     model: str = "gpt-4o-mini",
@@ -1172,7 +1160,6 @@ def create_context_manager(
         session_id=session_id,
         agent_name=agent_name,
     )
-
 
 def _load_config_from_file(path: str, base_config: ManagerConfig) -> ManagerConfig:
     """Load config from YAML file."""

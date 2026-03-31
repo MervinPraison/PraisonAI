@@ -23,12 +23,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from praisonaiagents._logging import get_logger
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, TypedDict
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -61,7 +61,6 @@ class LoopDetectionConfig:
         if self.critical_threshold <= self.warn_threshold:
             self.critical_threshold = self.warn_threshold + 1
 
-
 # ---------------------------------------------------------------------------
 # Result type
 # ---------------------------------------------------------------------------
@@ -73,9 +72,7 @@ class LoopDetectionResult(TypedDict, total=False):
     message: Optional[str]
     count: int
 
-
 _NOT_STUCK: LoopDetectionResult = {"stuck": False}
-
 
 # ---------------------------------------------------------------------------
 # History record
@@ -86,7 +83,6 @@ class ToolCallRecord(TypedDict, total=False):
     args_hash: str
     result_hash: Optional[str]
     timestamp: float
-
 
 # ---------------------------------------------------------------------------
 # Hashing helpers
@@ -108,10 +104,8 @@ def _stable_json(value: Any) -> str:
     except Exception:
         return '"<unserializable>"'
 
-
 def _sha256_hex(text: str, prefix_len: int = 16) -> str:
     return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:prefix_len]
-
 
 def hash_tool_call(tool_name: str, args: Any) -> str:
     """
@@ -127,7 +121,6 @@ def hash_tool_call(tool_name: str, args: Any) -> str:
     stable = _stable_json({"t": tool_name, "a": args})
     return _sha256_hex(stable)
 
-
 def _hash_result(result: Any) -> Optional[str]:
     """Hash a tool result for no-progress detection."""
     if result is None:
@@ -137,7 +130,6 @@ def _hash_result(result: Any) -> Optional[str]:
         return _sha256_hex(stable)
     except Exception:
         return None
-
 
 # ---------------------------------------------------------------------------
 # Record tool call / outcome
@@ -168,7 +160,6 @@ def record_tool_call(
     # Trim to sliding window
     if len(history) > max_size:
         del history[: len(history) - max_size]
-
 
 def record_tool_outcome(
     history: List[ToolCallRecord],
@@ -204,7 +195,6 @@ def record_tool_outcome(
             )
             return
 
-
 # ---------------------------------------------------------------------------
 # Detectors
 # ---------------------------------------------------------------------------
@@ -214,7 +204,6 @@ def _known_poll_tool(tool_name: str) -> bool:
     _poll_keywords = ("status", "poll", "check", "wait", "ping", "health", "command_status")
     name_lower = tool_name.lower()
     return any(kw in name_lower for kw in _poll_keywords)
-
 
 def _count_generic_repeat(
     history: List[ToolCallRecord],
@@ -226,7 +215,6 @@ def _count_generic_repeat(
         1 for rec in history
         if rec["tool_name"] == tool_name and rec["args_hash"] == args_hash
     )
-
 
 def _no_progress_streak(
     history: List[ToolCallRecord],
@@ -255,7 +243,6 @@ def _no_progress_streak(
             break  # result changed — no longer a streak
 
     return streak
-
 
 def _ping_pong_streak(
     history: List[ToolCallRecord],
@@ -292,7 +279,6 @@ def _ping_pong_streak(
         return 0
 
     return count + 1  # include current call
-
 
 # ---------------------------------------------------------------------------
 # Main detection function

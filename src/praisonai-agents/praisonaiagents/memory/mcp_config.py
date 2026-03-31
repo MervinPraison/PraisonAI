@@ -33,12 +33,12 @@ Config File Format (JSON):
 import os
 import json
 import logging
+from praisonaiagents._logging import get_logger
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class MCPConfig:
@@ -101,7 +101,6 @@ class MCPConfig:
         except ImportError:
             logger.warning("MCP tools not available")
             return None
-
 
 class MCPConfigManager:
     """

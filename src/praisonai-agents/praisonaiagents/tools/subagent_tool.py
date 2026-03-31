@@ -6,10 +6,10 @@ enabling hierarchical task delegation and multi-agent coordination.
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Any, Callable, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 def create_subagent_tool(
     agent_factory: Optional[Callable[..., Any]] = None,
@@ -174,7 +174,6 @@ def create_subagent_tool(
         },
     }
 
-
 def create_batch_tool() -> Dict[str, Any]:
     """
     Create a batch tool for executing multiple operations.
@@ -261,7 +260,6 @@ def create_batch_tool() -> Dict[str, Any]:
             "required": ["operations"],
         },
     }
-
 
 def create_todo_tools() -> List[Dict[str, Any]]:
     """

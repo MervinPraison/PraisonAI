@@ -6,6 +6,7 @@ PluginHook is now an alias for HookEvent (DRY compliance).
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
@@ -14,11 +15,10 @@ from typing import Any, Callable, Dict, List, Optional
 # Import HookEvent at module level for alias (DRY)
 from ..hooks.types import HookEvent
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # PluginHook is now an alias for HookEvent - single source of truth
 PluginHook = HookEvent
-
 
 class PluginType(str, Enum):
     """Types of plugins that can be registered.
@@ -31,7 +31,6 @@ class PluginType(str, Enum):
     POLICY = "policy"       # Provides execution rules
     GUARDRAIL = "guardrail" # Provides validation rules
     INTEGRATION = "integration"  # External tool integrations
-
 
 @dataclass
 class PluginInfo:
@@ -53,7 +52,6 @@ class PluginInfo:
             "hooks": [h.value for h in self.hooks],
             "dependencies": self.dependencies,
         }
-
 
 class Plugin(ABC):
     """
@@ -139,7 +137,6 @@ class Plugin(ABC):
     def get_tools(self) -> List[Dict[str, Any]]:
         """Return additional tools provided by this plugin."""
         return []
-
 
 class FunctionPlugin(Plugin):
     """

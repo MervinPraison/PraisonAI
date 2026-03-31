@@ -6,6 +6,7 @@ payload is the caller's responsibility (keeping the runner lightweight).
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 import time
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -13,8 +14,7 @@ from typing import List, Optional
 from .models import ScheduleJob
 from .protocols import ScheduleStoreProtocol
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class ScheduleRunner:
     """Stateless helper that inspects a store and returns due jobs.

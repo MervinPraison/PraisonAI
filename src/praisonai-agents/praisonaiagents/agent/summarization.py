@@ -6,11 +6,11 @@ Reuses existing telemetry/token_collector for token tracking.
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Optional, List, Dict, Any, Callable
 from dataclasses import dataclass, field
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class SummarizationConfig:
@@ -21,7 +21,6 @@ class SummarizationConfig:
     summary_model: Optional[str] = None  # Use smaller model for summaries
     preserve_system: bool = True  # Keep system message
     preserve_recent: int = 2  # Keep last N message pairs
-
 
 class SummarizationManager:
     """
@@ -180,7 +179,6 @@ SUMMARY:"""
         """Number of times summarization has been performed."""
         return self._summarization_count
 
-
 async def summarize_conversation(
     messages: List[Dict[str, str]],
     llm_call: Callable,
@@ -209,7 +207,6 @@ async def summarize_conversation(
     manager.reset_tokens()
     
     return new_history
-
 
 def summarize_conversation_sync(
     messages: List[Dict[str, str]],

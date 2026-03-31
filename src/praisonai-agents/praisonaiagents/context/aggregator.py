@@ -7,11 +7,11 @@ Inspired by CrewAI's ContextualMemory pattern.
 
 import asyncio
 import logging
+from praisonaiagents._logging import get_logger
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class AggregatedContext:
@@ -29,7 +29,6 @@ class AggregatedContext:
             "tokens_used": self.tokens_used,
             "fetch_times": self.fetch_times,
         }
-
 
 class ContextAggregator:
     """
@@ -287,7 +286,6 @@ class ContextAggregator:
         except Exception:
             # Fallback - create new event loop
             return asyncio.run(self.aggregate(query, sources, max_tokens))
-
 
 def create_aggregator_from_config(
     memory = None,

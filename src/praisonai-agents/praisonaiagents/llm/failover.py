@@ -11,6 +11,7 @@ Heavy implementations live in the praisonai wrapper.
 from __future__ import annotations
 
 import logging
+from praisonaiagents._logging import get_logger
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -24,8 +25,7 @@ from typing import (
     runtime_checkable,
 )
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class ProviderStatus(str, Enum):
     """Status of an LLM provider."""
@@ -34,7 +34,6 @@ class ProviderStatus(str, Enum):
     RATE_LIMITED = "rate_limited"
     ERROR = "error"
     DISABLED = "disabled"
-
 
 @dataclass
 class AuthProfile:
@@ -143,7 +142,6 @@ class AuthProfile:
         self.last_error = None
         self.last_error_time = None
 
-
 @runtime_checkable
 class FailoverProtocol(Protocol):
     """Protocol for failover management."""
@@ -159,7 +157,6 @@ class FailoverProtocol(Protocol):
     def mark_success(self, profile: AuthProfile) -> None:
         """Mark a profile as successful."""
         ...
-
 
 @dataclass
 class FailoverConfig:
@@ -194,7 +191,6 @@ class FailoverConfig:
             "cooldown_on_error": self.cooldown_on_error,
             "rotate_on_success": self.rotate_on_success,
         }
-
 
 class FailoverManager:
     """Manages failover between multiple LLM auth profiles.

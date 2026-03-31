@@ -26,13 +26,13 @@ import os
 import hashlib
 import json
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Optional, List, Dict, Any
 
 from praisonaiagents.context.fast.result import FastContextResult, FileMatch, LineRange
 from praisonaiagents.context.fast.fast_context_agent import FastContextAgent
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class FastContext:
     """High-level API for fast parallel code search.
@@ -407,7 +407,6 @@ class FastContext:
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
-
 
 # Convenience function for quick searches
 def fast_search(

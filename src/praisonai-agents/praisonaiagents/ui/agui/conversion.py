@@ -5,14 +5,14 @@ Converts between AG-UI message format and PraisonAI message format.
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Any, Dict, List, Optional, Set
 
 from pydantic import BaseModel
 
 from praisonaiagents.ui.agui.types import Message, ToolCall, FunctionCall
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 def agui_messages_to_praisonai(messages: List[Message]) -> List[Dict[str, Any]]:
     """
@@ -90,7 +90,6 @@ def agui_messages_to_praisonai(messages: List[Message]) -> List[Dict[str, Any]]:
     
     return result
 
-
 def praisonai_messages_to_agui(messages: List[Dict[str, Any]]) -> List[Message]:
     """
     Convert PraisonAI messages to AG-UI format.
@@ -151,7 +150,6 @@ def praisonai_messages_to_agui(messages: List[Dict[str, Any]]) -> List[Message]:
     
     return result
 
-
 def validate_state(state: Any, thread_id: str) -> Optional[Dict[str, Any]]:
     """
     Validate and convert state to a dictionary.
@@ -189,7 +187,6 @@ def validate_state(state: Any, thread_id: str) -> Optional[Dict[str, Any]]:
         f"State will be ignored. Thread: {thread_id}"
     )
     return None
-
 
 def extract_user_input(messages: List[Message]) -> str:
     """

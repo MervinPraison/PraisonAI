@@ -19,12 +19,13 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import logging
+from praisonaiagents._logging import get_logger
 import os
 from typing import Dict, List, Optional, Set
 
 from .protocols import ApprovalDecision, ApprovalRequest
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Default dangerous tools — same as old approval.py
 DEFAULT_DANGEROUS_TOOLS: Dict[str, str] = {
@@ -57,7 +58,6 @@ PERMISSION_PRESETS = {
     # "full" — no restrictions
     "full": frozenset(),
 }
-
 
 class ApprovalRegistry:
     """Per-agent approval configuration.

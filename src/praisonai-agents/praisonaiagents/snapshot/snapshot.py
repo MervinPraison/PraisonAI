@@ -6,6 +6,7 @@ Provides file change tracking using a shadow git repository.
 
 import hashlib
 import logging
+from praisonaiagents._logging import get_logger
 import os
 import shutil
 import subprocess
@@ -16,11 +17,10 @@ from typing import Any, Dict, List, Optional
 
 from ..paths import get_snapshots_dir
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Default snapshot directory (uses centralized paths - DRY)
 DEFAULT_SNAPSHOT_DIR = str(get_snapshots_dir())
-
 
 @dataclass
 class FileDiff:
@@ -50,7 +50,6 @@ class FileDiff:
             diff_content=data.get("diff_content", ""),
             status=data.get("status", "modified"),
         )
-
 
 @dataclass
 class SnapshotInfo:
@@ -89,7 +88,6 @@ class SnapshotInfo:
             additions=data.get("additions", 0),
             deletions=data.get("deletions", 0),
         )
-
 
 class FileSnapshot:
     """

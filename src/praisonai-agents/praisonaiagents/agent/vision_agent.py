@@ -12,12 +12,12 @@ Follows the Agent() class patterns with:
 
 import os
 import logging
+from praisonaiagents._logging import get_logger
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, Union, List
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class VisionConfig:
@@ -43,7 +43,6 @@ class VisionConfig:
             "api_base": self.api_base,
             "api_key": self.api_key,
         }
-
 
 class VisionAgent:
     """
@@ -166,10 +165,10 @@ class VisionAgent:
     def _configure_logging(self, verbose: Union[bool, int]) -> None:
         """Configure logging levels."""
         if isinstance(verbose, int) and verbose >= 10:
-            logging.getLogger("litellm").setLevel(logging.DEBUG)
+            get_logger("litellm").setLevel(logging.DEBUG)
         else:
-            logging.getLogger("litellm").setLevel(logging.WARNING)
-            logging.getLogger("httpx").setLevel(logging.WARNING)
+            get_logger("litellm").setLevel(logging.WARNING)
+            get_logger("httpx").setLevel(logging.WARNING)
     
     def _get_model_params(self, model: Optional[str] = None) -> Dict[str, Any]:
         """Build parameters for LiteLLM calls."""

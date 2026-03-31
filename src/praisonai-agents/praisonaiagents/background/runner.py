@@ -6,14 +6,14 @@ Manages background task execution.
 
 import asyncio
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Optional, List, Dict, Any, Callable, Union
 from datetime import datetime
 
 from .task import BackgroundTask, TaskStatus
 from .config import BackgroundConfig
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class BackgroundRunner:
     """
@@ -392,14 +392,12 @@ class BackgroundRunner:
         )
         return future.result(timeout=5)
 
-
 # ── Module-level background event loop (lazy, daemon) ───────────────────
 
 import threading as _threading
 
 _bg_loop: Optional[asyncio.AbstractEventLoop] = None
 _bg_lock = _threading.Lock()
-
 
 def _get_bg_loop() -> asyncio.AbstractEventLoop:
     """Return a running event loop on a background daemon thread.

@@ -19,6 +19,7 @@ Zero Performance Impact:
 import threading
 import json
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 
@@ -29,8 +30,7 @@ from .protocols import (
 )
 from .tokens import estimate_tokens_heuristic
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class AgentBudget:
@@ -44,7 +44,6 @@ class AgentBudget:
         if self.max_tokens <= 0:
             return 0
         return int((self.max_tokens - self.output_reserve) * self.history_ratio)
-
 
 class ContextViewImpl:
     """
@@ -128,7 +127,6 @@ class ContextViewImpl:
         result.pop("_metadata", None)
         result.pop("_token_cache", None)
         return result
-
 
 class ContextMutatorImpl:
     """
@@ -286,7 +284,6 @@ class ContextMutatorImpl:
             
             if 0 <= insert_index <= len(messages):
                 messages.insert(insert_index, marker_msg)
-
 
 class ContextStoreImpl:
     """
@@ -462,11 +459,9 @@ class ContextStoreImpl:
                 },
             }
 
-
 # Singleton store instance (lazy)
 _global_store: Optional[ContextStoreImpl] = None
 _store_lock = threading.Lock()
-
 
 def get_global_store(validate_schema: bool = False) -> ContextStoreImpl:
     """Get or create global context store."""
@@ -476,7 +471,6 @@ def get_global_store(validate_schema: bool = False) -> ContextStoreImpl:
         if _global_store is None:
             _global_store = ContextStoreImpl(validate_schema=validate_schema)
         return _global_store
-
 
 def reset_global_store() -> None:
     """Reset global store (for testing)."""

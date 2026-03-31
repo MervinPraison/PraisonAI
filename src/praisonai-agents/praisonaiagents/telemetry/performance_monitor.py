@@ -23,6 +23,7 @@ from typing import Dict, Any, List, Optional, Callable, Union
 from contextlib import contextmanager
 from datetime import datetime
 import logging
+from praisonaiagents._logging import get_logger
 
 try:
     from .telemetry import MinimalTelemetry
@@ -30,8 +31,7 @@ try:
 except ImportError:
     TELEMETRY_AVAILABLE = False
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 
 class PerformanceMonitor:
@@ -703,51 +703,41 @@ class PerformanceMonitor:
             }
         }
 
-
 # Global performance monitor instance
 performance_monitor = PerformanceMonitor()
-
 
 # Convenience functions for easy access
 def monitor_function(func_name: Optional[str] = None):
     """Convenience decorator for monitoring function performance."""
     return performance_monitor.monitor_function(func_name)
 
-
 def track_api_call(api_name: str, endpoint: Optional[str] = None):
     """Convenience context manager for tracking API calls."""
     return performance_monitor.track_api_call(api_name, endpoint)
-
 
 def get_performance_report() -> str:
     """Get a comprehensive performance report."""
     return performance_monitor.generate_performance_report()
 
-
 def get_function_stats(func_name: Optional[str] = None) -> Dict[str, Any]:
     """Get function performance statistics."""
     return performance_monitor.get_function_performance(func_name)
-
 
 def get_api_stats(api_name: Optional[str] = None) -> Dict[str, Any]:
     """Get API call performance statistics."""
     return performance_monitor.get_api_call_performance(api_name)
 
-
 def get_slowest_functions(limit: int = 10) -> List[Dict[str, Any]]:
     """Get the slowest performing functions."""
     return performance_monitor.get_slowest_functions(limit)
-
 
 def get_slowest_apis(limit: int = 10) -> List[Dict[str, Any]]:
     """Get the slowest performing API calls."""
     return performance_monitor.get_slowest_api_calls(limit)
 
-
 def clear_performance_data():
     """Clear all performance monitoring data."""
     performance_monitor.clear_statistics()
-
 
 def export_external_apm_metrics(service_name: str = "praisonai-agents") -> Dict[str, Any]:
     """Export lightweight metrics for external APM tools."""

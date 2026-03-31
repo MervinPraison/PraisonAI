@@ -1,12 +1,12 @@
 import os
 import logging
+from praisonaiagents._logging import get_logger
 from datetime import datetime
 from .chunking import Chunking
 from functools import cached_property
 
 
-
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class CustomMemory:
     @classmethod
@@ -66,10 +66,10 @@ class Knowledge:
                 '_client',
                 'main'
             ]:
-                logging.getLogger(logger_name).setLevel(logging.WARNING)
+                get_logger(logger_name).setLevel(logging.WARNING)
             
             # Disable OpenAI API request logging
-            logging.getLogger('openai').setLevel(logging.WARNING)
+            get_logger('openai').setLevel(logging.WARNING)
 
     @cached_property
     def _deps(self):

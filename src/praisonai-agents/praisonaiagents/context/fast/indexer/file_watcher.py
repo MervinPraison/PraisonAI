@@ -10,20 +10,19 @@ Monitors file system changes and triggers incremental index updates:
 import os
 import time
 import logging
+from praisonaiagents._logging import get_logger
 import threading
 from typing import Dict, Set, Callable, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class ChangeType(Enum):
     """Types of file system changes."""
     CREATED = "created"
     MODIFIED = "modified"
     DELETED = "deleted"
-
 
 @dataclass
 class FileChange:
@@ -37,7 +36,6 @@ class FileChange:
     path: str
     change_type: ChangeType
     timestamp: float
-
 
 class FileWatcher:
     """Watches for file system changes and triggers callbacks.
@@ -216,7 +214,6 @@ class FileWatcher:
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
-
 
 class IncrementalIndexer:
     """Manages incremental index updates based on file changes.

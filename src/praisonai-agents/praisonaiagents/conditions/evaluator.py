@@ -9,10 +9,10 @@ to enable DRY condition handling across the codebase.
 """
 import re
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Dict, Any, List, Optional
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class ExpressionCondition:
     """
@@ -61,7 +61,6 @@ class ExpressionCondition:
     
     def __repr__(self) -> str:
         return f"ExpressionCondition({self.expression!r})"
-
 
 class DictCondition:
     """
@@ -126,7 +125,6 @@ class DictCondition:
     
     def __repr__(self) -> str:
         return f"DictCondition(routes={self.routes!r}, key={self.key!r})"
-
 
 def evaluate_condition(
     condition: str,

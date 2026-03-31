@@ -23,11 +23,11 @@ Usage:
 
 from typing import List, Dict, Any, Optional
 import logging
+from praisonaiagents._logging import get_logger
 import os
 from importlib import util
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 def _check_tavily() -> tuple[bool, Optional[str]]:
     """Check if Tavily is available."""
@@ -37,7 +37,6 @@ def _check_tavily() -> tuple[bool, Optional[str]]:
         return False, "TAVILY_API_KEY not set"
     return True, None
 
-
 def _check_exa() -> tuple[bool, Optional[str]]:
     """Check if Exa is available."""
     if util.find_spec("exa_py") is None:
@@ -45,7 +44,6 @@ def _check_exa() -> tuple[bool, Optional[str]]:
     if not os.environ.get("EXA_API_KEY"):
         return False, "EXA_API_KEY not set"
     return True, None
-
 
 def _check_youdotcom() -> tuple[bool, Optional[str]]:
     """Check if You.com is available."""
@@ -55,13 +53,11 @@ def _check_youdotcom() -> tuple[bool, Optional[str]]:
         return False, "YDC_API_KEY not set"
     return True, None
 
-
 def _check_duckduckgo() -> tuple[bool, Optional[str]]:
     """Check if DuckDuckGo is available."""
     if util.find_spec("ddgs") is None:
         return False, "ddgs package not installed"
     return True, None
-
 
 def _check_brave() -> tuple[bool, Optional[str]]:
     """Check if Brave Search is available."""
@@ -71,13 +67,11 @@ def _check_brave() -> tuple[bool, Optional[str]]:
         return False, "requests package not installed"
     return True, None
 
-
 def _check_searxng() -> tuple[bool, Optional[str]]:
     """Check if SearxNG is available."""
     if util.find_spec("requests") is None:
         return False, "requests package not installed"
     return True, None
-
 
 def _search_tavily(query: str, max_results: int = 5, search_depth: str = "basic", raw_content: bool = False) -> List[Dict[str, Any]]:
     """Search using Tavily."""
@@ -105,7 +99,6 @@ def _search_tavily(query: str, max_results: int = 5, search_depth: str = "basic"
         })
     return results
 
-
 def _search_exa(query: str, max_results: int = 5, full_text: bool = True) -> List[Dict[str, Any]]:
     """Search using Exa.
     
@@ -127,7 +120,6 @@ def _search_exa(query: str, max_results: int = 5, full_text: bool = True) -> Lis
             "provider": "exa"
         })
     return results
-
 
 def _search_youdotcom(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
     """Search using You.com."""
@@ -169,7 +161,6 @@ def _search_youdotcom(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
                 "provider": "youdotcom"
             })
     return results
-
 
 def _search_brave(query: str, max_results: int = 5, extra_snippets: bool = True) -> List[Dict[str, Any]]:
     """Search using Brave Search.
@@ -213,46 +204,32 @@ def _search_brave(query: str, max_results: int = 5, extra_snippets: bool = True)
         })
     return results
 
+from praisonaiagents.utils.resilience import retry_with_backoff
 
+@retry_with_backoff(retries=3, backoff_in_seconds=1.0, exceptions=(Exception,), jitter_factor=0.25)
 def _search_duckduckgo(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
     """Search using DuckDuckGo with retry logic."""
-    import time
     from ddgs import DDGS
     
-    max_retries = 3
-    retry_delay = 1.0
+    results = []
+    ddgs = DDGS()
+    # Use positional 'query' (v8+) instead of keywords= (deprecated)
+    search_results = list(ddgs.text(query, max_results=max_results))
     
-    for attempt in range(max_retries):
-        try:
-            results = []
-            ddgs = DDGS()
-            # Use positional 'query' (v8+) instead of keywords= (deprecated)
-            search_results = list(ddgs.text(query, max_results=max_results))
-            
-            for result in search_results:
-                results.append({
-                    "title": result.get("title", ""),
-                    "url": result.get("href", ""),
-                    "snippet": result.get("body", ""),
-                    "provider": "duckduckgo"
-                })
-            
-            if results:
-                return results
-            
-            # Empty results - retry
-            if attempt < max_retries - 1:
-                logger.debug(f"DuckDuckGo returned empty, retrying ({attempt + 1}/{max_retries})...")
-                time.sleep(retry_delay * (attempt + 1))
-                
-        except Exception as e:
-            logger.debug(f"DuckDuckGo attempt {attempt + 1} failed: {e}")
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay * (attempt + 1))
-            else:
-                raise  # Re-raise on final attempt
+    for result in search_results:
+        results.append({
+            "title": result.get("title", ""),
+            "url": result.get("href", ""),
+            "snippet": result.get("body", ""),
+            "provider": "duckduckgo"
+        })
     
-    return []  # All retries exhausted with empty results
+    if results:
+        return results
+    
+    # Empty results - retry
+    logger.debug("DuckDuckGo returned empty, raising exception to trigger retry based on decorator.")
+    raise Exception("DuckDuckGo returned empty results")
 
 
 def _search_searxng(query: str, max_results: int = 5, searxng_url: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -283,7 +260,6 @@ def _search_searxng(query: str, max_results: int = 5, searxng_url: Optional[str]
         })
     return results
 
-
 # Provider configuration: (name, check_func, search_func)
 SEARCH_PROVIDERS = [
     ("tavily", _check_tavily, _search_tavily),
@@ -293,7 +269,6 @@ SEARCH_PROVIDERS = [
     ("duckduckgo", _check_duckduckgo, _search_duckduckgo),
     ("searxng", _check_searxng, _search_searxng),
 ]
-
 
 def search_web(
     query: str,
@@ -406,7 +381,6 @@ def search_web(
     logger.error(f"search_web: All providers failed - {error_summary}")
     return [{"error": f"All search providers failed: {error_summary}"}]
 
-
 def get_available_providers() -> List[Dict[str, Any]]:
     """Get list of available search providers and their status.
     
@@ -430,7 +404,6 @@ def get_available_providers() -> List[Dict[str, Any]]:
             "reason": error if not is_available else None
         })
     return result
-
 
 if __name__ == "__main__":
     # Example usage and provider status check

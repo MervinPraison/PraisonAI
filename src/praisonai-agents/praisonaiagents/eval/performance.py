@@ -6,6 +6,7 @@ Measures runtime and memory usage of agent executions or functions.
 
 import time
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Callable, Optional, TYPE_CHECKING
 
 from .base import BaseEvaluator
@@ -15,8 +16,7 @@ if TYPE_CHECKING:
     from ..agent.agent import Agent
     from ..agents.agents import AgentManager
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class PerformanceEvaluator(BaseEvaluator):
     """

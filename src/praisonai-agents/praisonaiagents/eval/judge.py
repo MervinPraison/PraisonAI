@@ -16,6 +16,7 @@ Example:
 
 import os
 import logging
+from praisonaiagents._logging import get_logger
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Type, TYPE_CHECKING
 
@@ -26,12 +27,10 @@ if TYPE_CHECKING:
     from ..agent.agent import Agent
     from ..agents.agents import AgentManager
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 # Judge Registry - follows add_X/get_X/list_X naming convention
 _JUDGE_REGISTRY: Dict[str, Type["Judge"]] = {}
-
 
 @dataclass
 class JudgeConfig:
@@ -54,7 +53,6 @@ class JudgeConfig:
     def __post_init__(self):
         if self.model is None:
             self.model = os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini")
-
 
 @dataclass
 class JudgeCriteriaConfig:
@@ -89,7 +87,6 @@ class JudgeCriteriaConfig:
     prompt_template: str
     scoring_dimensions: List[str]
     threshold: float = 7.0
-
 
 class Judge(BaseLLMGrader):
     """
@@ -540,17 +537,14 @@ SUGGESTIONS:
             # Fall back to sync
             return self._get_agents_output(agents, input_text)
 
-
 # Built-in judge types
 class AccuracyJudge(Judge):
     """Judge for accuracy evaluation (comparing output to expected)."""
     pass
 
-
 class CriteriaJudge(Judge):
     """Judge for criteria-based evaluation."""
     pass
-
 
 class RecipeJudge(Judge):
     """
@@ -646,7 +640,6 @@ SUGGESTIONS:
             criteria=criteria or self.criteria or f"Recipe quality in {self.mode} mode",
         )
 
-
 # Registry functions following PraisonAI naming conventions
 def add_judge(name: str, judge_class: Type[Judge]) -> None:
     """
@@ -662,7 +655,6 @@ def add_judge(name: str, judge_class: Type[Judge]) -> None:
         >>> add_judge("recipe", RecipeJudge)
     """
     _JUDGE_REGISTRY[name.lower()] = judge_class
-
 
 def get_judge(name: str) -> Optional[Type[Judge]]:
     """
@@ -680,7 +672,6 @@ def get_judge(name: str) -> Optional[Type[Judge]]:
     """
     return _JUDGE_REGISTRY.get(name.lower())
 
-
 def list_judges() -> List[str]:
     """
     List all registered judge types.
@@ -693,7 +684,6 @@ def list_judges() -> List[str]:
         >>> print(judges)  # ['accuracy', 'criteria', ...]
     """
     return list(_JUDGE_REGISTRY.keys())
-
 
 def remove_judge(name: str) -> bool:
     """
@@ -710,16 +700,13 @@ def remove_judge(name: str) -> bool:
         return True
     return False
 
-
 # Register built-in judges
 _JUDGE_REGISTRY["accuracy"] = AccuracyJudge
 _JUDGE_REGISTRY["criteria"] = CriteriaJudge
 _JUDGE_REGISTRY["recipe"] = RecipeJudge
 
-
 # Optimization Rule Registry - for domain-agnostic optimization rules
 _OPTIMIZATION_RULE_REGISTRY: Dict[str, Type] = {}
-
 
 def add_optimization_rule(name: str, rule_class: Type) -> None:
     """
@@ -739,7 +726,6 @@ def add_optimization_rule(name: str, rule_class: Type) -> None:
     """
     _OPTIMIZATION_RULE_REGISTRY[name.lower()] = rule_class
 
-
 def get_optimization_rule(name: str) -> Optional[Type]:
     """
     Get a registered optimization rule by name.
@@ -752,7 +738,6 @@ def get_optimization_rule(name: str) -> Optional[Type]:
     """
     return _OPTIMIZATION_RULE_REGISTRY.get(name.lower())
 
-
 def list_optimization_rules() -> List[str]:
     """
     List all registered optimization rules.
@@ -761,7 +746,6 @@ def list_optimization_rules() -> List[str]:
         List of rule names
     """
     return list(_OPTIMIZATION_RULE_REGISTRY.keys())
-
 
 def remove_optimization_rule(name: str) -> bool:
     """
@@ -777,7 +761,6 @@ def remove_optimization_rule(name: str) -> bool:
         del _OPTIMIZATION_RULE_REGISTRY[name.lower()]
         return True
     return False
-
 
 __all__ = [
     'Judge',

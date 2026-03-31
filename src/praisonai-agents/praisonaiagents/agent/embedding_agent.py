@@ -12,12 +12,12 @@ Follows the Agent() class patterns with:
 
 import os
 import logging
+from praisonaiagents._logging import get_logger
 import math
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, Union, List
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class EmbeddingConfig:
@@ -43,7 +43,6 @@ class EmbeddingConfig:
             "api_base": self.api_base,
             "api_key": self.api_key,
         }
-
 
 class EmbeddingAgent:
     """
@@ -164,10 +163,10 @@ class EmbeddingAgent:
     def _configure_logging(self, verbose: Union[bool, int]) -> None:
         """Configure logging levels."""
         if isinstance(verbose, int) and verbose >= 10:
-            logging.getLogger("litellm").setLevel(logging.DEBUG)
+            get_logger("litellm").setLevel(logging.DEBUG)
         else:
-            logging.getLogger("litellm").setLevel(logging.WARNING)
-            logging.getLogger("httpx").setLevel(logging.WARNING)
+            get_logger("litellm").setLevel(logging.WARNING)
+            get_logger("httpx").setLevel(logging.WARNING)
     
     def _get_model_params(self, model: Optional[str] = None) -> Dict[str, Any]:
         """Build parameters for LiteLLM calls."""

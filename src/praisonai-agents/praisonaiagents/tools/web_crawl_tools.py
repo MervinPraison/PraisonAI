@@ -20,10 +20,10 @@ Usage:
 
 import os
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Any, Dict, List, Optional, Union
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 def _get_available_crawl_providers() -> List[str]:
     """Get list of available crawl providers based on installed packages and API keys."""
@@ -54,7 +54,6 @@ def _get_available_crawl_providers() -> List[str]:
     providers.append("httpx")
     
     return providers
-
 
 def _crawl_with_tavily(urls: List[str]) -> List[Dict[str, Any]]:
     """Crawl URLs using Tavily Extract."""
@@ -90,7 +89,6 @@ def _crawl_with_tavily(urls: List[str]) -> List[Dict[str, Any]]:
             })
     
     return results
-
 
 def _crawl_with_crawl4ai(urls: List[str]) -> List[Dict[str, Any]]:
     """Crawl URLs using Crawl4AI."""
@@ -131,7 +129,6 @@ def _crawl_with_crawl4ai(urls: List[str]) -> List[Dict[str, Any]]:
             return loop.run_until_complete(_crawl_async())
     except RuntimeError:
         return asyncio.run(_crawl_async())
-
 
 def _crawl_with_httpx(urls: List[str]) -> List[Dict[str, Any]]:
     """Crawl URLs using basic HTTP fetch with httpx or urllib."""
@@ -181,7 +178,6 @@ def _crawl_with_httpx(urls: List[str]) -> List[Dict[str, Any]]:
             })
     
     return results
-
 
 def web_crawl(
     urls: Union[str, List[str]],
@@ -237,10 +233,8 @@ def web_crawl(
     
     return results[0] if single_url else results
 
-
 # Alias for consistency with search_web naming
 crawl_web = web_crawl
-
 
 def get_available_crawl_providers() -> List[str]:
     """Get list of available crawl providers."""

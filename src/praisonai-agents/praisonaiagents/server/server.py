@@ -7,6 +7,7 @@ Provides REST API and SSE event streaming.
 import asyncio
 import json
 import logging
+from praisonaiagents._logging import get_logger
 import queue
 import threading
 import time
@@ -14,12 +15,11 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Generator, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Default configuration
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
-
 
 @dataclass
 class ServerConfig:
@@ -39,7 +39,6 @@ class ServerConfig:
             "auth_token": "***" if self.auth_token else None,
             "max_connections": self.max_connections,
         }
-
 
 class SSEClient:
     """A Server-Sent Events client connection."""
@@ -74,7 +73,6 @@ class SSEClient:
             except queue.Empty:
                 # Send keepalive
                 yield ": keepalive\n\n"
-
 
 class AgentServer:
     """

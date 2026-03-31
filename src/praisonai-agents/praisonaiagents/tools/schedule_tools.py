@@ -17,13 +17,13 @@ Usage:
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # ── lazy singleton store ─────────────────────────────────────────────────────
 
 _store_instance = None
-
 
 def set_store(store):
     """Inject an external schedule store (e.g., config.yaml-backed).
@@ -34,7 +34,6 @@ def set_store(store):
     """
     global _store_instance
     _store_instance = store
-
 
 def _get_store():
     """Return (or create) the global schedule store.
@@ -49,9 +48,7 @@ def _get_store():
         _store_instance.migrate_from_json()
     return _store_instance
 
-
 # ── tools ────────────────────────────────────────────────────────────────────
-
 
 def schedule_add(
     name: str,
@@ -124,7 +121,6 @@ def schedule_add(
         logger.error("schedule_add failed: %s", e, exc_info=True)
         return f"Error adding schedule: {e}"
 
-
 def schedule_list() -> str:
     """List all scheduled jobs.
 
@@ -164,7 +160,6 @@ def schedule_list() -> str:
         logger.error("schedule_list failed: %s", e, exc_info=True)
         return f"Error listing schedules: {e}"
 
-
 def schedule_remove(name: str) -> str:
     """Remove a scheduled job by name.
 
@@ -184,9 +179,7 @@ def schedule_remove(name: str) -> str:
         logger.error("schedule_remove failed: %s", e, exc_info=True)
         return f"Error removing schedule: {e}"
 
-
 # ── helpers ──────────────────────────────────────────────────────────────────
-
 
 def _human_interval(seconds: int) -> str:
     """Convert seconds to a human-friendly string."""

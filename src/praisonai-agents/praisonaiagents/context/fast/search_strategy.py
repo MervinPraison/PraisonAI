@@ -8,6 +8,7 @@ Orchestrates multi-turn search with:
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Set
 from enum import Enum
@@ -15,15 +16,13 @@ from enum import Enum
 from praisonaiagents.context.fast.result import FastContextResult, FileMatch, LineRange
 from praisonaiagents.context.fast.parallel_executor import ToolCallBatch
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class SearchPhase(Enum):
     """Phases of the search strategy."""
     DISCOVERY = "discovery"      # Turn 1: Discover structure
     EXPLORATION = "exploration"  # Turn 2-3: Deep search
     REFINEMENT = "refinement"    # Turn 4: Final answer
-
 
 @dataclass
 class SearchState:
@@ -90,7 +89,6 @@ class SearchState:
         """Check if there are unexplored paths."""
         # Simple heuristic: if we found files but haven't explored many paths
         return len(self.discovered_files) > len(self.explored_paths) * 2
-
 
 class SearchStrategy:
     """Orchestrates multi-turn search strategy.

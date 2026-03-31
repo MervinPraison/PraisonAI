@@ -20,6 +20,7 @@ Usage:
 
 import importlib.util
 import logging
+from praisonaiagents._logging import get_logger
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -27,8 +28,7 @@ from typing import Any, Dict, List, Optional
 from .parser import parse_plugin_header_from_file, PluginParseError
 from ..paths import get_plugins_dir, get_project_data_dir
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 def get_default_plugin_dirs() -> List[Path]:
     """Get default plugin directory locations.
@@ -55,7 +55,6 @@ def get_default_plugin_dirs() -> List[Path]:
         dirs.append(user_plugins)
     
     return dirs
-
 
 def discover_plugins(
     plugin_dirs: Optional[List[str]] = None,
@@ -118,7 +117,6 @@ def discover_plugins(
             continue
     
     return plugins
-
 
 def load_plugin(filepath: str) -> Optional[Dict[str, Any]]:
     """Load a single plugin file and register its tools/hooks.
@@ -205,7 +203,6 @@ def load_plugin(filepath: str) -> Optional[Dict[str, Any]]:
             del sys.modules[module_name]
         return None
 
-
 def discover_and_load_plugins(
     plugin_dirs: Optional[List[str]] = None,
     include_defaults: bool = True,
@@ -233,7 +230,6 @@ def discover_and_load_plugins(
     
     return loaded
 
-
 def unload_plugin(module_name: str) -> bool:
     """Unload a plugin module.
     
@@ -251,7 +247,6 @@ def unload_plugin(module_name: str) -> bool:
         return True
     return False
 
-
 def ensure_plugin_dir() -> Path:
     """Ensure the user plugin directory exists.
     
@@ -264,7 +259,6 @@ def ensure_plugin_dir() -> Path:
     user_dir = get_plugins_dir()
     user_dir.mkdir(parents=True, exist_ok=True)
     return user_dir
-
 
 def get_plugin_template(name: str, description: str = "", author: str = "") -> str:
     """Generate a plugin template with the given metadata.
@@ -297,7 +291,6 @@ def example_tool(query: str) -> str:
         Result string
     """
     return f"Result: {{query}}"
-
 
 # Uncomment to add hooks:
 # from praisonaiagents.hooks import add_hook, HookResult

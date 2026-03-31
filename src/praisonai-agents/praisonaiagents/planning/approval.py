@@ -16,13 +16,13 @@ Features:
 import asyncio
 import inspect
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Callable, Optional, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .plan import Plan
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class ApprovalCallback:
     """
@@ -207,7 +207,6 @@ class ApprovalCallback:
                     return False
                     
         return True
-
 
 class InteractiveApproval:
     """

@@ -10,12 +10,12 @@ that was duplicated across multiple evaluators.
 
 import os
 import logging
+from praisonaiagents._logging import get_logger
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class GradeResult:
@@ -57,7 +57,6 @@ class GradeResult:
             expected_output=data.get("expected_output"),
             timestamp=data.get("timestamp", datetime.utcnow().isoformat()),
         )
-
 
 class BaseLLMGrader:
     """
@@ -335,7 +334,6 @@ EXPECTED OUTPUT (ideal response):
                 expected_output=expected_output,
             )
 
-
 def parse_score_reasoning(response_text: str) -> tuple:
     """
     Parse SCORE and REASONING from LLM response.
@@ -369,7 +367,6 @@ def parse_score_reasoning(response_text: str) -> tuple:
             reasoning = line.replace('REASONING:', '').strip()
     
     return score, reasoning
-
 
 __all__ = [
     'GradeResult',

@@ -11,10 +11,10 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 from enum import Enum
 import logging
+from praisonaiagents._logging import get_logger
 import math
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class IndexType(str, Enum):
     """Available index types."""
@@ -22,7 +22,6 @@ class IndexType(str, Enum):
     KEYWORD = "keyword"
     HYBRID = "hybrid"
     GRAPH = "graph"
-
 
 @dataclass
 class IndexStats:
@@ -32,7 +31,6 @@ class IndexStats:
     chunk_count: int
     total_tokens: int = 0
     metadata: Dict[str, Any] = field(default_factory=dict)
-
 
 @runtime_checkable
 class IndexProtocol(Protocol):
@@ -100,7 +98,6 @@ class IndexProtocol(Protocol):
         """Get index statistics."""
         ...
 
-
 class IndexRegistry:
     """Registry for index types."""
     
@@ -134,11 +131,9 @@ class IndexRegistry:
         """Clear all registered indices."""
         self._indices.clear()
 
-
 def get_index_registry() -> IndexRegistry:
     """Get the global index registry instance."""
     return IndexRegistry()
-
 
 class KeywordIndex:
     """
@@ -321,12 +316,10 @@ class KeywordIndex:
         
         return score
 
-
 # Register the keyword index by default
 def _register_default_indices():
     """Register default indices."""
     registry = get_index_registry()
     registry.register("keyword", KeywordIndex)
-
 
 _register_default_indices()

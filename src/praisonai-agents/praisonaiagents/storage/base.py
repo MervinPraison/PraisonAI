@@ -15,6 +15,7 @@ import os
 import threading
 import tempfile
 import logging
+from praisonaiagents._logging import get_logger
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 from datetime import datetime
@@ -24,8 +25,7 @@ from .models import BaseSessionInfo
 if TYPE_CHECKING:
     from .protocols import StorageBackendProtocol
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class FileLock:
     """
@@ -83,7 +83,6 @@ class FileLock:
         except Exception:
             pass
         return False
-
 
 class BaseJSONStore:
     """
@@ -292,7 +291,6 @@ class BaseJSONStore:
                 logger.error(f"Failed to delete {self.storage_path}: {e}")
                 return False
 
-
 def list_json_sessions(
     storage_dir: Path,
     suffix: str = ".json",
@@ -350,7 +348,6 @@ def list_json_sessions(
     
     return sessions[:limit]
 
-
 def cleanup_old_sessions(
     storage_dir: Path,
     suffix: str = ".json",
@@ -407,7 +404,6 @@ def cleanup_old_sessions(
                 pass
     
     return deleted
-
 
 class AsyncBaseJSONStore:
     """
@@ -526,7 +522,6 @@ class AsyncBaseJSONStore:
                 self._data = self._default_data()
                 return True
             return False
-
 
 __all__ = [
     'FileLock',

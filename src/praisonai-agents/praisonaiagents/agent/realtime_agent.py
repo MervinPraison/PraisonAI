@@ -4,7 +4,7 @@ from dataclasses import dataclass, field, asdict
 from typing import Any, Callable, Dict, List, Optional, Union
 import asyncio
 import logging
-
+from praisonaiagents._logging import get_logger
 
 @dataclass
 class RealtimeConfig:
@@ -32,7 +32,6 @@ class RealtimeConfig:
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary."""
         return {k: v for k, v in asdict(self).items() if v is not None}
-
 
 class RealtimeAgent:
     """Agent for real-time voice conversations using OpenAI Realtime API.
@@ -107,7 +106,7 @@ class RealtimeAgent:
         self._connected = False
         
         # Configure logging
-        self._logger = logging.getLogger(f"RealtimeAgent.{name}")
+        self._logger = get_logger(f"RealtimeAgent.{name}")
         if not verbose:
             self._logger.setLevel(logging.WARNING)
     

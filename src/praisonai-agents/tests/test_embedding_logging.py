@@ -29,20 +29,20 @@ class TestTraceLogging(unittest.TestCase):
     def setUp(self):
         """Set up test environment before each test."""
         # Store original logger level
-        self.original_level = logger.level
+        self.original_level = logger.logger.level
         # Create a string stream to capture log output
         self.log_capture = StringIO()
         self.handler = logging.StreamHandler(self.log_capture)
         self.handler.setLevel(TRACE_LEVEL)
         self.handler.setFormatter(logging.Formatter('%(levelname)s:%(name)s:%(message)s'))
-        logger.addHandler(self.handler)
+        logger.logger.addHandler(self.handler)
     
     def tearDown(self):
         """Clean up after each test."""
         # Restore original logger level
-        logger.setLevel(self.original_level)
+        logger.logger.setLevel(self.original_level)
         # Remove the test handler
-        logger.removeHandler(self.handler)
+        logger.logger.removeHandler(self.handler)
         self.handler.close()
     
     def test_trace_level_value(self):
@@ -52,15 +52,15 @@ class TestTraceLogging(unittest.TestCase):
     
     def test_trace_method_exists(self):
         """Test that trace method exists on logger."""
-        self.assertTrue(hasattr(logger, 'trace'))
-        self.assertTrue(callable(getattr(logger, 'trace')))
+        self.assertTrue(hasattr(logger.logger, 'trace'))
+        self.assertTrue(callable(getattr(logger.logger, 'trace')))
     
     def test_trace_logging_at_trace_level(self):
         """Test that TRACE messages are logged when level is set to TRACE."""
         logger.setLevel(TRACE_LEVEL)
         test_message = "Test trace message for embedding data"
         
-        logger.trace(test_message)
+        logger.logger.trace(test_message)
         
         log_output = self.log_capture.getvalue()
         self.assertIn("TRACE", log_output)
@@ -75,7 +75,7 @@ class TestTraceLogging(unittest.TestCase):
         self.log_capture.truncate(0)
         self.log_capture.seek(0)
         
-        logger.trace(test_message)
+        logger.logger.trace(test_message)
         
         log_output = self.log_capture.getvalue()
         self.assertNotIn(test_message, log_output)
@@ -89,7 +89,7 @@ class TestTraceLogging(unittest.TestCase):
         self.log_capture.truncate(0)
         self.log_capture.seek(0)
         
-        logger.trace(test_message)
+        logger.logger.trace(test_message)
         
         log_output = self.log_capture.getvalue()
         self.assertNotIn(test_message, log_output)
@@ -103,7 +103,7 @@ class TestTraceLogging(unittest.TestCase):
         self.log_capture.truncate(0)
         self.log_capture.seek(0)
         
-        logger.debug(test_message)
+        logger.logger.debug(test_message)
         
         log_output = self.log_capture.getvalue()
         self.assertIn("DEBUG", log_output)
@@ -118,7 +118,7 @@ class TestTraceLogging(unittest.TestCase):
         self.log_capture.truncate(0)
         self.log_capture.seek(0)
         
-        logger.info(test_message)
+        logger.logger.info(test_message)
         
         log_output = self.log_capture.getvalue()
         self.assertIn("INFO", log_output)
@@ -132,9 +132,9 @@ class TestTraceLogging(unittest.TestCase):
         self.log_capture.truncate(0)
         self.log_capture.seek(0)
         
-        logger.info("Info message")
-        logger.debug("Debug message")
-        logger.trace("Trace message")
+        logger.logger.info("Info message")
+        logger.logger.debug("Debug message")
+        logger.logger.trace("Trace message")
         
         log_output = self.log_capture.getvalue()
         self.assertIn("INFO", log_output)
@@ -161,21 +161,21 @@ def run_manual_verification():
     
     print("--- Testing with TRACE level (all messages should show) ---")
     logger.setLevel(TRACE_LEVEL)
-    logger.info("This is an INFO message")
-    logger.debug("This is a DEBUG message")
-    logger.trace("This is a TRACE message (embedding data would be here)")
+    logger.logger.info("This is an INFO message")
+    logger.logger.debug("This is a DEBUG message")
+    logger.logger.trace("This is a TRACE message (embedding data would be here)")
     
     print("\n--- Testing with DEBUG level (TRACE should be hidden) ---")
     logger.setLevel(logging.DEBUG)
-    logger.info("INFO with DEBUG level")
-    logger.debug("DEBUG with DEBUG level")
-    logger.trace("TRACE with DEBUG level (should be hidden)")
+    logger.logger.info("INFO with DEBUG level")
+    logger.logger.debug("DEBUG with DEBUG level")
+    logger.logger.trace("TRACE with DEBUG level (should be hidden)")
     
     print("\n--- Testing with INFO level (DEBUG and TRACE should be hidden) ---")
     logger.setLevel(logging.INFO)
-    logger.info("INFO with INFO level")
-    logger.debug("DEBUG with INFO level (should be hidden)")
-    logger.trace("TRACE with INFO level (should be hidden)")
+    logger.logger.info("INFO with INFO level")
+    logger.logger.debug("DEBUG with INFO level (should be hidden)")
+    logger.logger.trace("TRACE with INFO level (should be hidden)")
     
     print("\n✅ Manual verification completed!")
 

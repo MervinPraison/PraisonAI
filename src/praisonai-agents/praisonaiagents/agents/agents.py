@@ -2,6 +2,7 @@ import os
 import time
 import json
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Any, Dict, Optional, List
 from ..main import display_error, TaskOutput
 from ..agent.agent import Agent
@@ -27,7 +28,7 @@ class TaskStatus(Enum):
     UNKNOWN = "unknown"
 
 # Set up logger
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Global variables for managing the shared servers with thread-safety
 import threading
@@ -62,7 +63,6 @@ def process_video(video_path: str, seconds_per_frame=2):
         curr_frame += frames_to_skip
     video.release()
     return base64_frames
-
 
 def get_multimodal_message(text_prompt: str, images: list) -> list:
     """
@@ -107,7 +107,6 @@ def get_multimodal_message(text_prompt: str, images: list) -> list:
                 "image_url": {"url": img}
             })
     return content
-
 
 def process_task_context(context_item, verbose=0, user_id=None):
     """
@@ -450,17 +449,18 @@ class AgentTeam:
         
         # Set logger level based on verbose
         if _verbose >= 5:
-            logger.setLevel(logging.INFO)
+            logger.setLevel(10)  # DEBUG
         elif _verbose >= 3:
-            logger.setLevel(logging.DEBUG)
+            logger.setLevel(20)  # INFO
         else:
-            logger.setLevel(logging.WARNING)
-            
+            logger.setLevel(30)  # WARNING
+
         # Also set third-party loggers to WARNING
-        logging.getLogger('chromadb').setLevel(logging.WARNING)
-        logging.getLogger('openai').setLevel(logging.WARNING)
-        logging.getLogger('httpx').setLevel(logging.WARNING)
-        logging.getLogger('httpcore').setLevel(logging.WARNING)
+        import logging as _logging
+        get_logger('chromadb').setLevel(_logging.WARNING)
+        get_logger('openai').setLevel(_logging.WARNING)
+        get_logger('httpx').setLevel(_logging.WARNING)
+        get_logger('httpcore').setLevel(_logging.WARNING)
 
         if self.verbose:
             logger.info(f"Using model {self.manager_llm} for manager")
@@ -2434,7 +2434,6 @@ Context:
         # Restore original tasks reference for result retrieval
         self._plan_tasks = self.tasks.copy()
         # Keep plan tasks for results but note original tasks are preserved in _plan_tasks
-
 
 # Backward compatibility aliases (silent - no deprecation warnings)
 # AgentTeam is the primary name (v1.0+)

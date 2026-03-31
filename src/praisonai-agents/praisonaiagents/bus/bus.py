@@ -6,13 +6,13 @@ Provides publish/subscribe functionality for typed events.
 
 import asyncio
 import logging
+from praisonaiagents._logging import get_logger
 import threading
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 from dataclasses import dataclass, field
 from .event import Event, EventType
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class Subscriber:
@@ -35,7 +35,6 @@ class Subscriber:
         if self.event_types is None:
             return True
         return event_type in self.event_types
-
 
 class EventBus:
     """
@@ -324,11 +323,9 @@ class EventBus:
     def __repr__(self) -> str:
         return f"EventBus(subscribers={self.subscriber_count})"
 
-
 # Global default bus
 _default_bus: Optional[EventBus] = None
 _bus_lock = threading.Lock()
-
 
 def get_default_bus() -> EventBus:
     """Get the default global event bus."""
@@ -337,7 +334,6 @@ def get_default_bus() -> EventBus:
         if _default_bus is None:
             _default_bus = EventBus()
         return _default_bus
-
 
 def set_default_bus(bus: EventBus):
     """Set the default global event bus."""

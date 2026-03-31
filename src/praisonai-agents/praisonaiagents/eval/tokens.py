@@ -19,10 +19,10 @@ Example:
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Dict, Optional, Union
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 # Default context lengths for common models (fallback when litellm unavailable)
 # Based on official documentation as of January 2025
@@ -78,7 +78,6 @@ DEFAULT_CONTEXT_LENGTHS: Dict[str, int] = {
 # Default context length for unknown models
 DEFAULT_CONTEXT_LENGTH = 128000
 
-
 def estimate_tokens(
     text: str,
     method: str = "max",
@@ -129,7 +128,6 @@ def estimate_tokens(
         return (tokens_by_chars + tokens_by_words) // 2
     else:  # "max" (default - conservative)
         return max(tokens_by_chars, tokens_by_words)
-
 
 def get_context_length(
     model: str,
@@ -211,7 +209,6 @@ def get_context_length(
     logger.debug(f"Unknown model '{model}', using default context length {DEFAULT_CONTEXT_LENGTH}")
     return DEFAULT_CONTEXT_LENGTH
 
-
 def count_tokens(
     text: str,
     model: str = "gpt-4o-mini",
@@ -254,7 +251,6 @@ def count_tokens(
     
     # Fallback to estimation
     return estimate_tokens(text, method="max")
-
 
 def needs_chunking(
     text: str,
@@ -306,7 +302,6 @@ def needs_chunking(
     
     return needs_chunk
 
-
 def get_recommended_chunk_size(
     model: str = "gpt-4o-mini",
     target_chunks: int = 5,
@@ -344,7 +339,6 @@ def get_recommended_chunk_size(
     max_chunk = 16000
     
     return max(min_chunk, min(max_chunk, chars_per_chunk))
-
 
 __all__ = [
     "estimate_tokens",

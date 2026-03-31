@@ -17,11 +17,11 @@ Usage:
 import os
 import re
 import logging
+from praisonaiagents._logging import get_logger
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class MentionsParser:
     """
@@ -324,7 +324,6 @@ class MentionsParser:
                 return True
         return False
 
-
 def process_mentions(prompt: str, workspace_path: Optional[str] = None) -> Tuple[str, str]:
     """
     Convenience function to process mentions in a prompt.
@@ -338,7 +337,6 @@ def process_mentions(prompt: str, workspace_path: Optional[str] = None) -> Tuple
     """
     parser = MentionsParser(workspace_path=workspace_path)
     return parser.process(prompt)
-
 
 # Export
 __all__ = ["MentionsParser", "process_mentions"]
