@@ -6,6 +6,8 @@ from praisonaiagents._logging import get_logger
 from typing import List, Optional, Dict, Any, Union, Literal, Type
 from pydantic import BaseModel, ConfigDict
 import asyncio
+import contextvars
+from copy import deepcopy
 
 def _rich():
     """Lazy-load Rich display classes (cached by sys.modules after first call)."""
@@ -23,15 +25,107 @@ except ImportError:
 
 # Logging is already configured in _logging.py via __init__.py
 
-# Global list to store error logs
-error_logs = []
+# Thread-safe context variables for multi-agent isolation
+# Each agent context gets its own isolated state
+_error_logs_context: contextvars.ContextVar[list] = contextvars.ContextVar('error_logs', default=[])
+_sync_display_callbacks_context: contextvars.ContextVar[dict] = contextvars.ContextVar('sync_display_callbacks', default={})
+_async_display_callbacks_context: contextvars.ContextVar[dict] = contextvars.ContextVar('async_display_callbacks', default={})
+_approval_callback_context: contextvars.ContextVar = contextvars.ContextVar('approval_callback', default=None)
 
-# Separate registries for sync and async callbacks
-sync_display_callbacks = {}
-async_display_callbacks = {}
 
-# Global approval callback registry
-approval_callback = None
+class _ContextList:
+    """Thread-safe wrapper for context-local lists with copy-on-write semantics."""
+    
+    def __init__(self, context_var: contextvars.ContextVar):
+        self._context_var = context_var
+    
+    def append(self, item):
+        current_list = self._context_var.get([])
+        # Create a copy to avoid modifying shared state
+        new_list = current_list.copy()
+        new_list.append(item)
+        self._context_var.set(new_list)
+    
+    def extend(self, items):
+        current_list = self._context_var.get([])
+        new_list = current_list.copy()
+        new_list.extend(items)
+        self._context_var.set(new_list)
+    
+    def clear(self):
+        self._context_var.set([])
+    
+    def __iter__(self):
+        return iter(self._context_var.get([]))
+    
+    def __len__(self):
+        return len(self._context_var.get([]))
+    
+    def __getitem__(self, index):
+        return self._context_var.get([])[index]
+    
+    def __bool__(self):
+        return bool(self._context_var.get([]))
+
+
+class _ContextDict:
+    """Thread-safe wrapper for context-local dicts with copy-on-write semantics."""
+    
+    def __init__(self, context_var: contextvars.ContextVar):
+        self._context_var = context_var
+    
+    def __getitem__(self, key):
+        return self._context_var.get({})[key]
+    
+    def __setitem__(self, key, value):
+        current_dict = self._context_var.get({})
+        new_dict = current_dict.copy()
+        new_dict[key] = value
+        self._context_var.set(new_dict)
+    
+    def __contains__(self, key):
+        return key in self._context_var.get({})
+    
+    def get(self, key, default=None):
+        return self._context_var.get({}).get(key, default)
+    
+    def keys(self):
+        return self._context_var.get({}).keys()
+    
+    def values(self):
+        return self._context_var.get({}).values()
+    
+    def items(self):
+        return self._context_var.get({}).items()
+    
+    def __iter__(self):
+        return iter(self._context_var.get({}))
+    
+    def __bool__(self):
+        return bool(self._context_var.get({}))
+
+
+class _ContextVar:
+    """Thread-safe wrapper for context-local variables."""
+    
+    def __init__(self, context_var: contextvars.ContextVar):
+        self._context_var = context_var
+    
+    def get(self):
+        return self._context_var.get(None)
+    
+    def set(self, value):
+        self._context_var.set(value)
+    
+    def __bool__(self):
+        return bool(self._context_var.get(None))
+
+
+# Create thread-safe, context-isolated instances
+error_logs = _ContextList(_error_logs_context)
+sync_display_callbacks = _ContextDict(_sync_display_callbacks_context)
+async_display_callbacks = _ContextDict(_async_display_callbacks_context)
+approval_callback = _ContextVar(_approval_callback_context)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PraisonAI Unique Color Palette: "Elegant Intelligence"
@@ -134,13 +228,12 @@ def register_display_callback(display_type: str, callback_fn, is_async: bool = F
         sync_display_callbacks[display_type] = callback_fn
 
 def register_approval_callback(callback_fn):
-    """Register a global approval callback function for dangerous tool operations.
+    """Register a context-local approval callback function for dangerous tool operations.
     
     Args:
         callback_fn: Function that takes (function_name, arguments, risk_level) and returns ApprovalDecision
     """
-    global approval_callback
-    approval_callback = callback_fn
+    approval_callback.set(callback_fn)
 
 # Simplified aliases (consistent naming convention)
 add_display_callback = register_display_callback
