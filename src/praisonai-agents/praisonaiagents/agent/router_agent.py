@@ -7,14 +7,14 @@ model selection based on task characteristics.
 
 import os
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Dict, List, Optional, Any, Union
 from .agent import Agent
 from ..llm.model_router import ModelRouter
 from ..llm import LLM, TokenUsage
 from ..trace.protocol import get_default_emitter
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class RouterAgent(Agent):
     """

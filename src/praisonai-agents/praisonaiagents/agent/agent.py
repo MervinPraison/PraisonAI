@@ -2,6 +2,7 @@ import os
 import time
 import json
 import logging
+from praisonaiagents._logging import get_logger
 import asyncio
 import contextlib
 import threading
@@ -16,7 +17,7 @@ from .chat_handler import ChatHandlerMixin
 from .session_manager import SessionManagerMixin
 
 # Module-level logger for thread safety errors and debugging
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # ============================================================================
 # Performance: Lazy imports for heavy dependencies
@@ -195,7 +196,6 @@ class BudgetExceededError(Exception):
             f"${total_cost:.4f} >= ${max_budget:.4f}"
         )
 
-
 class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin):
     # Class-level counter for generating unique display names for nameless agents
     _agent_counter = 0
@@ -255,16 +255,16 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin):
     def _configure_logging(cls):
         """Configure logging settings once for all agent instances."""
         # Configure logging to suppress unwanted outputs
-        logging.getLogger("litellm").setLevel(logging.WARNING)
+        get_logger("litellm").setLevel(logging.WARNING)
         
         # Allow httpx logging when LOGLEVEL=debug, otherwise suppress it
         loglevel = os.environ.get('LOGLEVEL', 'INFO').upper()
         if loglevel == 'DEBUG':
-            logging.getLogger("httpx").setLevel(logging.INFO)
-            logging.getLogger("httpcore").setLevel(logging.INFO)
+            get_logger("httpx").setLevel(logging.INFO)
+            get_logger("httpcore").setLevel(logging.INFO)
         else:
-            logging.getLogger("httpx").setLevel(logging.WARNING)
-            logging.getLogger("httpcore").setLevel(logging.WARNING)
+            get_logger("httpx").setLevel(logging.WARNING)
+            get_logger("httpcore").setLevel(logging.WARNING)
     
     @classmethod
     def from_template(
@@ -2771,7 +2771,7 @@ Summary:"""
                         "agent_name": getattr(self, 'name', None),
                     })
                 elif self.autonomy_config.get("observe"):
-                    logging.getLogger(__name__).info(
+                    get_logger(__name__).info(
                         f"[autonomy] iteration={iterations} stage={stage} "
                         f"response_len={len(response_str)}"
                     )
@@ -3161,7 +3161,7 @@ Summary:"""
                         "agent_name": getattr(self, 'name', None),
                     })
                 elif self.autonomy_config.get("observe"):
-                    logging.getLogger(__name__).info(
+                    get_logger(__name__).info(
                         f"[autonomy-async] iteration={iterations} stage={stage} "
                         f"response_len={len(response_str)}"
                     )
@@ -6337,7 +6337,7 @@ Your Goal: {self.goal}"""
         self._final_display_shown = False
         
         # Log all parameter values when in debug mode
-        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+        if get_logger().getEffectiveLevel() == logging.DEBUG:
             param_info = {
                 "prompt": str(prompt)[:100] + "..." if isinstance(prompt, str) and len(str(prompt)) > 100 else str(prompt),
                 "temperature": temperature,
@@ -6503,7 +6503,7 @@ Your Goal: {self.goal}"""
                     self._persist_message("assistant", response_text)
 
                     # Log completion time if in debug mode
-                    if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                    if get_logger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
                         logging.debug(f"Agent.chat completed in {total_time:.2f} seconds")
 
@@ -6846,7 +6846,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         self._final_display_shown = False
         
         # Log all parameter values when in debug mode
-        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+        if get_logger().getEffectiveLevel() == logging.DEBUG:
             param_info = {
                 "prompt": str(prompt)[:100] + "..." if isinstance(prompt, str) and len(str(prompt)) > 100 else str(prompt),
                 "temperature": temperature,
@@ -6950,7 +6950,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                     self.chat_history.append({"role": "assistant", "content": response_text})
 
-                    if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                    if get_logger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
                         logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                     
@@ -6969,7 +6969,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # Rollback chat history if LLM call fails
                     self.chat_history = self.chat_history[:chat_history_length]
                     _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
-                    if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                    if get_logger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
                         logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
                     return None
@@ -7058,7 +7058,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             tools=formatted_tools,
                         )
                         result = await self._achat_completion(response, tools)
-                        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                        if get_logger().getEffectiveLevel() == logging.DEBUG:
                             total_time = time.time() - start_time
                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                         # Execute callback after tool completion
@@ -7072,7 +7072,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             response_format={"type": "json_object"}
                         )
                         response_text = response.choices[0].message.content
-                        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                        if get_logger().getEffectiveLevel() == logging.DEBUG:
                             total_time = time.time() - start_time
                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                         # Execute callback after JSON/Pydantic completion
@@ -7114,7 +7114,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         # Return the original response without reflection
                                         self.chat_history.append({"role": "user", "content": original_prompt})
                                         self.chat_history.append({"role": "assistant", "content": response_text})
-                                        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                                        if get_logger().getEffectiveLevel() == logging.DEBUG:
                                             total_time = time.time() - start_time
                                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                                         return await self._atrigger_after_agent_hook(original_prompt, response_text, start_time)
@@ -7166,7 +7166,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         break
                                     continue
                         
-                        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                        if get_logger().getEffectiveLevel() == logging.DEBUG:
                             total_time = time.time() - start_time
                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                         
@@ -7183,13 +7183,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             return None
                 except Exception as e:
                     _get_display_functions()['display_error'](f"Error in chat completion: {e}")
-                    if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                    if get_logger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
                         logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
                     return None
         except Exception as e:
             _get_display_functions()['display_error'](f"Error in achat: {e}")
-            if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+            if get_logger().getEffectiveLevel() == logging.DEBUG:
                 total_time = time.time() - start_time
                 logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
             return None
@@ -7270,7 +7270,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 except Exception as e:
                     _get_display_functions()['display_error'](f"Error executing tool {function_name}: {e}")
                     results.append(None)
-
 
             # If we have results, format them into a response
             if results:

@@ -9,17 +9,17 @@ Extends the policy engine with learning capabilities:
 
 import json
 import logging
+from praisonaiagents._logging import get_logger
 import os
 from dataclasses import dataclass, field
 from typing import Optional, List, Any, Dict
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Default rules file path (uses centralized paths - DRY)
 from ..paths import get_rules_dir as _get_rules_dir
 DEFAULT_RULES_DIR = str(_get_rules_dir())
 DEFAULT_RULES_FILE = os.path.join(DEFAULT_RULES_DIR, "default.rules")
-
 
 @dataclass
 class PolicyConfig:

@@ -10,6 +10,7 @@ import json
 import time
 import asyncio
 import logging
+from praisonaiagents._logging import get_logger
 import subprocess
 from typing import List, Optional, Dict, Any
 
@@ -19,13 +20,12 @@ from .types import (
 )
 from .registry import HookRegistry
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Exit codes for command hooks
 EXIT_CODE_SUCCESS = 0
 EXIT_CODE_BLOCKING_ERROR = 2
 EXIT_CODE_NON_BLOCKING_ERROR = 1
-
 
 class HookRunner:
     """

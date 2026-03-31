@@ -5,6 +5,7 @@ import time
 import inspect
 import shlex
 import logging
+from praisonaiagents._logging import get_logger
 import os
 import re
 import platform
@@ -146,7 +147,6 @@ class MCPToolRunner(threading.Thread):
         """Signal the thread to shut down."""
         self.queue.put(None)
 
-
 class MCP:
     """
     Model Context Protocol (MCP) integration for PraisonAI Agents.
@@ -216,26 +216,26 @@ class MCP:
 
         # Set up logging - default to WARNING level to hide INFO messages
         if debug:
-            logging.getLogger("mcp-wrapper").setLevel(logging.DEBUG)
-            logging.getLogger("mcp-sse").setLevel(logging.DEBUG)
-            logging.getLogger("mcp.client").setLevel(logging.DEBUG)
-            logging.getLogger("sse").setLevel(logging.DEBUG)
-            logging.getLogger("mcp-server").setLevel(logging.DEBUG)
-            logging.getLogger("mcp-client").setLevel(logging.DEBUG)
-            logging.getLogger("_client").setLevel(logging.DEBUG)
-            logging.getLogger("httpx").setLevel(logging.DEBUG)
-            logging.getLogger("llm").setLevel(logging.DEBUG)
+            get_logger("mcp-wrapper").setLevel(logging.DEBUG)
+            get_logger("mcp-sse").setLevel(logging.DEBUG)
+            get_logger("mcp.client").setLevel(logging.DEBUG)
+            get_logger("sse").setLevel(logging.DEBUG)
+            get_logger("mcp-server").setLevel(logging.DEBUG)
+            get_logger("mcp-client").setLevel(logging.DEBUG)
+            get_logger("_client").setLevel(logging.DEBUG)
+            get_logger("httpx").setLevel(logging.DEBUG)
+            get_logger("llm").setLevel(logging.DEBUG)
         else:
             # Set all MCP-related loggers to WARNING level by default
-            logging.getLogger("mcp-wrapper").setLevel(logging.WARNING)
-            logging.getLogger("mcp-sse").setLevel(logging.WARNING)
-            logging.getLogger("mcp.client").setLevel(logging.WARNING)
-            logging.getLogger("sse").setLevel(logging.WARNING)
-            logging.getLogger("mcp-server").setLevel(logging.WARNING)
-            logging.getLogger("mcp-client").setLevel(logging.WARNING)
-            logging.getLogger("_client").setLevel(logging.WARNING)
-            logging.getLogger("httpx").setLevel(logging.WARNING)
-            logging.getLogger("llm").setLevel(logging.WARNING)
+            get_logger("mcp-wrapper").setLevel(logging.WARNING)
+            get_logger("mcp-sse").setLevel(logging.WARNING)
+            get_logger("mcp.client").setLevel(logging.WARNING)
+            get_logger("sse").setLevel(logging.WARNING)
+            get_logger("mcp-server").setLevel(logging.WARNING)
+            get_logger("mcp-client").setLevel(logging.WARNING)
+            get_logger("_client").setLevel(logging.WARNING)
+            get_logger("httpx").setLevel(logging.WARNING)
+            get_logger("llm").setLevel(logging.WARNING)
         
         # Store additional parameters
         self.timeout = timeout

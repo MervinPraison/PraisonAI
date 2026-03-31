@@ -7,12 +7,12 @@ LLM model/provider based on task complexity, cost considerations, and model capa
 
 import os
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import IntEnum
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class TaskComplexity(IntEnum):
     """Enum for task complexity levels"""
@@ -20,7 +20,6 @@ class TaskComplexity(IntEnum):
     MODERATE = 2        # Summarization, basic analysis
     COMPLEX = 3         # Code generation, deep reasoning
     VERY_COMPLEX = 4    # Multi-step reasoning, complex analysis
-
 
 @dataclass
 class ModelProfile:
@@ -34,7 +33,6 @@ class ModelProfile:
     context_window: int
     supports_tools: bool = True
     supports_streaming: bool = True
-
 
 class ModelRouter:
     """
@@ -306,7 +304,6 @@ class ModelRouter:
         if not model:
             return 0.0
         return (model.cost_per_1k_tokens * estimated_tokens) / 1000
-
 
 def create_routing_agent(
     models: Optional[List[str]] = None,

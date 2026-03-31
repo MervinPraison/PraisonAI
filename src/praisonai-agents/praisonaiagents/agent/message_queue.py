@@ -9,12 +9,12 @@ import threading
 import heapq
 import time
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Optional, Any, List, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class MessagePriority(Enum):
     """Message priority levels."""
@@ -22,7 +22,6 @@ class MessagePriority(Enum):
     NORMAL = 5
     HIGH = 10
     URGENT = 20
-
 
 @dataclass(order=True)
 class QueuedMessage:
@@ -35,7 +34,6 @@ class QueuedMessage:
     def __post_init__(self):
         # Negate priority for max-heap behavior (higher priority = lower number in heap)
         self.priority = -self.priority
-
 
 class AgentMessageQueue:
     """
@@ -157,7 +155,6 @@ class AgentMessageQueue:
     def total_messages_processed(self) -> int:
         """Total number of messages ever enqueued."""
         return self._message_count
-
 
 class AsyncAgentMessageQueue:
     """

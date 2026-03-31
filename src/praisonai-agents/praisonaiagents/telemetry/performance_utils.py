@@ -18,6 +18,7 @@ from collections import defaultdict
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import logging
+from praisonaiagents._logging import get_logger
 from dataclasses import dataclass
 
 try:
@@ -26,7 +27,7 @@ try:
 except ImportError:
     PERFORMANCE_MONITOR_AVAILABLE = False
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Check if expensive flow analysis should be enabled (opt-in only)
 _FLOW_ANALYSIS_ENABLED = os.environ.get('PRAISONAI_FLOW_ANALYSIS_ENABLED', '').lower() in ('true', '1', 'yes')
@@ -35,7 +36,6 @@ _FLOW_ANALYSIS_ENABLED = os.environ.get('PRAISONAI_FLOW_ANALYSIS_ENABLED', '').l
 BOTTLENECK_THRESHOLD_AVERAGE = 1.0  # seconds - average duration to consider bottleneck
 BOTTLENECK_THRESHOLD_MAX = 5.0      # seconds - max duration to consider bottleneck
 HIGH_SEVERITY_THRESHOLD = 2.0       # seconds - average duration for high severity bottleneck
-
 
 
 
@@ -48,7 +48,7 @@ class FunctionFlowAnalyzer:
     """
     
     def __init__(self):
-        self.logger = logging.getLogger(__name__)
+        self.logger = get_logger(__name__)
         
         # Check if performance monitoring is disabled
         from .telemetry import _is_monitoring_disabled
@@ -371,7 +371,6 @@ class FunctionFlowAnalyzer:
         
         return "\n".join(lines)
 
-
 class PerformanceAnalyzer:
     """
     Comprehensive performance analysis tools.
@@ -572,27 +571,22 @@ class PerformanceAnalyzer:
         
         return "\n".join(report_lines)
 
-
 # Global instances for easy access
 flow_analyzer = FunctionFlowAnalyzer()
 performance_analyzer = PerformanceAnalyzer()
-
 
 # Convenience functions
 def analyze_function_flow() -> Dict[str, Any]:
     """Analyze current function execution flow."""
     return flow_analyzer.analyze_execution_flow()
 
-
 def visualize_execution_flow(format: str = "text") -> str:
     """Visualize function execution flow."""
     return flow_analyzer.visualize_flow(format=format)
 
-
 def analyze_performance_trends() -> Dict[str, Any]:
     """Analyze performance trends."""
     return performance_analyzer.analyze_performance_trends()
-
 
 def generate_comprehensive_report() -> str:
     """Generate comprehensive performance analysis report."""

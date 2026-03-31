@@ -24,9 +24,9 @@ Usage:
 
 from typing import List, Dict, Any, Optional, Union
 import logging
+from praisonaiagents._logging import get_logger
 import asyncio
 from importlib import util
-
 
 def _check_crawl4ai_available() -> tuple[bool, Optional[str]]:
     """Check if Crawl4AI and its Playwright browser binaries are available.
@@ -60,10 +60,9 @@ def _check_crawl4ai_available() -> tuple[bool, Optional[str]]:
         # If ms_pw doesn't exist yet, skip — _get_crawler will catch it.
     except Exception as e:
         # Browser check failed - not critical, _get_crawler will handle it
-        logging.getLogger(__name__).debug(f"Browser availability check failed: {e}")
+        get_logger(__name__).debug(f"Browser availability check failed: {e}")
 
     return True, None
-
 
 
 class Crawl4AITools:
@@ -99,7 +98,7 @@ class Crawl4AITools:
         self.headless = headless
         self.verbose = verbose
         self.browser_type = browser_type
-        self.logger = logging.getLogger(__name__)
+        self.logger = get_logger(__name__)
         self._crawler = None
     
     async def _get_crawler(self):
@@ -433,7 +432,6 @@ class Crawl4AITools:
             self.logger.error(f"Crawl4AI extract_llm error: {e}")
             return {"error": f"Crawl4AI extract_llm error: {str(e)}", "success": False}
 
-
 # Standalone async functions for easy access
 
 async def crawl4ai(
@@ -477,7 +475,6 @@ async def crawl4ai(
     finally:
         await tools.close()
 
-
 async def crawl4ai_many(
     urls: List[str],
     css_selector: Optional[str] = None
@@ -504,7 +501,6 @@ async def crawl4ai_many(
         return await tools.crawl_many(urls=urls, css_selector=css_selector)
     finally:
         await tools.close()
-
 
 async def crawl4ai_extract(
     url: str,
@@ -550,7 +546,6 @@ async def crawl4ai_extract(
     finally:
         await tools.close()
 
-
 async def crawl4ai_llm_extract(
     url: str,
     instruction: str,
@@ -590,7 +585,6 @@ async def crawl4ai_llm_extract(
     finally:
         await tools.close()
 
-
 # Synchronous wrappers for convenience
 
 def crawl4ai_sync(
@@ -614,7 +608,6 @@ def crawl4ai_sync(
         crawl4ai(url, css_selector, js_code, wait_for)
     )
 
-
 def crawl4ai_extract_sync(
     url: str,
     schema: Dict[str, Any],
@@ -633,7 +626,6 @@ def crawl4ai_extract_sync(
     return asyncio.run(
         crawl4ai_extract(url, schema, js_code)
     )
-
 
 if __name__ == "__main__":
     # Example usage

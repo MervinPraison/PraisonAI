@@ -8,13 +8,13 @@ and file-based verification for audio/video.
 
 import os
 import logging
+from praisonaiagents._logging import get_logger
 from dataclasses import dataclass, field
 from typing import Any, Dict, Literal, Optional
 
 from .base import BaseEvaluator
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class MediaEvaluationResult:
@@ -26,7 +26,6 @@ class MediaEvaluationResult:
     file_path: Optional[str] = None
     file_size: Optional[int] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-
 
 class MediaEvaluator(BaseEvaluator):
     """

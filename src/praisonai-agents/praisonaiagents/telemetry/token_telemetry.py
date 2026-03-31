@@ -4,13 +4,13 @@ Token telemetry integration for bridging token tracking with the main telemetry 
 
 from typing import Optional, Dict, Any
 import logging
+from praisonaiagents._logging import get_logger
 
 # Import dependencies
 from .token_collector import _token_collector, TokenMetrics
 from .telemetry import get_telemetry
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class TokenTelemetryBridge:
     """Bridges token tracking with the main telemetry system."""
@@ -79,7 +79,6 @@ class TokenTelemetryBridge:
         """Reset token metrics collection."""
         if _token_collector:
             _token_collector.reset()
-
 
 # Global telemetry bridge instance
 _token_telemetry_bridge = TokenTelemetryBridge()

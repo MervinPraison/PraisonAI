@@ -9,6 +9,7 @@ Follows the Agent() class patterns:
 """
 import os
 import logging
+from praisonaiagents._logging import get_logger
 import warnings
 from dataclasses import dataclass, field
 from typing import Optional, Any, Dict, Union, BinaryIO
@@ -16,7 +17,6 @@ from pathlib import Path
 
 # Filter out Pydantic warning about fields
 warnings.filterwarnings("ignore", "Valid config keys have changed in V2", UserWarning)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AudioConfig - Configuration dataclass following feature_configs.py patterns
@@ -58,7 +58,6 @@ class AudioConfig:
             "api_base": self.api_base,
             "api_key": self.api_key,
         }
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AudioAgent Class - Agent-centric audio processing
@@ -192,10 +191,10 @@ class AudioAgent:
     def _configure_logging(self, verbose: Union[bool, int]) -> None:
         """Configure logging levels."""
         if isinstance(verbose, int) and verbose >= 10:
-            logging.getLogger("litellm").setLevel(logging.DEBUG)
+            get_logger("litellm").setLevel(logging.DEBUG)
         else:
-            logging.getLogger("litellm").setLevel(logging.WARNING)
-            logging.getLogger("httpx").setLevel(logging.WARNING)
+            get_logger("litellm").setLevel(logging.WARNING)
+            get_logger("httpx").setLevel(logging.WARNING)
     
     def _get_model_params(self, model: Optional[str] = None) -> Dict[str, Any]:
         """Build parameters for LiteLLM calls."""

@@ -7,6 +7,7 @@ Thread-safe, no external dependencies.
 
 import json
 import logging
+from praisonaiagents._logging import get_logger
 import os
 import threading
 import time
@@ -14,14 +15,13 @@ from typing import Dict, List, Optional
 
 from .models import ScheduleJob, RunRecord
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 from ..paths import get_schedules_dir as _get_schedules_dir
 _DEFAULT_DIR = str(_get_schedules_dir())
 _JOBS_FILE = "jobs.json"
 _HISTORY_FILE = "history.json"
 _MAX_HISTORY = 200
-
 
 class FileScheduleStore:
     """CRUD store backed by a single JSON file.

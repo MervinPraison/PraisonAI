@@ -8,6 +8,7 @@ forking, and revert capabilities.
 import copy
 import json
 import logging
+from praisonaiagents._logging import get_logger
 import os
 import threading
 import time
@@ -18,8 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from .store import SessionData, SessionMessage, DefaultSessionStore, FileLock
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class SessionSnapshot:
@@ -52,7 +52,6 @@ class SessionSnapshot:
             label=data.get("label"),
             metadata=data.get("metadata", {}),
         )
-
 
 @dataclass
 class ExtendedSessionData(SessionData):
@@ -115,7 +114,6 @@ class ExtendedSessionData(SessionData):
             user_id=session.user_id,
             metadata=session.metadata,
         )
-
 
 class HierarchicalSessionStore(DefaultSessionStore):
     """
@@ -527,11 +525,9 @@ class HierarchicalSessionStore(DefaultSessionStore):
         self._save_extended_session(session)
         return session.session_id
 
-
 # Global hierarchical store instance
 _hierarchical_store: Optional[HierarchicalSessionStore] = None
 _hierarchical_lock = threading.Lock()
-
 
 def get_hierarchical_session_store() -> HierarchicalSessionStore:
     """Get the global hierarchical session store instance."""

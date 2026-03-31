@@ -16,6 +16,7 @@ Features:
 import os
 import json
 import logging
+from praisonaiagents._logging import get_logger
 from pathlib import Path
 from datetime import datetime
 from typing import List, Optional, Dict, Any
@@ -23,8 +24,7 @@ from typing import List, Optional, Dict, Any
 from .plan import Plan
 from .todo import TodoList
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class PlanStorage:
     """

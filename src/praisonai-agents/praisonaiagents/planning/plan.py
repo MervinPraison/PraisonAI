@@ -13,12 +13,12 @@ import uuid
 import re
 import yaml
 import logging
+from praisonaiagents._logging import get_logger
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, Literal
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class PlanStep:
@@ -92,7 +92,6 @@ class PlanStep:
         if self.status != "pending":
             return False
         return all(dep in completed_steps for dep in self.dependencies)
-
 
 @dataclass
 class Plan:

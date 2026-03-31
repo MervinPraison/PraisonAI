@@ -14,13 +14,13 @@ Usage::
 
 import asyncio
 import logging
+from praisonaiagents._logging import get_logger
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Union
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class HeartbeatConfig:
@@ -42,7 +42,6 @@ class HeartbeatConfig:
     on_result: Optional[Callable] = None
     on_error: Union[str, Callable] = "retry"
     max_retries: int = 3
-
 
 class Heartbeat:
     """Standalone heartbeat coordinator.

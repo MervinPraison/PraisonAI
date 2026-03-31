@@ -11,9 +11,9 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 from enum import Enum
 import logging
+from praisonaiagents._logging import get_logger
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class QueryMode(str, Enum):
     """Available query modes."""
@@ -22,7 +22,6 @@ class QueryMode(str, Enum):
     SQL = "sql"
     ROUTER = "router"
     SUMMARIZE = "summarize"
-
 
 @dataclass
 class QueryResult:
@@ -48,7 +47,6 @@ class QueryResult:
             "sub_questions": self.sub_questions,
             "metadata": self.metadata
         }
-
 
 @runtime_checkable
 class QueryEngineProtocol(Protocol):
@@ -90,7 +88,6 @@ class QueryEngineProtocol(Protocol):
         """Async version of query."""
         ...
 
-
 class QueryEngineRegistry:
     """Registry for query engines."""
     
@@ -124,11 +121,9 @@ class QueryEngineRegistry:
         """Clear all registered engines."""
         self._engines.clear()
 
-
 def get_query_engine_registry() -> QueryEngineRegistry:
     """Get the global query engine registry instance."""
     return QueryEngineRegistry()
-
 
 def decompose_question(question: str) -> List[str]:
     """
@@ -172,7 +167,6 @@ def decompose_question(question: str) -> List[str]:
     
     return sub_questions
 
-
 def synthesize_answer(
     question: str,
     contexts: List[str],
@@ -213,7 +207,6 @@ def synthesize_answer(
     
     return f"Based on the available information:\n\n{context_text}"
 
-
 class SimpleQueryEngine:
     """
     Simple query engine for testing and fallback.
@@ -251,7 +244,6 @@ class SimpleQueryEngine:
     ) -> QueryResult:
         """Async version (just calls sync)."""
         return self.query(question, context, **kwargs)
-
 
 class SubQuestionEngine:
     """
@@ -338,7 +330,6 @@ Return only the sub-questions, one per line, without numbering or bullets."""
         
         return decompose_question(question)
 
-
 # Register default engines
 def _register_default_engines():
     """Register default query engines."""
@@ -346,6 +337,5 @@ def _register_default_engines():
     registry.register("default", SimpleQueryEngine)
     registry.register("simple", SimpleQueryEngine)
     registry.register("sub_question", SubQuestionEngine)
-
 
 _register_default_engines()

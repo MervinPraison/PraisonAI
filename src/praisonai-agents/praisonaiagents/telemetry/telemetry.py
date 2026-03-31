@@ -13,6 +13,7 @@ import threading
 from typing import Dict, Any, Optional
 from datetime import datetime
 import logging
+from praisonaiagents._logging import get_logger
 from concurrent.futures import ThreadPoolExecutor
 
 # Lazy imports - only import when needed
@@ -74,7 +75,6 @@ def _is_monitoring_disabled() -> bool:
     _TELEMETRY_DISABLED_CACHE = not explicitly_enabled
     return _TELEMETRY_DISABLED_CACHE
 
-
 class MinimalTelemetry:
     """
     Minimal telemetry collector for anonymous usage tracking.
@@ -111,7 +111,7 @@ class MinimalTelemetry:
         
         # Fast path for disabled telemetry - minimal initialization
         if not self.enabled:
-            self.logger = logging.getLogger(__name__)
+            self.logger = get_logger(__name__)
             self.logger.debug("Telemetry is disabled")
             # Set minimal required attributes for disabled state
             self._shutdown_complete = True
@@ -125,7 +125,7 @@ class MinimalTelemetry:
             return
             
         # Full initialization only when enabled
-        self.logger = logging.getLogger(__name__)
+        self.logger = get_logger(__name__)
         
         # Add shutdown tracking to prevent double shutdown
         self._shutdown_complete = False
@@ -456,7 +456,7 @@ class MinimalTelemetry:
             except Exception as e:
                 # Silent fail - telemetry should never break user operations
                 # But log at debug level for troubleshooting
-                logger = logging.getLogger(__name__)
+                logger = get_logger(__name__)
                 logger.debug(f"Telemetry capture failed: {e}")
         
         # Reset counters
@@ -638,10 +638,8 @@ class MinimalTelemetry:
             else:
                 self.logger.debug(f"Error during PostHog thread cleanup: {e}")
 
-
 # Global telemetry instance
 _telemetry_instance = None
-
 
 def get_telemetry() -> MinimalTelemetry:
     """
@@ -655,7 +653,6 @@ def get_telemetry() -> MinimalTelemetry:
         _telemetry_instance = MinimalTelemetry()
     return _telemetry_instance
 
-
 def disable_telemetry():
     """Programmatically disable telemetry."""
     global _telemetry_instance
@@ -663,7 +660,6 @@ def disable_telemetry():
         _telemetry_instance.enabled = False
     else:
         _telemetry_instance = MinimalTelemetry(enabled=False)
-
 
 def force_shutdown_telemetry():
     """
@@ -699,7 +695,6 @@ def force_shutdown_telemetry():
         # Reset the global instance
         _telemetry_instance = None
 
-
 def enable_telemetry():
     """Programmatically enable telemetry (if not disabled by environment)."""
     global _telemetry_instance
@@ -708,7 +703,6 @@ def enable_telemetry():
             _telemetry_instance.enabled = True
         else:
             _telemetry_instance = MinimalTelemetry(enabled=True)
-
 
 # For backward compatibility with existing code
 class TelemetryCollector:

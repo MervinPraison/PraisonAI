@@ -6,6 +6,7 @@ Exposes PraisonAI Agents via the A2A (Agent2Agent) protocol.
 
 import asyncio
 import logging
+from praisonaiagents._logging import get_logger
 from typing import List, Optional, TYPE_CHECKING
 
 from praisonaiagents.ui.a2a.types import AgentCard
@@ -16,8 +17,7 @@ if TYPE_CHECKING:
     from praisonaiagents import Agent, AgentTeam
     from fastapi import APIRouter
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class A2A:
     """
@@ -371,7 +371,6 @@ class A2A:
             "result": task.model_dump(by_alias=True, exclude_none=True),
         })
 
-
 # =============================================================================
 # Helpers (module-level, no class dependency)
 # =============================================================================
@@ -385,7 +384,6 @@ def _jsonrpc_error(request_id, code: int, message: str):
         "id": request_id,
         "error": {"code": code, "message": message},
     })
-
 
 def _parse_message(msg_data: dict):
     """Parse a raw dict into an A2A Message object.

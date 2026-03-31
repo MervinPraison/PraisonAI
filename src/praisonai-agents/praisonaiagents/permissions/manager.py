@@ -7,6 +7,7 @@ with doom loop detection.
 
 import json
 import logging
+from praisonaiagents._logging import get_logger
 import os
 import threading
 from typing import Any, Callable, Dict, List, Optional
@@ -16,11 +17,10 @@ from .doom_loop import DoomLoopDetector
 
 from ..paths import get_permissions_dir
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Default storage path (uses centralized paths - DRY)
 DEFAULT_PERMISSIONS_DIR = str(get_permissions_dir())
-
 
 class PermissionManager:
     """

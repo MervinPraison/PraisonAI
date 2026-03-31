@@ -16,16 +16,16 @@ import os
 import json
 import hashlib
 import logging
+from praisonaiagents._logging import get_logger
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Dict, Optional, Set, List, Any
 from datetime import datetime
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Lazy availability check for watchfiles
 _WATCHFILES_AVAILABLE: Optional[bool] = None
-
 
 def _check_watchfiles() -> bool:
     """Lazy check for watchfiles availability."""
@@ -37,7 +37,6 @@ def _check_watchfiles() -> bool:
         except ImportError:
             _WATCHFILES_AVAILABLE = False
     return _WATCHFILES_AVAILABLE
-
 
 @dataclass
 class FileEntry:
@@ -53,7 +52,6 @@ class FileEntry:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "FileEntry":
         return cls(**data)
-
 
 @dataclass  
 class FileIndex:
@@ -231,7 +229,6 @@ class FileIndex:
     def __len__(self) -> int:
         return len(self.entries)
 
-
 class IndexWatcher:
     """Optional file watcher for real-time index updates.
     
@@ -268,7 +265,6 @@ class IndexWatcher:
     def stop(self) -> None:
         """Stop watching."""
         self._watching = False
-
 
 def is_watchfiles_available() -> bool:
     """Check if watchfiles is available for file watching.

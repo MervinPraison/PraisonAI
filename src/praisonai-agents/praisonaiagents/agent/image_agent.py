@@ -7,6 +7,7 @@ from typing import Optional, Any, Dict, Union, List
 from ..agent.agent import Agent
 from pydantic import BaseModel, Field
 import logging
+from praisonaiagents._logging import get_logger
 import warnings
 # Filter out Pydantic warning about fields
 warnings.filterwarnings("ignore", "Valid config keys have changed in V2", UserWarning)
@@ -77,10 +78,10 @@ class ImageAgent(Agent):
         # Only suppress logs if not in debug mode
         if not isinstance(verbose, bool) and verbose >= 10:
             # Enable detailed debug logging
-            logging.getLogger("asyncio").setLevel(logging.DEBUG)
-            logging.getLogger("selector_events").setLevel(logging.DEBUG)
-            logging.getLogger("litellm.utils").setLevel(logging.DEBUG)
-            logging.getLogger("litellm.main").setLevel(logging.DEBUG)
+            get_logger("asyncio").setLevel(logging.DEBUG)
+            get_logger("selector_events").setLevel(logging.DEBUG)
+            get_logger("litellm.utils").setLevel(logging.DEBUG)
+            get_logger("litellm.main").setLevel(logging.DEBUG)
             if hasattr(self, 'litellm'):
                 self.litellm.suppress_debug_messages = False
                 self.litellm.set_verbose = True
@@ -88,12 +89,12 @@ class ImageAgent(Agent):
             warnings.resetwarnings()
         else:
             # Suppress debug logging for normal operation
-            logging.getLogger("asyncio").setLevel(logging.WARNING)
-            logging.getLogger("selector_events").setLevel(logging.WARNING)
-            logging.getLogger("litellm.utils").setLevel(logging.WARNING)
-            logging.getLogger("litellm.main").setLevel(logging.WARNING)
-            logging.getLogger("httpx").setLevel(logging.WARNING)
-            logging.getLogger("httpcore").setLevel(logging.WARNING)
+            get_logger("asyncio").setLevel(logging.WARNING)
+            get_logger("selector_events").setLevel(logging.WARNING)
+            get_logger("litellm.utils").setLevel(logging.WARNING)
+            get_logger("litellm.main").setLevel(logging.WARNING)
+            get_logger("httpx").setLevel(logging.WARNING)
+            get_logger("httpcore").setLevel(logging.WARNING)
             if hasattr(self, 'litellm'):
                 self.litellm.suppress_debug_messages = True
                 self.litellm._logging._disable_debugging()

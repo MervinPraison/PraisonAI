@@ -6,6 +6,7 @@ import shutil
 import threading
 from typing import Any, Dict, List, Optional, Union, Literal
 import logging
+from praisonaiagents._logging import get_logger
 from datetime import datetime
 
 # Decomposed memory functionality - imported as mixins for backward compatibility
@@ -175,7 +176,6 @@ def _get_pymongo():
 
 
 
-
 class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
     """
     A single-file memory manager covering:
@@ -254,18 +254,17 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
         
         # Set logger level based on verbose
         if verbose >= 5:
-            logger.setLevel(logging.INFO)
+
         else:
-            logger.setLevel(logging.WARNING)
-            
+
         # Also set ChromaDB and OpenAI client loggers to WARNING
-        logging.getLogger('chromadb').setLevel(logging.WARNING)
-        logging.getLogger('openai').setLevel(logging.WARNING)
-        logging.getLogger('httpx').setLevel(logging.WARNING)
-        logging.getLogger('httpcore').setLevel(logging.WARNING)
-        logging.getLogger('chromadb.segment.impl.vector.local_persistent_hnsw').setLevel(logging.ERROR)
-        logging.getLogger('utils').setLevel(logging.WARNING)
-        logging.getLogger('litellm.utils').setLevel(logging.WARNING)
+        get_logger('chromadb').setLevel(logging.WARNING)
+        get_logger('openai').setLevel(logging.WARNING)
+        get_logger('httpx').setLevel(logging.WARNING)
+        get_logger('httpcore').setLevel(logging.WARNING)
+        get_logger('chromadb.segment.impl.vector.local_persistent_hnsw').setLevel(logging.ERROR)
+        get_logger('utils').setLevel(logging.WARNING)
+        get_logger('litellm.utils').setLevel(logging.WARNING)
             
         self.provider = self.cfg.get("provider", "rag")
         self.use_mem0 = (self.provider.lower() == "mem0") and _check_mem0()
@@ -1609,7 +1608,7 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
         """
         # Determine whether to include memory content in output based on logging level
         if include_in_output is None:
-            include_in_output = logging.getLogger().getEffectiveLevel() == logging.DEBUG
+            include_in_output = get_logger().getEffectiveLevel() == logging.DEBUG
         
         q = (task_descr + " " + additional).strip()
         lines = []

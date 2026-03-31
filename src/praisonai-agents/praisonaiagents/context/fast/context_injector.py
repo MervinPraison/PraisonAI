@@ -8,13 +8,13 @@ Injects FastContext results into the main agent with:
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 
 from praisonaiagents.context.fast.result import FastContextResult, FileMatch
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class InjectionConfig:
@@ -39,7 +39,6 @@ class InjectionConfig:
     
     # Approximate tokens per character (conservative estimate)
     chars_per_token: float = 4.0
-
 
 class ContextInjector:
     """Injects FastContext results into agent context.
@@ -354,7 +353,6 @@ class ContextInjector:
         
         # Prepend context
         return f"{context}\n\n---\n\n{user_message}"
-
 
 def inject_fast_context(
     result: FastContextResult,

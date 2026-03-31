@@ -5,6 +5,7 @@ Polls ScheduleRunner for due jobs and fires a callback.
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 import threading
 import time
 from typing import Callable, Optional
@@ -12,8 +13,7 @@ from typing import Callable, Optional
 from .runner import ScheduleRunner
 from .protocols import ScheduleStoreProtocol
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class ScheduleLoop:
     """Tick loop that polls a ScheduleRunner and fires due jobs.

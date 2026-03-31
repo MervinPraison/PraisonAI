@@ -41,13 +41,13 @@ import os
 import re
 import fnmatch
 import logging
+from praisonaiagents._logging import get_logger
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Literal, Callable
 from dataclasses import dataclass, field
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class Rule:
@@ -92,7 +92,6 @@ class Rule:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Rule':
         return cls(**data)
-
 
 class RulesManager:
     """
@@ -805,7 +804,6 @@ Should this rule be applied? Answer only "yes" or "no"."""
             "cursor_rules": source_counts.get("cursor", 0),
             "sources": source_counts
         }
-
 
 def create_rules_manager(
     workspace_path: Optional[str] = None,

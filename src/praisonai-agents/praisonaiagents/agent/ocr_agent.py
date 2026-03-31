@@ -9,13 +9,13 @@ Follows the Agent() class patterns:
 """
 import os
 import logging
+from praisonaiagents._logging import get_logger
 import warnings
 from dataclasses import dataclass
 from typing import Optional, Any, Dict, Union, List
 from pathlib import Path
 
 warnings.filterwarnings("ignore", "Valid config keys have changed in V2", UserWarning)
-
 
 @dataclass
 class OCRConfig:
@@ -37,7 +37,6 @@ class OCRConfig:
             "api_base": self.api_base,
             "api_key": self.api_key,
         }
-
 
 class OCRAgent:
     """
@@ -143,10 +142,10 @@ class OCRAgent:
     def _configure_logging(self, verbose: Union[bool, int]) -> None:
         """Configure logging levels."""
         if isinstance(verbose, int) and verbose >= 10:
-            logging.getLogger("litellm").setLevel(logging.DEBUG)
+            get_logger("litellm").setLevel(logging.DEBUG)
         else:
-            logging.getLogger("litellm").setLevel(logging.WARNING)
-            logging.getLogger("httpx").setLevel(logging.WARNING)
+            get_logger("litellm").setLevel(logging.WARNING)
+            get_logger("httpx").setLevel(logging.WARNING)
     
     def _get_model_params(self, model: Optional[str] = None) -> Dict[str, Any]:
         """Build parameters for LiteLLM calls."""

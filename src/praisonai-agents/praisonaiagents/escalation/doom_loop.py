@@ -11,9 +11,9 @@ from enum import Enum
 import time
 import hashlib
 import logging
+from praisonaiagents._logging import get_logger
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class DoomLoopType(Enum):
     """Types of doom loops that can be detected."""
@@ -24,7 +24,6 @@ class DoomLoopType(Enum):
     RESOURCE_EXHAUSTION = "resource_exhaustion"  # Budget exceeded
     REPEATED_OUTPUT = "repeated_output"      # Same output text repeated (content chanting)
 
-
 class RecoveryAction(Enum):
     """Actions to take when doom loop is detected."""
     CONTINUE = "continue"           # Continue execution
@@ -32,7 +31,6 @@ class RecoveryAction(Enum):
     ESCALATE_MODEL = "escalate_model"    # Try stronger model
     REQUEST_HELP = "request_help"        # Ask user for clarification
     ABORT = "abort"                      # Stop execution safely
-
 
 @dataclass
 class DoomLoopConfig:
@@ -64,7 +62,6 @@ class DoomLoopConfig:
     max_repeated_chunks: int = 8         # Max identical output chunks before flagging
     content_chunk_size: int = 50         # Sliding window chunk size (chars)
 
-
 @dataclass
 class DoomLoopEvent:
     """Event representing a doom loop detection."""
@@ -74,7 +71,6 @@ class DoomLoopEvent:
     recovery_action: RecoveryAction
     timestamp: float = field(default_factory=time.time)
     metadata: Dict[str, Any] = field(default_factory=dict)
-
 
 @dataclass
 class ActionRecord:
@@ -87,7 +83,6 @@ class ActionRecord:
     timestamp: float
     duration: float
     metadata: Dict[str, Any] = field(default_factory=dict)
-
 
 class DoomLoopDetector:
     """

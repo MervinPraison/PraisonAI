@@ -10,9 +10,9 @@ Implementations are provided by praisonai-tools or wrapper layer.
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 import logging
+from praisonaiagents._logging import get_logger
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class RerankResult:
@@ -33,7 +33,6 @@ class RerankResult:
     def __post_init__(self):
         if self.metadata is None:
             self.metadata = {}
-
 
 @runtime_checkable
 class RerankerProtocol(Protocol):
@@ -76,7 +75,6 @@ class RerankerProtocol(Protocol):
     ) -> List[RerankResult]:
         """Async version of rerank."""
         ...
-
 
 class RerankerRegistry:
     """
@@ -121,11 +119,9 @@ class RerankerRegistry:
         """Clear all registered rerankers."""
         self._rerankers.clear()
 
-
 def get_reranker_registry() -> RerankerRegistry:
     """Get the global reranker registry instance."""
     return RerankerRegistry()
-
 
 class SimpleReranker:
     """
@@ -185,12 +181,10 @@ class SimpleReranker:
         """Async version (just calls sync)."""
         return self.rerank(query, documents, top_k, **kwargs)
 
-
 # Register the simple reranker by default
 def _register_default_rerankers():
     """Register default rerankers."""
     registry = get_reranker_registry()
     registry.register("simple", SimpleReranker)
-
 
 _register_default_rerankers()

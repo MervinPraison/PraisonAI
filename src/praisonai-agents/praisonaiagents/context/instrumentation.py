@@ -15,6 +15,7 @@ Zero Performance Impact:
 
 import time
 import logging
+from praisonaiagents._logging import get_logger
 import functools
 import os
 from typing import Dict, Any, Callable, TypeVar, List
@@ -22,11 +23,10 @@ from dataclasses import dataclass
 from contextlib import contextmanager
 from threading import Lock
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Type variable for decorated functions
 F = TypeVar('F', bound=Callable[..., Any])
-
 
 @dataclass
 class ContextMetrics:
@@ -95,16 +95,13 @@ class ContextMetrics:
             },
         }
 
-
 # Global metrics instance
 _metrics = ContextMetrics()
 _metrics_lock = Lock()
 
-
 def get_metrics() -> ContextMetrics:
     """Get global metrics instance."""
     return _metrics
-
 
 def reset_metrics() -> None:
     """Reset global metrics (for testing)."""
@@ -112,11 +109,9 @@ def reset_metrics() -> None:
     with _metrics_lock:
         _metrics = ContextMetrics()
 
-
 def is_debug_enabled() -> bool:
     """Check if debug logging is enabled (cached check)."""
     return logger.isEnabledFor(logging.DEBUG) or os.environ.get('LOGLEVEL', '').upper() == 'DEBUG'
-
 
 def context_operation(operation_name: str) -> Callable[[F], F]:
     """
@@ -164,7 +159,6 @@ def context_operation(operation_name: str) -> Callable[[F], F]:
         return wrapper  # type: ignore
     return decorator
 
-
 @contextmanager
 def timed_section(name: str):
     """
@@ -185,7 +179,6 @@ def timed_section(name: str):
         elapsed_ms = (time.perf_counter() - start) * 1000
         logger.debug(f"[context.{name}] completed in {elapsed_ms:.2f}ms")
 
-
 def log_context_size(
     messages: List[Dict[str, Any]],
     tokens: int,
@@ -205,7 +198,6 @@ def log_context_size(
         f"{prefix}Context: {len(messages)} messages, "
         f"{tokens} tokens, {utilization*100:.1f}% utilization"
     )
-
 
 def log_optimization_event(
     event_type: str,
@@ -236,7 +228,6 @@ def log_optimization_event(
         if event_type in ("auto_compact", "overflow_detected"):
             _metrics.compactions_triggered += 1
 
-
 def log_cache_access(hit: bool) -> None:
     """Track cache hit/miss for token estimation."""
     if not is_debug_enabled():
@@ -248,12 +239,10 @@ def log_cache_access(hit: bool) -> None:
         else:
             _metrics.cache_misses += 1
 
-
 def track_tokens_processed(count: int) -> None:
     """Track total tokens processed."""
     with _metrics_lock:
         _metrics.tokens_processed += count
-
 
 # Benchmark utilities
 @dataclass
@@ -277,7 +266,6 @@ class BenchmarkResult:
             "max_ms": round(self.max_ms, 3),
             "std_dev_ms": round(self.std_dev_ms, 3),
         }
-
 
 def run_benchmark(
     name: str,
@@ -320,7 +308,6 @@ def run_benchmark(
         max_ms=max(times),
         std_dev_ms=statistics.stdev(times) if len(times) > 1 else 0.0,
     )
-
 
 def format_benchmark_results(results: List[BenchmarkResult]) -> str:
     """Format benchmark results as a table."""

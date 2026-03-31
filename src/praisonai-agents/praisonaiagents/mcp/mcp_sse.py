@@ -6,6 +6,7 @@ over SSE transport.
 
 import asyncio
 import logging
+from praisonaiagents._logging import get_logger
 import threading
 import inspect
 import json
@@ -20,7 +21,7 @@ except ImportError:
     ClientSession = None
     sse_client = None
 
-logger = logging.getLogger("mcp-sse")
+logger = get_logger("mcp-sse")
 
 # Import shared utilities for thread-safe event loop and schema fixing
 from .mcp_schema_utils import ThreadLocalEventLoop, fix_array_schemas
@@ -31,7 +32,6 @@ _event_loop_manager = ThreadLocalEventLoop()
 def get_event_loop():
     """Get or create a thread-local event loop."""
     return _event_loop_manager.get_loop()
-
 
 class SSEMCPTool:
     """A wrapper for an MCP tool that can be used with praisonaiagents."""
@@ -124,7 +124,6 @@ class SSEMCPTool:
             }
         }
 
-
 class SSEMCPClient:
     """A client for connecting to an MCP server over SSE."""
     
@@ -152,11 +151,10 @@ class SSEMCPClient:
 
         # Set up logging
         if debug:
-            logger.setLevel(logging.DEBUG)
+
         else:
             # Set to WARNING by default to hide INFO messages
-            logger.setLevel(logging.WARNING)
-        
+
         self._initialize()
         
     def _initialize(self):

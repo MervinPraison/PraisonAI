@@ -34,6 +34,7 @@ Example:
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 from typing import List, Optional, Any, Dict
 from dataclasses import dataclass, field
 from enum import Enum
@@ -47,7 +48,6 @@ class ExpandStrategy(Enum):
     CREATIVE = "creative"
     AUTO = "auto"
 
-
 @dataclass
 class ExpandResult:
     """Result of a prompt expansion operation."""
@@ -58,7 +58,6 @@ class ExpandResult:
     
     def __repr__(self):
         return f"ExpandResult(strategy={self.strategy_used.value}, original_len={len(self.original_prompt)}, expanded_len={len(self.expanded_prompt)})"
-
 
 class PromptExpanderAgent:
     """
@@ -213,7 +212,7 @@ Expanded prompt:"""
         self._agent = None  # Lazy initialized
         
         # Setup logging
-        self.logger = logging.getLogger(__name__)
+        self.logger = get_logger(__name__)
         if self.verbose:
             self.logger.setLevel(logging.DEBUG)
     

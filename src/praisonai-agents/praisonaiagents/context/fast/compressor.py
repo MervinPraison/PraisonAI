@@ -13,14 +13,14 @@ Design principles:
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Protocol, Optional, List
 from dataclasses import dataclass
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Lazy availability check for llmlingua
 _LLMLINGUA_AVAILABLE: Optional[bool] = None
-
 
 def _check_llmlingua() -> bool:
     """Lazy check for llmlingua availability."""
@@ -32,7 +32,6 @@ def _check_llmlingua() -> bool:
         except ImportError:
             _LLMLINGUA_AVAILABLE = False
     return _LLMLINGUA_AVAILABLE
-
 
 class ContextCompressor(Protocol):
     """Protocol for context compression."""
@@ -49,7 +48,6 @@ class ContextCompressor(Protocol):
         """
         ...
 
-
 @dataclass
 class CompressionConfig:
     """Configuration for context compression."""
@@ -57,7 +55,6 @@ class CompressionConfig:
     preserve_start_lines: int = 5  # Preserve first N lines
     preserve_end_lines: int = 3   # Preserve last N lines
     truncation_marker: str = "\n\n... [content truncated] ...\n\n"
-
 
 class TruncateCompressor:
     """Simple token-aware truncation compressor.
@@ -125,7 +122,6 @@ class TruncateCompressor:
         middle_truncated = middle_text[:middle_budget // 2]
         
         return start_text + '\n' + middle_truncated + self.config.truncation_marker + end_text
-
 
 class SmartCompressor:
     """Smart compressor that preserves important content.
@@ -214,7 +210,6 @@ class SmartCompressor:
         
         return '\n'.join(result_lines)
 
-
 def get_compressor(compressor_type: str = "truncate") -> ContextCompressor:
     """Get a context compressor by type.
     
@@ -243,7 +238,6 @@ def get_compressor(compressor_type: str = "truncate") -> ContextCompressor:
     
     else:
         raise ValueError(f"Invalid compressor type: {compressor_type}. Must be 'truncate', 'smart', or 'llmlingua'")
-
 
 def is_llmlingua_available() -> bool:
     """Check if llmlingua is available.

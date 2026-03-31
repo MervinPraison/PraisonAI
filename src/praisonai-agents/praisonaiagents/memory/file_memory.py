@@ -21,6 +21,7 @@ import time
 import sys
 import hashlib
 import logging
+from praisonaiagents._logging import get_logger
 import threading
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -34,8 +35,7 @@ if sys.platform != 'win32':
 else:
     _HAS_FCNTL = False
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -56,7 +56,6 @@ class MemoryItem:
     def from_dict(cls, data: Dict[str, Any]) -> 'MemoryItem':
         return cls(**data)
 
-
 @dataclass
 class EntityItem:
     """An entity memory item (person, place, concept)."""
@@ -74,7 +73,6 @@ class EntityItem:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'EntityItem':
         return cls(**data)
-
 
 class FileMemory:
     """
@@ -1687,7 +1685,6 @@ Summary:"""
         
         else:
             return {"error": f"Unknown action: {action}. Use /memory help for available commands."}
-
 
 # Convenience function for simple usage
 def create_memory(

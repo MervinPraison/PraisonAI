@@ -5,6 +5,7 @@ Exposes PraisonAI Agents via the AG-UI protocol.
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 import uuid
 from typing import AsyncIterator, List, Optional, TYPE_CHECKING
 
@@ -28,8 +29,7 @@ if TYPE_CHECKING:
     from praisonaiagents import Agent, AgentTeam
     from fastapi import APIRouter
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class AGUI:
     """

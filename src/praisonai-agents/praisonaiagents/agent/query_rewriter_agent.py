@@ -39,11 +39,11 @@ Example:
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 import json
 from typing import List, Optional, Any, Dict
 from dataclasses import dataclass, field
 from enum import Enum
-
 
 class RewriteStrategy(Enum):
     """Enumeration of available query rewriting strategies."""
@@ -54,7 +54,6 @@ class RewriteStrategy(Enum):
     MULTI_QUERY = "multi_query"
     CONTEXTUAL = "contextual"
     AUTO = "auto"
-
 
 @dataclass
 class RewriteResult:
@@ -85,7 +84,6 @@ class RewriteResult:
         if self.sub_queries:
             queries.extend(self.sub_queries)
         return list(set(queries))  # Remove duplicates
-
 
 class QueryRewriterAgent:
     """
@@ -271,7 +269,7 @@ Improved version:"""
         }
         
         # Setup logging
-        self.logger = logging.getLogger(__name__)
+        self.logger = get_logger(__name__)
         if self.verbose:
             self.logger.setLevel(logging.DEBUG)
     

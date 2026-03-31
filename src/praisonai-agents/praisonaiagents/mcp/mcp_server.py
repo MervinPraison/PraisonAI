@@ -18,12 +18,12 @@ Usage:
 import asyncio
 import inspect
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Any, Callable, Dict, List, Optional
 
 from .mcp_utils import function_to_mcp_schema
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class ToolsMCPServer:
     """MCP Server that exposes Python functions as MCP tools.
@@ -62,8 +62,7 @@ class ToolsMCPServer:
         self._debug = debug
         
         if debug:
-            logger.setLevel(logging.DEBUG)
-        
+
         # Register initial tools if provided
         if tools:
             self.register_tools(tools)
@@ -292,7 +291,6 @@ class ToolsMCPServer:
         print(f"🛠️  Available tools: {', '.join(self.get_tool_names())}")
         
         uvicorn.run(app, host=host, port=port)
-
 
 def launch_tools_mcp_server(
     tools: Optional[List[Callable]] = None,

@@ -7,6 +7,7 @@ supporting both synchronous and asynchronous operations.
 
 import os
 import logging
+from praisonaiagents._logging import get_logger
 import time
 import json
 import asyncio
@@ -54,7 +55,6 @@ def _get_rich_live():
         from rich.live import Live
         _rich_live = Live
     return _rich_live
-
 
 # Import display_tool_call for callback support (lazy import to avoid circular imports)
 _display_tool_call = None
@@ -125,7 +125,6 @@ class ToolCall:
     id: str
     type: str
     function: Dict[str, Any]
-
 
 def process_stream_chunks(chunks):
     """Process streaming chunks into combined response"""
@@ -245,7 +244,6 @@ def process_stream_chunks(chunks):
         print(f"Error processing chunks: {e}")
         return None
 
-
 class OpenAIClient:
     """
     Unified OpenAI client wrapper for sync/async operations.
@@ -281,7 +279,7 @@ class OpenAIClient:
         self._async_client = None
         
         # Set up logging
-        self.logger = logging.getLogger(__name__)
+        self.logger = get_logger(__name__)
         
         # Initialize console lazily
         self._console = None
@@ -1627,7 +1625,7 @@ class OpenAIClient:
                 cost = calculate_cost(final_response, model=model)
             except Exception as e:
                 # Cost calculation is optional - log for debugging
-                logging.getLogger(__name__).debug(f"Cost calculation failed: {e}")
+                get_logger(__name__).debug(f"Cost calculation failed: {e}")
             
             execute_sync_callback(
                 'llm_end',
@@ -1653,7 +1651,7 @@ class OpenAIClient:
                     )
                 except Exception as e:
                     # Narrative display is optional - log for debugging
-                    logging.getLogger(__name__).debug(f"Narrative display failed: {e}")
+                    get_logger(__name__).debug(f"Narrative display failed: {e}")
             
             if tool_calls and execute_tool_fn:
                 # Convert ToolCall dataclass objects to dict for JSON serialization
@@ -1853,7 +1851,7 @@ class OpenAIClient:
                     )
                 except Exception as e:
                     # Narrative display is optional - log for debugging
-                    logging.getLogger(__name__).debug(f"Narrative display failed: {e}")
+                    get_logger(__name__).debug(f"Narrative display failed: {e}")
             
             if tool_calls and execute_tool_fn:
                 # Convert ToolCall dataclass objects to dict for JSON serialization
@@ -2195,7 +2193,6 @@ class OpenAIClient:
             await asyncio.to_thread(self._sync_client.close)
         if self._async_client and hasattr(self._async_client, 'aclose'):
             await self._async_client.aclose()
-
 
 # Global client instance (similar to main.py pattern)
 _global_client = None

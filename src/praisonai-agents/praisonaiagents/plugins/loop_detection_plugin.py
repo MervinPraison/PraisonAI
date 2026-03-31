@@ -24,6 +24,7 @@ Zero Performance Impact:
 from __future__ import annotations
 
 import logging
+from praisonaiagents._logging import get_logger
 import threading
 from typing import List
 
@@ -38,7 +39,7 @@ from praisonaiagents.agent.loop_detection import (
     ToolCallRecord,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Default configuration (can be overridden before import)
@@ -57,18 +58,15 @@ DEFAULT_CONFIG = LoopDetectionConfig(
 
 _thread_local = threading.local()
 
-
 def _get_history() -> List[ToolCallRecord]:
     """Get the thread-local tool call history."""
     if not hasattr(_thread_local, "history"):
         _thread_local.history = []
     return _thread_local.history
 
-
 def reset_history() -> None:
     """Reset the tool call history for the current thread. Useful in tests."""
     _thread_local.history = []
-
 
 # ---------------------------------------------------------------------------
 # Hook implementation
@@ -125,7 +123,6 @@ def _loop_detection_hook(event: HookInput) -> HookResult:
     )
     # Return allow with additional_context so the runner can pass it back
     return HookResult(decision="allow", reason=message)
-
 
 # ---------------------------------------------------------------------------
 # Register hook on import (side effect is intentional for plugin pattern)

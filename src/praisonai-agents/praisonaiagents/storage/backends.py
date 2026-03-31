@@ -17,16 +17,16 @@ import time
 import threading
 import tempfile
 import logging
+from praisonaiagents._logging import get_logger
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..paths import get_storage_dir, get_storage_path
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Default storage directory (uses centralized paths - DRY)
 DEFAULT_STORAGE_DIR = str(get_storage_dir())
-
 
 class FileBackend:
     """
@@ -157,7 +157,6 @@ class FileBackend:
                     except Exception:
                         pass
         return count
-
 
 class SQLiteBackend:
     """
@@ -333,7 +332,6 @@ class SQLiteBackend:
             self._local.conn.close()
             self._local.conn = None
 
-
 class RedisBackend:
     """
     Redis-based storage backend.
@@ -460,7 +458,6 @@ class RedisBackend:
             self._client.close()
             self._client = None
 
-
 class MongoDBBackend:
     """
     MongoDB-based storage backend.
@@ -568,7 +565,6 @@ class MongoDBBackend:
             self._client = None
             self._collection = None
 
-
 def get_backend(
     backend_type: str = "file",
     **kwargs
@@ -605,7 +601,6 @@ def get_backend(
         return MongoDBBackend(**kwargs)
     else:
         raise ValueError(f"Unknown backend type: {backend_type}")
-
 
 __all__ = [
     'FileBackend',

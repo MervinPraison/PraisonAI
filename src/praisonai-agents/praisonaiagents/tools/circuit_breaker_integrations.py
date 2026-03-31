@@ -12,6 +12,7 @@ Following the protocol-driven, agent-centric approach from AGENTS.md.
 import asyncio
 import functools
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Any, Callable, Dict, List, Optional, Union, TypeVar, Coroutine
 
 from .circuit_breaker import (
@@ -20,10 +21,9 @@ from .circuit_breaker import (
 )
 from .retry import RetryPolicy, ToolExecutionConfig
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 T = TypeVar('T')
-
 
 def with_circuit_breaker(
     service_name: str,
@@ -92,7 +92,6 @@ def with_circuit_breaker(
             return sync_wrapper
     
     return decorator
-
 
 class LLMCircuitBreakerIntegration:
     """Integration between circuit breaker and LLM failover system.
@@ -163,7 +162,6 @@ class LLMCircuitBreakerIntegration:
             health_check,
             fallback
         )(llm_func)
-
 
 class MemoryCircuitBreakerIntegration:
     """Integration between circuit breaker and memory systems.
@@ -241,7 +239,6 @@ class MemoryCircuitBreakerIntegration:
             fallback if self.fallback_to_file else None
         )(store_func)
 
-
 class MCPCircuitBreakerIntegration:
     """Integration between circuit breaker and MCP transports.
     
@@ -303,7 +300,6 @@ class MCPCircuitBreakerIntegration:
             fallback
         )(transport_func)
 
-
 def integrate_with_retry_policy(
     retry_policy: RetryPolicy,
     circuit_breaker_config: CircuitBreakerConfig,
@@ -324,7 +320,6 @@ def integrate_with_retry_policy(
         circuit_breaker_config=circuit_breaker_config,
         timeout_ms=int(circuit_breaker_config.timeout * 1000)
     )
-
 
 def create_resilient_external_call(
     service_name: str,
@@ -418,7 +413,6 @@ def create_resilient_external_call(
                     
             raise last_exception
         return resilient_sync_wrapper
-
 
 # Convenience instances for common integrations
 llm_integration = LLMCircuitBreakerIntegration()

@@ -5,14 +5,14 @@ Manages and evaluates policies for execution control.
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Optional, List, Dict, Any
 
 from .types import PolicyAction, PolicyResult
 from .policy import Policy, PolicyRule
 from .config import PolicyConfig
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class PolicyEngine:
     """
@@ -253,7 +253,6 @@ class PolicyEngine:
         
         self.load_from_dict(data)
 
-
 # Convenience functions for common policies
 
 def create_deny_tools_policy(
@@ -284,7 +283,6 @@ def create_deny_tools_policy(
     
     return Policy(name=name, rules=rules)
 
-
 def create_allow_tools_policy(
     tool_patterns: List[str],
     name: str = "allow_tools"
@@ -309,7 +307,6 @@ def create_allow_tools_policy(
     ]
     
     return Policy(name=name, rules=rules, priority=10)
-
 
 def create_read_only_policy(name: str = "read_only") -> Policy:
     """

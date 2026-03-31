@@ -3,6 +3,7 @@ import json
 from datetime import datetime
 import os
 import logging
+from praisonaiagents._logging import get_logger
 
 # Setup logging based on environment variable
 log_level = os.getenv('LOGLEVEL', 'INFO').upper()
@@ -10,7 +11,7 @@ logging.basicConfig(
     level=log_level,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Lazy loader for LLM
 def get_llm():

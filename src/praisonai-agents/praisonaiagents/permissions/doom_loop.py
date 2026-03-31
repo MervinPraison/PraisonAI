@@ -5,18 +5,18 @@ Detects and prevents agents from getting stuck in repetitive loops.
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Default thresholds
 DEFAULT_LOOP_THRESHOLD = 3
 DEFAULT_WINDOW_SECONDS = 60
 DEFAULT_MAX_TOOL_CALLS = 50
-
 
 @dataclass
 class ToolCallRecord:
@@ -34,7 +34,6 @@ class ToolCallRecord:
             "timestamp": self.timestamp,
             "session_id": self.session_id,
         }
-
 
 @dataclass
 class DoomLoopResult:
@@ -54,7 +53,6 @@ class DoomLoopResult:
             "tool_name": self.tool_name,
             "recommendation": self.recommendation,
         }
-
 
 class DoomLoopDetector:
     """

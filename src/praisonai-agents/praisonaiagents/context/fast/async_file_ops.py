@@ -13,13 +13,13 @@ Design principles:
 
 import asyncio
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Optional, List
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Lazy availability check
 _AIOFILES_AVAILABLE: Optional[bool] = None
-
 
 def _check_aiofiles() -> bool:
     """Lazy check for aiofiles availability.
@@ -38,7 +38,6 @@ def _check_aiofiles() -> bool:
             logger.debug("aiofiles not available, using sync fallback")
     return _AIOFILES_AVAILABLE
 
-
 def _sync_read_file(
     path: str,
     encoding: str = 'utf-8',
@@ -47,7 +46,6 @@ def _sync_read_file(
     """Sync file read for fallback."""
     with open(path, 'r', encoding=encoding, errors=errors) as f:
         return f.read()
-
 
 def _sync_read_lines(
     path: str,
@@ -73,7 +71,6 @@ def _sync_read_lines(
         return [line.rstrip('\n\r') for line in lines[:end_idx]]
     else:
         return [line.rstrip('\n\r') for line in lines]
-
 
 async def async_read_file(
     path: str,
@@ -103,7 +100,6 @@ async def async_read_file(
             None, 
             lambda: _sync_read_file(path, encoding, errors)
         )
-
 
 async def async_read_lines(
     path: str,
@@ -148,7 +144,6 @@ async def async_read_lines(
             None,
             lambda: _sync_read_lines(path, start_line, end_line, encoding, errors)
         )
-
 
 def is_aiofiles_available() -> bool:
     """Check if aiofiles is available for async operations.

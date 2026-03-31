@@ -28,13 +28,13 @@ Usage:
 import shutil
 import subprocess
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Optional, List
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Availability cache for performance (checked once per process)
 _availability_cache: Optional[bool] = None
-
 
 def is_ast_grep_available() -> bool:
     """Check if ast-grep (sg) CLI is available.
@@ -62,7 +62,6 @@ def is_ast_grep_available() -> bool:
     
     return _availability_cache
 
-
 def _get_not_installed_message() -> str:
     """Get helpful error message when ast-grep is not installed."""
     return (
@@ -73,7 +72,6 @@ def _get_not_installed_message() -> str:
         "  npm install -g @ast-grep/cli\n\n"
         "For more information, visit: https://ast-grep.github.io/"
     )
-
 
 def ast_grep_search(
     pattern: str,
@@ -147,7 +145,6 @@ def ast_grep_search(
     except Exception as e:
         logger.exception("Unexpected error in ast_grep_search")
         return f"Error: {e}"
-
 
 def ast_grep_rewrite(
     pattern: str,
@@ -243,7 +240,6 @@ def ast_grep_rewrite(
         logger.exception("Unexpected error in ast_grep_rewrite")
         return f"Error: {e}"
 
-
 def ast_grep_scan(
     path: str = ".",
     rule_file: Optional[str] = None,
@@ -309,7 +305,6 @@ def ast_grep_scan(
         logger.exception("Unexpected error in ast_grep_scan")
         return f"Error: {e}"
 
-
 # Convenience function to get all ast-grep tools
 def get_ast_grep_tools() -> List:
     """Get all ast-grep tools as a list.
@@ -327,7 +322,6 @@ def get_ast_grep_tools() -> List:
         )
     """
     return [ast_grep_search, ast_grep_rewrite, ast_grep_scan]
-
 
 __all__ = [
     'is_ast_grep_available',

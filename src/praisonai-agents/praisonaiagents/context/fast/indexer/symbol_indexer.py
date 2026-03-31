@@ -12,13 +12,13 @@ Extracts code symbols from source files:
 import os
 import re
 import logging
+from praisonaiagents._logging import get_logger
 from dataclasses import dataclass, field
 from typing import Dict, List, Set, Optional, Any
 from pathlib import Path
 from enum import Enum
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class SymbolType(Enum):
     """Types of code symbols."""
@@ -33,7 +33,6 @@ class SymbolType(Enum):
     STRUCT = "struct"
     INTERFACE = "interface"
     MODULE = "module"
-
 
 @dataclass
 class Symbol:
@@ -71,7 +70,6 @@ class Symbol:
             "docstring": self.docstring
         }
 
-
 class LanguageParser:
     """Base class for language-specific parsers."""
     
@@ -86,7 +84,6 @@ class LanguageParser:
             List of extracted symbols
         """
         raise NotImplementedError
-
 
 class PythonParser(LanguageParser):
     """Parser for Python files."""
@@ -184,7 +181,6 @@ class PythonParser(LanguageParser):
             ))
         
         return symbols
-
 
 class JavaScriptParser(LanguageParser):
     """Parser for JavaScript/TypeScript files."""
@@ -291,7 +287,6 @@ class JavaScriptParser(LanguageParser):
         
         return symbols
 
-
 class GoParser(LanguageParser):
     """Parser for Go files."""
     
@@ -356,7 +351,6 @@ class GoParser(LanguageParser):
             ))
         
         return symbols
-
 
 class RustParser(LanguageParser):
     """Parser for Rust files."""
@@ -433,7 +427,6 @@ class RustParser(LanguageParser):
         
         return symbols
 
-
 class JavaParser(LanguageParser):
     """Parser for Java files."""
     
@@ -509,7 +502,6 @@ class JavaParser(LanguageParser):
             ))
         
         return symbols
-
 
 class SymbolIndexer:
     """Indexes code symbols from source files.

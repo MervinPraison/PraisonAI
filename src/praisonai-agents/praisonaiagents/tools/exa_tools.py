@@ -20,9 +20,9 @@ Usage:
 
 from typing import List, Dict, Any, Optional, Union
 import logging
+from praisonaiagents._logging import get_logger
 import os
 from importlib import util
-
 
 def _check_exa_available() -> tuple[bool, Optional[str]]:
     """Check if Exa is available and API key is set.
@@ -39,7 +39,6 @@ def _check_exa_available() -> tuple[bool, Optional[str]]:
         return False, "EXA_API_KEY environment variable is not set. Please set it to use Exa tools."
     
     return True, None
-
 
 class ExaTools:
     """Exa search and research tools.
@@ -66,7 +65,7 @@ class ExaTools:
         """
         self.api_key = api_key or os.environ.get("EXA_API_KEY")
         self._client = None
-        self.logger = logging.getLogger(__name__)
+        self.logger = get_logger(__name__)
     
     def _get_client(self):
         """Get or create Exa client."""
@@ -480,7 +479,6 @@ class ExaTools:
             self.logger.error(f"Exa answer error: {e}")
             return {"error": f"Exa answer error: {str(e)}"}
 
-
 # Standalone functions for easy access
 
 def exa_search(
@@ -528,7 +526,6 @@ def exa_search(
         end_published_date=end_published_date
     )
 
-
 def exa_search_contents(
     query: str,
     text: bool = True,
@@ -574,7 +571,6 @@ def exa_search_contents(
         exclude_domains=exclude_domains
     )
 
-
 def exa_find_similar(
     url: str,
     num_results: int = 10,
@@ -608,7 +604,6 @@ def exa_find_similar(
         category=category
     )
 
-
 def exa_answer(
     query: str,
     text: bool = False
@@ -633,7 +628,6 @@ def exa_answer(
     
     tools = ExaTools()
     return tools.answer(query=query, text=text)
-
 
 # Async versions
 
@@ -660,7 +654,6 @@ async def exa_search_async(
         lambda: exa_search(query, num_results, type, category)
     )
 
-
 async def exa_search_contents_async(
     query: str,
     text: bool = True,
@@ -684,7 +677,6 @@ async def exa_search_contents_async(
         lambda: exa_search_contents(query, text, highlights, num_results)
     )
 
-
 async def exa_answer_async(
     query: str,
     text: bool = False
@@ -704,10 +696,8 @@ async def exa_answer_async(
         lambda: exa_answer(query, text)
     )
 
-
 # Alias for simple usage
 exa = exa_search
-
 
 if __name__ == "__main__":
     # Example usage

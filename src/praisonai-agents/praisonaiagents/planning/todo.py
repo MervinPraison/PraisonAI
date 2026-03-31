@@ -16,14 +16,14 @@ Features:
 import uuid
 import json
 import logging
+from praisonaiagents._logging import get_logger
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, Literal, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .plan import Plan
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class TodoItem:
@@ -97,7 +97,6 @@ class TodoItem:
         if self.status != "pending":
             return False
         return all(dep in completed_ids for dep in self.dependencies)
-
 
 @dataclass
 class TodoList:

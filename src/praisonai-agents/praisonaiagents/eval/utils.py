@@ -4,11 +4,11 @@ Utility functions for PraisonAI Agents evaluation framework.
 
 import json
 import logging
+from praisonaiagents._logging import get_logger
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 def save_result_to_file(
     result: Any,
@@ -47,7 +47,6 @@ def save_result_to_file(
         logger.warning(f"Failed to save result: {e}")
         return False
 
-
 def load_result_from_file(file_path: str) -> Optional[Dict[str, Any]]:
     """
     Load evaluation result from a file.
@@ -70,7 +69,6 @@ def load_result_from_file(file_path: str) -> Optional[Dict[str, Any]]:
         logger.warning(f"Failed to load result: {e}")
         return None
 
-
 def format_score(score: float, max_score: float = 10.0) -> str:
     """
     Format a score for display.
@@ -84,7 +82,6 @@ def format_score(score: float, max_score: float = 10.0) -> str:
     """
     return f"{score:.1f}/{max_score:.0f}"
 
-
 def format_percentage(value: float) -> str:
     """
     Format a value as a percentage.
@@ -96,7 +93,6 @@ def format_percentage(value: float) -> str:
         Formatted percentage string
     """
     return f"{value * 100:.1f}%"
-
 
 def format_duration(seconds: float) -> str:
     """
@@ -119,7 +115,6 @@ def format_duration(seconds: float) -> str:
         secs = seconds % 60
         return f"{minutes}m {secs:.1f}s"
 
-
 def format_memory(mb: float) -> str:
     """
     Format memory usage for display.
@@ -136,7 +131,6 @@ def format_memory(mb: float) -> str:
         return f"{mb:.2f} MB"
     else:
         return f"{mb / 1024:.2f} GB"
-
 
 def calculate_pass_rate(passed: int, total: int) -> float:
     """

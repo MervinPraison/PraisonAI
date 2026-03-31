@@ -18,14 +18,14 @@ Example:
 
 import time
 import logging
+from praisonaiagents._logging import get_logger
 from typing import TYPE_CHECKING, Optional, Callable, Any, List
 from dataclasses import dataclass
 
 if TYPE_CHECKING:
     from ..agent.agent import Agent
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class EvaluationLoopConfig:
@@ -36,7 +36,6 @@ class EvaluationLoopConfig:
     mode: str = "optimize"
     model: str = "gpt-4o-mini"
     verbose: bool = False
-
 
 class EvaluationLoop:
     """
@@ -268,7 +267,6 @@ class EvaluationLoop:
             result.print_summary()
         
         return result
-
 
 __all__ = [
     'EvaluationLoop',

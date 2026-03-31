@@ -19,14 +19,14 @@ Example:
 from __future__ import annotations
 
 import logging
+from praisonaiagents._logging import get_logger
 import os
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Lazy-loaded AgentMail client (module-level singleton)
 _client = None
-
 
 def _detect_backend() -> str:
     """Detect which email backend is available.
@@ -42,7 +42,6 @@ def _detect_backend() -> str:
         "  - AGENTMAIL_API_KEY (+ AGENTMAIL_INBOX_ID) for AgentMail, or\n"
         "  - EMAIL_ADDRESS + EMAIL_PASSWORD for IMAP/SMTP (Gmail, Outlook, etc.)"
     )
-
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # AgentMail Backend
@@ -68,7 +67,6 @@ def _get_client():
             )
     return _client
 
-
 def _get_inbox_id() -> str:
     """Get the default inbox ID from env."""
     inbox_id = os.environ.get("AGENTMAIL_INBOX_ID", "")
@@ -79,13 +77,11 @@ def _get_inbox_id() -> str:
         )
     return inbox_id
 
-
 def _normalize_message_id(message_id: str) -> str:
     """LLMs often strip angle brackets from message IDs — restore them."""
     if message_id and "@" in message_id and not message_id.startswith("<"):
         return f"<{message_id}>"
     return message_id
-
 
 def _agentmail_send_email(to: str, subject: str, body: str) -> str:
     client = _get_client()
@@ -99,7 +95,6 @@ def _agentmail_send_email(to: str, subject: str, body: str) -> str:
     except Exception as e:
         logger.error(f"Failed to send email to {to}: {e}")
         return f"Failed to send email: {e}"
-
 
 def _agentmail_list_emails(limit: int = 10) -> str:
     client = _get_client()
@@ -129,7 +124,6 @@ def _agentmail_list_emails(limit: int = 10) -> str:
         logger.error(f"Failed to list emails: {e}")
         return f"Failed to list emails: {e}"
 
-
 def _agentmail_read_email(message_id: str) -> str:
     client = _get_client()
     inbox_id = _get_inbox_id()
@@ -152,7 +146,6 @@ def _agentmail_read_email(message_id: str) -> str:
         logger.error(f"Failed to read email {message_id}: {e}")
         return f"Failed to read email: {e}"
 
-
 def _agentmail_reply_email(message_id: str, body: str) -> str:
     client = _get_client()
     inbox_id = _get_inbox_id()
@@ -165,7 +158,6 @@ def _agentmail_reply_email(message_id: str, body: str) -> str:
     except Exception as e:
         logger.error(f"Failed to reply to {message_id}: {e}")
         return f"Failed to reply: {e}"
-
 
 def _agentmail_search_emails(
     label: Optional[str] = None,
@@ -209,7 +201,6 @@ def _agentmail_search_emails(
         logger.error(f"Failed to search emails: {e}")
         return f"Failed to search emails: {e}"
 
-
 def _agentmail_archive_email(message_id: str) -> str:
     client = _get_client()
     inbox_id = _get_inbox_id()
@@ -224,7 +215,6 @@ def _agentmail_archive_email(message_id: str) -> str:
     except Exception as e:
         logger.error(f"Failed to archive email {message_id}: {e}")
         return f"Failed to archive email: {e}"
-
 
 def _agentmail_forward_email(message_id: str, to: str, note: Optional[str] = None) -> str:
     client = _get_client()
@@ -242,7 +232,6 @@ def _agentmail_forward_email(message_id: str, to: str, note: Optional[str] = Non
         logger.error(f"Failed to forward email {message_id}: {e}")
         return f"Failed to forward email: {e}"
 
-
 def _agentmail_draft_email(to: str, subject: str, body: str) -> str:
     client = _get_client()
     inbox_id = _get_inbox_id()
@@ -255,7 +244,6 @@ def _agentmail_draft_email(to: str, subject: str, body: str) -> str:
         logger.error(f"Failed to create draft: {e}")
         return f"Failed to create draft: {e}"
 
-
 def _agentmail_send_draft(draft_id: str) -> str:
     client = _get_client()
     inbox_id = _get_inbox_id()
@@ -267,7 +255,6 @@ def _agentmail_send_draft(draft_id: str) -> str:
     except Exception as e:
         logger.error(f"Failed to send draft {draft_id}: {e}")
         return f"Failed to send draft: {e}"
-
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # SMTP/IMAP Backend — uses standard mailbox credentials
@@ -294,7 +281,6 @@ _IMAP_DEFAULTS = {
     "icloud.com": ("imap.mail.me.com", 993),
 }
 
-
 def _get_smtp_config():
     """Get SMTP config from env vars with smart defaults."""
     email_addr = os.environ.get("EMAIL_ADDRESS", "")
@@ -310,7 +296,6 @@ def _get_smtp_config():
     smtp_port = int(os.environ.get("EMAIL_SMTP_PORT", str(default_smtp[1])))
     return email_addr, password, smtp_server, smtp_port
 
-
 def _get_imap_config():
     """Get IMAP config from env vars with smart defaults."""
     email_addr = os.environ.get("EMAIL_ADDRESS", "")
@@ -325,7 +310,6 @@ def _get_imap_config():
     imap_port = int(os.environ.get("EMAIL_IMAP_PORT", str(default_imap[1])))
     return email_addr, password, imap_server, imap_port
 
-
 def _imap_connect(readonly: bool = True):
     """Connect to IMAP and select INBOX. Returns (mail, email_addr)."""
     import imaplib
@@ -334,7 +318,6 @@ def _imap_connect(readonly: bool = True):
     mail.login(email_addr, password)
     mail.select("INBOX", readonly=readonly)
     return mail, email_addr
-
 
 def _decode_header_value(raw_value: str) -> str:
     """Decode a MIME-encoded header value."""
@@ -347,7 +330,6 @@ def _decode_header_value(raw_value: str) -> str:
         else:
             result += part
     return result
-
 
 def _extract_body_preview(msg, max_len: int = 100) -> str:
     """Extract plain text body preview from an email message."""
@@ -366,7 +348,6 @@ def _extract_body_preview(msg, max_len: int = 100) -> str:
                 msg.get_content_charset() or "utf-8", errors="replace"
             )[:max_len]
     return ""
-
 
 def _smtp_send_email(to: str, subject: str, body: str) -> str:
     import smtplib
@@ -388,7 +369,6 @@ def _smtp_send_email(to: str, subject: str, body: str) -> str:
     except Exception as e:
         logger.error(f"Failed to send SMTP email to {to}: {e}")
         return f"Failed to send email: {e}"
-
 
 def _smtp_list_emails(limit: int = 10) -> str:
     import email as email_lib
@@ -427,7 +407,6 @@ def _smtp_list_emails(limit: int = 10) -> str:
         logger.error(f"Failed to read inbox: {e}")
         return f"Failed to read inbox: {e}"
 
-
 def _smtp_read_email(message_id: str) -> str:
     import email as email_lib
     try:
@@ -456,7 +435,6 @@ def _smtp_read_email(message_id: str) -> str:
     except Exception as e:
         logger.error(f"Failed to read email {message_id}: {e}")
         return f"Failed to read email: {e}"
-
 
 def _smtp_reply_email(message_id: str, body: str) -> str:
     import smtplib
@@ -500,7 +478,6 @@ def _smtp_reply_email(message_id: str, body: str) -> str:
     except Exception as e:
         logger.error(f"Failed to reply to {message_id}: {e}")
         return f"Failed to reply: {e}"
-
 
 def _smtp_search_emails(
     query: Optional[str] = None,
@@ -557,7 +534,6 @@ def _smtp_search_emails(
         logger.error(f"Failed to search emails: {e}")
         return f"Failed to search emails: {e}"
 
-
 def _smtp_archive_email(message_id: str) -> str:
     try:
         import imaplib
@@ -585,7 +561,6 @@ def _smtp_archive_email(message_id: str) -> str:
     except Exception as e:
         logger.error(f"Failed to archive email {message_id}: {e}")
         return f"Failed to archive email: {e}"
-
 
 def _smtp_draft_email(to: str, subject: str, body: str) -> str:
     import imaplib
@@ -615,7 +590,6 @@ def _smtp_draft_email(to: str, subject: str, body: str) -> str:
         logger.error(f"Failed to save draft: {e}")
         return f"Failed to save draft: {e}"
 
-
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Generic Tools — Auto-detect backend
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -639,7 +613,6 @@ def send_email(to: str, subject: str, body: str) -> str:
         return _agentmail_send_email(to, subject, body)
     return _smtp_send_email(to, subject, body)
 
-
 def list_emails(limit: int = 10) -> str:
     """List recent emails in the inbox.
 
@@ -655,7 +628,6 @@ def list_emails(limit: int = 10) -> str:
     if backend == "agentmail":
         return _agentmail_list_emails(limit)
     return _smtp_list_emails(limit)
-
 
 def read_email(message_id: str) -> str:
     """Read the full content of a specific email.
@@ -673,7 +645,6 @@ def read_email(message_id: str) -> str:
         return _agentmail_read_email(message_id)
     return _smtp_read_email(message_id)
 
-
 def reply_email(message_id: str, body: str) -> str:
     """Reply to an email message.
 
@@ -690,7 +661,6 @@ def reply_email(message_id: str, body: str) -> str:
     if backend == "agentmail":
         return _agentmail_reply_email(message_id, body)
     return _smtp_reply_email(message_id, body)
-
 
 def search_emails(
     query: Optional[str] = None,
@@ -724,7 +694,6 @@ def search_emails(
         return _agentmail_search_emails(label, after_date, before_date, limit)
     return _smtp_search_emails(query, from_addr, subject, limit)
 
-
 def archive_email(message_id: str) -> str:
     """Archive an email (remove from inbox, keep in archive).
 
@@ -741,7 +710,6 @@ def archive_email(message_id: str) -> str:
     if backend == "agentmail":
         return _agentmail_archive_email(message_id)
     return _smtp_archive_email(message_id)
-
 
 def forward_email(message_id: str, to: str, note: Optional[str] = None) -> str:
     """Forward an email to another recipient.
@@ -761,7 +729,6 @@ def forward_email(message_id: str, to: str, note: Optional[str] = None) -> str:
     if backend == "agentmail":
         return _agentmail_forward_email(message_id, to, note)
     return "Forward not supported with IMAP. Use read_email + send_email as a workaround."
-
 
 def draft_email(to: str, subject: str, body: str) -> str:
     """Create an email draft without sending it.
@@ -783,7 +750,6 @@ def draft_email(to: str, subject: str, body: str) -> str:
         return _agentmail_draft_email(to, subject, body)
     return _smtp_draft_email(to, subject, body)
 
-
 def send_draft(draft_id: str) -> str:
     """Send a previously created email draft.
 
@@ -799,7 +765,6 @@ def send_draft(draft_id: str) -> str:
     if backend == "agentmail":
         return _agentmail_send_draft(draft_id)
     return "send_draft requires AgentMail. IMAP drafts must be sent from your email client."
-
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # AgentMail-only tools (no IMAP equivalent)
@@ -827,7 +792,6 @@ def list_inboxes() -> str:
     except Exception as e:
         logger.error(f"Failed to list inboxes: {e}")
         return f"Failed to list inboxes: {e}"
-
 
 def create_inbox(display_name: Optional[str] = None) -> str:
     """Create a new email inbox (AgentMail only).
@@ -859,7 +823,6 @@ def create_inbox(display_name: Optional[str] = None) -> str:
         logger.error(f"Failed to create inbox: {e}")
         return f"Failed to create inbox: {e}"
 
-
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Backward-compatible aliases (smtp_ prefix)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -879,7 +842,6 @@ def smtp_send_email(to: str, subject: str, body: str) -> str:
     """
     return _smtp_send_email(to, subject, body)
 
-
 def smtp_read_inbox(limit: int = 10, folder: str = "INBOX") -> str:
     """Read recent emails from your mailbox using IMAP.
 
@@ -893,7 +855,6 @@ def smtp_read_inbox(limit: int = 10, folder: str = "INBOX") -> str:
         Summary of recent emails with sender, subject, and preview
     """
     return _smtp_list_emails(limit)
-
 
 def smtp_search_inbox(
     query: Optional[str] = None,
@@ -916,7 +877,6 @@ def smtp_search_inbox(
     """
     return _smtp_search_emails(query, from_addr, subject, limit)
 
-
 def smtp_archive_email(message_id: str) -> str:
     """Archive an email using IMAP.
 
@@ -929,7 +889,6 @@ def smtp_archive_email(message_id: str) -> str:
         Confirmation message
     """
     return _smtp_archive_email(message_id)
-
 
 def smtp_draft_email(to: str, subject: str, body: str) -> str:
     """Save an email draft using IMAP APPEND.

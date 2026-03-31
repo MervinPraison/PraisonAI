@@ -11,9 +11,9 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 from enum import Enum
 import logging
+from praisonaiagents._logging import get_logger
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class RetrievalStrategy(str, Enum):
     """Available retrieval strategies."""
@@ -22,7 +22,6 @@ class RetrievalStrategy(str, Enum):
     RECURSIVE = "recursive"
     AUTO_MERGE = "auto_merge"
     HYBRID = "hybrid"
-
 
 @dataclass
 class RetrievalResult:
@@ -51,7 +50,6 @@ class RetrievalResult:
             "doc_id": self.doc_id,
             "chunk_index": self.chunk_index
         }
-
 
 @runtime_checkable
 class RetrieverProtocol(Protocol):
@@ -96,7 +94,6 @@ class RetrieverProtocol(Protocol):
         """Async version of retrieve."""
         ...
 
-
 class RetrieverRegistry:
     """
     Registry for retrieval strategies.
@@ -140,11 +137,9 @@ class RetrieverRegistry:
         """Clear all registered retrievers."""
         self._retrievers.clear()
 
-
 def get_retriever_registry() -> RetrieverRegistry:
     """Get the global retriever registry instance."""
     return RetrieverRegistry()
-
 
 def reciprocal_rank_fusion(
     result_lists: List[List[RetrievalResult]],
@@ -195,7 +190,6 @@ def reciprocal_rank_fusion(
         ))
     
     return fused_results
-
 
 def merge_adjacent_chunks(
     results: List[RetrievalResult],
@@ -259,7 +253,6 @@ def merge_adjacent_chunks(
     # Sort by score
     merged_results.sort(key=lambda x: x.score, reverse=True)
     return merged_results
-
 
 def _merge_chunk_group(chunks: List[RetrievalResult]) -> RetrievalResult:
     """Merge a group of chunks into a single result."""

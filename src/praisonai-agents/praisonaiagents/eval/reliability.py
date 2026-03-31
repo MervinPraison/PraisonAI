@@ -5,6 +5,7 @@ Evaluates agent reliability by verifying expected tool calls are made.
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Dict, List, Optional, Set, Any, TYPE_CHECKING
 
 from .base import BaseEvaluator
@@ -14,8 +15,7 @@ if TYPE_CHECKING:
     from ..agent.agent import Agent
     from ..agents.agents import AgentManager
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class ReliabilityEvaluator(BaseEvaluator):
     """

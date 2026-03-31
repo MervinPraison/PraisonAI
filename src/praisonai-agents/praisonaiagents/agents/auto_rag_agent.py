@@ -18,6 +18,7 @@ Usage:
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -27,15 +28,13 @@ if TYPE_CHECKING:
     from praisonaiagents.agent import Agent
     from praisonaiagents.rag import RAG, ContextPack
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class RetrievalPolicy(Enum):
     """Policy for when to perform RAG retrieval."""
     AUTO = "auto"      # Decide based on query heuristics
     ALWAYS = "always"  # Always retrieve
     NEVER = "never"    # Never retrieve (direct chat only)
-
 
 @dataclass
 class AutoRagConfig:
@@ -100,7 +99,6 @@ class AutoRagConfig:
             kwargs["auto_keywords"] = keywords
         
         return cls(**kwargs)
-
 
 class AutoRagAgent:
     """

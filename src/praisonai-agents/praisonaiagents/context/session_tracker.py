@@ -10,9 +10,9 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime
 import json
 import logging
+from praisonaiagents._logging import get_logger
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class SessionState:
@@ -53,7 +53,6 @@ class SessionState:
             updated_at=data.get("updated_at", ""),
             turn_count=data.get("turn_count", 0),
         )
-
 
 class SessionContextTracker:
     """

@@ -1,4 +1,5 @@
 import logging
+from praisonaiagents._logging import get_logger
 import os
 import warnings
 import re
@@ -91,7 +92,6 @@ class LLMContextLengthExceededException(Exception):
         ]
         return any(phrase in error_message.lower() for phrase in context_limit_phrases)
 
-
 @dataclass
 class TokenUsage:
     """
@@ -119,7 +119,6 @@ class TokenUsage:
             'audio_input_tokens': self.audio_input_tokens,
             'audio_output_tokens': self.audio_output_tokens,
         }
-
 
 class LLM:
     """
@@ -237,21 +236,21 @@ Respond with ONLY a valid JSON tool call in this format:
                 litellm._logging._disable_debugging()
             
             # Always suppress litellm's internal debug messages
-            logging.getLogger("litellm.utils").setLevel(logging.WARNING)
-            logging.getLogger("litellm.main").setLevel(logging.WARNING)
-            logging.getLogger("litellm.litellm_logging").setLevel(logging.WARNING)
-            logging.getLogger("litellm.transformation").setLevel(logging.WARNING)
+            get_logger("litellm.utils").setLevel(logging.WARNING)
+            get_logger("litellm.main").setLevel(logging.WARNING)
+            get_logger("litellm.litellm_logging").setLevel(logging.WARNING)
+            get_logger("litellm.transformation").setLevel(logging.WARNING)
             
             # Allow httpx logging when LOGLEVEL=debug, otherwise suppress it
             loglevel = os.environ.get('LOGLEVEL', 'INFO').upper()
             if loglevel == 'DEBUG':
-                logging.getLogger("litellm.llms.custom_httpx.http_handler").setLevel(logging.INFO)
+                get_logger("litellm.llms.custom_httpx.http_handler").setLevel(logging.INFO)
             else:
-                logging.getLogger("litellm.llms.custom_httpx.http_handler").setLevel(logging.WARNING)
+                get_logger("litellm.llms.custom_httpx.http_handler").setLevel(logging.WARNING)
             
             # Keep asyncio at WARNING unless explicitly in high debug mode
-            logging.getLogger("asyncio").setLevel(logging.WARNING)
-            logging.getLogger("selector_events").setLevel(logging.WARNING)
+            get_logger("asyncio").setLevel(logging.WARNING)
+            get_logger("selector_events").setLevel(logging.WARNING)
             
             # Enable error dropping for cleaner output
             litellm.drop_params = True
@@ -277,7 +276,7 @@ Respond with ONLY a valid JSON tool call in this format:
         """
         # Check for debug logging - either global debug level OR explicit verbose mode
         verbose = config.get('verbose', self.verbose if hasattr(self, 'verbose') else False)
-        should_log = logging.getLogger().getEffectiveLevel() == logging.DEBUG or (not isinstance(verbose, bool) and verbose >= 10)
+        should_log = get_logger().getEffectiveLevel() == logging.DEBUG or (not isinstance(verbose, bool) and verbose >= 10)
         
         if should_log:
             # Mask sensitive information
@@ -3065,7 +3064,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             raise
 
         # Log completion time if in debug mode
-        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+        if get_logger().getEffectiveLevel() == logging.DEBUG:
             total_time = time.time() - start_time
             logging.debug(f"get_response completed in {total_time:.2f} seconds")
 
@@ -4127,7 +4126,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             raise
             
         # Log completion time if in debug mode
-        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+        if get_logger().getEffectiveLevel() == logging.DEBUG:
             total_time = time.time() - start_time
             logging.debug(f"get_response_async completed in {total_time:.2f} seconds")
 
@@ -4982,7 +4981,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def _prepare_response_logging(self, temperature: float, stream: bool, verbose: bool, markdown: bool, **kwargs) -> Optional[Dict[str, Any]]:
         """Prepare debug logging information for response methods"""
-        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+        if get_logger().getEffectiveLevel() == logging.DEBUG:
             debug_info = {
                 "model": self.model,
                 "timeout": self.timeout,
@@ -5086,7 +5085,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         try:
             import litellm
             import logging
-            logger = logging.getLogger(__name__)
+            logger = get_logger(__name__)
             
             litellm.set_verbose = False
             start_time = time.time()
@@ -5182,7 +5181,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         try:
             import litellm
             import logging
-            logger = logging.getLogger(__name__)
+            logger = get_logger(__name__)
             
             litellm.set_verbose = False
             start_time = time.time()

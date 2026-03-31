@@ -1,4 +1,5 @@
 import logging
+from praisonaiagents._logging import get_logger
 import asyncio
 import inspect
 from typing import List, Optional, Dict, Any, Type, Callable, Union, Coroutine, Literal, Tuple, get_args, get_origin
@@ -10,7 +11,7 @@ import os
 import time
 
 # Set up logger
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class Task:
     """
@@ -336,15 +337,14 @@ class Task:
         # Set logger level based on config verbose level
         verbose = self.config.get("verbose", 0)
         if verbose >= 5:
-            logger.setLevel(logging.INFO)
+
         else:
-            logger.setLevel(logging.WARNING)
 
         # Also set third-party loggers to WARNING
-        logging.getLogger('chromadb').setLevel(logging.WARNING)
-        logging.getLogger('openai').setLevel(logging.WARNING)
-        logging.getLogger('httpx').setLevel(logging.WARNING)
-        logging.getLogger('httpcore').setLevel(logging.WARNING)
+        get_logger('chromadb').setLevel(logging.WARNING)
+        get_logger('openai').setLevel(logging.WARNING)
+        get_logger('httpx').setLevel(logging.WARNING)
+        get_logger('httpcore').setLevel(logging.WARNING)
 
         if self.output_json and self.output_pydantic:
             raise ValueError("Only one output type can be defined")

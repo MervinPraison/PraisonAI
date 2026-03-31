@@ -17,13 +17,13 @@ when explicitly enabled to avoid impacting performance.
 
 import re
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Any, Dict, List, Optional, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .file_memory import FileMemory
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class AutoMemoryExtractor:
     """
@@ -220,7 +220,6 @@ JSON array (no markdown, just the array):"""
         text_lower = text.lower()
         return any(kw in text_lower for kw in keywords)
 
-
 class AutoMemory:
     """
     Wrapper that adds auto-generation capabilities to FileMemory.
@@ -361,7 +360,6 @@ class AutoMemory:
         """Set LLM function for enhanced extraction."""
         self.extractor.use_llm = True
         self.extractor.llm_func = llm_func
-
 
 def create_auto_memory(
     memory: "FileMemory",

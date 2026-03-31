@@ -5,6 +5,7 @@ Implements progressive escalation from direct response to full autonomous mode.
 """
 
 import logging
+from praisonaiagents._logging import get_logger
 import time
 from typing import Any, Dict, List, Optional, Callable
 
@@ -18,8 +19,7 @@ from .types import (
 from .triggers import EscalationTrigger
 from .doom_loop import DoomLoopDetector, RecoveryAction
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class EscalationPipeline:
     """

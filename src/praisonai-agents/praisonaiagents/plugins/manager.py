@@ -8,6 +8,7 @@ Thread-safe and async-safe for multi-agent environments.
 import asyncio
 import importlib.util
 import logging
+from praisonaiagents._logging import get_logger
 import sys
 import threading
 from pathlib import Path
@@ -15,8 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from .plugin import Plugin, PluginHook, PluginInfo, FunctionPlugin
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class PluginManager:
     """
@@ -424,10 +424,8 @@ class PluginManager:
         """Get a single-file plugin by name."""
         return self._single_file_plugins.get(name)
 
-
 # Global plugin manager instance
 _default_manager: Optional[PluginManager] = None
-
 
 def get_plugin_manager() -> PluginManager:
     """Get the global plugin manager."""

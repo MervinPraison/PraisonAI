@@ -8,6 +8,7 @@ import os
 import json
 import asyncio
 import logging
+from praisonaiagents._logging import get_logger
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 
@@ -18,8 +19,7 @@ from .types import (
 )
 from .config import LSPConfig
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class LSPClient:
     """

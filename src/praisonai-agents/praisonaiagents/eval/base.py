@@ -8,12 +8,12 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Union, TYPE_CHECKING
 import uuid
 import logging
+from praisonaiagents._logging import get_logger
 
 if TYPE_CHECKING:
     from .results import AccuracyResult, PerformanceResult, ReliabilityResult, CriteriaResult
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class BaseEvaluator(ABC):
     """

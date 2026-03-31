@@ -4,7 +4,7 @@ from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Optional, Union
 import asyncio
 import logging
-
+from praisonaiagents._logging import get_logger
 
 @dataclass
 class CodeConfig:
@@ -28,7 +28,6 @@ class CodeConfig:
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary."""
         return {k: v for k, v in asdict(self).items() if v is not None}
-
 
 class CodeAgent:
     """Agent for code generation, execution, review, and refactoring.
@@ -96,7 +95,7 @@ class CodeAgent:
         self._console = None
         
         # Configure logging
-        self._logger = logging.getLogger(f"CodeAgent.{name}")
+        self._logger = get_logger(f"CodeAgent.{name}")
         if not verbose:
             self._logger.setLevel(logging.WARNING)
     
@@ -311,7 +310,7 @@ Follow best practices and coding standards."""
                 os.unlink(temp_file)
             except Exception as e:
                 # Temp file cleanup failed - not critical
-                logging.getLogger(__name__).debug(f"Failed to clean up temp file {temp_file}: {e}")
+                get_logger(__name__).debug(f"Failed to clean up temp file {temp_file}: {e}")
     
     async def aexecute(self, code: str, language: str = "python", **kwargs) -> Dict[str, Any]:
         """Execute code asynchronously.
