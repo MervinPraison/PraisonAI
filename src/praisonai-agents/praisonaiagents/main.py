@@ -2,6 +2,7 @@ import os
 import time
 import json
 import logging
+import threading
 from praisonaiagents._logging import get_logger
 from typing import List, Optional, Dict, Any, Union, Literal, Type
 from pydantic import BaseModel, ConfigDict
@@ -23,15 +24,64 @@ except ImportError:
 
 # Logging is already configured in _logging.py via __init__.py
 
-# Global list to store error logs
-error_logs = []
+# Thread-safe global state protection
+_main_globals_lock = threading.Lock()
 
-# Separate registries for sync and async callbacks
-sync_display_callbacks = {}
-async_display_callbacks = {}
+# Global list to store error logs (protected by _main_globals_lock)
+_error_logs = []
 
-# Global approval callback registry
-approval_callback = None
+# Separate registries for sync and async callbacks (protected by _main_globals_lock)
+_sync_display_callbacks = {}
+_async_display_callbacks = {}
+
+# Global approval callback registry (protected by _main_globals_lock)
+_approval_callback = None
+
+# Thread-safe accessor functions
+def _get_error_logs():
+    """Thread-safe access to error logs."""
+    with _main_globals_lock:
+        return _error_logs.copy()
+
+def _add_error_log(error):
+    """Thread-safe addition to error logs."""
+    with _main_globals_lock:
+        _error_logs.append(error)
+
+def _get_sync_display_callbacks():
+    """Thread-safe access to sync display callbacks."""
+    with _main_globals_lock:
+        return _sync_display_callbacks.copy()
+
+def _get_async_display_callbacks():
+    """Thread-safe access to async display callbacks."""
+    with _main_globals_lock:
+        return _async_display_callbacks.copy()
+
+def _get_approval_callback():
+    """Thread-safe access to approval callback."""
+    with _main_globals_lock:
+        return _approval_callback
+
+def _set_approval_callback(callback):
+    """Thread-safe setting of approval callback."""
+    with _main_globals_lock:
+        global _approval_callback
+        _approval_callback = callback
+
+def _register_display_callback(display_type: str, callback_fn, is_async: bool = False):
+    """Thread-safe registration of display callback."""
+    with _main_globals_lock:
+        if is_async:
+            _async_display_callbacks[display_type] = callback_fn
+        else:
+            _sync_display_callbacks[display_type] = callback_fn
+
+# Backward compatibility - expose as module-level references
+error_logs = _error_logs  # Direct reference for read access, use helper functions for writes
+sync_display_callbacks = _sync_display_callbacks  # Direct reference for read access, use helper functions for writes  
+async_display_callbacks = _async_display_callbacks  # Direct reference for read access, use helper functions for writes
+approval_callback = _approval_callback  # Direct reference for read access, use helper functions for writes
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PraisonAI Unique Color Palette: "Elegant Intelligence"
@@ -128,10 +178,7 @@ def register_display_callback(display_type: str, callback_fn, is_async: bool = F
         callback_fn: The callback function to register
         is_async (bool): Whether the callback is asynchronous
     """
-    if is_async:
-        async_display_callbacks[display_type] = callback_fn
-    else:
-        sync_display_callbacks[display_type] = callback_fn
+    _register_display_callback(display_type, callback_fn, is_async)
 
 def register_approval_callback(callback_fn):
     """Register a global approval callback function for dangerous tool operations.
@@ -139,8 +186,7 @@ def register_approval_callback(callback_fn):
     Args:
         callback_fn: Function that takes (function_name, arguments, risk_level) and returns ApprovalDecision
     """
-    global approval_callback
-    approval_callback = callback_fn
+    _set_approval_callback(callback_fn)
 
 # Simplified aliases (consistent naming convention)
 add_display_callback = register_display_callback
@@ -155,8 +201,9 @@ def execute_sync_callback(display_type: str, **kwargs):
         display_type (str): Type of display event
         **kwargs: Arguments to pass to the callback function
     """
-    if display_type in sync_display_callbacks:
-        callback = sync_display_callbacks[display_type]
+    sync_callbacks = _get_sync_display_callbacks()
+    if display_type in sync_callbacks:
+        callback = sync_callbacks[display_type]
         import inspect
         sig = inspect.signature(callback)
         
@@ -180,8 +227,9 @@ async def execute_callback(display_type: str, **kwargs):
     import inspect
     
     # Execute synchronous callback if registered
-    if display_type in sync_display_callbacks:
-        callback = sync_display_callbacks[display_type]
+    sync_callbacks = _get_sync_display_callbacks()
+    if display_type in sync_callbacks:
+        callback = sync_callbacks[display_type]
         sig = inspect.signature(callback)
         
         # Filter kwargs to what the callback accepts to maintain backward compatibility
@@ -196,8 +244,9 @@ async def execute_callback(display_type: str, **kwargs):
         await loop.run_in_executor(None, lambda: callback(**supported_kwargs))
     
     # Execute asynchronous callback if registered
-    if display_type in async_display_callbacks:
-        callback = async_display_callbacks[display_type]
+    async_callbacks = _get_async_display_callbacks()
+    if display_type in async_callbacks:
+        callback = async_callbacks[display_type]
         sig = inspect.signature(callback)
         
         # Filter kwargs to what the callback accepts to maintain backward compatibility
@@ -418,7 +467,7 @@ def display_error(message: str, console=None):
         title="⚠ Error",
         border_style=PRAISON_COLORS["error"]
     ))
-    error_logs.append(message)
+    _add_error_log(message)
 
 def display_generating(content: str = "", start_time: Optional[float] = None):
     if not content or not str(content).strip():
@@ -615,7 +664,7 @@ async def adisplay_error(message: str, console=None):
     await execute_callback('error', message=message)
     
     console.print(Panel.fit(Text(message, style="bold red"), title="Error", border_style="red"))
-    error_logs.append(message)
+    _add_error_log(message)
 
 async def adisplay_generating(content: str = "", start_time: Optional[float] = None):
     """Async version of display_generating."""
