@@ -32,7 +32,7 @@ class PraisonAIAgentComponent(Component):
     knowledge, and guardrails support. Supports both sync and async execution.
     """
 
-    display_name: str = "PraisonAI Agent"
+    display_name: str = "Agent"
     description: str = "Create a PraisonAI agent with tools, memory, handoffs, knowledge, and guardrails."
     documentation: str = "https://docs.praison.ai"
     icon: str = "bot"
@@ -47,6 +47,12 @@ class PraisonAIAgentComponent(Component):
             display_name="Agent Name",
             info="Name for identification and logging.",
             value="Agent",
+        ),
+        IntInput(
+            name="order",
+            display_name="Order",
+            info="Execution order in sequential workflows (1 = first, 2 = second, etc.).",
+            value=1,
         ),
         MultilineInput(
             name="role",
@@ -389,6 +395,9 @@ class PraisonAIAgentComponent(Component):
 
         # Build agent
         agent = agent_class(**kwargs)
+        
+        # Store order for sequential execution sorting
+        agent._langflow_order = self.order or 1
 
         self.status = f"Agent '{self.agent_name}' created"
         return agent

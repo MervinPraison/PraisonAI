@@ -29,7 +29,7 @@ class PraisonAIAgentsComponent(Component):
     or workflow process types.
     """
 
-    display_name: str = "PraisonAI Agents"
+    display_name: str = "Agent Team"
     description: str = "Orchestrate multiple PraisonAI agents for complex workflows."
     documentation: str = "https://docs.praison.ai"
     icon: str = "bot"
@@ -53,13 +53,6 @@ class PraisonAIAgentsComponent(Component):
             display_name="Agents",
             info="List of PraisonAI agents to orchestrate.",
             input_types=["Agent"],
-            is_list=True,
-        ),
-        HandleInput(
-            name="tasks",
-            display_name="Tasks",
-            info="List of tasks for the agents to execute. If empty, auto-generated from agents.",
-            input_types=["Task"],
             is_list=True,
         ),
         # ============================================================
@@ -102,7 +95,7 @@ class PraisonAIAgentsComponent(Component):
         # VARIABLES
         # ============================================================
         DictInput(
-            name="variables",
+            name="global_variables",
             display_name="Variables",
             info="Global variables for substitution in all task descriptions.",
             advanced=True,
@@ -200,13 +193,15 @@ class PraisonAIAgentsComponent(Component):
 
         # Filter out None values
         agents = [a for a in (self.agents or []) if a is not None]
-        tasks = [t for t in (self.tasks or []) if t is not None]
 
         if not agents:
             msg = "At least one agent is required."
             raise ValueError(msg)
+        
+        # Sort agents by their order (set in Agent component)
+        agents = sorted(agents, key=lambda a: getattr(a, '_langflow_order', 1))
 
-        # Build kwargs
+        # Build kwargs - tasks auto-generated from agents
         kwargs = {
             "agents": agents,
             "process": self.process,
@@ -220,13 +215,9 @@ class PraisonAIAgentsComponent(Component):
         if self.team_name and self.team_name != "AgentTeam":
             kwargs["name"] = self.team_name
 
-        # Add tasks if provided
-        if tasks:
-            kwargs["tasks"] = tasks
-
         # Add variables if provided
-        if self.variables:
-            kwargs["variables"] = self.variables
+        if self.global_variables:
+            kwargs["variables"] = self.global_variables
 
         # Add memory configuration
         if self.memory:
