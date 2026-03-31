@@ -230,7 +230,7 @@ For the full framework with CLI support:
 pip install praisonai
 ```
 
-🦞 **AgentClaw** — full UI with bots, memory, knowledge, and gateway:
+🦞 **PraisonAI Claw** — full UI with bots, memory, knowledge, and gateway:
 
 ```bash
 pip install "praisonai[claw]"
@@ -347,7 +347,7 @@ agent.chat("Hello!")  # Auto-persists messages, runs, traces
 
 > 📖 [Full persistence docs](https://docs.praison.ai/docs/databases/overview) — PostgreSQL, MySQL, SQLite, MongoDB, Redis, and 20+ more
 
-### 6. AgentClaw 🦞 (Dashboard UI)
+### 6. PraisonAI Claw 🦞 (Dashboard UI)
 
 Connect your AI agents to **Telegram, Discord, Slack, WhatsApp** and more — all from a single command.
 
