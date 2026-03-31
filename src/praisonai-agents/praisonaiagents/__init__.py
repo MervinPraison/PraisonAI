@@ -237,6 +237,16 @@ _LAZY_IMPORTS = {
     'RealtimeConfig': ('praisonaiagents.agent.realtime_agent', 'RealtimeConfig'),
     'CodeAgent': ('praisonaiagents.agent.code_agent', 'CodeAgent'),
     'CodeConfig': ('praisonaiagents.agent.code_agent', 'CodeConfig'),
+    'ReasoningAgent': ('praisonaiagents.agent.reasoning_agent', 'ReasoningAgent'),
+    'DualBrainAgent': ('praisonaiagents.agent.dual_brain_agent', 'DualBrainAgent'),
+    
+    # Reasoning module
+    'ReasoningConfig': ('praisonaiagents.reasoning', 'ReasoningConfig'),
+    'ReasoningStep': ('praisonaiagents.reasoning', 'ReasoningStep'),
+    'ReasoningTrace': ('praisonaiagents.reasoning', 'ReasoningTrace'),
+    'ReasoningFlow': ('praisonaiagents.reasoning', 'ReasoningFlow'),
+    'ActionState': ('praisonaiagents.reasoning', 'ActionState'),
+    'reason_step': ('praisonaiagents.reasoning', 'reason_step'),
     
     # AgentTeam (primary) / AgentManager (alias)
     'AgentTeam': ('praisonaiagents.agents.agents', 'AgentTeam'),
