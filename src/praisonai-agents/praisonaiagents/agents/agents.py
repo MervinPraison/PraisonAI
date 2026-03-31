@@ -653,7 +653,16 @@ class AgentTeam:
         if task.status == "not started":
             task.status = "in progress"
 
+        # Initialize memory before task execution
+        if not task.memory:
+            task.memory = task.initialize_memory()
+
         executor_agent = task.agent
+        
+        # Create agent from agent_config if provided and no agent assigned
+        if executor_agent is None and getattr(task, 'agent_config', None):
+            executor_agent = self._create_agent_from_config(task.agent_config)
+            task.agent = executor_agent
         
         # Set current agent for token tracking
         llm = getattr(executor_agent, 'llm', None) or getattr(executor_agent, 'llm_instance', None)
@@ -699,13 +708,25 @@ User Input/Topic: {context_text}
 Task: {task_description}
 Expected Output: {task.expected_output}
 
-IMPORTANT: Your response must be about the user's input/topic above. Incorporate it into your task.
-Please provide only the final result of your work. Do not add any conversation or extra explanation."""
+IMPORTANT: Your response must be about the user's input/topic above. Incorporate it into your task."""
         else:
             task_prompt = f"""
 You need to do the following task: {task_description}.
-Expected Output: {task.expected_output}.
-Please provide only the final result of your work. Do not add any conversation or extra explanation."""
+Expected Output: {task.expected_output}."""
+
+        # Add memory context if available
+        if task.memory:
+            try:
+                memory_context = task.memory.build_context_for_task(task.description)
+                if memory_context:
+                    # Log detailed memory context for debugging
+                    logger.debug(f"Memory context for task '{task.description}': {memory_context}")
+                    # Include actual memory content without verbose headers (essential for AI agent functionality)
+                    task_prompt += f"\n\n{memory_context}"
+            except Exception as e:
+                logger.error(f"Error getting memory context: {e}")
+
+        task_prompt += "\nPlease provide only the final result of your work. Do not add any conversation or extra explanation."
 
         if self.verbose >= 2:
             logger.info(f"Executing task {task_id}: {task_description} using {executor_agent.display_name}")
@@ -734,6 +755,17 @@ Please provide only the final result of your work. Do not add any conversation o
             )
 
         if agent_output:
+            # Store the response in memory
+            if task.memory:
+                try:
+                    task.store_in_memory(
+                        content=agent_output,
+                        agent_name=executor_agent.display_name,
+                        task_id=task_id
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to store agent output in memory: {e}")
+
             task_output = TaskOutput(
                 description=task.description,
                 summary=task.description[:10],
@@ -1000,6 +1032,11 @@ Please provide only the final result of your work. Do not add any conversation o
         if llm and hasattr(llm, 'set_current_agent'):
             llm.set_current_agent(executor_agent.display_name)
 
+        # Ensure tools are available from both task and agent
+        tools = task.tools or []
+        if executor_agent and executor_agent.tools:
+            tools.extend(executor_agent.tools)
+
         # Substitute variables in task description if provided
         task_description = task.description
         if getattr(task, 'variables', None):
@@ -1062,7 +1099,7 @@ Expected Output: {task.expected_output}."""
             # Use shared multimodal helper (DRY - defined at module level)
             agent_output = executor_agent.chat(
                 get_multimodal_message(task_prompt, task.images),
-                tools=task.tools,
+                tools=tools,
                 output_json=task.output_json,
                 output_pydantic=task.output_pydantic,
                 task_name=task.name,
@@ -1072,7 +1109,7 @@ Expected Output: {task.expected_output}."""
         else:
             agent_output = executor_agent.chat(
                 task_prompt,
-                tools=task.tools,
+                tools=tools,
                 output_json=task.output_json,
                 output_pydantic=task.output_pydantic,
                 stream=self.stream,
