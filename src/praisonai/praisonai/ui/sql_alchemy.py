@@ -544,9 +544,10 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         if not user_threads:
             return []
         else:
-            thread_ids = (
-                "('" + "','".join([t["thread_id"] for t in user_threads]) + "')"
-            )
+            # Build parameterized IN clause to prevent SQL injection
+            thread_id_list = [t["thread_id"] for t in user_threads]
+            tid_placeholders = ", ".join(f":tid_{i}" for i in range(len(thread_id_list)))
+            tid_params = {f"tid_{i}": tid for i, tid in enumerate(thread_id_list)}
 
         steps_feedbacks_query = f"""
             SELECT
@@ -573,11 +574,11 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 f."comment" AS feedback_comment,
                 f."id" AS feedback_id
             FROM steps s LEFT JOIN feedbacks f ON s."id" = f."forId"
-            WHERE s."threadId" IN {thread_ids}
+            WHERE s."threadId" IN ({tid_placeholders})
             ORDER BY s."createdAt" ASC
         """
         steps_feedbacks = await self.execute_sql(
-            query=steps_feedbacks_query, parameters={}
+            query=steps_feedbacks_query, parameters=tid_params
         )
 
         elements_query = f"""
@@ -596,9 +597,9 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 e."forId" AS element_forid,
                 e."mime" AS element_mime
             FROM elements e
-            WHERE e."threadId" IN {thread_ids}
+            WHERE e."threadId" IN ({tid_placeholders})
         """
-        elements = await self.execute_sql(query=elements_query, parameters={})
+        elements = await self.execute_sql(query=elements_query, parameters=tid_params)
 
         thread_dicts = {}
         for thread in user_threads:

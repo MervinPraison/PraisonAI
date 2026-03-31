@@ -25,7 +25,11 @@ from ..sandbox.protocols import ResourceLimits
 
 def _safe_getattr(obj, name, *default):
     """getattr wrapper that blocks access to dunder attributes."""
-    if isinstance(name, str) and name.startswith('_'):
+    if type(name) is not str:
+        raise AttributeError(
+            f"Attribute name must be a plain str, got {type(name).__name__}"
+        )
+    if name.startswith('_'):
         raise AttributeError(
             f"Access to private/protected attribute '{name}' is restricted"
         )
@@ -169,7 +173,9 @@ def safe_execute():
         # Create safe globals
         # Create a safe getattr that blocks dunder access (defense-in-depth)
         def _safe_getattr(obj, name, *default):
-            if isinstance(name, str) and name.startswith('_'):
+            if type(name) is not str:
+                raise AttributeError(f"Attribute name must be a plain str, got {{type(name).__name__}}")
+            if name.startswith('_'):
                 raise AttributeError(f"Access to attribute '{{name}}' is restricted")
             return getattr(obj, name, *default) if default else getattr(obj, name)
         

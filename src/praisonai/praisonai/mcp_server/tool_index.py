@@ -372,13 +372,11 @@ class MCPToolIndex:
         Returns:
             List of matching ToolInfo objects
         """
-        import re
-        
-        pattern = re.compile(query, re.IGNORECASE)
+        query_lower = query.lower()
         matches = []
         
         for tool in self.get_all_tools():
-            if pattern.search(tool.name) or pattern.search(tool.hint):
+            if query_lower in tool.name.lower() or query_lower in tool.hint.lower():
                 matches.append(tool)
         
         return matches
