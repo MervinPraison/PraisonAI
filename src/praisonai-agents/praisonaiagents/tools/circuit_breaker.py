@@ -429,10 +429,9 @@ class CircuitBreakerRegistry:
             return {name: breaker.stats.to_dict() for name, breaker in self._breakers.items()}
     
     def reset_all(self) -> None:
-        """Reset all circuit breakers."""
+        """Reset all circuit breakers and clear the registry."""
         with self._lock:
-            for breaker in self._breakers.values():
-                breaker.reset()
+            self._breakers.clear()
 
 
 # Global registry instance for convenience

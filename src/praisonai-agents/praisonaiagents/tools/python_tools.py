@@ -167,8 +167,13 @@ def safe_execute():
                     }}
         
         # Create safe globals
-        safe_globals = {{
-            '__builtins__': {{
+        # Create a safe getattr that blocks dunder access (defense-in-depth)
+        def _safe_getattr(obj, name, *default):
+            if isinstance(name, str) and name.startswith('_'):
+                raise AttributeError(f"Access to attribute '{{name}}' is restricted")
+            return getattr(obj, name, *default) if default else getattr(obj, name)
+        
+        safe_builtins = {{
                 'print': print, 'len': len, 'range': range, 'enumerate': enumerate,
                 'zip': zip, 'map': map, 'filter': filter, 'sum': sum, 'min': min,
                 'max': max, 'abs': abs, 'round': round, 'sorted': sorted,
@@ -176,20 +181,29 @@ def safe_execute():
                 'float': float, 'str': str, 'bool': bool, 'list': list,
                 'tuple': tuple, 'dict': dict, 'set': set, 'pow': pow,
                 'divmod': divmod, 'isinstance': isinstance, 'type': type,
-                'hasattr': hasattr,
-            }}
+                'hasattr': hasattr, 'getattr': _safe_getattr,
+                # Exceptions
+                'Exception': Exception, 'ValueError': ValueError,
+                'TypeError': TypeError, 'KeyError': KeyError,
+                'IndexError': IndexError, 'RuntimeError': RuntimeError,
+                'AttributeError': AttributeError, 'StopIteration': StopIteration,
+                'ZeroDivisionError': ZeroDivisionError, 'OverflowError': OverflowError,
+                # Class definition support
+                '__build_class__': __builtins__['__build_class__'] if isinstance(__builtins__, dict) else getattr(__builtins__, '__build_class__', None),
         }}
+        safe_globals = {{'__builtins__': safe_builtins}}
         
-        # Execute user code
+        # Execute user code (use safe_globals as both globals AND locals
+        # so function defs can see each other)
         compiled_code = compile(user_code, '<string>', 'exec')
-        exec(compiled_code, safe_globals, {{}})
+        exec(compiled_code, safe_globals)
         
         # Try to get result from last expression
         tree = ast.parse(user_code)
         if tree.body and isinstance(tree.body[-1], ast.Expr):
             result = eval(
                 compile(ast.Expression(tree.body[-1].value), '<string>', 'eval'),
-                safe_globals, {{}}
+                safe_globals
             )
         
         return {{

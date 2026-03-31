@@ -18,6 +18,14 @@ from praisonaiagents.tools.circuit_breaker import (
 class TestCircuitBreaker:
     """Test circuit breaker functionality."""
     
+    def setup_method(self):
+        """Clean global registry before each test."""
+        reset_all_circuit_breakers()
+    
+    def teardown_method(self):
+        """Clean global registry after each test."""
+        reset_all_circuit_breakers()
+    
     def test_circuit_breaker_closed_state(self):
         """Test circuit breaker starts in closed state."""
         breaker = CircuitBreaker("test_service")
@@ -71,7 +79,7 @@ class TestCircuitBreaker:
     
     def test_circuit_transitions_to_half_open(self):
         """Test circuit transitions to half-open after recovery timeout."""
-        config = CircuitBreakerConfig(failure_threshold=1, recovery_timeout=0.05)
+        config = CircuitBreakerConfig(failure_threshold=1, recovery_timeout=0.05, success_threshold=1)
         breaker = CircuitBreaker("test_service", config)
         
         def failing_func():
@@ -256,6 +264,14 @@ class TestCircuitBreaker:
 class TestCircuitBreakerIntegration:
     """Test circuit breaker integration with existing systems."""
     
+    def setup_method(self):
+        """Clean global registry before each test."""
+        reset_all_circuit_breakers()
+    
+    def teardown_method(self):
+        """Clean global registry after each test."""
+        reset_all_circuit_breakers()
+    
     def test_integration_with_retry_policy(self):
         """Test integration between circuit breaker and retry policy."""
         from praisonaiagents.tools.circuit_breaker_integrations import integrate_with_retry_policy
@@ -276,7 +292,7 @@ class TestCircuitBreakerIntegration:
         
         call_count = 0
         
-        @with_circuit_breaker("decorator_service", 
+        @with_circuit_breaker("decorator_service_test", 
                               config=CircuitBreakerConfig(failure_threshold=2))
         def decorated_func(should_fail=False):
             nonlocal call_count
@@ -303,7 +319,7 @@ class TestCircuitBreakerIntegration:
         """Test async circuit breaker decorator functionality."""
         from praisonaiagents.tools.circuit_breaker_integrations import with_circuit_breaker
         
-        @with_circuit_breaker("async_decorator_service",
+        @with_circuit_breaker("async_decorator_service_test",
                               config=CircuitBreakerConfig(failure_threshold=1))
         async def async_decorated_func(should_fail=False):
             await asyncio.sleep(0.01)  # Simulate async work
