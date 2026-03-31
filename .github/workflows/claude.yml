@@ -42,12 +42,36 @@ jobs:
           trigger_phrase: "@claude"
           label_trigger: "claude"
           direct_prompt: |
-            Analyze this issue and implement a fix following AGENTS.md:
-            1. Read AGENTS.md for repo guidelines
-            2. Search the codebase and identify the root cause
-            3. Create a fix branch and implement a minimal, focused fix
-            4. Run tests to verify
-            5. Commit, push, and create a PR using `gh pr create`
+            You are working on the PraisonAI SDK. Follow AGENTS.md strictly.
+
+            STEP 0 — SETUP GIT IDENTITY:
+            git config user.name "MervinPraison"
+            git config user.email "mervinpraison@gmail.com"
+
+            STEP 1 — READ GUIDELINES:
+            Read AGENTS.md to understand the architecture rules.
+
+            STEP 2 — ARCHITECTURE VALIDATION (MANDATORY before writing code):
+            Before implementing anything, answer these questions:
+            - Does this add heavy implementations to the core SDK (praisonaiagents)? If YES → move it to the wrapper (praisonai) or make it a plugin.
+            - Does it duplicate existing functionality? Check if Agent already supports this via existing params (reflection, planning, tools, hooks, memory).
+            - Does it inherit from Agent properly? New agent types MUST inherit Agent, not wrap it with composition.
+            - Does it add new dependencies? Only optional deps allowed, must be lazy-imported.
+            - Will agent.py grow larger? If the change adds >50 lines to agent.py, find a way to extract instead.
+            - Is there a name collision with existing exports in __init__.py?
+            If ANY of these checks fail, add a comment to the issue explaining why and close it. Do NOT create a PR.
+
+            STEP 3 — IMPLEMENT:
+            - Create a fix branch and implement a minimal, focused fix
+            - Follow protocol-driven design: protocols in core SDK, heavy implementations in wrapper
+            - Keep changes small and backward-compatible
+
+            STEP 4 — TEST:
+            - Run: cd src/praisonai-agents && PYTHONPATH=. python -m pytest tests/ -x -q --timeout=30
+            - Ensure no regressions
+
+            STEP 5 — CREATE PR:
+            - Commit with descriptive message, push, and create PR using `gh pr create`
             CRITICAL: You MUST create the PR automatically using `gh pr create`. Do NOT just provide a link.
           allowed_tools: |
             Bash(git:*)
