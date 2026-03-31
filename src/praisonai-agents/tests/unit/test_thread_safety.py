@@ -10,17 +10,44 @@ import time
 import pytest
 
 
+_backup_modules = {}
+
 def clear_modules():
     """Clear all praisonai and litellm related modules from cache."""
+    global _backup_modules
     to_remove = [m for m in list(sys.modules.keys()) 
                  if 'praison' in m or 'litellm' in m]
+    
     for mod in to_remove:
+        _backup_modules[mod] = sys.modules[mod]
         del sys.modules[mod]
+
+def restore_modules():
+    """Restore modules to prevent bleeding into other tests."""
+    global _backup_modules
+    if not _backup_modules:
+        return
+        
+    current_modules = list(sys.modules.keys())
+    for mod in current_modules:
+        if ('praison' in mod or 'litellm' in mod):
+            if mod not in _backup_modules:
+                del sys.modules[mod]
+                
+    for k, v in _backup_modules.items():
+        sys.modules[k] = v
+    _backup_modules.clear()
 
 
 class TestLiteAgentThreadSafety:
     """Test thread safety of LiteAgent (no external deps)."""
     
+    def setup_method(self):
+        clear_modules()
+        
+    def teardown_method(self):
+        restore_modules()
+        
     def test_concurrent_chat_history_access(self):
         """Multiple threads should safely access chat_history."""
         from praisonaiagents.lite import LiteAgent
@@ -123,6 +150,10 @@ class TestAgentThreadSafety:
     def setup_method(self):
         """Set up test fixtures."""
         clear_modules()
+        
+    def teardown_method(self):
+        """Clean up test fixtures."""
+        restore_modules()
     
     def test_agent_has_history_lock(self):
         """Agent should have a history lock for thread safety."""

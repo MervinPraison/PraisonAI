@@ -499,43 +499,6 @@ _LAZY_IMPORTS = {
     'StructuredFormatter': ('praisonaiagents._logging', 'StructuredFormatter'),
 }
 
-
-def _custom_handler(name, cache):
-    """Handle special cases that need custom logic."""
-    import warnings
-    
-    # Agents is a silent alias for AgentManager
-    if name == "Agents":
-        value = lazy_import('praisonaiagents.agents.agents', 'AgentManager', cache)
-        cache['AgentManager'] = value
-        cache['Agents'] = value
-        return value
-    
-    # Module imports (return the module itself)
-    if name == 'tools':
-        import importlib
-        mod = importlib.import_module('.tools', 'praisonaiagents')
-        cache['tools'] = mod
-        return mod
-    if name == 'config':
-        import importlib
-        mod = importlib.import_module('.config', 'praisonaiagents')
-        cache['config'] = mod
-        return mod
-    if name == 'memory':
-        import importlib
-        mod = importlib.import_module('.memory', 'praisonaiagents')
-        cache['memory'] = mod
-        return mod
-    if name == 'workflows':
-        import importlib
-        mod = importlib.import_module('.workflows', 'praisonaiagents')
-        cache['workflows'] = mod
-        return mod
-    
-    raise AttributeError(f"Not handled by custom_handler: {name}")
-
-
 # ============================================================================
 # SUBPACKAGE FUNCTION OVERRIDES
 # ============================================================================
@@ -583,8 +546,50 @@ class _EmbeddingProxy:
     def __repr__(self):
         return f"<lazy proxy for {self._load()!r}>"
 
+_global_embedding_proxy = _EmbeddingProxy()
+
+def _custom_handler(name, cache):
+    """Handle special cases that need custom logic."""
+    import warnings
+    
+    # Agents is a silent alias for AgentManager
+    if name == "Agents":
+        value = lazy_import('praisonaiagents.agents.agents', 'AgentManager', cache)
+        cache['AgentManager'] = value
+        cache['Agents'] = value
+        return value
+        
+    # Handle embedding specifically if missing from module dict due to submodule reload
+    if name in ("embedding", "embeddings"):
+        return _global_embedding_proxy
+    
+    # Module imports (return the module itself)
+    if name == 'tools':
+        import importlib
+        mod = importlib.import_module('.tools', 'praisonaiagents')
+        cache['tools'] = mod
+        return mod
+    if name == 'config':
+        import importlib
+        mod = importlib.import_module('.config', 'praisonaiagents')
+        cache['config'] = mod
+        return mod
+    if name == 'memory':
+        import importlib
+        mod = importlib.import_module('.memory', 'praisonaiagents')
+        cache['memory'] = mod
+        return mod
+    if name == 'workflows':
+        import importlib
+        mod = importlib.import_module('.workflows', 'praisonaiagents')
+        cache['workflows'] = mod
+        return mod
+    
+    raise AttributeError(f"Not handled by custom_handler: {name}")
+
+
 # Override the submodule with our function proxy
-embedding = _EmbeddingProxy()
+embedding = _global_embedding_proxy
 embeddings = embedding  # embeddings is an alias
 
 

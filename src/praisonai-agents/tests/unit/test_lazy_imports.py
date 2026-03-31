@@ -8,12 +8,36 @@ import sys
 import pytest
 
 
+_backup_modules = {}
+
 def clear_modules():
     """Clear all praisonai, litellm, and requests related modules from cache."""
+    global _backup_modules
     to_remove = [m for m in list(sys.modules.keys()) 
                  if 'praison' in m or 'litellm' in m or m == 'requests' or m.startswith('requests.')]
+    
+    # Backup ONLY the ones we are about to remove
     for mod in to_remove:
+        _backup_modules[mod] = sys.modules[mod]
         del sys.modules[mod]
+
+def restore_modules():
+    """Restore modules to prevent bleeding into other tests."""
+    global _backup_modules
+    if not _backup_modules:
+        return
+        
+    # Remove any test-created module singletons that would shadow the restored ones
+    current_modules = list(sys.modules.keys())
+    for mod in current_modules:
+        if ('praison' in mod or 'litellm' in mod or mod == 'requests' or mod.startswith('requests.')):
+            if mod not in _backup_modules:
+                del sys.modules[mod]
+                
+    # Restore the backup
+    for k, v in _backup_modules.items():
+        sys.modules[k] = v
+    _backup_modules.clear()
 
 
 class TestLazyImports:
@@ -25,7 +49,7 @@ class TestLazyImports:
     
     def teardown_method(self):
         """Clean up after each test."""
-        clear_modules()
+        restore_modules()
     
     def test_litellm_not_loaded_on_import(self):
         """litellm should NOT be loaded when importing praisonaiagents."""
@@ -117,6 +141,10 @@ class TestLitePackage:
     def setup_method(self):
         """Clear module cache before each test."""
         clear_modules()
+        
+    def teardown_method(self):
+        """Clean up after each test."""
+        restore_modules()
     
     def test_lite_import_fast(self):
         """Lite package should import quickly without heavy deps."""
@@ -187,7 +215,7 @@ class TestTelemetryConfig:
                     del os.environ[key]
             else:
                 os.environ[key] = value
-        clear_modules()
+        restore_modules()
     
     def test_telemetry_disabled_by_default(self):
         """Telemetry should be disabled by default (opt-in model)."""

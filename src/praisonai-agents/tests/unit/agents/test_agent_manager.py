@@ -29,23 +29,34 @@ class TestAgentManagerRename:
     
     def test_agents_is_silent_alias_v4(self):
         """Agents should be a SILENT alias in v4 (no deprecation warning)."""
-        # Clear any cached imports
+        # Force reload to test module-level warnings
+        # Back up existing modules to prevent test suite scope pollution
         import sys
+        _backup = {}
         modules_to_remove = [k for k in sys.modules.keys() if 'praisonaiagents' in k]
         for mod in modules_to_remove:
+            _backup[mod] = sys.modules[mod]
             del sys.modules[mod]
         
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            # Import fresh
-            import praisonaiagents
-            # Access Agents to trigger lazy loading
-            _ = praisonaiagents.Agents
-            
-            # v4.0.0: Agents is now a SILENT alias - no warnings expected
-            deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
-            agents_warnings = [x for x in deprecation_warnings if 'Agents' in str(x.message)]
-            assert len(agents_warnings) == 0, f"Agents should be silent alias in v4, got: {[str(x.message) for x in agents_warnings]}"
+        try:
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                # Import fresh
+                import praisonaiagents
+                # Access Agents to trigger lazy loading
+                _ = praisonaiagents.Agents
+                
+                # v4.0.0: Agents is now a SILENT alias - no warnings expected
+                deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
+                agents_warnings = [x for x in deprecation_warnings if 'Agents' in str(x.message)]
+                assert len(agents_warnings) == 0, f"Agents should be silent alias in v4, got: {[str(x.message) for x in agents_warnings]}"
+        finally:
+            # Clean up what was created during the test
+            _added = [k for k in sys.modules.keys() if 'praisonaiagents' in k and k not in _backup]
+            for mod in _added:
+                del sys.modules[mod]
+            # Restore the backup
+            sys.modules.update(_backup)
     
     def test_agent_manager_no_deprecation_warning(self):
         """Importing AgentManager should NOT emit a deprecation warning."""

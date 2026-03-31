@@ -5054,7 +5054,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.5.98"
+version = "1.5.100"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },
