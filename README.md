@@ -30,11 +30,11 @@ PraisonAI 🦞 — Automate and solve complex challenges with AI agent teams tha
 </p>
 
 <p align="center">
-  <img src=".github/images/latest_ai_news_and_crawl_each_url_to_find_info.gif" alt="PraisonAI command execution" width="800" />
+  <img src=".github/images/agentflow.gif" alt="PraisonAI AgentFlow" width="800" />
 </p>
 
 <p align="center">
-  <img src=".github/images/agentflow.gif" alt="PraisonAI AgentFlow" width="800" />
+  <img src=".github/images/latest_ai_news_and_crawl_each_url_to_find_info.gif" alt="PraisonAI command execution" width="800" />
 </p>
 
 <div align="center">

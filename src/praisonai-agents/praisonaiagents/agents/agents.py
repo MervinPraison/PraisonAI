@@ -669,10 +669,13 @@ class AgentTeam:
         if llm and hasattr(llm, 'set_current_agent'):
             llm.set_current_agent(executor_agent.display_name)
 
-        # Ensure tools are available from both task and agent
-        tools = task.tools or []
+        # Ensure tools are available from both task and agent (create copy to avoid mutation)
+        tools = list(task.tools or [])
         if executor_agent and executor_agent.tools:
             tools.extend(executor_agent.tools)
+
+        logger.info(f"Task config: {task.config}")
+        logger.info(f"Task memory status: {'Initialized' if task.memory else 'Not initialized'}")
 
         # Substitute variables in task description if provided
         task_description = task.description
@@ -1032,8 +1035,8 @@ Expected Output: {task.expected_output}."""
         if llm and hasattr(llm, 'set_current_agent'):
             llm.set_current_agent(executor_agent.display_name)
 
-        # Ensure tools are available from both task and agent
-        tools = task.tools or []
+        # Ensure tools are available from both task and agent (create copy to avoid mutation)
+        tools = list(task.tools or [])
         if executor_agent and executor_agent.tools:
             tools.extend(executor_agent.tools)
 
