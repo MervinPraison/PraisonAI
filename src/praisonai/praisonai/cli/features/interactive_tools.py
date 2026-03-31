@@ -54,6 +54,7 @@ TOOL_GROUPS = {
         "list_files",
         "execute_command",
         "internet_search",
+        "web_crawl",
     ],
 }
 
@@ -182,6 +183,12 @@ def _load_basic_tools() -> Dict[str, Callable]:
         tools["internet_search"] = internet_search
     except ImportError:
         logger.debug("internet_search not available")
+    
+    try:
+        from praisonaiagents.tools import web_crawl
+        tools["web_crawl"] = web_crawl
+    except ImportError:
+        logger.debug("web_crawl not available")
     
     return tools
 
