@@ -67,7 +67,7 @@
     "@modelcontextprotocol/sdk": "^1.12.1",
     "axios": "^1.7.9",
     "dotenv": "^16.4.7",
-    "fast-xml-parser": "^4.5.1",
+    "fast-xml-parser": "^5.5.7",
     "node-fetch": "^2.6.9",
     "openai": "^4.81.0"
   },

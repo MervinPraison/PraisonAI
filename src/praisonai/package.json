@@ -7,6 +7,6 @@
     "typescript-eslint": "^8.8.1"
   },
   "dependencies": {
-    "mintlify": "^4.0.300"
+    "mintlify": "^4.2.462"
   }
 }
