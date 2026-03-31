@@ -15,6 +15,7 @@ jobs:
     # Allow: human users, github-actions[bot] (auto-comments/labels)
     # Block: dependabot, cursor, renovate, other bots
     if: |
+      (github.event.action != 'labeled' || github.event.label.name == 'claude') &&
       (
         !contains(github.actor, '[bot]') ||
         github.actor == 'github-actions[bot]'
