@@ -442,8 +442,9 @@ class AgentsGenerator:
             for agent_name, agent_config in config['agents'].items():
                 role_config = dict(agent_config) if agent_config else {}
                 # Convert 'instructions' to 'backstory' if present
+                # Note: preserve 'instructions' key so _run_praisonai can pass it to PraisonAgent
                 if 'instructions' in role_config and 'backstory' not in role_config:
-                    role_config['backstory'] = role_config.pop('instructions')
+                    role_config['backstory'] = role_config['instructions']
                 # Ensure required fields have defaults
                 if 'role' not in role_config:
                     role_config['role'] = agent_name.replace('_', ' ').title()
@@ -1207,7 +1208,7 @@ class AgentsGenerator:
         self.logger.debug(f"Global config - ACP: {acp_enabled}, LSP: {lsp_enabled}")
         
         if config.get('process') == 'hierarchical':
-            agents = AgentTeam(
+            agents = Agents(
                 agents=list(agents.values()),
                 tasks=tasks,
                 process="hierarchical",
@@ -1217,7 +1218,7 @@ class AgentsGenerator:
                 lsp=lsp_enabled
             )
         else:
-            agents = AgentTeam(
+            agents = Agents(
                 agents=list(agents.values()),
                 tasks=tasks,
                 memory=memory,
@@ -1231,7 +1232,7 @@ class AgentsGenerator:
 
         response = agents.start()
         self.logger.debug(f"Result: {response}")
-        result = ""
+        result = response if response else ""
         
         if AGENTOPS_AVAILABLE:
             agentops.end_session("Success")

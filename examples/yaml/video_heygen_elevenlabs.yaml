@@ -1,0 +1,87 @@
+# HeyGen + ElevenLabs Video Generation Workflow
+#
+# Sequential multi-agent workflow:
+#   1. Audio Agent → generates speech with ElevenLabs
+#   2. Upload Agent → uploads audio to HeyGen 
+#   3. Video Agent → triggers HeyGen video generation
+#   4. Status Agent → polls and waits for video completion
+#
+# Usage:
+#   python video_heygen_elevenlabs_workflow.py
+#
+# Required env vars:
+#   HEYGEN_API_KEY, ELEVENLABS_API_KEY, OPENAI_API_KEY
+
+framework: praisonai
+process: sequential
+
+agents:
+  audio_generator:
+    role: Audio Generator
+    goal: Generate speech audio from text using ElevenLabs
+    instructions: |
+      You generate speech audio files using ElevenLabs text-to-speech.
+      When given text, call elevenlabs_speak_to_file with the text and output_path.
+      IMPORTANT: Only pass 'text' and 'output_path' parameters. Use all defaults for other params.
+      Report the output_path and audio_bytes from the result.
+    tools:
+      - elevenlabs_speak_to_file
+
+  asset_uploader:
+    role: Asset Uploader
+    goal: Upload audio files to HeyGen as assets
+    instructions: |
+      You upload audio files to HeyGen for video generation.
+      Call heygen_upload_asset with the file_path and content_type="audio/mpeg".
+      Report the asset "id" from the result - this is critical for the next step.
+    tools:
+      - heygen_upload_asset
+
+  video_generator:
+    role: Video Generator
+    goal: Generate HeyGen avatar video using uploaded audio
+    instructions: |
+      You create HeyGen avatar videos using external audio.
+      Call heygen_generate_video_with_audio with the avatar_id and audio_asset_id.
+      The audio_asset_id comes from the previous step's upload result.
+      Report the video_id from the result data.
+    tools:
+      - heygen_generate_video_with_audio
+
+  video_monitor:
+    role: Video Monitor
+    goal: Wait for video completion and report the final URL
+    instructions: |
+      You monitor HeyGen video generation status.
+      Call heygen_wait_for_video with the video_id from the previous step.
+      Use poll_interval=10 and max_wait=300.
+      When complete, report the video_url from the result.
+    tools:
+      - heygen_wait_for_video
+
+steps:
+  - agent: audio_generator
+    action: |
+      Generate speech audio for this text: "{{script}}"
+      Save to output_path: "/tmp/workflow_speech.mp3"
+
+  - agent: asset_uploader
+    action: |
+      Upload the audio file at "/tmp/workflow_speech.mp3" to HeyGen.
+      Use content_type "audio/mpeg".
+
+  - agent: video_generator
+    action: |
+      Generate a HeyGen video using:
+      - avatar_id: "{{avatar_id}}"
+      - audio_asset_id: use the asset id from the previous upload step
+
+  - agent: video_monitor
+    action: |
+      Wait for the video to complete. Use the video_id from the previous step.
+      Poll every 10 seconds, max wait 300 seconds.
+      Report the final video URL.
+
+variables:
+  script: "Welcome to PraisonAI! Build powerful AI agents in just three lines of code. Fast, simple, and production-ready."
+  avatar_id: "YOUR_AVATAR_ID"
