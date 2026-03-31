@@ -187,6 +187,60 @@ class PraisonAIAgentsComponent(Component):
         else:
             return AgentTeam
 
+    def _sort_agents_by_chain(self, agents: list) -> list:
+        """Sort agents by their chain order (previous_agent connections).
+        
+        Agents are connected: Agent1 → Agent2 → Agent3
+        The first agent has no previous_agent, subsequent agents point to their predecessor.
+        """
+        if len(agents) <= 1:
+            return agents
+        
+        # Find agents that have a previous_agent set
+        has_previous = set()
+        
+        for agent in agents:
+            prev = getattr(agent, '_langflow_previous', None)
+            if prev is not None:
+                has_previous.add(id(agent))
+        
+        # Find starting agents (those with no previous)
+        starting_agents = [a for a in agents if id(a) not in has_previous or getattr(a, '_langflow_previous', None) is None]
+        
+        if not starting_agents:
+            # No clear start, return as-is
+            return agents
+        
+        # Build chain from each starting agent
+        sorted_agents = []
+        visited = set()
+        
+        # Start with agents that have no previous
+        for start in starting_agents:
+            if id(start) in visited:
+                continue
+            sorted_agents.append(start)
+            visited.add(id(start))
+        
+        # Now add agents that follow (have previous_agent set)
+        # Keep iterating until all agents are placed
+        remaining = [a for a in agents if id(a) not in visited]
+        while remaining:
+            added = False
+            for agent in remaining[:]:
+                prev = getattr(agent, '_langflow_previous', None)
+                if prev is not None and id(prev) in visited:
+                    sorted_agents.append(agent)
+                    visited.add(id(agent))
+                    remaining.remove(agent)
+                    added = True
+            if not added:
+                # No progress, add remaining as-is
+                sorted_agents.extend(remaining)
+                break
+        
+        return sorted_agents
+
     def build_agents(self) -> Any:
         """Build and return the PraisonAI Agents instance."""
         agents_class = self._import_agents()
@@ -198,8 +252,8 @@ class PraisonAIAgentsComponent(Component):
             msg = "At least one agent is required."
             raise ValueError(msg)
         
-        # Sort agents by their order (set in Agent component)
-        agents = sorted(agents, key=lambda a: getattr(a, '_langflow_order', 1))
+        # Sort agents by chain order (previous_agent connections)
+        agents = self._sort_agents_by_chain(agents)
 
         # Build kwargs - tasks auto-generated from agents
         kwargs = {

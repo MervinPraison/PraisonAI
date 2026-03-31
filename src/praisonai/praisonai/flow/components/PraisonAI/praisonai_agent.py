@@ -48,11 +48,11 @@ class PraisonAIAgentComponent(Component):
             info="Name for identification and logging.",
             value="Agent",
         ),
-        IntInput(
-            name="order",
-            display_name="Order",
-            info="Execution order in sequential workflows (1 = first, 2 = second, etc.).",
-            value=1,
+        HandleInput(
+            name="previous_agent",
+            display_name="Previous Agent",
+            info="Connect from previous agent to define execution order (Agent 1 → Agent 2 → Agent 3).",
+            input_types=["Agent"],
         ),
         MultilineInput(
             name="role",
@@ -396,8 +396,8 @@ class PraisonAIAgentComponent(Component):
         # Build agent
         agent = agent_class(**kwargs)
         
-        # Store order for sequential execution sorting
-        agent._langflow_order = self.order or 1
+        # Store previous agent reference for chaining
+        agent._langflow_previous = self.previous_agent
 
         self.status = f"Agent '{self.agent_name}' created"
         return agent
