@@ -11,6 +11,7 @@ import asyncio
 import logging
 import os
 import re
+import secrets
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -239,7 +240,29 @@ class WebSocketGateway:
         async def health(request):
             return JSONResponse(self.health())
         
+        def _check_auth(request) -> Optional[JSONResponse]:
+            """Validate auth token if configured. Returns error response or None."""
+            if not self.config.auth_token:
+                return None
+            auth_header = request.headers.get("authorization", "")
+            if not auth_header.startswith("Bearer "):
+                return JSONResponse(
+                    {"error": "Authentication required"},
+                    status_code=401,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            token = auth_header[7:]
+            if not secrets.compare_digest(token, self.config.auth_token):
+                return JSONResponse(
+                    {"error": "Invalid authentication token"},
+                    status_code=403,
+                )
+            return None
+        
         async def info(request):
+            auth_err = _check_auth(request)
+            if auth_err:
+                return auth_err
             return JSONResponse({
                 "name": "PraisonAI Gateway",
                 "version": "1.0.0",
@@ -249,6 +272,13 @@ class WebSocketGateway:
             })
         
         async def websocket_endpoint(websocket: WebSocket):
+            # Authenticate WebSocket via query param or first message
+            if self.config.auth_token:
+                ws_token = websocket.query_params.get("token", "")
+                if not secrets.compare_digest(ws_token, self.config.auth_token):
+                    await websocket.close(code=4003, reason="Authentication required")
+                    return
+            
             await websocket.accept()
             client_id = str(uuid.uuid4())
             self._clients[client_id] = websocket

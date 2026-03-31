@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 from pathlib import Path
 from enum import Enum
+import shlex
 import subprocess
 import logging
 import tempfile
@@ -85,7 +86,8 @@ class SandboxPolicy:
     # Command restrictions
     blocked_commands: Set[str] = field(default_factory=lambda: {
         "rm", "rmdir", "mv", "dd", "mkfs", "fdisk",
-        "sudo", "su", "chmod", "chown", "kill", "pkill"
+        "sudo", "su", "chmod", "chown", "kill", "pkill",
+        "sh", "bash", "dash", "zsh", "csh", "ksh"
     })
     
     @classmethod
@@ -112,7 +114,8 @@ class SandboxPolicy:
                 blocked_commands={
                     "rm", "rmdir", "mv", "dd", "mkfs", "fdisk",
                     "sudo", "su", "chmod", "chown", "kill", "pkill",
-                    "curl", "wget", "nc", "netcat", "ssh", "scp"
+                    "curl", "wget", "nc", "netcat", "ssh", "scp",
+                    "sh", "bash", "dash", "zsh", "csh", "ksh"
                 }
             )
         
@@ -324,8 +327,8 @@ class SubprocessSandbox:
         # Execute
         try:
             result = subprocess.run(
-                command,
-                shell=True,
+                shlex.split(command),
+                shell=False,
                 cwd=cwd,
                 env=env,
                 capture_output=capture_output,

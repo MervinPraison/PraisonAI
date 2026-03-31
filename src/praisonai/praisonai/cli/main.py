@@ -4110,12 +4110,15 @@ Do NOT add any explanations or formatting."""
             
             # Add feature flags if enabled
             if hasattr(self, 'args'):
-                if getattr(self.args, 'web_search', False):
-                    agent_config["web_search"] = True
-                if getattr(self.args, 'web_fetch', False):
-                    agent_config["web_fetch"] = True
+                if getattr(self.args, 'web_search', False) or getattr(self.args, 'web_fetch', False):
+                    from praisonaiagents.config.web_config import WebConfig
+                    agent_config["web"] = WebConfig(
+                        search=getattr(self.args, 'web_search', False),
+                        fetch=getattr(self.args, 'web_fetch', False),
+                    )
                 if getattr(self.args, 'prompt_caching', False):
-                    agent_config["prompt_caching"] = True
+                    from praisonaiagents import CachingConfig
+                    agent_config["caching"] = CachingConfig(prompt_caching=True)
                 
                 # Load tools if specified (--tools flag)
                 if getattr(self.args, 'tools', None):
@@ -4238,7 +4241,8 @@ Do NOT add any explanations or formatting."""
                 
                 # Metrics - Token/cost tracking (display happens AFTER execution)
                 if getattr(self.args, 'metrics', False):
-                    agent_config["metrics"] = True
+                    from praisonaiagents import OutputConfig
+                    agent_config["output"] = OutputConfig(metrics=True)
                 
                 # Telemetry - Usage monitoring
                 if getattr(self.args, 'telemetry', False):

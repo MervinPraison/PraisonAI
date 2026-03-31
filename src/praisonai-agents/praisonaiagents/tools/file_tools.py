@@ -289,6 +289,40 @@ class FileTools:
             # Validate destination path
             safe_path = FileTools._validate_path(destination)
             
+            # Validate URL to prevent SSRF
+            from urllib.parse import urlparse
+            import ipaddress
+            import socket
+            
+            parsed = urlparse(url)
+            if parsed.scheme not in ("http", "https"):
+                return {
+                    "success": False, "path": "", "size": 0,
+                    "error": f"Unsupported URL scheme: {parsed.scheme}. Only http/https allowed."
+                }
+            
+            hostname = parsed.hostname or ""
+            # Resolve hostname and check for private/reserved IPs
+            try:
+                resolved = socket.getaddrinfo(hostname, parsed.port or 443)
+                for family, _, _, _, sockaddr in resolved:
+                    addr = ipaddress.ip_address(sockaddr[0])
+                    if addr.is_private or addr.is_loopback or addr.is_reserved or addr.is_link_local:
+                        return {
+                            "success": False, "path": "", "size": 0,
+                            "error": f"Access to private/internal addresses is blocked: {hostname}"
+                        }
+            except (socket.gaierror, ValueError):
+                pass  # Let httpx handle DNS failures naturally
+            
+            # Block cloud metadata endpoints
+            _blocked_hosts = {"169.254.169.254", "metadata.google.internal", "metadata.google.com"}
+            if hostname in _blocked_hosts:
+                return {
+                    "success": False, "path": "", "size": 0,
+                    "error": f"Access to metadata service is blocked: {hostname}"
+                }
+            
             # Create directory if needed
             os.makedirs(os.path.dirname(safe_path) or ".", exist_ok=True)
             
