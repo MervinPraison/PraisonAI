@@ -157,8 +157,8 @@ jobs:
       if: matrix.python-version == '3.11'
       uses: codecov/codecov-action@v5
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        file: src/praisonai/coverage.xml
+        token: ${{ secrets.CODECOV_TOKEN || '' }}
+        files: src/praisonai/coverage.xml
         flags: main-tests
         fail_ci_if_error: false
 
@@ -301,8 +301,10 @@ jobs:
     steps:
     - name: Check if Google key is available
       id: check-key
+      env:
+        GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
       run: |
-        if [ -n "${{ secrets.GOOGLE_API_KEY }}" ]; then
+        if [ -n "$GOOGLE_API_KEY" ]; then
           echo "has_key=true" >> $GITHUB_OUTPUT
         else
           echo "has_key=false" >> $GITHUB_OUTPUT
@@ -356,8 +358,10 @@ jobs:
     steps:
     - name: Check if Groq key is available
       id: check-key
+      env:
+        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       run: |
-        if [ -n "${{ secrets.GROQ_API_KEY }}" ]; then
+        if [ -n "$GROQ_API_KEY" ]; then
           echo "has_key=true" >> $GITHUB_OUTPUT
         else
           echo "has_key=false" >> $GITHUB_OUTPUT
@@ -411,8 +415,10 @@ jobs:
     steps:
     - name: Check if xAI key is available
       id: check-key
+      env:
+        XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
       run: |
-        if [ -n "${{ secrets.XAI_API_KEY }}" ]; then
+        if [ -n "$XAI_API_KEY" ]; then
           echo "has_key=true" >> $GITHUB_OUTPUT
         else
           echo "has_key=false" >> $GITHUB_OUTPUT
@@ -466,8 +472,10 @@ jobs:
     steps:
     - name: Check if Cohere key is available
       id: check-key
+      env:
+        COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
       run: |
-        if [ -n "${{ secrets.COHERE_API_KEY }}" ]; then
+        if [ -n "$COHERE_API_KEY" ]; then
           echo "has_key=true" >> $GITHUB_OUTPUT
         else
           echo "has_key=false" >> $GITHUB_OUTPUT

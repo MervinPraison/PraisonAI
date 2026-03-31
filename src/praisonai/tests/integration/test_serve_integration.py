@@ -9,8 +9,12 @@ import subprocess
 import sys
 import time
 import socket
+from pathlib import Path
 
 import pytest
+
+# Dynamic path to src/praisonai — works on any CI runner or local machine
+PRAISONAI_SRC = str(Path(__file__).parent.parent.parent)
 
 
 def is_port_in_use(port: int) -> bool:
@@ -65,7 +69,7 @@ roles:
             [sys.executable, "-m", "praisonai.cli.commands.serve", "agents", "--help"],
             capture_output=True,
             text=True,
-            cwd="/Users/praison/praisonai-package/src/praisonai"
+            cwd=PRAISONAI_SRC
         )
         # Should show help without error
         assert "--host" in result.stdout or result.returncode == 0
@@ -80,7 +84,7 @@ class TestServeA2AIntegration:
             [sys.executable, "-m", "praisonai.cli.commands.serve", "a2a", "--help"],
             capture_output=True,
             text=True,
-            cwd="/Users/praison/praisonai-package/src/praisonai"
+            cwd=PRAISONAI_SRC
         )
         assert "--host" in result.stdout or result.returncode == 0
 
@@ -94,7 +98,7 @@ class TestServeUnifiedIntegration:
             [sys.executable, "-m", "praisonai.cli.commands.serve", "unified", "--help"],
             capture_output=True,
             text=True,
-            cwd="/Users/praison/praisonai-package/src/praisonai"
+            cwd=PRAISONAI_SRC
         )
         assert "--host" in result.stdout or result.returncode == 0
 
@@ -108,7 +112,7 @@ class TestServeGatewayIntegration:
             [sys.executable, "-m", "praisonai.cli.commands.serve", "gateway", "--help"],
             capture_output=True,
             text=True,
-            cwd="/Users/praison/praisonai-package/src/praisonai"
+            cwd=PRAISONAI_SRC
         )
         assert "--host" in result.stdout or result.returncode == 0
 
@@ -122,7 +126,7 @@ class TestServeMCPIntegration:
             [sys.executable, "-m", "praisonai.cli.commands.serve", "mcp", "--help"],
             capture_output=True,
             text=True,
-            cwd="/Users/praison/praisonai-package/src/praisonai"
+            cwd=PRAISONAI_SRC
         )
         assert "--transport" in result.stdout or result.returncode == 0
 
@@ -136,7 +140,7 @@ class TestServeRecipeIntegration:
             [sys.executable, "-m", "praisonai.cli.commands.serve", "recipe", "--help"],
             capture_output=True,
             text=True,
-            cwd="/Users/praison/praisonai-package/src/praisonai"
+            cwd=PRAISONAI_SRC
         )
         assert "--host" in result.stdout or result.returncode == 0
 
