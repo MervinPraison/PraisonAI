@@ -1120,9 +1120,15 @@ class AgentsGenerator:
             llm_model = llm_model or os.environ.get("MODEL_NAME") or "gpt-4o-mini"
             
             # Extract YAML configuration for new CLI parity features
-            agent_trust = details.get('trust', False)
             agent_tool_timeout = details.get('tool_timeout', None)
+            
             agent_planning_tools = details.get('planning_tools', None)
+            agent_planning = details.get('planning', False)
+            if agent_planning_tools is not None:
+                if isinstance(agent_planning, dict):
+                    agent_planning['planning_tools'] = agent_planning_tools
+                elif not agent_planning:
+                    agent_planning = {'planning_tools': agent_planning_tools}
             
             agent = PraisonAgent(
                 name=role_filled,
@@ -1134,9 +1140,8 @@ class AgentsGenerator:
                 allow_delegation=details.get('allow_delegation', False),
                 llm=llm_model,
                 reflection=details.get('reflection', False),
-                trust=agent_trust,
                 tool_timeout=agent_tool_timeout,
-                planning_tools=agent_planning_tools,
+                planning=agent_planning,
             )
             
             if self.agent_callback:
@@ -1213,17 +1218,13 @@ class AgentsGenerator:
                 tasks=tasks,
                 process="hierarchical",
                 manager_llm=config.get('manager_llm') or os.environ.get("MODEL_NAME") or "gpt-4o-mini",
-                memory=memory,
-                acp=acp_enabled,
-                lsp=lsp_enabled
+                memory=memory
             )
         else:
             agents = AgentTeam(
                 agents=list(agents.values()),
                 tasks=tasks,
-                memory=memory,
-                acp=acp_enabled,
-                lsp=lsp_enabled
+                memory=memory
             )
 
         self.logger.debug("Final Configuration:")
