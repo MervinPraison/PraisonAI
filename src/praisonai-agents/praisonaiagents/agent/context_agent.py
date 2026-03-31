@@ -19,41 +19,52 @@ from pathlib import Path
 from typing import Optional, Any, Dict, Union, List, TYPE_CHECKING
 
 # Lazy imports for performance - these are only loaded when needed
+# Thread-safe lazy loading with double-checked locking pattern
+import threading
+_lazy_lock = threading.Lock()
 _subprocess = None
 _glob = None
 _ast = None
 _asyncio = None
 
 def _get_subprocess():
-    """Lazy import subprocess to avoid import-time overhead."""
+    """Lazy import subprocess to avoid import-time overhead (thread-safe)."""
     global _subprocess
     if _subprocess is None:
-        import subprocess
-        _subprocess = subprocess
+        with _lazy_lock:
+            if _subprocess is None:
+                import subprocess
+                _subprocess = subprocess
     return _subprocess
 
 def _get_glob():
-    """Lazy import glob to avoid import-time overhead."""
+    """Lazy import glob to avoid import-time overhead (thread-safe)."""
     global _glob
     if _glob is None:
-        import glob
-        _glob = glob
+        with _lazy_lock:
+            if _glob is None:
+                import glob
+                _glob = glob
     return _glob
 
 def _get_ast():
-    """Lazy import ast to avoid import-time overhead."""
+    """Lazy import ast to avoid import-time overhead (thread-safe)."""
     global _ast
     if _ast is None:
-        import ast
-        _ast = ast
+        with _lazy_lock:
+            if _ast is None:
+                import ast
+                _ast = ast
     return _ast
 
 def _get_asyncio():
-    """Lazy import asyncio to avoid import-time overhead."""
+    """Lazy import asyncio to avoid import-time overhead (thread-safe)."""
     global _asyncio
     if _asyncio is None:
-        import asyncio
-        _asyncio = asyncio
+        with _lazy_lock:
+            if _asyncio is None:
+                import asyncio
+                _asyncio = asyncio
     return _asyncio
 
 async def _async_subprocess_run(cmd: list, timeout: int = 60) -> tuple:
