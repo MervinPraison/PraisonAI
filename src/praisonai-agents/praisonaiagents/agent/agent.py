@@ -163,11 +163,40 @@ from ..config.feature_configs import (
 # Applied even when context management is disabled to prevent runaway tool outputs
 DEFAULT_TOOL_OUTPUT_LIMIT = 16000
 
-# Global variables for API server (protected by _server_lock for thread safety)
-_server_lock = threading.Lock()
-_server_started = {}  # Dict of port -> started boolean
-_registered_agents = {}  # Dict of port -> Dict of path -> agent_id
-_shared_apps = {}  # Dict of port -> FastAPI app
+# DEPRECATED: Legacy global variables - now using unified ServerRegistry
+# These are kept for backward compatibility but redirect to ServerRegistry
+from ..core.server_registry import get_server_registry
+
+_server_registry = get_server_registry()
+
+# Backward compatibility wrappers
+def _get_server_started():
+    """Get server started status dict (backward compatibility)."""
+    return {port: _server_registry.is_started(port) for port in _server_registry.list_ports()}
+
+def _get_registered_agents():
+    """Get registered agents dict (backward compatibility).""" 
+    result = {}
+    for port in _server_registry.list_ports():
+        agents = _server_registry.get_agents(port)
+        if agents:
+            result[port] = agents
+    return result
+
+def _get_shared_apps():
+    """Get shared apps dict (backward compatibility)."""
+    result = {}
+    for port in _server_registry.list_ports():
+        app = _server_registry.get_app(port) 
+        if app is not None:
+            result[port] = app
+    return result
+
+# Legacy variables that redirect to ServerRegistry
+_server_started = _get_server_started()
+_registered_agents = _get_registered_agents()
+_shared_apps = _get_shared_apps()
+_server_lock = _server_registry._lock  # Use ServerRegistry's lock for compatibility
 
 # Don't import FastAPI dependencies here - use lazy loading instead
 

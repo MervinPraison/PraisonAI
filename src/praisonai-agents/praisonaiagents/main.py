@@ -2,6 +2,8 @@ import os
 import time
 import json
 import logging
+import contextvars
+import threading
 from typing import List, Optional, Dict, Any, Union, Literal, Type
 from pydantic import BaseModel, ConfigDict
 import asyncio
@@ -23,15 +25,69 @@ except ImportError:
 
 # Logging is already configured in _logging.py via __init__.py
 
-# Global list to store error logs
-error_logs = []
+# Thread-safe global state using context variables for multi-agent safety
+# Each agent/session gets its own isolated state
+_error_logs_var: contextvars.ContextVar[List[str]] = contextvars.ContextVar('error_logs', default=[])
+_sync_callbacks_var: contextvars.ContextVar[Dict[str, Any]] = contextvars.ContextVar('sync_display_callbacks', default={})
+_async_callbacks_var: contextvars.ContextVar[Dict[str, Any]] = contextvars.ContextVar('async_display_callbacks', default={})
+_approval_callback_var: contextvars.ContextVar[Any] = contextvars.ContextVar('approval_callback', default=None)
 
-# Separate registries for sync and async callbacks
-sync_display_callbacks = {}
-async_display_callbacks = {}
+# Lock for protecting the fallback global registries (used when no context available)
+_global_lock = threading.Lock()
+_global_error_logs = []
+_global_sync_callbacks = {}
+_global_async_callbacks = {}
+_global_approval_callback = None
 
-# Global approval callback registry
-approval_callback = None
+# Context-aware accessors with fallback to thread-safe globals
+def _get_error_logs():
+    """Get error logs for current context, fallback to thread-safe global."""
+    try:
+        return _error_logs_var.get()
+    except LookupError:
+        # No context variable set, use thread-safe global fallback
+        with _global_lock:
+            return _global_error_logs.copy()
+
+def _add_error_log(message: str):
+    """Add error log to current context, fallback to thread-safe global."""
+    try:
+        logs = _error_logs_var.get()
+        logs.append(message)
+    except LookupError:
+        # No context variable set, use thread-safe global fallback
+        with _global_lock:
+            _global_error_logs.append(message)
+
+def _get_sync_callbacks():
+    """Get sync callbacks for current context, fallback to thread-safe global."""
+    try:
+        return _sync_callbacks_var.get()
+    except LookupError:
+        with _global_lock:
+            return _global_sync_callbacks.copy()
+
+def _get_async_callbacks():
+    """Get async callbacks for current context, fallback to thread-safe global."""
+    try:
+        return _async_callbacks_var.get()
+    except LookupError:
+        with _global_lock:
+            return _global_async_callbacks.copy()
+
+def _get_approval_callback():
+    """Get approval callback for current context, fallback to thread-safe global."""
+    try:
+        return _approval_callback_var.get()
+    except LookupError:
+        with _global_lock:
+            return _global_approval_callback
+
+# Backward compatibility globals (dynamically resolve to context-aware versions)
+error_logs = []  # Will be replaced by context-aware calls in functions
+sync_display_callbacks = {}  # Will be replaced by context-aware calls in functions  
+async_display_callbacks = {}  # Will be replaced by context-aware calls in functions
+approval_callback = None  # Will be replaced by context-aware calls in functions
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PraisonAI Unique Color Palette: "Elegant Intelligence"
@@ -128,10 +184,20 @@ def register_display_callback(display_type: str, callback_fn, is_async: bool = F
         callback_fn: The callback function to register
         is_async (bool): Whether the callback is asynchronous
     """
-    if is_async:
-        async_display_callbacks[display_type] = callback_fn
-    else:
-        sync_display_callbacks[display_type] = callback_fn
+    try:
+        if is_async:
+            callbacks = _async_callbacks_var.get()
+            callbacks[display_type] = callback_fn
+        else:
+            callbacks = _sync_callbacks_var.get()
+            callbacks[display_type] = callback_fn
+    except LookupError:
+        # No context variable set, use thread-safe global fallback
+        with _global_lock:
+            if is_async:
+                _global_async_callbacks[display_type] = callback_fn
+            else:
+                _global_sync_callbacks[display_type] = callback_fn
 
 def register_approval_callback(callback_fn):
     """Register a global approval callback function for dangerous tool operations.
@@ -139,8 +205,13 @@ def register_approval_callback(callback_fn):
     Args:
         callback_fn: Function that takes (function_name, arguments, risk_level) and returns ApprovalDecision
     """
-    global approval_callback
-    approval_callback = callback_fn
+    try:
+        _approval_callback_var.set(callback_fn)
+    except LookupError:
+        # No context variable set, use thread-safe global fallback
+        with _global_lock:
+            global _global_approval_callback
+            _global_approval_callback = callback_fn
 
 
 # Simplified aliases (consistent naming convention)
@@ -157,8 +228,10 @@ def execute_sync_callback(display_type: str, **kwargs):
         display_type (str): Type of display event
         **kwargs: Arguments to pass to the callback function
     """
-    if display_type in sync_display_callbacks:
-        callback = sync_display_callbacks[display_type]
+    # Get callbacks from current context or thread-safe global fallback
+    callbacks = _get_sync_callbacks()
+    if display_type in callbacks:
+        callback = callbacks[display_type]
         import inspect
         sig = inspect.signature(callback)
         
@@ -181,9 +254,13 @@ async def execute_callback(display_type: str, **kwargs):
     """
     import inspect
     
+    # Get callbacks from current context or thread-safe global fallback
+    sync_callbacks = _get_sync_callbacks()
+    async_callbacks = _get_async_callbacks()
+    
     # Execute synchronous callback if registered
-    if display_type in sync_display_callbacks:
-        callback = sync_display_callbacks[display_type]
+    if display_type in sync_callbacks:
+        callback = sync_callbacks[display_type]
         sig = inspect.signature(callback)
         
         # Filter kwargs to what the callback accepts to maintain backward compatibility
@@ -198,8 +275,8 @@ async def execute_callback(display_type: str, **kwargs):
         await loop.run_in_executor(None, lambda: callback(**supported_kwargs))
     
     # Execute asynchronous callback if registered
-    if display_type in async_display_callbacks:
-        callback = async_display_callbacks[display_type]
+    if display_type in async_callbacks:
+        callback = async_callbacks[display_type]
         sig = inspect.signature(callback)
         
         # Filter kwargs to what the callback accepts to maintain backward compatibility
@@ -420,7 +497,7 @@ def display_error(message: str, console=None):
         title="⚠ Error",
         border_style=PRAISON_COLORS["error"]
     ))
-    error_logs.append(message)
+    _add_error_log(message)
 
 def display_generating(content: str = "", start_time: Optional[float] = None):
     if not content or not str(content).strip():
@@ -617,7 +694,7 @@ async def adisplay_error(message: str, console=None):
     await execute_callback('error', message=message)
     
     console.print(Panel.fit(Text(message, style="bold red"), title="Error", border_style="red"))
-    error_logs.append(message)
+    _add_error_log(message)
 
 async def adisplay_generating(content: str = "", start_time: Optional[float] = None):
     """Async version of display_generating."""

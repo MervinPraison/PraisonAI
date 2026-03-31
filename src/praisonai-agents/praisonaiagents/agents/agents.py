@@ -29,12 +29,17 @@ class TaskStatus(Enum):
 # Set up logger
 logger = logging.getLogger(__name__)
 
-# Global variables for managing the shared servers with thread-safety
-import threading
-_agents_server_lock = threading.Lock()  # Protect all global server state mutations
-_agents_server_started = {}  # Dict of port -> started boolean
-_agents_registered_endpoints = {}  # Dict of port -> Dict of path -> endpoint_id
-_agents_shared_apps = {}  # Dict of port -> FastAPI app
+# DEPRECATED: Legacy global variables - now using unified ServerRegistry  
+# These redirect to the shared ServerRegistry to prevent race conditions
+from ..core.server_registry import get_server_registry
+
+_server_registry = get_server_registry()
+
+# Backward compatibility using unified ServerRegistry
+_agents_server_lock = _server_registry._lock  # Use unified lock
+_agents_server_started = {}  # Will be populated dynamically
+_agents_registered_endpoints = {}  # Will be populated dynamically  
+_agents_shared_apps = {}  # Will be populated dynamically
 
 def encode_file_to_base64(file_path: str) -> str:
     """Base64-encode a file."""
