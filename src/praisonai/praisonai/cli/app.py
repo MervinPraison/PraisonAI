@@ -230,6 +230,7 @@ def register_commands():
     from .commands.plugins import app as plugins_app
     from .commands.sandbox import app as sandbox_app
     from .commands.claw import app as claw_app
+    from .commands.flow import app as flow_app
     
     # Import TUI and queue commands
     from .features.tui.debug import create_debug_app as create_tui_debug_app
@@ -408,6 +409,7 @@ def register_commands():
     app.add_typer(plugins_app, name="plugins", help="Plugin management and inspection")
     app.add_typer(sandbox_app, name="sandbox", help="Sandbox container management")
     app.add_typer(claw_app, name="claw", help="🦞 PraisonAI Dashboard (full UI)")
+    app.add_typer(flow_app, name="flow", help="Visual workflow builder (Langflow)")
     
     # Register standardise command
     try:

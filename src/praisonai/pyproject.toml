@@ -12,7 +12,7 @@ dependencies = [
     "rich>=13.7",
     "markdown>=3.5",
     "pyparsing>=3.0.0",
-    "praisonaiagents>=1.5.91",
+    "praisonaiagents>=1.5.93",
     "python-dotenv>=0.19.0",
     "litellm>=1.81.0,<=1.82.6",
     "PyYAML>=6.0",
@@ -182,6 +182,9 @@ dev = [
 [project.urls]
 Homepage = "https://docs.praison.ai"
 Repository = "https://github.com/mervinpraison/PraisonAI"
+
+[tool.uv.sources]
+praisonaiagents = { path = "../praisonai-agents" }
 
 [tool.uv]
 # Exclude from lock resolution — these cause cross-extra conflicts that

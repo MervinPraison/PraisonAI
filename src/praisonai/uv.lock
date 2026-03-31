@@ -4984,8 +4984,8 @@ requires-dist = [
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen-v4'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.1.0" },
-    { name = "praisonaiagents", specifier = ">=1.5.91" },
-    { name = "praisonaiagents", extras = ["all"], marker = "extra == 'claw'", specifier = ">=1.5.40" },
+    { name = "praisonaiagents", directory = "../praisonai-agents" },
+    { name = "praisonaiagents", extras = ["all"], marker = "extra == 'claw'", directory = "../praisonai-agents" },
     { name = "psutil", marker = "extra == 'all'", specifier = ">=5.9.0" },
     { name = "psutil", marker = "extra == 'bot'", specifier = ">=5.9.0" },
     { name = "psutil", marker = "extra == 'claw'", specifier = ">=5.9.0" },
@@ -5054,18 +5054,14 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.5.91"
-source = { registry = "https://pypi.org/simple" }
+version = "1.5.93"
+source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },
     { name = "openai" },
     { name = "posthog" },
     { name = "pydantic" },
     { name = "rich" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/97/02/2a91d05f29b6561973fd6f896c95bafc94f04ca7899c63624c399a0ac90a/praisonaiagents-1.5.91.tar.gz", hash = "sha256:b81042a74305676953fcc30d04244cfe0b612663c88d8d6b07ef8714bd2b8dd3", size = 1258588, upload-time = "2026-03-31T10:04:30.342Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/35/e6/7c04d5b52abf651a44fe99f5eb322cb2786bdbc6259fb67effa9e9c0a165/praisonaiagents-1.5.91-py3-none-any.whl", hash = "sha256:43f3f19519ef77d051931c533df47009710b06b0ec7f0d721fa2d7c594c11dac", size = 1314792, upload-time = "2026-03-31T10:04:28.43Z" },
 ]
 
 [package.optional-dependencies]
@@ -5097,6 +5093,57 @@ knowledge = [
     { name = "markitdown", extra = ["all"] },
     { name = "mem0ai" },
 ]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiohttp", specifier = ">=3.8.0" },
+    { name = "ast-grep-cli", marker = "extra == 'autonomy'", specifier = ">=0.30.0" },
+    { name = "chonkie", marker = "extra == 'knowledge'", specifier = ">=1.0.2" },
+    { name = "chromadb", marker = "extra == 'graph'", specifier = ">=1.0.0" },
+    { name = "chromadb", marker = "extra == 'knowledge'", specifier = ">=1.0.0" },
+    { name = "chromadb", marker = "extra == 'memory'", specifier = ">=1.0.0" },
+    { name = "crawl4ai", marker = "extra == 'crawl'", specifier = ">=0.4.0" },
+    { name = "ddgs", marker = "extra == 'search'", specifier = ">=9.0.0" },
+    { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115.0" },
+    { name = "fastapi", marker = "extra == 'mcp'", specifier = ">=0.115.0" },
+    { name = "fastapi", marker = "extra == 'os'", specifier = ">=0.115.0" },
+    { name = "litellm", marker = "extra == 'llm'", specifier = ">=1.81.0,<=1.82.6" },
+    { name = "litellm", marker = "extra == 'memory'", specifier = ">=1.81.0,<=1.82.6" },
+    { name = "markitdown", extras = ["all"], marker = "extra == 'knowledge'", specifier = ">=0.1.0" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.20.0" },
+    { name = "mem0ai", marker = "extra == 'knowledge'", specifier = ">=0.1.0" },
+    { name = "mem0ai", extras = ["graph"], marker = "extra == 'graph'", specifier = ">=0.1.0" },
+    { name = "motor", marker = "extra == 'mongodb'", specifier = ">=3.4.0" },
+    { name = "openai", specifier = ">=1.68.2" },
+    { name = "passlib", extras = ["bcrypt"], marker = "extra == 'auth'", specifier = ">=1.7.4" },
+    { name = "playwright", marker = "extra == 'crawl'", specifier = ">=1.47.0" },
+    { name = "posthog", specifier = ">=3.0.0" },
+    { name = "posthog", marker = "extra == 'telemetry'", specifier = ">=3.0.0" },
+    { name = "praisonaiagents", extras = ["api"], marker = "extra == 'all'" },
+    { name = "praisonaiagents", extras = ["auth"], marker = "extra == 'all'" },
+    { name = "praisonaiagents", extras = ["crawl"], marker = "extra == 'all'" },
+    { name = "praisonaiagents", extras = ["graph"], marker = "extra == 'all'" },
+    { name = "praisonaiagents", extras = ["knowledge"], marker = "extra == 'all'" },
+    { name = "praisonaiagents", extras = ["llm"], marker = "extra == 'all'" },
+    { name = "praisonaiagents", extras = ["mcp"], marker = "extra == 'all'" },
+    { name = "praisonaiagents", extras = ["memory"], marker = "extra == 'all'" },
+    { name = "praisonaiagents", extras = ["mongodb"], marker = "extra == 'all'" },
+    { name = "praisonaiagents", extras = ["search"], marker = "extra == 'all'" },
+    { name = "praisonaiagents", extras = ["telemetry"], marker = "extra == 'all'" },
+    { name = "pydantic", specifier = ">=2.10.0" },
+    { name = "pydantic", marker = "extra == 'llm'", specifier = ">=2.10.0" },
+    { name = "pyjwt", marker = "extra == 'auth'", specifier = ">=2.8.0" },
+    { name = "pyjwt", marker = "extra == 'os'", specifier = ">=2.8.0" },
+    { name = "pymongo", marker = "extra == 'mongodb'", specifier = ">=4.6.3" },
+    { name = "python-jose", extras = ["cryptography"], marker = "extra == 'auth'", specifier = ">=3.3.0" },
+    { name = "python-multipart", marker = "extra == 'auth'", specifier = ">=0.0.6" },
+    { name = "rich" },
+    { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.34.0" },
+    { name = "uvicorn", marker = "extra == 'mcp'", specifier = ">=0.34.0" },
+    { name = "uvicorn", marker = "extra == 'os'", specifier = ">=0.34.0" },
+    { name = "websockets", marker = "extra == 'mcp'", specifier = ">=12.0" },
+]
+provides-extras = ["mcp", "memory", "knowledge", "graph", "llm", "api", "os", "telemetry", "mongodb", "auth", "autonomy", "search", "crawl", "all"]
 
 [[package]]
 name = "pre-commit"

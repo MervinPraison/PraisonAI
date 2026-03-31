@@ -2951,7 +2951,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.5.91"
+version = "1.5.93"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -3061,7 +3061,7 @@ requires-dist = [
     { name = "mem0ai", marker = "extra == 'knowledge'", specifier = ">=0.1.0" },
     { name = "mem0ai", extras = ["graph"], marker = "extra == 'graph'", specifier = ">=0.1.0" },
     { name = "motor", marker = "extra == 'mongodb'", specifier = ">=3.4.0" },
-    { name = "openai", specifier = ">=2.0.0" },
+    { name = "openai", specifier = ">=1.68.2" },
     { name = "passlib", extras = ["bcrypt"], marker = "extra == 'auth'", specifier = ">=1.7.4" },
     { name = "playwright", marker = "extra == 'crawl'", specifier = ">=1.47.0" },
     { name = "posthog", specifier = ">=3.0.0" },
