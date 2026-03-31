@@ -50,6 +50,11 @@ __all__ = [
     "EvalReport",
     "EvalPackage",
     "EvalRunnerProtocol",
+    # EvalSuite - Multi-agent evaluation orchestration
+    "EvalSuite",
+    "TestCase",
+    "EvalSuiteResult",
+    "StatisticalAnalysis",
     # Unified Judge API (follows add_X/get_X/list_X naming)
     "Judge",
     "JudgeConfig",
@@ -115,6 +120,11 @@ _LAZY_IMPORTS = {
     "EvalReport": ("package", "EvalReport"),
     "EvalPackage": ("package", "EvalPackage"),
     "EvalRunnerProtocol": ("package", "EvalRunnerProtocol"),
+    # EvalSuite components
+    "EvalSuite": ("suite", "EvalSuite"),
+    "TestCase": ("suite", "TestCase"),
+    "EvalSuiteResult": ("suite", "EvalSuiteResult"),
+    "StatisticalAnalysis": ("suite", "StatisticalAnalysis"),
     # Unified Judge API (follows add_X/get_X/list_X naming)
     "Judge": ("judge", "Judge"),
     "JudgeConfig": ("judge", "JudgeConfig"),
