@@ -14,7 +14,7 @@ class AgentsAPIProvider(BaseProvider):
     """
     Provider adapter for agents-as-API endpoints.
     
-    Connects to FastAPI-based agent servers launched via Agent.launch() or Agents.launch()
+    Connects to FastAPI-based agent servers launched via Agent.launch() or AgentTeam.launch()
     and provides unified discovery and invocation interface.
     """
     

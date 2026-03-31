@@ -155,13 +155,23 @@ class TestLlmContentNoDoubleEmission:
     def test_interaction_callback_does_not_trigger_narrative(self):
         """After interaction callback fires, no narrative should duplicate."""
         from praisonaiagents.output.editor import enable_editor_output, disable_editor_output
-        from praisonaiagents.main import sync_display_callbacks
+        import praisonaiagents.main as _main
+
+        # Save and clear callbacks to isolate from test pollution
+        saved_sync = dict(_main.sync_display_callbacks)
+        saved_async = dict(_main.async_display_callbacks)
+        _main.sync_display_callbacks.clear()
+        _main.async_display_callbacks.clear()
 
         try:
             editor_output = enable_editor_output(use_color=False)
 
+            # Verify callbacks got registered
+            assert 'llm_content' in _main.sync_display_callbacks, \
+                f"llm_content not registered. Keys: {list(_main.sync_display_callbacks.keys())}"
+
             # Simulate: interaction fires first (final response)
-            interaction_cb = sync_display_callbacks.get('interaction')
+            interaction_cb = _main.sync_display_callbacks.get('interaction')
             if interaction_cb:
                 interaction_cb(
                     message="What is Python?",
@@ -169,16 +179,22 @@ class TestLlmContentNoDoubleEmission:
                     agent_name="TestAgent",
                 )
 
-            # Then llm_content fires with same text (should NOT happen in prod
-            # due to callback_executed guard, but test the editor handles it)
-            llm_content_cb = sync_display_callbacks['llm_content']
+            # Then llm_content fires with same text
+            llm_content_cb = _main.sync_display_callbacks['llm_content']
             llm_content_cb(content="Python is a programming language.", agent_name="TestAgent")
 
             from praisonaiagents.output.editor import BlockType
             narrative_blocks = [b for b in editor_output._blocks if b.type == BlockType.NARRATIVE]
             summary_blocks = [b for b in editor_output._blocks if b.type == BlockType.SUMMARY]
 
-            # Both should exist since the guard is in llm.py, not editor.py
-            assert len(narrative_blocks) >= 1 or len(summary_blocks) >= 1
+            # The deduplication logic should prevent llm_content from adding a narrative block
+            # because the interaction callback already displayed the same text
+            assert len(narrative_blocks) == 0, \
+                f"Expected 0 NARRATIVE blocks due to deduplication, got {len(narrative_blocks)}"
         finally:
             disable_editor_output()
+            # Restore original callbacks
+            _main.sync_display_callbacks.clear()
+            _main.sync_display_callbacks.update(saved_sync)
+            _main.async_display_callbacks.clear()
+            _main.async_display_callbacks.update(saved_async)

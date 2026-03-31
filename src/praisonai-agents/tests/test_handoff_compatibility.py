@@ -169,7 +169,6 @@ def test_all_agent_parameters():
         instructions="Test Instructions",
         llm="gpt-4",
         tools=[],
-        function_calling_llm=None,
         # Consolidated params
         execution=ExecutionConfig(max_iter=10, max_rpm=100, max_execution_time=300, max_retry_limit=5),
         output=OutputConfig(verbose=False, markdown=False, stream=False, reasoning_steps=True),

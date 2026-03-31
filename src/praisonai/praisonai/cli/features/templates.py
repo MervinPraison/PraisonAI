@@ -592,7 +592,7 @@ class TemplatesHandler:
             # Run workflow - determine which class to use based on config structure
             if "agents" in workflow_config and "tasks" in workflow_config:
                 # Agents format (agents + tasks)
-                from praisonaiagents import Agent, Task, Agents
+                from praisonaiagents import Agent, Task, AgentTeam
                 
                 # Build agents
                 agents_config = workflow_config.get("agents", [])

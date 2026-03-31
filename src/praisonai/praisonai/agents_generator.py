@@ -26,7 +26,7 @@ AGENTOPS_AVAILABLE = False
 PRAISONAI_AVAILABLE = False
 
 try:
-    from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, Agents
+    from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, AgentTeam
     PRAISONAI_AVAILABLE = True
 except ImportError:
     pass
@@ -1208,7 +1208,7 @@ class AgentsGenerator:
         self.logger.debug(f"Global config - ACP: {acp_enabled}, LSP: {lsp_enabled}")
         
         if config.get('process') == 'hierarchical':
-            agents = Agents(
+            agents = AgentTeam(
                 agents=list(agents.values()),
                 tasks=tasks,
                 process="hierarchical",
@@ -1218,7 +1218,7 @@ class AgentsGenerator:
                 lsp=lsp_enabled
             )
         else:
-            agents = Agents(
+            agents = AgentTeam(
                 agents=list(agents.values()),
                 tasks=tasks,
                 memory=memory,

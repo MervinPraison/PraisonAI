@@ -4857,7 +4857,7 @@ Now, {final_instruction.lower()}:"""
             praisonai agents.yaml --serve
         """
         import yaml
-        from praisonaiagents import Agent, Agents
+        from praisonaiagents import Agent, AgentTeam
         
         # Determine the YAML file path
         yaml_file = None
@@ -5296,7 +5296,7 @@ Now, {final_instruction.lower()}:"""
             
             # If tools are provided, use Agent with tools first, then DeepResearchAgent
             if tools_list:
-                from praisonaiagents import Agent, Task, Agents
+                from praisonaiagents import Agent, Task, AgentTeam
                 
                 # Create a research assistant agent with tools
                 research_assistant = Agent(

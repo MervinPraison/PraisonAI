@@ -970,7 +970,7 @@ def _execute_praisonai_workflow(
     options: Dict[str, Any],
 ) -> Any:
     """Execute a PraisonAI agents/tasks workflow."""
-    from praisonaiagents import Agent, Task, Agents
+    from praisonaiagents import Agent, Task, AgentTeam
     from praisonai.templates.tool_override import resolve_tools
     
     agents = []

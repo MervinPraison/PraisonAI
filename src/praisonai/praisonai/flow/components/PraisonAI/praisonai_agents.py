@@ -186,7 +186,7 @@ class PraisonAIAgentsComponent(Component):
     def _import_agents(self):
         """Import Agents class with proper error handling."""
         try:
-            from praisonaiagents import Agents
+            from praisonaiagents import AgentTeam
         except ImportError as e:
             msg = "PraisonAI Agents is not installed. Install with: pip install praisonaiagents"
             raise ImportError(msg) from e

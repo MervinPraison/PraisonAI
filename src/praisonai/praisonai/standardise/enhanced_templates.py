@@ -118,7 +118,7 @@ print(result)
 ```
 
 ```python Advanced Usage
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 
 # Advanced {slug} with multiple agents
 agent1 = Agent(name="Agent1", instructions="First agent")
@@ -493,7 +493,7 @@ Usage:
     python {slug}-advanced.py
 """
 
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 from typing import Any
 
 # ============================================================

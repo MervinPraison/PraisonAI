@@ -29,7 +29,7 @@ from .models import TrainingIteration, TrainingReport, TrainingScenario
 from .storage import TrainingStorage
 
 if TYPE_CHECKING:
-    from praisonaiagents import Agent, Agents
+    from praisonaiagents import Agent, AgentTeam
 
 logger = logging.getLogger(__name__)
 

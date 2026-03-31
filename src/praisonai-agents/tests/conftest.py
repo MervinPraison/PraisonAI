@@ -91,3 +91,67 @@ def live_test_enabled():
     if os.environ.get("PRAISONAI_LIVE_TESTS") != "1":
         pytest.skip("Live tests disabled. Set PRAISONAI_LIVE_TESTS=1 to enable.")
     return True
+
+
+# =============================================================================
+# GLOBAL STATE CLEANUP FIXTURES (autouse)
+# =============================================================================
+# These fixtures prevent test pollution from global mutable state.
+# They run automatically before each test to reset shared registries.
+# =============================================================================
+
+@pytest.fixture(autouse=True)
+def _reset_circuit_breaker_registry():
+    """Reset the global circuit breaker registry between tests.
+    
+    CircuitBreaker._registry is a class-level dict that persists across tests.
+    Tests that create circuit breakers pollute the registry for later tests.
+    """
+    yield
+    try:
+        from praisonaiagents.llm.circuit_breaker import CircuitBreaker
+        CircuitBreaker._registry.clear()
+    except (ImportError, AttributeError):
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _reset_display_callbacks():
+    """Restore display callback dicts between tests.
+    
+    sync_display_callbacks and async_display_callbacks are module-level dicts
+    that get mutated by enable_editor_output() and similar functions.
+    Tests that register callbacks pollute the dict for later tests.
+    """
+    try:
+        import praisonaiagents.main as _main
+        saved_sync = dict(_main.sync_display_callbacks)
+        saved_async = dict(_main.async_display_callbacks)
+    except (ImportError, AttributeError):
+        yield
+        return
+    
+    yield
+    
+    _main.sync_display_callbacks.clear()
+    _main.sync_display_callbacks.update(saved_sync)
+    _main.async_display_callbacks.clear()
+    _main.async_display_callbacks.update(saved_async)
+
+@pytest.fixture(autouse=True)
+def _reset_module_shadowing():
+    """Remove submodules from praisonaiagents namespace after tests to restore __getattr__.
+    
+    If 'from praisonaiagents.embedding import xyz' is called, Python adds the 'embedding'
+    module object to praisonaiagents.__dict__, which overrides the __getattr__ proxy for
+    lazy loading. This resets it so proxy tests don't fail mysteriously depending on run order.
+    """
+    yield
+    import sys
+    try:
+        import praisonaiagents
+        # Remove embedding module shadowing
+        if hasattr(praisonaiagents, 'embedding') and isinstance(praisonaiagents.embedding, type(sys)):
+            delattr(praisonaiagents, 'embedding')
+    except (ImportError, AttributeError):
+        pass

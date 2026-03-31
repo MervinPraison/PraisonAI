@@ -144,7 +144,7 @@ def _get_praisonai():
     """Lazy load praisonaiagents classes."""
     global _praisonai_classes
     if _praisonai_classes is None:
-        from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, Agents
+        from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, AgentTeam
         _praisonai_classes = (PraisonAgent, PraisonTask, Agents)
     return _praisonai_classes
 

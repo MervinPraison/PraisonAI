@@ -953,7 +953,7 @@ print(result)
             "",
             "## CRITICAL RULES:",
             f"1. ONE-LINE docstring: `\"\"\"{name} - Advanced Example\"\"\"`",
-            "2. MUST use real imports: `from praisonaiagents import Agent, Task, Agents`",
+            "2. MUST use real imports: `from praisonaiagents import Agent, Task, AgentTeam`",
             "3. Use AgentTeam() NOT PraisonAIAgentTeam() - Agents is the correct alias",
             "4. NO mock classes - use the REAL classes from praisonaiagents",
             "5. FLAT CODE - NO class definitions (simple def OK for tools/guardrails)",
@@ -1062,7 +1062,7 @@ print(result)
         # Generate dynamic sections
         sections.append(f'''```python
 """{name} - Advanced Example"""
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 
 # Section 1: Basic {slug} usage
 agent1 = Agent(instructions="Demonstrate {slug}", {param_name}={param_value})

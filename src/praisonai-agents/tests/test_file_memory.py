@@ -593,7 +593,7 @@ class TestMemoryIntegrationWithOpenAI:
             
         finally:
             # Cleanup
-            memory_path = f".praison/memory/{test_user_id}"
+            memory_path = f".praisonai/memory/{test_user_id}"
             if os.path.exists(memory_path):
                 shutil.rmtree(memory_path)
     
@@ -611,8 +611,12 @@ class TestMemoryIntegrationWithOpenAI:
         test_user_id = "persistence_test_user"
         
         try:
+            # Clean stale memory from prior runs
+            memory_path = f".praisonai/memory/{test_user_id}"
+            if os.path.exists(memory_path):
+                shutil.rmtree(memory_path)
+            
             from praisonaiagents.config import MemoryConfig
-            # First agent - store memories
             agent1 = Agent(
                 name="Agent 1",
                 # Uses default model (gpt-4o-mini via OPENAI_MODEL_NAME or fallback)
@@ -651,7 +655,7 @@ class TestMemoryIntegrationWithOpenAI:
             
         finally:
             # Cleanup
-            memory_path = f".praison/memory/{test_user_id}"
+            memory_path = f".praisonai/memory/{test_user_id}"
             if os.path.exists(memory_path):
                 shutil.rmtree(memory_path)
 
@@ -801,8 +805,12 @@ class TestMultiAgentMemoryIntegration:
         test_user_id = "multi_agent_llm_test"
         
         try:
+            # Clean stale memory from prior runs
+            memory_path = f".praisonai/memory/{test_user_id}"
+            if os.path.exists(memory_path):
+                shutil.rmtree(memory_path)
+            
             from praisonaiagents.config import MemoryConfig
-            # Agent 1 stores memories
             agent1 = Agent(
                 name="Agent1",
                 memory=MemoryConfig(user_id=test_user_id),
@@ -832,6 +840,6 @@ class TestMultiAgentMemoryIntegration:
             print(f"✅ Multi-agent memory sharing test passed! Response: {result}")
             
         finally:
-            memory_path = f".praison/memory/{test_user_id}"
+            memory_path = f".praisonai/memory/{test_user_id}"
             if os.path.exists(memory_path):
                 shutil.rmtree(memory_path)

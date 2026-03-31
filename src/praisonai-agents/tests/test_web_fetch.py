@@ -241,7 +241,12 @@ class TestWebFetchWithWebSearch:
     """Test that web_fetch and web_search can be used together."""
     
     def test_both_web_fetch_and_web_search(self):
-        """Test using both web_fetch and web_search on supported model."""
+        """Test using both web_fetch and web_search on Anthropic model.
+        
+        Note: Anthropic models support web_fetch natively but NOT web_search.
+        When web_search=True on an Anthropic model, it falls back to DuckDuckGo
+        tool injection rather than native web_search_options.
+        """
         from praisonaiagents.llm.llm import LLM
         llm = LLM(
             model="anthropic/claude-3-5-sonnet-latest",
@@ -250,17 +255,14 @@ class TestWebFetchWithWebSearch:
         )
         params = llm._build_completion_params()
         
-        # Should have web_search_options
-        assert 'web_search_options' in params
-        
-        # Should also have web_fetch tool
+        # Should have web_fetch tool (native Anthropic support)
         assert 'tools' in params
         web_fetch_found = False
         for tool in params['tools']:
             if isinstance(tool, dict) and tool.get('type') == 'web_fetch_20250910':
                 web_fetch_found = True
                 break
-        assert web_fetch_found
+        assert web_fetch_found, "web_fetch tool should be present for Anthropic models"
 
 
 @pytest.mark.skipif(

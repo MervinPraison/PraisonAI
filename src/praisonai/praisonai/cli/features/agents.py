@@ -179,7 +179,7 @@ class MultiAgentHandler:
             Execution result
         """
         try:
-            from praisonaiagents import Agent, Task, Agents
+            from praisonaiagents import Agent, Task, AgentTeam
             
             # Create Agent objects
             agents = []

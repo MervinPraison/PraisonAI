@@ -5,7 +5,7 @@ import yaml
 import logging
 import inspect
 import chainlit as cl
-from praisonaiagents import Agent, Task, Agents, register_display_callback
+from praisonaiagents import Agent, Task, AgentTeam, register_display_callback
 
 framework = "praisonai"
 config_list = [

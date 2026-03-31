@@ -792,7 +792,7 @@ import sys
 sys.path.insert(0, "{self._get_project_root()}/src/praisonai")
 
 t0 = time.perf_counter()
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 t_import = time.perf_counter()
 
 agent = Agent(name="Helper", instructions="You are helpful", llm="{self.DEFAULT_MODEL}", output="minimal")
@@ -838,7 +838,7 @@ import sys
 sys.path.insert(0, "{self._get_project_root()}/src/praisonai")
 
 t0 = time.perf_counter()
-from praisonaiagents import Agent, Task, Agents
+from praisonaiagents import Agent, Task, AgentTeam
 t_import = time.perf_counter()
 
 agent1 = Agent(name="Analyzer", instructions="Analyze the request", llm="{self.DEFAULT_MODEL}", output="minimal")

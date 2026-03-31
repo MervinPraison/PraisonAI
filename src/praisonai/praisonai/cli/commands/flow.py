@@ -33,7 +33,7 @@ def flow_start(
 ):
     """Start PraisonAI Flow — visual workflow builder.
 
-    Launches Langflow with PraisonAI Agent, Agents, and Task components
+    Launches Langflow with PraisonAI Agent, AgentTeam, and Task components
     pre-loaded in the sidebar. Build complex AI workflows visually.
 
     Install: pip install praisonai[flow]
@@ -80,6 +80,14 @@ def flow_start(
     env["LANGFLOW_COMPONENTS_PATH"] = (
         f"{all_paths},{existing}" if existing else all_paths
     )
+
+    # Suppress macOS CoreFoundation fork safety warnings (harmless noise from multiprocessing)
+    if sys.platform == "darwin":
+        env.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
+
+    # Suppress noisy Openlayer/loguru debug messages unless user wants them
+    if log_level.lower() not in ("debug",):
+        env.setdefault("LOGURU_LEVEL", log_level.upper())
 
     # Build langflow run command
     cmd = [

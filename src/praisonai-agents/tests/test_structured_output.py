@@ -100,6 +100,7 @@ class TestStructuredOutputWiring:
         agent._yaml_output_json = {"type": "array", "items": {"type": "string"}}
         agent._yaml_output_pydantic = None  # Explicitly None to avoid conflict
         agent._yaml_step_name = "test_step"
+        agent._yaml_guardrail = None  # Prevent Mock auto-creating a truthy guardrail
         
         # Mock the chat method
         agent.chat = Mock(return_value="test output")
@@ -125,6 +126,7 @@ class TestStructuredOutputWiring:
         agent._yaml_output_json = None  # Explicitly None to avoid conflict
         agent._yaml_output_pydantic = "TopicList"
         agent._yaml_step_name = "test_step"
+        agent._yaml_guardrail = None  # Prevent Mock auto-creating a truthy guardrail
         agent.chat = Mock(return_value="test output")
         
         workflow = Workflow(steps=[])
