@@ -15,6 +15,9 @@ This is the main entry point for context management in both SDK and CLI.
 
 import hashlib
 import json
+from praisonaiagents._logging import get_logger
+
+logger = get_logger(__name__)
 import threading
 import atexit
 from typing import Dict, List, Any, Optional, Literal, Callable, Tuple

@@ -337,14 +337,16 @@ class Task:
         # Set logger level based on config verbose level
         verbose = self.config.get("verbose", 0)
         if verbose >= 5:
-
+            logger.setLevel(10)  # DEBUG
         else:
+            logger.setLevel(30)  # WARNING
 
         # Also set third-party loggers to WARNING
-        get_logger('chromadb').setLevel(logging.WARNING)
-        get_logger('openai').setLevel(logging.WARNING)
-        get_logger('httpx').setLevel(logging.WARNING)
-        get_logger('httpcore').setLevel(logging.WARNING)
+        import logging as _logging
+        get_logger('chromadb').setLevel(_logging.WARNING)
+        get_logger('openai').setLevel(_logging.WARNING)
+        get_logger('httpx').setLevel(_logging.WARNING)
+        get_logger('httpcore').setLevel(_logging.WARNING)
 
         if self.output_json and self.output_pydantic:
             raise ValueError("Only one output type can be defined")

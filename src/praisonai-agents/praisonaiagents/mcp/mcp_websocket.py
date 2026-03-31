@@ -417,8 +417,9 @@ class WebSocketMCPClient:
         
         # Configure logging
         if debug:
-
+            logger.setLevel(10)  # DEBUG
         else:
+            logger.setLevel(30)  # WARNING
 
         # Initialize connection
         self._initialize()

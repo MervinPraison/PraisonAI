@@ -254,16 +254,18 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
         
         # Set logger level based on verbose
         if verbose >= 5:
-
+            logger.setLevel(10)  # DEBUG
         else:
+            logger.setLevel(30)  # WARNING
 
         # Also set ChromaDB and OpenAI client loggers to WARNING
-        get_logger('chromadb').setLevel(logging.WARNING)
-        get_logger('openai').setLevel(logging.WARNING)
-        get_logger('httpx').setLevel(logging.WARNING)
-        get_logger('httpcore').setLevel(logging.WARNING)
-        get_logger('chromadb.segment.impl.vector.local_persistent_hnsw').setLevel(logging.ERROR)
-        get_logger('utils').setLevel(logging.WARNING)
+        import logging as _logging
+        get_logger('chromadb').setLevel(_logging.WARNING)
+        get_logger('openai').setLevel(_logging.WARNING)
+        get_logger('httpx').setLevel(_logging.WARNING)
+        get_logger('httpcore').setLevel(_logging.WARNING)
+        get_logger('chromadb.segment.impl.vector.local_persistent_hnsw').setLevel(_logging.ERROR)
+        get_logger('utils').setLevel(_logging.WARNING)
         get_logger('litellm.utils').setLevel(logging.WARNING)
             
         self.provider = self.cfg.get("provider", "rag")

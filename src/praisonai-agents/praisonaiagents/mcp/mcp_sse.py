@@ -151,9 +151,10 @@ class SSEMCPClient:
 
         # Set up logging
         if debug:
-
+            logger.setLevel(10)  # DEBUG
         else:
             # Set to WARNING by default to hide INFO messages
+            logger.setLevel(30)  # WARNING
 
         self._initialize()
         

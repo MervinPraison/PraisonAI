@@ -151,8 +151,8 @@ class TestSearchWebReliability:
         
         # Check that the function has retry logic by inspecting source
         source = inspect.getsource(_search_duckduckgo)
-        assert 'max_retries' in source, "_search_duckduckgo should have retry logic"
-        assert 'retry_delay' in source, "_search_duckduckgo should have retry delay"
+        assert 'retry_with_backoff' in source, "_search_duckduckgo should have retry logic"
+        assert 'retry_with_backoff' in source, "_search_duckduckgo should have retry delay"
 
 
 class TestToolErrorConsistency:

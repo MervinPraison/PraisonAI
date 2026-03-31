@@ -505,9 +505,10 @@ class HTTPStreamMCPClient:
         
         # Set up logging
         if debug:
-
+            logger.setLevel(10)  # DEBUG
         else:
             # Set to WARNING by default to hide INFO messages
+            logger.setLevel(30)  # WARNING
 
         # Register this client for cleanup and setup exit handler
         _active_clients.add(self)

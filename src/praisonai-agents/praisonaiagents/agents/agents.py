@@ -449,16 +449,18 @@ class AgentTeam:
         
         # Set logger level based on verbose
         if _verbose >= 5:
-
+            logger.setLevel(10)  # DEBUG
         elif _verbose >= 3:
-
+            logger.setLevel(20)  # INFO
         else:
+            logger.setLevel(30)  # WARNING
 
         # Also set third-party loggers to WARNING
-        get_logger('chromadb').setLevel(logging.WARNING)
-        get_logger('openai').setLevel(logging.WARNING)
-        get_logger('httpx').setLevel(logging.WARNING)
-        get_logger('httpcore').setLevel(logging.WARNING)
+        import logging as _logging
+        get_logger('chromadb').setLevel(_logging.WARNING)
+        get_logger('openai').setLevel(_logging.WARNING)
+        get_logger('httpx').setLevel(_logging.WARNING)
+        get_logger('httpcore').setLevel(_logging.WARNING)
 
         if self.verbose:
             logger.info(f"Using model {self.manager_llm} for manager")

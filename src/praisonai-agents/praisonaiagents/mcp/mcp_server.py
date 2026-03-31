@@ -62,6 +62,7 @@ class ToolsMCPServer:
         self._debug = debug
         
         if debug:
+            logger.setLevel(10)  # DEBUG
 
         # Register initial tools if provided
         if tools:

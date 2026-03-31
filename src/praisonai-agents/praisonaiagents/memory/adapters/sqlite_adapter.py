@@ -68,8 +68,9 @@ class SqliteMemoryAdapter:
         
         # Set logger level based on verbose
         if verbose >= 5:
-
+            logger.setLevel(10)  # DEBUG
         else:
+            logger.setLevel(30)  # WARNING
 
     def _get_stm_conn(self):
         """Get thread-local short-term memory connection."""
