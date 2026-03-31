@@ -4134,21 +4134,24 @@ Do NOT add any explanations or formatting."""
                 
                 # Planning Mode
                 if getattr(self.args, 'planning', False):
-                    agent_config["planning"] = True
+                    from praisonaiagents import PlanningConfig
+                    planning_kwargs = {}
                     print("[bold cyan]Planning mode enabled - agent will create a plan before execution[/bold cyan]")
                     
                     # Load planning tools if specified
                     if getattr(self.args, 'planning_tools', None):
                         planning_tools_list = self._load_tools(self.args.planning_tools)
                         if planning_tools_list:
-                            agent_config["planning_tools"] = planning_tools_list
+                            planning_kwargs["tools"] = planning_tools_list
                     # If no planning_tools but --tools is specified, use those for planning too
                     elif getattr(self.args, 'tools', None) and agent_config.get('tools'):
-                        agent_config["planning_tools"] = agent_config['tools']
+                        planning_kwargs["tools"] = agent_config['tools']
                         print("[cyan]Using --tools for planning as well[/cyan]")
                     
                     if getattr(self.args, 'planning_reasoning', False):
-                        agent_config["planning_reasoning"] = True
+                        planning_kwargs["reasoning"] = True
+                    
+                    agent_config["planning"] = PlanningConfig(**planning_kwargs) if planning_kwargs else True
                 
                 # P8/G11: Tool timeout - prevent slow tools from blocking
                 tool_timeout = getattr(self.args, 'tool_timeout', 60)
@@ -4157,20 +4160,26 @@ Do NOT add any explanations or formatting."""
                 
                 # Memory
                 if getattr(self.args, 'memory', False):
-                    agent_config["memory"] = True
-                    print("[bold cyan]Memory enabled - agent will remember context across sessions[/bold cyan]")
-                    
+                    memory_kwargs = {}
                     if getattr(self.args, 'user_id', None):
-                        agent_config["user_id"] = self.args.user_id
-                
-                # Session management
-                if getattr(self.args, 'auto_save', None):
-                    agent_config["memory"] = True  # Auto-save requires memory
-                    agent_config["auto_save"] = self.args.auto_save
+                        memory_kwargs["user_id"] = self.args.user_id
+                    if getattr(self.args, 'auto_save', None):
+                        memory_kwargs["auto_save"] = self.args.auto_save
+                        print(f"[bold cyan]Auto-save enabled - session will be saved as '{self.args.auto_save}'[/bold cyan]")
+                    if memory_kwargs:
+                        from praisonaiagents import MemoryConfig
+                        agent_config["memory"] = MemoryConfig(**memory_kwargs)
+                    else:
+                        agent_config["memory"] = True
+                    print("[bold cyan]Memory enabled - agent will remember context across sessions[/bold cyan]")
+                elif getattr(self.args, 'auto_save', None):
+                    from praisonaiagents import MemoryConfig
+                    agent_config["memory"] = MemoryConfig(auto_save=self.args.auto_save)
                     print(f"[bold cyan]Auto-save enabled - session will be saved as '{self.args.auto_save}'[/bold cyan]")
                 
                 if getattr(self.args, 'history', None):
-                    agent_config["memory"] = True  # History requires memory
+                    if agent_config.get("memory") is None:
+                        agent_config["memory"] = True  # History requires memory
                     # Note: history_in_context param removed - history loading now via context= param
                     print(f"[bold cyan]History enabled - loading context from last {self.args.history} session(s)[/bold cyan]")
                 
@@ -4178,7 +4187,12 @@ Do NOT add any explanations or formatting."""
                 if getattr(self.args, 'claude_memory', False):
                     llm = getattr(self.args, 'llm', '')
                     if llm and 'anthropic' in llm.lower():
-                        agent_config["claude_memory"] = True
+                        from praisonaiagents import MemoryConfig
+                        existing_memory = agent_config.get("memory")
+                        if isinstance(existing_memory, MemoryConfig):
+                            existing_memory.claude_memory = True
+                        else:
+                            agent_config["memory"] = MemoryConfig(claude_memory=True)
                         print("[bold cyan]Claude Memory Tool enabled - Claude will autonomously manage memories[/bold cyan]")
                     else:
                         print("[yellow]Warning: --claude-memory requires an Anthropic model (--llm anthropic/...)[/yellow]")
