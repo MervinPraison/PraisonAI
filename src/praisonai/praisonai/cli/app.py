@@ -269,7 +269,7 @@ def register_commands():
     app.add_typer(call_app, name="call", help="Voice/call interaction mode")
     app.add_typer(realtime_app, name="realtime", help="Realtime interaction mode")
     app.add_typer(train_app, name="train", help="Model training and fine-tuning")
-    app.add_typer(ui_app, name="ui", help="Web UI management")
+    app.add_typer(ui_app, name="ui", help="🤖 Clean Chat UI (praisonaiui)")
     app.add_typer(context_app, name="context", help="Context management")
     app.add_typer(research_app, name="research", help="Research and analysis")
     app.add_typer(memory_app, name="memory", help="Memory management")

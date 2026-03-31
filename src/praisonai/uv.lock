@@ -4907,10 +4907,7 @@ realtime = [
     { name = "yfinance" },
 ]
 ui = [
-    { name = "aiosqlite" },
-    { name = "chainlit" },
-    { name = "greenlet" },
-    { name = "sqlalchemy" },
+    { name = "aiui" },
 ]
 
 [package.metadata]
@@ -4925,7 +4922,7 @@ requires-dist = [
     { name = "aiosqlite", marker = "extra == 'claw'", specifier = ">=0.20.0" },
     { name = "aiosqlite", marker = "extra == 'code'", specifier = ">=0.20.0" },
     { name = "aiosqlite", marker = "extra == 'realtime'", specifier = ">=0.20.0" },
-    { name = "aiosqlite", marker = "extra == 'ui'", specifier = ">=0.20.0" },
+    { name = "aiui", marker = "extra == 'ui'", specifier = ">=0.3.60" },
     { name = "aiui", extras = ["all"], marker = "extra == 'claw'", specifier = ">=0.3.60" },
     { name = "autogen-agentchat", marker = "extra == 'autogen-v4'", specifier = ">=0.4.0" },
     { name = "autogen-core", marker = "extra == 'autogen-v4'", specifier = ">=0.4.0" },
@@ -4937,7 +4934,6 @@ requires-dist = [
     { name = "chainlit", marker = "extra == 'claw'", specifier = ">=2.8.5,<=2.9.4" },
     { name = "chainlit", marker = "extra == 'code'", specifier = ">=2.8.5,<=2.9.4" },
     { name = "chainlit", marker = "extra == 'realtime'", specifier = ">=2.8.5,<=2.9.4" },
-    { name = "chainlit", marker = "extra == 'ui'", specifier = ">=2.8.5,<=2.9.4" },
     { name = "crawl4ai", marker = "extra == 'all'", specifier = ">=0.7.0" },
     { name = "crawl4ai", marker = "extra == 'chat'", specifier = ">=0.7.0" },
     { name = "crawl4ai", marker = "extra == 'claw'", specifier = ">=0.7.0" },
@@ -4968,7 +4964,6 @@ requires-dist = [
     { name = "greenlet", marker = "extra == 'claw'", specifier = ">=3.0.3" },
     { name = "greenlet", marker = "extra == 'code'", specifier = ">=3.0.3" },
     { name = "greenlet", marker = "extra == 'realtime'", specifier = ">=3.0.3" },
-    { name = "greenlet", marker = "extra == 'ui'", specifier = ">=3.0.3" },
     { name = "litellm", specifier = ">=1.81.0,<=1.82.6" },
     { name = "markdown", specifier = ">=3.5" },
     { name = "mcp", specifier = ">=1.20.0" },
@@ -5012,7 +5007,6 @@ requires-dist = [
     { name = "sqlalchemy", marker = "extra == 'claw'", specifier = ">=2.0.36" },
     { name = "sqlalchemy", marker = "extra == 'code'", specifier = ">=2.0.36" },
     { name = "sqlalchemy", marker = "extra == 'realtime'", specifier = ">=2.0.36" },
-    { name = "sqlalchemy", marker = "extra == 'ui'", specifier = ">=2.0.36" },
     { name = "sse-starlette", marker = "extra == 'all'", specifier = ">=1.6.0" },
     { name = "sse-starlette", marker = "extra == 'api'", specifier = ">=1.6.0" },
     { name = "sse-starlette", marker = "extra == 'claw'", specifier = ">=1.6.0" },
@@ -5054,7 +5048,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.5.105"
+version = "1.5.106"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },

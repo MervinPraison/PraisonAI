@@ -12,7 +12,7 @@ dependencies = [
     "rich>=13.7",
     "markdown>=3.5",
     "pyparsing>=3.0.0",
-    "praisonaiagents>=1.5.105",
+    "praisonaiagents>=1.5.106",
     "python-dotenv>=0.19.0",
     "litellm>=1.81.0,<=1.82.6",
     "PyYAML>=6.0",
@@ -28,10 +28,7 @@ praisonai-call = "praisonai.api.call:main"
 
 [project.optional-dependencies]
 ui = [
-    "chainlit>=2.8.5,<=2.9.4",
-    "sqlalchemy>=2.0.36",
-    "aiosqlite>=0.20.0",
-    "greenlet>=3.0.3"
+    "aiui>=0.3.60",
 ]
 gradio = ["gradio>=4.26.0"]
 api = [

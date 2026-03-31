@@ -1129,7 +1129,8 @@ class PraisonAI:
         if args.command == 'api:app' or args.command == '/app/api:app':
             args.command = 'agents.yaml'
         if args.command == 'ui':
-            args.ui = 'chainlit'
+            # UI command — routes to Typer CLI for clean chat UI (praisonaiui)
+            pass
         # chat and code commands are now terminal-native (handled by Typer commands)
         # They no longer set args.ui = 'chainlit' or open browser
         
@@ -1238,11 +1239,16 @@ class PraisonAI:
                 config_yaml_destination = os.path.join(os.getcwd(), 'config.yaml')
 
             elif args.command == 'ui':
-                if not CHAINLIT_AVAILABLE:
-                    print("[red]ERROR: UI is not installed. Install with:[/red]")
-                    print("\npip install \"praisonai[ui]\"\n")
-                    sys.exit(1)
-                self.create_chainlit_interface()
+                # UI command — Clean Chat UI (praisonaiui)
+                # Routes to Typer CLI for ui command (launches clean chat)
+                from .app import app as typer_app, register_commands
+                register_commands()
+                import sys as _sys
+                _sys.argv = ['praisonai', 'ui'] + unknown_args
+                try:
+                    typer_app()
+                except SystemExit as e:
+                    sys.exit(e.code if e.code else 0)
                 sys.exit(0)
 
             elif args.command == 'context':
