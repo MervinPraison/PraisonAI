@@ -4,7 +4,10 @@ PraisonAI CLI Package
 This package provides the command-line interface for PraisonAI.
 
 Structure:
-- main.py: Main CLI entry point (PraisonAI class)
+- ../.__main__.py: Unified CLI entry point (Typer-first, legacy fallback)
+- app.py: Typer app with all command registrations
+- main.py: Legacy argparse PraisonAI class (used for prompts/YAML)
+- commands/: Individual Typer command modules
 - features/: Feature handlers for CLI flags and commands
 """
 
@@ -21,6 +24,5 @@ def __getattr__(name):
 
 def main():
     """CLI entry point function."""
-    from .main import PraisonAI
-    praison_ai = PraisonAI()
-    praison_ai.main()
+    from praisonai.__main__ import main as _main
+    _main()

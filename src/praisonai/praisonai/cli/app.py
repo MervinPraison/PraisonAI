@@ -163,8 +163,14 @@ def get_output_controller() -> OutputController:
 
 
 # Import and register command groups
+_commands_registered = False
+
 def register_commands():
-    """Register all command groups."""
+    """Register all command groups (idempotent)."""
+    global _commands_registered
+    if _commands_registered:
+        return
+    _commands_registered = True
     # Import command modules - Core commands
     from .commands.config import app as config_app
     from .commands.traces import app as traces_app
