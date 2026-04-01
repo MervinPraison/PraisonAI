@@ -36,10 +36,17 @@ jobs:
         with:
           fetch-depth: 0
           
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CLAUDE_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
+
       - uses: anthropics/claude-code-action@beta
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ secrets.GH_TOKEN }}
+          github_token: ${{ steps.app-token.outputs.token }}
           trigger_phrase: "@claude"
           label_trigger: "claude"
           direct_prompt: |
