@@ -147,6 +147,10 @@ class EvalSuite:
             logger.error(f"EvalSuite '{self.name}' failed: {e}")
             result.errors.append(str(e))
             result.success = False
+            
+            # Re-raise RuntimeError for fail_fast behavior
+            if self.fail_fast and isinstance(e, RuntimeError):
+                raise
         
         result.end_time = time.time()
         
@@ -211,10 +215,13 @@ class EvalSuite:
         
         if hasattr(eval_result, 'overall_score'):
             return float(eval_result.overall_score)
+
+        if hasattr(eval_result, 'avg_score'):
+            return float(eval_result.avg_score)
         
         # Try to extract from result dictionary
         if isinstance(eval_result, dict):
-            for key in ['score', 'overall_score', 'final_score']:
+            for key in ['score', 'overall_score', 'avg_score', 'final_score']:
                 if key in eval_result:
                     return float(eval_result[key])
         

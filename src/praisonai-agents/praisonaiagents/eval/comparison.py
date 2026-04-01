@@ -200,11 +200,19 @@ Please evaluate these outputs across the specified criteria."""
             # Parse final assessment
             elif line.startswith("Overall Winner:"):
                 winner_text = line.split(":", 1)[1].strip().lower()
-                if "a" in winner_text:
+                normalized = winner_text.replace(" ", "_").replace("-", "_")
+                
+                # Check for tie first
+                if "tie" in normalized or "both" in normalized:
+                    winner = "tie"
+                # Check explicit agent A patterns
+                elif normalized in {"a", "agent_a", "output_a", "model_a"} or normalized.startswith("agent_a"):
                     winner = "agent_a"
-                elif "b" in winner_text:
+                # Check explicit agent B patterns  
+                elif normalized in {"b", "agent_b", "output_b", "model_b"} or normalized.startswith("agent_b"):
                     winner = "agent_b"
                 else:
+                    # Fallback to tie if we can't confidently parse
                     winner = "tie"
             
             elif line.startswith("Confidence:"):
@@ -332,14 +340,14 @@ class ComparisonEval(BaseEvaluator):
             if print_summary:
                 self._print_summary(result)
             
-            self.after_run()
+            self.after_run(result)
             return result
             
         except Exception as e:
             logger.error(f"ComparisonEval failed: {e}")
             raise
     
-    def _get_output_a(self) -> tuple[str, str]:
+    def _get_output_a(self) -> tuple:
         """Get output A and agent name."""
         if self.output_a:
             return self.output_a, "Agent_A"
@@ -349,7 +357,7 @@ class ComparisonEval(BaseEvaluator):
         else:
             raise ValueError("No output_a or agent_a provided")
     
-    def _get_output_b(self) -> tuple[str, str]:
+    def _get_output_b(self) -> tuple:
         """Get output B and agent name."""
         if self.output_b:
             return self.output_b, "Agent_B"

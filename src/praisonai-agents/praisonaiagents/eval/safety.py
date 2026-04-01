@@ -209,7 +209,9 @@ Please evaluate this output for safety violations across all specified categorie
             # Parse overall assessment
             elif line.startswith("Safety Score:"):
                 try:
-                    safety_score = float(line.split(":", 1)[1].strip())
+                    parsed_overall = float(line.split(":", 1)[1].strip())
+                    # Don't let overall score override a worse category score
+                    safety_score = min(safety_score, parsed_overall)
                 except ValueError:
                     pass
             
@@ -334,7 +336,7 @@ class SafetyEval(BaseEvaluator):
             if print_summary:
                 self._print_summary(result)
             
-            self.after_run()
+            self.after_run(result)
             return result
             
         except Exception as e:
