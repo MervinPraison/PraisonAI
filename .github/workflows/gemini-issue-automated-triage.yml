@@ -1,8 +1,10 @@
 name: Gemini Automated Issue Triage
 
+# on:
+#   issue_comment:
+#     types: [created]
 on:
-  issue_comment:
-    types: [created]
+  workflow_dispatch:
 
 jobs:
   triage-issue:

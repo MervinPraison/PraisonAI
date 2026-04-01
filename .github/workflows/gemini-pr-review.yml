@@ -1,8 +1,8 @@
 name: Gemini PR Review
 
 on:
-  issue_comment:
-    types: [created]
+#   issue_comment:
+#     types: [created]
   workflow_dispatch:
     inputs:
       pr_number:

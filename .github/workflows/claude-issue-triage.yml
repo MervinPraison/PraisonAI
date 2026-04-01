@@ -2,8 +2,9 @@ name: Claude Issue Triage
 description: "Automatically triage GitHub issues using Claude Code"
 
 on:
-  issues:
-    types: [opened]
+  workflow_dispatch:
+#   issues:
+#     types: [opened]
 
 jobs:
   triage-issue:

@@ -6,7 +6,7 @@ on:
   pull_request_review_comment:
     types: [created]
   issues:
-    types: [assigned, labeled]
+    types: [assigned, labeled, opened]
   pull_request_review:
     types: [submitted]
 

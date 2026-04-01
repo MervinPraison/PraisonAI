@@ -1,8 +1,9 @@
 name: Auto Issue Comment
 
 on:
-  issues:
-    types: [opened]
+  workflow_dispatch:
+#   issues:
+#     types: [opened]
 
 jobs:
   # Trigger Claude by adding the 'claude' label (only if not already labeled)
