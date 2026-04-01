@@ -96,4 +96,5 @@ Cargo.lock
 .windsurf
 .agent
 
-src/praisonai/build
+src/praisonai/build*.egg-info/
+src/praisonai/PraisonAI.egg-info/

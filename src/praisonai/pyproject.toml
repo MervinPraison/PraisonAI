@@ -63,6 +63,9 @@ code = [
     "sqlalchemy>=2.0.36",
     "playwright>=1.47.0"
 ]
+sandbox = [
+    "sandlock>=0.1.0",
+]
 realtime = [
     "chainlit>=2.8.5,<=2.9.4",
     "aiosqlite>=0.20.0",
