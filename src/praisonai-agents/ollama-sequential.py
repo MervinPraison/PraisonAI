@@ -1,4 +1,4 @@
-from praisonaiagents import Agent
+from praisonaiagents import Agent, AgentConfig
 
 def get_stock_price(company_name: str) -> str:
     """
@@ -23,7 +23,8 @@ def multiply(a: int, b: int) -> int:
 agent = Agent(
     instructions="You are a helpful assistant. You can use the tools provided to you to help the user.",
     llm="ollama/llama3.2",
-    tools=[get_stock_price, multiply]
+    tools=[get_stock_price, multiply],
+    config=AgentConfig(stream=True, log_level="DEBUG", max_iterations=5)
 )
 
 result = agent.start("what is the stock price of Google? multiply the Google stock price with 2")
