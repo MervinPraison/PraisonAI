@@ -1440,12 +1440,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
         
         try:
-            return await self._achat_impl(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, task_name, task_description, task_id, attachments, _trace_emitter)
+            return await self._achat_impl(
+                prompt=prompt, temperature=temperature, tools=tools,
+                output_json=output_json, output_pydantic=output_pydantic,
+                reasoning_steps=reasoning_steps, stream=stream,
+                task_name=task_name, task_description=task_description, task_id=task_id,
+                config=config, force_retrieval=force_retrieval, skip_retrieval=skip_retrieval,
+                attachments=attachments, _trace_emitter=_trace_emitter, tool_choice=tool_choice
+            )
         finally:
             _trace_emitter.agent_end(self.name)
 
-    async def _achat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, task_name, task_description, task_id, attachments, _trace_emitter):
+    async def _achat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None):
         """Internal async chat implementation (extracted for trace wrapping)."""
+        # Use agent's stream setting if not explicitly provided
+        if stream is None:
+            stream = self.stream
         # Process ephemeral attachments (DRY - builds multimodal prompt)
         # IMPORTANT: Original text 'prompt' is stored in history, attachments are NOT
         llm_prompt = self._build_multimodal_prompt(prompt, attachments) if attachments else prompt
@@ -1506,7 +1516,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if self._knowledge_sources and not self._knowledge_processed:
                 self._ensure_knowledge_processed()
             
-            if self.knowledge:
+            if not skip_retrieval and self.knowledge:
                 search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
                 if search_results:
                     if isinstance(search_results, dict) and 'results' in search_results:
@@ -1580,7 +1590,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         task_description=task_description,
                         task_id=task_id,
                         execute_tool_fn=self.execute_tool_async,
-                        reasoning_steps=reasoning_steps
+                        reasoning_steps=reasoning_steps,
+                        stream=stream
                     )
 
                     self.chat_history.append({"role": "assistant", "content": response_text})
@@ -1686,11 +1697,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                     # Make the API call based on the type of request
                     if tools:
-                        response = await self._openai_client.async_client.chat.completions.create(
+                        effective_tool_choice = tool_choice or getattr(self, '_yaml_tool_choice', None)
+                        tool_call_kwargs = dict(
                             model=self.llm,
                             messages=messages,
                             temperature=temperature,
                             tools=formatted_tools,
+                        )
+                        if effective_tool_choice:
+                            tool_call_kwargs['tool_choice'] = effective_tool_choice
+                        response = await self._openai_client.async_client.chat.completions.create(
+                            **tool_call_kwargs
                         )
                         result = await self._achat_completion(response, tools)
                         if get_logger().getEffectiveLevel() == logging.DEBUG:
@@ -1920,7 +1937,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             model=self.llm,
                             messages=messages,
                             temperature=1.0,
-                            stream=True
+                            stream=stream
                         )
                         full_response_text = ""
                         reasoning_content = ""
