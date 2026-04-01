@@ -52,7 +52,7 @@ jobs:
     - name: Sync with upstream
       run: |
         git config --global user.name "MervinPraison"
-        git config --global user.email "praison.ms@gmail.com"
+        git config --global user.email "454862+MervinPraison@users.noreply.github.com"
         
         # Add upstream remote
         git remote add upstream https://github.com/MervinPraison/PraisonAI.git
@@ -474,7 +474,7 @@ jobs:
     - name: Create tag at commit
       run: |
         git config --global user.name "MervinPraison"
-        git config --global user.email "praison.ms@gmail.com"
+        git config --global user.email "454862+MervinPraison@users.noreply.github.com"
         
         # Remove tag if it exists locally
         git tag -d ${{ github.event.inputs.tag }} || true

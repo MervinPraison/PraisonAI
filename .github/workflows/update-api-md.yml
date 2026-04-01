@@ -53,5 +53,5 @@ jobs:
         commit_message: "docs: auto-update api.md [skip ci]"
         file_pattern: 'api.md'
         commit_user_name: "MervinPraison"
-        commit_user_email: "praison.ms@gmail.com"
-        commit_author: "MervinPraison <praison.ms@gmail.com>"
+        commit_user_email: "454862+MervinPraison@users.noreply.github.com"
+        commit_author: "MervinPraison <454862+MervinPraison@users.noreply.github.com>"

@@ -37,7 +37,7 @@ def example_simple_enable():
         instructions="You are a helpful assistant",
         memory=True,      # Enable memory with defaults
         reflection=True,  # Enable self-reflection
-        web=True,         # Enable web search + fetch
+        web=WebConfig(fetch=False),         # Enable web search + fetch
     )
     print(f"Agent created with memory={agent._memory_instance is not None}")
     print(f"  self_reflect={agent.self_reflect}")
@@ -152,7 +152,7 @@ def example_string_presets():
         instructions="You are a verbose assistant",
         output="verbose",      # String preset for output
         execution="fast",      # String preset for execution
-        web="tavily",          # String preset for web provider
+        web=["tavily", {"fetch": False}],          # String preset with override for web provider
     )
     print(f"Output preset 'verbose': verbose={agent.verbose}, metrics={agent.metrics}")
     print(f"Execution preset 'fast': max_iter={agent.max_iter}")

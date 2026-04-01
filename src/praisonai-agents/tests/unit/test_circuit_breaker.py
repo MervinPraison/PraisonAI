@@ -388,6 +388,8 @@ class TestCircuitBreakerIntegration:
 
 
 # Real agentic test (MANDATORY per AGENTS.md)
+import os
+@pytest.mark.skipif(not os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY") == "not-needed", reason="Requires OpenAI API Key")
 def test_circuit_breaker_real_agentic():
     """Real agentic test - create agent and test circuit breaker integration."""
     from praisonaiagents import Agent
