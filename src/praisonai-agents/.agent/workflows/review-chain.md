@@ -11,11 +11,11 @@ PR opened
   ↓
 CodeRabbit (@coderabbitai) ─── auto for human PRs, triggered via comment for bot PRs
 Qodo (/review)             ─── auto for human PRs, triggered via comment for bot PRs
-Gemini (@gemini)           ─── triggered via comment for bot PRs
-  ↓ (~3-5 min)
+Gemini (@gemini)           ─── triggered via comment for bot PRs/Issues
+  ↓ (~3-5 min)                  ↓ (auto triggers Claude on completion)
 Copilot (@copilot)         ─── triggered ONLY after CodeRabbit or Qodo post their review
   ↓
-Claude (@claude)           ─── triggered ONLY after Copilot submits review (final reviewer)
+Claude (@claude)           ─── triggered ONLY after Copilot OR Gemini finishes (final reviewer)
 ```
 
 ## Workflow Files
@@ -23,7 +23,7 @@ Claude (@claude)           ─── triggered ONLY after Copilot submits review
 | File | Trigger | Does what |
 |------|---------|-----------|
 | `auto-pr-comment.yml` | `issue_comment`, `pull_request_review`, `pull_request:opened` | Triggers Copilot after CodeRabbit/Qodo finish. For bot PRs: triggers CodeRabbit+Qodo+Gemini first. |
-| `chain-claude-after-copilot.yml` | `pull_request_review:submitted` | Triggers Claude after Copilot reviews. |
+| `chain-claude-after-copilot.yml` | `pull_request_review:submitted`, `issue_comment` | Triggers Claude after Copilot reviews, AND automatically after Gemini Code Assist finishes fixing issues/PRs. |
 | `claude.yml` | `issue_comment`, `pull_request_review_comment`, `issues:assigned/labeled` | Claude responds to @claude mentions. |
 
 ## Bot PR fix

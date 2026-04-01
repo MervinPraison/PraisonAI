@@ -5,9 +5,8 @@ on:
   pull_request_review:
     types: [submitted]
 
-  # Future: re-enable issue_comment trigger for Gemini→Claude chain
-  # issue_comment:
-  #   types: [created]
+  issue_comment:
+    types: [created]
 
 jobs:
   # Trigger Claude after Copilot finishes on a PR — Claude is the FINAL reviewer
@@ -23,7 +22,7 @@ jobs:
       - name: Post Claude final review + fix request
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             github.rest.issues.createComment({
               issue_number: context.issue.number,
@@ -32,24 +31,28 @@ jobs:
               body: '@claude You are the FINAL architecture reviewer. Read ALL comments above from Qodo, Coderabbit, and Copilot carefully before responding.\n\n**Phase 1: Review per AGENTS.md**\n1. Protocol-driven: heavy code in wrapper, not core SDK?\n2. Backward compatible: no public API removed without deprecation?\n3. Performance: no hot-path regressions, lazy imports for optional deps?\n4. DRY: no duplication, reuses existing abstractions?\n5. Async-safe and multi-agent safe?\n\n**Phase 2: Fix valid issues from other reviewers**\n6. Read Qodo, Coderabbit, and Copilot reviews above\n7. For each VALID suggestion they raised: implement the fix\n8. Push all fixes to THIS branch (do NOT create a new PR)\n9. Comment a summary of what you fixed and what you intentionally skipped (with reasoning)\n\n**Phase 3: Final verdict**\n10. If all issues are resolved and tests pass, approve the PR\n11. If blocking issues remain, request changes with clear action items'
             })
 
-  # Future: Trigger Claude after Gemini finishes on an Issue (commented out)
-  # claude-after-gemini-on-issue:
-  #   if: |
-  #     github.event_name == 'issue_comment' &&
-  #     !github.event.issue.pull_request &&
-  #     github.event.comment.user.login == 'gemini-code-assist[bot]'
-  #   runs-on: ubuntu-latest
-  #   permissions:
-  #     issues: write
-  #   steps:
-  #     - name: Post Claude analysis request (final reviewer)
-  #       uses: actions/github-script@v7
-  #       with:
-  #         github-token: ${{ secrets.GITHUB_TOKEN }}
-  #         script: |
-  #           github.rest.issues.createComment({
-  #             issue_number: context.issue.number,
-  #             owner: context.repo.owner,
-  #             repo: context.repo.repo,
-  #             body: '@claude You are the lead engineer. Read Gemini\'s analysis above first.\n\nAnalyze this issue and implement a fix following AGENTS.md:\n1. Ensure backward compatibility — no features removed\n2. Zero performance regression on hot paths\n3. Minimal, focused changes only\n4. Run tests to verify the fix\n5. Create a PR with your changes using gh'
-  #           })
+  # Trigger Claude after Gemini finishes on an Issue or PR
+  claude-after-gemini:
+    if: |
+      github.event_name == 'issue_comment' &&
+      (
+        github.event.comment.user.login == 'gemini-code-assist[bot]' ||
+        contains(github.event.comment.body, 'Review completed by Gemini CLI') ||
+        contains(github.event.comment.body, 'The fix is ready for review. Please test')
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Post Claude analysis request (final reviewer)
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '@claude You are the lead engineer. Read Gemini\'s analysis/review above first.\n\nAnalyze the issue/PR and ensure all fixes follow AGENTS.md:\n1. Ensure backward compatibility — no features removed\n2. Zero performance regression on hot paths\n3. Minimal, focused changes only\n4. Push all valid missing fixes to the branch.'
+            })
