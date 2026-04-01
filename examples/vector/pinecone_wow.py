@@ -15,8 +15,8 @@ if not api_key:
 agent = Agent(
     name="Assistant",
     instructions="You are a helpful assistant with access to documents.",
-    knowledge=["./docs/guide.pdf"],  # Add your documents here
     knowledge={
+        "sources": ["./docs/guide.pdf"],
         "vector_store": "pinecone",
         "api_key": api_key,
         "environment": "us-east-1"

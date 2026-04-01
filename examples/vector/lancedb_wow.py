@@ -5,11 +5,7 @@ from praisonaiagents import Agent
 agent = Agent(
     name="Assistant",
     instructions="You are a helpful assistant with access to documents.",
-    knowledge=["./docs/guide.pdf"],  # Add your documents here
-    knowledge={
-        "vector_store": "lancedb",
-        "path": "/tmp/lancedb_demo"
-    }
+    knowledge={"sources": ["./docs/guide.pdf"], "vector_store": {"provider": "lancedb", "path": "/tmp/lancedb_demo"}}
 )
 
 # Chat - agent uses knowledge for RAG

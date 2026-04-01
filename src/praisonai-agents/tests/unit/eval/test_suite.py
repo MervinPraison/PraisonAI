@@ -212,7 +212,8 @@ class TestEvalSuite:
         """Test score extraction from object with overall_score."""
         suite = EvalSuite(evaluators=[Mock()])
         
-        result_obj = Mock()
+        class DummyResult: pass
+        result_obj = DummyResult()
         result_obj.overall_score = 9.2
         
         score = suite._extract_score(result_obj)

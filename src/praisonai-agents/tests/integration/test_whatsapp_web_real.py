@@ -21,6 +21,10 @@ import time
 
 import pytest
 import yaml
+try:
+    import neonize
+except Exception as e:
+    pytest.skip(f"Skipping whatsapp tests: 'neonize' not available ({e}).", allow_module_level=True)
 
 # ── Helpers ────────────────────────────────────────────────────────
 

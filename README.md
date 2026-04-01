@@ -25,6 +25,15 @@
 
 PraisonAI 🦞 — Automate and solve complex challenges with AI agent teams that plan, research, code, and deliver results to Telegram, Discord, and WhatsApp — running 24/7. A low-code, production-ready multi-agent framework with handoffs, guardrails, memory, RAG, and 100+ LLM providers, built around simplicity, customisation, and effective human-agent collaboration.
 
+<div align="center">
+  <br>
+  <a href="https://x.com/elonmusk/status/1893870468249141688" target="_blank">
+    <img src="https://img.shields.io/badge/Highlighted_by_Elon_Musk-000000?style=for-the-badge&logo=x&logoColor=white" alt="Highlighted by Elon Musk" />
+  </a>
+  <p><em>"Grok 3 customer support" — <a href="https://x.com/elonmusk/status/1893870468249141688">Elon Musk quoting PraisonAI's tutorial</a></em></p>
+  <br>
+</div>
+
 <p align="center">
   <img src=".github/images/dashboard.png" alt="PraisonAI Dashboard" width="800" />
 </p>

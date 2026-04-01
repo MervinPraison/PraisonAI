@@ -11,11 +11,7 @@ url = os.getenv("PGVECTOR_URL", "postgresql://postgres:postgres@localhost:5433/p
 agent = Agent(
     name="Assistant",
     instructions="You are a helpful assistant with access to documents.",
-    knowledge=["./docs/guide.pdf"],  # Add your documents here
-    knowledge={
-        "vector_store": "pgvector",
-        "url": url
-    }
+    knowledge={"sources": ["./docs/guide.pdf"], "vector_store": {"provider": "pgvector", "url": url}}
 )
 
 # Chat - agent uses knowledge for RAG

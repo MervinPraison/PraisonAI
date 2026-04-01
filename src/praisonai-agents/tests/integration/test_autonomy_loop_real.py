@@ -6,9 +6,12 @@ Run with: pytest tests/integration/test_autonomy_loop_real.py -v -s
 """
 
 import time
+import os
+import pytest
 from praisonaiagents import Agent
 
 
+@pytest.mark.skipif(not os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY") == "not-needed", reason="Requires OpenAI API Key")
 class TestAutonomousLoopReal:
     """Real API tests for autonomous loop features."""
 

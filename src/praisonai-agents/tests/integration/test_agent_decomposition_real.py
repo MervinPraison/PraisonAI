@@ -52,7 +52,10 @@ def echo_tool(message: str) -> str:
 @pytest.fixture
 def api_key_check():
     """Ensure an API key is available for real LLM testing."""
-    if not os.environ.get("OPENAI_API_KEY") and not os.environ.get("ANTHROPIC_API_KEY"):
+    has_openai = bool(os.environ.get("OPENAI_API_KEY") and os.environ.get("OPENAI_API_KEY") != "not-needed")
+    has_anthropic = bool(os.environ.get("ANTHROPIC_API_KEY") and os.environ.get("ANTHROPIC_API_KEY") != "not-needed")
+    
+    if not has_openai and not has_anthropic:
         pytest.skip("Requires OPENAI_API_KEY or ANTHROPIC_API_KEY")
 
 

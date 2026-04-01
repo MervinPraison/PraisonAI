@@ -11,11 +11,7 @@ url = os.getenv("QDRANT_URL", "http://localhost:6333")
 agent = Agent(
     name="Assistant",
     instructions="You are a helpful assistant with access to documents.",
-    knowledge=["./docs/guide.pdf"],  # Add your documents here
-    knowledge={
-        "vector_store": "qdrant",
-        "url": url
-    }
+    knowledge={"sources": ["./docs/guide.pdf"], "vector_store": {"provider": "qdrant", "url": url}}
 )
 
 # Chat - agent uses knowledge for RAG

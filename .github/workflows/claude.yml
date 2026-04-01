@@ -56,7 +56,7 @@ jobs:
 
             STEP 0 — SETUP GIT IDENTITY:
             git config user.name "MervinPraison"
-            git config user.email "mervinpraison@gmail.com"
+            git config user.email "454862+MervinPraison@users.noreply.github.com"
 
             STEP 1 — READ GUIDELINES:
             Read AGENTS.md to understand the architecture rules.

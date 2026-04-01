@@ -16,8 +16,8 @@ if not weaviate_key:
 agent = Agent(
     name="Assistant",
     instructions="You are a helpful assistant with access to documents.",
-    knowledge=["./docs/guide.pdf"],  # Add your documents here
     knowledge={
+        "sources": ["./docs/guide.pdf"],
         "vector_store": "weaviate",
         "url": weaviate_url,
         "api_key": weaviate_key
