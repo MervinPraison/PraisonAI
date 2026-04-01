@@ -1,0 +1,4 @@
+[console_scripts]
+praisonai = praisonai.__main__:main
+praisonai-call = praisonai.api.call:main
+setup-conda-env = praisonai.setup.setup_conda_env:main

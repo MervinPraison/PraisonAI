@@ -64,7 +64,6 @@ class SandlockSandbox:
         self.config = config or SandboxConfig.native()
         self._is_running = False
         self._temp_dir: Optional[str] = None
-        self._sandbox = None
         
         # Lazy import sandlock to avoid import-time dependency
         try:
@@ -79,11 +78,7 @@ class SandlockSandbox:
     @property
     def is_available(self) -> bool:
         """Whether sandlock backend is available."""
-        try:
-            import sandlock
-            return sandlock.is_available()
-        except ImportError:
-            return False
+        return self._sandlock.is_available()
     
     @property
     def sandbox_type(self) -> str:
@@ -165,7 +160,101 @@ class SandlockSandbox:
         )
         
         return policy
-    
+
+    def _safe_sandbox_path(self, path: str) -> Optional[str]:
+        """Resolve a caller-supplied path to an absolute path inside _temp_dir.
+
+        Returns None if the resolved path would escape the sandbox root,
+        preventing path-traversal attacks via sequences like ``../../etc/passwd``.
+        """
+        if not self._temp_dir:
+            return None
+        # Join, then resolve symlinks / ".." components
+        candidate = os.path.realpath(
+            os.path.join(self._temp_dir, path.lstrip("/"))
+        )
+        sandbox_root = os.path.realpath(self._temp_dir)
+        # Ensure the resolved path is strictly inside the sandbox root (not equal to it)
+        if not candidate.startswith(sandbox_root + os.sep):
+            logger.warning("Path traversal attempt blocked: %s", path)
+            return None
+        return candidate
+
+    async def _run_sandlocked(
+        self,
+        cmd: List[str],
+        execution_id: str,
+        limits: ResourceLimits,
+        env: Optional[Dict[str, str]],
+        working_dir: Optional[str],
+    ) -> SandboxResult:
+        """Execute *cmd* inside a sandlock Sandbox and return a SandboxResult.
+
+        Centralises all sandlock Sandbox/Policy construction and error handling
+        so that ``execute`` and ``run_command`` share a single code path.
+        """
+        policy = self._create_policy(limits, working_dir)
+
+        process_env = os.environ.copy()
+        if env:
+            process_env.update(env)
+
+        started_at = time.time()
+
+        try:
+            sandbox = self._sandlock.Sandbox(policy)
+
+            result = await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: sandbox.run(cmd, env=process_env, cwd=working_dir)
+            )
+
+            completed_at = time.time()
+
+            return SandboxResult(
+                execution_id=execution_id,
+                status=SandboxStatus.COMPLETED,
+                exit_code=result.exit_code,
+                stdout=result.stdout,
+                stderr=result.stderr,
+                duration_seconds=completed_at - started_at,
+                started_at=started_at,
+                completed_at=completed_at,
+                metadata={
+                    "sandbox_type": "sandlock",
+                    "landlock_enabled": True,
+                    "seccomp_enabled": True,
+                },
+            )
+
+        except self._sandlock.TimeoutError:
+            return SandboxResult(
+                execution_id=execution_id,
+                status=SandboxStatus.TIMEOUT,
+                error=f"Execution timed out after {limits.timeout_seconds}s",
+                duration_seconds=limits.timeout_seconds,
+                started_at=started_at,
+                completed_at=time.time(),
+            )
+        except self._sandlock.SecurityViolationError as e:
+            return SandboxResult(
+                execution_id=execution_id,
+                status=SandboxStatus.FAILED,
+                error=f"Security violation: {e}",
+                duration_seconds=time.time() - started_at,
+                started_at=started_at,
+                completed_at=time.time(),
+            )
+        except Exception as e:
+            return SandboxResult(
+                execution_id=execution_id,
+                status=SandboxStatus.FAILED,
+                error=str(e),
+                duration_seconds=time.time() - started_at,
+                started_at=started_at,
+                completed_at=time.time(),
+            )
+
     async def execute(
         self,
         code: str,
@@ -188,84 +277,18 @@ class SandlockSandbox:
         limits = limits or self.config.resource_limits
         execution_id = str(uuid.uuid4())
         
-        # Create code file
-        if language == "python":
-            code_file = os.path.join(self._temp_dir, f"code_{execution_id}.py")
-            cmd = ["python3", "-c", code]
-        elif language == "bash":
-            code_file = os.path.join(self._temp_dir, f"code_{execution_id}.sh")
+        if language == "bash":
             cmd = ["bash", "-c", code]
         else:
-            # Default to python
-            code_file = os.path.join(self._temp_dir, f"code_{execution_id}.py") 
             cmd = ["python3", "-c", code]
         
-        # Create sandlock policy
-        policy = self._create_policy(limits, working_dir or self._temp_dir)
-        
-        # Prepare environment
-        process_env = os.environ.copy()
-        if env:
-            process_env.update(env)
-        
-        started_at = time.time()
-        
-        try:
-            # Execute with sandlock isolation
-            Sandbox = self._sandlock.Sandbox
-            sandbox = Sandbox(policy)
-            
-            # Run the command with kernel-level isolation
-            result = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: sandbox.run(cmd, env=process_env, cwd=working_dir or self._temp_dir)
-            )
-            
-            completed_at = time.time()
-            
-            return SandboxResult(
-                execution_id=execution_id,
-                status=SandboxStatus.COMPLETED,
-                exit_code=result.exit_code,
-                stdout=result.stdout,
-                stderr=result.stderr,
-                duration_seconds=completed_at - started_at,
-                started_at=started_at,
-                completed_at=completed_at,
-                metadata={
-                    "sandbox_type": "sandlock",
-                    "landlock_enabled": True,
-                    "seccomp_enabled": True,
-                }
-            )
-            
-        except self._sandlock.TimeoutError:
-            return SandboxResult(
-                execution_id=execution_id,
-                status=SandboxStatus.TIMEOUT,
-                error=f"Execution timed out after {limits.timeout_seconds}s",
-                duration_seconds=limits.timeout_seconds,
-                started_at=started_at,
-                completed_at=time.time(),
-            )
-        except self._sandlock.SecurityViolationError as e:
-            return SandboxResult(
-                execution_id=execution_id,
-                status=SandboxStatus.FAILED,
-                error=f"Security violation: {str(e)}",
-                duration_seconds=time.time() - started_at,
-                started_at=started_at,
-                completed_at=time.time(),
-            )
-        except Exception as e:
-            return SandboxResult(
-                execution_id=execution_id,
-                status=SandboxStatus.FAILED,
-                error=str(e),
-                duration_seconds=time.time() - started_at,
-                started_at=started_at,
-                completed_at=time.time(),
-            )
+        return await self._run_sandlocked(
+            cmd,
+            execution_id=execution_id,
+            limits=limits,
+            env=env,
+            working_dir=working_dir or self._temp_dir,
+        )
     
     async def execute_file(
         self,
@@ -314,64 +337,15 @@ class SandlockSandbox:
         if isinstance(command, str):
             cmd = ["sh", "-c", command]
         else:
-            cmd = command
+            cmd = list(command)
         
-        # Create sandlock policy
-        policy = self._create_policy(limits, working_dir or self._temp_dir)
-        
-        # Prepare environment
-        process_env = os.environ.copy()
-        if env:
-            process_env.update(env)
-        
-        started_at = time.time()
-        
-        try:
-            # Execute with sandlock isolation
-            Sandbox = self._sandlock.Sandbox
-            sandbox = Sandbox(policy)
-            
-            result = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: sandbox.run(cmd, env=process_env, cwd=working_dir or self._temp_dir)
-            )
-            
-            completed_at = time.time()
-            
-            return SandboxResult(
-                execution_id=execution_id,
-                status=SandboxStatus.COMPLETED,
-                exit_code=result.exit_code,
-                stdout=result.stdout,
-                stderr=result.stderr,
-                duration_seconds=completed_at - started_at,
-                started_at=started_at,
-                completed_at=completed_at,
-                metadata={
-                    "sandbox_type": "sandlock",
-                    "landlock_enabled": True,
-                    "seccomp_enabled": True,
-                }
-            )
-            
-        except self._sandlock.TimeoutError:
-            return SandboxResult(
-                execution_id=execution_id,
-                status=SandboxStatus.TIMEOUT,
-                error=f"Command timed out after {limits.timeout_seconds}s",
-                duration_seconds=limits.timeout_seconds,
-                started_at=started_at,
-                completed_at=time.time(),
-            )
-        except Exception as e:
-            return SandboxResult(
-                execution_id=execution_id,
-                status=SandboxStatus.FAILED,
-                error=str(e),
-                duration_seconds=time.time() - started_at,
-                started_at=started_at,
-                completed_at=time.time(),
-            )
+        return await self._run_sandlocked(
+            cmd,
+            execution_id=execution_id,
+            limits=limits,
+            env=env,
+            working_dir=working_dir or self._temp_dir,
+        )
     
     async def write_file(
         self,
@@ -379,10 +353,10 @@ class SandlockSandbox:
         content: Union[str, bytes],
     ) -> bool:
         """Write a file to the sandbox."""
-        if not self._temp_dir:
+        full_path = self._safe_sandbox_path(path)
+        if full_path is None:
             return False
         
-        full_path = os.path.join(self._temp_dir, path.lstrip("/"))
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         
         try:
@@ -399,12 +373,8 @@ class SandlockSandbox:
         path: str,
     ) -> Optional[Union[str, bytes]]:
         """Read a file from the sandbox."""
-        if not self._temp_dir:
-            return None
-        
-        full_path = os.path.join(self._temp_dir, path.lstrip("/"))
-        
-        if not os.path.exists(full_path):
+        full_path = self._safe_sandbox_path(path)
+        if full_path is None or not os.path.exists(full_path):
             return None
         
         try:
@@ -421,12 +391,8 @@ class SandlockSandbox:
         path: str = "/",
     ) -> List[str]:
         """List files in a sandbox directory."""
-        if not self._temp_dir:
-            return []
-        
-        full_path = os.path.join(self._temp_dir, path.lstrip("/"))
-        
-        if not os.path.exists(full_path):
+        full_path = self._safe_sandbox_path(path)
+        if full_path is None or not os.path.exists(full_path):
             return []
         
         try:
