@@ -54,5 +54,5 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '@claude You are the lead engineer. Read Gemini\'s analysis/review above first.\n\nAnalyze the issue/PR and ensure all fixes follow AGENTS.md:\n1. Ensure backward compatibility — no features removed\n2. Zero performance regression on hot paths\n3. Minimal, focused changes only\n4. Push all valid missing fixes to the branch.'
+              body: '@claude You are the Lead Engineer. Read Gemini\'s analysis/review above carefully.\n\n**Phase 1: Review per AGENTS.md**\n1. Protocol-driven: check heavy implementations vs core SDK\n2. Backward compatible: ensure zero feature regressions\n3. Performance: no hot-path regressions\n\n**Phase 2: FIX Valid Issues**\n4. For any VALID bugs or architectural flaws Gemini found: implement the fix\n5. Push all code fixes directly to THIS branch (do NOT create a new PR)\n6. Comment a summary of exact files modified and what you skipped\n\n**Phase 3: Final Verdict**\n7. If all issues are resolved, approve the PR / close the Issue\n8. If blocking issues remain, request changes / leave clear action items'
             })
