@@ -29,6 +29,7 @@ jobs:
       pull-requests: write
       issues: write
       actions: read
+      id-token: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -38,7 +39,7 @@ jobs:
       - uses: anthropics/claude-code-action@beta
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ secrets.PAT_TOKEN }}
+          github_token: ${{ secrets.GH_TOKEN }}
           trigger_phrase: "@claude"
           label_trigger: "claude"
           direct_prompt: |

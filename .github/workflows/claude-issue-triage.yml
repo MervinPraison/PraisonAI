@@ -20,4 +20,4 @@ jobs:
         uses: ./.github/actions/claude-issue-triage-action
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ secrets.PAT_TOKEN }} 
+          github_token: ${{ secrets.GH_TOKEN }} 
