@@ -31,6 +31,11 @@ __all__ = [
     "RedisBackend",
     "MongoDBBackend",
     "get_backend",
+    # New storage adapters
+    "RedisStorageAdapter",
+    "MongoDBStorageAdapter",
+    "PostgreSQLStorageAdapter",
+    "DynamoDBStorageAdapter",
 ]
 
 _LAZY_IMPORTS = {
@@ -50,6 +55,11 @@ _LAZY_IMPORTS = {
     "RedisBackend": ("backends", "RedisBackend"),
     "MongoDBBackend": ("backends", "MongoDBBackend"),
     "get_backend": ("backends", "get_backend"),
+    # New storage adapters
+    "RedisStorageAdapter": ("redis_adapter", "RedisStorageAdapter"),
+    "MongoDBStorageAdapter": ("mongodb_adapter", "MongoDBStorageAdapter"),
+    "PostgreSQLStorageAdapter": ("postgresql_adapter", "PostgreSQLStorageAdapter"),
+    "DynamoDBStorageAdapter": ("dynamodb_adapter", "DynamoDBStorageAdapter"),
 }
 
 

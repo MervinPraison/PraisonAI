@@ -100,6 +100,21 @@ crawl = [
     "playwright>=1.47.0",
 ]
 
+# Redis storage backend
+redis = [
+    "redis>=5.0.0"
+]
+
+# PostgreSQL storage backend
+postgresql = [
+    "psycopg2-binary>=2.9.0"
+]
+
+# DynamoDB storage backend
+dynamodb = [
+    "boto3>=1.26.0"
+]
+
 # Combined features
 all = [
     "praisonaiagents[memory]",
@@ -112,7 +127,10 @@ all = [
     "praisonaiagents[mongodb]",
     "praisonaiagents[auth]",
     "praisonaiagents[search]",
-    "praisonaiagents[crawl]"
+    "praisonaiagents[crawl]",
+    "praisonaiagents[redis]",
+    "praisonaiagents[postgresql]",
+    "praisonaiagents[dynamodb]"
 ]
 
 [tool.setuptools.packages.find]
