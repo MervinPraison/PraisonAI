@@ -231,6 +231,7 @@ class MemoryMixin:
         """Get the current number of messages in chat history."""
         return len(self.chat_history)
 
+    @contextlib.contextmanager
     def ephemeral(self) -> Generator[None, None, None]:
         """
         Context manager for ephemeral conversations.

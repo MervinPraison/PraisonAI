@@ -520,14 +520,16 @@ class TestMethodExistence:
         assert missing == [], f"Missing properties: {missing}"
 
     def test_mixin_inheritance(self):
-        """Agent inherits from all three mixins."""
+        """Agent inherits from all mixins."""
         from praisonaiagents.agent.tool_execution import ToolExecutionMixin
-        from praisonaiagents.agent.chat_handler import ChatHandlerMixin
-        from praisonaiagents.agent.session_manager import SessionManagerMixin
+        from praisonaiagents.agent.chat_mixin import ChatMixin
+        from praisonaiagents.agent.memory_mixin import MemoryMixin
+        from praisonaiagents.agent.execution_mixin import ExecutionMixin
         
         assert issubclass(Agent, ToolExecutionMixin)
-        assert issubclass(Agent, ChatHandlerMixin)
-        assert issubclass(Agent, SessionManagerMixin)
+        assert issubclass(Agent, ChatMixin)
+        assert issubclass(Agent, MemoryMixin)
+        assert issubclass(Agent, ExecutionMixin)
 
     def test_init_accepts_all_34_params(self):
         """Agent.__init__ must accept all 34 documented parameters."""
