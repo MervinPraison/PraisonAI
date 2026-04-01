@@ -4,6 +4,8 @@ description: PR review chain — how automated reviews flow for every PR
 
 ## Review Chain (Sequential)
 
+> **KEY PHILOSOPHY: We act as the Manager, GitHub Actions execute the Workflow.**
+> As the local agent, our job is to analyze, supervise, and coordinate the cloud bots. If we identify a gap in the review chain or code (e.g., missing tests), provide detailed relevant information and trigger the agents (like `@claude`) again.
 ```
 PR opened
   ↓
