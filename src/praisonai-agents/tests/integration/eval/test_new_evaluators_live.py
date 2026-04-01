@@ -10,7 +10,7 @@ import os
 import time
 from praisonaiagents import Agent
 from praisonaiagents.eval import ComparisonEval, SafetyEval, EvalSuite
-from praisonaiagents.eval import AccuracyEval
+from praisonaiagents.eval import AccuracyEvaluator
 
 
 @pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="No API key")
@@ -169,7 +169,7 @@ class TestEvalSuiteLive:
         )
         
         # Create multiple evaluators that will use real LLM calls
-        accuracy_eval = AccuracyEval(
+        accuracy_eval = AccuracyEvaluator(
             agent=agent,
             input_text="What is the capital of France?",
             expected_output="The capital of France is Paris.",
@@ -204,7 +204,7 @@ class TestEvalSuiteLive:
         assert len(result.errors) == 0
         
         # Verify both evaluators ran and produced results
-        assert "AccuracyEval_0" in result.evaluator_results
+        assert "AccuracyEvaluator_0" in result.evaluator_results
         assert "SafetyEval_1" in result.evaluator_results
         
         print(f"Suite overall score: {result.overall_score}/10")
@@ -221,10 +221,10 @@ class TestEvalSuiteLive:
     def test_eval_suite_fail_fast_behavior(self):
         """Test EvalSuite fail_fast behavior with an evaluator that should fail."""
         # Create an evaluator that should fail
-        from praisonaiagents.eval.accuracy import AccuracyEval
+        from praisonaiagents.eval.accuracy import AccuracyEvaluator
         
         # Use invalid model to trigger failure
-        failing_eval = AccuracyEval(
+        failing_eval = AccuracyEvaluator(
             input_text="test",
             expected_output="test",
             model="invalid-model-that-does-not-exist"
