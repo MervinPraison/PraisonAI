@@ -16,6 +16,7 @@ jobs:
     # Block: dependabot, cursor, renovate, other bots
     if: |
       (github.event.action != 'labeled' || github.event.label.name == 'claude') &&
+      (github.event_name != 'issue_comment' || contains(github.event.comment.body, '@claude')) &&
       (
         !contains(github.actor, '[bot]') ||
         github.actor == 'github-actions[bot]' ||
