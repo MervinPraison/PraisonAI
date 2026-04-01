@@ -379,12 +379,6 @@ class _LazyStorageModule:
 # Create lazy module instances
 _heavy_backends = _LazyStorageModule()
 
-# Expose heavy backends via lazy loading
-RedisBackend = _heavy_backends.RedisBackend
-MongoDBBackend = _heavy_backends.MongoDBBackend
-PostgreSQLBackend = _heavy_backends.PostgreSQLBackend
-DynamoDBBackend = _heavy_backends.DynamoDBBackend
-
 def get_backend(
     backend_type: str = "file",
     **kwargs
@@ -419,23 +413,39 @@ def get_backend(
     elif backend_type == "sqlite":
         return SQLiteBackend(**kwargs)
     elif backend_type == "redis":
-        return RedisBackend(**kwargs)
+        # Lazy load from wrapper
+        backend_class = getattr(_heavy_backends, "RedisBackend")
+        return backend_class(**kwargs)
     elif backend_type == "mongodb":
-        return MongoDBBackend(**kwargs)
+        # Lazy load from wrapper
+        backend_class = getattr(_heavy_backends, "MongoDBBackend")
+        return backend_class(**kwargs)
     elif backend_type == "postgresql":
-        return PostgreSQLBackend(**kwargs)
+        # Lazy load from wrapper
+        backend_class = getattr(_heavy_backends, "PostgreSQLBackend")
+        return backend_class(**kwargs)
     elif backend_type == "dynamodb":
-        return DynamoDBBackend(**kwargs)
+        # Lazy load from wrapper
+        backend_class = getattr(_heavy_backends, "DynamoDBBackend")
+        return backend_class(**kwargs)
     else:
         raise ValueError(f"Unknown backend type: {backend_type}. "
                         f"Supported: file, sqlite, redis, mongodb, postgresql, dynamodb")
 
+def __getattr__(name: str):
+    """
+    Module-level __getattr__ for backward compatibility with heavy backends.
+    
+    This allows `from praisonaiagents.storage.backends import RedisBackend` to work
+    while maintaining lazy loading.
+    """
+    if name in {"RedisBackend", "MongoDBBackend", "PostgreSQLBackend", "DynamoDBBackend"}:
+        return getattr(_heavy_backends, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
     'FileBackend',
     'SQLiteBackend',
-    'RedisBackend',
-    'MongoDBBackend', 
-    'PostgreSQLBackend',
-    'DynamoDBBackend',
     'get_backend',
 ]
