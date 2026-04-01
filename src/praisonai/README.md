@@ -48,6 +48,8 @@ PraisonAI 🦞 — Automate and solve complex challenges with AI agent teams tha
   <img src=".github/images/latest_ai_news_and_crawl_each_url_to_find_info.gif" alt="PraisonAI command execution" width="800" />
 </p>
 
+\* `export TAVILY_API_KEY=xxxxx`
+
 <div align="center">
   <a href="https://docs.praison.ai">
     <p align="center">

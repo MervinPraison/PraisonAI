@@ -1126,9 +1126,16 @@ class AgentsGenerator:
             agent_planning = details.get('planning', False)
             if agent_planning_tools is not None:
                 if isinstance(agent_planning, dict):
-                    agent_planning['planning_tools'] = agent_planning_tools
+                    agent_planning['tools'] = agent_planning_tools
                 elif not agent_planning:
-                    agent_planning = {'planning_tools': agent_planning_tools}
+                    agent_planning = {'tools': agent_planning_tools}
+            
+            # Clean up user YAML if they nested 'planning_tools' inside 'planning'
+            if isinstance(agent_planning, dict) and 'planning_tools' in agent_planning:
+                if 'tools' not in agent_planning:
+                    agent_planning['tools'] = agent_planning.pop('planning_tools')
+                else:
+                    agent_planning.pop('planning_tools')
             
             agent = PraisonAgent(
                 name=role_filled,
