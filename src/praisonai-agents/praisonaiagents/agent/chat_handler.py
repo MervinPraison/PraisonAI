@@ -77,7 +77,7 @@ class ChatHandlerMixin:
         context = {
             'prompt': prompt,
             'timestamp': time.time(),
-            'agent_name': getattr(self, 'name', 'Agent'),
+            'agent_name': getattr(self, 'name', None) or 'Agent',
         }
         
         # Add any additional context from kwargs
@@ -110,7 +110,7 @@ class ChatHandlerMixin:
             response: Generated response  
             duration: Processing duration in seconds
         """
-        agent_name = getattr(self, 'name', 'Agent')
+        agent_name = getattr(self, 'name', None) or 'Agent'
         duration_str = f" (took {duration:.2f}s)" if duration else ""
         
         logger.debug(f"[{agent_name}] Chat interaction{duration_str}")

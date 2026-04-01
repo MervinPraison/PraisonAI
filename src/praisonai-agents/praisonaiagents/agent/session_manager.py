@@ -38,7 +38,7 @@ class SessionManagerMixin:
         
         # Generate new session ID
         timestamp = int(time.time())
-        agent_name = getattr(self, 'name', 'agent')
+        agent_name = (getattr(self, 'name', None) or 'agent').lower().replace(' ', '_')
         new_session_id = f"{agent_name}_{timestamp}"
         
         logger.debug(f"Initialized new session: {new_session_id}")
@@ -134,7 +134,7 @@ class SessionManagerMixin:
         """
         return {
             'session_id': session_id,
-            'agent_name': getattr(self, 'name', 'Agent'),
+            'agent_name': getattr(self, 'name', None) or 'Agent',
             'created_at': time.time(),
             'last_accessed': time.time(),
         }
