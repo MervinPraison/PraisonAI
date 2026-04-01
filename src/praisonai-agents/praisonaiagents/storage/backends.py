@@ -332,238 +332,58 @@ class SQLiteBackend:
             self._local.conn.close()
             self._local.conn = None
 
-class RedisBackend:
+class _LazyStorageModule:
     """
-    Redis-based storage backend.
+    Lazy proxy for heavy storage backends.
     
-    Uses Redis for high-speed caching and ephemeral data storage.
-    Requires the `redis` package (optional dependency).
-    
-    Example:
-        ```python
-        backend = RedisBackend(url="redis://localhost:6379")
-        backend.save("session_123", {"messages": []})
-        data = backend.load("session_123")
-        ```
+    Allows access to Redis, MongoDB, PostgreSQL, and DynamoDB adapters
+    without importing heavy dependencies in the core SDK.
+    Actual backend classes are loaded only when accessed from the wrapper.
     """
     
-    def __init__(
-        self,
-        url: str = "redis://localhost:6379",
-        prefix: str = "praison:",
-        ttl: Optional[int] = None,
-        db: int = 0,
-    ):
-        """
-        Initialize the Redis backend.
-        
-        Args:
-            url: Redis connection URL
-            prefix: Key prefix for all stored data
-            ttl: Optional TTL in seconds for all keys
-            db: Redis database number
-        """
-        self.url = url
-        self.prefix = prefix
-        self.ttl = ttl
-        self.db = db
-        self._client = None
+    _BACKENDS = {
+        "RedisBackend": "praisonai.storage",
+        "MongoDBBackend": "praisonai.storage", 
+        "PostgreSQLBackend": "praisonai.storage",
+        "DynamoDBBackend": "praisonai.storage",
+        # Legacy names for compatibility
+        "RedisStorageAdapter": "praisonai.storage",
+        "MongoDBStorageAdapter": "praisonai.storage",
+        "PostgreSQLStorageAdapter": "praisonai.storage", 
+        "DynamoDBStorageAdapter": "praisonai.storage",
+    }
     
-    def _get_client(self):
-        """Lazy initialize Redis client."""
-        if self._client is None:
+    def __getattr__(self, name: str):
+        if name in self._BACKENDS:
             try:
-                import redis
-            except ImportError:
+                import importlib
+                module = importlib.import_module(self._BACKENDS[name])
+                # Try both adapter and backend naming
+                for attr_name in [name, name.replace("Backend", "StorageAdapter")]:
+                    if hasattr(module, attr_name):
+                        return getattr(module, attr_name)
+                raise AttributeError(f"module '{self._BACKENDS[name]}' has no attribute {name!r}")
+            except ImportError as e:
                 raise ImportError(
-                    "Redis backend requires the 'redis' package. "
-                    "Install with: pip install redis"
-                )
-            self._client = redis.from_url(self.url, db=self.db)
-        return self._client
+                    f"Storage backend '{name}' requires the praisonai package. "
+                    f"Install with: pip install praisonai\n"
+                    f"For specific backends, use: pip install 'praisonai[redis]', 'praisonai[mongodb]', etc.\n"
+                    f"Original error: {e}"
+                ) from e
+        raise AttributeError(f"module 'storage' has no attribute {name!r}")
     
-    def _make_key(self, key: str) -> str:
-        """Create prefixed key."""
-        return f"{self.prefix}{key}"
-    
-    def save(self, key: str, data: Dict[str, Any]) -> None:
-        """Save data with the given key."""
-        client = self._get_client()
-        full_key = self._make_key(key)
-        json_data = json.dumps(data, default=str, ensure_ascii=False)
-        
-        if self.ttl:
-            client.setex(full_key, self.ttl, json_data)
-        else:
-            client.set(full_key, json_data)
-    
-    def load(self, key: str) -> Optional[Dict[str, Any]]:
-        """Load data by key."""
-        client = self._get_client()
-        full_key = self._make_key(key)
-        
-        value = client.get(full_key)
-        if value:
-            try:
-                return json.loads(value)
-            except json.JSONDecodeError:
-                return None
-        return None
-    
-    def delete(self, key: str) -> bool:
-        """Delete data by key."""
-        client = self._get_client()
-        full_key = self._make_key(key)
-        return client.delete(full_key) > 0
-    
-    def list_keys(self, prefix: str = "") -> List[str]:
-        """List all keys, optionally filtered by prefix."""
-        client = self._get_client()
-        pattern = self._make_key(f"{prefix}*")
-        
-        keys = []
-        for key in client.keys(pattern):
-            # Remove the prefix to return clean keys
-            key_str = key.decode() if isinstance(key, bytes) else key
-            clean_key = key_str[len(self.prefix):]
-            keys.append(clean_key)
-        
-        return sorted(keys)
-    
-    def exists(self, key: str) -> bool:
-        """Check if a key exists."""
-        client = self._get_client()
-        full_key = self._make_key(key)
-        return client.exists(full_key) > 0
-    
-    def clear(self) -> int:
-        """Clear all data with our prefix. Returns number of items deleted."""
-        client = self._get_client()
-        pattern = self._make_key("*")
-        keys = list(client.keys(pattern))
-        
-        if keys:
-            return client.delete(*keys)
-        return 0
-    
-    def set_ttl(self, key: str, ttl: int) -> bool:
-        """Set TTL on a specific key."""
-        client = self._get_client()
-        full_key = self._make_key(key)
-        return client.expire(full_key, ttl)
-    
-    def close(self) -> None:
-        """Close the Redis connection."""
-        if self._client:
-            self._client.close()
-            self._client = None
+    def __repr__(self):
+        return "<module 'praisonaiagents.storage' (lazy heavy backends)>"
 
-class MongoDBBackend:
-    """
-    MongoDB-based storage backend.
-    
-    Uses MongoDB for document-oriented data storage.
-    Requires the `pymongo` package (optional dependency).
-    
-    Example:
-        ```python
-        backend = MongoDBBackend(url="mongodb://localhost:27017/")
-        backend.save("session_123", {"messages": []})
-        data = backend.load("session_123")
-        ```
-    """
-    
-    def __init__(
-        self,
-        url: str = "mongodb://localhost:27017/",
-        database: str = "praisonai",
-        collection: str = "praison_storage",
-        max_pool_size: int = 50,
-    ):
-        self.url = url
-        self.database = database
-        self.collection_name = collection
-        self.max_pool_size = max_pool_size
-        self._client = None
-        self._collection = None
-    
-    def _get_collection(self):
-        """Lazy initialize MongoDB client and collection."""
-        if self._collection is None:
-            try:
-                import pymongo
-            except ImportError:
-                raise ImportError(
-                    "MongoDB backend requires the 'pymongo' package. "
-                    "Install with: pip install pymongo"
-                )
-            self._client = pymongo.MongoClient(
-                self.url,
-                maxPoolSize=self.max_pool_size,
-                retryWrites=True,
-                retryReads=True,
-                serverSelectionTimeoutMS=5000,  # 5 second timeout for connection
-            )
-            db = self._client[self.database]
-            self._collection = db[self.collection_name]
-        return self._collection
-    
-    def save(self, key: str, data: Dict[str, Any]) -> None:
-        """Save data with the given key (upsert)."""
-        collection = self._get_collection()
-        json_data = json.dumps(data, default=str, ensure_ascii=False)
-        collection.replace_one(
-            {"_id": key},
-            {"_id": key, "data": json_data, "updated_at": time.time()},
-            upsert=True,
-        )
-    
-    def load(self, key: str) -> Optional[Dict[str, Any]]:
-        """Load data by key."""
-        collection = self._get_collection()
-        doc = collection.find_one({"_id": key})
-        if doc and "data" in doc:
-            try:
-                return json.loads(doc["data"])
-            except json.JSONDecodeError:
-                return None
-        return None
-    
-    def delete(self, key: str) -> bool:
-        """Delete data by key."""
-        collection = self._get_collection()
-        result = collection.delete_one({"_id": key})
-        return result.deleted_count > 0
-    
-    def list_keys(self, prefix: str = "") -> List[str]:
-        """List all keys, optionally filtered by prefix."""
-        collection = self._get_collection()
-        if prefix:
-            cursor = collection.find(
-                {"_id": {"$regex": f"^{prefix}"}},
-                {"_id": 1}
-            )
-        else:
-            cursor = collection.find({}, {"_id": 1})
-        return sorted([doc["_id"] for doc in cursor])
-    
-    def exists(self, key: str) -> bool:
-        """Check if a key exists."""
-        collection = self._get_collection()
-        return collection.count_documents({"_id": key}, limit=1) > 0
-    
-    def clear(self) -> int:
-        """Clear all data. Returns number of items deleted."""
-        collection = self._get_collection()
-        result = collection.delete_many({})
-        return result.deleted_count
-    
-    def close(self) -> None:
-        """Close the MongoDB connection."""
-        if self._client:
-            self._client.close()
-            self._client = None
-            self._collection = None
+
+# Create lazy module instances
+_heavy_backends = _LazyStorageModule()
+
+# Expose heavy backends via lazy loading
+RedisBackend = _heavy_backends.RedisBackend
+MongoDBBackend = _heavy_backends.MongoDBBackend
+PostgreSQLBackend = _heavy_backends.PostgreSQLBackend
+DynamoDBBackend = _heavy_backends.DynamoDBBackend
 
 def get_backend(
     backend_type: str = "file",
@@ -573,7 +393,7 @@ def get_backend(
     Factory function to get a storage backend.
     
     Args:
-        backend_type: Type of backend ("file", "sqlite", or "redis")
+        backend_type: Type of backend ("file", "sqlite", "redis", "mongodb", "postgresql", "dynamodb")
         **kwargs: Backend-specific arguments
         
     Returns:
@@ -581,14 +401,17 @@ def get_backend(
         
     Example:
         ```python
-        # File backend (default)
+        # File backend (default) - lightweight, in core SDK
         backend = get_backend("file", storage_dir="~/.praisonai/data")
         
-        # SQLite backend
+        # SQLite backend - lightweight, in core SDK
         backend = get_backend("sqlite", db_path="~/.praisonai/data.db")
         
-        # Redis backend
+        # Heavy backends - from wrapper, require praisonai package
         backend = get_backend("redis", url="redis://localhost:6379")
+        backend = get_backend("mongodb", url="mongodb://localhost:27017/")
+        backend = get_backend("postgresql", host="localhost", database="praisonai")
+        backend = get_backend("dynamodb", table_name="praisonai-storage")
         ```
     """
     if backend_type == "file":
@@ -599,13 +422,20 @@ def get_backend(
         return RedisBackend(**kwargs)
     elif backend_type == "mongodb":
         return MongoDBBackend(**kwargs)
+    elif backend_type == "postgresql":
+        return PostgreSQLBackend(**kwargs)
+    elif backend_type == "dynamodb":
+        return DynamoDBBackend(**kwargs)
     else:
-        raise ValueError(f"Unknown backend type: {backend_type}")
+        raise ValueError(f"Unknown backend type: {backend_type}. "
+                        f"Supported: file, sqlite, redis, mongodb, postgresql, dynamodb")
 
 __all__ = [
     'FileBackend',
     'SQLiteBackend',
     'RedisBackend',
-    'MongoDBBackend',
+    'MongoDBBackend', 
+    'PostgreSQLBackend',
+    'DynamoDBBackend',
     'get_backend',
 ]

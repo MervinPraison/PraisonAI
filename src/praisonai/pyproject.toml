@@ -122,6 +122,11 @@ all = [
     "yfinance>=0.2.44",
     "ddgs>=9.0.0",
     "psutil>=5.9.0",  # Shell tools
+    # Storage backends
+    "redis>=5.0.0",
+    "pymongo>=4.6.0", 
+    "psycopg2-binary>=2.9.0",
+    "boto3>=1.35.0",
 ]
 bot = [
     # Dependencies for Telegram, Discord, Slack, and WhatsApp bots
@@ -138,6 +143,19 @@ bot-whatsapp-web = [
     # WhatsApp Web mode (experimental, token-free via QR scan)
     "neonize>=0.3.14",
     "qrcode>=7.0",
+]
+# Storage backend dependencies
+redis = [
+    "redis>=5.0.0",
+]
+mongodb = [
+    "pymongo>=4.6.0",
+]
+postgresql = [
+    "psycopg2-binary>=2.9.0",
+]
+dynamodb = [
+    "boto3>=1.35.0",
 ]
 claw = [
     # PraisonAI 🦞 — Full dashboard + bots + memory + knowledge + gateway
@@ -169,6 +187,11 @@ claw = [
     "slack-bolt>=1.18.0",
     "brotlicffi>=1.0.0",
     "aiohttp>=3.8.0",
+    # Storage backends
+    "redis>=5.0.0",
+    "pymongo>=4.6.0", 
+    "psycopg2-binary>=2.9.0",
+    "boto3>=1.35.0",
 ]
 dev = [
     "textual-dev>=1.0.0",

@@ -27,9 +27,11 @@ __all__ = [
     "cleanup_old_sessions",
     # Backend implementations
     "FileBackend",
-    "SQLiteBackend",
+    "SQLiteBackend", 
     "RedisBackend",
     "MongoDBBackend",
+    "PostgreSQLBackend",
+    "DynamoDBBackend",
     "get_backend",
 ]
 
@@ -44,11 +46,13 @@ _LAZY_IMPORTS = {
     "AsyncBaseJSONStore": ("base", "AsyncBaseJSONStore"),
     "list_json_sessions": ("base", "list_json_sessions"),
     "cleanup_old_sessions": ("base", "cleanup_old_sessions"),
-    # Backend implementations
+    # Backend implementations  
     "FileBackend": ("backends", "FileBackend"),
     "SQLiteBackend": ("backends", "SQLiteBackend"),
     "RedisBackend": ("backends", "RedisBackend"),
     "MongoDBBackend": ("backends", "MongoDBBackend"),
+    "PostgreSQLBackend": ("backends", "PostgreSQLBackend"),
+    "DynamoDBBackend": ("backends", "DynamoDBBackend"),
     "get_backend": ("backends", "get_backend"),
 }
 
