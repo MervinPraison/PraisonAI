@@ -174,6 +174,18 @@ def __getattr__(name):
         from .session_manager import SessionManagerMixin
         _lazy_cache[name] = SessionManagerMixin
         return SessionManagerMixin
+    elif name == 'ChatMixin':
+        from .chat_mixin import ChatMixin
+        _lazy_cache[name] = ChatMixin
+        return ChatMixin
+    elif name == 'ExecutionMixin':
+        from .execution_mixin import ExecutionMixin
+        _lazy_cache[name] = ExecutionMixin
+        return ExecutionMixin
+    elif name == 'MemoryMixin':
+        from .memory_mixin import MemoryMixin
+        _lazy_cache[name] = MemoryMixin
+        return MemoryMixin
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -239,4 +251,7 @@ __all__ = [
     'ToolExecutionMixin',
     'ChatHandlerMixin',
     'SessionManagerMixin',
+    'ChatMixin',
+    'ExecutionMixin',
+    'MemoryMixin',
 ]

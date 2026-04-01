@@ -7,12 +7,8 @@ for maintainability.
 """
 
 import os
-import re
-import time
-import json
 import logging
 from praisonaiagents._logging import get_logger
-import threading
 
 # Fallback helpers to avoid circular imports
 def _get_console():
