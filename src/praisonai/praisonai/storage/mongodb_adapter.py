@@ -6,6 +6,7 @@ This is the wrapper implementation that contains the heavy MongoDB dependency.
 """
 
 import json
+import re
 import time
 from typing import Dict, Any, List, Optional
 
@@ -115,14 +116,18 @@ class MongoDBStorageAdapter:
         try:
             # Store as JSON string for consistency
             json_data = json.dumps(data, default=str, ensure_ascii=False)
+            now = time.time()
             
-            collection.replace_one(
+            collection.update_one(
                 {"_id": key},
                 {
-                    "_id": key,
-                    "data": json_data,
-                    "updated_at": time.time(),
-                    "created_at": time.time(),  # Will be ignored on update
+                    "$set": {
+                        "data": json_data,
+                        "updated_at": now,
+                    },
+                    "$setOnInsert": {
+                        "created_at": now,
+                    },
                 },
                 upsert=True,
             )
@@ -160,9 +165,10 @@ class MongoDBStorageAdapter:
         
         try:
             if prefix:
-                # Use regex for prefix matching
+                # Escape regex metacharacters to prevent ReDoS / unexpected matches
+                escaped = re.escape(prefix)
                 cursor = collection.find(
-                    {"_id": {"$regex": f"^{prefix}"}},
+                    {"_id": {"$regex": f"^{escaped}"}},
                     {"_id": 1}
                 ).sort("_id", 1)
             else:

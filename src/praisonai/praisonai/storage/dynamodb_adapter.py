@@ -115,11 +115,6 @@ class DynamoDBStorageAdapter:
     def _create_table(self) -> None:
         """Create DynamoDB table if it doesn't exist."""
         try:
-            import boto3
-        except ImportError:
-            raise ImportError("boto3 required for DynamoDB operations")
-            
-        try:
             table = self._dynamodb.create_table(
                 TableName=self.table_name,
                 KeySchema=[
@@ -203,12 +198,16 @@ class DynamoDBStorageAdapter:
         table = self._get_table()
         
         try:
+            from boto3.dynamodb.conditions import Attr
+
             keys = []
-            scan_kwargs = {"ProjectionExpression": "#k", "ExpressionAttributeNames": {"#k": "key"}}
+            scan_kwargs: Dict[str, Any] = {
+                "ProjectionExpression": "#k",
+                "ExpressionAttributeNames": {"#k": "key"},
+            }
             
             if prefix:
-                scan_kwargs["FilterExpression"] = "begins_with(#k, :prefix)"
-                scan_kwargs["ExpressionAttributeValues"] = {":prefix": prefix}
+                scan_kwargs["FilterExpression"] = Attr("key").begins_with(prefix)
             
             # Scan table (note: can be expensive for large tables)
             response = table.scan(**scan_kwargs)

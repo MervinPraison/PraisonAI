@@ -6,9 +6,22 @@ This is the wrapper implementation that contains the heavy PostgreSQL dependency
 """
 
 import json
+import re
 import time
 import threading
 from typing import Dict, Any, List, Optional
+
+_SAFE_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,62}$')
+
+
+def _validate_identifier(name: str, kind: str = "identifier") -> str:
+    """Validate that a SQL identifier is safe (alphanumeric + underscore, no spaces)."""
+    if not _SAFE_IDENTIFIER_RE.match(name):
+        raise ValueError(
+            f"Invalid SQL {kind} {name!r}. "
+            "Must start with a letter or underscore and contain only letters, digits, or underscores."
+        )
+    return name
 
 
 class PostgreSQLStorageAdapter:
@@ -66,7 +79,8 @@ class PostgreSQLStorageAdapter:
         self.database = database
         self.user = user
         self.password = password
-        self.table = table
+        # Validate table name to prevent SQL injection
+        self.table = _validate_identifier(table, "table name")
         self.sslmode = sslmode
         self.connect_timeout = connect_timeout
         self.command_timeout = command_timeout
