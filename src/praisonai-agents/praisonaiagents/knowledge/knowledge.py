@@ -324,7 +324,20 @@ class Knowledge:
         if rerank is None:
             rerank = self.config.get("reranker", {}).get("default_rerank", False)
         
-        results = self.memory.search(query, user_id=user_id, agent_id=agent_id, run_id=run_id, rerank=rerank, **kwargs)
+        try:
+            results = self.memory.search(query, user_id=user_id, agent_id=agent_id, run_id=run_id, rerank=rerank, **kwargs)
+        except TypeError as e:
+            # Additional safeguard for mem0 MongoDB vector store issues
+            error_msg = str(e).lower()
+            if "unexpected keyword argument" in error_msg and "vectors" in error_msg:
+                logger.warning(
+                    "Knowledge search failed due to mem0 MongoDB vector store compatibility issue. "
+                    "This is a known upstream bug: https://github.com/mem0ai/mem0/issues/3185. "
+                    "Returning empty results."
+                )
+                results = []
+            else:
+                raise
         
         # Emit trace event for knowledge search
         self._emit_knowledge_event("search", query, results, agent_id)
