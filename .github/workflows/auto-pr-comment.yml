@@ -97,7 +97,11 @@ jobs:
     if: |
       github.event_name == 'pull_request' &&
       github.event.action == 'opened' &&
-      github.event.pull_request.user.login == 'github-actions[bot]'
+      (
+        github.event.pull_request.user.login == 'github-actions[bot]' ||
+        github.event.pull_request.user.login == 'praisonai-triage-agent[bot]' ||
+        github.event.pull_request.user.type == 'Bot'
+      )
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
