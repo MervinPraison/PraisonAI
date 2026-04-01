@@ -18,7 +18,8 @@ jobs:
       (github.event.action != 'labeled' || github.event.label.name == 'claude') &&
       (
         !contains(github.actor, '[bot]') ||
-        github.actor == 'github-actions[bot]'
+        github.actor == 'github-actions[bot]' ||
+        github.actor == 'praisonai-triage-agent[bot]'
       ) &&
       github.actor != 'dependabot[bot]' &&
       github.actor != 'cursor[bot]' &&

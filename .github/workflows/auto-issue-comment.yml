@@ -19,7 +19,7 @@ jobs:
       - name: Add claude label to trigger analysis
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GH_TOKEN }}
           script: |
             // Check if 'claude' label already exists on this issue
             const labels = context.payload.issue.labels.map(l => l.name);
