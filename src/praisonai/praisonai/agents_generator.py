@@ -1082,6 +1082,48 @@ class AgentsGenerator:
         tools_list = self.load_tools_from_tools_py()
         self.logger.debug(f"Loaded tools from tools.py: {tools_list}")
 
+        # Initialize InteractiveRuntime for ACP/LSP if enabled globally
+        global_config = config.get('config', {})
+        acp_enabled = global_config.get('acp', False)
+        lsp_enabled = global_config.get('lsp', False)
+        interactive_runtime = None
+        interactive_loop = None
+        
+        if acp_enabled or lsp_enabled:
+            try:
+                import asyncio
+                import os
+                from praisonai.cli.features.interactive_runtime import InteractiveRuntime, RuntimeConfig
+                from praisonai.cli.features.agent_tools import create_agent_centric_tools
+                import nest_asyncio
+                
+                nest_asyncio.apply()
+                runtime_config = RuntimeConfig(
+                    workspace=os.getcwd(),
+                    acp_enabled=acp_enabled,
+                    lsp_enabled=lsp_enabled,
+                    approval_mode="auto"
+                )
+                interactive_runtime = InteractiveRuntime(runtime_config)
+                self.logger.info(f"Starting InteractiveRuntime (ACP: {acp_enabled}, LSP: {lsp_enabled})")
+                
+                try:
+                    interactive_loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    interactive_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(interactive_loop)
+                
+                interactive_loop.run_until_complete(interactive_runtime.start())
+                
+                centric_tools = create_agent_centric_tools(interactive_runtime)
+                self.logger.info(f"Injected {len(centric_tools)} InteractiveRuntime tools globally")
+                tools_list.extend(centric_tools)
+                
+            except ImportError as e:
+                self.logger.warning(f"Failed to load InteractiveRuntime components: {e}")
+            except Exception as e:
+                self.logger.error(f"Error starting InteractiveRuntime: {e}")
+
         # Create agents from config
         for role, details in config['roles'].items():
             role_filled = safe_format(details['role'], topic=topic)
@@ -1232,9 +1274,17 @@ class AgentsGenerator:
         self.logger.debug(f"Agents: {agents.agents}")
         self.logger.debug(f"Tasks: {agents.tasks}")
 
-        response = agents.start()
-        self.logger.debug(f"Result: {response}")
-        result = response if response else ""
+        try:
+            response = agents.start()
+            self.logger.debug(f"Result: {response}")
+            result = response if response else ""
+        finally:
+            if interactive_runtime and interactive_loop:
+                try:
+                    self.logger.info("Stopping InteractiveRuntime...")
+                    interactive_loop.run_until_complete(interactive_runtime.stop())
+                except Exception as e:
+                    self.logger.error(f"Error stopping InteractiveRuntime: {e}")
         
         if AGENTOPS_AVAILABLE:
             agentops.end_session("Success")
