@@ -215,6 +215,13 @@ runs:
         - Documentation updates
         - Testing and deployment
         
+        CRITICAL INSTRUCTION: If your task involves modifying codebase files to add a feature or fix a bug:
+        1. ALWAYS create a new git branch appropriately named (e.g. \`feature/issue-<number>\`).
+        2. MANDATORY: Before writing any code, you MUST carefully read "src/praisonai-agents/AGENTS.md" to understand this repository's extremely specific Architecture, Protocol-First design rules, and Agent-Centric Philosophy.
+        3. Make your necessary code changes honoring the rules in AGENTS.md.
+        4. Commit your changes and push the branch to the remote repository.
+        5. Use the GitHub CLI (\`gh pr create --title "..." --body "Fixes #<number>"\`) to open a Pull Request containing your work.
+        
         Respond naturally and helpfully to the user's request using the available tools.
         EOF
         
