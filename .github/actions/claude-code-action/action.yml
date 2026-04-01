@@ -5,6 +5,9 @@ inputs:
   anthropic_api_key:
     description: "Anthropic API key"
     required: false
+  claude_code_oauth_token:
+    description: "Claude Code OAuth Token for Claude Pro"
+    required: false
   github_token:
     description: "GitHub token for Claude to operate with"
     required: false
@@ -253,4 +256,5 @@ runs:
         echo "✅ Claude Code execution completed"
       env:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude_code_oauth_token }}
         GITHUB_TOKEN: ${{ inputs.github_token }} 

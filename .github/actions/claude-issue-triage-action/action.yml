@@ -6,8 +6,8 @@ inputs:
     description: "Timeout in minutes for execution"
     required: false
     default: "5"
-  anthropic_api_key:
-    description: "Anthropic API key"
+  claude_code_oauth_token:
+    description: "Claude Code OAuth token for Pro subscription access"
     required: true
   github_token:
     description: "GitHub token with repo and issues permissions"
@@ -87,5 +87,5 @@ runs:
         direct_prompt: ${{ steps.generate_prompt.outputs.PROMPT }}
         allowed_tools: "Bash(gh label list),mcp__github__get_issue,mcp__github__get_issue_comments,mcp__github__update_issue,mcp__github__search_issues,mcp__github__list_issues"
         timeout_minutes: ${{ inputs.timeout_minutes }}
-        anthropic_api_key: ${{ inputs.anthropic_api_key }}
+        claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
         github_token: ${{ inputs.github_token }} 
