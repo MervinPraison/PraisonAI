@@ -721,7 +721,7 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
             # Pass rerank and other kwargs to Mem0 search
             search_params = {"query": query, "limit": limit, "rerank": rerank}
             search_params.update(kwargs)
-            results = self.mem0_client.search(**search_params)
+            results = self._safe_mem0_search(self.mem0_client, **search_params)
             filtered = [r for r in results if r.get("score", 1.0) >= relevance_cutoff]
             return filtered
             
@@ -997,7 +997,7 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
             # Pass rerank and other kwargs to Mem0 search
             search_params = {"query": query, "limit": limit, "rerank": rerank}
             search_params.update(kwargs)
-            results = self.mem0_client.search(**search_params)
+            results = self._safe_mem0_search(self.mem0_client, **search_params)
             # Filter by quality
             filtered = [r for r in results if r.get("metadata", {}).get("quality", 0.0) >= min_quality]
             logger.info(f"Found {len(filtered)} results in Mem0")
@@ -1452,7 +1452,7 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
             # Pass rerank and other kwargs to Mem0 search
             search_params = {"query": query, "limit": limit, "user_id": user_id, "rerank": rerank}
             search_params.update(kwargs)
-            return self.mem0_client.search(**search_params)
+            return self._safe_mem0_search(self.mem0_client, **search_params)
         elif self.use_mongodb and hasattr(self, "mongo_users"):
             try:
                 results = []
@@ -1519,7 +1519,7 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
             # Include any additional kwargs
             search_params.update(kwargs)
             
-            return self.mem0_client.search(**search_params)
+            return self._safe_mem0_search(self.mem0_client, **search_params)
         
         # For MongoDB or local memory, use specific search methods
         if user_id:
@@ -2020,6 +2020,30 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
         """Ensure connections are closed when leaving a context manager block."""
         self.close_connections()
     
+    def _safe_mem0_search(self, mem0_client, **kwargs):
+        """
+        Defensive wrapper for mem0.search() to handle MongoDB vector store compatibility.
+        
+        Catches TypeError about unexpected 'vectors' kwarg and falls back gracefully.
+        This addresses the upstream mem0 bug: https://github.com/mem0ai/mem0/issues/3185
+        """
+        try:
+            return mem0_client.search(**kwargs)
+        except TypeError as e:
+            error_msg = str(e).lower()
+            if "unexpected keyword argument" in error_msg and "vectors" in error_msg:
+                logger.warning(
+                    "Detected mem0 MongoDB vector store compatibility issue. "
+                    "This is a known upstream bug: https://github.com/mem0ai/mem0/issues/3185. "
+                    "The MongoDB vector store requires Atlas and has signature mismatches. "
+                    "Consider using Qdrant or Chroma as mem0 vector store backends instead."
+                )
+                # Return empty results rather than crashing
+                return []
+            else:
+                # Re-raise if it's a different TypeError
+                raise
+
     def __del__(self):
         """
         Attempt to clean up any open SQLite connections when this instance

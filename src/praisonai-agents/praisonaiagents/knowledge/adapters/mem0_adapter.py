@@ -129,6 +129,30 @@ class Mem0Adapter:
         
         return item
     
+    def _safe_mem0_search(self, **kwargs):
+        """
+        Defensive wrapper for mem0.search() to handle MongoDB vector store compatibility.
+        
+        Catches TypeError about unexpected 'vectors' kwarg and returns safe fallback.
+        This addresses the upstream mem0 bug: https://github.com/mem0ai/mem0/issues/3185
+        """
+        try:
+            return self.memory.search(**kwargs)
+        except TypeError as e:
+            error_msg = str(e).lower()
+            if "unexpected keyword argument" in error_msg and "vectors" in error_msg:
+                logger.warning(
+                    "Detected mem0 MongoDB vector store compatibility issue. "
+                    "This is a known upstream bug: https://github.com/mem0ai/mem0/issues/3185. "
+                    "The MongoDB vector store requires Atlas and has signature mismatches. "
+                    "Returning empty results. Consider using Qdrant or Chroma as vector store backends."
+                )
+                # Return empty results structure that matches expected mem0 format
+                return {"results": []}
+            else:
+                # Re-raise if it's a different TypeError
+                raise
+    
     def _normalize_mem0_results(self, raw: Any) -> SearchResult:
         """
         Normalize mem0 search results to SearchResult.
@@ -200,7 +224,7 @@ class Mem0Adapter:
         self._check_scope(user_id, agent_id, run_id, "search")
         
         try:
-            raw_results = self.memory.search(
+            raw_results = self._safe_mem0_search(
                 query=query,
                 user_id=user_id,
                 agent_id=agent_id,
