@@ -186,6 +186,20 @@ class Knowledge:
                 else:
                     del mem0_config["reranker"]
         
+        # CRITICAL FIX: Prevent mem0 from using MongoDB as its vector store directly, as it's broken upstream.
+        # Guide users to use PraisonAI's native MongoDB adapter instead.
+        if mem0_config.get("vector_store", {}).get("provider") == "mongodb":
+            logger.warning(
+                "Mem0's native MongoDB vector store integration is currently broken (upstream issue #1249) "
+                "and requires MongoDB Atlas. "
+                "Falling back to Qdrant for mem0. "
+                "If you intend to use MongoDB, please configure 'vector_store.provider: mongodb' directly "
+                "in your PraisonAI Knowledge config to use PraisonAI's native MongoDB adapter."
+            )
+            mem0_config["vector_store"]["provider"] = "qdrant" # Force Qdrant as a fallback
+            mem0_config["vector_store"]["config"]["collection_name"] = mem0_config["vector_store"]["config"].get("collection_name", "mem0_qdrant_fallback")
+            mem0_config["vector_store"]["config"]["path"] = mem0_config["vector_store"]["config"].get("path", ".mem0_qdrant_fallback_data")
+
         return mem0_config
 
     @cached_property
