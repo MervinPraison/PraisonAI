@@ -6,6 +6,7 @@ Extracted from agent.py for better modularity and maintainability.
 """
 
 import logging
+import time
 from typing import Optional, Any, Dict, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -39,7 +40,6 @@ class ChatHandlerMixin:
         
         # Add any metadata-based formatting if needed
         if metadata and metadata.get('add_timestamp'):
-            import time
             timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
             formatted = f"[{timestamp}] {formatted}"
             
@@ -76,7 +76,7 @@ class ChatHandlerMixin:
         """
         context = {
             'prompt': prompt,
-            'timestamp': time.time() if 'time' in globals() else None,
+            'timestamp': time.time(),
             'agent_name': getattr(self, 'name', 'Agent'),
         }
         
@@ -97,8 +97,10 @@ class ChatHandlerMixin:
         """
         logger.error(f"Chat error occurred: {error}", exc_info=True)
         
-        # Return a user-friendly error message
-        return f"I encountered an error while processing your request: {str(error)}"
+        # Return a user-friendly error message without exposing internal details.
+        # Include a timestamp reference so users can correlate with server logs.
+        error_ref = time.strftime('%Y%m%d%H%M%S')
+        return f"I encountered an error while processing your request (ref: {error_ref}). Please try again."
     
     def _log_chat_interaction(self, prompt: str, response: str, duration: Optional[float] = None):
         """Log chat interaction for debugging and analytics.
