@@ -1211,13 +1211,7 @@ class AgentsGenerator:
         # Create and run the PraisonAI agents
         memory = config.get('memory', False)
         
-        # Extract global config for CLI parity features
-        global_config = config.get('config', {})
-        acp_enabled = global_config.get('acp', False)
-        lsp_enabled = global_config.get('lsp', False)
-        
         self.logger.debug(f"Memory: {memory}")
-        self.logger.debug(f"Global config - ACP: {acp_enabled}, LSP: {lsp_enabled}")
         
         if config.get('process') == 'hierarchical':
             agents = AgentTeam(
