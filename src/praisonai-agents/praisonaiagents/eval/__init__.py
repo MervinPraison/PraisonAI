@@ -9,6 +9,9 @@ Evaluator Types:
     - PerformanceEvaluator: Measure runtime and memory usage
     - ReliabilityEvaluator: Verify expected tool calls are made
     - CriteriaEvaluator: Evaluate against custom criteria
+    - ComparisonEval: Side-by-side comparison of two agent outputs
+    - SafetyEval: Detect harmful, biased, or inappropriate outputs
+    - EvalSuite: Orchestrator for running multiple evaluations
 
 Example:
     >>> from praisonaiagents.eval import AccuracyEvaluator
@@ -27,11 +30,17 @@ __all__ = [
     "ReliabilityEvaluator",
     "CriteriaEvaluator",
     "MediaEvaluator",
+    "ComparisonEval",
+    "SafetyEval",
+    "EvalSuite",
     "AccuracyResult",
     "PerformanceResult",
     "ReliabilityResult",
     "CriteriaResult",
     "MediaEvaluationResult",
+    "ComparisonResult",
+    "SafetyResult",
+    "EvalSuiteResult",
     "EvaluationScore",
     "PerformanceMetrics",
     "ToolCallResult",
@@ -92,11 +101,17 @@ _LAZY_IMPORTS = {
     "ReliabilityEvaluator": ("reliability", "ReliabilityEvaluator"),
     "CriteriaEvaluator": ("criteria", "CriteriaEvaluator"),
     "MediaEvaluator": ("media", "MediaEvaluator"),
+    "ComparisonEval": ("comparison", "ComparisonEval"),
+    "SafetyEval": ("safety", "SafetyEval"),
+    "EvalSuite": ("suite", "EvalSuite"),
     "AccuracyResult": ("results", "AccuracyResult"),
     "PerformanceResult": ("results", "PerformanceResult"),
     "ReliabilityResult": ("results", "ReliabilityResult"),
     "CriteriaResult": ("results", "CriteriaResult"),
     "MediaEvaluationResult": ("media", "MediaEvaluationResult"),
+    "ComparisonResult": ("comparison", "ComparisonResult"),
+    "SafetyResult": ("safety", "SafetyResult"),
+    "EvalSuiteResult": ("suite", "EvalSuiteResult"),
     "EvaluationScore": ("results", "EvaluationScore"),
     "PerformanceMetrics": ("results", "PerformanceMetrics"),
     "ToolCallResult": ("results", "ToolCallResult"),
