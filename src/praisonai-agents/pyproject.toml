@@ -75,6 +75,21 @@ mongodb = [
     "motor>=3.4.0"
 ]
 
+# Redis dependencies
+redis = [
+    "redis>=4.5.0"
+]
+
+# PostgreSQL dependencies  
+postgresql = [
+    "psycopg2-binary>=2.9.0"
+]
+
+# DynamoDB dependencies
+dynamodb = [
+    "boto3>=1.26.0"
+]
+
 # Authentication dependencies
 auth = [
     "PyJWT>=2.8.0",
