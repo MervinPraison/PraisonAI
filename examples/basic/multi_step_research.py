@@ -5,22 +5,22 @@ markdown report, reads it back, lists files, and gets system info.
 """
 from praisonaiagents import Agent
 from praisonaiagents.tools import (
-    write_file, read_file, execute_command, list_directory, get_system_info
+    write_file, read_file, execute_command, list_files, get_system_info
 )
 
 try:
     from praisonaiagents.tools import web_search
     tools = [web_search, write_file, read_file, execute_command,
-             list_directory, get_system_info]
+             list_files, get_system_info]
 except ImportError:
     tools = [write_file, read_file, execute_command,
-             list_directory, get_system_info]
+             list_files, get_system_info]
 
 agent = Agent(
     instructions="You are a helpful research assistant.",
     output="editor",
     tools=tools,
-    approval=True,
+    approval=False,
 )
 agent.start(
     "Research the top 3 Python web frameworks (Django, FastAPI, Flask), then: "

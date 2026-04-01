@@ -271,30 +271,11 @@ class ShellTools:
             logging.error(error_msg)
             return {}
 
-# Lazy instance — deferred so module can be imported without psutil
-_shell_tools = None
-
-def _get_shell_tools():
-    global _shell_tools
-    if _shell_tools is None:
-        _shell_tools = ShellTools()
-    return _shell_tools
-
-def execute_command(*args, **kwargs):
-    """Execute a shell command safely."""
-    return _get_shell_tools().execute_command(*args, **kwargs)
-
-def list_processes(*args, **kwargs):
-    """List running processes with their details."""
-    return _get_shell_tools().list_processes(*args, **kwargs)
-
-def kill_process(*args, **kwargs):
-    """Kill a process by its PID."""
-    return _get_shell_tools().kill_process(*args, **kwargs)
-
-def get_system_info(*args, **kwargs):
-    """Get system information."""
-    return _get_shell_tools().get_system_info(*args, **kwargs)
+_shell_tools = ShellTools()
+execute_command = _shell_tools.execute_command
+list_processes = _shell_tools.list_processes
+kill_process = _shell_tools.kill_process
+get_system_info = _shell_tools.get_system_info
 
 if __name__ == "__main__":
     # Example usage

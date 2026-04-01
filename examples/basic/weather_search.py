@@ -5,20 +5,20 @@ it, and lists created files.
 """
 from praisonaiagents import Agent
 from praisonaiagents.tools import (
-    write_file, execute_command, list_directory
+    write_file, execute_command, list_files
 )
 
 try:
     from praisonaiagents.tools import web_search
-    tools = [web_search, write_file, execute_command, list_directory]
+    tools = [web_search, write_file, execute_command, list_files]
 except ImportError:
-    tools = [write_file, execute_command, list_directory]
+    tools = [write_file, execute_command, list_files]
 
 agent = Agent(
     instructions="You are a helpful research assistant.",
     output="editor",
     tools=tools,
-    approval=True,
+    approval=False,
 )
 agent.start(
     "Search the web for the current weather in Tokyo, create a JSON file at "
