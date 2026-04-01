@@ -104,6 +104,8 @@ jobs:
             - Search codebase for related files using `glob`, `search_file_content`, `list_directory`
             
             **STEP 2: If Code Changes Are Needed**
+            MANDATORY FIRST STEP: Before writing any code, you MUST use `read_file` to carefully read "src/praisonai-agents/AGENTS.md". You must honor this repository's extremely specific Architecture, Protocol-First design rules, and Agent-Centric Philosophy!
+            
             Create a new branch with 'gemini/' prefix:
             - Use: `git checkout -b gemini/issue-${ISSUE_NUMBER}-description`
             - Example: `git checkout -b gemini/issue-123-fix-sequential-tools`

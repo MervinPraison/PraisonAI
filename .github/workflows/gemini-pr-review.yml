@@ -159,6 +159,8 @@ jobs:
             - Analyze the code changes thoroughly
 
             **STEP 2: If Code Improvements Are Needed**
+            MANDATORY FIRST STEP: Before writing any code, you MUST use `read_file` to carefully read "src/praisonai-agents/AGENTS.md". You must honor this repository's extremely specific Architecture, Protocol-First design rules, and Agent-Centric Philosophy!
+            
             **IMPORTANT:** DO NOT create a new branch! Work on the EXISTING PR branch.
             - Use: `git fetch origin` to get latest changes
             - Get PR branch name: `gh pr view ${PR_NUMBER} --json headRefName`
