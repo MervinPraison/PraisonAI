@@ -25,11 +25,9 @@ __all__ = [
     "FileLock",
     "list_json_sessions",
     "cleanup_old_sessions",
-    # Backend implementations
+    # Lightweight backend implementations (core SDK only)
     "FileBackend",
-    "SQLiteBackend",
-    "RedisBackend",
-    "MongoDBBackend",
+    "SQLiteBackend", 
     "get_backend",
 ]
 
@@ -44,11 +42,9 @@ _LAZY_IMPORTS = {
     "AsyncBaseJSONStore": ("base", "AsyncBaseJSONStore"),
     "list_json_sessions": ("base", "list_json_sessions"),
     "cleanup_old_sessions": ("base", "cleanup_old_sessions"),
-    # Backend implementations
+    # Lightweight backend implementations (core SDK only)
     "FileBackend": ("backends", "FileBackend"),
     "SQLiteBackend": ("backends", "SQLiteBackend"),
-    "RedisBackend": ("backends", "RedisBackend"),
-    "MongoDBBackend": ("backends", "MongoDBBackend"),
     "get_backend": ("backends", "get_backend"),
 }
 
@@ -60,6 +56,10 @@ def __getattr__(name: str):
         import importlib
         module = importlib.import_module(f".{module_name}", __name__)
         return getattr(module, attr_name)
+    # Handle heavy backend access via backends module (for backward compatibility)
+    elif name in {"RedisBackend", "MongoDBBackend", "PostgreSQLBackend", "DynamoDBBackend"}:
+        from .backends import __getattr__ as backends_getattr
+        return backends_getattr(name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
