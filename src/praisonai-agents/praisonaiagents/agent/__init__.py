@@ -107,6 +107,22 @@ def __getattr__(name):
         from .code_agent import CodeConfig
         _lazy_cache[name] = CodeConfig
         return CodeConfig
+    elif name == 'ReasoningAgent':
+        from .reasoning_agent import ReasoningAgent
+        _lazy_cache[name] = ReasoningAgent
+        return ReasoningAgent
+    elif name == 'ReasoningConfig':
+        from .reasoning_agent import ReasoningConfig
+        _lazy_cache[name] = ReasoningConfig
+        return ReasoningConfig
+    elif name == 'DualBrainAgent':
+        from .dual_brain_agent import DualBrainAgent
+        _lazy_cache[name] = DualBrainAgent
+        return DualBrainAgent
+    elif name == 'DualBrainConfig':
+        from .dual_brain_agent import DualBrainConfig
+        _lazy_cache[name] = DualBrainConfig
+        return DualBrainConfig
     
     # Handoff - lightweight
     _handoff_names = {
@@ -197,6 +213,10 @@ __all__ = [
     'RealtimeConfig',
     'CodeAgent',
     'CodeConfig',
+    'ReasoningAgent',
+    'ReasoningConfig',
+    'DualBrainAgent', 
+    'DualBrainConfig',
     'ContextAgent',
     'create_context_agent',
     'Handoff',
