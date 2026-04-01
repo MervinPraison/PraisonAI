@@ -16,6 +16,8 @@ from .chat_mixin import ChatMixin
 from .execution_mixin import ExecutionMixin
 from .memory_mixin import MemoryMixin
 from .tool_execution import ToolExecutionMixin
+from .chat_handler import ChatHandlerMixin
+from .session_manager import SessionManagerMixin
 
 # Module-level logger for thread safety errors and debugging
 logger = get_logger(__name__)
@@ -197,7 +199,7 @@ class BudgetExceededError(Exception):
             f"${total_cost:.4f} >= ${max_budget:.4f}"
         )
 
-class Agent(ChatMixin, ExecutionMixin, MemoryMixin, ToolExecutionMixin):
+class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin):
     # Class-level counter for generating unique display names for nameless agents
     _agent_counter = 0
     _agent_counter_lock = threading.Lock()
