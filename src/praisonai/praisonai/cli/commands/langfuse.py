@@ -5,6 +5,7 @@ Langfuse instances for observability and evaluation of agent workflows.
 """
 
 import os
+import json
 import subprocess
 import sys
 import time
@@ -113,11 +114,16 @@ def langfuse_start(
             
             # Wait for health check
             console.print("[yellow]⏳ Waiting for services to be ready...[/yellow]")
+            try:
+                import requests as requests_lib
+            except ImportError:
+                requests_lib = None
             max_wait = 180  # 3 minutes
             for i in range(max_wait):
                 try:
-                    import requests
-                    response = requests.get(f"http://{host}:{port}", timeout=5)
+                    if requests_lib is None:
+                        break
+                    response = requests_lib.get(f"http://{host}:{port}", timeout=5)
                     if response.status_code < 500:
                         break
                 except Exception:
@@ -197,6 +203,11 @@ def langfuse_status(
         console.print("Run 'praisonai langfuse' to set up Langfuse")
         return
     
+    try:
+        import requests as requests_lib
+    except ImportError:
+        requests_lib = None
+
     # Check Docker containers
     try:
         result = subprocess.run([
@@ -208,7 +219,6 @@ def langfuse_status(
             return
         
         # Parse JSON output
-        import json
         containers = []
         for line in result.stdout.strip().split('\n'):
             if line:
@@ -253,12 +263,14 @@ def langfuse_status(
                 port = "3000"
             
             try:
-                import requests
-                response = requests.get(f"http://127.0.0.1:{port}", timeout=5)
-                if response.status_code < 500:
-                    console.print(f"[green]🌐 Web UI available: http://127.0.0.1:{port}[/green]")
+                if requests_lib is not None:
+                    response = requests_lib.get(f"http://127.0.0.1:{port}", timeout=5)
+                    if response.status_code < 500:
+                        console.print(f"[green]🌐 Web UI available: http://127.0.0.1:{port}[/green]")
+                    else:
+                        console.print(f"[yellow]🌐 Web UI starting: http://127.0.0.1:{port}[/yellow]")
                 else:
-                    console.print(f"[yellow]🌐 Web UI starting: http://127.0.0.1:{port}[/yellow]")
+                    console.print(f"[blue]🌐 Web UI: http://127.0.0.1:{port}[/blue]")
             except Exception:
                 console.print(f"[red]🌐 Web UI not responding: http://127.0.0.1:{port}[/red]")
         
@@ -468,5 +480,5 @@ def langfuse_version():
             if result.returncode == 0:
                 version = result.stdout.strip()
                 console.print(f"[bold]Local Langfuse[/bold]: {version}")
-        except:
+        except Exception:
             pass

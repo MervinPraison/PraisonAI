@@ -25,22 +25,29 @@ class LangfuseSinkConfig:
     Configuration for Langfuse trace sink.
     
     Follows the False=disabled, True=defaults, Config=custom pattern from AGENTS.md §5.2.
+    
+    Fields not explicitly provided are filled from environment variables:
+      LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST (or LANGFUSE_BASE_URL).
     """
     public_key: str = ""
     secret_key: str = ""
-    host: str = "https://cloud.langfuse.com"
+    host: str = ""
     flush_at: int = 20
     flush_interval: float = 10.0
     enabled: bool = True
     
     def __post_init__(self):
-        """Validate configuration."""
-        if self.enabled and not (self.public_key and self.secret_key):
-            # Try environment variables if not explicitly set
-            import os
-            self.public_key = self.public_key or os.getenv("LANGFUSE_PUBLIC_KEY", "")
-            self.secret_key = self.secret_key or os.getenv("LANGFUSE_SECRET_KEY", "")
-            self.host = self.host or os.getenv("LANGFUSE_HOST", os.getenv("LANGFUSE_BASE_URL", self.host))
+        """Fill missing fields from environment variables."""
+        import os
+        if not self.public_key:
+            self.public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+        if not self.secret_key:
+            self.secret_key = os.getenv("LANGFUSE_SECRET_KEY", "")
+        if not self.host:
+            self.host = os.getenv(
+                "LANGFUSE_HOST",
+                os.getenv("LANGFUSE_BASE_URL", "https://cloud.langfuse.com"),
+            )
 
 
 class LangfuseSink:
@@ -78,7 +85,7 @@ class LangfuseSink:
             
             # Validate config
             if not (self._config.public_key and self._config.secret_key):
-                raise ImportError(
+                raise ValueError(
                     "Langfuse credentials missing. Set LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY "
                     "environment variables or pass them to LangfuseSinkConfig."
                 )
@@ -255,8 +262,9 @@ class LangfuseSink:
     def close(self) -> None:
         """Close the sink and release resources."""
         if not self._closed:
-            self._closed = True
+            # Flush before marking closed, so flush() guard passes
             self.flush()
+            self._closed = True
             if self._client:
                 try:
                     # Close any remaining spans
@@ -264,7 +272,7 @@ class LangfuseSink:
                         for span in self._spans.values():
                             try:
                                 span.end()
-                            except:
+                            except Exception:
                                 pass
                         self._spans.clear()
                         self._traces.clear()
