@@ -9,28 +9,13 @@ import logging
 from typing import Any, Dict, List, Optional, Union
 
 # ========================================================================
-# ENVIRONMENT CONFIGURATION
+# ARCHITECTURAL FIX: REMOVED ENVIRONMENT MUTATIONS
 # ========================================================================
-def _configure_environment():
-    """Set environment variables to suppress debug messages at the source."""
-    env_vars = {
-        # LiteLLM configuration
-        "LITELLM_TELEMETRY": "False",
-        "LITELLM_DROP_PARAMS": "True",
-        "LITELLM_LOG": "ERROR",
-        "LITELLM_DEBUG": "False",
-        "LITELLM_SUPPRESS_DEBUG_INFO": "True",
-        "LITELLM_VERBOSE": "False",
-        "LITELLM_SET_VERBOSE": "False",
-        # HTTPX configuration
-        "HTTPX_DISABLE_WARNINGS": "True",
-        "HTTPX_LOG_LEVEL": "ERROR",
-        # Pydantic configuration
-        "PYDANTIC_WARNINGS_ENABLED": "False",
-    }
-    
-    for key, value in env_vars.items():
-        os.environ[key] = value
+# REMOVED: _configure_environment() function that violated protocol-driven architecture
+# by mutating global environment variables at import time.
+#
+# This violated the principle that core SDK should have no side effects.
+# Environment configuration should be done explicitly by the user or wrapper package.
 
 
 # ========================================================================
@@ -156,7 +141,8 @@ def initialize_logging():
     Note: litellm configuration is NOT done here to avoid importing litellm
     at package import time. Call configure_litellm() when litellm is needed.
     """
-    _configure_environment()
+    # ARCHITECTURAL FIX: Removed call to _configure_environment()
+    # This violated protocol-driven architecture by having import-time side effects
     _configure_loggers()
     # NOTE: _configure_litellm() is NOT called here to avoid importing litellm
     # It will be called lazily when LLM class is instantiated

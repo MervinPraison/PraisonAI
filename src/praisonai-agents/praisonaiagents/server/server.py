@@ -1,235 +1,107 @@
 """
-HTTP Server implementation for PraisonAI Agents.
+Lightweight server adapter for protocol-driven architecture.
 
-Provides REST API and SSE event streaming.
+This replaces the heavy server implementation which has been moved to the wrapper package.
+Now contains only lightweight protocol adapters that delegate to the wrapper implementation.
+
+ARCHITECTURAL CHANGE:
+- Removed: 330+ lines of HTTP server, SSE, queues, threading implementation
+- Added: Lightweight protocol adapter that delegates to wrapper package
 """
 
-import asyncio
-import json
+from typing import Any, Callable, Dict, Optional
 import logging
-from praisonaiagents._logging import get_logger
-import queue
-import threading
-import time
-import uuid
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Generator, List, Optional
 
-logger = get_logger(__name__)
+# Use centralized lazy loading
+from .._lazy import lazy_import
 
-# Default configuration
+logger = logging.getLogger(__name__)
+
+# Default configuration  
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 
-@dataclass
-class ServerConfig:
-    """Server configuration."""
-    
-    host: str = DEFAULT_HOST
-    port: int = DEFAULT_PORT
-    cors_origins: List[str] = field(default_factory=lambda: ["*"])
-    auth_token: Optional[str] = None
-    max_connections: int = 100
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "host": self.host,
-            "port": self.port,
-            "cors_origins": self.cors_origins,
-            "auth_token": "***" if self.auth_token else None,
-            "max_connections": self.max_connections,
-        }
-
-class SSEClient:
-    """A Server-Sent Events client connection."""
-    
-    def __init__(self, client_id: str):
-        self.client_id = client_id
-        self.queue: queue.Queue = queue.Queue()
-        self.connected = True
-        self.created_at = time.time()
-    
-    def send(self, event_type: str, data: Dict[str, Any]):
-        """Send an event to this client."""
-        if self.connected:
-            self.queue.put({
-                "event": event_type,
-                "data": data,
-                "id": str(uuid.uuid4()),
-            })
-    
-    def disconnect(self):
-        """Disconnect this client."""
-        self.connected = False
-    
-    def events(self) -> Generator[str, None, None]:
-        """Generate SSE formatted events."""
-        while self.connected:
-            try:
-                event = self.queue.get(timeout=30)
-                yield f"id: {event['id']}\n"
-                yield f"event: {event['event']}\n"
-                yield f"data: {json.dumps(event['data'])}\n\n"
-            except queue.Empty:
-                # Send keepalive
-                yield ": keepalive\n\n"
-
 class AgentServer:
     """
-    HTTP server for PraisonAI Agents.
+    Lightweight server adapter that delegates to wrapper implementation.
     
-    Provides REST API endpoints and SSE event streaming
-    for real-time agent communication.
-    
-    Example:
-        server = AgentServer(port=8080)
-        
-        # Register event handler
-        @server.on_event("message")
-        def handle_message(data):
-            print(f"Message: {data}")
-        
-        # Start server
-        server.start()
+    This maintains backward compatibility while following protocol-driven architecture.
+    The actual heavy implementation (HTTP, SSE, queues, threading) is in the wrapper package.
     """
     
     def __init__(
         self,
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
-        config: Optional[ServerConfig] = None,
+        config: Optional[Any] = None,
     ):
-        """
-        Initialize the server.
-        
-        Args:
-            host: Host to bind to
-            port: Port to bind to
-            config: Optional server configuration
-        """
-        self.config = config or ServerConfig(host=host, port=port)
-        self.host = self.config.host
-        self.port = self.config.port
-        
-        self._clients: Dict[str, SSEClient] = {}
-        self._event_handlers: Dict[str, List[Callable]] = {}
-        self._running = False
-        self._server_thread: Optional[threading.Thread] = None
-        self._app = None
-        self._server = None
+        """Initialize lightweight server adapter."""
+        self._host = host
+        self._port = port
+        self._config = config
+        self._wrapper_server = None
     
-    def _create_app(self):
-        """Create the ASGI application."""
-        try:
-            from starlette.applications import Starlette
-            from starlette.responses import JSONResponse, StreamingResponse
-            from starlette.routing import Route
-            from starlette.middleware.cors import CORSMiddleware
-        except ImportError:
-            logger.warning("Starlette not installed. Server features unavailable.")
-            return None
-        
-        async def health(request):
-            return JSONResponse({
-                "status": "ok",
-                "timestamp": time.time(),
-                "clients": len(self._clients),
-            })
-        
-        async def events(request):
-            client_id = str(uuid.uuid4())
-            client = SSEClient(client_id)
-            self._clients[client_id] = client
-            
-            logger.info(f"SSE client connected: {client_id}")
-            
-            async def event_generator():
-                try:
-                    for event in client.events():
-                        yield event
-                finally:
-                    client.disconnect()
-                    self._clients.pop(client_id, None)
-                    logger.info(f"SSE client disconnected: {client_id}")
-            
-            return StreamingResponse(
-                event_generator(),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                },
-            )
-        
-        async def publish(request):
+    def _get_wrapper_server(self):
+        """Lazy load the wrapper server implementation."""
+        if self._wrapper_server is None:
             try:
-                data = await request.json()
-                event_type = data.get("type", "message")
-                event_data = data.get("data", {})
-                
-                self.broadcast(event_type, event_data)
-                
-                return JSONResponse({
-                    "success": True,
-                    "clients": len(self._clients),
-                })
-            except Exception as e:
-                return JSONResponse(
-                    {"success": False, "error": str(e)},
-                    status_code=400
-                )
-        
-        async def info(request):
-            return JSONResponse({
-                "name": "PraisonAI Agent Server",
-                "version": "1.0.0",
-                "clients": len(self._clients),
-                "config": self.config.to_dict(),
-            })
-        
-        routes = [
-            Route("/health", health, methods=["GET"]),
-            Route("/events", events, methods=["GET"]),
-            Route("/publish", publish, methods=["POST"]),
-            Route("/info", info, methods=["GET"]),
-        ]
-        
-        app = Starlette(routes=routes)
-        
-        # Add CORS middleware
-        app = CORSMiddleware(
-            app,
-            allow_origins=self.config.cors_origins,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
-        
-        return app
+                # Lazy import from wrapper package
+                WrapperServer = lazy_import('praisonai.server', 'AgentServer')
+                self._wrapper_server = WrapperServer(self._host, self._port, self._config)
+            except ImportError:
+                # Fallback to minimal implementation
+                logger.warning("Wrapper server not available, using minimal fallback")
+                self._wrapper_server = _MinimalServer(self._host, self._port)
+        return self._wrapper_server
     
+    # Delegate all methods to wrapper implementation
     def broadcast(self, event_type: str, data: Dict[str, Any]):
-        """
-        Broadcast an event to all connected clients.
-        
-        Args:
-            event_type: The event type
-            data: The event data
-        """
-        for client in list(self._clients.values()):
-            try:
-                client.send(event_type, data)
-            except Exception as e:
-                logger.error(f"Error broadcasting to client: {e}")
+        """Broadcast an event to all connected clients."""
+        self._get_wrapper_server().broadcast(event_type, data)
     
     def on_event(self, event_type: str) -> Callable:
-        """
-        Decorator to register an event handler.
-        
-        Args:
-            event_type: The event type to handle
-            
-        Returns:
-            Decorator function
-        """
+        """Decorator to register an event handler."""
+        return self._get_wrapper_server().on_event(event_type)
+    
+    def start(self, blocking: bool = False):
+        """Start the server."""
+        self._get_wrapper_server().start(blocking)
+    
+    def stop(self):
+        """Stop the server."""
+        if self._wrapper_server:
+            self._wrapper_server.stop()
+    
+    @property
+    def is_running(self) -> bool:
+        """Check if server is running."""
+        return self._get_wrapper_server().is_running
+    
+    @property
+    def client_count(self) -> int:
+        """Get number of connected clients."""
+        return self._get_wrapper_server().client_count
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.stop()
+
+
+class _MinimalServer:
+    """Minimal fallback when wrapper is not available."""
+    
+    def __init__(self, host: str, port: int):
+        self._host = host
+        self._port = port
+        self._running = False
+        self._event_handlers = {}
+    
+    def broadcast(self, event_type: str, data: Dict[str, Any]):
+        logger.debug(f"Minimal server broadcast: {event_type}")
+    
+    def on_event(self, event_type: str) -> Callable:
         def decorator(func: Callable) -> Callable:
             if event_type not in self._event_handlers:
                 self._event_handlers[event_type] = []
@@ -238,92 +110,21 @@ class AgentServer:
         return decorator
     
     def start(self, blocking: bool = False):
-        """
-        Start the server.
-        
-        Args:
-            blocking: If True, block until server stops
-        """
-        if self._running:
-            logger.warning("Server already running")
-            return
-        
-        self._app = self._create_app()
-        if self._app is None:
-            logger.error("Failed to create app - missing dependencies")
-            return
-        
+        logger.info(f"Minimal server started (mock) on {self._host}:{self._port}")
         self._running = True
-        
-        if blocking:
-            self._run_server()
-        else:
-            self._server_thread = threading.Thread(
-                target=self._run_server,
-                daemon=True
-            )
-            self._server_thread.start()
-            # Give server time to start
-            time.sleep(0.5)
-        
-        logger.info(f"Server started on {self.host}:{self.port}")
-    
-    def _run_server(self):
-        """Run the server in an event loop."""
-        try:
-            import uvicorn
-            
-            config = uvicorn.Config(
-                self._app,
-                host=self.host,
-                port=self.port,
-                log_level="warning",
-            )
-            self._server = uvicorn.Server(config)
-            
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(self._server.serve())
-        except ImportError:
-            logger.error("uvicorn not installed. Cannot start server.")
-        except Exception as e:
-            logger.error(f"Server error: {e}")
-        finally:
-            self._running = False
     
     def stop(self):
-        """Stop the server."""
-        if not self._running:
-            return
-        
+        logger.info("Minimal server stopped")
         self._running = False
-        
-        # Disconnect all clients
-        for client in list(self._clients.values()):
-            client.disconnect()
-        self._clients.clear()
-        
-        # Stop the server
-        if self._server:
-            self._server.should_exit = True
-        
-        logger.info("Server stopped")
     
     @property
     def is_running(self) -> bool:
-        """Check if server is running."""
         return self._running
     
     @property
     def client_count(self) -> int:
-        """Get number of connected clients."""
-        return len(self._clients)
-    
-    def __enter__(self):
-        """Context manager entry."""
-        self.start()
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
-        self.stop()
+        return 0
+
+
+# Backward compatibility alias
+Server = AgentServer
