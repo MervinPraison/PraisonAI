@@ -9,6 +9,7 @@ Schema Version: 1.0
 
 import json
 import time
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
@@ -388,17 +389,20 @@ class TraceEmitter:
 
 # Global default emitter (NoOp by default)
 _default_emitter: Optional[TraceEmitter] = None
+_default_emitter_lock = threading.Lock()
 
 
 def get_default_emitter() -> TraceEmitter:
     """Get the default trace emitter."""
     global _default_emitter
-    if _default_emitter is None:
-        _default_emitter = TraceEmitter(sink=NoOpSink(), enabled=False)
-    return _default_emitter
+    with _default_emitter_lock:
+        if _default_emitter is None:
+            _default_emitter = TraceEmitter(sink=NoOpSink(), enabled=False)
+        return _default_emitter
 
 
 def set_default_emitter(emitter: TraceEmitter) -> None:
     """Set the default trace emitter."""
     global _default_emitter
-    _default_emitter = emitter
+    with _default_emitter_lock:
+        _default_emitter = emitter

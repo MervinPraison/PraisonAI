@@ -11,6 +11,7 @@ from praisonaiagents._logging import get_logger
 import time
 import json
 import asyncio
+import threading
 from typing import Any, Dict, List, Optional, Union, AsyncIterator, Iterator, Callable, Tuple, TYPE_CHECKING
 from pydantic import BaseModel
 from dataclasses import dataclass
@@ -2197,6 +2198,7 @@ class OpenAIClient:
 # Global client instance (similar to main.py pattern)
 _global_client = None
 _global_client_params = None
+_global_client_lock = threading.Lock()
 
 def get_openai_client(api_key: Optional[str] = None, base_url: Optional[str] = None) -> OpenAIClient:
     """
@@ -2216,9 +2218,10 @@ def get_openai_client(api_key: Optional[str] = None, base_url: Optional[str] = N
     normalized_base_url = base_url
     current_params = (normalized_api_key, normalized_base_url)
     
-    # Only create new client if parameters changed or first time
-    if _global_client is None or _global_client_params != current_params:
-        _global_client = OpenAIClient(api_key=api_key, base_url=base_url)
-        _global_client_params = current_params
-    
-    return _global_client
+    # Thread-safe client creation
+    with _global_client_lock:
+        # Only create new client if parameters changed or first time
+        if _global_client is None or _global_client_params != current_params:
+            _global_client = OpenAIClient(api_key=api_key, base_url=base_url)
+            _global_client_params = current_params
+        return _global_client

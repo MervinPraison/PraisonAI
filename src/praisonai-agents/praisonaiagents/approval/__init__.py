@@ -50,20 +50,30 @@ logger = get_logger(__name__)
 
 # ── Singleton registry ───────────────────────────────────────────────────────
 
+import threading
+
 _registry: Optional[ApprovalRegistry] = None
+_registry_lock = threading.Lock()
 
 def get_approval_registry() -> ApprovalRegistry:
     """Return the global singleton :class:`ApprovalRegistry`."""
     global _registry
-    if _registry is None:
-        _registry = ApprovalRegistry()
-    return _registry
+    with _registry_lock:
+        if _registry is None:
+            _registry = ApprovalRegistry()
+        return _registry
 
 # ── Backward-compatible API (delegates to registry) ─────────────────────────
 
 # These globals are kept for code that imports them directly.
-APPROVAL_REQUIRED_TOOLS: Set[str] = get_approval_registry()._required_tools
-TOOL_RISK_LEVELS: Dict[str, str] = get_approval_registry()._risk_levels
+# NOTE: Accessing these will trigger lazy initialization of the registry
+def __getattr__(name):
+    """Module-level attribute access for lazy initialization."""
+    if name == "APPROVAL_REQUIRED_TOOLS":
+        return get_approval_registry()._required_tools
+    elif name == "TOOL_RISK_LEVELS":
+        return get_approval_registry()._risk_levels
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 # Legacy global callback holder — set_approval_callback wraps it into a backend
 approval_callback: Optional[Callable] = None

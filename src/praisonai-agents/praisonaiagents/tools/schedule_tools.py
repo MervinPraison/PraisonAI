@@ -17,6 +17,7 @@ Usage:
 """
 
 import logging
+import threading
 from praisonaiagents._logging import get_logger
 
 logger = get_logger(__name__)
@@ -24,6 +25,7 @@ logger = get_logger(__name__)
 # ── lazy singleton store ─────────────────────────────────────────────────────
 
 _store_instance = None
+_store_instance_lock = threading.Lock()
 
 def set_store(store):
     """Inject an external schedule store (e.g., config.yaml-backed).
@@ -33,7 +35,8 @@ def set_store(store):
     ``config.yaml`` instead of the default ``jobs.json``.
     """
     global _store_instance
-    _store_instance = store
+    with _store_instance_lock:
+        _store_instance = store
 
 def _get_store():
     """Return (or create) the global schedule store.
@@ -42,11 +45,12 @@ def _get_store():
     Automatically migrates any existing ``jobs.json`` data on first use.
     """
     global _store_instance
-    if _store_instance is None:
-        from ..scheduler.config_store import ConfigYamlScheduleStore
-        _store_instance = ConfigYamlScheduleStore()
-        _store_instance.migrate_from_json()
-    return _store_instance
+    with _store_instance_lock:
+        if _store_instance is None:
+            from ..scheduler.config_store import ConfigYamlScheduleStore
+            _store_instance = ConfigYamlScheduleStore()
+            _store_instance.migrate_from_json()
+        return _store_instance
 
 # ── tools ────────────────────────────────────────────────────────────────────
 
