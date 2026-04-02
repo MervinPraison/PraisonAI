@@ -13,8 +13,8 @@ jobs:
   # Claude reads ALL previous reviews (Qodo, Coderabbit, Copilot) and fixes any valid issues
   claude-final-review:
     if: |
-      github.event_name == 'pull_request_review' &&
-      github.event.review.user.login == 'copilot-pull-request-reviewer[bot]'
+      (github.event_name == 'pull_request_review' && contains(github.event.review.user.login, 'copilot')) ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.user.login, 'copilot'))
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
