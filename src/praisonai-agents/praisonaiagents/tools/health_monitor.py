@@ -455,9 +455,14 @@ def get_circuit_breaker_dashboard_data() -> Dict[str, Any]:
     
     return dashboard_data
 
-# Global health monitor instance for convenience
-_global_health_monitor = HealthMonitor()
+# Global health monitor instance for convenience (lazy initialization)
+_global_health_monitor = None
+_global_health_monitor_lock = threading.Lock()
 
 def get_health_monitor() -> HealthMonitor:
     """Get the global health monitor instance."""
-    return _global_health_monitor
+    global _global_health_monitor
+    with _global_health_monitor_lock:
+        if _global_health_monitor is None:
+            _global_health_monitor = HealthMonitor()
+        return _global_health_monitor

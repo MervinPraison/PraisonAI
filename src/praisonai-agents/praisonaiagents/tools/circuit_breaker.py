@@ -434,8 +434,18 @@ class CircuitBreakerRegistry:
             self._breakers.clear()
 
 
-# Global registry instance for convenience
-_global_registry = CircuitBreakerRegistry()
+# Global registry instance for convenience (lazy initialization)
+_global_registry = None
+_global_registry_lock = threading.Lock()
+
+
+def _get_global_registry() -> CircuitBreakerRegistry:
+    """Get or create the global circuit breaker registry."""
+    global _global_registry
+    with _global_registry_lock:
+        if _global_registry is None:
+            _global_registry = CircuitBreakerRegistry()
+        return _global_registry
 
 
 def get_circuit_breaker(
@@ -455,14 +465,14 @@ def get_circuit_breaker(
     Returns:
         CircuitBreaker instance
     """
-    return _global_registry.get_or_create(name, config, health_check, fallback)
+    return _get_global_registry().get_or_create(name, config, health_check, fallback)
 
 
 def get_all_circuit_breaker_stats() -> Dict[str, Dict[str, Any]]:
     """Get statistics for all circuit breakers in the global registry."""
-    return _global_registry.get_all_stats()
+    return _get_global_registry().get_all_stats()
 
 
 def reset_all_circuit_breakers() -> None:
     """Reset all circuit breakers in the global registry."""
-    _global_registry.reset_all()
+    _get_global_registry().reset_all()
