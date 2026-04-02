@@ -215,6 +215,36 @@ class SandlockSandbox:
             )
 
             completed_at = time.time()
+            duration = completed_at - started_at
+
+            # Check result.success and exit_code to determine actual status
+            if not result.success:
+                # Check if this was a timeout based on duration
+                if duration >= limits.timeout_seconds:
+                    return SandboxResult(
+                        execution_id=execution_id,
+                        status=SandboxStatus.TIMEOUT,
+                        error=f"Execution timed out after {limits.timeout_seconds}s",
+                        exit_code=result.exit_code,
+                        stdout=result.stdout,
+                        stderr=result.stderr,
+                        duration_seconds=duration,
+                        started_at=started_at,
+                        completed_at=completed_at,
+                    )
+                else:
+                    # Non-zero exit or other failure
+                    return SandboxResult(
+                        execution_id=execution_id,
+                        status=SandboxStatus.FAILED,
+                        error=f"Execution failed with exit code {result.exit_code}: {result.stderr}",
+                        exit_code=result.exit_code,
+                        stdout=result.stdout,
+                        stderr=result.stderr,
+                        duration_seconds=duration,
+                        started_at=started_at,
+                        completed_at=completed_at,
+                    )
 
             return SandboxResult(
                 execution_id=execution_id,
@@ -222,7 +252,7 @@ class SandlockSandbox:
                 exit_code=result.exit_code,
                 stdout=result.stdout,
                 stderr=result.stderr,
-                duration_seconds=completed_at - started_at,
+                duration_seconds=duration,
                 started_at=started_at,
                 completed_at=completed_at,
                 metadata={

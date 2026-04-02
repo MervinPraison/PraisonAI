@@ -148,11 +148,18 @@ class TestSandlockSandbox:
 
         sandbox = _make_sandbox(mock_sandlock)
 
-        # Simulate timeout by raising generic exception after enough time
+        # Create a mock Result object indicating timeout
+        mock_timeout_result = Mock()
+        mock_timeout_result.success = False
+        mock_timeout_result.exit_code = 124  # Common timeout exit code
+        mock_timeout_result.stdout = ""
+        mock_timeout_result.stderr = "Process timed out"
+
+        # Simulate timeout by returning failed Result after enough time
         with patch("asyncio.get_running_loop") as mock_loop, \
-             patch("time.time", side_effect=[0, 11]):  # Started at 0, ended at 11s (> 10s timeout)
+             patch("time.time", side_effect=[0, 11, 11]):  # Started at 0, ended at 11s (> 10s timeout)
             mock_loop.return_value.run_in_executor = AsyncMock(
-                side_effect=Exception("Process timed out")
+                return_value=mock_timeout_result
             )
 
             await sandbox.start()
@@ -171,18 +178,26 @@ class TestSandlockSandbox:
 
         sandbox = _make_sandbox(mock_sandlock)
 
-        # Simulate execution failure (not timeout)
+        # Create a mock Result object indicating non-zero exit
+        mock_failed_result = Mock()
+        mock_failed_result.success = False
+        mock_failed_result.exit_code = 1  # Non-zero exit code
+        mock_failed_result.stdout = ""
+        mock_failed_result.stderr = "Permission denied"
+
+        # Simulate execution failure (not timeout) 
         with patch("asyncio.get_running_loop") as mock_loop, \
-             patch("time.time", side_effect=[0, 2]):  # Started at 0, ended at 2s (< 10s timeout)
+             patch("time.time", side_effect=[0, 2, 2]):  # Started at 0, ended at 2s (< 10s timeout)
             mock_loop.return_value.run_in_executor = AsyncMock(
-                side_effect=Exception("Execution failed")
+                return_value=mock_failed_result
             )
 
             await sandbox.start()
             result = await sandbox.execute("import os; os.system('rm -rf /')")
 
         assert result.status == SandboxStatus.FAILED
-        assert "Execution failed" in result.error
+        assert "exit code 1" in result.error
+        assert "Permission denied" in result.error
 
     @pytest.mark.asyncio
     async def test_safe_sandbox_path_traversal_blocked(self):
@@ -217,3 +232,42 @@ class TestSandlockSandbox:
         assert success is False
 
         await sandbox.stop()
+
+    @pytest.mark.asyncio
+    async def test_real_sandlock_integration(self):
+        """Integration test with real sandlock package if available.
+        
+        This test uses the actual sandlock package (if available) to ensure
+        the integration works with the real API surface, not just mocks.
+        """
+        try:
+            # Try to import real sandlock
+            import sandlock
+            
+            # Only run if Landlock is actually supported on this system
+            if sandlock.landlock_abi_version() < 1:
+                pytest.skip("Landlock not supported on this system")
+            
+            # Test with real sandlock package
+            from praisonai.sandbox.sandlock import SandlockSandbox
+            
+            sandbox = SandlockSandbox()
+            assert sandbox.is_available
+            
+            await sandbox.start()
+            
+            # Execute simple code that should succeed
+            result = await sandbox.execute(
+                "print('Real sandlock integration test')", 
+                limits=ResourceLimits(timeout_seconds=5, memory_mb=64)
+            )
+            
+            # Should complete successfully
+            assert result.status == SandboxStatus.COMPLETED
+            assert result.exit_code == 0
+            assert "Real sandlock integration test" in result.stdout
+            
+            await sandbox.stop()
+            
+        except ImportError:
+            pytest.skip("sandlock package not available for integration test")
