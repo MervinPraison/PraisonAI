@@ -26,12 +26,6 @@ logger = get_logger(__name__, extra_data={"subsystem": "memory"})
 TRACE_LEVEL = 5
 logging.addLevelName(TRACE_LEVEL, 'TRACE')
 
-def trace(self, message, *args, **kwargs):
-    if self.isEnabledFor(TRACE_LEVEL):
-        self._log(TRACE_LEVEL, message, args, **kwargs)
-
-# Note: trace method available locally, but not monkey-patched globally
-
 # Thread-safe lazy imports using proper thread synchronization
 import threading
 
@@ -942,7 +936,7 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
                 from praisonaiagents.embedding import embedding as get_embedding
                 
                 logger.info("Getting embeddings...")
-                logger.trace(f"Embedding input text: {text}")
+                logger.log(TRACE_LEVEL, f"Embedding input text: {text}")
                 
                 result = get_embedding(text, model=self.embedding_model)
                 embedding = result.embeddings[0] if result.embeddings else None
@@ -952,7 +946,7 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
                     return
                     
                 logger.info("Successfully got embeddings")
-                logger.trace(f"Received embedding of length: {len(embedding)}")
+                logger.log(TRACE_LEVEL, f"Received embedding of length: {len(embedding)}")
                 
                 # Sanitize metadata for ChromaDB
                 sanitized_metadata = self._sanitize_metadata(metadata)
