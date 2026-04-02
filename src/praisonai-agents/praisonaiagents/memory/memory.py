@@ -30,7 +30,7 @@ def trace(self, message, *args, **kwargs):
     if self.isEnabledFor(TRACE_LEVEL):
         self._log(TRACE_LEVEL, message, args, **kwargs)
 
-logging.Logger.trace = trace
+# Note: trace method available locally, but not monkey-patched globally
 
 # Thread-safe lazy imports using proper thread synchronization
 import threading
