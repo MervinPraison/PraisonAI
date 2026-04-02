@@ -204,6 +204,15 @@ PraisonAI supports 100+ LLM providers through seamless integration:
 
 </details>
 
+
+<div align="center">
+  <a href="https://x.com/elonmusk/status/1893870468249141688" target="_blank">
+    <img src=".github/images/elon_musk_praisonai.png" alt="Highlighted by Elon Musk" width="600" />
+  </a>
+  <p><em>"Grok 3 customer support" — <a href="https://x.com/elonmusk/status/1893870468249141688">Elon Musk quoting PraisonAI's tutorial</a></em></p>
+</div>
+<br>
+
 ---
 
 ## 🚀 Quick Start

@@ -311,9 +311,120 @@ class WebSocketGateway:
                     source=client_id,
                 ))
         
+        # ── Approval endpoints ─────────────────────────────────────────
+        # Lazy-import approval machinery so it doesn't slow down startup
+        # or fail if optional deps are missing.
+        from .exec_approval import Resolution, get_exec_approval_manager
+        from .rate_limiter import AuthRateLimiter
+
+        _approval_mgr = get_exec_approval_manager()
+        _approval_rate = AuthRateLimiter(max_attempts=10, window_seconds=60)
+
+        async def approval_pending(request):
+            """GET /api/approval/pending — list pending approval requests."""
+            auth_err = _check_auth(request)
+            if auth_err:
+                return auth_err
+            return JSONResponse({
+                "pending": _approval_mgr.list_pending(),
+                "allow_list": _approval_mgr.allowlist.list(),
+            })
+
+        async def approval_resolve(request):
+            """POST /api/approval/resolve — approve or deny a tool request.
+
+            Body: {"request_id": "...", "approved": true/false,
+                   "reason": "...", "allow_always": false}
+            """
+            auth_err = _check_auth(request)
+            if auth_err:
+                return auth_err
+
+            client_ip = request.client.host if request.client else "unknown"
+            if not _approval_rate.allow("approval_resolve", client_ip):
+                retry = _approval_rate.time_until_allowed("approval_resolve", client_ip)
+                return JSONResponse(
+                    {"error": "Rate limited", "retry_after_seconds": round(retry)},
+                    status_code=429,
+                )
+
+            try:
+                body = await request.json()
+            except Exception:
+                return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+            request_id = body.get("request_id", "")
+            if not request_id:
+                return JSONResponse(
+                    {"error": "request_id is required"}, status_code=400,
+                )
+
+            resolution = Resolution(
+                approved=bool(body.get("approved", False)),
+                reason=str(body.get("reason", "")),
+                allow_always=bool(body.get("allow_always", False)),
+            )
+
+            found = _approval_mgr.resolve(request_id, resolution)
+            if not found:
+                return JSONResponse(
+                    {"error": "Request not found or already resolved"},
+                    status_code=404,
+                )
+
+            return JSONResponse({
+                "resolved": True,
+                "request_id": request_id,
+                "approved": resolution.approved,
+            })
+
+        async def approval_allowlist(request):
+            """GET/POST/DELETE /api/approval/allow-list
+
+            GET    → list allow-listed tools
+            POST   → add a tool: {"tool_name": "..."}
+            DELETE → remove a tool: {"tool_name": "..."}
+            """
+            auth_err = _check_auth(request)
+            if auth_err:
+                return auth_err
+
+            if request.method == "GET":
+                return JSONResponse({
+                    "allow_list": _approval_mgr.allowlist.list(),
+                })
+
+            try:
+                body = await request.json()
+            except Exception:
+                return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+            tool_name = body.get("tool_name", "")
+            if not tool_name:
+                return JSONResponse(
+                    {"error": "tool_name is required"}, status_code=400,
+                )
+
+            if request.method == "POST":
+                _approval_mgr.allowlist.add(tool_name)
+                return JSONResponse({"added": tool_name})
+            elif request.method == "DELETE":
+                removed = _approval_mgr.allowlist.remove(tool_name)
+                if not removed:
+                    return JSONResponse(
+                        {"error": f"'{tool_name}' not in allow-list"},
+                        status_code=404,
+                    )
+                return JSONResponse({"removed": tool_name})
+
+            return JSONResponse({"error": "Method not allowed"}, status_code=405)
+
         routes = [
             Route("/health", health, methods=["GET"]),
             Route("/info", info, methods=["GET"]),
+            Route("/api/approval/pending", approval_pending, methods=["GET"]),
+            Route("/api/approval/resolve", approval_resolve, methods=["POST"]),
+            Route("/api/approval/allow-list", approval_allowlist, methods=["GET", "POST", "DELETE"]),
             WebSocketRoute("/ws", websocket_endpoint),
         ]
         
