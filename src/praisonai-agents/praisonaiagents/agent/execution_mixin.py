@@ -14,42 +14,6 @@ from praisonaiagents._logging import get_logger
 import asyncio
 import threading
 
-# Async-safe sleep utilities
-def _smart_sleep(duration: float):
-    """
-    Sleep that detects async context and uses appropriate method.
-    In async contexts, avoids blocking the event loop by using asyncio.sleep.
-    """
-    try:
-        # Check if we're in an async event loop
-        loop = asyncio.get_running_loop()
-        
-        # We're in an async context - create a task and wait for it
-        # This approach schedules the sleep as a coroutine without blocking
-        async def _sleep_coro():
-            await asyncio.sleep(duration)
-        
-        # Create the task and let it run
-        # Note: This doesn't wait for completion, which is intentional
-        # for non-critical timing like server startup delays
-        task = loop.create_task(_sleep_coro())
-        
-        # For server startup timing, add a minimal delay to ensure ordering
-        # but avoid long blocks that stall the event loop
-        if duration > 0.1:
-            # Use a short blocking sleep for essential timing
-            time.sleep(0.01)  # 10ms minimal delay for startup synchronization
-        else:
-            time.sleep(duration)
-            
-    except RuntimeError:
-        # No event loop running, safe to use blocking sleep
-        time.sleep(duration)
-
-async def _async_safe_sleep(duration: float):
-    """Async version that always uses asyncio.sleep when in event loop."""
-    await asyncio.sleep(duration)
-
 # Fallback helpers to avoid circular imports
 def _get_console():
     from rich.console import Console
@@ -989,10 +953,10 @@ Write the complete compiled report:"""
                 server_thread.start()
 
                 # Wait for a moment to allow the server to start and register endpoints
-                _smart_sleep(0.5)
+                time.sleep(0.5)
             else:
                 # If server is already running, wait a moment to make sure the endpoint is registered
-                _smart_sleep(0.1)
+                time.sleep(0.1)
                 print(f"🔌 Available endpoints on port {port}: {', '.join(list(_registered_agents[port].keys()))}")
             
             # Get the stack frame to check if this is the last launch() call in the script
@@ -1021,7 +985,7 @@ Write the complete compiled report:"""
                         try:
                             print("\nAll agents registered for HTTP mode. Press Ctrl+C to stop the servers.")
                             while True:
-                                _smart_sleep(1)
+                                time.sleep(1)
                         except KeyboardInterrupt:
                             print("\nServers stopped")
                 except Exception as e:
@@ -1030,7 +994,7 @@ Write the complete compiled report:"""
                     try:
                         print("\nKeeping HTTP servers alive. Press Ctrl+C to stop.")
                         while True:
-                            _smart_sleep(1)
+                            time.sleep(1)
                     except KeyboardInterrupt:
                         print("\nServers stopped")
             return None
@@ -1089,12 +1053,12 @@ Write the complete compiled report:"""
 
             server_thread = threading.Thread(target=run_mcp_server, daemon=True)
             server_thread.start()
-            _smart_sleep(0.5)
+            time.sleep(0.5)
 
             try:
                 print("\nKeeping MCP server alive. Press Ctrl+C to stop.")
                 while True:
-                    _smart_sleep(1)
+                    time.sleep(1)
             except KeyboardInterrupt:
                 print("\nMCP Server stopped")
             return None
