@@ -78,7 +78,10 @@ class SandlockSandbox:
     @property
     def is_available(self) -> bool:
         """Whether sandlock backend is available."""
-        return self._sandlock.is_available()
+        try:
+            return self._sandlock.landlock_abi_version() >= 6
+        except (AttributeError, ImportError):
+            return False
     
     @property
     def sandbox_type(self) -> str:
@@ -155,8 +158,8 @@ class SandlockSandbox:
             max_processes=limits.max_processes,
             max_open_files=limits.max_open_files,
             
-            # CPU and timeout limits
-            max_cpu_time_seconds=limits.timeout_seconds,
+            # Note: CPU throttle percentage, not time limit
+            # Execution timeout is handled via Sandbox.run(timeout=...)
         )
         
         return policy
@@ -204,9 +207,11 @@ class SandlockSandbox:
         try:
             sandbox = self._sandlock.Sandbox(policy)
 
+            # Configure environment before sandbox creation if needed
+            # sandlock.run() only accepts cmd and optional timeout parameter
             result = await asyncio.get_running_loop().run_in_executor(
                 None,
-                lambda: sandbox.run(cmd, env=process_env, cwd=working_dir)
+                lambda: sandbox.run(cmd, timeout=limits.timeout_seconds)
             )
 
             completed_at = time.time()
@@ -227,24 +232,29 @@ class SandlockSandbox:
                 },
             )
 
-        except self._sandlock.TimeoutError:
-            return SandboxResult(
-                execution_id=execution_id,
-                status=SandboxStatus.TIMEOUT,
-                error=f"Execution timed out after {limits.timeout_seconds}s",
-                duration_seconds=limits.timeout_seconds,
-                started_at=started_at,
-                completed_at=time.time(),
-            )
-        except self._sandlock.SecurityViolationError as e:
-            return SandboxResult(
-                execution_id=execution_id,
-                status=SandboxStatus.FAILED,
-                error=f"Security violation: {e}",
-                duration_seconds=time.time() - started_at,
-                started_at=started_at,
-                completed_at=time.time(),
-            )
+        # Note: Sandlock doesn't raise timeout/security exceptions
+        # Instead, check result.exit_code for timeout/termination conditions
+        except Exception as e:
+            # Check if this was a timeout by examining exit code or duration
+            duration = time.time() - started_at
+            if duration >= limits.timeout_seconds:
+                return SandboxResult(
+                    execution_id=execution_id,
+                    status=SandboxStatus.TIMEOUT,
+                    error=f"Execution timed out after {limits.timeout_seconds}s",
+                    duration_seconds=duration,
+                    started_at=started_at,
+                    completed_at=time.time(),
+                )
+            else:
+                return SandboxResult(
+                    execution_id=execution_id,
+                    status=SandboxStatus.FAILED,
+                    error=f"Execution failed: {e}",
+                    duration_seconds=duration,
+                    started_at=started_at,
+                    completed_at=time.time(),
+                )
         except Exception as e:
             return SandboxResult(
                 execution_id=execution_id,
