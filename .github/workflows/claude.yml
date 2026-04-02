@@ -51,6 +51,8 @@ jobs:
           github_token: ${{ steps.app-token.outputs.token }}
           trigger_phrase: "@claude"
           label_trigger: "claude"
+          allowed_non_write_users: "*"
+
           direct_prompt: |
             You are working on the PraisonAI SDK. Follow AGENTS.md strictly.
 
