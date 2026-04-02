@@ -2224,5 +2224,4 @@ def get_openai_client(api_key: Optional[str] = None, base_url: Optional[str] = N
         if _global_client is None or _global_client_params != current_params:
             _global_client = OpenAIClient(api_key=api_key, base_url=base_url)
             _global_client_params = current_params
-    
-    return _global_client
+        return _global_client
