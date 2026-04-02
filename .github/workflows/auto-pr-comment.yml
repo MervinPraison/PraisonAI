@@ -17,6 +17,11 @@ on:
   pull_request:
     types: [opened]
 
+env:
+  MAX_POLL_ATTEMPTS: 20
+  POLL_DELAY_MS: 30000
+  CLAUDE_TRIGGER_LOGINS: '["MervinPraison","github-actions[bot]"]'
+
 jobs:
   # ================================================================
   # HUMAN PRs: Trigger @copilot AFTER CodeRabbit posts its summary
@@ -119,22 +124,28 @@ jobs:
       needs.copilot-after-coderabbit.result == 'success' &&
       needs.copilot-after-coderabbit.outputs.triggered == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
+      issues: write
       pull-requests: write
     steps:
       - name: Wait for Copilot to respond (poll)
         id: poll
         uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ needs.copilot-after-coderabbit.outputs.pr_number }}
+          MAX_POLL_ATTEMPTS: ${{ env.MAX_POLL_ATTEMPTS }}
+          POLL_DELAY_MS: ${{ env.POLL_DELAY_MS }}
         with:
           github-token: ${{ secrets.GH_TOKEN }}
           script: |
-            const pr = parseInt('${{ needs.copilot-after-coderabbit.outputs.pr_number }}');
+            const pr = parseInt(process.env.PR_NUMBER, 10);
             const owner = context.repo.owner;
             const repo = context.repo.repo;
 
             // Poll for Copilot's response — check every 30s for up to 10 minutes
-            const maxAttempts = 20;
-            const delayMs = 30000;
+            const maxAttempts = parseInt(process.env.MAX_POLL_ATTEMPTS, 10);
+            const delayMs = parseInt(process.env.POLL_DELAY_MS, 10);
 
             for (let i = 0; i < maxAttempts; i++) {
               console.log(`Poll attempt ${i + 1}/${maxAttempts}...`);
@@ -191,28 +202,33 @@ jobs:
       - name: Check if Claude already triggered
         id: check_claude
         uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ needs.copilot-after-coderabbit.outputs.pr_number }}
+          TRIGGER_LOGINS: ${{ env.CLAUDE_TRIGGER_LOGINS }}
         with:
           github-token: ${{ secrets.GH_TOKEN }}
           script: |
-            const pr = parseInt('${{ needs.copilot-after-coderabbit.outputs.pr_number }}');
+            const pr = parseInt(process.env.PR_NUMBER, 10);
+            const triggerLogins = JSON.parse(process.env.TRIGGER_LOGINS);
             const comments = await github.rest.issues.listComments({
               issue_number: pr,
               owner: context.repo.owner,
               repo: context.repo.repo
             });
             const alreadyPosted = comments.data.some(c =>
-              c.body.includes('@claude') &&
-              (c.user.login === 'MervinPraison' || c.user.login === 'github-actions[bot]')
+              c.body.includes('@claude') && triggerLogins.includes(c.user.login)
             );
             core.setOutput('already_triggered', alreadyPosted ? 'true' : 'false');
 
       - name: Trigger Claude final review
         if: steps.check_claude.outputs.already_triggered != 'true'
         uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ needs.copilot-after-coderabbit.outputs.pr_number }}
         with:
           github-token: ${{ secrets.GH_TOKEN }}
           script: |
-            const pr = parseInt('${{ needs.copilot-after-coderabbit.outputs.pr_number }}');
+            const pr = parseInt(process.env.PR_NUMBER, 10);
             await github.rest.issues.createComment({
               issue_number: pr,
               owner: context.repo.owner,
@@ -231,20 +247,26 @@ jobs:
       needs.copilot-after-qodo.result == 'success' &&
       needs.copilot-after-qodo.outputs.triggered == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
+      issues: write
       pull-requests: write
     steps:
       - name: Wait for Copilot to respond (poll)
         id: poll
         uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ needs.copilot-after-qodo.outputs.pr_number }}
+          MAX_POLL_ATTEMPTS: ${{ env.MAX_POLL_ATTEMPTS }}
+          POLL_DELAY_MS: ${{ env.POLL_DELAY_MS }}
         with:
           github-token: ${{ secrets.GH_TOKEN }}
           script: |
-            const pr = parseInt('${{ needs.copilot-after-qodo.outputs.pr_number }}');
+            const pr = parseInt(process.env.PR_NUMBER, 10);
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const maxAttempts = 20;
-            const delayMs = 30000;
+            const maxAttempts = parseInt(process.env.MAX_POLL_ATTEMPTS, 10);
+            const delayMs = parseInt(process.env.POLL_DELAY_MS, 10);
 
             for (let i = 0; i < maxAttempts; i++) {
               console.log(`Poll attempt ${i + 1}/${maxAttempts}...`);
@@ -284,28 +306,33 @@ jobs:
       - name: Check if Claude already triggered
         id: check_claude
         uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ needs.copilot-after-qodo.outputs.pr_number }}
+          TRIGGER_LOGINS: ${{ env.CLAUDE_TRIGGER_LOGINS }}
         with:
           github-token: ${{ secrets.GH_TOKEN }}
           script: |
-            const pr = parseInt('${{ needs.copilot-after-qodo.outputs.pr_number }}');
+            const pr = parseInt(process.env.PR_NUMBER, 10);
+            const triggerLogins = JSON.parse(process.env.TRIGGER_LOGINS);
             const comments = await github.rest.issues.listComments({
               issue_number: pr,
               owner: context.repo.owner,
               repo: context.repo.repo
             });
             const alreadyPosted = comments.data.some(c =>
-              c.body.includes('@claude') &&
-              (c.user.login === 'MervinPraison' || c.user.login === 'github-actions[bot]')
+              c.body.includes('@claude') && triggerLogins.includes(c.user.login)
             );
             core.setOutput('already_triggered', alreadyPosted ? 'true' : 'false');
 
       - name: Trigger Claude final review
         if: steps.check_claude.outputs.already_triggered != 'true'
         uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ needs.copilot-after-qodo.outputs.pr_number }}
         with:
           github-token: ${{ secrets.GH_TOKEN }}
           script: |
-            const pr = parseInt('${{ needs.copilot-after-qodo.outputs.pr_number }}');
+            const pr = parseInt(process.env.PR_NUMBER, 10);
             await github.rest.issues.createComment({
               issue_number: pr,
               owner: context.repo.owner,
@@ -313,6 +340,56 @@ jobs:
               body: '@claude You are the FINAL architecture reviewer. Read ALL comments above from Gemini, Qodo, CodeRabbit, and Copilot carefully before responding.\n\n**Phase 1: Review per AGENTS.md**\n1. Protocol-driven: check heavy implementations vs core SDK\n2. Backward compatible: ensure zero feature regressions\n3. Performance: no hot-path regressions\n\n**Phase 2: FIX Valid Issues**\n4. For any VALID bugs or architectural flaws found by Gemini, CodeRabbit, Qodo, Copilot, or any other reviewer: implement the fix\n5. Push all code fixes directly to THIS branch (do NOT create a new PR)\n6. Comment a summary of exact files modified and what you skipped\n\n**Phase 3: Final Verdict**\n7. If all issues are resolved, approve the PR / close the Issue\n8. If blocking issues remain, request changes / leave clear action items'
             });
             console.log(`Claude triggered on PR #${pr}`);
+
+  # ================================================================
+  # Claude after Gemini — restores the trigger lost from the deleted
+  # chain-claude-after-copilot.yml workflow.
+  # Fires when Gemini posts a review comment on a PR or issue.
+  # ================================================================
+  claude-after-gemini:
+    if: |
+      github.event_name == 'issue_comment' &&
+      (
+        github.event.comment.user.login == 'gemini-code-assist[bot]' ||
+        contains(github.event.comment.body, 'Review completed by Gemini CLI') ||
+        contains(github.event.comment.body, 'The fix is ready for review. Please test')
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Check if Claude already triggered
+        id: check_claude
+        uses: actions/github-script@v7
+        env:
+          TRIGGER_LOGINS: ${{ env.CLAUDE_TRIGGER_LOGINS }}
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            const triggerLogins = JSON.parse(process.env.TRIGGER_LOGINS);
+            const comments = await github.rest.issues.listComments({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            });
+            const alreadyPosted = comments.data.some(c =>
+              c.body.includes('@claude') && triggerLogins.includes(c.user.login)
+            );
+            core.setOutput('already_triggered', alreadyPosted ? 'true' : 'false');
+
+      - name: Post Claude analysis request (Lead Engineer)
+        if: steps.check_claude.outputs.already_triggered != 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '@claude You are the Lead Engineer. Read ALL analysis and reviews above carefully (Gemini, CodeRabbit, Qodo, Copilot, etc).\n\n**Phase 1: Review per AGENTS.md**\n1. Protocol-driven: check heavy implementations vs core SDK\n2. Backward compatible: ensure zero feature regressions\n3. Performance: no hot-path regressions\n\n**Phase 2: FIX Valid Issues**\n4. For any VALID bugs or architectural flaws found by Gemini, CodeRabbit, Qodo, Copilot, or any other reviewer: implement the fix\n5. Push all code fixes directly to THIS branch (do NOT create a new PR)\n6. Comment a summary of exact files modified and what you skipped\n\n**Phase 3: Final Verdict**\n7. If all issues are resolved, approve the PR / close the Issue\n8. If blocking issues remain, request changes / leave clear action items'
+            });
 
   # ================================================================
   # BOT PRs: CodeRabbit/Qodo skip bot-authored PRs by default.
