@@ -45,7 +45,7 @@ class TestSandlockSandbox:
     def test_fallback_to_subprocess_when_unavailable(self):
         """Test fallback to subprocess when sandlock is not available."""
         mock_sandlock = Mock()
-        mock_sandlock.landlock_abi_version.return_value = 5  # < 6, so unavailable
+        mock_sandlock.landlock_abi_version.return_value = 0  # < 1, so unavailable
 
         sandbox = _make_sandbox(mock_sandlock)
         assert not sandbox.is_available
@@ -55,7 +55,7 @@ class TestSandlockSandbox:
     async def test_fallback_execution(self):
         """Test that execution falls back to subprocess when sandlock unavailable."""
         mock_sandlock = Mock()
-        mock_sandlock.landlock_abi_version.return_value = 5  # < 6, so unavailable
+        mock_sandlock.landlock_abi_version.return_value = 0  # < 1, so unavailable
 
         sandbox = _make_sandbox(mock_sandlock)
 
