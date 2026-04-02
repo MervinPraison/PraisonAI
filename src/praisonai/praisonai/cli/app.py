@@ -237,6 +237,7 @@ def register_commands():
     from .commands.sandbox import app as sandbox_app
     from .commands.claw import app as claw_app
     from .commands.flow import app as flow_app
+    from .commands.langfuse import app as langfuse_app
     
     # Import TUI and queue commands
     from .features.tui.debug import create_debug_app as create_tui_debug_app
@@ -416,6 +417,7 @@ def register_commands():
     app.add_typer(sandbox_app, name="sandbox", help="Sandbox container management")
     app.add_typer(claw_app, name="claw", help="🦞 PraisonAI Dashboard (full UI)")
     app.add_typer(flow_app, name="flow", help="Visual workflow builder (Langflow)")
+    app.add_typer(langfuse_app, name="langfuse", help="🔍 Langfuse observability platform")
     
     # Register standardise command
     try:
