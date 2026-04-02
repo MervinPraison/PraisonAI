@@ -203,90 +203,45 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
     def __init__(self, cfg: Dict[str, Any] = None):
         """Initialize memory manager with configuration."""
         self.cfg = cfg or {}
+        self.verbose = self.cfg.get("verbose", 0)
         self._local = threading.local()
         self._connection_lock = threading.Lock()
+        self._write_lock = threading.Lock()
         self._all_connections = set()
-        
-        # Initialize STM/LTM if appropriate
-        if self.cfg.get("provider") != "mem0":
-            self._init_stm_ltm()
-        
-        # Set up graph/mem0 client if requested
+
+        # Determine active provider and feature flags (used by mixin classes)
+        self.provider = self.cfg.get("provider", "rag")
+        self.use_rag = (
+            self.provider.lower() == "rag"
+            and _check_chromadb()
+            and self.cfg.get("use_embedding", False)
+        )
+        self.use_mongodb = self.provider.lower() == "mongodb" and _check_pymongo()
+
+        # Learn support
+        self._learn_manager = None
+        self._learn_config = self.cfg.get("learn", None)
+
+        # Initialize SQLite STM/LTM tables via StorageMixin helpers
+        if self.provider != "mem0":
+            self._init_stm()
+            self._init_ltm()
+
+        # Set up Mem0 client if requested
         self.mem0_client = None
-        if self.cfg.get("provider") == "mem0":
+        if self.provider == "mem0":
             self._init_mem0()
-            
-        # MongoDB setup
+
+        # Set up MongoDB client if requested
         self.mongo_client = None
         self.mongo_db = None
-        if self.cfg.get("provider") == "mongodb":
+        if self.use_mongodb:
             self._init_mongodb()
-        
-        # Set up local vector store if requested  
-        self._chroma_client = None
-        self._chroma_collection = None
-        if self.cfg.get("use_embedding", False) and self.cfg.get("provider") == "rag":
+
+        # Set up local vector store if using RAG embeddings
+        if self.use_rag:
             self._init_chroma()
     
-    def _init_stm_ltm(self):
-        """Initialize SQLite databases for STM/LTM."""
-        stm_db_path = self.cfg.get("short_db", "short_term_memory.db")
-        ltm_db_path = self.cfg.get("long_db", "long_term_memory.db")
-        
-        # Ensure parent directories exist
-        for db_path in [stm_db_path, ltm_db_path]:
-            os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
-        
-        # Set up STM schema
-        with sqlite3.connect(stm_db_path) as conn:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS short_term_memory (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    content TEXT NOT NULL,
-                    timestamp REAL NOT NULL,
-                    metadata TEXT,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-        
-        # Set up LTM schema
-        with sqlite3.connect(ltm_db_path) as conn:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS long_term_memory (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    content TEXT NOT NULL,
-                    embedding BLOB,
-                    quality_score REAL,
-                    timestamp REAL NOT NULL,
-                    metadata TEXT,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            # Entities table
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS entities (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT UNIQUE NOT NULL,
-                    type TEXT NOT NULL,
-                    description TEXT NOT NULL,
-                    relations TEXT,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            # User memory table
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS user_memory (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id TEXT NOT NULL,
-                    key TEXT NOT NULL,
-                    value TEXT NOT NULL,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(user_id, key)
-                )
-            ''')
-
     def _init_mem0(self):
         """Initialize Mem0 client for graph memory."""
         if not _check_mem0():
@@ -308,7 +263,8 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
             logger.warning("pymongo not available. Install with: pip install pymongo")
             return
         
-        pymongo_module, MongoClient = _get_pymongo()
+        pymongo_info = _get_pymongo()
+        MongoClient = pymongo_info["MongoClient"]
         mongo_config = self.cfg.get("config", {})
         uri = mongo_config.get("uri", "mongodb://localhost:27017/")
         
@@ -326,7 +282,9 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
             logger.warning("chromadb not available. Install with: pip install chromadb")
             return
         
-        chromadb_module, ChromaSettings = _get_chromadb()
+        chromadb_info = _get_chromadb()
+        chromadb_module = chromadb_info["module"]
+        ChromaSettings = chromadb_info["settings"]
         
         try:
             persist_directory = self.cfg.get("rag_db_path", "./rag_db")
@@ -338,14 +296,17 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
                 persist_directory=persist_directory
             )
             
-            self._chroma_client = chromadb_module.PersistentClient(
+            self.chroma_client = chromadb_module.PersistentClient(
                 path=persist_directory,
                 settings=settings
             )
             
             collection_name = self.cfg.get("collection_name", "memory_collection")
-            self._chroma_collection = self._chroma_client.get_or_create_collection(
-                name=collection_name
+            self.stm_collection = self.chroma_client.get_or_create_collection(
+                name=f"{collection_name}_short_term"
+            )
+            self.ltm_collection = self.chroma_client.get_or_create_collection(
+                name=f"{collection_name}_long_term"
             )
             
             logger.debug(f"Initialized ChromaDB collection: {collection_name}")

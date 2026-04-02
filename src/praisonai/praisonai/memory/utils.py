@@ -33,10 +33,13 @@ def _check_chromadb():
         return _module_cache["chromadb"]["available"]
 
 def _get_chromadb():
-    """Get chromadb module and settings (thread-safe lazy load)."""
+    """Get chromadb module and settings as a dict (thread-safe lazy load)."""
     if not _check_chromadb():
         raise ImportError("chromadb is required. Install with: pip install chromadb")
-    return _module_cache["chromadb"]["module"], _module_cache["chromadb"]["settings"]
+    return {
+        "module": _module_cache["chromadb"]["module"],
+        "settings": _module_cache["chromadb"]["settings"],
+    }
 
 def _check_pymongo():
     """Thread-safe lazy check for pymongo availability."""
@@ -61,7 +64,10 @@ def _check_pymongo():
         return _module_cache["pymongo"]["available"]
 
 def _get_pymongo():
-    """Get pymongo module and MongoClient (thread-safe lazy load)."""
+    """Get pymongo module and MongoClient as a dict (thread-safe lazy load)."""
     if not _check_pymongo():
         raise ImportError("pymongo is required. Install with: pip install pymongo")
-    return _module_cache["pymongo"]["module"], _module_cache["pymongo"]["client"]
+    return {
+        "module": _module_cache["pymongo"]["module"],
+        "MongoClient": _module_cache["pymongo"]["client"],
+    }

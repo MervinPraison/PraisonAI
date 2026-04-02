@@ -5,10 +5,13 @@ This module contains methods related to data storage, database connections,
 and persistence operations. Split from the main memory.py file for better maintainability.
 """
 
+import json
 import os
 import sqlite3
 import threading
 import logging
+import time
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
 # Import shared utility functions
@@ -95,12 +98,12 @@ class StorageMixin:
         # Initialize collections
         try:
             self.stm_collection = self.chroma_client.get_collection("short_term_memory")
-        except:
+        except Exception:
             self.stm_collection = self.chroma_client.create_collection("short_term_memory")
             
         try:
             self.ltm_collection = self.chroma_client.get_collection("long_term_memory")
-        except:
+        except Exception:
             self.ltm_collection = self.chroma_client.create_collection("long_term_memory")
     
     def _init_mongodb(self):
@@ -221,3 +224,109 @@ class StorageMixin:
             self._log_verbose("Long-term SQLite memory reset")
         except Exception as e:
             logging.warning(f"Failed to reset SQLite LTM: {e}")
+
+    # -----------------------------------------------------------------------
+    # SQLite write helpers
+    # -----------------------------------------------------------------------
+
+    def _store_sqlite_stm(self, content: str, metadata: Dict, quality_score: float) -> str:
+        """Insert a record into the short_term SQLite table and return its row id."""
+        conn = self._get_stm_conn()
+        with self._write_lock:
+            cursor = conn.execute(
+                "INSERT INTO short_term (content, metadata, timestamp, quality_score) VALUES (?, ?, ?, ?)",
+                (content, json.dumps(metadata, default=str, ensure_ascii=False),
+                 datetime.now().isoformat(), quality_score),
+            )
+            conn.commit()
+        return str(cursor.lastrowid)
+
+    def _store_sqlite_ltm(self, content: str, metadata: Dict, quality_score: float) -> str:
+        """Insert a record into the long_term SQLite table and return its row id."""
+        conn = self._get_ltm_conn()
+        with self._write_lock:
+            cursor = conn.execute(
+                "INSERT INTO long_term (content, metadata, timestamp, quality_score) VALUES (?, ?, ?, ?)",
+                (content, json.dumps(metadata, default=str, ensure_ascii=False),
+                 datetime.now().isoformat(), quality_score),
+            )
+            conn.commit()
+        return str(cursor.lastrowid)
+
+    # -----------------------------------------------------------------------
+    # ChromaDB write helpers
+    # -----------------------------------------------------------------------
+
+    def _store_vector_stm(self, content: str, metadata: Dict, quality_score: float) -> Optional[str]:
+        """Store a record in the ChromaDB short-term collection."""
+        if not hasattr(self, 'stm_collection') or self.stm_collection is None:
+            return None
+        doc_id = str(time.time_ns())
+        try:
+            self.stm_collection.add(
+                documents=[content],
+                metadatas=[{**{k: str(v) for k, v in metadata.items()},
+                            "quality_score": str(quality_score)}],
+                ids=[doc_id],
+            )
+        except Exception as e:
+            logging.warning(f"ChromaDB STM store failed: {e}")
+            return None
+        return doc_id
+
+    def _store_vector_ltm(self, content: str, metadata: Dict, quality_score: float) -> Optional[str]:
+        """Store a record in the ChromaDB long-term collection."""
+        if not hasattr(self, 'ltm_collection') or self.ltm_collection is None:
+            return None
+        doc_id = str(time.time_ns())
+        try:
+            self.ltm_collection.add(
+                documents=[content],
+                metadatas=[{**{k: str(v) for k, v in metadata.items()},
+                            "quality_score": str(quality_score)}],
+                ids=[doc_id],
+            )
+        except Exception as e:
+            logging.warning(f"ChromaDB LTM store failed: {e}")
+            return None
+        return doc_id
+
+    # -----------------------------------------------------------------------
+    # MongoDB write helpers
+    # -----------------------------------------------------------------------
+
+    def _store_mongodb_stm(self, content: str, metadata: Dict, quality_score: float) -> Optional[str]:
+        """Insert a record into the MongoDB short-term collection."""
+        if not hasattr(self, 'stm_collection') or self.stm_collection is None:
+            return None
+        doc_id = str(time.time_ns())
+        try:
+            self.stm_collection.insert_one({
+                "_id": doc_id,
+                "content": content,
+                "metadata": metadata,
+                "quality_score": quality_score,
+                "timestamp": datetime.now().isoformat(),
+            })
+        except Exception as e:
+            logging.warning(f"MongoDB STM store failed: {e}")
+            return None
+        return doc_id
+
+    def _store_mongodb_ltm(self, content: str, metadata: Dict, quality_score: float) -> Optional[str]:
+        """Insert a record into the MongoDB long-term collection."""
+        if not hasattr(self, 'ltm_collection') or self.ltm_collection is None:
+            return None
+        doc_id = str(time.time_ns())
+        try:
+            self.ltm_collection.insert_one({
+                "_id": doc_id,
+                "content": content,
+                "metadata": metadata,
+                "quality_score": quality_score,
+                "timestamp": datetime.now().isoformat(),
+            })
+        except Exception as e:
+            logging.warning(f"MongoDB LTM store failed: {e}")
+            return None
+        return doc_id

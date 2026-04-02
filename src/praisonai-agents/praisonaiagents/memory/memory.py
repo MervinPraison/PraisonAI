@@ -12,6 +12,7 @@ ARCHITECTURAL CHANGE:
 - Added: Lightweight protocol adapter that delegates to wrapper package
 """
 
+import os
 from typing import Any, Dict, List, Optional
 import logging
 
@@ -34,12 +35,19 @@ class Memory:
     
     def __init__(self, cfg: Dict[str, Any] = None):
         """Initialize lightweight memory adapter."""
-        self._cfg = cfg or {}
+        self._cfg = dict(cfg or {})
         self._wrapper_memory = None
-        
-        # ARCHITECTURAL FIX: Removed environment variable mutation
-        # Before: os.environ["LITELLM_TELEMETRY"] = "False" 
-        # This violated protocol-driven architecture by having global side effects
+
+        # Apply project-relative defaults for database paths so they are
+        # placed under the project data directory (not the cwd).
+        if "short_db" not in self._cfg or "long_db" not in self._cfg:
+            try:
+                from ..paths import get_project_data_dir
+                _project_data = str(get_project_data_dir())
+                self._cfg.setdefault("short_db", os.path.join(_project_data, "short_term.db"))
+                self._cfg.setdefault("long_db", os.path.join(_project_data, "long_term.db"))
+            except Exception:
+                pass  # keep caller-provided or default paths
     
     def _get_wrapper_memory(self):
         """Lazy load the wrapper memory implementation."""
@@ -48,7 +56,7 @@ class Memory:
                 # Lazy import from wrapper package
                 WrapperMemory = lazy_import('praisonai.memory', 'Memory')
                 self._wrapper_memory = WrapperMemory(self._cfg)
-            except ImportError:
+            except (ImportError, AttributeError):
                 # Fallback to minimal in-memory implementation
                 logger.warning("Wrapper memory not available, using minimal fallback")
                 self._wrapper_memory = _MinimalMemory(self._cfg)
