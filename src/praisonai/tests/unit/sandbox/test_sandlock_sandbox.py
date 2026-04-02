@@ -45,7 +45,7 @@ class TestSandlockSandbox:
     def test_fallback_to_subprocess_when_unavailable(self):
         """Test fallback to subprocess when sandlock is not available."""
         mock_sandlock = Mock()
-        mock_sandlock.is_available.return_value = False
+        mock_sandlock.landlock_abi_version.return_value = 0  # < 1, so unavailable
 
         sandbox = _make_sandbox(mock_sandlock)
         assert not sandbox.is_available
@@ -55,7 +55,7 @@ class TestSandlockSandbox:
     async def test_fallback_execution(self):
         """Test that execution falls back to subprocess when sandlock unavailable."""
         mock_sandlock = Mock()
-        mock_sandlock.is_available.return_value = False
+        mock_sandlock.landlock_abi_version.return_value = 0  # < 1, so unavailable
 
         sandbox = _make_sandbox(mock_sandlock)
 
@@ -98,7 +98,7 @@ class TestSandlockSandbox:
     def test_status_reporting(self):
         """Test sandbox status reporting."""
         mock_sandlock = Mock()
-        mock_sandlock.is_available.return_value = True
+        mock_sandlock.landlock_abi_version.return_value = 6  # >= 6, so available
 
         sandbox = _make_sandbox(mock_sandlock)
         status = sandbox.get_status()
@@ -122,7 +122,7 @@ class TestSandlockSandbox:
 
         mock_sandlock.Policy.return_value = Mock()
         mock_sandlock.Sandbox.return_value = Mock(run=Mock(return_value=mock_result))
-        mock_sandlock.is_available.return_value = True
+        mock_sandlock.landlock_abi_version.return_value = 6  # >= 6, so available
 
         sandbox = _make_sandbox(mock_sandlock)
 
@@ -142,65 +142,68 @@ class TestSandlockSandbox:
     async def test_sandlock_execution_timeout(self):
         """Test timeout handling in sandlock execution."""
         mock_sandlock = Mock()
-
-        class FakeTimeoutError(Exception):
-            pass
-
-        mock_sandlock.TimeoutError = FakeTimeoutError
-        mock_sandlock.SecurityViolationError = Exception
         mock_sandlock.Policy.return_value = Mock()
         mock_sandlock.Sandbox.return_value = Mock()
-        mock_sandlock.is_available.return_value = True
+        mock_sandlock.landlock_abi_version.return_value = 6  # >= 6, so available
 
         sandbox = _make_sandbox(mock_sandlock)
 
-        with patch("asyncio.get_running_loop") as mock_loop:
+        # Create a mock Result object indicating timeout
+        mock_timeout_result = Mock()
+        mock_timeout_result.success = False
+        mock_timeout_result.exit_code = 124  # Common timeout exit code
+        mock_timeout_result.stdout = ""
+        mock_timeout_result.stderr = "Process timed out"
+
+        # Simulate timeout by returning failed Result after enough time
+        with patch("asyncio.get_running_loop") as mock_loop, \
+             patch("time.time", side_effect=[0, 11, 11]):  # Started at 0, ended at 11s (> 10s timeout)
             mock_loop.return_value.run_in_executor = AsyncMock(
-                side_effect=FakeTimeoutError()
+                return_value=mock_timeout_result
             )
 
             await sandbox.start()
-            result = await sandbox.execute("import time; time.sleep(100)")
+            result = await sandbox.execute("import time; time.sleep(100)", limits=ResourceLimits(timeout_seconds=10))
 
         assert result.status == SandboxStatus.TIMEOUT
         assert "timed out" in result.error.lower()
 
     @pytest.mark.asyncio
-    async def test_sandlock_security_violation(self):
-        """Test security violation handling."""
+    async def test_sandlock_execution_failure(self):
+        """Test general execution failure handling."""
         mock_sandlock = Mock()
-
-        class FakeTimeoutError(Exception):
-            pass
-
-        class FakeSecurityViolationError(Exception):
-            pass
-
-        mock_sandlock.SecurityViolationError = FakeSecurityViolationError
-        mock_sandlock.TimeoutError = FakeTimeoutError
         mock_sandlock.Policy.return_value = Mock()
         mock_sandlock.Sandbox.return_value = Mock()
-        mock_sandlock.is_available.return_value = True
+        mock_sandlock.landlock_abi_version.return_value = 6  # >= 6, so available
 
         sandbox = _make_sandbox(mock_sandlock)
 
-        with patch("asyncio.get_running_loop") as mock_loop:
+        # Create a mock Result object indicating non-zero exit
+        mock_failed_result = Mock()
+        mock_failed_result.success = False
+        mock_failed_result.exit_code = 1  # Non-zero exit code
+        mock_failed_result.stdout = ""
+        mock_failed_result.stderr = "Permission denied"
+
+        # Simulate execution failure (not timeout) 
+        with patch("asyncio.get_running_loop") as mock_loop, \
+             patch("time.time", side_effect=[0, 2, 2]):  # Started at 0, ended at 2s (< 10s timeout)
             mock_loop.return_value.run_in_executor = AsyncMock(
-                side_effect=FakeSecurityViolationError("Access denied")
+                return_value=mock_failed_result
             )
 
             await sandbox.start()
             result = await sandbox.execute("import os; os.system('rm -rf /')")
 
         assert result.status == SandboxStatus.FAILED
-        assert "Security violation" in result.error
-        assert "Access denied" in result.error
+        assert "exit code 1" in result.error
+        assert "Permission denied" in result.error
 
     @pytest.mark.asyncio
     async def test_safe_sandbox_path_traversal_blocked(self):
         """Test that path traversal attempts are blocked by _safe_sandbox_path."""
         mock_sandlock = Mock()
-        mock_sandlock.is_available.return_value = True
+        mock_sandlock.landlock_abi_version.return_value = 6  # >= 6, so available
 
         sandbox = _make_sandbox(mock_sandlock)
         await sandbox.start()
@@ -220,7 +223,7 @@ class TestSandlockSandbox:
     async def test_write_file_blocks_traversal(self):
         """Test that write_file refuses paths that escape the sandbox root."""
         mock_sandlock = Mock()
-        mock_sandlock.is_available.return_value = True
+        mock_sandlock.landlock_abi_version.return_value = 6  # >= 6, so available
 
         sandbox = _make_sandbox(mock_sandlock)
         await sandbox.start()
@@ -229,3 +232,42 @@ class TestSandlockSandbox:
         assert success is False
 
         await sandbox.stop()
+
+    @pytest.mark.asyncio
+    async def test_real_sandlock_integration(self):
+        """Integration test with real sandlock package if available.
+        
+        This test uses the actual sandlock package (if available) to ensure
+        the integration works with the real API surface, not just mocks.
+        """
+        try:
+            # Try to import real sandlock
+            import sandlock
+            
+            # Only run if Landlock is actually supported on this system
+            if sandlock.landlock_abi_version() < 1:
+                pytest.skip("Landlock not supported on this system")
+            
+            # Test with real sandlock package
+            from praisonai.sandbox.sandlock import SandlockSandbox
+            
+            sandbox = SandlockSandbox()
+            assert sandbox.is_available
+            
+            await sandbox.start()
+            
+            # Execute simple code that should succeed
+            result = await sandbox.execute(
+                "print('Real sandlock integration test')", 
+                limits=ResourceLimits(timeout_seconds=5, memory_mb=64)
+            )
+            
+            # Should complete successfully
+            assert result.status == SandboxStatus.COMPLETED
+            assert result.exit_code == 0
+            assert "Real sandlock integration test" in result.stdout
+            
+            await sandbox.stop()
+            
+        except ImportError:
+            pytest.skip("sandlock package not available for integration test")
