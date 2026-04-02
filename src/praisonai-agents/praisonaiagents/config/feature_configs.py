@@ -723,7 +723,7 @@ class ExecutionConfig:
 
     # Action when budget exceeded: "stop" (default) raises BudgetExceededError,
     # "warn" logs warning but continues, or callable(total_cost, max_budget).
-    on_budget_exceeded: Any = "stop"
+    on_budget_exceeded: Union[str, Callable, None] = "stop"
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -738,6 +738,7 @@ class ExecutionConfig:
             "context_compaction": self.context_compaction,
             "max_context_tokens": self.max_context_tokens,
             "max_budget": self.max_budget,
+            "on_budget_exceeded": self.on_budget_exceeded,
         }
 
 
