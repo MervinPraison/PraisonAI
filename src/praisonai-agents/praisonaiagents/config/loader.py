@@ -30,6 +30,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 
 # ============================================================================
@@ -331,6 +332,7 @@ def get_plugins_config() -> PluginsConfig:
     return get_config().plugins
 
 
+@lru_cache(maxsize=1)
 def get_defaults_config() -> DefaultsConfig:
     """Get defaults configuration.
     
