@@ -237,7 +237,7 @@ class AgentsGenerator:
         
         CLI configuration takes precedence over YAML configuration for:
         - Global config fields (acp, lsp) -> config.config
-        - Agent-level fields (trust, tool_timeout, planning_tools) -> applied to all agents
+        - Agent-level fields (trust, tool_timeout, planning_tools, autonomy, guardrail, approval) -> applied to all agents
         
         Args:
             config (dict): The parsed YAML configuration
