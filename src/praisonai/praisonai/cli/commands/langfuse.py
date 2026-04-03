@@ -18,6 +18,26 @@ from rich.table import Table
 app = typer.Typer(name="langfuse", help="🔍 Langfuse observability platform")
 
 
+def _format_publishers(publishers):
+    """Format Publishers field for display in status table."""
+    if isinstance(publishers, list) and publishers:
+        # Publishers is array of port mapping objects
+        ports = []
+        for pub in publishers:
+            if isinstance(pub, dict):
+                url = pub.get("URL", "")
+                target_port = pub.get("TargetPort", "")
+                published_port = pub.get("PublishedPort", "")
+                protocol = pub.get("Protocol", "tcp")
+                if published_port and target_port:
+                    ports.append(f"{url}:{published_port}->{target_port}/{protocol}")
+        return ", ".join(ports) if ports else ""
+    elif isinstance(publishers, str):
+        return publishers  # Fallback for string format
+    else:
+        return ""
+
+
 @app.callback(invoke_without_command=True)
 def langfuse_start(
     ctx: typer.Context,
@@ -238,7 +258,7 @@ def langfuse_status(
             table.add_row(
                 container.get("Service", "unknown"),
                 f"[{status_color}]{container.get('State', 'unknown')}[/{status_color}]",
-                container.get("Publishers", ""),
+                _format_publishers(container.get("Publishers", [])),
                 health
             )
         
@@ -256,11 +276,20 @@ def langfuse_status(
                 c for c in containers 
                 if c.get("Service") == "langfuse-web"
             )
-            ports = web_container.get("Publishers", "")
-            if ":" in ports:
-                port = ports.split(":")[0] if "->" in ports else "3000"
-            else:
-                port = "3000"
+            # Extract published port from Publishers array
+            publishers = web_container.get("Publishers", [])
+            port = "3000"
+            if isinstance(publishers, list) and publishers:
+                # Publishers is array of {"URL": "0.0.0.0", "TargetPort": 80, "PublishedPort": 8080, "Protocol": "tcp"}
+                for pub in publishers:
+                    if isinstance(pub, dict) and pub.get("TargetPort") == 3000:
+                        port = str(pub.get("PublishedPort", 3000))
+                        break
+            elif isinstance(publishers, str) and ":" in publishers:
+                # Fallback for older format or edge cases
+                import re
+                match = re.search(r":(\d+)->", publishers)
+                port = match.group(1) if match else "3000"
             
             try:
                 if requests_lib is not None:
@@ -398,7 +427,18 @@ def langfuse_test():
         console.print("[yellow]Install with: pip install praisonai[langfuse][/yellow]")
         raise typer.Abort()
     
-    # Load configuration
+    # Load configuration from env vars and ~/.praisonai/langfuse.env if present
+    config_file = Path.home() / ".praisonai" / "langfuse.env"
+    if config_file.exists():
+        # Load env file into current process environment
+        with open(config_file, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    os.environ[key.strip()] = value.strip()
+        console.print(f"[dim]📄 Loaded config from {config_file}[/dim]")
+    
     config = LangfuseSinkConfig()
     
     if not config.enabled:

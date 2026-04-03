@@ -54,13 +54,13 @@ class LangfuseSink:
     """
     TraceSinkProtocol implementation for Langfuse.
     
-    Maps PraisonAI ActionEvents to Langfuse trace/span/event API:
-    - AGENT_START -> trace.create() + span.create()
-    - AGENT_END -> span.update(endTime=...)
-    - TOOL_START -> span.create() (child)
-    - TOOL_END -> span.update(endTime=..., output=...)
-    - ERROR -> event.create(level=ERROR)
-    - OUTPUT -> event.create()
+    Maps PraisonAI ActionEvents to Langfuse v3+ observation API:
+    - AGENT_START -> start_observation(as_type="span") for trace and root span
+    - AGENT_END -> observation.update() + observation.end()
+    - TOOL_START -> start_observation(as_type="span") for child span
+    - TOOL_END -> observation.update() + observation.end()
+    - ERROR -> start_observation(as_type="event", level="ERROR")
+    - OUTPUT -> start_observation(as_type="event")
     
     Thread-safe: langfuse.Langfuse handles its own batching and thread safety.
     """
@@ -70,8 +70,8 @@ class LangfuseSink:
     def __init__(self, config: Optional[LangfuseSinkConfig] = None):
         self._config = config or LangfuseSinkConfig()
         self._client: Optional[Any] = None  # Lazy-loaded langfuse.Langfuse
-        self._traces: Dict[str, Any] = {}  # agent_name -> langfuse trace
-        self._spans: Dict[str, Any] = {}   # agent_name -> langfuse span
+        self._traces: Dict[str, Any] = {}  # agent_name -> trace observation
+        self._spans: Dict[str, Any] = {}   # span_key -> span observation
         self._lock = threading.Lock()
         self._closed = False
         
@@ -134,15 +134,19 @@ class LangfuseSink:
             self._handle_output(event, agent_name)
     
     def _handle_agent_start(self, event: ActionEvent, agent_name: str) -> None:
-        """Handle AGENT_START -> create trace and root span."""
-        # Create trace
+        """Handle AGENT_START -> create trace observation and root span."""
+        # Create root span observation (trace is implicit in v3+)
         trace_name = f"agent-run-{agent_name}"
         trace_input = event.metadata.get("input") if event.metadata else None
         
-        trace = self._client.trace(
+        # Use unique agent key combining agent_id and name for collision safety
+        agent_key = f"{event.agent_id or agent_name}-{agent_name}"
+        
+        span = self._client.start_observation(
             name=trace_name,
+            as_type="span",
             input=trace_input,
-            timestamp=event.timestamp,
+            start_time=event.timestamp,
             metadata={
                 "agent_id": event.agent_id,
                 "agent_name": agent_name,
@@ -150,62 +154,65 @@ class LangfuseSink:
                 **(event.metadata if event.metadata else {}),
             }
         )
-        self._traces[agent_name] = trace
-        
-        # Create root span for the agent
-        span = trace.span(
-            name=agent_name,
-            start_time=event.timestamp,
-            metadata={
-                "agent_id": event.agent_id,
-                **(event.metadata if event.metadata else {}),
-            }
-        )
-        self._spans[agent_name] = span
+        # Store both trace and span reference with unique key
+        self._traces[agent_key] = span  # Root span serves as trace reference
+        self._spans[agent_key] = span
     
     def _handle_agent_end(self, event: ActionEvent, agent_name: str) -> None:
-        """Handle AGENT_END -> end root span."""
-        span = self._spans.get(agent_name)
+        """Handle AGENT_END -> end root span observation."""
+        agent_key = f"{event.agent_id or agent_name}-{agent_name}"
+        span = self._spans.get(agent_key)
         if span:
-            span.end(
+            span.update(
                 end_time=event.timestamp,
                 output=event.metadata.get("output") if event.metadata else None,
                 status_message=event.status or "completed",
                 level="ERROR" if event.status == "error" else "DEFAULT",
             )
+            span.end()
             # Clean up
-            self._spans.pop(agent_name, None)
-            self._traces.pop(agent_name, None)
+            self._spans.pop(agent_key, None)
+            self._traces.pop(agent_key, None)
     
     def _handle_tool_start(self, event: ActionEvent, agent_name: str) -> None:
-        """Handle TOOL_START -> create child span."""
-        parent_span = self._spans.get(agent_name)
+        """Handle TOOL_START -> create child span observation."""
+        agent_key = f"{event.agent_id or agent_name}-{agent_name}"
+        parent_span = self._spans.get(agent_key)
         if not parent_span:
             return
         
         tool_name = event.tool_name or "unknown-tool"
-        tool_span = parent_span.span(
+        
+        # Generate unique tool invocation key with UUID for collision safety
+        import uuid
+        tool_invocation_id = str(uuid.uuid4())[:8]  # Short UUID
+        tool_key = f"{agent_key}:{tool_name}:{tool_invocation_id}"
+        
+        tool_span = self._client.start_observation(
             name=tool_name,
+            as_type="span",
             start_time=event.timestamp,
             input=event.tool_args,
             metadata={
                 "tool_name": tool_name,
+                "parent_agent": agent_name,
+                "invocation_id": tool_invocation_id,
                 **(event.metadata if event.metadata else {}),
             }
         )
         
-        # Store with tool-specific key to handle multiple concurrent tools
-        tool_key = f"{agent_name}:{tool_name}:{event.timestamp}"
+        # Store with unique tool key
         self._spans[tool_key] = tool_span
     
     def _handle_tool_end(self, event: ActionEvent, agent_name: str) -> None:
-        """Handle TOOL_END -> end tool span."""
+        """Handle TOOL_END -> end tool span observation."""
+        agent_key = f"{event.agent_id or agent_name}-{agent_name}"
         tool_name = event.tool_name or "unknown-tool"
         
         # Find the most recent matching tool span
         tool_key = None
         for key in self._spans:
-            if key.startswith(f"{agent_name}:{tool_name}:"):
+            if key.startswith(f"{agent_key}:{tool_name}:") and key != agent_key:
                 tool_key = key
         
         if not tool_key:
@@ -213,7 +220,7 @@ class LangfuseSink:
         
         tool_span = self._spans.pop(tool_key, None)
         if tool_span:
-            tool_span.end(
+            tool_span.update(
                 end_time=event.timestamp,
                 output=event.tool_result_summary,
                 status_message=event.status or "completed",
@@ -223,33 +230,40 @@ class LangfuseSink:
                     **(event.metadata if event.metadata else {}),
                 }
             )
+            tool_span.end()
     
     def _handle_error(self, event: ActionEvent, agent_name: str) -> None:
-        """Handle ERROR -> create error event."""
-        trace = self._traces.get(agent_name)
-        if trace:
-            trace.event(
-                name="error",
-                start_time=event.timestamp,
-                level="ERROR",
-                status_message=event.error_message,
-                input=event.tool_args,
-                metadata={
-                    "tool_name": event.tool_name,
-                    **(event.metadata if event.metadata else {}),
-                }
-            )
+        """Handle ERROR -> create error event observation."""
+        agent_key = f"{event.agent_id or agent_name}-{agent_name}"
+        
+        error_event = self._client.start_observation(
+            name="error",
+            as_type="event",
+            start_time=event.timestamp,
+            level="ERROR",
+            status_message=event.error_message,
+            input=event.tool_args,
+            metadata={
+                "tool_name": event.tool_name,
+                "agent_name": agent_name,
+                **(event.metadata if event.metadata else {}),
+            }
+        )
+        error_event.end()
     
     def _handle_output(self, event: ActionEvent, agent_name: str) -> None:
-        """Handle OUTPUT -> create output event."""
-        trace = self._traces.get(agent_name)
-        if trace:
-            trace.event(
-                name="output",
-                start_time=event.timestamp,
-                output=event.tool_result_summary,
-                metadata=event.metadata or {},
-            )
+        """Handle OUTPUT -> create output event observation."""
+        output_event = self._client.start_observation(
+            name="output",
+            as_type="event",
+            start_time=event.timestamp,
+            output=event.tool_result_summary,
+            metadata={
+                "agent_name": agent_name,
+                **(event.metadata or {}),
+            }
+        )
+        output_event.end()
     
     def flush(self) -> None:
         """Flush any buffered events."""
