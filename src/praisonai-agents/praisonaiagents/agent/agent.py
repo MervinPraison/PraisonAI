@@ -476,24 +476,24 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
         # CONSOLIDATED FEATURE PARAMS (agent-centric API)
         # Each follows: False=disabled, True=defaults, Config=custom
         # ============================================================
-        memory: Optional[Any] = None,  # Union[bool, MemoryConfig, MemoryManager]
-        knowledge: Optional[Union[bool, List[str], Any]] = None,  # Union[bool, list, KnowledgeConfig, Knowledge]
-        planning: Optional[Union[bool, Any]] = False,  # Union[bool, PlanningConfig]
-        reflection: Optional[Union[bool, Any]] = None,  # Union[bool, ReflectionConfig]
-        guardrails: Optional[Union[bool, Callable, Any]] = None,  # Union[bool, Callable, GuardrailConfig]
-        web: Optional[Union[bool, Any]] = None,  # Union[bool, WebConfig]
-        context: Optional[Union[bool, Any]] = None,  # Union[bool, ManagerConfig, ContextManager] - None=smart default
-        autonomy: Optional[Union[bool, Dict[str, Any], Any]] = None,  # Union[bool, dict, AutonomyConfig]
+        memory: Optional[Union[bool, 'MemoryConfig', 'MemoryManager']] = None,
+        knowledge: Optional[Union[bool, List[str], 'KnowledgeConfig', 'Knowledge']] = None,
+        planning: Optional[Union[bool, 'PlanningConfig']] = False,
+        reflection: Optional[Union[bool, 'ReflectionConfig']] = None,
+        guardrails: Optional[Union[bool, Callable, 'GuardrailConfig']] = None,
+        web: Optional[Union[bool, 'WebConfig']] = None,
+        context: Optional[Union[bool, 'ManagerConfig', 'ContextManager']] = None,
+        autonomy: Optional[Union[bool, Dict[str, Any], 'AutonomyConfig']] = None,
         verification_hooks: Optional[List[Any]] = None,  # Deprecated: use autonomy=AutonomyConfig(verification_hooks=[...])
-        output: Optional[Union[str, Any]] = None,  # Union[str preset, OutputConfig]
-        execution: Optional[Union[str, Any]] = None,  # Union[str preset, ExecutionConfig]
-        templates: Optional[Any] = None,  # TemplateConfig
-        caching: Optional[Union[bool, Any]] = None,  # Union[bool, CachingConfig]
-        hooks: Optional[Union[List[Any], Any]] = None,  # Union[list, HooksConfig]
-        skills: Optional[Union[List[str], Any]] = None,  # Union[list, SkillsConfig]
-        approval: Optional[Union[bool, Any]] = None,  # Union[bool, ApprovalProtocol backend]
+        output: Optional[Union[str, 'OutputConfig']] = None,
+        execution: Optional[Union[str, 'ExecutionConfig']] = None,
+        templates: Optional['TemplateConfig'] = None,
+        caching: Optional[Union[bool, 'CachingConfig']] = None,
+        hooks: Optional[Union[List[Any], 'HooksConfig']] = None,
+        skills: Optional[Union[List[str], 'SkillsConfig']] = None,
+        approval: Optional[Union[bool, 'ApprovalProtocol']] = None,
         tool_timeout: Optional[int] = None,  # P8/G11: Timeout in seconds for each tool call
-        learn: Optional[Union[bool, Any]] = None,  # Union[bool, LearnConfig] - Continuous learning (peer to memory)
+        learn: Optional[Union[bool, 'LearnConfig']] = None,  # Continuous learning (peer to memory)
     ):
         """Initialize an Agent instance.
 
@@ -790,6 +790,7 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
             editor_output = getattr(_output_config, 'editor_output', False)  # Editor: Step N display
             output_file = getattr(_output_config, 'output_file', None)  # Auto-save to file
             output_template = getattr(_output_config, 'template', None)  # Response template
+            tool_output_limit = getattr(_output_config, 'tool_output_limit', DEFAULT_TOOL_OUTPUT_LIMIT)
         else:
             # Fallback defaults match silent mode (zero overhead)
             verbose, markdown, stream, metrics, reasoning_steps = False, False, False, False, False
@@ -798,6 +799,7 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
             status_trace = False
             simple_output = False
             editor_output = False
+            tool_output_limit = DEFAULT_TOOL_OUTPUT_LIMIT
         
         # Enable editor output mode if configured (beginner-friendly, takes priority)
         # Shows: Step 1: 📄 Creating file: path → ✓ Done
@@ -1518,6 +1520,7 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
         self._init_memory(memory, user_id)
         self.verbose = verbose
         self._has_explicit_output_config = _has_explicit_output  # Track if user set output mode
+        self.tool_output_limit = tool_output_limit  # Configurable tool output limit
         self.allow_delegation = allow_delegation
         self.step_callback = step_callback
         # Token budget guard (zero overhead when _max_budget is None)
