@@ -41,6 +41,8 @@ from .registry import (
     DEFAULT_REGISTRY_PORT,
     _calculate_checksum,
     _get_timestamp,
+    _validate_name,
+    _validate_version,
 )
 
 
@@ -383,6 +385,20 @@ class RegistryServer:
         
         name = unquote(path_params[0])
         version = unquote(path_params[1])
+        
+        # Validate URL path params before any processing
+        if not _validate_name(name):
+            return self._error_response(
+                f"Invalid recipe name in URL: {name!r}",
+                status=400,
+                code="invalid_name",
+            )
+        if not _validate_version(version):
+            return self._error_response(
+                f"Invalid version in URL: {version!r}",
+                status=400,
+                code="invalid_version",
+            )
         
         # Parse multipart data
         content_type = headers.get("Content-Type", "")

@@ -128,6 +128,40 @@ def _validate_version(version: str) -> bool:
     return bool(re.match(r'^\d+\.\d+\.\d+([a-zA-Z0-9._-]*)?$', version))
 
 
+def _safe_extractall(tar: tarfile.TarFile, dest_dir: Path) -> None:
+    """Safely extract tar members, rejecting path traversal attempts.
+    
+    Validates every member name to prevent:
+    - Absolute paths
+    - '..' traversal sequences
+    - Resolved paths that escape dest_dir
+    
+    Raises:
+        RegistryError: If any member attempts path traversal.
+    """
+    dest_resolved = dest_dir.resolve()
+    for member in tar.getmembers():
+        member_path = Path(member.name)
+        # Reject absolute paths
+        if member_path.is_absolute():
+            raise RegistryError(
+                f"Refusing to extract absolute path in archive: {member.name}"
+            )
+        # Reject '..' components
+        if '..' in member_path.parts:
+            raise RegistryError(
+                f"Refusing to extract path traversal in archive: {member.name}"
+            )
+        # Reject resolved paths escaping dest_dir
+        resolved = (dest_resolved / member_path).resolve()
+        if not str(resolved).startswith(str(dest_resolved) + os.sep) and resolved != dest_resolved:
+            raise RegistryError(
+                f"Refusing to extract path escaping target directory: {member.name}"
+            )
+    # All members validated — safe to extract
+    tar.extractall(dest_dir)
+
+
 def _atomic_write(file_path: Path, data: bytes) -> None:
     """Write data atomically using temp file + rename."""
     file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -231,8 +265,27 @@ class LocalRegistry:
         if not name or not version:
             raise RegistryError("Bundle manifest missing name or version")
         
-        # Check if version exists
+        # Validate name and version BEFORE any filesystem operation
+        if not _validate_name(name):
+            raise RegistryError(
+                f"Invalid recipe name in manifest: {name!r}. "
+                "Names must be alphanumeric with optional dots, hyphens, or underscores."
+            )
+        if not _validate_version(version):
+            raise RegistryError(
+                f"Invalid version in manifest: {version!r}. "
+                "Versions must follow semver format (e.g. 1.0.0)."
+            )
+        
+        # Path confinement: ensure resolved path stays under recipes_path
         recipe_dir = self.recipes_path / name / version
+        recipes_root = self.recipes_path.resolve()
+        if not str(recipe_dir.resolve()).startswith(str(recipes_root) + os.sep):
+            raise RegistryError(
+                f"Path traversal detected in manifest name/version: {name}@{version}"
+            )
+        
+        # Check if version exists
         if recipe_dir.exists() and not force:
             raise RecipeExistsError(f"Recipe {name}@{version} already exists. Use --force to overwrite.")
         
@@ -341,7 +394,7 @@ class LocalRegistry:
         recipe_dir.mkdir(parents=True, exist_ok=True)
         
         with tarfile.open(bundle_path, "r:gz") as tar:
-            tar.extractall(recipe_dir)
+            _safe_extractall(tar, recipe_dir)
         
         return {
             "name": name,
@@ -736,7 +789,7 @@ class HttpRegistry:
         recipe_dir.mkdir(parents=True, exist_ok=True)
         
         with tarfile.open(bundle_path, "r:gz") as tar:
-            tar.extractall(recipe_dir)
+            _safe_extractall(tar, recipe_dir)
         
         return {
             "name": name,
