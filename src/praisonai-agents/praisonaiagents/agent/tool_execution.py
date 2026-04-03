@@ -216,10 +216,11 @@ class ToolExecutionMixin:
                     else:
                         # Apply default limit even without context management
                         # This prevents runaway tool outputs from causing overflow
-                        if len(result_str) > self.tool_output_limit:
+                        limit = getattr(self, 'tool_output_limit', 16000)
+                        if len(result_str) > limit:
                             # Use smart truncation format that judge recognizes as OK
-                            tail_size = min(self.tool_output_limit // 5, 2000)
-                            head = result_str[:self.tool_output_limit - tail_size]
+                            tail_size = min(limit // 5, 2000)
+                            head = result_str[:limit - tail_size]
                             tail = result_str[-tail_size:] if tail_size > 0 else ""
                             truncated = f"{head}\n...[{len(result_str):,} chars, showing first/last portions]...\n{tail}"
                         else:
@@ -229,7 +230,7 @@ class ToolExecutionMixin:
                         logging.debug(f"Truncated {function_name} output from {len(result_str)} to {len(truncated)} chars")
                         # For dicts, truncate large string fields (e.g., raw_content from search)
                         if isinstance(result, dict):
-                            max_field_chars = self.tool_output_limit if not self.context_manager else None
+                            max_field_chars = getattr(self, 'tool_output_limit', 16000) if not self.context_manager else None
                             result = self._truncate_dict_fields(result, function_name, max_field_chars)
                         else:
                             result = truncated

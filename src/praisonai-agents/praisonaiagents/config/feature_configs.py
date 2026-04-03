@@ -629,6 +629,12 @@ class OutputConfig:
     # Tool output limit - maximum characters for tool output
     # Default: 16000 chars (≈ 4000 tokens) to prevent runaway tool outputs
     tool_output_limit: int = 16000
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.tool_output_limit, int) or self.tool_output_limit <= 0:
+            raise ValueError(
+                "OutputConfig.tool_output_limit must be a positive integer."
+            )
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""

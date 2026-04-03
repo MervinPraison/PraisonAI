@@ -269,7 +269,7 @@ class AgentsGenerator:
         }
         
         # Apply field mappings and special handling
-        for cli_field, yaml_field in field_mappings.items():
+        for cli_field in field_mappings:
             if cli_field in agent_overrides:
                 value = agent_overrides.pop(cli_field)
                 if cli_field == 'trust' and value:
@@ -1200,6 +1200,29 @@ class AgentsGenerator:
             autonomy_config = details.get('autonomy')
             guardrails_config = details.get('guardrails')
             approval_config = details.get('approval')
+            
+            # Convert YAML approval dict to valid approval config
+            if isinstance(approval_config, dict):
+                try:
+                    from .cli.features.approval import resolve_approval_config
+                    # Map common YAML fields to resolve_approval_config parameters
+                    approval_config = resolve_approval_config(
+                        backend=approval_config.get('backend') or approval_config.get('backend_name'),
+                        approve_all_tools=approval_config.get('approve_all_tools') or approval_config.get('all_tools'),
+                        approval_timeout=approval_config.get('approval_timeout') or approval_config.get('timeout')
+                    )
+                except ImportError:
+                    # Fallback: Create ApprovalConfig directly if resolve_approval_config isn't available
+                    try:
+                        from praisonaiagents.approval.protocols import ApprovalConfig
+                        approval_config = ApprovalConfig(
+                            backend=None,  # Will use default backend
+                            all_tools=approval_config.get('approve_all_tools', approval_config.get('all_tools', False)),
+                            timeout=approval_config.get('approval_timeout', approval_config.get('timeout', 0))
+                        )
+                    except ImportError:
+                        # Last resort: disable approval for this agent
+                        approval_config = None
             
             agent = PraisonAgent(
                 name=role_filled,

@@ -176,6 +176,12 @@ _shared_apps = {}  # Dict of port -> FastAPI app
 # Don't import FastAPI dependencies here - use lazy loading instead
 
 if TYPE_CHECKING:
+    from ..approval.protocols import ApprovalConfig, ApprovalProtocol
+    from ..config.feature_configs import LearnConfig, MemoryConfig
+    from ..context.models import ContextConfig
+    from ..context.manager import ContextManager
+    from ..knowledge.knowledge import Knowledge
+    from ..agent.autonomy import AutonomyConfig
     from ..task.task import Task
     from .handoff import Handoff, HandoffConfig, HandoffResult
     from ..rag.models import RAGResult, ContextPack
@@ -476,13 +482,13 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
         # CONSOLIDATED FEATURE PARAMS (agent-centric API)
         # Each follows: False=disabled, True=defaults, Config=custom
         # ============================================================
-        memory: Optional[Union[bool, 'MemoryConfig', 'MemoryManager']] = None,
-        knowledge: Optional[Union[bool, List[str], 'KnowledgeConfig', 'Knowledge']] = None,
-        planning: Optional[Union[bool, 'PlanningConfig']] = False,
-        reflection: Optional[Union[bool, 'ReflectionConfig']] = None,
-        guardrails: Optional[Union[bool, Callable, 'GuardrailConfig']] = None,
-        web: Optional[Union[bool, 'WebConfig']] = None,
-        context: Optional[Union[bool, 'ManagerConfig', 'ContextManager']] = None,
+        memory: Optional[Union[bool, str, 'MemoryConfig', 'MemoryManager']] = None,
+        knowledge: Optional[Union[bool, str, List[str], 'KnowledgeConfig', 'Knowledge']] = None,
+        planning: Optional[Union[bool, str, 'PlanningConfig']] = False,
+        reflection: Optional[Union[bool, str, 'ReflectionConfig']] = None,
+        guardrails: Optional[Union[bool, str, Callable, 'GuardrailConfig']] = None,
+        web: Optional[Union[bool, str, 'WebConfig']] = None,
+        context: Optional[Union[bool, 'ContextConfig', 'ContextManager']] = None,
         autonomy: Optional[Union[bool, Dict[str, Any], 'AutonomyConfig']] = None,
         verification_hooks: Optional[List[Any]] = None,  # Deprecated: use autonomy=AutonomyConfig(verification_hooks=[...])
         output: Optional[Union[str, 'OutputConfig']] = None,
@@ -491,9 +497,9 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
         caching: Optional[Union[bool, 'CachingConfig']] = None,
         hooks: Optional[Union[List[Any], 'HooksConfig']] = None,
         skills: Optional[Union[List[str], 'SkillsConfig']] = None,
-        approval: Optional[Union[bool, 'ApprovalProtocol']] = None,
+        approval: Optional[Union[bool, str, 'ApprovalConfig', 'ApprovalProtocol']] = None,
         tool_timeout: Optional[int] = None,  # P8/G11: Timeout in seconds for each tool call
-        learn: Optional[Union[bool, 'LearnConfig']] = None,  # Continuous learning (peer to memory)
+        learn: Optional[Union[bool, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
     ):
         """Initialize an Agent instance.
 
