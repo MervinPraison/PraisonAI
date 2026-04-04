@@ -8,6 +8,7 @@ and quality scoring logic. Split from the main memory.py file for better maintai
 import json
 import logging
 import threading
+import asyncio
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
@@ -321,8 +322,6 @@ class MemoryCoreMixin:
         Returns:
             The memory ID of the stored content
         """
-        import asyncio
-        
         if not content.strip():
             return ""
         
@@ -330,15 +329,16 @@ class MemoryCoreMixin:
         if quality_score is None:
             quality_score = self.compute_quality_score(content, metadata)
         
-        # Prepare metadata
-        clean_metadata = metadata.copy() if metadata else {}
-        clean_metadata.update({
+        # Prepare metadata (mirror sync version's metadata construction)
+        raw_metadata = metadata.copy() if metadata else {}
+        raw_metadata.update({
             "timestamp": datetime.now().isoformat(),
             "quality_score": quality_score,
             "memory_type": "short_term"
         })
         if user_id:
-            clean_metadata["user_id"] = user_id
+            raw_metadata["user_id"] = user_id
+        clean_metadata = self._sanitize_metadata(raw_metadata)
 
         # Store in SQLite STM
         memory_id = ""
@@ -377,8 +377,6 @@ class MemoryCoreMixin:
         Returns:
             The memory ID of the stored content
         """
-        import asyncio
-        
         if not content.strip():
             return ""
         
@@ -388,4 +386,3 @@ class MemoryCoreMixin:
         
         # Use sync version in thread to avoid blocking event loop
         return await asyncio.to_thread(self.store_long_term, content, metadata, quality_score, user_id)
-        return self._learn_manager
