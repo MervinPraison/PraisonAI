@@ -200,7 +200,13 @@ TOOL_MAPPINGS = {
     'email_tools': ('.email_tools', None),
 }
 
-_instances = {}  # Cache for class instances (protected by _tools_lock)
+# Tool factory functions - creates new instances instead of shared cache
+# This prevents state leakage between concurrent agents
+def _create_tool_instance(class_name: str, module_path: str):
+    """Create a new tool instance. Each call returns a fresh instance to prevent state sharing."""
+    module = import_module(module_path, __package__)
+    class_ = getattr(module, class_name)
+    return class_()
 
 # Profile exports (lazy loaded)
 _PROFILE_EXPORTS = frozenset({
@@ -325,17 +331,10 @@ def __getattr__(name: str) -> Any:
             return module  # Returns the callable module
         return getattr(module, name)
     else:
-        # Class method import (thread-safe)
-        if class_name not in _instances:
-            with _tools_lock:
-                # Double-check pattern to avoid race conditions
-                if class_name not in _instances:
-                    module = import_module(module_path, __package__)
-                    class_ = getattr(module, class_name)
-                    _instances[class_name] = class_()
-        
-        # Get the method and bind it to the instance
-        method = getattr(_instances[class_name], name)
+        # Create a fresh tool instance for each agent/session to prevent state leakage
+        # This factory pattern ensures multi-agent safety by avoiding shared mutable state
+        instance = _create_tool_instance(class_name, module_path)
+        method = getattr(instance, name)
         return method
 
 __all__ = list(TOOL_MAPPINGS.keys()) + [
