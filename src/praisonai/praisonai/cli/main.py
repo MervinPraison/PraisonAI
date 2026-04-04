@@ -3996,6 +3996,27 @@ Do NOT add any explanations or formatting."""
         if getattr(self.args, 'lsp', False):
             cli_config['lsp'] = True
             
+        # Extract new agent-level CLI flags for YAML parity
+        autonomy = getattr(self.args, 'autonomy', None)
+        if autonomy is not None:
+            cli_config['autonomy'] = autonomy
+            
+        guardrail = getattr(self.args, 'guardrail', None)
+        if guardrail is not None:
+            cli_config['guardrail'] = guardrail
+            
+        approval = getattr(self.args, 'approval', None)
+        if approval is not None:
+            cli_config['approval'] = approval
+            
+        approve_all_tools = getattr(self.args, 'approve_all_tools', None)
+        if approve_all_tools is not None:
+            cli_config['approve_all_tools'] = approve_all_tools
+            
+        approval_timeout = getattr(self.args, 'approval_timeout', None)
+        if approval_timeout is not None:
+            cli_config['approval_timeout'] = approval_timeout
+            
         return cli_config
 
     def handle_direct_prompt(self, prompt):
