@@ -329,7 +329,8 @@ class MemoryCoreMixin:
         if quality_score is None:
             quality_score = self.compute_quality_score(content, metadata)
         
-        # Prepare metadata (mirror sync version's metadata construction)
+        # Prepare metadata (mirror sync version's metadata construction including sanitization
+        # to ensure only JSON-serializable values are stored, preventing crashes across backends)
         raw_metadata = metadata.copy() if metadata else {}
         raw_metadata.update({
             "timestamp": datetime.now().isoformat(),
