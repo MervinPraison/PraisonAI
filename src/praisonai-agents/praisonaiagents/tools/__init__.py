@@ -200,13 +200,16 @@ TOOL_MAPPINGS = {
     'email_tools': ('.email_tools', None),
 }
 
-# Tool factory functions - creates new instances instead of shared cache
-# This prevents state leakage between concurrent agents
+# Tool factory functions - caches classes but creates fresh instances
+# This prevents state leakage between concurrent agents while optimizing import performance
+_loaded_classes = {}  # Cache the Class, NOT the instance
+
 def _create_tool_instance(class_name: str, module_path: str):
-    """Create a new tool instance. Each call returns a fresh instance to prevent state sharing."""
-    module = import_module(module_path, __package__)
-    class_ = getattr(module, class_name)
-    return class_()
+    """Create a new tool instance. Caches the class but returns fresh instances to prevent state sharing."""
+    if class_name not in _loaded_classes:
+        module = import_module(module_path, __package__)
+        _loaded_classes[class_name] = getattr(module, class_name)
+    return _loaded_classes[class_name]()  # Fresh instance safe for multi-agent
 
 # Profile exports (lazy loaded)
 _PROFILE_EXPORTS = frozenset({

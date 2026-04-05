@@ -305,6 +305,7 @@ class MemoryCoreMixin:
                 self._learn_manager = LearnManager(config=self._learn_config)
             except ImportError:
                 logging.warning("Learn manager not available - install learn dependencies")
+        return self._learn_manager
 
     # Async variants to prevent event loop blocking
     async def store_short_term_async(self, content: str, metadata: Optional[Dict] = None, quality_score: Optional[float] = None, 
