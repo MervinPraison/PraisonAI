@@ -300,9 +300,9 @@ CONTEXT_PRESETS: Dict[str, Dict[str, Any]] = {
 # =============================================================================
 
 AUTONOMY_PRESETS: Dict[str, Dict[str, Any]] = {
-    "suggest": {"mode": "suggest"},
-    "auto_edit": {"mode": "auto_edit"},
-    "full_auto": {"mode": "full_auto"},
+    "suggest": {"level": "suggest"},
+    "auto_edit": {"level": "auto_edit"},
+    "full_auto": {"level": "full_auto"},
 }
 
 
