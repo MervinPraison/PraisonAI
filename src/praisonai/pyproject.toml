@@ -44,6 +44,7 @@ os = [
     "sse-starlette>=1.6.0"
 ]
 agentops = ["agentops>=0.3.12"]
+langfuse = ["langfuse>=3.0.0"]
 chat = [
     "chainlit>=2.8.5,<=2.9.4",
     "aiosqlite>=0.20.0",
@@ -125,6 +126,8 @@ all = [
     "yfinance>=0.2.44",
     "ddgs>=9.0.0",
     "psutil>=5.9.0",  # Shell tools
+    # Observability
+    "langfuse>=3.0.0",
     # Storage backends
     "redis>=5.0.0",
     "pymongo>=4.6.0", 
@@ -183,6 +186,8 @@ claw = [
     "ddgs>=9.0.0",
     # Shell tools
     "psutil>=5.9.0",
+    # Observability
+    "langfuse>=3.0.0",
     # Bot channels (Telegram, Discord, Slack)
     "python-telegram-bot>=20.0",
     "discord.py>=2.0.0",
