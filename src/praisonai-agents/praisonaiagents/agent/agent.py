@@ -488,8 +488,8 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
         reflection: Optional[Union[bool, str, 'ReflectionConfig']] = None,
         guardrails: Optional[Union[bool, str, Callable, 'GuardrailConfig']] = None,
         web: Optional[Union[bool, str, 'WebConfig']] = None,
-        context: Optional[Union[bool, 'ContextConfig', 'ContextManager']] = None,
-        autonomy: Optional[Union[bool, Dict[str, Any], 'AutonomyConfig']] = None,
+        context: Optional[Union[bool, str, Dict[str, Any], 'ContextConfig', 'ContextManager']] = None,
+        autonomy: Optional[Union[bool, str, Dict[str, Any], 'AutonomyConfig']] = None,
         verification_hooks: Optional[List[Any]] = None,  # Deprecated: use autonomy=AutonomyConfig(verification_hooks=[...])
         output: Optional[Union[bool, str, Dict[str, Any], 'OutputConfig']] = None,
         execution: Optional[Union[bool, str, Dict[str, Any], 'ExecutionConfig']] = None,
@@ -497,9 +497,9 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
         caching: Optional[Union[bool, str, Dict[str, Any], 'CachingConfig']] = None,
         hooks: Optional[Union[List[Any], Dict[str, Any], 'HooksConfig']] = None,
         skills: Optional[Union[List[str], str, Dict[str, Any], 'SkillsConfig']] = None,
-        approval: Optional[Union[bool, str, 'ApprovalConfig', 'ApprovalProtocol']] = None,
+        approval: Optional[Union[bool, str, Dict[str, Any], 'ApprovalConfig', 'ApprovalProtocol']] = None,
         tool_timeout: Optional[int] = None,  # P8/G11: Timeout in seconds for each tool call
-        learn: Optional[Union[bool, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
+        learn: Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
     ):
         """Initialize an Agent instance.
 
@@ -544,10 +544,14 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
                 - WebConfig: Custom configuration
             context: Context management. Accepts:
                 - bool: True enables with defaults
-                - ManagerConfig: Custom configuration
+                - str: Preset name ("sliding_window", "summarize", "truncate")
+                - Dict[str, Any]: ContextConfig fields
+                - ContextConfig: Custom configuration
+                - ContextManager: Pre-configured instance
             autonomy: Autonomy settings. Accepts:
                 - bool: True enables with defaults
-                - Dict: Configuration dict
+                - str: Level preset ("suggest", "auto_edit", "full_auto")
+                - Dict[str, Any]: Configuration dict
                 - AutonomyConfig: Custom configuration
             verification_hooks: **Deprecated** — use ``autonomy=AutonomyConfig(verification_hooks=[...])``.
                 Still works for backward compatibility.
@@ -578,6 +582,7 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
                 - SkillsConfig: Custom configuration
             learn: Continuous learning configuration. Accepts:
                 - bool: True enables with defaults (AGENTIC mode), False disables
+                - str: Mode string ("disabled", "agentic", "propose")
                 - Dict[str, Any]: Config fields (e.g. {"mode": "agentic", "backend": "sqlite"})
                 - LearnConfig: Custom configuration
                 Learning is a first-class citizen, peer to memory. It captures patterns,
