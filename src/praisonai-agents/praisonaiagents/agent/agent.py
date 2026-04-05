@@ -488,18 +488,18 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
         reflection: Optional[Union[bool, str, 'ReflectionConfig']] = None,
         guardrails: Optional[Union[bool, str, Callable, 'GuardrailConfig']] = None,
         web: Optional[Union[bool, str, 'WebConfig']] = None,
-        context: Optional[Union[bool, 'ContextConfig', 'ContextManager']] = None,
-        autonomy: Optional[Union[bool, Dict[str, Any], 'AutonomyConfig']] = None,
+        context: Optional[Union[bool, str, Dict[str, Any], 'ContextConfig', 'ContextManager']] = None,
+        autonomy: Optional[Union[bool, str, Dict[str, Any], 'AutonomyConfig']] = None,
         verification_hooks: Optional[List[Any]] = None,  # Deprecated: use autonomy=AutonomyConfig(verification_hooks=[...])
-        output: Optional[Union[str, 'OutputConfig']] = None,
-        execution: Optional[Union[str, 'ExecutionConfig']] = None,
-        templates: Optional['TemplateConfig'] = None,
-        caching: Optional[Union[bool, 'CachingConfig']] = None,
-        hooks: Optional[Union[List[Any], 'HooksConfig']] = None,
-        skills: Optional[Union[List[str], 'SkillsConfig']] = None,
-        approval: Optional[Union[bool, str, 'ApprovalConfig', 'ApprovalProtocol']] = None,
+        output: Optional[Union[bool, str, Dict[str, Any], 'OutputConfig']] = None,
+        execution: Optional[Union[bool, str, Dict[str, Any], 'ExecutionConfig']] = None,
+        templates: Optional[Union[str, Dict[str, Any], 'TemplateConfig']] = None,
+        caching: Optional[Union[bool, str, Dict[str, Any], 'CachingConfig']] = None,
+        hooks: Optional[Union[List[Any], Dict[str, Any], 'HooksConfig']] = None,
+        skills: Optional[Union[List[str], str, Dict[str, Any], 'SkillsConfig']] = None,
+        approval: Optional[Union[bool, str, Dict[str, Any], 'ApprovalConfig', 'ApprovalProtocol']] = None,
         tool_timeout: Optional[int] = None,  # P8/G11: Timeout in seconds for each tool call
-        learn: Optional[Union[bool, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
+        learn: Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
     ):
         """Initialize an Agent instance.
 
