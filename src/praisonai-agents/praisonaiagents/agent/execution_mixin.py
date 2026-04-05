@@ -15,44 +15,6 @@ import asyncio
 import threading
 
 
-def _async_safe_sleep(seconds: float):
-    """Async-safe sleep that uses asyncio.sleep when in an event loop."""
-    try:
-        # Check if there's a running event loop
-        loop = asyncio.get_running_loop()
-        if loop.is_running():
-            # We're in an async context, use asyncio.sleep
-            return asyncio.create_task(asyncio.sleep(seconds))
-    except RuntimeError:
-        # No running event loop, we're in sync context
-        pass
-    
-    # Fallback to regular time.sleep for sync contexts
-    time.sleep(seconds)
-    return None
-
-
-def _smart_sleep(seconds: float):
-    """Smart sleep that detects async context and uses appropriate sleep method.
-    
-    Returns a coroutine if in async context, otherwise sleeps synchronously.
-    """
-    try:
-        # Check if there's a running event loop
-        loop = asyncio.get_running_loop()
-        if loop.is_running():
-            # We're in an async context, return a coroutine
-            async def async_sleep():
-                await asyncio.sleep(seconds)
-            return async_sleep()
-    except RuntimeError:
-        # No running event loop, we're in sync context
-        pass
-    
-    # Sync context - use regular time.sleep
-    time.sleep(seconds)
-    return None
-
 # Fallback helpers to avoid circular imports
 def _get_console():
     from rich.console import Console
@@ -992,10 +954,10 @@ Write the complete compiled report:"""
                 server_thread.start()
 
                 # Wait for a moment to allow the server to start and register endpoints
-                _smart_sleep(0.5)
+                time.sleep(0.5)
             else:
                 # If server is already running, wait a moment to make sure the endpoint is registered
-                _smart_sleep(0.1)
+                time.sleep(0.1)
                 print(f"🔌 Available endpoints on port {port}: {', '.join(list(_registered_agents[port].keys()))}")
             
             # Get the stack frame to check if this is the last launch() call in the script
@@ -1024,7 +986,7 @@ Write the complete compiled report:"""
                         try:
                             print("\nAll agents registered for HTTP mode. Press Ctrl+C to stop the servers.")
                             while True:
-                                _smart_sleep(1)
+                                time.sleep(1)
                         except KeyboardInterrupt:
                             print("\nServers stopped")
                 except Exception as e:
@@ -1033,7 +995,7 @@ Write the complete compiled report:"""
                     try:
                         print("\nKeeping HTTP servers alive. Press Ctrl+C to stop.")
                         while True:
-                            _smart_sleep(1)
+                            time.sleep(1)
                     except KeyboardInterrupt:
                         print("\nServers stopped")
             return None
@@ -1092,12 +1054,12 @@ Write the complete compiled report:"""
 
             server_thread = threading.Thread(target=run_mcp_server, daemon=True)
             server_thread.start()
-            _smart_sleep(0.5)
+            time.sleep(0.5)
 
             try:
                 print("\nKeeping MCP server alive. Press Ctrl+C to stop.")
                 while True:
-                    _smart_sleep(1)
+                    time.sleep(1)
             except KeyboardInterrupt:
                 print("\nMCP Server stopped")
             return None
