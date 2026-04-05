@@ -2581,6 +2581,25 @@ wheels = [
 ]
 
 [[package]]
+name = "langfuse"
+version = "4.0.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "backoff" },
+    { name = "httpx" },
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-sdk" },
+    { name = "packaging" },
+    { name = "pydantic" },
+    { name = "wrapt" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ab/d0/6d79ed5614f86f27f5df199cf10c6facf6874ff6f91b828ae4dad90aa86d/langfuse-4.0.6.tar.gz", hash = "sha256:83a6f8cc8f1431fa2958c91e2673bc4179f993297e9b1acd1dbf001785e6cf83", size = 274094, upload-time = "2026-04-01T20:04:15.153Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/50/b4/088048e37b6d7ec1b52c6a11bc33101454285a22eaab8303dcccfd78344d/langfuse-4.0.6-py3-none-any.whl", hash = "sha256:0562b1dcf83247f9d8349f0f755eaed9a7f952fee67e66580970f0738bf3adbf", size = 472841, upload-time = "2026-04-01T20:04:16.451Z" },
+]
+
+[[package]]
 name = "langgraph"
 version = "1.0.10"
 source = { registry = "https://pypi.org/simple" }
@@ -4788,6 +4807,7 @@ all = [
     { name = "flask" },
     { name = "gradio" },
     { name = "greenlet" },
+    { name = "langfuse" },
     { name = "playwright" },
     { name = "plotly" },
     { name = "psutil" },
@@ -4865,6 +4885,7 @@ claw = [
     { name = "fastapi" },
     { name = "flask" },
     { name = "greenlet" },
+    { name = "langfuse" },
     { name = "playwright" },
     { name = "praisonaiagents", extra = ["all"] },
     { name = "psutil" },
@@ -4903,6 +4924,9 @@ dynamodb = [
 ]
 gradio = [
     { name = "gradio" },
+]
+langfuse = [
+    { name = "langfuse" },
 ]
 mongodb = [
     { name = "pymongo" },
@@ -4996,6 +5020,9 @@ requires-dist = [
     { name = "greenlet", marker = "extra == 'claw'", specifier = ">=3.0.3" },
     { name = "greenlet", marker = "extra == 'code'", specifier = ">=3.0.3" },
     { name = "greenlet", marker = "extra == 'realtime'", specifier = ">=3.0.3" },
+    { name = "langfuse", marker = "extra == 'all'", specifier = ">=3.0.0" },
+    { name = "langfuse", marker = "extra == 'claw'", specifier = ">=3.0.0" },
+    { name = "langfuse", marker = "extra == 'langfuse'", specifier = ">=3.0.0" },
     { name = "litellm", specifier = ">=1.81.0,<=1.82.6" },
     { name = "markdown", specifier = ">=3.5" },
     { name = "mcp", specifier = ">=1.20.0" },
@@ -5074,7 +5101,7 @@ requires-dist = [
     { name = "yfinance", marker = "extra == 'all'", specifier = ">=0.2.44" },
     { name = "yfinance", marker = "extra == 'realtime'", specifier = ">=0.2.44" },
 ]
-provides-extras = ["ui", "gradio", "api", "os", "agentops", "chat", "code", "sandbox", "realtime", "call", "train", "crewai", "autogen", "ag2", "autogen-v4", "acp", "lite", "all", "bot", "bot-whatsapp-web", "redis", "mongodb", "postgresql", "dynamodb", "claw", "dev"]
+provides-extras = ["ui", "gradio", "api", "os", "agentops", "langfuse", "chat", "code", "sandbox", "realtime", "call", "train", "crewai", "autogen", "ag2", "autogen-v4", "acp", "lite", "all", "bot", "bot-whatsapp-web", "redis", "mongodb", "postgresql", "dynamodb", "claw", "dev"]
 
 [[package]]
 name = "praisonai-tools"
@@ -5090,7 +5117,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.5.112"
+version = "1.5.113"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },

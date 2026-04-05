@@ -142,7 +142,11 @@ class AICoder:
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.cwd
             )
-            stdout, stderr = await process.communicate()
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=60)
+            except asyncio.TimeoutError:
+                process.kill()
+                return "Error: Command execution timed out after 60 seconds."
             if stdout:
                 return f"Command output:\n{stdout.decode()}"
             if stderr:

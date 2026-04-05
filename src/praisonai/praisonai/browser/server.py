@@ -112,7 +112,19 @@ class BrowserServer:
         import json
         import time
         import uuid
+        import os
         
+        origin = websocket.headers.get("origin")
+        allowed_origins = os.environ.get("ALLOWED_ORIGINS", "").split(",")
+        if origin:
+            is_allowed = origin.startswith("http://localhost") or origin.startswith("http://127.0.0.1") or origin.startswith("chrome-extension://")
+            if any(origin == allowed.strip() for allowed in allowed_origins if allowed.strip()):
+                is_allowed = True
+            
+            if not is_allowed:
+                await websocket.close(code=1008)
+                return
+
         await websocket.accept()
         
         # Create connection tracking

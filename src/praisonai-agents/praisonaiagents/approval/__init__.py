@@ -124,14 +124,16 @@ def configure_default_approvals() -> None:
         reg.add_requirement(tool_name, risk_level)
 
 def add_approval_requirement(tool_name: str, risk_level: str = "high") -> None:
-    get_approval_registry().add_requirement(tool_name, risk_level)
-    APPROVAL_REQUIRED_TOOLS.add(tool_name)
-    TOOL_RISK_LEVELS[tool_name] = risk_level
+    reg = get_approval_registry()
+    reg.add_requirement(tool_name, risk_level)
+    reg._required_tools.add(tool_name)
+    reg._risk_levels[tool_name] = risk_level
 
 def remove_approval_requirement(tool_name: str) -> None:
-    get_approval_registry().remove_requirement(tool_name)
-    APPROVAL_REQUIRED_TOOLS.discard(tool_name)
-    TOOL_RISK_LEVELS.pop(tool_name, None)
+    reg = get_approval_registry()
+    reg.remove_requirement(tool_name)
+    reg._required_tools.discard(tool_name)
+    reg._risk_levels.pop(tool_name, None)
 
 def is_approval_required(tool_name: str) -> bool:
     return get_approval_registry().is_required(tool_name)
@@ -167,8 +169,8 @@ def require_approval(risk_level: RiskLevel = "high"):
         tool_name = getattr(func, '__name__', str(func))
         reg = get_approval_registry()
         reg.add_requirement(tool_name, risk_level)
-        APPROVAL_REQUIRED_TOOLS.add(tool_name)
-        TOOL_RISK_LEVELS[tool_name] = risk_level
+        reg._required_tools.add(tool_name)
+        reg._risk_levels[tool_name] = risk_level
 
         @wraps(func)
         def wrapper(*args, **kwargs):

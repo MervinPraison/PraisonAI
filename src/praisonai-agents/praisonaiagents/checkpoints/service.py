@@ -217,7 +217,11 @@ class CheckpointService:
             cwd=self.config.workspace_dir
         )
         
-        stdout, stderr = await process.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+        except asyncio.TimeoutError:
+            process.kill()
+            raise RuntimeError(f"Git command timed out after 30 seconds: {' '.join(args)}")
         
         if process.returncode != 0:
             error_msg = stderr.decode().strip()

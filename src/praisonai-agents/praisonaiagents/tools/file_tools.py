@@ -39,17 +39,20 @@ class FileTools:
         if filepath.startswith('~'):
             filepath = os.path.expanduser(filepath)
         
-        # Normalize the path
-        normalized = os.path.normpath(filepath)
-        absolute = os.path.abspath(normalized)
-        
-        # Check for path traversal attempts (.. after normalization)
+        # Check for path traversal attempts BEFORE normalization
         # We check the original input for '..' to catch traversal attempts
-        if '..' in normalized:
+        if '..' in filepath:
             raise ValueError(f"Path traversal detected: {filepath}")
         
-        # Additional check: ensure the resolved path doesn't escape expected boundaries
-        # This is a basic check - in production, you'd want to define allowed directories
+        # Normalize the path and securely resolve symlinks
+        normalized = os.path.normpath(filepath)
+        absolute = os.path.realpath(normalized)
+        
+        # Prevent path traversal outside current workspace / allowed directories
+        cwd = os.getcwd()
+        if not absolute.startswith(cwd):
+            raise ValueError(f"Path traversal detected: {filepath} escapes workspace {cwd}")
+        
         return absolute
     
     @staticmethod
@@ -327,7 +330,7 @@ class FileTools:
             os.makedirs(os.path.dirname(safe_path) or ".", exist_ok=True)
             
             # Download file
-            with httpx.stream("GET", url, timeout=timeout, follow_redirects=True) as response:
+            with httpx.stream("GET", url, timeout=timeout, follow_redirects=False) as response:
                 response.raise_for_status()
                 
                 total_size = int(response.headers.get("content-length", 0))

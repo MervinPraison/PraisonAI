@@ -371,9 +371,11 @@ class OAuthManager:
         Returns:
             True if valid
         """
+        import hmac
         # Check if we have this token stored
         for stored_token in self._tokens.values():
-            if stored_token.access_token == token:
+            # Use hmac.compare_digest to prevent timing attacks
+            if hmac.compare_digest(stored_token.access_token, token):
                 return not stored_token.is_expired()
         
         # Token not found — deny by default

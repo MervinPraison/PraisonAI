@@ -30,14 +30,23 @@ def resolve_approval_backend(value: Optional[str]) -> Optional[Any]:
     Raises:
         ValueError: If the value is not a recognised backend name.
     """
-    if value is None or value.lower() == "none":
+    if value is None:
+        return None
+        
+    if isinstance(value, bool):
+        value = "true" if value else "false"
+        
+    if str(value).lower() == "none":
         return None
 
-    name = value.lower().strip()
+    name = str(value).lower().strip()
 
-    if name in ("true", "console"):
+    if name in ("true", "console", "yes", "1"):
         from praisonaiagents.approval.backends import ConsoleBackend
         return ConsoleBackend()
+
+    if name in ("false", "no", "0"):
+        return None
 
     if name == "auto":
         from praisonaiagents.approval.backends import AutoApproveBackend
