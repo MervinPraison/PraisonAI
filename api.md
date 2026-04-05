@@ -862,6 +862,13 @@ Methods:
 * <code title="cli">praisonai knowledge index <a href="./src/praisonai/praisonai/cli/commands/knowledge.py">--help</a></code>
 * <code title="cli">praisonai knowledge list <a href="./src/praisonai/praisonai/cli/commands/knowledge.py">--help</a></code>
 * <code title="cli">praisonai knowledge search <a href="./src/praisonai/praisonai/cli/commands/knowledge.py">--help</a></code>
+* <code title="cli">praisonai langfuse config <a href="./src/praisonai/praisonai/cli/commands/langfuse.py">--help</a></code>
+* <code title="cli">praisonai langfuse connect <a href="./src/praisonai/praisonai/cli/commands/langfuse.py">--help</a></code>
+* <code title="cli">praisonai langfuse langfuse-start <a href="./src/praisonai/praisonai/cli/commands/langfuse.py">--help</a></code>
+* <code title="cli">praisonai langfuse status <a href="./src/praisonai/praisonai/cli/commands/langfuse.py">--help</a></code>
+* <code title="cli">praisonai langfuse stop <a href="./src/praisonai/praisonai/cli/commands/langfuse.py">--help</a></code>
+* <code title="cli">praisonai langfuse test <a href="./src/praisonai/praisonai/cli/commands/langfuse.py">--help</a></code>
+* <code title="cli">praisonai langfuse version <a href="./src/praisonai/praisonai/cli/commands/langfuse.py">--help</a></code>
 * <code title="cli">praisonai loop help <a href="./src/praisonai/praisonai/cli/commands/loop.py">--help</a></code>
 * <code title="cli">praisonai loop loop-main <a href="./src/praisonai/praisonai/cli/commands/loop.py">--help</a></code>
 * <code title="cli">praisonai lsp logs <a href="./src/praisonai/praisonai/cli/commands/lsp.py">--help</a></code>
