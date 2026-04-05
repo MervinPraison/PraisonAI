@@ -488,18 +488,18 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
         reflection: Optional[Union[bool, str, 'ReflectionConfig']] = None,
         guardrails: Optional[Union[bool, str, Callable, 'GuardrailConfig']] = None,
         web: Optional[Union[bool, str, 'WebConfig']] = None,
-        context: Optional[Union[bool, str, Dict[str, Any], 'ContextConfig', 'ContextManager']] = None,
-        autonomy: Optional[Union[bool, str, Dict[str, Any], 'AutonomyConfig']] = None,
+        context: Optional[Union[bool, 'ContextConfig', 'ContextManager']] = None,
+        autonomy: Optional[Union[bool, Dict[str, Any], 'AutonomyConfig']] = None,
         verification_hooks: Optional[List[Any]] = None,  # Deprecated: use autonomy=AutonomyConfig(verification_hooks=[...])
         output: Optional[Union[bool, str, Dict[str, Any], 'OutputConfig']] = None,
         execution: Optional[Union[bool, str, Dict[str, Any], 'ExecutionConfig']] = None,
-        templates: Optional[Union[str, Dict[str, Any], 'TemplateConfig']] = None,
+        templates: Optional[Union[Dict[str, Any], 'TemplateConfig']] = None,
         caching: Optional[Union[bool, str, Dict[str, Any], 'CachingConfig']] = None,
         hooks: Optional[Union[List[Any], Dict[str, Any], 'HooksConfig']] = None,
         skills: Optional[Union[List[str], str, Dict[str, Any], 'SkillsConfig']] = None,
-        approval: Optional[Union[bool, str, Dict[str, Any], 'ApprovalConfig', 'ApprovalProtocol']] = None,
+        approval: Optional[Union[bool, str, 'ApprovalConfig', 'ApprovalProtocol']] = None,
         tool_timeout: Optional[int] = None,  # P8/G11: Timeout in seconds for each tool call
-        learn: Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
+        learn: Optional[Union[bool, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
     ):
         """Initialize an Agent instance.
 
@@ -552,14 +552,20 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
             verification_hooks: **Deprecated** — use ``autonomy=AutonomyConfig(verification_hooks=[...])``.
                 Still works for backward compatibility.
             output: Output configuration. Accepts:
+                - bool: True=default OutputConfig, False=disabled
                 - str: Preset name ("silent", "actions", "verbose", "json", "stream")
+                - Dict[str, Any]: Config overrides (e.g. {"verbose": 2, "stream": True})
                 - OutputConfig: Custom configuration
                 Controls: verbose, markdown, stream, metrics, reasoning_steps
             execution: Execution configuration. Accepts:
+                - bool: True=default ExecutionConfig, False=disabled
                 - str: Preset name ("fast", "balanced", "thorough")
+                - Dict[str, Any]: Config overrides (e.g. {"max_iter": 10, "max_rpm": 60})
                 - ExecutionConfig: Custom configuration
                 Controls: max_iter, max_rpm, max_execution_time, max_retry_limit
-            templates: Template configuration (TemplateConfig).
+            templates: Template configuration. Accepts:
+                - Dict[str, Any]: Template fields (e.g. {"system": "...", "prompt": "..."})
+                - TemplateConfig: Custom configuration
                 Controls: system_template, prompt_template, response_template
             caching: Caching configuration. Accepts:
                 - bool: True enables with defaults
@@ -571,7 +577,8 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
                 - List[str]: Skill directory paths
                 - SkillsConfig: Custom configuration
             learn: Continuous learning configuration. Accepts:
-                - bool: True enables with defaults, False disables
+                - bool: True enables with defaults (AGENTIC mode), False disables
+                - Dict[str, Any]: Config fields (e.g. {"mode": "agentic", "backend": "sqlite"})
                 - LearnConfig: Custom configuration
                 Learning is a first-class citizen, peer to memory. It captures patterns,
                 preferences, and insights from interactions to improve future responses.
@@ -1089,7 +1096,11 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
                     # Unknown string mode, disable learning
                     _learn_config = None
             else:
-                _learn_config = learn  # Pass through
+                logging.warning(
+                    "Unsupported learn= value %r; expected bool, dict, or LearnConfig. "
+                    "Learning disabled.", learn
+                )
+                _learn_config = None
         elif _memory_config is not None and isinstance(_memory_config, MemoryConfig):
             # Fallback to memory.learn for backward compatibility
             if _memory_config.learn:
