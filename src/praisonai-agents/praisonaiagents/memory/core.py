@@ -8,6 +8,7 @@ and quality scoring logic. Split from the main memory.py file for better maintai
 import json
 import logging
 import threading
+import asyncio
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
@@ -305,3 +306,85 @@ class MemoryCoreMixin:
             except ImportError:
                 logging.warning("Learn manager not available - install learn dependencies")
         return self._learn_manager
+
+    # Async variants to prevent event loop blocking
+    async def store_short_term_async(self, content: str, metadata: Optional[Dict] = None, quality_score: Optional[float] = None, 
+                                   user_id: Optional[str] = None, auto_promote: bool = True) -> str:
+        """
+        Async version of store_short_term to prevent event loop blocking.
+        
+        Args:
+            content: The content to store
+            metadata: Optional metadata dictionary
+            quality_score: Optional pre-calculated quality score
+            user_id: Optional user identifier
+            auto_promote: Whether to automatically promote to LTM if quality is high
+            
+        Returns:
+            The memory ID of the stored content
+        """
+        if not content.strip():
+            return ""
+        
+        # Calculate quality score if not provided
+        if quality_score is None:
+            quality_score = self.compute_quality_score(content, metadata)
+        
+        # Prepare metadata (mirror sync version's metadata construction including sanitization
+        # to ensure only JSON-serializable values are stored, preventing crashes across backends)
+        raw_metadata = metadata.copy() if metadata else {}
+        raw_metadata.update({
+            "timestamp": datetime.now().isoformat(),
+            "quality_score": quality_score,
+            "memory_type": "short_term"
+        })
+        if user_id:
+            raw_metadata["user_id"] = user_id
+        clean_metadata = self._sanitize_metadata(raw_metadata)
+
+        # Store in SQLite STM
+        memory_id = ""
+        try:
+            memory_id = await asyncio.to_thread(self._store_sqlite_stm, content, clean_metadata, quality_score)
+        except Exception as e:
+            logging.error(f"Failed to store in SQLite STM: {e}")
+            return ""
+        
+        # Auto-promote to long-term memory if quality is high (async)
+        if auto_promote and quality_score >= 7.5:  # High quality threshold
+            try:
+                await self.store_long_term_async(content, clean_metadata, quality_score, user_id)
+                self._log_verbose(f"Auto-promoted STM content to LTM (score: {quality_score:.2f})")
+            except Exception as e:
+                logging.warning(f"Failed to auto-promote to LTM: {e}")
+        
+        # Emit memory event
+        self._emit_memory_event("store", "short_term", content, clean_metadata)
+        
+        self._log_verbose(f"Stored in STM: {content[:100]}... (quality: {quality_score:.2f})")
+        
+        return memory_id or ""
+
+    async def store_long_term_async(self, content: str, metadata: Optional[Dict] = None, quality_score: Optional[float] = None,
+                                  user_id: Optional[str] = None) -> str:
+        """
+        Async version of store_long_term to prevent event loop blocking.
+        
+        Args:
+            content: The content to store
+            metadata: Optional metadata dictionary
+            quality_score: Optional pre-calculated quality score
+            user_id: Optional user identifier
+            
+        Returns:
+            The memory ID of the stored content
+        """
+        if not content.strip():
+            return ""
+        
+        # Calculate quality score if not provided
+        if quality_score is None:
+            quality_score = self.compute_quality_score(content, metadata)
+        
+        # Use sync version in thread to avoid blocking event loop
+        return await asyncio.to_thread(self.store_long_term, content, metadata, quality_score, user_id)

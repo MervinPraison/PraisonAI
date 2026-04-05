@@ -291,21 +291,6 @@ class ObservabilityHooks:
             "final_stage": self._current_stage.name if self._current_stage else None,
         }
 
-# Global hooks instance (opt-in)
-_global_hooks: Optional[ObservabilityHooks] = None
-
-def get_hooks() -> Optional[ObservabilityHooks]:
-    """Get global observability hooks."""
-    return _global_hooks
-
-def enable_observability() -> ObservabilityHooks:
-    """Enable global observability."""
-    global _global_hooks
-    if _global_hooks is None:
-        _global_hooks = ObservabilityHooks(enabled=True)
-    return _global_hooks
-
-def disable_observability():
-    """Disable global observability."""
-    global _global_hooks
-    _global_hooks = None
+# NOTE: Observability is now per-agent/per-pipeline to comply with multi-agent safety.
+# Each agent creates its own ObservabilityHooks instance when observe=True.
+# See agent.py:2236 for the correct per-instance pattern.

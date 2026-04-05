@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import time
 import json
 from typing import Dict, Optional, List, Any, AsyncGenerator
 from pydantic import BaseModel, ConfigDict
@@ -25,6 +26,8 @@ class Process:
         manager_llm: Optional[str] = None,
         verbose: bool = False,
         max_iter: int = 10,
+        max_retries: int = 3,
+        workflow_timeout: Optional[int] = None,  # seconds, None = no timeout
         output: Optional[str] = None,
     ):
         logging.debug(f"=== Initializing Process ===")
@@ -37,6 +40,8 @@ class Process:
         self.agents = agents
         self.manager_llm = manager_llm
         self.max_iter = max_iter
+        self.max_retries = max_retries
+        self.workflow_timeout = workflow_timeout
         self.task_retry_counter: Dict[str, int] = {} # Initialize retry counter
         self.workflow_finished = False # ADDED: Workflow finished flag
         self._state_lock = asyncio.Lock() # Async lock for shared state protection
@@ -233,7 +238,7 @@ class Process:
             if hasattr(task, 'description') and 'Input data from previous tasks:' in task.description:
                 task.description = task.description.split('Input data from previous tasks:')[0].strip()
         
-        while fallback_attempts < Process.DEFAULT_RETRY_LIMIT and not temp_current_task:
+        while fallback_attempts < self.max_retries and not temp_current_task:
             fallback_attempts += 1
             logging.debug(f"Fallback attempt {fallback_attempts}: Trying to find next 'not started' task.")
             for task_candidate in self.tasks.values():
@@ -248,13 +253,13 @@ class Process:
                     if not leads_to_task and not task_candidate.next_tasks:
                         continue  # Skip if no valid path exists
                         
-                    if self.task_retry_counter.get(task_candidate.id, 0) < Process.DEFAULT_RETRY_LIMIT:
+                    if self.task_retry_counter.get(task_candidate.id, 0) < self.max_retries:
                         self.task_retry_counter[task_candidate.id] = self.task_retry_counter.get(task_candidate.id, 0) + 1
                         temp_current_task = task_candidate
                         logging.debug(f"Fallback attempt {fallback_attempts}: Found 'not started' task: {temp_current_task.name}, retry count: {self.task_retry_counter[temp_current_task.id]}")
                         return temp_current_task # Return the found task immediately
                     else:
-                        logging.debug(f"Max retries reached for task {task_candidate.name} in fallback mode, marking as failed.")
+                        logging.debug(f"Max retries ({self.max_retries}) reached for task {task_candidate.name} in fallback mode, marking as failed.")
                         task_candidate.status = "failed"
             if not temp_current_task:
                 logging.debug(f"Fallback attempt {fallback_attempts}: No 'not started' task found within retry limit.")
@@ -383,6 +388,7 @@ class Process:
         """Async version of workflow method"""
         logging.debug("=== Starting Async Workflow ===")
         current_iter = 0  # Track how many times we've looped
+        workflow_start = time.monotonic()  # For timeout enforcement
         # Build workflow relationships first
         logging.debug("Building workflow relationships...")
         for task in self.tasks.values():
@@ -417,6 +423,13 @@ class Process:
             if current_iter > self.max_iter:
                 logging.info(f"Max iteration limit {self.max_iter} reached, ending workflow.")
                 break
+
+            # Enforce workflow timeout if set
+            if self.workflow_timeout is not None:
+                elapsed = time.monotonic() - workflow_start
+                if elapsed > self.workflow_timeout:
+                    logging.warning(f"Workflow timeout ({self.workflow_timeout}s) exceeded after {elapsed:.1f}s, stopping.")
+                    break
 
             # ADDED: Check workflow finished flag at the start of each cycle
             if self.workflow_finished:
@@ -455,11 +468,13 @@ Context tasks: {[t.name for t in current_task.context] if current_task.context e
 Description length: {len(current_task.description)}
             """)
 
-            # Add context from previous tasks to description
+            # Build context and set description for this execution pass only
             context = self._build_task_context(current_task)
-            if context:
-                # Update task description with context
-                current_task.description = current_task.description + context
+            # Store original description if not already stored
+            if not hasattr(current_task, '_original_description'):
+                current_task._original_description = current_task.description
+            # Set description with context for execution; reset after yield to prevent accumulation
+            current_task.description = current_task._original_description + (context if context else "")
 
             # Skip execution for loop tasks, only process their subtasks
             if current_task.task_type == "loop":
@@ -566,6 +581,9 @@ Subtask: {st.name}
                 logging.debug(f"Task next_tasks: {current_task.next_tasks}")
                 yield task_id
                 visited_tasks.add(task_id)
+                # Reset description to original after execution to prevent context accumulation
+                if hasattr(current_task, '_original_description'):
+                    current_task.description = current_task._original_description
 
                 # Only end workflow if no next_tasks AND no conditions
                 if not current_task.next_tasks and not current_task.condition and not any(
@@ -577,28 +595,29 @@ Subtask: {st.name}
                     current_task = None
                     break
 
-            # Reset completed task to "not started" so it can run again
-            if self.tasks[task_id].status == "completed":
-                # Never reset loop tasks, decision tasks, or their subtasks if rerun is False
-                subtask_name = self.tasks[task_id].name
-                task_to_check = self.tasks[task_id]
-                logging.debug(f"=== Checking reset for completed task: {subtask_name} ===")
-                logging.debug(f"Task type: {task_to_check.task_type}")
-                logging.debug(f"Task status before reset check: {task_to_check.status}")
-                logging.debug(f"Task rerun: {getattr(task_to_check, 'rerun', True)}") # default to True if not set
-                logging.debug(f"Task async_execution: {task_to_check.async_execution}")
+            # Reset completed task to "not started" so it can run again (atomic operation)
+            async with self._state_lock:
+                if self.tasks[task_id].status == "completed":
+                    # Never reset loop tasks, decision tasks, or their subtasks if rerun is False
+                    subtask_name = self.tasks[task_id].name
+                    task_to_check = self.tasks[task_id]
+                    logging.debug(f"=== Checking reset for completed task: {subtask_name} ===")
+                    logging.debug(f"Task type: {task_to_check.task_type}")
+                    logging.debug(f"Task status before reset check: {task_to_check.status}")
+                    logging.debug(f"Task rerun: {getattr(task_to_check, 'rerun', True)}") # default to True if not set
+                    logging.debug(f"Task async_execution: {task_to_check.async_execution}")
 
-                if (getattr(task_to_check, 'rerun', True) and # Corrected condition - reset only if rerun is True (or default True)
-                    task_to_check.task_type != "loop" and # Removed "decision" from exclusion
-                    not any(t.task_type == "loop" and subtask_name.startswith(t.name + "_")
-                           for t in self.tasks.values()) and
-                    not task_to_check.async_execution):  # Don't reset async parallel tasks
-                    logging.debug(f"=== Resetting non-loop, non-decision, non-parallel task {subtask_name} to 'not started' ===")
-                    self.tasks[task_id].status = "not started"
-                    logging.debug(f"Task status after reset: {self.tasks[task_id].status}")
-                else:
-                    logging.debug(f"=== Skipping reset for loop/decision/subtask/parallel or rerun=False: {subtask_name} ===")
-                    logging.debug(f"Keeping status as: {self.tasks[task_id].status}")
+                    if (getattr(task_to_check, 'rerun', True) and # Corrected condition - reset only if rerun is True (or default True)
+                        task_to_check.task_type != "loop" and # Removed "decision" from exclusion
+                        not any(t.task_type == "loop" and subtask_name.startswith(t.name + "_")
+                               for t in self.tasks.values()) and
+                        not task_to_check.async_execution):  # Don't reset async parallel tasks
+                        logging.debug(f"=== Resetting non-loop, non-decision, non-parallel task {subtask_name} to 'not started' ===")
+                        self.tasks[task_id].status = "not started"
+                        logging.debug(f"Task status after reset: {self.tasks[task_id].status}")
+                    else:
+                        logging.debug(f"=== Skipping reset for loop/decision/subtask/parallel or rerun=False: {subtask_name} ===")
+                        logging.debug(f"Keeping status as: {self.tasks[task_id].status}")
 
             # Handle loop progression
             if current_task.task_type == "loop":
@@ -1116,11 +1135,13 @@ Context tasks: {[t.name for t in current_task.context] if current_task.context e
 Description length: {len(current_task.description)}
             """)
 
-            # Add context from previous tasks to description
+            # Build context and set description for this execution pass only
             context = self._build_task_context(current_task)
-            if context:
-                # Update task description with context
-                current_task.description = current_task.description + context
+            # Store original description if not already stored
+            if not hasattr(current_task, '_original_description'):
+                current_task._original_description = current_task.description
+            # Set description with context for execution; reset after yield to prevent accumulation
+            current_task.description = current_task._original_description + (context if context else "")
 
             # Skip execution for loop tasks, only process their subtasks
             if current_task.task_type == "loop":
@@ -1227,6 +1248,9 @@ Subtask: {st.name}
                 logging.debug(f"Task next_tasks: {current_task.next_tasks}")
                 yield task_id
                 visited_tasks.add(task_id)
+                # Reset description to original after execution to prevent context accumulation
+                if hasattr(current_task, '_original_description'):
+                    current_task.description = current_task._original_description
 
                 # Only end workflow if no next_tasks AND no conditions
                 if not current_task.next_tasks and not current_task.condition and not any(
