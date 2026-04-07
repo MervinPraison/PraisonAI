@@ -488,18 +488,18 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
         reflection: Optional[Union[bool, str, 'ReflectionConfig']] = None,
         guardrails: Optional[Union[bool, str, Callable, 'GuardrailConfig']] = None,
         web: Optional[Union[bool, str, 'WebConfig']] = None,
-        context: Optional[Union[bool, 'ContextConfig', 'ContextManager']] = None,
-        autonomy: Optional[Union[bool, Dict[str, Any], 'AutonomyConfig']] = None,
+        context: Optional[Union[bool, str, Dict[str, Any], 'ContextConfig', 'ContextManager']] = None,
+        autonomy: Optional[Union[bool, str, Dict[str, Any], 'AutonomyConfig']] = None,
         verification_hooks: Optional[List[Any]] = None,  # Deprecated: use autonomy=AutonomyConfig(verification_hooks=[...])
-        output: Optional[Union[str, 'OutputConfig']] = None,
-        execution: Optional[Union[str, 'ExecutionConfig']] = None,
-        templates: Optional['TemplateConfig'] = None,
-        caching: Optional[Union[bool, 'CachingConfig']] = None,
-        hooks: Optional[Union[List[Any], 'HooksConfig']] = None,
-        skills: Optional[Union[List[str], 'SkillsConfig']] = None,
-        approval: Optional[Union[bool, str, 'ApprovalConfig', 'ApprovalProtocol']] = None,
+        output: Optional[Union[bool, str, Dict[str, Any], 'OutputConfig']] = None,
+        execution: Optional[Union[bool, str, Dict[str, Any], 'ExecutionConfig']] = None,
+        templates: Optional[Union[Dict[str, Any], 'TemplateConfig']] = None,
+        caching: Optional[Union[bool, str, Dict[str, Any], 'CachingConfig']] = None,
+        hooks: Optional[Union[List[Any], Dict[str, Any], 'HooksConfig']] = None,
+        skills: Optional[Union[List[str], str, Dict[str, Any], 'SkillsConfig']] = None,
+        approval: Optional[Union[bool, str, Dict[str, Any], 'ApprovalConfig', 'ApprovalProtocol']] = None,
         tool_timeout: Optional[int] = None,  # P8/G11: Timeout in seconds for each tool call
-        learn: Optional[Union[bool, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
+        learn: Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
     ):
         """Initialize an Agent instance.
 
@@ -544,22 +544,32 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
                 - WebConfig: Custom configuration
             context: Context management. Accepts:
                 - bool: True enables with defaults
-                - ManagerConfig: Custom configuration
+                - str: Preset name ("sliding_window", "summarize", "truncate")
+                - Dict[str, Any]: ContextConfig fields
+                - ContextConfig: Custom configuration
+                - ContextManager: Pre-configured instance
             autonomy: Autonomy settings. Accepts:
                 - bool: True enables with defaults
-                - Dict: Configuration dict
+                - str: Level preset ("suggest", "auto_edit", "full_auto")
+                - Dict[str, Any]: Configuration dict
                 - AutonomyConfig: Custom configuration
             verification_hooks: **Deprecated** — use ``autonomy=AutonomyConfig(verification_hooks=[...])``.
                 Still works for backward compatibility.
             output: Output configuration. Accepts:
+                - bool: True=default OutputConfig, False=disabled
                 - str: Preset name ("silent", "actions", "verbose", "json", "stream")
+                - Dict[str, Any]: Config overrides (e.g. {"verbose": 2, "stream": True})
                 - OutputConfig: Custom configuration
                 Controls: verbose, markdown, stream, metrics, reasoning_steps
             execution: Execution configuration. Accepts:
+                - bool: True=default ExecutionConfig, False=disabled
                 - str: Preset name ("fast", "balanced", "thorough")
+                - Dict[str, Any]: Config overrides (e.g. {"max_iter": 10, "max_rpm": 60})
                 - ExecutionConfig: Custom configuration
                 Controls: max_iter, max_rpm, max_execution_time, max_retry_limit
-            templates: Template configuration (TemplateConfig).
+            templates: Template configuration. Accepts:
+                - Dict[str, Any]: Template fields (e.g. {"system": "...", "prompt": "..."})
+                - TemplateConfig: Custom configuration
                 Controls: system_template, prompt_template, response_template
             caching: Caching configuration. Accepts:
                 - bool: True enables with defaults
@@ -571,7 +581,9 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
                 - List[str]: Skill directory paths
                 - SkillsConfig: Custom configuration
             learn: Continuous learning configuration. Accepts:
-                - bool: True enables with defaults, False disables
+                - bool: True enables with defaults (AGENTIC mode), False disables
+                - str: Mode string ("disabled", "agentic", "propose")
+                - Dict[str, Any]: Config fields (e.g. {"mode": "agentic", "backend": "sqlite"})
                 - LearnConfig: Custom configuration
                 Learning is a first-class citizen, peer to memory. It captures patterns,
                 preferences, and insights from interactions to improve future responses.
@@ -1076,8 +1088,24 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
                 _learn_config = learn
             elif isinstance(learn, dict):
                 _learn_config = LearnConfig(**learn)
+            elif isinstance(learn, str):
+                # String mode: "disabled", "agentic", "propose"
+                from ..memory.learn.protocols import LearnMode
+                if learn == "disabled":
+                    _learn_config = None
+                elif learn == "agentic":
+                    _learn_config = LearnConfig(mode=LearnMode.AGENTIC)
+                elif learn == "propose":
+                    _learn_config = LearnConfig(mode=LearnMode.PROPOSE)
+                else:
+                    # Unknown string mode, disable learning
+                    _learn_config = None
             else:
-                _learn_config = learn  # Pass through
+                logging.warning(
+                    "Unsupported learn= value %r; expected bool, dict, or LearnConfig. "
+                    "Learning disabled.", learn
+                )
+                _learn_config = None
         elif _memory_config is not None and isinstance(_memory_config, MemoryConfig):
             # Fallback to memory.learn for backward compatibility
             if _memory_config.learn:
@@ -1651,6 +1679,12 @@ Your Goal: {self.goal}
             self._approval_backend = approval.backend
             self._approve_all_tools = approval.all_tools
             self._approval_timeout = approval.timeout  # None = indefinite, 0 = backend default
+        elif isinstance(approval, dict):
+            # Dict config: convert to ApprovalConfig
+            approval_config = ApprovalConfig(**approval)
+            self._approval_backend = approval_config.backend
+            self._approve_all_tools = approval_config.all_tools
+            self._approval_timeout = approval_config.timeout
         else:
             # Plain backend object — dangerous tools only, backend default timeout
             self._approval_backend = approval
@@ -1958,6 +1992,64 @@ Your Goal: {self.goal}
         elif hasattr(self._context_param, 'process'):
             # Already a ContextManager instance
             self._context_manager = self._context_param
+        elif isinstance(self._context_param, str):
+            # String preset: "sliding_window", "summarize", "truncate"
+            from ..config.presets import CONTEXT_PRESETS
+            preset_config = CONTEXT_PRESETS.get(self._context_param)
+            if preset_config is not None:
+                # Convert preset to ContextConfig, then to ManagerConfig
+                try:
+                    from ..context.models import ContextConfig as _ContextConfig
+                    context_config = _ContextConfig(**preset_config)
+                    manager_config = ManagerConfig(
+                        auto_compact=context_config.auto_compact,
+                        compact_threshold=context_config.compact_threshold,
+                        strategy=context_config.strategy,
+                        output_reserve=context_config.output_reserve,
+                        default_tool_output_max=context_config.tool_output_max,
+                        protected_tools=list(context_config.protected_tools),
+                        keep_recent_turns=context_config.keep_recent_turns,
+                        monitor_enabled=context_config.monitor.enabled if context_config.monitor else False,
+                    )
+                    self._context_manager = ContextManager(
+                        model=self.llm if isinstance(self.llm, str) else "gpt-4o-mini",
+                        config=manager_config,
+                        agent_name=self.name or "Agent",
+                        session_cache=self._session_dedup_cache,
+                        llm_summarize_fn=None,
+                    )
+                except Exception as e:
+                    logging.debug(f"Context preset conversion failed: {e}")
+                    self._context_manager = None
+            else:
+                # Unknown string preset, disable
+                self._context_manager = None
+        elif isinstance(self._context_param, dict):
+            # Dict config: convert to ContextConfig, then to ManagerConfig
+            try:
+                from ..context.models import ContextConfig as _ContextConfig
+                context_config = _ContextConfig(**self._context_param)
+                manager_config = ManagerConfig(
+                    auto_compact=context_config.auto_compact,
+                    compact_threshold=context_config.compact_threshold,
+                    strategy=context_config.strategy,
+                    output_reserve=context_config.output_reserve,
+                    default_tool_output_max=context_config.tool_output_max,
+                    protected_tools=list(context_config.protected_tools),
+                    keep_recent_turns=context_config.keep_recent_turns,
+                    monitor_enabled=context_config.monitor.enabled if context_config.monitor else False,
+                )
+                llm_summarize_enabled = self._context_param.get('llm_summarize', False)
+                self._context_manager = ContextManager(
+                    model=self.llm if isinstance(self.llm, str) else "gpt-4o-mini",
+                    config=manager_config,
+                    agent_name=self.name or "Agent",
+                    session_cache=self._session_dedup_cache,
+                    llm_summarize_fn=self._create_llm_summarize_fn() if llm_summarize_enabled else None,
+                )
+            except Exception as e:
+                logging.debug(f"Context dict conversion failed: {e}")
+                self._context_manager = None
         else:
             # Unknown type, disable
             self._context_manager = None
@@ -2174,6 +2266,25 @@ Summary:"""
             # Extract verification_hooks from AutonomyConfig if provided
             if autonomy.verification_hooks and not verification_hooks:
                 self._verification_hooks = autonomy.verification_hooks
+        elif isinstance(autonomy, str):
+            # String preset: "suggest", "auto_edit", "full_auto"
+            from ..config.presets import AUTONOMY_PRESETS
+            preset_config = AUTONOMY_PRESETS.get(autonomy)
+            if preset_config is not None:
+                config = AutonomyConfig.from_dict(preset_config)
+            else:
+                # Unknown string preset — disable autonomy
+                self.autonomy_enabled = False
+                self.autonomy_config = {}
+                self._autonomy_trigger = None
+                self._doom_loop_tracker = None
+                self._file_snapshot = None
+                self._snapshot_stack = []
+                self._redo_stack = []
+                self._autonomy_turn_tool_count = 0
+                self._consecutive_no_tool_turns = 0
+                self._doom_recovery_active = False
+                return
         else:
             self.autonomy_enabled = False
             self.autonomy_config = {}
