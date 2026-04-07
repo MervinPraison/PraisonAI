@@ -171,7 +171,7 @@ def safe_execute():
                 }}
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
                 if node.func.id in ('exec', 'eval', 'compile', '__import__',
-                                     'open', 'input', 'breakpoint',
+                                     'open', 'input', 'breakpoint', 'getattr',
                                      'setattr', 'delattr', 'dir'):
                     return {{
                         "result": None,

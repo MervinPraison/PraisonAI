@@ -542,7 +542,9 @@ class ContextMonitor:
         # Verify the resolved path stays within the expected parent dir
         resolved = result.resolve()
         parent_resolved = self.path.parent.resolve()
-        if not str(resolved).startswith(str(parent_resolved) + '/') and resolved.parent != parent_resolved:
+        try:
+            resolved.relative_to(parent_resolved)
+        except ValueError:
             # Fallback to a safe hash-based name
             import hashlib
             hash_name = hashlib.sha256(agent_name.encode()).hexdigest()[:16]
