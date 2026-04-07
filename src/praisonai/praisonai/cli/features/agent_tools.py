@@ -34,6 +34,10 @@ def _sanitize_filepath(filepath: str, workspace: str = None) -> str:
     if any(ch in filepath for ch in ('|', ';', '`', '$', '&', '\n', '\r')):
         raise ValueError(f"Unsafe characters in filepath: {filepath!r}")
     
+    # Reject absolute paths — files must be relative to workspace
+    if os.path.isabs(filepath):
+        raise ValueError(f"Absolute paths are not allowed: {filepath!r}")
+    
     # Normalize and reject path traversal
     normalized = os.path.normpath(filepath)
     if '..' in normalized.split(os.sep):
@@ -65,7 +69,8 @@ def _sanitize_command(command: str) -> str:
     # Reject command chaining operators that indicate injection
     DANGEROUS_PATTERNS = [
         '$(', '`',      # Command substitution
-        '&&', '||',     # Command chaining  
+        '&&', '||',     # Command chaining
+        ';',            # Command separator
         '>>', '> ',     # Output redirection
         '| ',           # Pipe
     ]

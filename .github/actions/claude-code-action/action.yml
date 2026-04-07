@@ -207,21 +207,41 @@ runs:
         User Request:
         $USER_REQUEST
         
-        Please analyze the request and provide helpful assistance. You have access to repository tools and can help with:
-        - Code analysis and implementation
-        - GitHub workflows and automation
-        - Pull request reviews and feedback
-        - Issue resolution and bug fixes
-        - Documentation updates
-        - Testing and deployment
-        
+        Please analyze the request and provide helpful assistance.
+
         CRITICAL INSTRUCTION: If your task involves modifying codebase files to add a feature or fix a bug:
-        1. ALWAYS create a new git branch appropriately named (e.g. \`feature/issue-<number>\`).
-        2. MANDATORY: Before writing any code, you MUST carefully read "src/praisonai-agents/AGENTS.md" to understand this repository's extremely specific Architecture, Protocol-First design rules, and Agent-Centric Philosophy.
-        3. Make your necessary code changes honoring the rules in AGENTS.md.
-        4. Commit your changes and push the branch to the remote repository.
-        5. Use the GitHub CLI (\`gh pr create --title "..." --body "Fixes #<number>"\`) to open a Pull Request containing your work.
-        
+
+        STEP 0 — SETUP GIT IDENTITY:
+        git config user.name "MervinPraison"
+        git config user.email "454862+MervinPraison@users.noreply.github.com"
+
+        STEP 1 — READ GUIDELINES:
+        MANDATORY: Before writing any code, you MUST carefully read "src/praisonai-agents/AGENTS.md" to understand this repository's extremely specific Architecture, Protocol-First design rules, and Agent-Centric Philosophy.
+
+        STEP 2 — ARCHITECTURE VALIDATION (MANDATORY before writing code):
+        Before implementing anything, answer these questions:
+        - Does this add heavy implementations to the core SDK (praisonaiagents)? If YES → move it to the wrapper (praisonai) or make it a plugin.
+        - Does it duplicate existing functionality? Check if Agent already supports this via existing params (reflection, planning, tools, hooks, memory).
+        - Does it inherit from Agent properly? New agent types MUST inherit Agent, not wrap it with composition.
+        - Does it add new dependencies? Only optional deps allowed, must be lazy-imported.
+        - Will agent.py grow larger? If the change adds >50 lines to agent.py, find a way to extract instead.
+        - Is there a name collision with existing exports in __init__.py?
+        If ANY of these checks fail, add a comment to the issue explaining why and close it. Do NOT create a PR.
+
+        STEP 3 — IMPLEMENT:
+        - Create a new git branch appropriately named (e.g. \`feature/issue-<number>\`)
+        - Follow protocol-driven design: protocols in core SDK, heavy implementations in wrapper
+        - Keep changes small and backward-compatible
+
+        STEP 4 — TEST:
+        - Run: cd src/praisonai-agents && PYTHONPATH=. python -m pytest tests/ -x -q --timeout=30
+        - Ensure no regressions
+
+        STEP 5 — CREATE PR:
+        - Commit with descriptive message, push the branch
+        - Use the GitHub CLI (\`gh pr create --title "..." --body "Fixes #<number>"\`) to open a Pull Request
+        CRITICAL: You MUST create the PR automatically using \`gh pr create\`. Do NOT just provide a link.
+
         Respond naturally and helpfully to the user's request using the available tools.
         EOF
         
