@@ -11,10 +11,115 @@ on:
     types: [submitted]
 
 jobs:
+  # ================================================================
+  # Job 1: Lightweight triage for ALL new issues (including external users)
+  # Posts welcome comment + adds triage labels. No Claude code execution.
+  # ================================================================
+  issue-triage:
+    if: |
+      github.event_name == 'issues' &&
+      github.event.action == 'opened' &&
+      !contains(toJSON(github.event.issue.labels), 'claude')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CLAUDE_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
+
+      - name: Triage and acknowledge issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const issue = context.payload.issue;
+            const title = (issue.title || '').toLowerCase();
+            const body = (issue.body || '').toLowerCase();
+            const content = title + ' ' + body;
+            const isOwner = ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(
+              issue.author_association
+            );
+
+            // --- Label triage ---
+            const labels = [];
+
+            // Kind labels
+            if (content.includes('feature request') || content.includes('[feature')) {
+              labels.push('enhancement');
+            } else if (content.includes('bug') || content.includes('error') || content.includes('crash') || content.includes('traceback')) {
+              labels.push('bug');
+            } else if (content.includes('question') || content.includes('how do i') || content.includes('how to')) {
+              labels.push('question');
+            }
+
+            // Area labels
+            if (content.includes('security') || content.includes('cve') || content.includes('vulnerability')) {
+              labels.push('security');
+            }
+            if (content.includes('performance') || content.includes('slow') || content.includes('memory leak')) {
+              labels.push('performance');
+            }
+            if (content.includes('documentation') || content.includes('docs')) {
+              labels.push('documentation');
+            }
+            if (content.includes('typescript') || content.includes('javascript') || content.includes('npm')) {
+              labels.push('javascript');
+            }
+
+            // Apply labels
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                issue_number: issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels
+              });
+            }
+
+            // --- Acknowledgment comment (external users only) ---
+            if (!isOwner) {
+              await github.rest.issues.createComment({
+                issue_number: issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: [
+                  `👋 Thanks for opening this issue, @${issue.user.login}!`,
+                  '',
+                  'A maintainer will review this shortly. In the meantime:',
+                  '- Make sure you\'ve included steps to reproduce (for bugs)',
+                  '- Check [existing issues](https://github.com/MervinPraison/PraisonAI/issues) for duplicates',
+                  '- Review the [documentation](https://docs.praison.ai) for related guides',
+                  '',
+                  '_A maintainer can trigger deeper analysis by commenting `@claude` on this issue._'
+                ].join('\n')
+              });
+            }
+
+            // --- For owner: add 'claude' label to trigger the code-fix job ---
+            if (isOwner) {
+              await github.rest.issues.addLabels({
+                issue_number: issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels: ['claude']
+              });
+            }
+
+  # ================================================================
+  # Job 2: Full Claude code-fix (owner/collaborator only)
+  # Triggers on: labeled 'claude', @claude comments, assignments
+  # ================================================================
   claude-response:
     # Allow: human users, github-actions[bot] (auto-comments/labels)
     # Block: dependabot, cursor, renovate, other bots
+    # Skip 'opened' events — triage job handles those above
     if: |
+      github.event.action != 'opened' &&
       (github.event.action != 'labeled' || github.event.label.name == 'claude') &&
       (github.event_name != 'issue_comment' || contains(github.event.comment.body, '@claude')) &&
       (
@@ -51,7 +156,6 @@ jobs:
           github_token: ${{ steps.app-token.outputs.token }}
           trigger_phrase: "@claude"
           label_trigger: "claude"
-          allowed_non_write_users: "*"
 
           direct_prompt: |
             You are working on the PraisonAI SDK. Follow AGENTS.md strictly.
