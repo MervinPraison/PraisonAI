@@ -7,6 +7,7 @@ Provides SSE-based event streaming for agent-to-user communication.
 import asyncio
 import json
 import logging
+import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -240,8 +241,36 @@ def create_a2u_routes(app: Any, event_bus: Optional[A2UEventBus] = None) -> None
         except ImportError:
             raise ImportError("Starlette or FastAPI required for A2U routes")
     
+    def _authenticate_request(request) -> Optional[JSONResponse]:
+        """Check bearer token auth when A2U_AUTH_TOKEN is configured.
+        
+        Returns None if authenticated, or a 401/403 JSONResponse otherwise.
+        """
+        auth_token = os.environ.get("A2U_AUTH_TOKEN")
+        if not auth_token:
+            # No token configured — auth disabled (development mode)
+            return None
+        
+        auth_header = request.headers.get("authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return JSONResponse(
+                {"error": "Authentication required. Set Authorization: Bearer <token>"},
+                status_code=401,
+            )
+        
+        import hmac
+        provided = auth_header[7:]  # strip "Bearer "
+        if not hmac.compare_digest(provided, auth_token):
+            return JSONResponse(
+                {"error": "Invalid authentication token"},
+                status_code=403,
+            )
+    
     async def a2u_info(request):
         """GET /a2u/info - Get A2U server info."""
+        auth_error = _authenticate_request(request)
+        if auth_error:
+            return auth_error
         return JSONResponse({
             "name": "A2U Event Stream",
             "version": "1.0.0",
@@ -258,6 +287,9 @@ def create_a2u_routes(app: Any, event_bus: Optional[A2UEventBus] = None) -> None
     
     async def a2u_subscribe(request):
         """POST /a2u/subscribe - Subscribe to an event stream."""
+        auth_error = _authenticate_request(request)
+        if auth_error:
+            return auth_error
         try:
             body = await request.json()
         except Exception:
@@ -279,6 +311,9 @@ def create_a2u_routes(app: Any, event_bus: Optional[A2UEventBus] = None) -> None
     
     async def a2u_unsubscribe(request):
         """POST /a2u/unsubscribe - Unsubscribe from an event stream."""
+        auth_error = _authenticate_request(request)
+        if auth_error:
+            return auth_error
         try:
             body = await request.json()
         except Exception:
@@ -295,6 +330,9 @@ def create_a2u_routes(app: Any, event_bus: Optional[A2UEventBus] = None) -> None
     
     async def a2u_events_stream(request):
         """GET /a2u/events/{stream_name} - Stream events via SSE."""
+        auth_error = _authenticate_request(request)
+        if auth_error:
+            return auth_error
         stream_name = request.path_params.get("stream_name", "events")
         
         # Create subscription for this stream
@@ -319,6 +357,9 @@ def create_a2u_routes(app: Any, event_bus: Optional[A2UEventBus] = None) -> None
     
     async def a2u_events_subscription(request):
         """GET /a2u/events/sub/{subscription_id} - Stream events for subscription."""
+        auth_error = _authenticate_request(request)
+        if auth_error:
+            return auth_error
         subscription_id = request.path_params.get("subscription_id")
         
         if subscription_id not in bus._subscriptions:

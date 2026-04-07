@@ -291,7 +291,20 @@ class MultiAgentLedger:
         self._shared_tokens: int = 0  # Tokens shared across agents
     
     def get_agent_ledger(self, agent_id: str) -> ContextLedgerManager:
-        """Get or create ledger for an agent."""
+        """Get or create ledger for an agent.
+        
+        Args:
+            agent_id: Unique identifier for the agent.
+            
+        Returns:
+            ContextLedgerManager for this agent.
+            
+        Raises:
+            ValueError: If agent_id is empty or contains only whitespace.
+        """
+        if not agent_id or not agent_id.strip():
+            raise ValueError("agent_id must be a non-empty string")
+        
         if agent_id not in self._agents:
             self._agents[agent_id] = ContextLedgerManager(agent_id)
         return self._agents[agent_id]

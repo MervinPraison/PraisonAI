@@ -514,7 +514,10 @@ class ContextMonitor:
         return str(output_path)
     
     def _get_output_path(self, agent_name: str = "") -> Path:
-        """Get output path, optionally per-agent."""
+        """Get output path, optionally per-agent.
+        
+        Security: Agent names are sanitized to prevent path traversal.
+        """
         if not self.multi_agent_files or not agent_name:
             return self.path
         
@@ -522,10 +525,30 @@ class ContextMonitor:
         stem = self.path.stem
         suffix = self.path.suffix or (".json" if self.format == "json" else ".txt")
         
-        # Sanitize agent name
-        safe_name = re.sub(r'[^\w\-]', '_', agent_name.lower())
+        # Sanitize agent name:
+        # 1. Strip any path separators first (defence in depth)
+        safe_name = agent_name.replace('/', '_').replace('\\', '_')
+        # 2. Collapse to safe chars only
+        safe_name = re.sub(r'[^\w\-]', '_', safe_name.lower())
+        # 3. Enforce length limit to prevent filesystem issues
+        safe_name = safe_name[:64] if safe_name else 'unknown'
+        # 4. Strip leading/trailing underscores / dots  
+        safe_name = safe_name.strip('_.')
+        if not safe_name:
+            safe_name = 'unknown'
         
-        return self.path.parent / f"{stem}_{safe_name}{suffix}"
+        result = self.path.parent / f"{stem}_{safe_name}{suffix}"
+        
+        # Verify the resolved path stays within the expected parent dir
+        resolved = result.resolve()
+        parent_resolved = self.path.parent.resolve()
+        if not str(resolved).startswith(str(parent_resolved) + '/') and resolved.parent != parent_resolved:
+            # Fallback to a safe hash-based name
+            import hashlib
+            hash_name = hashlib.sha256(agent_name.encode()).hexdigest()[:16]
+            result = self.path.parent / f"{stem}_{hash_name}{suffix}"
+        
+        return result
     
     def _get_warnings(
         self,
