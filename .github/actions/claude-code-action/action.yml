@@ -218,15 +218,18 @@ runs:
         STEP 1 — READ GUIDELINES:
         MANDATORY: Before writing any code, you MUST carefully read "src/praisonai-agents/AGENTS.md" to understand this repository's extremely specific Architecture, Protocol-First design rules, and Agent-Centric Philosophy.
 
-        STEP 2 — ARCHITECTURE VALIDATION (MANDATORY before writing code):
+        STEP 2 — ARCHITECTURE VALIDATION & ROUTING (MANDATORY before writing code):
         Before implementing anything, answer these questions:
-        - Does this add heavy implementations to the core SDK (praisonaiagents)? If YES → move it to the wrapper (praisonai) or make it a plugin.
+        - CORE vs WRAPPER vs TOOLS ROUTING:
+          1. Core SDK (praisonaiagents/): Only core protocols, base classes, decorators. No heavy implementations.
+          2. Wrapper (praisonai/): CLI, heavy implementations, optional dependencies.
+          3. Tools (PraisonAI-Tools): Specific integrations, external tools (e.g. SurrealDB, Slack), and community extensions MUST go to the `MervinPraison/PraisonAI-Tools` repository. If the feature is a tool, clone `https://github.com/MervinPraison/PraisonAI-Tools`, implement it there, and create the PR using `gh pr create -R MervinPraison/PraisonAI-Tools`.
         - Does it duplicate existing functionality? Check if Agent already supports this via existing params (reflection, planning, tools, hooks, memory).
         - Does it inherit from Agent properly? New agent types MUST inherit Agent, not wrap it with composition.
         - Does it add new dependencies? Only optional deps allowed, must be lazy-imported.
         - Will agent.py grow larger? If the change adds >50 lines to agent.py, find a way to extract instead.
         - Is there a name collision with existing exports in __init__.py?
-        If ANY of these checks fail, add a comment to the issue explaining why and close it. Do NOT create a PR.
+        If ANY of these conceptual checks fail (excluding routing), add a comment to the issue explaining why and close it. Do NOT create a PR.
 
         STEP 3 — IMPLEMENT:
         - Create a new git branch appropriately named (e.g. \`feature/issue-<number>\`)
