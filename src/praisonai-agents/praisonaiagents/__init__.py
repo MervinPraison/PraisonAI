@@ -447,6 +447,16 @@ _LAZY_IMPORTS = {
     'SandboxConfig': ('praisonaiagents.sandbox.config', 'SandboxConfig'),
     'SecurityPolicy': ('praisonaiagents.sandbox.config', 'SecurityPolicy'),
     
+    # GNAP (Git-Native Agent Protocol) protocols and models
+    'GNAPProtocol': ('praisonaiagents.gnap.protocols', 'GNAPProtocol'),
+    'GNAPRepositoryProtocol': ('praisonaiagents.gnap.protocols', 'GNAPRepositoryProtocol'),
+    'GNAPTaskProtocol': ('praisonaiagents.gnap.protocols', 'GNAPTaskProtocol'),
+    'GNAPTaskSpec': ('praisonaiagents.gnap.protocols', 'GNAPTaskSpec'),
+    'GNAPTaskStatus': ('praisonaiagents.gnap.protocols', 'GNAPTaskStatus'),
+    'GNAPTask': ('praisonaiagents.gnap.models', 'GNAPTask'),
+    'GNAPConfig': ('praisonaiagents.gnap.models', 'GNAPConfig'),
+    'TaskDependency': ('praisonaiagents.gnap.models', 'TaskDependency'),
+    
     # Model failover
     'AuthProfile': ('praisonaiagents.llm.failover', 'AuthProfile'),
     'ProviderStatus': ('praisonaiagents.llm.failover', 'ProviderStatus'),
