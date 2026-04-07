@@ -14,6 +14,7 @@ from praisonaiagents._logging import get_logger
 import asyncio
 import threading
 
+
 # Fallback helpers to avoid circular imports
 def _get_console():
     from rich.console import Console
@@ -1013,6 +1014,7 @@ Write the complete compiled report:"""
             from mcp.server.fastmcp import FastMCP
             from mcp.server.sse import SseServerTransport
             from starlette.applications import Starlette
+            from starlette.routing import Mount
             import threading
             import time
             import asyncio
