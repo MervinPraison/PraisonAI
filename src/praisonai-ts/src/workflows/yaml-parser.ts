@@ -4,6 +4,7 @@
  */
 
 import { AgentFlow, Task, TaskConfig } from './index';
+import * as path from 'path';
 
 export interface YAMLWorkflowDefinition {
   name: string;
@@ -39,8 +40,9 @@ export interface ParsedWorkflow {
  * Parse YAML string into workflow definition
  */
 export function parseYAMLWorkflow(yamlContent: string): YAMLWorkflowDefinition {
-  // Simple YAML parser for workflow definitions
-  // For production, use js-yaml package
+  // SECURITY: If migrating to js-yaml, you MUST use:
+  //   yaml.load(content, { schema: yaml.JSON_SCHEMA })
+  // Never use yaml.load() with DEFAULT_SCHEMA — it enables arbitrary JS execution.
   const lines = yamlContent.split('\n');
   const result: YAMLWorkflowDefinition = {
     name: '',
@@ -82,7 +84,15 @@ export function parseYAMLWorkflow(yamlContent: string): YAMLWorkflowDefinition {
         type: 'agent'
       };
     } else if (currentStep) {
-      // Step properties
+      // Step properties — whitelist allowed keys to prevent injection
+      const ALLOWED_STEP_KEYS = new Set([
+        'type', 'agent', 'tool', 'input', 'output', 'condition',
+        'onError', 'maxRetries', 'timeout', 'loopCondition', 'maxIterations',
+      ]);
+      if (!ALLOWED_STEP_KEYS.has(key)) {
+        // Ignore unknown keys — do not allow arbitrary property injection
+        continue;
+      }
       if (key === 'type') currentStep.type = value as any;
       else if (key === 'agent') currentStep.agent = value;
       else if (key === 'tool') currentStep.tool = value;
@@ -265,9 +275,33 @@ function parseValue(value: string): any {
 export async function loadWorkflowFromFile(
   filePath: string,
   agents: Record<string, any> = {},
-  tools: Record<string, any> = {}
+  tools: Record<string, any> = {},
+  options: { basePath?: string; maxFileSizeBytes?: number } = {}
 ): Promise<ParsedWorkflow> {
   const fs = await import('fs/promises');
+
+  // SECURITY: Prevent path traversal
+  const normalizedPath = path.normalize(filePath);
+  if (normalizedPath.includes('..')) {
+    throw new Error('Path traversal detected: ".." is not allowed in file paths');
+  }
+
+  // If basePath is specified, ensure resolvedPath stays within it
+  if (options.basePath) {
+    const resolvedBase = path.resolve(options.basePath);
+    const resolvedFile = path.resolve(options.basePath, normalizedPath);
+    if (!resolvedFile.startsWith(resolvedBase + path.sep) && resolvedFile !== resolvedBase) {
+      throw new Error(`File path must be within base directory: ${options.basePath}`);
+    }
+  }
+
+  // SECURITY: Enforce file size limit (default 1 MB)
+  const maxSize = options.maxFileSizeBytes ?? 1_048_576;
+  const stat = await fs.stat(filePath);
+  if (stat.size > maxSize) {
+    throw new Error(`File too large: ${stat.size} bytes exceeds limit of ${maxSize} bytes`);
+  }
+
   const content = await fs.readFile(filePath, 'utf-8');
   const definition = parseYAMLWorkflow(content);
   return createWorkflowFromYAML(definition, agents, tools);

@@ -15,7 +15,68 @@ if TYPE_CHECKING:
     from .code_intelligence import CodeIntelligenceRouter
     from .action_orchestrator import ActionOrchestrator
 
+import os
+import re
+
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_filepath(filepath: str, workspace: str = None) -> str:
+    """Validate and sanitize a filepath against injection attacks.
+    
+    Raises ValueError if the path is unsafe.
+    """
+    # Reject null bytes (common injection technique)
+    if '\x00' in filepath:
+        raise ValueError("Null bytes are not allowed in file paths")
+    
+    # Reject obvious shell meta-characters in file names
+    if any(ch in filepath for ch in ('|', ';', '`', '$', '&', '\n', '\r')):
+        raise ValueError(f"Unsafe characters in filepath: {filepath!r}")
+    
+    # Normalize and reject path traversal
+    normalized = os.path.normpath(filepath)
+    if '..' in normalized.split(os.sep):
+        raise ValueError(f"Path traversal detected in: {filepath!r}")
+    
+    # If we have a workspace, ensure the resolved path stays within it
+    if workspace:
+        resolved = os.path.realpath(os.path.join(workspace, normalized))
+        ws_resolved = os.path.realpath(workspace)
+        if not resolved.startswith(ws_resolved + os.sep) and resolved != ws_resolved:
+            raise ValueError(
+                f"Path {filepath!r} resolves outside workspace {workspace!r}"
+            )
+    
+    return normalized
+
+
+def _sanitize_command(command: str) -> str:
+    """Basic command sanitization — reject common injection vectors.
+    
+    The command still goes through ACP approval flow, but this prevents
+    the most egregious prompt-injection-to-shell-injection chains.
+    
+    Raises ValueError if dangerous patterns are detected.
+    """
+    if '\x00' in command:
+        raise ValueError("Null bytes are not allowed in commands")
+    
+    # Reject command chaining operators that indicate injection
+    DANGEROUS_PATTERNS = [
+        '$(', '`',      # Command substitution
+        '&&', '||',     # Command chaining  
+        '>>', '> ',     # Output redirection
+        '| ',           # Pipe
+    ]
+    for pattern in DANGEROUS_PATTERNS:
+        if pattern in command:
+            raise ValueError(
+                f"Potentially unsafe command pattern detected: {pattern!r} "
+                f"in command: {command!r}. Use separate commands instead."
+            )
+    
+    return command
 
 
 def create_agent_centric_tools(
@@ -77,8 +138,17 @@ def create_agent_centric_tools(
             JSON string with result including plan status and verification
         """
         async def _create():
+            # Validate filepath
+            try:
+                safe_path = _sanitize_filepath(
+                    filepath, 
+                    workspace=getattr(runtime.config, 'workspace', None)
+                )
+            except ValueError as e:
+                return json.dumps({"success": False, "error": str(e)})
+            
             # Build a detailed prompt for the orchestrator
-            prompt = f"create file {filepath}"
+            prompt = f"create file {safe_path}"
             
             # Create plan
             result = await orchestrator.create_plan(prompt)
@@ -141,7 +211,15 @@ def create_agent_centric_tools(
             JSON string with result including plan status
         """
         async def _edit():
-            prompt = f"edit file {filepath}"
+            try:
+                safe_path = _sanitize_filepath(
+                    filepath,
+                    workspace=getattr(runtime.config, 'workspace', None)
+                )
+            except ValueError as e:
+                return json.dumps({"success": False, "error": str(e)})
+            
+            prompt = f"edit file {safe_path}"
             
             result = await orchestrator.create_plan(prompt)
             if not result.success:
@@ -189,7 +267,15 @@ def create_agent_centric_tools(
             JSON string with result
         """
         async def _delete():
-            prompt = f"delete file {filepath}"
+            try:
+                safe_path = _sanitize_filepath(
+                    filepath,
+                    workspace=getattr(runtime.config, 'workspace', None)
+                )
+            except ValueError as e:
+                return json.dumps({"success": False, "error": str(e)})
+            
+            prompt = f"delete file {safe_path}"
             
             result = await orchestrator.create_plan(prompt)
             if not result.success:
@@ -234,7 +320,12 @@ def create_agent_centric_tools(
             JSON string with command output
         """
         async def _execute():
-            prompt = f"run command: {command}"
+            try:
+                safe_cmd = _sanitize_command(command)
+            except ValueError as e:
+                return json.dumps({"success": False, "error": str(e)})
+            
+            prompt = f"run command: {safe_cmd}"
             
             result = await orchestrator.create_plan(prompt)
             if not result.success:
@@ -414,10 +505,16 @@ def create_agent_centric_tools(
             if not path.is_absolute():
                 path = Path(runtime.config.workspace) / filepath
             
-            if not path.exists():
+            # SECURITY: Ensure resolved path stays within workspace
+            resolved = path.resolve()
+            ws_resolved = Path(runtime.config.workspace).resolve()
+            if not str(resolved).startswith(str(ws_resolved) + os.sep) and resolved != ws_resolved:
+                return json.dumps({"error": f"Path escapes workspace: {filepath}"})
+            
+            if not resolved.exists():
                 return json.dumps({"error": f"File not found: {filepath}"})
             
-            content = path.read_text()
+            content = resolved.read_text()
             
             # Track in trace if enabled
             if runtime._trace:
@@ -451,7 +548,13 @@ def create_agent_centric_tools(
             if not path.is_absolute():
                 path = Path(runtime.config.workspace) / directory
             
-            if not path.exists():
+            # SECURITY: Ensure resolved path stays within workspace
+            resolved = path.resolve()
+            ws_resolved = Path(runtime.config.workspace).resolve()
+            if not str(resolved).startswith(str(ws_resolved) + os.sep) and resolved != ws_resolved:
+                return json.dumps({"error": f"Directory escapes workspace: {directory}"})
+            
+            if not resolved.exists():
                 return json.dumps({"error": f"Directory not found: {directory}"})
             
             files = []

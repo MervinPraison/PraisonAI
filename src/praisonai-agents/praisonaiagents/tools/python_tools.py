@@ -143,7 +143,15 @@ def safe_execute():
         blocked_attrs = {{
             '__subclasses__', '__bases__', '__mro__', '__globals__',
             '__code__', '__class__', '__dict__', '__builtins__',
-            '__import__', '__loader__', '__spec__'
+            '__import__', '__loader__', '__spec__', '__init_subclass__',
+            '__set_name__', '__reduce__', '__reduce_ex__',
+            '__traceback__', '__qualname__', '__module__',
+            '__wrapped__', '__closure__', '__annotations__',
+            # Frame/code object introspection
+            'gi_frame', 'gi_code', 'cr_frame', 'cr_code',
+            'ag_frame', 'ag_code', 'tb_frame', 'tb_next',
+            'f_globals', 'f_locals', 'f_builtins', 'f_code',
+            'co_consts', 'co_names',
         }}
         
         for node in ast.walk(tree):
@@ -162,7 +170,9 @@ def safe_execute():
                     "success": False
                 }}
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-                if node.func.id in ('exec', 'eval', 'compile', '__import__', 'open'):
+                if node.func.id in ('exec', 'eval', 'compile', '__import__',
+                                     'open', 'input', 'breakpoint',
+                                     'setattr', 'delattr', 'dir'):
                     return {{
                         "result": None,
                         "stdout": "",
