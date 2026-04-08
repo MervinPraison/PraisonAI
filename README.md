@@ -307,7 +307,7 @@ Deploy PraisonAI for always-on operation with automatic restarts and process sup
 
 <div align="center">
   <a href="https://docs.praison.ai/docs/guides/deployment/production-minimal">
-    <img src="https://img.shields.io/badge/🚀_Deploy_24/7-Production_Ready-green?style=for-the-badge&logo=rocket&logoColor=white" alt="24/7 Deployment Guide" />
+    <img src="https://img.shields.io/badge/🚀_Deploy_24%2F7-Production_Ready-green?style=for-the-badge&logo=rocket&logoColor=white" alt="24/7 Deployment Guide" />
   </a>
 </div>
 
