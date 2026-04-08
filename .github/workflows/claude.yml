@@ -154,6 +154,8 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
 
       - uses: anthropics/claude-code-action@beta
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         with:
           allowed_bots: 'praisonai-triage-agent[bot]'
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -164,9 +166,11 @@ jobs:
           direct_prompt: |
             You are working on the PraisonAI SDK. Follow AGENTS.md strictly.
 
-            STEP 0 — SETUP GIT IDENTITY (GLOBAL — required for all repos):
+            STEP 0 — SETUP GIT IDENTITY & AUTH (GLOBAL — required for all repos):
             git config --global user.name "MervinPraison"
             git config --global user.email "454862+MervinPraison@users.noreply.github.com"
+            gh auth setup-git
+
 
             STEP 1 — READ GUIDELINES:
             Read AGENTS.md to understand the architecture rules.
@@ -192,22 +196,23 @@ jobs:
             - Keep changes small and backward-compatible
 
             STEP 3-ALT — IMPLEMENT IN EXTERNAL REPO (for PraisonAI-Tools, PraisonAIDocs, PraisonAI-Plugins):
-            When work must happen in a different repository, follow these steps EXACTLY:
-            a) Clone with authentication (CRITICAL — use GH_TOKEN, never bare https):
+            When work must happen in a different repository, follow these steps EXACTLY. Do NOT attempt to use `cd`, as directory state is not preserved. Use `git -C` for all commands.
+            a) Clone the repository:
                gh repo clone MervinPraison/<REPO_NAME> /tmp/<REPO_NAME>
-            b) cd into the cloned repo:
-               cd /tmp/<REPO_NAME>
+            b) Copy GitHub authentication from the main repository so push works seamlessly:
+               git -C /tmp/<REPO_NAME> config http."https://github.com/".extraheader "$(git config --get http."https://github.com/".extraheader)"
             c) Create a feature branch (NEVER commit to main):
-               git checkout -b claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)
-            d) Make your changes
+               git -C /tmp/<REPO_NAME> checkout -b claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)
+            d) Make your changes using absolute paths (e.g. edit /tmp/<REPO_NAME>/docs.json)
             e) Commit:
-               git add -A && git commit -m "feat: <description> (fixes #$ISSUE_NUMBER)"
-            f) Push the branch (gh clone already configured auth):
-               git push origin claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)
+               git -C /tmp/<REPO_NAME> add -A
+               git -C /tmp/<REPO_NAME> commit -m "feat: <description> (fixes #$ISSUE_NUMBER)"
+            f) Push the branch:
+               git -C /tmp/<REPO_NAME> push origin claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)
             g) Create PR in the EXTERNAL repo:
-               gh pr create -R MervinPraison/<REPO_NAME> --title "feat: <title>" --body "<body>"
-            CRITICAL: The `gh repo clone` command automatically configures the auth token for push.
-            Do NOT use `git clone https://github.com/...` — it has no credentials.
+               gh pr create -R MervinPraison/<REPO_NAME> --head claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d) --title "feat: <title>" --body "Fixes MervinPraison/PraisonAI#$ISSUE_NUMBER
+
+               <body>"
 
             STEP 4 — TEST:
             - For SDK changes: cd src/praisonai-agents && PYTHONPATH=. python -m pytest tests/ -x -q --timeout=30
@@ -218,6 +223,7 @@ jobs:
             - Commit with descriptive message, push, and create PR using `gh pr create`
             - For external repos, use `gh pr create -R MervinPraison/<REPO_NAME>`
             CRITICAL: You MUST create the PR automatically using `gh pr create`. Do NOT just provide a link or say "manual push required".
+            NOTE: If you worked on an external repo, the wrapper action will report "No commits" for the main repo at the end. This is expected, do not worry about it.
           allowed_tools: |
             Bash(git:*)
             Bash(python:*)
