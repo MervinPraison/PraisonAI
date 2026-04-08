@@ -35,9 +35,14 @@ class SearchMixin:
         # Protocol-driven search: Delegate to adapter first
         try:
             if hasattr(self, 'memory_adapter') and self.memory_adapter:
+                # Extract agent_id and run_id from kwargs to avoid duplicate arguments
+                adapter_kwargs = dict(kwargs)
+                agent_id = adapter_kwargs.pop('agent_id', None)
+                run_id = adapter_kwargs.pop('run_id', None)
+                
                 adapter_results = self.memory_adapter.search_short_term(
-                    query, limit=limit, user_id=user_id, agent_id=kwargs.get('agent_id'), 
-                    run_id=kwargs.get('run_id'), **kwargs
+                    query, limit=limit, user_id=user_id, agent_id=agent_id, 
+                    run_id=run_id, **adapter_kwargs
                 )
                 # Convert adapter results to legacy format
                 if isinstance(adapter_results, list):
@@ -94,9 +99,14 @@ class SearchMixin:
         # Protocol-driven search: Delegate to adapter first
         try:
             if hasattr(self, 'memory_adapter') and self.memory_adapter:
+                # Extract agent_id and run_id from kwargs to avoid duplicate arguments
+                adapter_kwargs = dict(kwargs)
+                agent_id = adapter_kwargs.pop('agent_id', None)
+                run_id = adapter_kwargs.pop('run_id', None)
+                
                 adapter_results = self.memory_adapter.search_long_term(
-                    query, limit=limit, user_id=user_id, agent_id=kwargs.get('agent_id'), 
-                    run_id=kwargs.get('run_id'), **kwargs
+                    query, limit=limit, user_id=user_id, agent_id=agent_id, 
+                    run_id=run_id, **adapter_kwargs
                 )
                 # Convert adapter results to legacy format
                 if isinstance(adapter_results, list):

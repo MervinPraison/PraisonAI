@@ -4040,7 +4040,7 @@ Summary:"""
                         text = r.get('memory', '') or r.get('text', '') or ''
                         metadata = r.get('metadata') or {}
                     else:
-                        text = getattr(r, 'text', None) or getattr(r, 'memory', None) or ''
+                        text = getattr(r, 'text', None) or getattr(r, 'memory', None) or str(r) or ''
                         metadata = getattr(r, 'metadata', None)
                         if metadata is None:
                             metadata = {}

@@ -15,8 +15,7 @@ from .search import SearchMixin
 from .core import MemoryCoreMixin
 
 # Protocol-driven imports (AGENTS.md compliant)
-from .protocols import MemoryProtocol
-from .adapters import get_memory_adapter, get_first_available_memory_adapter
+from .adapters import get_memory_adapter
 from .adapters.sqlite_adapter import SqliteMemoryAdapter
 
 # Disable litellm telemetry before any imports

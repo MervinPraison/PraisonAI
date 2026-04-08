@@ -80,7 +80,6 @@ class TestDirectoryIngestion:
         
         # The memory field should contain actual text, NOT the directory path
         if len(results) > 0:
-            print(f"DEBUG results[0]: {results[0]}")
             if isinstance(results[0], dict):
                 memory = results[0].get('memory', results[0].get('text', '')) or ''
             else:

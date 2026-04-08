@@ -178,8 +178,6 @@ class RAG:
             **kwargs,
         )
         
-        from .models import SearchResult as RagSearchResult
-        from praisonaiagents.knowledge.models import SearchResult as KnowledgeSearchResult
         
         # Handle different result formats
         if isinstance(results, dict):
