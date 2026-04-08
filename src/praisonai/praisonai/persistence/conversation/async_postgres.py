@@ -8,6 +8,7 @@ Install: pip install asyncpg
 import asyncio
 import json
 import logging
+import threading
 import time
 from typing import List, Optional
 
@@ -64,12 +65,14 @@ class AsyncPostgresConversationStore(ConversationStore):
         self._pool = None
         self._initialized = False
         self._init_lock = None
+        self._lock_creation_lock = threading.Lock()
     
     async def init(self):
         """Initialize connection pool and create tables."""
         if self._init_lock is None:
-            import asyncio
-            self._init_lock = asyncio.Lock()
+            with self._lock_creation_lock:
+                if self._init_lock is None:  # Double-checked locking
+                    self._init_lock = asyncio.Lock()
         
         async with self._init_lock:
             if self._initialized:
@@ -77,11 +80,11 @@ class AsyncPostgresConversationStore(ConversationStore):
             
             try:
                 import asyncpg
-            except ImportError:
+            except ImportError as err:
                 raise ImportError(
                     "asyncpg is required for async PostgreSQL support. "
                     "Install with: pip install asyncpg"
-                )
+                ) from err
             
             if self.url:
                 self._pool = await asyncpg.create_pool(self.url, min_size=1, max_size=self.pool_size)

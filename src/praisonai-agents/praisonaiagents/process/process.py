@@ -45,7 +45,7 @@ class Process:
         self.workflow_timeout = workflow_timeout
         self.task_retry_counter: Dict[str, int] = {} # Initialize retry counter
         self.workflow_finished = False # ADDED: Workflow finished flag
-        self._state_lock = threading.Lock() # Thread lock for shared state protection
+        self._state_lock = None # Lazy-initialized async lock for shared state protection
         
         # Resolve verbose from output= param (takes precedence) or legacy verbose= param
         if output is not None:
@@ -597,6 +597,8 @@ Subtask: {st.name}
                     break
 
             # Reset completed task to "not started" so it can run again (atomic operation)
+            if self._state_lock is None:
+                self._state_lock = asyncio.Lock()
             async with self._state_lock:
                 if self.tasks[task_id].status == "completed":
                     # Never reset loop tasks, decision tasks, or their subtasks if rerun is False
