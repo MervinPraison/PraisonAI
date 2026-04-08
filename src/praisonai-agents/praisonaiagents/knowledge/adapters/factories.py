@@ -198,7 +198,7 @@ class ChromaKnowledgeAdapter:
             content_embedding = None
         
         if content_embedding is None:
-            return AddResult(success=False, error="Failed to generate embedding")
+            return AddResult(success=False, message="Failed to generate embedding")
         
         # Generate ID and store
         import time
@@ -224,7 +224,7 @@ class ChromaKnowledgeAdapter:
             return AddResult(success=True, id=doc_id)
             
         except Exception as e:
-            return AddResult(success=False, error=str(e))
+            return AddResult(success=False, message=str(e))
     
     def get(self, item_id: str, **kwargs: Any):
         """Get a specific item by ID from ChromaDB."""
@@ -298,7 +298,7 @@ class ChromaKnowledgeAdapter:
             self.collection.delete(ids=[item_id])
             return self.add(content, **kwargs)
         except Exception as e:
-            return AddResult(success=False, error=str(e))
+            return AddResult(success=False, message=str(e))
     
     def delete(self, item_id: str, **kwargs: Any) -> bool:
         """Delete an item by ID from ChromaDB."""
@@ -319,7 +319,7 @@ class ChromaKnowledgeAdapter:
             else:
                 # Get filtered items and delete them
                 all_items = self.get_all(user_id=user_id, agent_id=agent_id, run_id=run_id)
-                item_ids = [item.id for item in all_items.items]
+                item_ids = [item.id for item in all_items.results]
                 if item_ids:
                     self.collection.delete(ids=item_ids)
                 return True
@@ -450,7 +450,7 @@ class SQLiteKnowledgeAdapter:
             return AddResult(success=True, id=doc_id)
             
         except Exception as e:
-            return AddResult(success=False, error=str(e))
+            return AddResult(success=False, message=str(e))
     
     def get(self, item_id: str, **kwargs: Any):
         """Get a specific item by ID from SQLite."""
@@ -532,7 +532,7 @@ class SQLiteKnowledgeAdapter:
             return AddResult(success=True, id=item_id)
             
         except Exception as e:
-            return AddResult(success=False, error=str(e))
+            return AddResult(success=False, message=str(e))
     
     def delete(self, item_id: str, **kwargs: Any) -> bool:
         """Delete an item by ID from SQLite."""

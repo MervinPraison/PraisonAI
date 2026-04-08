@@ -365,7 +365,7 @@ class MongoDBMemoryAdapter:
             "_id": doc_id,
             "content": text,
             "metadata": metadata or {},
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.now(datetime.timezone.utc),
             "memory_type": "short_term"
         }
         
@@ -397,7 +397,7 @@ class MongoDBMemoryAdapter:
             "_id": doc_id,
             "content": text,
             "metadata": metadata or {},
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.now(datetime.timezone.utc),
             "memory_type": "long_term"
         }
         
