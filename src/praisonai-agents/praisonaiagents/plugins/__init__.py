@@ -115,8 +115,9 @@ def enable(plugins: list = None) -> None:
     from .manager import get_plugin_manager
     manager = get_plugin_manager()
     
-    # Auto-discover plugins from default directories
+    # Auto-discover plugins from default directories and entry points
     manager.auto_discover_plugins()
+    manager.discover_entry_points()
     
     # Enable specific plugins or all
     if plugins is not None:
