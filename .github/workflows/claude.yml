@@ -152,17 +152,21 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            if (context.issue.pull_request) {
+            const isPR = context.eventName === 'pull_request' || (context.payload.issue && context.payload.issue.pull_request);
+            if (isPR) {
+              const prNumber = context.payload.pull_request ? context.payload.pull_request.number : context.payload.issue.number;
               const pr = await github.rest.pulls.get({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                pull_number: context.issue.number
+                pull_number: prNumber
               });
               
               core.setOutput('pr_branch', pr.data.head.ref);
               
               if (pr.data.head.repo && pr.data.head.repo.full_name !== context.repo.full_name) {
                 core.setOutput('is_fork', 'true');
+                core.setOutput('clone_url', pr.data.head.repo.clone_url);
+                core.setOutput('branch', pr.data.head.ref);
                 return;
               }
             }
