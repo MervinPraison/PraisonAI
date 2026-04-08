@@ -50,6 +50,7 @@ class HandoffConfig:
         detect_cycles: Enable cycle detection to prevent infinite loops
         max_depth: Maximum handoff chain depth
         async_mode: Enable async execution
+        allow_parallel: Enable parallel execution (from Delegator)
         on_handoff: Callback when handoff starts
         on_complete: Callback when handoff completes
         on_error: Callback when handoff fails
@@ -70,6 +71,7 @@ class HandoffConfig:
     
     # Execution mode
     async_mode: bool = False
+    allow_parallel: bool = False
     
     # Callbacks
     on_handoff: Optional[Callable] = None
@@ -88,6 +90,7 @@ class HandoffConfig:
             "detect_cycles": self.detect_cycles,
             "max_depth": self.max_depth,
             "async_mode": self.async_mode,
+            "allow_parallel": self.allow_parallel,
         }
     
     @classmethod
@@ -817,6 +820,85 @@ RECOMMENDED_PROMPT_PREFIX = """You have the ability to transfer tasks to special
 When you determine that a task would be better handled by another agent with specific expertise, 
 use the transfer tool to hand off the task. The receiving agent will have the full context of 
 the conversation and will continue helping the user."""
+
+async def parallel_handoffs(
+    source: 'Agent',
+    targets: List[tuple],  # [(agent, prompt), ...]
+    max_concurrent: int = 5,
+    config: Optional[HandoffConfig] = None,
+) -> List['HandoffResult']:
+    """
+    Execute multiple handoffs in parallel with concurrency control.
+    
+    This function provides the parallel execution capabilities from SubagentDelegator
+    while using the unified Handoff system.
+    
+    Args:
+        source: Source agent performing the handoffs
+        targets: List of (agent, prompt) tuples for parallel execution
+        max_concurrent: Maximum concurrent handoffs (overrides config)
+        config: Optional HandoffConfig for additional settings
+        
+    Returns:
+        List of HandoffResult objects from each parallel handoff
+        
+    Example:
+        results = await parallel_handoffs(
+            source=main_agent,
+            targets=[
+                (research_agent, "Research topic X"),
+                (analysis_agent, "Analyze data Y"),
+                (summary_agent, "Summarize findings Z")
+            ],
+            max_concurrent=3
+        )
+    """
+    if not hasattr(source, 'handoff_to_async'):
+        raise ValueError("Source agent must support async handoffs")
+    
+    # Create semaphore for concurrency control
+    semaphore = asyncio.Semaphore(max_concurrent)
+    
+    async def _run_one(agent, prompt):
+        async with semaphore:
+            try:
+                return await source.handoff_to_async(agent, prompt, config=config)
+            except Exception as e:
+                logger.error(f"Parallel handoff failed to {agent.name if hasattr(agent, 'name') else str(agent)}: {e}")
+                # Return a failed HandoffResult object
+                return HandoffResult(
+                    success=False,
+                    response="",
+                    target_agent=agent.name if hasattr(agent, 'name') else str(agent),
+                    source_agent=source.name if hasattr(source, 'name') else str(source),
+                    duration_seconds=0.0,
+                    error=str(e),
+                    handoff_depth=0
+                )
+    
+    # Execute all handoffs concurrently
+    tasks = [_run_one(agent, prompt) for agent, prompt in targets]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Convert any exceptions to failed results
+    processed_results = []
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            agent, prompt = targets[i]
+            processed_results.append(HandoffResult(
+                success=False,
+                response="",
+                target_agent=agent.name if hasattr(agent, 'name') else str(agent),
+                source_agent=source.name if hasattr(source, 'name') else str(source),
+                duration_seconds=0.0,
+                error=str(result),
+                handoff_depth=0
+            ))
+        else:
+            processed_results.append(result)
+    
+    return processed_results
+
 
 def prompt_with_handoff_instructions(base_prompt: str, agent: 'Agent') -> str:
     """
