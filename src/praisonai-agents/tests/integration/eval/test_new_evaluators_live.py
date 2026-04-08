@@ -225,6 +225,7 @@ class TestEvalSuiteLive:
         
         # Use invalid model to trigger failure
         failing_eval = AccuracyEvaluator(
+            func=lambda x: "test_output",
             input_text="test",
             expected_output="test",
             model="invalid-model-that-does-not-exist"

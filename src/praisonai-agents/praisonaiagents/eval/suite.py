@@ -218,6 +218,9 @@ class EvalSuite:
 
         if hasattr(eval_result, 'avg_score'):
             return float(eval_result.avg_score)
+            
+        if hasattr(eval_result, 'safety_score'):
+            return float(eval_result.safety_score)
         
         # Try to extract from result dictionary
         if isinstance(eval_result, dict):
