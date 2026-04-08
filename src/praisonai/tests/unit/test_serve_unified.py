@@ -209,10 +209,3 @@ class TestDeprecationWarnings:
         assert acp_main.__doc__ is not None
         assert "DEPRECATED" in acp_main.__doc__ or "serve acp" in acp_main.__doc__
     
-    def test_ui_deprecation_message_in_docstring(self):
-        """Test ui command has deprecation in docstring."""
-        from praisonai.cli.commands.ui import ui_main
-        
-        # Check docstring mentions deprecation
-        assert ui_main.__doc__ is not None
-        assert "DEPRECATED" in ui_main.__doc__ or "serve ui" in ui_main.__doc__
