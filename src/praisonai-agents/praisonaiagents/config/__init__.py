@@ -90,6 +90,14 @@ __all__ = [
     "ConfigEntry",
     "getenv_cached",
     "clear_env_cache",
+    # Configuration schema protocols (NEW)
+    "ConfigSchemaProtocol",
+    "ConfigMappingProtocol", 
+    "ConfigValidatorProtocol",
+    "ConfigMergerProtocol",
+    "ValidationResult",
+    "CliMapping",
+    "PrecedenceChain",
 ]
 
 # Module mapping for lazy loading
@@ -163,6 +171,14 @@ _MODULE_MAP = {
     "ConfigEntry": "resolver",
     "getenv_cached": "resolver",
     "clear_env_cache": "resolver",
+    # protocols
+    "ConfigSchemaProtocol": "protocols",
+    "ConfigMappingProtocol": "protocols", 
+    "ConfigValidatorProtocol": "protocols",
+    "ConfigMergerProtocol": "protocols",
+    "ValidationResult": "protocols",
+    "CliMapping": "protocols",
+    "PrecedenceChain": "protocols",
 }
 
 
