@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import threading
 import time
 import json
 from typing import Dict, Optional, List, Any, AsyncGenerator
@@ -44,7 +45,7 @@ class Process:
         self.workflow_timeout = workflow_timeout
         self.task_retry_counter: Dict[str, int] = {} # Initialize retry counter
         self.workflow_finished = False # ADDED: Workflow finished flag
-        self._state_lock = asyncio.Lock() # Async lock for shared state protection
+        self._state_lock = threading.Lock() # Thread lock for shared state protection
         
         # Resolve verbose from output= param (takes precedence) or legacy verbose= param
         if output is not None:
