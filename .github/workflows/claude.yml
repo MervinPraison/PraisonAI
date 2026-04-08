@@ -177,12 +177,13 @@ jobs:
 
             STEP 2 — ARCHITECTURE VALIDATION & ROUTING (MANDATORY before writing code):
             Before implementing anything, answer these questions:
-            - CORE vs WRAPPER vs TOOLS vs DOCS ROUTING:
+            - CORE vs WRAPPER vs TOOLS vs DOCS vs PLUGINS ROUTING:
               1. Core SDK (praisonaiagents/): Only core protocols, base classes, decorators. No heavy implementations.
               2. Wrapper (praisonai/): CLI, heavy implementations, optional dependencies.
               3. Tools (PraisonAI-Tools): Specific integrations, external tools (e.g. SurrealDB, Slack), and community extensions.
               4. Documentation (PraisonAIDocs): Documentation pages, guides, API references.
-              For items routed to an EXTERNAL repository (Tools, Docs), follow STEP 3-ALT below.
+              5. Plugins (PraisonAI-Plugins): Full plugin packages and extensions.
+              For items routed to an EXTERNAL repository (Tools, Docs, Plugins), follow STEP 3-ALT below.
             - Does it duplicate existing functionality? Check if Agent already supports this via existing params (reflection, planning, tools, hooks, memory).
             - Does it inherit from Agent properly? New agent types MUST inherit Agent, not wrap it with composition.
             - Does it add new dependencies? Only optional deps allowed, must be lazy-imported.
