@@ -397,10 +397,13 @@ class RAGSchemaProvider:
         for field_name, field_info in field_dict.items():
             cli_flag = self._field_to_cli_flag(field_name)
             env_var = self._field_to_env_var(field_name)
-            from pydantic_core import PydanticUndefinedType
-            default = field_info.default
-            if isinstance(default, PydanticUndefinedType):
-                default = None
+            try:
+                from pydantic_core import PydanticUndefinedType
+                default = field_info.default
+                if isinstance(default, PydanticUndefinedType):
+                    default = None
+            except ImportError:
+                default = field_info.default if hasattr(field_info, 'default') else None
             
             mapping = CliMapping(
                 field_name=field_name,
@@ -418,10 +421,10 @@ class RAGSchemaProvider:
     def get_precedence_chain(self) -> PrecedenceChain:
         """Get the documented precedence chain."""
         return PrecedenceChain(
-            chain=["env_vars", "cli_flags", "config_file", "defaults"],
+            chain=["cli_flags", "env_vars", "config_file", "defaults"],
             descriptions={
-                "env_vars": "Environment variables (PRAISONAI_*) (highest priority)",
-                "cli_flags": "Command line arguments",
+                "cli_flags": "Command line arguments (highest priority)",
+                "env_vars": "Environment variables (PRAISONAI_*)",
                 "config_file": "YAML configuration file",
                 "defaults": "Built-in default values (lowest priority)"
             }
@@ -522,11 +525,11 @@ class RAGSchemaProvider:
         file_config: Dict[str, Any],
         defaults: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Merge configurations following documented precedence: ENV > CLI > YAML > defaults."""
+        """Merge configurations following documented precedence: CLI > ENV > YAML > defaults."""
         result = defaults.copy()
         
         # Apply in precedence order (lowest to highest)
-        for config in [file_config, cli_config, env_config]:
+        for config in [file_config, env_config, cli_config]:
             for key, value in config.items():
                 if value is not None:
                     result[key] = value

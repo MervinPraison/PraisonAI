@@ -5,7 +5,7 @@ Provides basic configuration schema functionality for environments
 where Pydantic is not available.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 try:
@@ -299,10 +299,10 @@ class BasicRAGSchemaProvider:
     def get_precedence_chain(self) -> PrecedenceChain:
         """Get documented precedence chain."""
         return PrecedenceChain(
-            chain=["env_vars", "cli_flags", "config_file", "defaults"],
+            chain=["cli_flags", "env_vars", "config_file", "defaults"],
             descriptions={
-                "env_vars": "Environment variables (PRAISONAI_*) (highest priority)",
-                "cli_flags": "Command line arguments",
+                "cli_flags": "Command line arguments (highest priority)",
+                "env_vars": "Environment variables (PRAISONAI_*)",
                 "config_file": "YAML configuration file",
                 "defaults": "Built-in default values (lowest priority)"
             }
@@ -372,7 +372,7 @@ class BasicRAGSchemaProvider:
     
     def merge_with_precedence(self, cli_config: Dict[str, Any], env_config: Dict[str, Any], 
                             file_config: Dict[str, Any], defaults: Dict[str, Any]) -> Dict[str, Any]:
-        """Merge configs following precedence."""
+        """Merge configs following precedence: CLI > ENV > YAML > defaults."""
         result = defaults.copy()
         for config in [file_config, env_config, cli_config]:
             for key, value in config.items():

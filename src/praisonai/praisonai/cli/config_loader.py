@@ -5,8 +5,8 @@ UPDATED: Now uses unified schema for true CLI/YAML/Python consistency.
 Implements single documented precedence chain with strong validation.
 
 Precedence (highest to lowest):
-1. Environment variables (PRAISONAI_*)
-2. CLI flags 
+1. CLI flags
+2. Environment variables (PRAISONAI_*)
 3. Config file (YAML)
 4. Defaults
 
@@ -177,8 +177,8 @@ def merge_configs(
     Merge configurations with proper precedence.
     
     Precedence (highest to lowest):
-    1. Environment variables
-    2. CLI flags
+    1. CLI flags
+    2. Environment variables
     3. Config file
     4. Defaults
     
@@ -198,13 +198,13 @@ def merge_configs(
         if value is not None:
             result[key] = value
     
-    # Apply CLI config (higher priority)
-    for key, value in cli_config.items():
+    # Apply env config (higher priority)
+    for key, value in env_config.items():
         if value is not None:
             result[key] = value
     
-    # Apply env config (highest priority)
-    for key, value in env_config.items():
+    # Apply CLI config (highest priority)
+    for key, value in cli_config.items():
         if value is not None:
             result[key] = value
     
