@@ -253,3 +253,95 @@ class ContextLengthExceededError(LLMProviderError):
         self.tokens = tokens
         self.max_tokens = max_tokens
         super().__init__(f"Input length ({tokens} tokens) exceeds model limit ({max_tokens} tokens)", provider=provider, model=model)
+
+
+@runtime_checkable
+class LLMProviderAdapter(Protocol):
+    """
+    Protocol for provider-specific LLM adaptations.
+    
+    This replaces scattered provider dispatch logic throughout the core.
+    Each provider implements these hooks to handle provider-specific quirks
+    without requiring if/elif branching in the core chat loop.
+    
+    Example:
+        ```python
+        class OllamaAdapter:
+            def supports_prompt_caching(self) -> bool:
+                return False
+            
+            def should_summarize_tools(self, iter_count: int) -> bool:
+                return iter_count >= 3  # Ollama-specific threshold
+            
+            def format_tools(self, tools) -> list:
+                return tools  # No special formatting needed
+            
+            def post_tool_iteration(self, state) -> None:
+                if state.get('empty_response') and state.get('tools'):
+                    # Add Ollama-specific tool summary
+                    state['summary'] = "Tool results processed"
+        ```
+    """
+    
+    def supports_prompt_caching(self) -> bool:
+        """Check if this provider supports prompt caching."""
+        ...
+    
+    def should_summarize_tools(self, iter_count: int) -> bool:
+        """Check if tools should be summarized at this iteration count."""
+        ...
+    
+    def format_tools(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Format tools for this provider's requirements."""
+        ...
+    
+    def post_tool_iteration(self, state: Dict[str, Any]) -> None:
+        """Handle provider-specific post-tool processing."""
+        ...
+    
+    def supports_structured_output(self) -> bool:
+        """Check if provider supports structured JSON output."""
+        ...
+    
+    def supports_streaming(self) -> bool:
+        """Check if provider supports streaming responses."""
+        ...
+
+
+@runtime_checkable  
+class UnifiedLLMProtocol(Protocol):
+    """
+    Unified protocol for LLM dispatch that consolidates the dual execution paths.
+    
+    This replaces the separate custom-LLM path (LLM.get_response) and OpenAI path 
+    (OpenAIClient) with a single async-first protocol that all providers implement.
+    
+    Sync methods become thin wrappers around async using asyncio.run().
+    """
+    
+    async def achat_completion(
+        self,
+        messages: List[Dict[str, Any]],
+        *,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        temperature: float = 0.0,
+        max_tokens: Optional[int] = None,
+        stream: bool = False,
+        **kwargs: Any,
+    ) -> Union[Dict[str, Any], AsyncIterator[Dict[str, Any]]]:
+        """
+        Primary async chat completion method.
+        All LLM interactions go through this single path.
+        """
+        ...
+    
+    def chat_completion(
+        self,
+        messages: List[Dict[str, Any]], 
+        **kwargs: Any
+    ) -> Union[Dict[str, Any], Iterator[Dict[str, Any]]]:
+        """
+        Sync wrapper around achat_completion.
+        Implemented as: asyncio.run(self.achat_completion(...))
+        """
+        ...
