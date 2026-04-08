@@ -201,6 +201,8 @@ def _build_execution_context(agents_instance, task_id):
     Build unified execution context for task execution (DRY helper).
     Eliminates duplication between sync/async execution paths.
     """
+    from .protocols import ExecutionContext
+    
     task = agents_instance.tasks[task_id]
     
     # Initialize memory before task execution
@@ -233,7 +235,7 @@ def _build_execution_context(agents_instance, task_id):
     # Build context first to include in task prompt
     context_text = ""
     if task.context:
-        context_results = []  # Use list to avoid duplicates
+        context_results = []  # Collect contexts then de-duplicate
         for context_item in task.context:
             # Use the centralized helper function
             context_str = process_task_context(context_item, agents_instance.verbose, agents_instance.user_id)
@@ -257,16 +259,19 @@ def _build_execution_context(agents_instance, task_id):
         logger.info(f"Executing task {task_id}: {task_description} using {executor_agent.display_name}")
     logger.debug(f"Starting execution of task {task_id} with prompt:\n{task_prompt}")
 
-    return {
-        'task': task,
-        'task_id': task_id,
-        'executor_agent': executor_agent,
-        'tools': tools,
-        'task_description': task_description,
-        'context_text': context_text,
-        'task_prompt': task_prompt,
-        'llm': llm
-    }
+    return ExecutionContext(
+        task_id=task_id,
+        task=task,
+        executor_agent=executor_agent,
+        tools=tools,
+        task_description=task_description,
+        context_text=context_text,
+        task_prompt=task_prompt,
+        llm=llm,
+        verbose=agents_instance.verbose,
+        stream=agents_instance.stream,
+        user_id=agents_instance.user_id
+    )
 
 
 def _process_task_result(agents_instance, context, agent_output):
@@ -274,10 +279,12 @@ def _process_task_result(agents_instance, context, agent_output):
     Process task execution result (DRY helper).
     Eliminates duplication in result processing between sync/async paths.
     """
-    task = context['task']
-    task_id = context['task_id']
-    executor_agent = context['executor_agent']
-    llm = context['llm']
+    from .protocols import TaskResult
+    
+    task = context.task
+    task_id = context.task_id
+    executor_agent = context.executor_agent
+    llm = context.llm
     
     if agent_output:
         # Store the response in memory
@@ -327,10 +334,10 @@ def _process_task_result(agents_instance, context, agent_output):
                 logger.debug(f"Output that failed Pydantic parsing: {agent_output}")
 
         task.result = task_output
-        return task_output
+        return TaskResult(task_output=task_output, success=True)
     else:
         task.status = "failed"
-        return None
+        return TaskResult(task_output=None, success=False, error="Agent did not produce any output.")
 
 def process_task_context(context_item, verbose=0, user_id=None):
     """
@@ -882,12 +889,13 @@ class AgentTeam:
 
         # Execute with agent using DRY helper
         agent_output = await _execute_with_agent_async(
-            context['executor_agent'], context['task_prompt'], context['task'], 
-            context['tools'], stream=self.stream
+            context.executor_agent, context.task_prompt, context.task, 
+            context.tools, stream=self.stream
         )
 
         # Process result using DRY helper
-        return _process_task_result(self, context, agent_output)
+        task_result = _process_task_result(self, context, agent_output)
+        return task_result.task_output
 
     async def arun_task(self, task_id):
         """Async version of run_task method"""
@@ -1101,12 +1109,13 @@ class AgentTeam:
 
         # Execute with agent using DRY helper
         agent_output = _execute_with_agent_sync(
-            context['executor_agent'], context['task_prompt'], context['task'], 
-            context['tools'], stream=self.stream
+            context.executor_agent, context.task_prompt, context.task, 
+            context.tools, stream=self.stream
         )
 
         # Process result using DRY helper
-        return _process_task_result(self, context, agent_output)
+        task_result = _process_task_result(self, context, agent_output)
+        return task_result.task_output
 
     def run_task(self, task_id):
         """Synchronous version of run_task method"""

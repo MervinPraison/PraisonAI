@@ -1,5 +1,5 @@
 """Agent protocols for extensibility."""
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable, Union
+from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 from dataclasses import dataclass
 
 
@@ -136,7 +136,7 @@ class ExecutionContext:
     user_id: Optional[str] = None
 
 
-@dataclass 
+@dataclass
 class TaskResult:
     """Standardized result from task execution."""
     task_output: Any  # TaskOutput object
