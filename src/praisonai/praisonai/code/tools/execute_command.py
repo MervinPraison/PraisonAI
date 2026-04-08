@@ -83,7 +83,7 @@ def execute_command(
         workspace: Workspace root (for security validation)
         timeout: Command timeout in seconds
         capture_output: Whether to capture stdout/stderr
-        shell: Whether to run through shell
+        shell: DEPRECATED - shell=True is no longer supported for security reasons
         env: Additional environment variables
         
     Returns:
@@ -153,31 +153,39 @@ def execute_command(
     try:
         # Execute command
         if shell:
-            # Use shlex.quote to safely escape the command for shell execution
-            # This prevents shell injection by properly quoting the command
-            if _re.search(r'[;&|`$]', command):
+            # For security reasons, shell=True is no longer supported
+            return {
+                'success': False,
+                'error': "shell=True is no longer supported for security reasons. Use shell=False (default) with direct command execution.",
+                'command': command,
+                'exit_code': -1,
+                'stdout': '',
+                'stderr': '',
+            }
+        else:
+            # Parse command for non-shell execution
+            # Use posix=True on Unix-like systems, False on Windows for proper path handling
+            try:
+                args = shlex.split(command, posix=(os.name == 'posix'))
+                if not args:
+                    return {
+                        'success': False,
+                        'error': "Empty command after parsing",
+                        'command': command,
+                        'exit_code': -1,
+                        'stdout': '',
+                        'stderr': '',
+                    }
+            except ValueError as e:
                 return {
                     'success': False,
-                    'error': f"Command blocked: shell=True does not allow shell operators (;&|`$)",
+                    'error': f"Invalid command syntax: {str(e)}",
                     'command': command,
                     'exit_code': -1,
                     'stdout': '',
                     'stderr': '',
                 }
-            # Use shell=False with shlex.split for safer execution
-            args = shlex.split(command)
-            result = subprocess.run(
-                args,
-                shell=False,  # Use shell=False for security
-                cwd=work_dir,
-                capture_output=capture_output,
-                timeout=timeout,
-                env=cmd_env,
-                text=True,
-            )
-        else:
-            # Parse command for non-shell execution
-            args = shlex.split(command)
+            
             result = subprocess.run(
                 args,
                 cwd=work_dir,

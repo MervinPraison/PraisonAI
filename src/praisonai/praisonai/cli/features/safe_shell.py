@@ -10,6 +10,7 @@ import shlex
 import logging
 import time
 import threading
+import os
 from typing import List, Optional, Set, Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -204,7 +205,28 @@ def safe_execute(
     try:
         # Execute command
         # Use shell=False with shlex.split for safer execution
-        args = shlex.split(command)
+        try:
+            args = shlex.split(command, posix=(os.name == 'posix'))
+            if not args:
+                return ExecutionResult(
+                    success=False,
+                    exit_code=-1,
+                    stdout="",
+                    stderr="",
+                    duration_ms=0.0,
+                    command=command,
+                    error="Empty command after parsing"
+                )
+        except ValueError as e:
+            return ExecutionResult(
+                success=False,
+                exit_code=-1,
+                stdout="",
+                stderr="",
+                duration_ms=0.0,
+                command=command,
+                error=f"Invalid command syntax: {str(e)}"
+            )
         process = subprocess.Popen(
             args,
             shell=False,  # Use shell=False for security
@@ -300,7 +322,28 @@ async def safe_execute_async(
     
     try:
         # Use create_subprocess_exec instead of create_subprocess_shell for security
-        args = shlex.split(command)
+        try:
+            args = shlex.split(command, posix=(os.name == 'posix'))
+            if not args:
+                return ExecutionResult(
+                    success=False,
+                    exit_code=-1,
+                    stdout="",
+                    stderr="",
+                    duration_ms=0,
+                    command=command,
+                    error="Empty command after parsing"
+                )
+        except ValueError as e:
+            return ExecutionResult(
+                success=False,
+                exit_code=-1,
+                stdout="",
+                stderr="",
+                duration_ms=0,
+                command=command,
+                error=f"Invalid command syntax: {str(e)}"
+            )
         process = await asyncio.create_subprocess_exec(
             *args,
             stdout=asyncio.subprocess.PIPE,
