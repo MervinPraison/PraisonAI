@@ -147,11 +147,35 @@ jobs:
           private-key: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
+      - name: Check for Fork PR
+        id: check_fork
+        uses: actions/github-script@v7
+        with:
+          script: |
+            if (context.issue.pull_request) {
+              const pr = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number
+              });
+              if (pr.data.head.repo && pr.data.head.repo.full_name !== context.repo.full_name) {
+                core.setOutput('is_fork', 'true');
+                core.setOutput('clone_url', pr.data.head.repo.clone_url);
+                return;
+              }
+            }
+            core.setOutput('is_fork', 'false');
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup Remote for Fork PR
+        if: steps.check_fork.outputs.is_fork == 'true'
+        run: |
+          git remote set-url origin ${{ steps.check_fork.outputs.clone_url }}
 
       - uses: anthropics/claude-code-action@beta
         env:
@@ -164,6 +188,7 @@ jobs:
           label_trigger: "claude"
 
           direct_prompt: |
+            ${{ steps.check_fork.outputs.is_fork == 'true' && 'CRITICAL: THIS IS A PULL REQUEST FROM A FORK. YOU DO NOT HAVE PUSH PERMISSIONS TO THIS REPOSITORY. ONLY READ FILES, VALIDATE CODE, AND PROVIDE YOUR COMMENTS/FEEDBACK DIRECTLY IN THIS PR VIA COMMENTS. DO NOT ATTEMPT TO PUSH OR CREATE PULL REQUESTS.\n\n' || '' }}
             You are working on the PraisonAI SDK. Follow AGENTS.md strictly.
 
             STEP 0 — SETUP GIT IDENTITY & AUTH (GLOBAL — required for all repos):

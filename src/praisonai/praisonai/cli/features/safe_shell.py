@@ -176,6 +176,19 @@ def safe_execute(
     """
     start_time = time.time()
     
+    # Block dangerous shell injection characters
+    banned_chars = [';', '&', '|', '$', '`']
+    if any(char in command for char in banned_chars):
+        return ExecutionResult(
+            success=False,
+            exit_code=-1,
+            stdout="",
+            stderr="",
+            duration_ms=0,
+            command=command,
+            error="Command contains blocked shell characters"
+        )
+    
     # Check if command is banned
     if is_command_banned(command):
         return ExecutionResult(
@@ -258,6 +271,19 @@ async def safe_execute_async(
     import asyncio
     
     start_time = time.time()
+    
+    # Block dangerous shell injection characters
+    banned_chars = [';', '&', '|', '$', '`']
+    if any(char in command for char in banned_chars):
+        return ExecutionResult(
+            success=False,
+            exit_code=-1,
+            stdout="",
+            stderr="",
+            duration_ms=0,
+            command=command,
+            error="Command contains blocked shell characters"
+        )
     
     if is_command_banned(command):
         return ExecutionResult(

@@ -233,6 +233,11 @@ class JobWorkflowExecutor:
 
     def _exec_shell(self, cmd: str, step: Dict) -> Dict:
         """Execute a shell command."""
+        # Block dangerous shell injection characters
+        banned_chars = [';', '&', '|', '$', '`']
+        if any(char in cmd for char in banned_chars):
+            return {"ok": False, "error": "Command contains blocked shell characters"}
+            
         cwd = step.get("cwd", self._cwd)
         env = self._build_env(step)
         result = subprocess.run(

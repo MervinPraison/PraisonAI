@@ -444,6 +444,17 @@ class ActionOrchestrator:
         
         elif step.action_type == ActionType.SHELL_COMMAND:
             import subprocess
+            
+            # Block shell injection characters
+            banned_chars = [';', '&', '|', '$', '`']
+            if any(char in step.target for char in banned_chars):
+                return {
+                    "command": step.target,
+                    "stdout": "",
+                    "stderr": "Command contains blocked shell characters",
+                    "returncode": -1
+                }
+                
             result = subprocess.run(
                 step.target,
                 shell=True,

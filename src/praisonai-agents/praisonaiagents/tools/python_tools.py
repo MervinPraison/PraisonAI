@@ -61,6 +61,8 @@ def _validate_code_ast(code: str):
         'ag_frame', 'ag_code', 'tb_frame', 'tb_next',
         'f_globals', 'f_locals', 'f_builtins', 'f_code',
         'co_consts', 'co_names',
+        '__getattribute__', '__getattr__', '__setattr__', '__delattr__',
+        '__dir__', '__get__', '__set__', '__delete__',
     })
 
     for node in ast.walk(tree):
@@ -84,6 +86,15 @@ def _validate_code_ast(code: str):
                 'setattr', 'delattr', 'dir',
             ):
                 return f"Call to '{func.id}' is not allowed"
+                
+        # Block dangerous constants (strings containing dunders)
+        # Fallback for Python 3.7 ast.Str
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if any(attr in node.value for attr in _blocked_attrs):
+                return f"String constant contains restricted attribute name"
+        elif type(node).__name__ == 'Str':
+            if any(attr in getattr(node, 's', '') for attr in _blocked_attrs):
+                return f"String constant contains restricted attribute name"
 
     return None
 
@@ -152,6 +163,8 @@ def safe_execute():
             'ag_frame', 'ag_code', 'tb_frame', 'tb_next',
             'f_globals', 'f_locals', 'f_builtins', 'f_code',
             'co_consts', 'co_names',
+            '__getattribute__', '__getattr__', '__setattr__', '__delattr__',
+            '__dir__', '__get__', '__set__', '__delete__',
         }}
         
         for node in ast.walk(tree):
@@ -177,6 +190,22 @@ def safe_execute():
                         "result": None,
                         "stdout": "",
                         "stderr": f"Call to '{{node.func.id}}' is not allowed",
+                        "success": False
+                    }}
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if any(attr in node.value for attr in blocked_attrs):
+                    return {{
+                        "result": None,
+                        "stdout": "",
+                        "stderr": "String constant contains restricted attribute name",
+                        "success": False
+                    }}
+            elif type(node).__name__ == 'Str':
+                if any(attr in getattr(node, 's', '') for attr in blocked_attrs):
+                    return {{
+                        "result": None,
+                        "stdout": "",
+                        "stderr": "String constant contains restricted attribute name",
                         "success": False
                     }}
         

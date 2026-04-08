@@ -69,7 +69,7 @@ def execute_command(
     workspace: Optional[str] = None,
     timeout: int = 120,
     capture_output: bool = True,
-    shell: bool = True,
+    shell: bool = False,
     env: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
@@ -153,6 +153,15 @@ def execute_command(
     try:
         # Execute command
         if shell:
+            if _re.search(r'[;&|`$]', command):
+                return {
+                    'success': False,
+                    'error': f"Command blocked: shell=True does not allow shell operators (;&|`$)",
+                    'command': command,
+                    'exit_code': -1,
+                    'stdout': '',
+                    'stderr': '',
+                }
             result = subprocess.run(
                 command,
                 shell=True,
