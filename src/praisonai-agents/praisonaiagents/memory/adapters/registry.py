@@ -57,6 +57,22 @@ def list_memory_adapters() -> List[str]:
     return _memory_registry.list_adapters()
 
 
+# Canonical aliases per AGENTS.md naming conventions
+def add_memory_adapter(name: str, adapter_class: Type[MemoryProtocol]) -> None:
+    """Canonical alias for register_memory_adapter (preferred naming per AGENTS.md)."""
+    return register_memory_adapter(name, adapter_class)
+
+
+def add_memory_factory(name: str, factory_func: Callable[..., MemoryProtocol]) -> None:
+    """Canonical alias for register_memory_factory (preferred naming per AGENTS.md)."""
+    return register_memory_factory(name, factory_func)
+
+
+def has_memory_adapter(name: str) -> bool:
+    """Canonical alias for is_available (preferred naming per AGENTS.md)."""
+    return _memory_registry.is_available(name)
+
+
 def get_first_available_memory_adapter(
     preferences: Optional[List[str]] = None, **kwargs
 ) -> Optional[Tuple[str, MemoryProtocol]]:
@@ -79,8 +95,12 @@ def get_first_available_memory_adapter(
 __all__ = [
     'MemoryAdapterRegistry',
     'register_memory_adapter',
-    'register_memory_factory',
+    'register_memory_factory', 
     'get_memory_adapter',
     'list_memory_adapters',
     'get_first_available_memory_adapter',
+    # Canonical aliases (preferred)
+    'add_memory_adapter',
+    'add_memory_factory',
+    'has_memory_adapter',
 ]

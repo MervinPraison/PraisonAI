@@ -7,7 +7,7 @@ scattered provider dispatch logic throughout the core.
 This demonstrates the protocol-driven approach for Gap 2.
 """
 
-from ..protocols import LLMProviderAdapter
+from ..protocols import LLMProviderProtocol
 from ..model_capabilities import GEMINI_INTERNAL_TOOLS
 from typing import Dict, Any, List
 
@@ -88,38 +88,52 @@ class GeminiAdapter(DefaultAdapter):
         return True
 
 
-# Provider adapter registry
-_provider_adapters = {
-    'default': DefaultAdapter(),
-    'ollama': OllamaAdapter(),
-    'anthropic': AnthropicAdapter(),
-    'claude': AnthropicAdapter(),
-    'gemini': GeminiAdapter(),
-}
+# Provider adapter registry - public for extension
+_provider_adapters: Dict[str, LLMProviderProtocol] = {}
+
+# Register core adapters at import time
+_default_adapter = DefaultAdapter()
+_provider_adapters['default'] = _default_adapter
+_provider_adapters['ollama'] = OllamaAdapter()
+_provider_adapters['anthropic'] = AnthropicAdapter()
+_provider_adapters['claude'] = AnthropicAdapter()  # Alias
+_provider_adapters['gemini'] = GeminiAdapter()
 
 
-def get_provider_adapter(model: str) -> LLMProviderAdapter:
+def add_provider_adapter(name: str, adapter: LLMProviderProtocol) -> None:
     """
-    Get provider adapter for a model string.
+    Register a provider adapter by name.
     
-    This replaces scattered model.startswith() checks in llm.py.
+    This enables new providers to be added without modifying core code.
     
     Args:
-        model: Model identifier (e.g., "claude-3.5", "ollama/llama3", "gemini-pro")
+        name: Provider name (e.g., "cohere", "huggingface")
+        adapter: Provider adapter implementing LLMProviderProtocol
+    """
+    _provider_adapters[name] = adapter
+
+
+def get_provider_adapter(name: str) -> LLMProviderProtocol:
+    """
+    Get provider adapter by name with fallback to default.
+    
+    Args:
+        name: Provider name (e.g., "anthropic", "ollama", "gemini")
         
     Returns:
-        Provider adapter instance
+        Provider adapter instance (default if name not found)
     """
-    model_lower = model.lower()
-    
-    if model_lower.startswith('claude-') or 'anthropic' in model_lower:
-        return _provider_adapters['anthropic']
-    elif model_lower.startswith('ollama/') or 'ollama' in model_lower:
-        return _provider_adapters['ollama']
-    elif model_lower.startswith('gemini-') or model_lower.startswith('gemini/'):
-        return _provider_adapters['gemini']
-    else:
-        return _provider_adapters['default']
+    return _provider_adapters.get(name, _provider_adapters['default'])
+
+
+def list_provider_adapters() -> List[str]:
+    """List all registered provider adapter names."""
+    return sorted(_provider_adapters.keys())
+
+
+def has_provider_adapter(name: str) -> bool:
+    """Check if a provider adapter is registered."""
+    return name in _provider_adapters
 
 
 __all__ = [
@@ -128,4 +142,7 @@ __all__ = [
     'AnthropicAdapter',
     'GeminiAdapter',
     'get_provider_adapter',
+    'add_provider_adapter',
+    'list_provider_adapters',
+    'has_provider_adapter',
 ]

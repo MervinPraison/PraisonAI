@@ -64,16 +64,33 @@ def get_first_available_knowledge_adapter(
     Get first available knowledge adapter.
 
     Args:
-        preferences: List of adapter names to try (defaults to ["sqlite", "in_memory"])
+        preferences: List of adapter names to try (defaults to ["mem0", "mongodb"])
         **kwargs: Configuration passed to adapter constructor
 
     Returns:
         (adapter_name, adapter_instance) tuple or None
     """
     if preferences is None:
-        preferences = ["sqlite", "in_memory"]
+        # Default to actual available adapters per knowledge/adapters/__init__.py
+        preferences = ["mem0", "mongodb"]
 
     return _knowledge_registry.get_first_available(preferences, **kwargs)
+
+
+# Canonical aliases per AGENTS.md naming conventions
+def add_knowledge_adapter(name: str, adapter_class: Type[KnowledgeStoreProtocol]) -> None:
+    """Canonical alias for register_knowledge_adapter (preferred naming per AGENTS.md)."""
+    return register_knowledge_adapter(name, adapter_class)
+
+
+def add_knowledge_factory(name: str, factory_func: Callable[..., KnowledgeStoreProtocol]) -> None:
+    """Canonical alias for register_knowledge_factory (preferred naming per AGENTS.md)."""
+    return register_knowledge_factory(name, factory_func)
+
+
+def has_knowledge_adapter(name: str) -> bool:
+    """Canonical alias for is_available (preferred naming per AGENTS.md)."""
+    return _knowledge_registry.is_available(name)
 
 
 __all__ = [
@@ -83,4 +100,8 @@ __all__ = [
     'get_knowledge_adapter',
     'list_knowledge_adapters',
     'get_first_available_knowledge_adapter',
+    # Canonical aliases (preferred)
+    'add_knowledge_adapter',
+    'add_knowledge_factory',
+    'has_knowledge_adapter',
 ]

@@ -69,4 +69,5 @@ class InMemoryAdapter:
         return results[:limit]
 
     def get_all_memories(self, **kwargs) -> List[Dict[str, Any]]:
-        return list(self._data)
+        # Return defensive copy to prevent external mutation of internal state
+        return [dict(entry) for entry in self._data]

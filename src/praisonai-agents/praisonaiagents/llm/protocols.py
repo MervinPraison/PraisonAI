@@ -256,7 +256,7 @@ class ContextLengthExceededError(LLMProviderError):
 
 
 @runtime_checkable
-class LLMProviderAdapter(Protocol):
+class LLMProviderProtocol(Protocol):
     """
     Protocol for provider-specific LLM adaptations.
     
@@ -316,7 +316,9 @@ class UnifiedLLMProtocol(Protocol):
     This replaces the separate custom-LLM path (LLM.get_response) and OpenAI path 
     (OpenAIClient) with a single async-first protocol that all providers implement.
     
-    Sync methods become thin wrappers around async using asyncio.run().
+    Sync implementations must not call asyncio.run() from library internals.
+    Provide native sync implementations or convert streaming responses
+    to real Iterator[Dict[str, Any]] objects.
     """
     
     async def achat_completion(
@@ -341,7 +343,7 @@ class UnifiedLLMProtocol(Protocol):
         **kwargs: Any
     ) -> Union[Dict[str, Any], Iterator[Dict[str, Any]]]:
         """
-        Sync wrapper around achat_completion.
-        Implemented as: asyncio.run(self.achat_completion(...))
+        Synchronous chat completion entry point.
+        For streaming, implementations must return a real Iterator[Dict[str, Any]].
         """
         ...

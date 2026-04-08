@@ -48,28 +48,33 @@ class AdapterRegistry(Generic[T]):
         Return an adapter instance for *name*, or ``None`` if unavailable.
 
         Tries the factory first (if registered), then falls back to direct
-        class instantiation.  Instantiation errors are logged at DEBUG level
-        so callers can chain fallbacks without hiding genuine failures.
+        class instantiation. Lock is only held for lookup, not construction
+        to avoid deadlocks and blocking registry access.
         """
+        # Only hold lock to look up the factory/class, not during instantiation
         with self._lock:
-            if name in self._factories:
-                try:
-                    return self._factories[name](**kwargs)
-                except Exception as e:
-                    logger.debug(
-                        "%s factory '%s' failed: %s", self._type_name, name, e
-                    )
+            factory = self._factories.get(name)
+            adapter_cls = self._adapters.get(name)
 
-            if name in self._adapters:
-                try:
-                    return self._adapters[name](**kwargs)
-                except Exception as e:
-                    logger.debug(
-                        "%s adapter '%s' instantiation failed: %s",
-                        self._type_name,
-                        name,
-                        e,
-                    )
+        # Try factory first (instantiate outside lock)
+        if factory is not None:
+            try:
+                return factory(**kwargs)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Failed to create {self._type_name} adapter '{name}' via factory. "
+                    "Check adapter config and installed extras."
+                ) from exc
+
+        # Try direct class instantiation (outside lock)
+        if adapter_cls is not None:
+            try:
+                return adapter_cls(**kwargs)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Failed to instantiate {self._type_name} adapter '{name}'. "
+                    "Check adapter constructor args and installed extras."
+                ) from exc
 
         return None
 
