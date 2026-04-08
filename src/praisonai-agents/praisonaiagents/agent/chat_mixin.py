@@ -13,6 +13,7 @@ import logging
 from praisonaiagents._logging import get_logger
 import asyncio
 import threading
+from ..errors import BudgetExceededError
 
 # Fallback helpers to avoid circular imports
 def _get_console():
@@ -666,7 +667,13 @@ Your Goal: {self.goal}"""
             self._llm_call_count += 1
             if self._max_budget and self._total_cost >= self._max_budget:
                 if self._on_budget_exceeded == "stop":
-                    raise BudgetExceededError(self.name, self._total_cost, self._max_budget)
+                    raise BudgetExceededError(
+                        f"Agent '{self.name}' exceeded budget: ${self._total_cost:.4f} >= ${self._max_budget:.4f}",
+                        budget_type="cost",
+                        limit=self._max_budget,
+                        used=self._total_cost,
+                        agent_id=self.name
+                    )
                 elif self._on_budget_exceeded == "warn":
                     logging.warning(
                         f"[budget] {self.name}: ${self._total_cost:.4f} exceeded "
@@ -692,6 +699,8 @@ Your Goal: {self.goal}"""
             
             return final_response
 
+        except BudgetExceededError:
+            raise
         except Exception as e:
             error_str = str(e).lower()
             

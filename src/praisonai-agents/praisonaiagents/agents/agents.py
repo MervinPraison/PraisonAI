@@ -108,6 +108,93 @@ def get_multimodal_message(text_prompt: str, images: list) -> list:
             })
     return content
 
+def _prepare_task_prompt(task, task_description, context_text=None):
+    """
+    Prepare task prompt with context and memory (DRY helper).
+    """
+    # Build task prompt - only use "User Input/Topic" format if there's actual content
+    if context_text and context_text.strip():
+        task_prompt = f"""
+User Input/Topic: {context_text}
+
+Task: {task_description}
+Expected Output: {task.expected_output}
+
+IMPORTANT: Your response must be about the user's input/topic above. Incorporate it into your task."""
+    else:
+        task_prompt = f"""
+You need to do the following task: {task_description}.
+Expected Output: {task.expected_output}."""
+
+    # Add memory context if available
+    if task.memory:
+        try:
+            memory_context = task.memory.build_context_for_task(task.description)
+            if memory_context:
+                # Log detailed memory context for debugging
+                logger.debug(f"Memory context for task '{task.description}': {memory_context}")
+                # Include actual memory content without verbose headers (essential for AI agent functionality)
+                task_prompt += f"\n\n{memory_context}"
+        except Exception as e:
+            logger.error(f"Error getting memory context: {e}")
+
+    task_prompt += "\nPlease provide only the final result of your work. Do not add any conversation or extra explanation."
+    return task_prompt
+
+def _execute_with_agent_sync(executor_agent, task_prompt, task, tools, stream=None):
+    """
+    Execute task with agent synchronously (DRY helper).
+    """
+    if task.images:
+        return executor_agent.chat(
+            get_multimodal_message(task_prompt, task.images),
+            tools=tools,
+            output_json=task.output_json,
+            output_pydantic=task.output_pydantic,
+            stream=stream,
+            task_name=task.name,
+            task_description=task.description,
+            task_id=task.id
+        )
+    else:
+        return executor_agent.chat(
+            task_prompt,
+            tools=tools,
+            output_json=task.output_json,
+            output_pydantic=task.output_pydantic,
+            stream=stream,
+            task_name=task.name,
+            task_description=task.description,
+            task_id=task.id
+        )
+
+async def _execute_with_agent_async(executor_agent, task_prompt, task, tools, stream=None):
+    """
+    Execute task with agent asynchronously (DRY helper).
+    """
+    if task.images:
+        return await executor_agent.achat(
+            get_multimodal_message(task_prompt, task.images),
+            tools=tools,
+            output_json=task.output_json,
+            output_pydantic=task.output_pydantic,
+            stream=stream,
+            task_name=task.name,
+            task_description=task.description,
+            task_id=task.id
+        )
+    else:
+        return await executor_agent.achat(
+            task_prompt,
+            tools=tools,
+            output_json=task.output_json,
+            output_pydantic=task.output_pydantic,
+            stream=stream,
+            task_name=task.name,
+            task_description=task.description,
+            task_id=task.id
+        )
+
 def process_task_context(context_item, verbose=0, user_id=None):
     """
     Process a single context item for task execution.
@@ -703,59 +790,17 @@ class AgentTeam:
             context_separator = '\n\n'
             context_text = context_separator.join(unique_contexts)
         
-        # Build task prompt - only use "User Input/Topic" format if there's actual content
-        if context_text and context_text.strip():
-            task_prompt = f"""
-User Input/Topic: {context_text}
-
-Task: {task_description}
-Expected Output: {task.expected_output}
-
-IMPORTANT: Your response must be about the user's input/topic above. Incorporate it into your task."""
-        else:
-            task_prompt = f"""
-You need to do the following task: {task_description}.
-Expected Output: {task.expected_output}."""
-
-        # Add memory context if available
-        if task.memory:
-            try:
-                memory_context = task.memory.build_context_for_task(task.description)
-                if memory_context:
-                    # Log detailed memory context for debugging
-                    logger.debug(f"Memory context for task '{task.description}': {memory_context}")
-                    # Include actual memory content without verbose headers (essential for AI agent functionality)
-                    task_prompt += f"\n\n{memory_context}"
-            except Exception as e:
-                logger.error(f"Error getting memory context: {e}")
-
-        task_prompt += "\nPlease provide only the final result of your work. Do not add any conversation or extra explanation."
+        # Build task prompt using DRY helper
+        task_prompt = _prepare_task_prompt(task, task_description, context_text)
 
         if self.verbose >= 2:
             logger.info(f"Executing task {task_id}: {task_description} using {executor_agent.display_name}")
         logger.debug(f"Starting execution of task {task_id} with prompt:\n{task_prompt}")
 
-        if task.images:
-            # Use shared multimodal helper (DRY - defined at module level)
-            agent_output = await executor_agent.achat(
-                get_multimodal_message(task_prompt, task.images),
-                tools=tools,
-                output_json=task.output_json,
-                output_pydantic=task.output_pydantic,
-                task_name=task.name,
-                task_description=task.description,
-                task_id=task.id
-            )
-        else:
-            agent_output = await executor_agent.achat(
-                task_prompt,
-                tools=tools,
-                output_json=task.output_json,
-                output_pydantic=task.output_pydantic,
-                task_name=task.name,
-                task_description=task.description,
-                task_id=task.id
-            )
+        # Execute with agent using DRY helper (fixes missing stream parameter)
+        agent_output = await _execute_with_agent_async(
+            executor_agent, task_prompt, task, tools, stream=self.stream
+        )
 
         if agent_output:
             # Store the response in memory
@@ -1066,60 +1111,17 @@ Expected Output: {task.expected_output}."""
             context_separator = '\n\n'
             context_text = context_separator.join(unique_contexts)
         
-        # Build task prompt - only use "User Input/Topic" format if there's actual content
-        if context_text and context_text.strip():
-            task_prompt = f"""
-User Input/Topic: {context_text}
-
-Task: {task_description}
-Expected Output: {task.expected_output}
-
-IMPORTANT: Your response must be about the user's input/topic above. Incorporate it into your task."""
-        else:
-            task_prompt = f"""
-You need to do the following task: {task_description}.
-Expected Output: {task.expected_output}."""
-
-        # Add memory context if available
-        if task.memory:
-            try:
-                memory_context = task.memory.build_context_for_task(task.description)
-                if memory_context:
-                    # Log detailed memory context for debugging
-                    logger.debug(f"Memory context for task '{task.description}': {memory_context}")
-                    # Include actual memory content without verbose headers (essential for AI agent functionality)
-                    task_prompt += f"\n\n{memory_context}"
-            except Exception as e:
-                logger.error(f"Error getting memory context: {e}")
-
-        task_prompt += "\nPlease provide only the final result of your work. Do not add any conversation or extra explanation."
+        # Build task prompt using DRY helper
+        task_prompt = _prepare_task_prompt(task, task_description, context_text)
 
         if self.verbose >= 2:
             logger.info(f"Executing task {task_id}: {task.description} using {executor_agent.display_name}")
         logger.debug(f"Starting execution of task {task_id} with prompt:\n{task_prompt}")
 
-        if task.images:
-            # Use shared multimodal helper (DRY - defined at module level)
-            agent_output = executor_agent.chat(
-                get_multimodal_message(task_prompt, task.images),
-                tools=tools,
-                output_json=task.output_json,
-                output_pydantic=task.output_pydantic,
-                task_name=task.name,
-                task_description=task.description,
-                task_id=task_id
-            )
-        else:
-            agent_output = executor_agent.chat(
-                task_prompt,
-                tools=tools,
-                output_json=task.output_json,
-                output_pydantic=task.output_pydantic,
-                stream=self.stream,
-                task_name=task.name,
-                task_description=task.description,
-                task_id=task_id
-            )
+        # Execute with agent using DRY helper
+        agent_output = _execute_with_agent_sync(
+            executor_agent, task_prompt, task, tools, stream=self.stream
+        )
 
         if agent_output:
             # Store the response in memory
