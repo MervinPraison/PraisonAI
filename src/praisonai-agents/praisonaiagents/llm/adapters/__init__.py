@@ -32,20 +32,64 @@ class DefaultAdapter:
     
     def supports_streaming(self) -> bool:
         return True  # Most providers support streaming
+    
+    def supports_streaming_with_tools(self) -> bool:
+        return True  # Most providers support streaming with tools
+    
+    def get_max_iteration_threshold(self) -> int:
+        return 10  # Conservative default
+    
+    def format_tool_result_message(self, function_name: str, tool_result: Any) -> Dict[str, Any]:
+        # Standard OpenAI-style tool result message
+        return {
+            "role": "tool",
+            "content": str(tool_result),
+            "tool_call_id": getattr(tool_result, 'tool_call_id', f"call_{function_name}")
+        }
+    
+    def handle_empty_response_with_tools(self, state: Dict[str, Any]) -> bool:
+        return False  # No special handling by default
 
 
 class OllamaAdapter(DefaultAdapter):
     """
     Ollama-specific provider adapter.
     
-    Demonstrates how to extract Ollama-specific logic from llm.py
-    scattered provider dispatch into a clean adapter.
+    Handles Ollama's specific quirks:
+    - Doesn't support streaming with tools reliably
+    - Needs tool summarization after iteration 1
+    - Uses natural language tool result format
+    - Handles empty responses after tool execution
     """
     
     def should_summarize_tools(self, iter_count: int) -> bool:
         # Replaces: OLLAMA_SUMMARY_ITERATION_THRESHOLD logic
         # Must match LLM.OLLAMA_SUMMARY_ITERATION_THRESHOLD = 1
         return iter_count >= 1
+    
+    def supports_streaming_with_tools(self) -> bool:
+        # Ollama doesn't reliably support streaming with tools
+        return False
+    
+    def get_max_iteration_threshold(self) -> int:
+        return 1  # Ollama-specific threshold
+    
+    def format_tool_result_message(self, function_name: str, tool_result: Any) -> Dict[str, Any]:
+        # Ollama uses natural language format for tool results
+        return {
+            "role": "user", 
+            "content": f"Tool '{function_name}' returned: {tool_result}"
+        }
+    
+    def handle_empty_response_with_tools(self, state: Dict[str, Any]) -> bool:
+        # Handle Ollama's tendency to return empty responses after tool execution
+        iteration_count = state.get('iteration_count', 0)
+        has_tool_results = bool(state.get('accumulated_tool_results'))
+        response_text = state.get('response_text', '').strip()
+        
+        if iteration_count >= 1 and has_tool_results and not response_text:
+            return True  # Signal that special handling is needed
+        return False
     
     def post_tool_iteration(self, state: Dict[str, Any]) -> None:
         # Replaces: Ollama-specific post-tool summary branches
@@ -67,7 +111,14 @@ class AnthropicAdapter(DefaultAdapter):
 
 
 class GeminiAdapter(DefaultAdapter):
-    """Google Gemini provider adapter."""
+    """
+    Google Gemini provider adapter.
+    
+    Handles Gemini's specific quirks:
+    - Has internal tools that need special formatting
+    - Doesn't support streaming with tools reliably
+    - Supports structured output
+    """
     
     def format_tools(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         # Replaces: gemini_internal_tools handling in llm.py
@@ -83,6 +134,10 @@ class GeminiAdapter(DefaultAdapter):
             else:
                 formatted.append(tool)
         return formatted
+    
+    def supports_streaming_with_tools(self) -> bool:
+        # Gemini has issues with streaming + tools
+        return False
     
     def supports_structured_output(self) -> bool:
         return True

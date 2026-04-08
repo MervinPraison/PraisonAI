@@ -415,6 +415,9 @@ Respond with ONLY a valid JSON tool call in this format:
         # Apply Ollama-specific defaults after model is set
         self._apply_ollama_defaults()
         
+        # Initialize provider adapter for dispatch logic
+        self._provider_adapter = self._initialize_provider_adapter()
+        
         # Token tracking
         self.last_token_metrics: Optional[TokenMetrics] = None
         self.session_token_metrics: Optional[TokenMetrics] = None
@@ -474,9 +477,63 @@ Respond with ONLY a valid JSON tool call in this format:
             self._console = _get_console()()
         return self._console
 
+    def _detect_provider(self) -> str:
+        """
+        Detect provider from model name.
+        
+        Consolidates all provider detection logic into a single method
+        that replaces scattered _is_X_provider() calls.
+        
+        Returns:
+            Provider name (e.g., "ollama", "anthropic", "gemini", "openai")
+        """
+        if not self.model:
+            return "default"
+        
+        model_lower = self.model.lower()
+        
+        # Direct model prefixes
+        if self.model.startswith("ollama/"):
+            return "ollama"
+        
+        # Check base_url for provider hints
+        if self.base_url and "ollama" in self.base_url.lower():
+            return "ollama"
+        
+        # Check model name patterns
+        if any(prefix in model_lower for prefix in ['claude', 'anthropic/']):
+            return "anthropic"
+        
+        if any(prefix in model_lower for prefix in ['gemini', 'gemini/', 'google/gemini']):
+            return "gemini"
+        
+        # Check for Ollama models without prefix
+        ollama_patterns = [
+            'llama', 'llama2', 'llama3', 'mistral', 'mixtral', 'phi', 'vicuna',
+            'wizardlm', 'orca', 'falcon', 'alpaca', 'wizard-coder', 'starcoder',
+            'codellama', 'phind-codellama', 'deepseek-coder', 'magicoder',
+            'qwen', 'qwen2'
+        ]
+        if any(pattern in model_lower for pattern in ollama_patterns):
+            return "ollama"
+        
+        # Default fallback
+        return "openai"
+    
+    def _initialize_provider_adapter(self):
+        """Initialize provider adapter based on detected provider."""
+        provider = self._detect_provider()
+        
+        # Import here to avoid circular imports
+        from .adapters import get_provider_adapter
+        adapter = get_provider_adapter(provider)
+        
+        logging.debug(f"[ADAPTER] Initialized {provider} adapter: {adapter.__class__.__name__}")
+        return adapter
+    
     def _apply_ollama_defaults(self):
         """Apply Ollama-specific defaults for tool calling reliability."""
-        if self._is_ollama_provider():
+        if self._detect_provider() == "ollama":
             # Apply defaults only if not explicitly set by user
             if not self._max_tool_repairs_explicit:
                 self.max_tool_repairs = 2
@@ -753,14 +810,17 @@ Respond with ONLY a valid JSON tool call in this format:
 
     def _supports_prompt_caching(self) -> bool:
         """
-        Check if the current model supports prompt caching via LiteLLM.
+        Check if the current model supports prompt caching.
         
-        Prompt caching allows caching parts of prompts to reduce costs and latency.
-        Supported by OpenAI, Anthropic, Bedrock, and Deepseek.
+        Uses provider adapter to eliminate scattered provider logic.
         
         Returns:
             bool: True if the model supports prompt caching, False otherwise
         """
+        if hasattr(self, '_provider_adapter') and self._provider_adapter:
+            return self._provider_adapter.supports_prompt_caching()
+        
+        # Fallback to model capabilities if adapter not initialized
         from .model_capabilities import supports_prompt_caching
         return supports_prompt_caching(self.model)
 
@@ -1270,12 +1330,19 @@ Now provide your final answer using this result. Summarize the information natur
                 - final_response_text: Text to use as final response (None if continuing)
                 - iteration_count: Updated iteration count
         """
-        if not (self._is_ollama_provider() and iteration_count >= self.OLLAMA_SUMMARY_ITERATION_THRESHOLD):
+        # Use provider adapter to determine if tool summarization should occur
+        if hasattr(self, '_provider_adapter') and self._provider_adapter:
+            should_summarize = self._provider_adapter.should_summarize_tools(iteration_count)
+        else:
+            # Fallback to original Ollama logic if adapter not initialized
+            should_summarize = self._detect_provider() == "ollama" and iteration_count >= self.OLLAMA_SUMMARY_ITERATION_THRESHOLD
+            
+        if not should_summarize:
             return False, None, iteration_count
             
-        # For Ollama: if we have meaningful tool results, generate summary immediately
-        # Don't wait for more iterations as Ollama tends to repeat tool calls
-        if accumulated_tool_results and iteration_count >= self.OLLAMA_SUMMARY_ITERATION_THRESHOLD:
+        # If we should summarize: if we have meaningful tool results, generate summary immediately
+        # Don't wait for more iterations as some providers tend to repeat tool calls
+        if accumulated_tool_results and should_summarize:
             # Generate summary from tool results
             tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
             if tool_summary:
@@ -1301,9 +1368,7 @@ Now provide your final answer using this result. Summarize the information natur
         """
         Check if the current provider supports streaming with tools.
         
-        Most providers that support tool calling also support streaming with tools,
-        but some providers (like Ollama and certain local models) require non-streaming
-        calls when tools are involved.
+        Uses provider adapter to eliminate scattered provider logic.
         
         Returns:
             bool: True if provider supports streaming with tools, False otherwise
@@ -1311,32 +1376,11 @@ Now provide your final answer using this result. Summarize the information natur
         if not self.model:
             return False
         
-        # Ollama doesn't reliably support streaming with tools
-        if self._is_ollama_provider():
-            return False
+        # Use provider adapter for streaming with tools support
+        if hasattr(self, '_provider_adapter') and self._provider_adapter:
+            return self._provider_adapter.supports_streaming_with_tools()
         
-        # Import the capability check function
-        from .model_capabilities import supports_streaming_with_tools
-        
-        # Check if this model supports streaming with tools
-        if supports_streaming_with_tools(self.model):
-            return True
-        
-        # Anthropic Claude models support streaming with tools
-        if self.model.startswith("claude-"):
-            return True
-        
-        # Google Gemini models support streaming with tools
-        if any(self.model.startswith(prefix) for prefix in ["gemini-", "gemini/"]):
-            return True
-        
-        # Models with XML tool format support streaming with tools
-        if self._supports_xml_tool_format():
-            return True
-        
-        # For other providers, default to False to be safe
-        # This ensures we make a single non-streaming call rather than risk
-        # missing tool calls or making duplicate calls
+        # Fallback to conservative default if adapter not initialized
         return False
     
     def _build_messages(self, prompt, system_prompt=None, chat_history=None, output_json=None, output_pydantic=None, tools=None):

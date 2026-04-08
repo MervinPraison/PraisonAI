@@ -11,9 +11,9 @@ from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Protocol,
 
 
 @runtime_checkable
-class LLMProviderProtocol(Protocol):
+class LLMClientProtocol(Protocol):
     """
-    Protocol defining the interface that LLM providers must implement.
+    Protocol defining the interface that LLM clients must implement.
     
     This enables switching between different LLM backends (litellm, openai,
     anthropic, local models, etc.) without modifying core agent code.
@@ -305,6 +305,22 @@ class LLMProviderProtocol(Protocol):
     
     def supports_streaming(self) -> bool:
         """Check if provider supports streaming responses."""
+        ...
+    
+    def supports_streaming_with_tools(self) -> bool:
+        """Check if provider supports streaming with tools enabled."""
+        ...
+    
+    def get_max_iteration_threshold(self) -> int:
+        """Get provider-specific maximum iteration count."""
+        ...
+    
+    def format_tool_result_message(self, function_name: str, tool_result: Any) -> Dict[str, Any]:
+        """Format tool result message for this provider's requirements."""
+        ...
+    
+    def handle_empty_response_with_tools(self, state: Dict[str, Any]) -> bool:
+        """Handle provider-specific empty response with tools logic."""
         ...
 
 
