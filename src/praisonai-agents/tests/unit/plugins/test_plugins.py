@@ -363,3 +363,29 @@ class TestGlobalPluginManager:
         manager2 = get_plugin_manager()
         
         assert manager1 is manager2
+
+
+class TestEntryPointsDiscovery:
+    """Tests for entry_points plugin discovery."""
+    
+    def test_discover_entry_points_no_plugins(self):
+        """Test entry_points discovery with no plugins installed."""
+        manager = PluginManager()
+        
+        # Should return 0 when no entry_points exist for our group
+        loaded = manager.discover_entry_points()
+        
+        assert loaded == 0
+    
+    def test_discover_entry_points_import_error(self, monkeypatch):
+        """Test graceful handling when importlib.metadata is not available."""
+        # Simulate ImportError by patching the import
+        def mock_import(*args, **kwargs):
+            raise ImportError("No module named importlib.metadata")
+        
+        monkeypatch.setattr("builtins.__import__", mock_import)
+        
+        manager = PluginManager()
+        loaded = manager.discover_entry_points()
+        
+        assert loaded == 0

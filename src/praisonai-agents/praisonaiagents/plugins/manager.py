@@ -423,6 +423,40 @@ class PluginManager:
     def get_single_file_plugin(self, name: str) -> Optional[Dict[str, Any]]:
         """Get a single-file plugin by name."""
         return self._single_file_plugins.get(name)
+    
+    def discover_entry_points(self) -> int:
+        """
+        Discover plugins registered via pip entry_points.
+        
+        Looks for entry_points in the "praisonaiagents.plugins" group.
+        Compatible with Python 3.8+ using importlib.metadata backport.
+        
+        Returns:
+            Number of plugins loaded
+        """
+        try:
+            if sys.version_info >= (3, 10):
+                from importlib.metadata import entry_points
+                eps = entry_points(group="praisonaiagents.plugins")
+            else:
+                from importlib.metadata import entry_points
+                eps = entry_points().get("praisonaiagents.plugins", [])
+        except ImportError:
+            logger.warning("importlib.metadata not available - cannot discover entry_points plugins")
+            return 0
+
+        loaded = 0
+        for ep in eps:
+            try:
+                plugin_class = ep.load()
+                plugin = plugin_class()
+                if self.register(plugin):
+                    loaded += 1
+                    logger.info(f"Loaded entry_point plugin: {ep.name}")
+            except Exception as e:
+                logger.error(f"Failed to load entry_point plugin {ep.name}: {e}")
+        
+        return loaded
 
 # Global plugin manager instance
 _default_manager: Optional[PluginManager] = None
