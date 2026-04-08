@@ -164,19 +164,21 @@ jobs:
           direct_prompt: |
             You are working on the PraisonAI SDK. Follow AGENTS.md strictly.
 
-            STEP 0 — SETUP GIT IDENTITY:
-            git config user.name "MervinPraison"
-            git config user.email "454862+MervinPraison@users.noreply.github.com"
+            STEP 0 — SETUP GIT IDENTITY (GLOBAL — required for all repos):
+            git config --global user.name "MervinPraison"
+            git config --global user.email "454862+MervinPraison@users.noreply.github.com"
 
             STEP 1 — READ GUIDELINES:
             Read AGENTS.md to understand the architecture rules.
 
             STEP 2 — ARCHITECTURE VALIDATION & ROUTING (MANDATORY before writing code):
             Before implementing anything, answer these questions:
-            - CORE vs WRAPPER vs TOOLS ROUTING:
+            - CORE vs WRAPPER vs TOOLS vs DOCS ROUTING:
               1. Core SDK (praisonaiagents/): Only core protocols, base classes, decorators. No heavy implementations.
               2. Wrapper (praisonai/): CLI, heavy implementations, optional dependencies.
-              3. Tools (PraisonAI-Tools): Specific integrations, external tools (e.g. SurrealDB, Slack), and community extensions MUST go to the `MervinPraison/PraisonAI-Tools` repository. If the feature is a tool, clone `https://github.com/MervinPraison/PraisonAI-Tools`, implement it there, and create the PR using `gh pr create -R MervinPraison/PraisonAI-Tools`.
+              3. Tools (PraisonAI-Tools): Specific integrations, external tools (e.g. SurrealDB, Slack), and community extensions.
+              4. Documentation (PraisonAIDocs): Documentation pages, guides, API references.
+              For items routed to an EXTERNAL repository (Tools, Docs), follow STEP 3-ALT below.
             - Does it duplicate existing functionality? Check if Agent already supports this via existing params (reflection, planning, tools, hooks, memory).
             - Does it inherit from Agent properly? New agent types MUST inherit Agent, not wrap it with composition.
             - Does it add new dependencies? Only optional deps allowed, must be lazy-imported.
@@ -184,18 +186,38 @@ jobs:
             - Is there a name collision with existing exports in __init__.py?
             If ANY of these conceptual checks fail (excluding routing), add a comment to the issue explaining why and close it. Do NOT create a PR.
 
-            STEP 3 — IMPLEMENT:
+            STEP 3 — IMPLEMENT (for changes in THIS repo — PraisonAI):
             - Create a fix branch and implement a minimal, focused fix
             - Follow protocol-driven design: protocols in core SDK, heavy implementations in wrapper
             - Keep changes small and backward-compatible
 
+            STEP 3-ALT — IMPLEMENT IN EXTERNAL REPO (for PraisonAI-Tools, PraisonAIDocs, PraisonAI-Plugins):
+            When work must happen in a different repository, follow these steps EXACTLY:
+            a) Clone with authentication (CRITICAL — use GH_TOKEN, never bare https):
+               gh repo clone MervinPraison/<REPO_NAME> /tmp/<REPO_NAME>
+            b) cd into the cloned repo:
+               cd /tmp/<REPO_NAME>
+            c) Create a feature branch (NEVER commit to main):
+               git checkout -b claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)
+            d) Make your changes
+            e) Commit:
+               git add -A && git commit -m "feat: <description> (fixes #$ISSUE_NUMBER)"
+            f) Push the branch (gh clone already configured auth):
+               git push origin claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)
+            g) Create PR in the EXTERNAL repo:
+               gh pr create -R MervinPraison/<REPO_NAME> --title "feat: <title>" --body "<body>"
+            CRITICAL: The `gh repo clone` command automatically configures the auth token for push.
+            Do NOT use `git clone https://github.com/...` — it has no credentials.
+
             STEP 4 — TEST:
-            - Run: cd src/praisonai-agents && PYTHONPATH=. python -m pytest tests/ -x -q --timeout=30
+            - For SDK changes: cd src/praisonai-agents && PYTHONPATH=. python -m pytest tests/ -x -q --timeout=30
+            - For docs changes: verify files exist and are valid markdown/MDX
             - Ensure no regressions
 
             STEP 5 — CREATE PR:
             - Commit with descriptive message, push, and create PR using `gh pr create`
-            CRITICAL: You MUST create the PR automatically using `gh pr create`. Do NOT just provide a link.
+            - For external repos, use `gh pr create -R MervinPraison/<REPO_NAME>`
+            CRITICAL: You MUST create the PR automatically using `gh pr create`. Do NOT just provide a link or say "manual push required".
           allowed_tools: |
             Bash(git:*)
             Bash(python:*)
