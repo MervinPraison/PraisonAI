@@ -1,5 +1,5 @@
 """Agent protocols for extensibility."""
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Awaitable, Dict, List, Optional, Protocol, runtime_checkable
 from dataclasses import dataclass
 
 
@@ -170,7 +170,7 @@ class TaskExecutorProtocol(Protocol):
     def execute_task_impl(
         self, 
         context: ExecutionContext
-    ) -> TaskResult:
+    ) -> Awaitable[TaskResult]:
         """Execute a task with unified business logic.
         
         This method contains the single source of truth for task execution

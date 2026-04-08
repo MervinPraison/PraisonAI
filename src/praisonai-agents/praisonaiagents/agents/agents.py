@@ -216,6 +216,13 @@ def _build_execution_context(agents_instance, task_id):
         executor_agent = agents_instance._create_agent_from_config(task.agent_config)
         task.agent = executor_agent
     
+    # Validate executor agent exists
+    if executor_agent is None:
+        raise ValueError(
+            f"Task {task_id} has no assigned agent. "
+            "Set task.agent or provide task.agent_config before execution."
+        )
+    
     # Set current agent for token tracking
     llm = getattr(executor_agent, 'llm', None) or getattr(executor_agent, 'llm_instance', None)
     if llm and hasattr(llm, 'set_current_agent'):
@@ -228,9 +235,9 @@ def _build_execution_context(agents_instance, task_id):
 
     # Substitute variables in task description if provided
     task_description = task.description
-    if getattr(task, 'variables', None):
-        for key, value in task.variables.items():
-            task_description = task_description.replace(f"{{{{{key}}}}}", str(value))
+    variables = getattr(task, 'variables', None) or getattr(agents_instance, 'variables', None) or {}
+    for key, value in variables.items():
+        task_description = task_description.replace(f"{{{{{key}}}}}", str(value))
 
     # Build context first to include in task prompt
     context_text = ""
