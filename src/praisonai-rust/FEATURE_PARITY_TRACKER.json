@@ -1712,6 +1712,7 @@
       "planning": [],
       "plugins": [
         "PluginRegistry",
+        "ToolDefinition",
         "disable_plugins",
         "enable_plugins",
         "get_plugin_manager",
@@ -1736,7 +1737,6 @@
       "tools": [
         "FunctionTool",
         "Tool",
-        "ToolDefinition",
         "ToolRegistry",
         "ToolResult"
       ],
