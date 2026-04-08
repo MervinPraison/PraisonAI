@@ -262,7 +262,7 @@ class MemoryMixin:
             from datetime import datetime, timezone
             # Per-hour session ID: YYYYMMDDHH (UTC) + agent name hash for uniqueness
             hour_str = datetime.now(timezone.utc).strftime("%Y%m%d%H")
-            agent_hash = hashlib.md5((self.name or "agent").encode()).hexdigest()[:6]
+            agent_hash = hashlib.sha256((self.name or "agent").encode()).hexdigest()[:6]
             self._session_id = f"{hour_str}-{agent_hash}"
         
         # Call db adapter's on_agent_start to get previous messages

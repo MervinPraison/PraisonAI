@@ -129,7 +129,7 @@ def deduplicate_topics(topics: list, key: str = "title", similarity_threshold: f
         normalized = " ".join(w for w in normalized.split() if len(w) > 3)
         
         # Check exact hash match
-        content_hash = hashlib.md5(normalized.encode()).hexdigest()
+        content_hash = hashlib.sha256(normalized.encode()).hexdigest()
         if content_hash in seen_hashes:
             continue
         
@@ -590,7 +590,7 @@ class ContextManager:
             if isinstance(content, str) and len(content) > 100:
                 # Hash the content (first 2000 chars to avoid hashing huge content)
                 content_key = content[:2000]
-                content_hash = hashlib.md5(content_key.encode()).hexdigest()[:16]
+                content_hash = hashlib.sha256(content_key.encode()).hexdigest()[:16]
                 
                 # Check local seen hashes first
                 if content_hash in seen_hashes:
@@ -710,7 +710,7 @@ class ContextManager:
             Tuple of (token_count, metrics)
         """
         # Check cache
-        cache_key = hashlib.md5(text.encode()).hexdigest()
+        cache_key = hashlib.sha256(text.encode()).hexdigest()
         if cache_key in self._estimation_cache:
             return self._estimation_cache[cache_key], None
         

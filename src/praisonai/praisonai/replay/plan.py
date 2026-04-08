@@ -196,5 +196,5 @@ class JudgePlan:
 def generate_fix_id(agent_name: str, fix_type: str, target_path: str) -> str:
     """Generate a unique fix ID."""
     content = f"{agent_name}:{fix_type}:{target_path}"
-    hash_suffix = hashlib.md5(content.encode()).hexdigest()[:8]
+    hash_suffix = hashlib.sha256(content.encode()).hexdigest()[:8]
     return f"fix_{hash_suffix}"

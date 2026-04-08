@@ -148,7 +148,7 @@ def _generate_cyclonedx(
     return {
         "bomFormat": "CycloneDX",
         "specVersion": "1.4",
-        "serialNumber": f"urn:uuid:{hashlib.md5(f'{name}{version}{_get_timestamp()}'.encode()).hexdigest()}",
+        "serialNumber": f"urn:uuid:{hashlib.sha256(f'{name}{version}{_get_timestamp()}'.encode()).hexdigest()}",
         "version": 1,
         "metadata": {
             "timestamp": _get_timestamp(),

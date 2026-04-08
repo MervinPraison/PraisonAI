@@ -269,7 +269,7 @@ class CLIDocsSource:
         """Generate unique ID for a command."""
         rel_path = path.relative_to(self.root).as_posix()
         # Hash the command for uniqueness
-        cmd_hash = hashlib.md5(cmd.encode()).hexdigest()[:8]
+        cmd_hash = hashlib.sha256(cmd.encode()).hexdigest()[:8]
         return f"{rel_path.replace('/', '__').replace('.mdx', '').replace('.md', '')}__{line}__{cmd_hash}"
     
     def get_groups(self) -> List[str]:

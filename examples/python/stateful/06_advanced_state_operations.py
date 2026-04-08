@@ -308,7 +308,7 @@ def manage_state_versioning() -> Dict[str, Any]:
     versions[version_id] = {
         "config": current_config.copy(),
         "timestamp": datetime.now().isoformat(),
-        "hash": hashlib.md5(json.dumps(current_config, sort_keys=True).encode()).hexdigest()
+        "hash": hashlib.sha256(json.dumps(current_config, sort_keys=True).encode()).hexdigest()
     }
     
     # Make changes

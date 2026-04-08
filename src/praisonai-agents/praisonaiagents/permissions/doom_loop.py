@@ -108,7 +108,7 @@ class DoomLoopDetector:
         
         try:
             arg_str = json.dumps(arguments, sort_keys=True, default=str)
-            return hashlib.md5(arg_str.encode()).hexdigest()[:16]
+            return hashlib.sha256(arg_str.encode()).hexdigest()[:16]
         except (TypeError, ValueError):
             return "unhashable"
     

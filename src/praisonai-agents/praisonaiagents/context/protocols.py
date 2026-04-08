@@ -153,7 +153,7 @@ class ContextMessage:
     def content_hash(self) -> str:
         """Get hash of content for caching."""
         content_str = str(self.content) if not isinstance(self.content, str) else self.content
-        return hashlib.md5(content_str.encode()).hexdigest()[:16]
+        return hashlib.sha256(content_str.encode()).hexdigest()[:16]
 
 
 @runtime_checkable

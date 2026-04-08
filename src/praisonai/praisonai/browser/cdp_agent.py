@@ -976,7 +976,7 @@ Respond in this exact JSON format:
                     latest_screenshot = screenshot
                     
                     # Hash screenshot to detect changes
-                    current_hash = hashlib.md5(screenshot[:1000].encode()).hexdigest()
+                    current_hash = hashlib.sha256(screenshot[:1000].encode()).hexdigest()
                     
                     if current_hash == last_hash:
                         # Page hasn't changed

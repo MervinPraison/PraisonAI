@@ -458,7 +458,7 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         
         # Generate unique Message-ID
         domain = self._email_address.split("@")[-1]
-        message_id = f"<{hashlib.md5(f'{time.time()}{channel_id}'.encode()).hexdigest()}@{domain}>"
+        message_id = f"<{hashlib.sha256(f'{time.time()}{channel_id}'.encode()).hexdigest()}@{domain}>"
         msg["Message-ID"] = message_id
         
         # Threading headers
