@@ -151,13 +151,32 @@ class ChromaKnowledgeAdapter:
         if query_embedding is None:
             return SearchResult(results=[])
         
+        # Build where filters for scoped search
+        where_filter = {}
+        if user_id is not None:
+            where_filter["user_id"] = user_id
+        if agent_id is not None:
+            where_filter["agent_id"] = agent_id
+        if run_id is not None:
+            where_filter["run_id"] = run_id
+        
+        # Merge with additional filters
+        if filters:
+            where_filter.update(filters)
+        
         # Search ChromaDB
         try:
-            response = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=limit,
-                include=["documents", "metadatas", "distances"]
-            )
+            query_kwargs = {
+                "query_embeddings": [query_embedding],
+                "n_results": limit,
+                "include": ["documents", "metadatas", "distances"]
+            }
+            
+            # Add where filter if any conditions specified
+            if where_filter:
+                query_kwargs["where"] = where_filter
+            
+            response = self.collection.query(**query_kwargs)
             
             items = []
             if response["ids"]:
@@ -314,7 +333,14 @@ class ChromaKnowledgeAdapter:
         try:
             if not any([user_id, agent_id, run_id]):
                 # Delete entire collection
-                self.client.delete_collection(self.collection.name)
+                collection_name = self.collection.name
+                self.client.delete_collection(collection_name)
+                
+                # Recreate the collection to keep adapter usable
+                self.collection = self.client.create_collection(
+                    name=collection_name,
+                    metadata={"hnsw:space": "cosine"}
+                )
                 return True
             else:
                 # Get filtered items and delete them

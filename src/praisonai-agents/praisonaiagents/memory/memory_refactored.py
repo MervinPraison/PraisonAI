@@ -200,7 +200,7 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
         evaluator_quality: float = None
     ):
         """Store in short-term memory using configured adapter."""
-        logger.info(f"Storing in short-term memory via {self.provider}: {text[:100]}...")
+        logger.info(f"Storing in short-term memory via {self.provider}, length: {len(text)} chars")
         
         # Process quality metrics
         metadata = self._process_quality_metrics(
@@ -263,7 +263,7 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
         evaluator_quality: float = None
     ):
         """Store in long-term memory using configured adapter."""
-        logger.info(f"Storing in long-term memory via {self.provider}: {text[:100]}...")
+        logger.info(f"Storing in long-term memory via {self.provider}, length: {len(text)} chars")
         
         # Process quality metrics
         metadata = self._process_quality_metrics(

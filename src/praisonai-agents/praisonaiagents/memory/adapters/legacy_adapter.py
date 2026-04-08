@@ -13,6 +13,7 @@ This approach follows the Strangler Fig pattern:
 """
 
 import os
+import uuid
 from typing import Any, Dict, List, Optional
 from ..protocols import MemoryProtocol
 
@@ -39,7 +40,8 @@ class LegacyMemoryAdapter:
     def store_short_term(self, text: str, metadata: Optional[Dict[str, Any]] = None, **kwargs) -> str:
         """Store in short-term memory via legacy Memory class."""
         self._memory.store_short_term(text, metadata=metadata, **kwargs)
-        return str(id(text))  # Simple ID generation for compatibility
+        # Generate a stable UUID instead of using unstable id(text)
+        return str(uuid.uuid4())
     
     def search_short_term(self, query: str, limit: int = 5, **kwargs) -> List[Dict[str, Any]]:
         """Search short-term memory via legacy Memory class."""
@@ -48,7 +50,8 @@ class LegacyMemoryAdapter:
     def store_long_term(self, text: str, metadata: Optional[Dict[str, Any]] = None, **kwargs) -> str:
         """Store in long-term memory via legacy Memory class."""
         self._memory.store_long_term(text, metadata=metadata, **kwargs)
-        return str(id(text))  # Simple ID generation for compatibility
+        # Generate a stable UUID instead of using unstable id(text)
+        return str(uuid.uuid4())
     
     def search_long_term(self, query: str, limit: int = 5, **kwargs) -> List[Dict[str, Any]]:
         """Search long-term memory via legacy Memory class."""
