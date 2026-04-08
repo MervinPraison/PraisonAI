@@ -369,3 +369,140 @@ class TestStalePackagesCheck:
         assert Agent is not None
         assert hasattr(Agent, '__init__')
         assert hasattr(Agent, 'start')
+
+
+class TestBotSecurityCheck:
+    """Tests for check_bot_security() in bot_checks."""
+
+    def setup_method(self):
+        """Pre-import _config_schema so mock.patch can resolve it."""
+        import praisonai.bots._config_schema  # noqa: F401 – ensures module is in sys.modules
+
+    def test_skip_when_no_config_file(self, tmp_path):
+        """Returns SKIP when bot.yaml does not exist."""
+        from praisonai.cli.features.doctor.checks.bot_checks import check_bot_security
+
+        config = DoctorConfig(config_file=str(tmp_path / "bot.yaml"))
+        result = check_bot_security(config)
+
+        assert result.status == CheckStatus.SKIP
+        assert result.id == "bot_security"
+
+    def test_pass_when_all_secure(self, tmp_path):
+        """Returns PASS when allowlists set and secret env var present."""
+        from praisonai.cli.features.doctor.checks.bot_checks import check_bot_security
+
+        mock_channel = MagicMock()
+        mock_channel.allowlist = ["user1"]
+        mock_channel.blocklist = []
+        mock_channel.group_policy = "mention_only"
+
+        mock_bot_config = MagicMock()
+        mock_bot_config.channels = {"telegram": mock_channel}
+
+        with patch(
+            "praisonai.cli.features.doctor.checks.bot_checks.os.path.exists",
+            return_value=True,
+        ), patch(
+            "praisonai.bots._config_schema.load_and_validate_bot_yaml",
+            return_value=mock_bot_config,
+        ), patch.dict(
+            os.environ, {"PRAISONAI_GATEWAY_SECRET": "s3cr3t"}
+        ):
+            result = check_bot_security(DoctorConfig())
+
+        assert result.status == CheckStatus.PASS
+
+    def test_warn_when_no_allowlist(self, tmp_path):
+        """Returns WARN when channel has no allowlist or blocklist."""
+        from praisonai.cli.features.doctor.checks.bot_checks import check_bot_security
+
+        mock_channel = MagicMock()
+        mock_channel.allowlist = []
+        mock_channel.blocklist = []
+        mock_channel.group_policy = "mention_only"
+
+        mock_bot_config = MagicMock()
+        mock_bot_config.channels = {"telegram": mock_channel}
+
+        with patch(
+            "praisonai.cli.features.doctor.checks.bot_checks.os.path.exists",
+            return_value=True,
+        ), patch(
+            "praisonai.bots._config_schema.load_and_validate_bot_yaml",
+            return_value=mock_bot_config,
+        ), patch.dict(
+            os.environ, {"PRAISONAI_GATEWAY_SECRET": "s3cr3t"}
+        ):
+            result = check_bot_security(DoctorConfig())
+
+        assert result.status == CheckStatus.WARN
+        assert "telegram" in result.details
+
+    def test_warn_when_respond_all_group_policy(self, tmp_path):
+        """Returns WARN when group_policy is 'respond_all'."""
+        from praisonai.cli.features.doctor.checks.bot_checks import check_bot_security
+
+        mock_channel = MagicMock()
+        mock_channel.allowlist = ["user1"]
+        mock_channel.blocklist = []
+        mock_channel.group_policy = "respond_all"
+
+        mock_bot_config = MagicMock()
+        mock_bot_config.channels = {"discord": mock_channel}
+
+        with patch(
+            "praisonai.cli.features.doctor.checks.bot_checks.os.path.exists",
+            return_value=True,
+        ), patch(
+            "praisonai.bots._config_schema.load_and_validate_bot_yaml",
+            return_value=mock_bot_config,
+        ), patch.dict(
+            os.environ, {"PRAISONAI_GATEWAY_SECRET": "s3cr3t"}
+        ):
+            result = check_bot_security(DoctorConfig())
+
+        assert result.status == CheckStatus.WARN
+        assert "respond_all" in result.details
+
+    def test_warn_when_gateway_secret_missing(self, tmp_path):
+        """Returns WARN when PRAISONAI_GATEWAY_SECRET is not set."""
+        from praisonai.cli.features.doctor.checks.bot_checks import check_bot_security
+
+        mock_channel = MagicMock()
+        mock_channel.allowlist = ["user1"]
+        mock_channel.blocklist = []
+        mock_channel.group_policy = "mention_only"
+
+        mock_bot_config = MagicMock()
+        mock_bot_config.channels = {"telegram": mock_channel}
+
+        env_without_secret = {k: v for k, v in os.environ.items() if k != "PRAISONAI_GATEWAY_SECRET"}
+
+        with patch(
+            "praisonai.cli.features.doctor.checks.bot_checks.os.path.exists",
+            return_value=True,
+        ), patch(
+            "praisonai.bots._config_schema.load_and_validate_bot_yaml",
+            return_value=mock_bot_config,
+        ), patch.dict(os.environ, env_without_secret, clear=True):
+            result = check_bot_security(DoctorConfig())
+
+        assert result.status == CheckStatus.WARN
+        assert "PRAISONAI_GATEWAY_SECRET" in result.details
+
+    def test_fail_on_invalid_yaml(self, tmp_path):
+        """Returns FAIL when bot.yaml has invalid security config (ValueError)."""
+        from praisonai.cli.features.doctor.checks.bot_checks import check_bot_security
+
+        with patch(
+            "praisonai.cli.features.doctor.checks.bot_checks.os.path.exists",
+            return_value=True,
+        ), patch(
+            "praisonai.bots._config_schema.load_and_validate_bot_yaml",
+            side_effect=ValueError("bad yaml"),
+        ):
+            result = check_bot_security(DoctorConfig())
+
+        assert result.status == CheckStatus.FAIL
+        assert "bad yaml" in result.message
