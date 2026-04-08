@@ -60,6 +60,9 @@ class AdapterRegistry(Generic[T]):
         if factory is not None:
             try:
                 return factory(**kwargs)
+            except (ImportError, ModuleNotFoundError):
+                # Optional dependency missing - return None for graceful fallback
+                return None
             except Exception as exc:
                 raise RuntimeError(
                     f"Failed to create {self._type_name} adapter '{name}' via factory. "
@@ -70,6 +73,9 @@ class AdapterRegistry(Generic[T]):
         if adapter_cls is not None:
             try:
                 return adapter_cls(**kwargs)
+            except (ImportError, ModuleNotFoundError):
+                # Optional dependency missing - return None for graceful fallback
+                return None
             except Exception as exc:
                 raise RuntimeError(
                     f"Failed to instantiate {self._type_name} adapter '{name}'. "

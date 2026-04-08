@@ -4025,17 +4025,28 @@ Summary:"""
                 return "", None
             
             # Normalize results format (filter out None values, handle None metadata)
-            if isinstance(search_results, dict) and 'results' in search_results:
+            # Normalize results format (filter out None values, handle None metadata)
+            if hasattr(search_results, "results") and isinstance(getattr(search_results, "results"), list):
+                search_results = getattr(search_results, "results")
+            elif isinstance(search_results, dict) and 'results' in search_results:
+                search_results = search_results['results']
+                
+            if isinstance(search_results, list):
                 results = []
-                for r in search_results['results']:
+                for r in search_results:
                     if r is None:
                         continue
-                    text = r.get('memory', '') or ''
-                    metadata = r.get('metadata') or {}  # Handle None metadata
+                    if isinstance(r, dict):
+                        text = r.get('memory', '') or r.get('text', '') or ''
+                        metadata = r.get('metadata') or {}
+                    else:
+                        text = getattr(r, 'text', None) or getattr(r, 'memory', None) or ''
+                        metadata = getattr(r, 'metadata', None)
+                        if metadata is None:
+                            metadata = {}
+                    
                     if text:
-                        results.append({"text": text, "metadata": metadata})
-            elif isinstance(search_results, list):
-                results = [{"text": str(r), "metadata": {}} for r in search_results if r is not None and str(r)]
+                        results.append({"text": str(text), "metadata": metadata})
             else:
                 results = [{"text": str(search_results), "metadata": {}}] if search_results else []
             

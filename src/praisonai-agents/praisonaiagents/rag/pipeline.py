@@ -31,16 +31,34 @@ class DefaultCitationFormatter:
         citations = []
         
         for i, result in enumerate(results):
-            # Handle different result formats
-            text = result.get("text") or result.get("memory", "")
-            # CRITICAL: Handle metadata=None from mem0 - ensure always dict
-            metadata = result.get("metadata") or {}
-            score = result.get("score", 0.0)
+            # Handle both dict and dataclass formats
+            is_dict = isinstance(result, dict)
+            
+            # Extract text field
+            if is_dict:
+                text = result.get("text") or result.get("memory", "")
+            else:
+                text = getattr(result, "text", None) or getattr(result, "memory", None) or ""
+                
+            # CRITICAL: Handle metadata=None - ensure always dict
+            if is_dict:
+                metadata = result.get("metadata") or {}
+            else:
+                metadata = getattr(result, "metadata", None)
+                if metadata is None:
+                    metadata = {}
+                    
+            score = result.get("score", 0.0) if is_dict else getattr(result, "score", 0.0)
             
             # Extract source info
             source = metadata.get("source", "")
             filename = metadata.get("filename", "")
-            doc_id = result.get("id") or metadata.get("doc_id", "")
+            
+            if is_dict:
+                doc_id = result.get("id") or metadata.get("doc_id", "")
+            else:
+                doc_id = getattr(result, "id", None) or metadata.get("doc_id", "")
+                
             chunk_id = metadata.get("chunk_id", "")
             
             citation = Citation(
@@ -160,16 +178,24 @@ class RAG:
             **kwargs,
         )
         
+        from .models import SearchResult as RagSearchResult
+        from praisonaiagents.knowledge.models import SearchResult as KnowledgeSearchResult
+        
         # Handle different result formats
         if isinstance(results, dict):
             results = results.get("results", [])
-        
+        elif hasattr(results, "results") and isinstance(getattr(results, "results"), list):
+            results = getattr(results, "results")
+            
         # Filter by minimum score
         if self.config.min_score > 0:
-            results = [
-                r for r in results
-                if r.get("score", 0) >= self.config.min_score
-            ]
+            filtered = []
+            for r in results:
+                # Handle both dict and dataclass/pydantic models
+                score = r.get("score", 0) if isinstance(r, dict) else getattr(r, "score", 0)
+                if score >= self.config.min_score:
+                    filtered.append(r)
+            results = filtered
         
         # Limit to top_k
         results = results[:self.config.top_k]

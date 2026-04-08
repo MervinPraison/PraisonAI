@@ -153,15 +153,15 @@ def normalize_search_item(raw: Dict[str, Any]) -> SearchResultItem:
     if raw is None:
         return SearchResultItem()
     
-    # Handle text field (mem0 uses 'memory', others use 'text')
-    text = raw.get("text") or raw.get("memory", "") or ""
-    
     # Handle metadata - CRITICAL: ensure never None
     metadata = raw.get("metadata")
     if metadata is None:
         metadata = {}
     elif not isinstance(metadata, dict):
         metadata = {}
+        
+    # Handle text field (mem0 uses 'memory', others use 'text' or store in metadata['data'])
+    text = raw.get("text") or raw.get("memory", "") or metadata.get("data", "") or ""
     
     # Extract source/filename from metadata if not at top level
     source = raw.get("source") or metadata.get("source")
