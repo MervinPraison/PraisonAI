@@ -96,6 +96,17 @@ class BasicRAGSchemaProvider:
         errors = []
         warnings = []
         
+        # Check for unknown fields first
+        known_fields = {
+            "collection", "top_k", "hybrid", "rerank", "min_score", 
+            "include_citations", "max_context_tokens", "vector_store_provider",
+            "vector_store_path", "host", "port", "openai_compat", "model", "verbose"
+        }
+        unknown_fields = set(config.keys()) - known_fields
+        if unknown_fields:
+            for field in unknown_fields:
+                errors.append(f"Unknown field '{field}'. Valid fields: {', '.join(sorted(known_fields))}")
+        
         # Check required fields
         if "collection" not in config:
             errors.append("collection is required")

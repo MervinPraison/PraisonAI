@@ -5,8 +5,8 @@ UPDATED: Now uses unified schema for true CLI/YAML/Python consistency.
 Implements single documented precedence chain with strong validation.
 
 Precedence (highest to lowest):
-1. CLI flags 
-2. Environment variables
+1. Environment variables (PRAISONAI_*)
+2. CLI flags 
 3. Config file (YAML)
 4. Defaults
 
@@ -18,7 +18,7 @@ import os
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .schema_provider import rag_schema_provider
 
@@ -177,8 +177,8 @@ def merge_configs(
     Merge configurations with proper precedence.
     
     Precedence (highest to lowest):
-    1. CLI flags
-    2. Environment variables
+    1. Environment variables
+    2. CLI flags
     3. Config file
     4. Defaults
     
@@ -198,13 +198,13 @@ def merge_configs(
         if value is not None:
             result[key] = value
     
-    # Apply env config (higher priority)
-    for key, value in env_config.items():
+    # Apply CLI config (higher priority)
+    for key, value in cli_config.items():
         if value is not None:
             result[key] = value
     
-    # Apply CLI config (highest priority)
-    for key, value in cli_config.items():
+    # Apply env config (highest priority)
+    for key, value in env_config.items():
         if value is not None:
             result[key] = value
     
@@ -296,7 +296,22 @@ def load_unified_config(
     
     file_config = {}
     if config_file:
-        file_config = load_config_file(config_file)
+        raw_config = load_config_file(config_file)
+        # Flatten nested config sections for backward compatibility
+        if "knowledge" in raw_config:
+            file_config.update(raw_config["knowledge"])
+        if "rag" in raw_config:
+            file_config.update(raw_config["rag"])
+        if "retrieval" in raw_config:
+            file_config.update(raw_config["retrieval"])
+        if "server" in raw_config:
+            file_config.update(raw_config["server"])
+        
+        # Also include top-level keys
+        for key, value in raw_config.items():
+            if key not in ["knowledge", "rag", "retrieval", "server"]:
+                file_config[key] = value
+        
         # Apply YAML to Python field mapping
         file_config = rag_schema_provider.yaml_to_python(file_config)
     
@@ -320,10 +335,28 @@ def load_unified_config(
     if validate:
         result = rag_schema_provider.validate(merged_config)
         if not result.is_valid:
-            error_msg = "Configuration validation failed:\n" + "\n".join(result.errors)
+            # Add source attribution for better error messages
+            error_lines = ["Configuration validation failed:"]
+            for error in result.errors:
+                # Try to identify which source provided the invalid value
+                field_name = error.split(":")[0] if ":" in error else "unknown"
+                sources = []
+                if field_name in env_config:
+                    sources.append("ENV")
+                if field_name in cli_config:
+                    sources.append("CLI")
+                if field_name in file_config:
+                    sources.append(f"file '{config_file}'" if config_file else "file")
+                
+                source_info = f" (from {', '.join(sources)})" if sources else ""
+                error_lines.append(f"  • {error}{source_info}")
+            
             if result.warnings:
-                error_msg += "\nWarnings:\n" + "\n".join(result.warnings)
-            raise ValueError(error_msg)
+                error_lines.append("Warnings:")
+                for warning in result.warnings:
+                    error_lines.append(f"  • {warning}")
+            
+            raise ValueError("\n".join(error_lines))
         
         # Log warnings even if validation passes
         if result.warnings:
@@ -352,9 +385,15 @@ def get_cli_flags() -> List[Dict[str, Any]]:
             "name": f"--{mapping.cli_flag}",
             "dest": mapping.field_name,
             "help": mapping.description,
-            "type": mapping.type_hint,
-            "default": mapping.default,
+            "default": None,  # Don't set defaults - preserves precedence
         }
+        
+        # Handle boolean flags specially
+        if mapping.type_hint == bool:
+            flag_def["action"] = "store_true"
+            # Don't set type for boolean flags
+        else:
+            flag_def["type"] = mapping.type_hint
         
         # Add environment variable to help text
         if mapping.env_var:
@@ -367,9 +406,32 @@ def get_cli_flags() -> List[Dict[str, Any]]:
 
 def get_config_schema() -> Dict[str, Any]:
     """
-    Get the unified configuration schema for documentation.
+    Get the configuration schema for documentation.
     
     Returns:
-        Dict describing the unified configuration schema
+        Dict describing the configuration schema in legacy format for backward compatibility
     """
-    return rag_schema_provider.get_schema_info()
+    # Return legacy nested structure to maintain backward compatibility
+    return {
+        "knowledge": {
+            "collection": "Collection/index name (default: 'default')",
+            "vector_store_provider": "Vector store provider (default: 'chroma')",
+            "vector_store_path": "Path to vector store (default: './.praison/knowledge/{collection}')",
+        },
+        "retrieval": {
+            "top_k": "Number of results to retrieve (default: 5)",
+            "hybrid": "Enable hybrid retrieval (default: false)",
+            "rerank": "Enable reranking (default: false)",
+            "min_score": "Minimum relevance score (default: 0.0)",
+        },
+        "rag": {
+            "include_citations": "Include citations in response (default: true)",
+            "max_context_tokens": "Maximum context tokens (default: 4000)",
+            "model": "LLM model to use (default: gpt-4o-mini)",
+        },
+        "server": {
+            "host": "Server host (default: '127.0.0.1')",
+            "port": "Server port (default: 8080)",
+            "openai_compat": "Enable OpenAI-compatible endpoint (default: false)",
+        },
+    }

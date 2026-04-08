@@ -21,12 +21,21 @@ except ImportError:
     yaml = None
 
 try:
-    from pydantic import BaseModel, Field, ValidationError, field_validator
+    from pydantic import BaseModel, Field, ValidationError
+    try:
+        # Pydantic V2
+        from pydantic import field_validator
+        PYDANTIC_V2 = True
+    except ImportError:
+        # Pydantic V1  
+        from pydantic import validator as field_validator
+        PYDANTIC_V2 = False
 except ImportError:
     BaseModel = None
     Field = None
     ValidationError = None
     field_validator = None
+    PYDANTIC_V2 = False
 
 from praisonaiagents.config.protocols import (
     ConfigSchemaProtocol,
@@ -38,8 +47,7 @@ from praisonaiagents.config.protocols import (
 from praisonaiagents.rag.models import RAGConfig, RetrievalStrategy
 
 
-
-if BaseModel is not None:
+if BaseModel:
     class UnifiedRAGSchema(BaseModel):
         """
         Unified RAG schema that serves as single source of truth.
@@ -136,23 +144,38 @@ if BaseModel is not None:
             description="Enable verbose output"
         )
         
-        @field_validator('vector_store_provider')
-        @classmethod
-        def validate_provider(cls, v):
-            valid_providers = ['chroma', 'pinecone', 'weaviate', 'qdrant']
-            if v not in valid_providers:
-                raise ValueError(f"Invalid provider '{v}'. Valid options: {', '.join(valid_providers)}")
-            return v
-        
-        @field_validator('model')
-        @classmethod
-        def validate_model(cls, v):
-            if v is not None and not isinstance(v, str):
-                raise ValueError("Model must be a string")
-            return v
+        if PYDANTIC_V2:
+            @field_validator('vector_store_provider')
+            @classmethod
+            def validate_provider(cls, v):
+                valid_providers = ['chroma', 'pinecone', 'weaviate', 'qdrant']
+                if v not in valid_providers:
+                    raise ValueError(f"Invalid provider '{v}'. Valid options: {', '.join(valid_providers)}")
+                return v
+            
+            @field_validator('model')
+            @classmethod  
+            def validate_model(cls, v):
+                if v is not None and not isinstance(v, str):
+                    raise ValueError("Model must be a string")
+                return v
+        else:
+            @field_validator('vector_store_provider')
+            def validate_provider(cls, v):
+                valid_providers = ['chroma', 'pinecone', 'weaviate', 'qdrant']
+                if v not in valid_providers:
+                    raise ValueError(f"Invalid provider '{v}'. Valid options: {', '.join(valid_providers)}")
+                return v
+            
+            @field_validator('model')
+            def validate_model(cls, v):
+                if v is not None and not isinstance(v, str):
+                    raise ValueError("Model must be a string")
+                return v
         
         def to_rag_config(self) -> 'RAGConfig':
             """Convert to core SDK RAGConfig."""
+            # Map unified schema to core SDK format
             strategy = RetrievalStrategy.HYBRID if self.hybrid else RetrievalStrategy.BASIC
             
             return RAGConfig(
@@ -185,8 +208,6 @@ if BaseModel is not None:
                 }
             
             return config
-else:
-    UnifiedRAGSchema = None
 
 
 class RAGSchemaProvider:
@@ -198,7 +219,7 @@ class RAGSchemaProvider:
     """
     
     def __init__(self):
-        self.schema_class = UnifiedRAGSchema
+        self.schema_class = UnifiedRAGSchema if BaseModel else None
         
         # Field name mappings between interfaces
         self.yaml_to_python_map = {
@@ -208,7 +229,8 @@ class RAGSchemaProvider:
             "citations": "include_citations",
         }
         
-        self.cli_flag_map = {
+        # CLI flag mappings - these will be derived from schema when possible
+        self._cli_flag_map = {
             "collection": "collection",
             "top-k": "top_k", 
             "hybrid": "hybrid",
@@ -254,10 +276,30 @@ class RAGSchemaProvider:
                 normalized=config
             )
         
+        # Check for unknown fields first
+        known_fields = set()
+        if PYDANTIC_V2:
+            known_fields = set(self.schema_class.model_fields.keys())
+        else:
+            known_fields = set(self.schema_class.__fields__.keys())
+            
+        unknown_fields = set(config.keys()) - known_fields
+        if unknown_fields:
+            return ValidationResult(
+                is_valid=False,
+                errors=[f"Unknown field '{field}'. Valid fields: {', '.join(sorted(known_fields))}" for field in unknown_fields],
+                warnings=[],
+                normalized=None
+            )
+        
         try:
             # Create schema instance to validate
             schema_instance = self.schema_class(**config)
-            normalized = schema_instance.model_dump()
+            # Use model_dump for V2, dict() for V1
+            if PYDANTIC_V2:
+                normalized = schema_instance.model_dump()
+            else:
+                normalized = schema_instance.dict()
             
             return ValidationResult(
                 is_valid=True,
@@ -288,14 +330,20 @@ class RAGSchemaProvider:
             )
     
     def get_cli_mapping(self) -> List[CliMapping]:
-        """Generate CLI mappings from schema fields."""
+        """Generate CLI mappings derived from schema fields."""
         mappings = []
         
         if not BaseModel:
             # Fallback without Pydantic
             return self._get_fallback_cli_mapping()
         
-        for field_name, field_info in self.schema_class.model_fields.items():
+        # Get field info - compatible with both Pydantic V1 and V2
+        if PYDANTIC_V2:
+            field_dict = self.schema_class.model_fields
+        else:
+            field_dict = self.schema_class.__fields__
+            
+        for field_name, field_info in field_dict.items():
             cli_flag = self._field_to_cli_flag(field_name)
             env_var = self._field_to_env_var(field_name)
             from pydantic_core import PydanticUndefinedType
@@ -308,7 +356,7 @@ class RAGSchemaProvider:
                 cli_flag=cli_flag,
                 description=field_info.description or f"Set {field_name}",
                 type_hint=self._get_python_type(field_info),
-                default=default,
+                default=None,  # Use None for argparse - don't override precedence
                 env_var=env_var
             )
             
@@ -319,10 +367,10 @@ class RAGSchemaProvider:
     def get_precedence_chain(self) -> PrecedenceChain:
         """Get the documented precedence chain."""
         return PrecedenceChain(
-            chain=["cli_flags", "env_vars", "config_file", "defaults"],
+            chain=["env_vars", "cli_flags", "config_file", "defaults"],
             descriptions={
-                "cli_flags": "Command line arguments (highest priority)",
-                "env_vars": "Environment variables (PRAISONAI_*)",
+                "env_vars": "Environment variables (PRAISONAI_*) (highest priority)",
+                "cli_flags": "Command line arguments",
                 "config_file": "YAML configuration file",
                 "defaults": "Built-in default values (lowest priority)"
             }
@@ -337,7 +385,11 @@ class RAGSchemaProvider:
         if BaseModel:
             try:
                 schema_instance = self.schema_class(**normalized)
-                return schema_instance.model_dump()
+                # Use model_dump for V2, dict() for V1
+                if PYDANTIC_V2:
+                    return schema_instance.model_dump()
+                else:
+                    return schema_instance.dict()
             except ValidationError:
                 pass  # Fall through to manual defaults
         
@@ -373,15 +425,25 @@ class RAGSchemaProvider:
         }
         
         if BaseModel:
-            from pydantic_core import PydanticUndefinedType
-            for field_name, field_info in self.schema_class.model_fields.items():
-                default = field_info.default
-                if isinstance(default, PydanticUndefinedType):
-                    default = None
+            # Get field info - compatible with both Pydantic V1 and V2
+            if PYDANTIC_V2:
+                field_dict = self.schema_class.model_fields
+            else:
+                field_dict = self.schema_class.__fields__
+                
+            for field_name, field_info in field_dict.items():
+                # Handle field type - different between V1 and V2
+                if PYDANTIC_V2:
+                    field_type = str(field_info.annotation)
+                    field_default = field_info.default
+                else:
+                    field_type = str(field_info.type_)
+                    field_default = field_info.default
+                    
                 info["fields"][field_name] = {
-                    "type": str(field_info.annotation),
+                    "type": field_type,
                     "description": field_info.description,
-                    "default": default,
+                    "default": field_default,
                 }
                 info["cli_mappings"][self._field_to_cli_flag(field_name)] = field_name
         
@@ -395,7 +457,7 @@ class RAGSchemaProvider:
         """Map CLI arguments to Python API format.""" 
         python_config = {}
         
-        for cli_flag, python_field in self.cli_flag_map.items():
+        for cli_flag, python_field in self._cli_flag_map.items():
             cli_key = cli_flag.replace("-", "_")  # argparse converts dashes to underscores
             if cli_key in cli_args and cli_args[cli_key] is not None:
                 python_config[python_field] = cli_args[cli_key]
@@ -409,11 +471,11 @@ class RAGSchemaProvider:
         file_config: Dict[str, Any],
         defaults: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Merge configurations following documented precedence."""
+        """Merge configurations following documented precedence: ENV > CLI > YAML > defaults."""
         result = defaults.copy()
         
         # Apply in precedence order (lowest to highest)
-        for config in [file_config, env_config, cli_config]:
+        for config in [file_config, cli_config, env_config]:
             for key, value in config.items():
                 if value is not None:
                     result[key] = value
@@ -434,8 +496,8 @@ class RAGSchemaProvider:
     
     def _field_to_cli_flag(self, field_name: str) -> str:
         """Convert field name to CLI flag format."""
-        # Convert snake_case to kebab-case and find mapping
-        for cli_flag, python_field in self.cli_flag_map.items():
+        # Find mapping in predefined mappings
+        for cli_flag, python_field in self._cli_flag_map.items():
             if python_field == field_name:
                 return cli_flag
         
@@ -453,19 +515,33 @@ class RAGSchemaProvider:
         """Extract Python type from Pydantic v2 field info."""
         if not BaseModel:
             return str
-        
-        annotation = getattr(field_info, 'annotation', None)
-        if annotation is None:
-            return str
-        
-        origin = getattr(annotation, '__origin__', None)
-        if origin is Union:
-            # Handle Optional types (Union[X, None])
-            args = annotation.__args__
-            for arg in args:
-                if arg is not type(None):
-                    return arg
-        return annotation
+            
+        # Handle field type - different between V1 and V2
+        if PYDANTIC_V2:
+            if hasattr(field_info, 'annotation'):
+                field_type = field_info.annotation
+                if hasattr(field_type, '__origin__'):
+                    # Handle Union types (like Optional)
+                    if field_type.__origin__ is Union:
+                        args = field_type.__args__
+                        # Return first non-None type
+                        for arg in args:
+                            if arg is not type(None):
+                                return arg
+                return field_type
+        else:
+            if hasattr(field_info, 'type_'):
+                field_type = field_info.type_
+                if hasattr(field_type, '__origin__'):
+                    # Handle Union types (like Optional)
+                    if field_type.__origin__ is Union:
+                        args = field_type.__args__
+                        # Return first non-None type
+                        for arg in args:
+                            if arg is not type(None):
+                                return arg
+                return field_type
+        return str
     
     def _apply_field_mappings(self, config: Dict[str, Any], mapping: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """Apply field name mappings."""
@@ -506,18 +582,18 @@ class RAGSchemaProvider:
     def _get_fallback_cli_mapping(self) -> List[CliMapping]:
         """Fallback CLI mapping without Pydantic."""
         return [
-            CliMapping("collection", "collection", "Collection name", str, "default"),
-            CliMapping("top_k", "top-k", "Number of results", int, 5),
-            CliMapping("hybrid", "hybrid", "Enable hybrid retrieval", bool, False),
-            CliMapping("rerank", "rerank", "Enable reranking", bool, False),
-            CliMapping("min_score", "min-score", "Minimum relevance score", float, 0.0),
-            CliMapping("include_citations", "citations", "Include citations", bool, True),
-            CliMapping("max_context_tokens", "max-context", "Max context tokens", int, 4000),
-            CliMapping("vector_store_provider", "vector-store", "Vector store provider", str, "chroma"),
-            CliMapping("host", "host", "Server host", str, "127.0.0.1"),
-            CliMapping("port", "port", "Server port", int, 8080),
+            CliMapping("collection", "collection", "Collection name", str, None),
+            CliMapping("top_k", "top-k", "Number of results", int, None),
+            CliMapping("hybrid", "hybrid", "Enable hybrid retrieval", bool, None),
+            CliMapping("rerank", "rerank", "Enable reranking", bool, None),
+            CliMapping("min_score", "min-score", "Minimum relevance score", float, None),
+            CliMapping("include_citations", "citations", "Include citations", bool, None),
+            CliMapping("max_context_tokens", "max-context", "Max context tokens", int, None),
+            CliMapping("vector_store_provider", "vector-store", "Vector store provider", str, None),
+            CliMapping("host", "host", "Server host", str, None),
+            CliMapping("port", "port", "Server port", int, None),
             CliMapping("model", "model", "LLM model", str, None),
-            CliMapping("verbose", "verbose", "Verbose output", bool, False),
+            CliMapping("verbose", "verbose", "Verbose output", bool, None),
         ]
 
 
