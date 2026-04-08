@@ -67,16 +67,20 @@ def calculate(expression: str) -> str:
 '''
 
 # Write the test files
-with open("test_agents.yaml", "w") as f:
+import os
+FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
+os.makedirs(FIXTURES_DIR, exist_ok=True)
+
+with open(os.path.join(FIXTURES_DIR, "test_agents.yaml"), "w") as f:
     f.write(agents_yaml_content)
 
-with open("test_tools.py", "w") as f:
+with open(os.path.join(FIXTURES_DIR, "test_tools.py"), "w") as f:
     f.write(tools_py_content)
 
-print("Test files created successfully!")
+print("Test files created successfully in tests/fixtures/!")
 print("\nTo test the fix:")
-print("1. Copy test_agents.yaml to agents.yaml")
-print("2. Copy test_tools.py to tools.py")
+print("1. Copy tests/fixtures/test_agents.yaml to agents.yaml")
+print("2. Copy tests/fixtures/test_tools.py to tools.py")
 print("3. Run the chatbot UI")
 print("4. Ask the agent to use multiple tools")
 print("\nThe agent should now be able to use all three tools (search_web, get_weather, calculate)")
