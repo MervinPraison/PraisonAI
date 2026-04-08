@@ -182,7 +182,7 @@ jobs:
               2. Wrapper (praisonai/): CLI, heavy implementations, optional dependencies.
               3. Tools (PraisonAI-Tools): Capabilities Agents actively call during execution (e.g. SurrealDB tool, Slack tool).
               4. Documentation (PraisonAIDocs): Documentation pages, guides, API references.
-              5. Plugins (PraisonAI-Plugins): Framework lifecycle extensions replacing systemic behavior (e.g. tracing, logging, metrics).
+              5. Plugins (PraisonAI-Plugins): Framework lifecycle extensions replacing systemic behavior (e.g. tracing, logging, metrics, hooks, guardrails).
               For items routed to an EXTERNAL repository (Tools, Docs, Plugins), follow STEP 3-ALT below.
             - Does it duplicate existing functionality? Check if Agent already supports this via existing params (reflection, planning, tools, hooks, memory).
             - Does it inherit from Agent properly? New agent types MUST inherit Agent, not wrap it with composition.
