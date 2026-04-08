@@ -123,7 +123,8 @@ def start_api_server(
         server_code = generate_api_server_code(agents_file, config)
         
         # Write to temporary file
-        server_file = "api_server.py"
+        import tempfile
+        server_file = os.path.join(tempfile.gettempdir(), f"praisonai_api_server.py")
         with open(server_file, 'w') as f:
             f.write(server_code)
         
