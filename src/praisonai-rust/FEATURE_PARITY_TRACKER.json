@@ -5,10 +5,10 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 315,
+    "pythonCoreFeatures": 321,
     "rustFeatures": 667,
-    "gapCount": 37,
-    "parityPercentage": 211.7
+    "gapCount": 42,
+    "parityPercentage": 207.8
   },
   "pythonCoreSDK": {
     "exports": [
@@ -80,6 +80,7 @@
       "EmbeddingAgent",
       "EmbeddingConfig",
       "EmbeddingResult",
+      "ErrorContextProtocol",
       "EscalationPipeline",
       "EscalationStage",
       "EventType",
@@ -124,6 +125,7 @@
       "KNOWLEDGE_PRESETS",
       "Knowledge",
       "KnowledgeConfig",
+      "LLMError",
       "LLMGuardrail",
       "LLMPluginProtocol",
       "LearnBackend",
@@ -152,6 +154,7 @@
       "MultiAgentMemoryConfig",
       "MultiAgentOutputConfig",
       "MultiAgentPlanningConfig",
+      "NetworkError",
       "OCRAgent",
       "OCRConfig",
       "OUTPUT_PRESETS",
@@ -176,6 +179,7 @@
       "PluginParseError",
       "PluginProtocol",
       "PluginsConfig",
+      "PraisonAIError",
       "PraisonConfig",
       "PromptExpanderAgent",
       "Provider",
@@ -223,6 +227,7 @@
       "TemplateConfig",
       "TodoItem",
       "TodoList",
+      "ToolExecutionError",
       "ToolPluginProtocol",
       "ToolRegistry",
       "ToolResult",
@@ -230,6 +235,7 @@
       "Tools",
       "TraceSink",
       "TraceSinkProtocol",
+      "ValidationError",
       "VideoAgent",
       "VideoConfig",
       "VisionAgent",
@@ -1706,7 +1712,6 @@
       "planning": [],
       "plugins": [
         "PluginRegistry",
-        "ToolDefinition",
         "disable_plugins",
         "enable_plugins",
         "get_plugin_manager",
@@ -1731,6 +1736,7 @@
       "tools": [
         "FunctionTool",
         "Tool",
+        "ToolDefinition",
         "ToolRegistry",
         "ToolResult"
       ],
@@ -1796,15 +1802,6 @@
         "effort": "high",
         "status": "TODO",
         "category": "tools"
-      },
-      {
-        "feature": "BudgetExceededError",
-        "python": true,
-        "rust": false,
-        "priority": "P0",
-        "effort": "low",
-        "status": "TODO",
-        "category": "agent"
       },
       {
         "feature": "CodeAgent",
@@ -1942,33 +1939,6 @@
         "category": "agent"
       },
       {
-        "feature": "HandoffCycleError",
-        "python": true,
-        "rust": true,
-        "priority": "P0",
-        "effort": "low",
-        "status": "DONE",
-        "category": "agent"
-      },
-      {
-        "feature": "HandoffDepthError",
-        "python": true,
-        "rust": true,
-        "priority": "P0",
-        "effort": "low",
-        "status": "DONE",
-        "category": "agent"
-      },
-      {
-        "feature": "HandoffError",
-        "python": true,
-        "rust": true,
-        "priority": "P0",
-        "effort": "low",
-        "status": "DONE",
-        "category": "agent"
-      },
-      {
         "feature": "HandoffInputData",
         "python": true,
         "rust": true,
@@ -1979,15 +1949,6 @@
       },
       {
         "feature": "HandoffResult",
-        "python": true,
-        "rust": true,
-        "priority": "P0",
-        "effort": "low",
-        "status": "DONE",
-        "category": "agent"
-      },
-      {
-        "feature": "HandoffTimeoutError",
         "python": true,
         "rust": true,
         "priority": "P0",
@@ -3082,6 +3043,15 @@
         "category": "bots"
       },
       {
+        "feature": "BudgetExceededError",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "CACHING_PRESETS",
         "python": true,
         "rust": true,
@@ -3251,6 +3221,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "embedding"
+      },
+      {
+        "feature": "ErrorContextProtocol",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "medium",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "EscalationPipeline",
@@ -3424,6 +3403,42 @@
         "category": "config"
       },
       {
+        "feature": "HandoffCycleError",
+        "python": true,
+        "rust": true,
+        "priority": "P3",
+        "effort": "low",
+        "status": "DONE",
+        "category": "other"
+      },
+      {
+        "feature": "HandoffDepthError",
+        "python": true,
+        "rust": true,
+        "priority": "P3",
+        "effort": "low",
+        "status": "DONE",
+        "category": "other"
+      },
+      {
+        "feature": "HandoffError",
+        "python": true,
+        "rust": true,
+        "priority": "P3",
+        "effort": "low",
+        "status": "DONE",
+        "category": "other"
+      },
+      {
+        "feature": "HandoffTimeoutError",
+        "python": true,
+        "rust": true,
+        "priority": "P3",
+        "effort": "low",
+        "status": "DONE",
+        "category": "other"
+      },
+      {
         "feature": "Heartbeat",
         "python": true,
         "rust": false,
@@ -3476,6 +3491,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "LLMError",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "LLMPluginProtocol",
@@ -3658,6 +3682,15 @@
         "category": "config"
       },
       {
+        "feature": "NetworkError",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "OUTPUT_PRESETS",
         "python": true,
         "rust": true,
@@ -3791,6 +3824,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "PraisonAIError",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "PraisonConfig",
@@ -3964,6 +4006,15 @@
         "category": "config"
       },
       {
+        "feature": "ToolExecutionError",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "ToolPluginProtocol",
         "python": true,
         "rust": true,
@@ -3989,6 +4040,15 @@
         "effort": "medium",
         "status": "DONE",
         "category": "trace"
+      },
+      {
+        "feature": "ValidationError",
+        "python": true,
+        "rust": true,
+        "priority": "P3",
+        "effort": "low",
+        "status": "DONE",
+        "category": "other"
       },
       {
         "feature": "WEB_PRESETS",

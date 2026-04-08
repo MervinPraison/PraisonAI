@@ -4,14 +4,14 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 315,
+    "pythonCoreFeatures": 321,
     "pythonWrapperFeatures": 99,
     "typescriptFeatures": 1192,
-    "gapCount": 22,
+    "gapCount": 28,
     "priorityP0": 1,
     "priorityP1": 0,
     "priorityP2": 0,
-    "priorityP3": 21
+    "priorityP3": 27
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -84,6 +84,7 @@
       "EmbeddingAgent",
       "EmbeddingConfig",
       "EmbeddingResult",
+      "ErrorContextProtocol",
       "EscalationPipeline",
       "EscalationStage",
       "EventType",
@@ -128,6 +129,7 @@
       "KNOWLEDGE_PRESETS",
       "Knowledge",
       "KnowledgeConfig",
+      "LLMError",
       "LLMGuardrail",
       "LLMPluginProtocol",
       "LearnBackend",
@@ -156,6 +158,7 @@
       "MultiAgentMemoryConfig",
       "MultiAgentOutputConfig",
       "MultiAgentPlanningConfig",
+      "NetworkError",
       "OCRAgent",
       "OCRConfig",
       "OUTPUT_PRESETS",
@@ -180,6 +183,7 @@
       "PluginParseError",
       "PluginProtocol",
       "PluginsConfig",
+      "PraisonAIError",
       "PraisonConfig",
       "PromptExpanderAgent",
       "Provider",
@@ -227,6 +231,7 @@
       "TemplateConfig",
       "TodoItem",
       "TodoList",
+      "ToolExecutionError",
       "ToolPluginProtocol",
       "ToolRegistry",
       "ToolResult",
@@ -234,6 +239,7 @@
       "Tools",
       "TraceSink",
       "TraceSinkProtocol",
+      "ValidationError",
       "VideoAgent",
       "VideoConfig",
       "VisionAgent",
@@ -337,7 +343,6 @@
         "Agent",
         "AudioAgent",
         "AudioConfig",
-        "BudgetExceededError",
         "CodeAgent",
         "CodeConfig",
         "CodeExecutionStep",
@@ -352,12 +357,8 @@
         "FileSearchCall",
         "Handoff",
         "HandoffConfig",
-        "HandoffCycleError",
-        "HandoffDepthError",
-        "HandoffError",
         "HandoffInputData",
         "HandoffResult",
-        "HandoffTimeoutError",
         "ImageAgent",
         "MCPCall",
         "OCRAgent",
@@ -569,17 +570,28 @@
         "Agents",
         "AsyncLearnProtocol",
         "AutonomyConfig",
+        "BudgetExceededError",
         "DoomLoopDetector",
+        "ErrorContextProtocol",
         "EscalationPipeline",
         "EscalationStage",
+        "HandoffCycleError",
+        "HandoffDepthError",
+        "HandoffError",
+        "HandoffTimeoutError",
         "Heartbeat",
         "HeartbeatConfig",
+        "LLMError",
         "LearnManager",
         "LearnManagerProtocol",
         "LearnProtocol",
+        "NetworkError",
         "ObservabilityEventType",
         "ObservabilityHooks",
+        "PraisonAIError",
         "StructuredFormatter",
+        "ToolExecutionError",
+        "ValidationError",
         "config",
         "configure_structured_logging",
         "embedding",
@@ -2871,15 +2883,6 @@
         "category": "tools"
       },
       {
-        "feature": "BudgetExceededError",
-        "python": true,
-        "typescript": true,
-        "priority": "P0",
-        "effort": "low",
-        "status": "DONE",
-        "category": "agent"
-      },
-      {
         "feature": "CodeAgent",
         "python": true,
         "typescript": true,
@@ -3015,33 +3018,6 @@
         "category": "agent"
       },
       {
-        "feature": "HandoffCycleError",
-        "python": true,
-        "typescript": true,
-        "priority": "P0",
-        "effort": "low",
-        "status": "DONE",
-        "category": "agent"
-      },
-      {
-        "feature": "HandoffDepthError",
-        "python": true,
-        "typescript": true,
-        "priority": "P0",
-        "effort": "low",
-        "status": "DONE",
-        "category": "agent"
-      },
-      {
-        "feature": "HandoffError",
-        "python": true,
-        "typescript": true,
-        "priority": "P0",
-        "effort": "low",
-        "status": "DONE",
-        "category": "agent"
-      },
-      {
         "feature": "HandoffInputData",
         "python": true,
         "typescript": true,
@@ -3052,15 +3028,6 @@
       },
       {
         "feature": "HandoffResult",
-        "python": true,
-        "typescript": true,
-        "priority": "P0",
-        "effort": "low",
-        "status": "DONE",
-        "category": "agent"
-      },
-      {
-        "feature": "HandoffTimeoutError",
         "python": true,
         "typescript": true,
         "priority": "P0",
@@ -4155,6 +4122,15 @@
         "category": "bots"
       },
       {
+        "feature": "BudgetExceededError",
+        "python": true,
+        "typescript": true,
+        "priority": "P3",
+        "effort": "low",
+        "status": "DONE",
+        "category": "other"
+      },
+      {
         "feature": "CACHING_PRESETS",
         "python": true,
         "typescript": true,
@@ -4324,6 +4300,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "embedding"
+      },
+      {
+        "feature": "ErrorContextProtocol",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "medium",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "EscalationPipeline",
@@ -4497,6 +4482,42 @@
         "category": "config"
       },
       {
+        "feature": "HandoffCycleError",
+        "python": true,
+        "typescript": true,
+        "priority": "P3",
+        "effort": "low",
+        "status": "DONE",
+        "category": "other"
+      },
+      {
+        "feature": "HandoffDepthError",
+        "python": true,
+        "typescript": true,
+        "priority": "P3",
+        "effort": "low",
+        "status": "DONE",
+        "category": "other"
+      },
+      {
+        "feature": "HandoffError",
+        "python": true,
+        "typescript": true,
+        "priority": "P3",
+        "effort": "low",
+        "status": "DONE",
+        "category": "other"
+      },
+      {
+        "feature": "HandoffTimeoutError",
+        "python": true,
+        "typescript": true,
+        "priority": "P3",
+        "effort": "low",
+        "status": "DONE",
+        "category": "other"
+      },
+      {
         "feature": "Heartbeat",
         "python": true,
         "typescript": false,
@@ -4549,6 +4570,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "LLMError",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "LLMPluginProtocol",
@@ -4731,6 +4761,15 @@
         "category": "config"
       },
       {
+        "feature": "NetworkError",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "OUTPUT_PRESETS",
         "python": true,
         "typescript": true,
@@ -4864,6 +4903,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "PraisonAIError",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "PraisonConfig",
@@ -5037,6 +5085,15 @@
         "category": "config"
       },
       {
+        "feature": "ToolExecutionError",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "ToolPluginProtocol",
         "python": true,
         "typescript": true,
@@ -5062,6 +5119,15 @@
         "effort": "medium",
         "status": "DONE",
         "category": "trace"
+      },
+      {
+        "feature": "ValidationError",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "WEB_PRESETS",

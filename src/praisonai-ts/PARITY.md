@@ -7,18 +7,18 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 315 |
+| Python Core Features | 321 |
 | Python Wrapper Features | 99 |
 | TypeScript Features | 1192 |
-| **Gap Count** | **22** |
+| **Gap Count** | **28** |
 | P0 (Critical) | 1 |
 | P1 (High) | 0 |
 | P2 (Medium) | 0 |
-| P3 (Low) | 21 |
+| P3 (Low) | 27 |
 
 ## Gap Matrix
 
-### P0_CoreParity (57 done, 1 todo)
+### P0_CoreParity (52 done, 1 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -27,7 +27,6 @@
 | `AudioAgent` | ✅ | ✅ | high | ✅ DONE |
 | `AudioConfig` | ✅ | ✅ | low | ✅ DONE |
 | `BaseTool` | ✅ | ✅ | high | ✅ DONE |
-| `BudgetExceededError` | ✅ | ✅ | low | ✅ DONE |
 | `CodeAgent` | ✅ | ✅ | high | ✅ DONE |
 | `CodeConfig` | ✅ | ✅ | low | ✅ DONE |
 | `CodeExecutionStep` | ✅ | ✅ | high | ✅ DONE |
@@ -43,12 +42,8 @@
 | `FunctionTool` | ✅ | ✅ | high | ✅ DONE |
 | `Handoff` | ✅ | ✅ | high | ✅ DONE |
 | `HandoffConfig` | ✅ | ✅ | low | ✅ DONE |
-| `HandoffCycleError` | ✅ | ✅ | low | ✅ DONE |
-| `HandoffDepthError` | ✅ | ✅ | low | ✅ DONE |
-| `HandoffError` | ✅ | ✅ | low | ✅ DONE |
 | `HandoffInputData` | ✅ | ✅ | high | ✅ DONE |
 | `HandoffResult` | ✅ | ✅ | low | ✅ DONE |
-| `HandoffTimeoutError` | ✅ | ✅ | low | ✅ DONE |
 | `ImageAgent` | ✅ | ✅ | high | ✅ DONE |
 | `MCPCall` | ✅ | ✅ | high | ✅ DONE |
 | `OCRAgent` | ✅ | ✅ | high | ✅ DONE |
@@ -152,7 +147,7 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (175 done, 21 todo)
+### P3_Advanced (180 done, 27 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -162,19 +157,25 @@
 | `BotOSProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `ConsoleBackend` | ✅ | ❌ | high | ⏳ TODO |
 | `DoomLoopDetector` | ✅ | ❌ | high | ⏳ TODO |
+| `ErrorContextProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `EscalationPipeline` | ✅ | ❌ | high | ⏳ TODO |
 | `EscalationStage` | ✅ | ❌ | high | ⏳ TODO |
 | `Heartbeat` | ✅ | ❌ | high | ⏳ TODO |
 | `HeartbeatConfig` | ✅ | ❌ | low | ⏳ TODO |
+| `LLMError` | ✅ | ❌ | low | ⏳ TODO |
 | `LearnBackend` | ✅ | ❌ | high | ⏳ TODO |
 | `LearnManager` | ✅ | ❌ | high | ⏳ TODO |
 | `LearnManagerProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `LearnMode` | ✅ | ❌ | high | ⏳ TODO |
 | `LearnProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `LearnScope` | ✅ | ❌ | high | ⏳ TODO |
+| `NetworkError` | ✅ | ❌ | low | ⏳ TODO |
 | `ObservabilityEventType` | ✅ | ❌ | high | ⏳ TODO |
 | `ObservabilityHooks` | ✅ | ❌ | high | ⏳ TODO |
+| `PraisonAIError` | ✅ | ❌ | low | ⏳ TODO |
 | `StructuredFormatter` | ✅ | ❌ | high | ⏳ TODO |
+| `ToolExecutionError` | ✅ | ❌ | low | ⏳ TODO |
+| `ValidationError` | ✅ | ❌ | low | ⏳ TODO |
 | `configure\_structured\_logging` | ✅ | ❌ | low | ⏳ TODO |
 | `get\_logger` | ✅ | ❌ | low | ⏳ TODO |
 | `A2A` | ✅ | ✅ | low | ✅ DONE |
@@ -200,6 +201,7 @@
 | `BotMessage` | ✅ | ✅ | high | ✅ DONE |
 | `BotProtocol` | ✅ | ✅ | medium | ✅ DONE |
 | `BotUser` | ✅ | ✅ | high | ✅ DONE |
+| `BudgetExceededError` | ✅ | ✅ | low | ✅ DONE |
 | `CACHING\_PRESETS` | ✅ | ✅ | low | ✅ DONE |
 | `CONTEXT\_PRESETS` | ✅ | ✅ | low | ✅ DONE |
 | `CachingConfig` | ✅ | ✅ | low | ✅ DONE |
@@ -234,6 +236,10 @@
 | `GatewaySessionProtocol` | ✅ | ✅ | medium | ✅ DONE |
 | `GuardrailAction` | ✅ | ✅ | high | ✅ DONE |
 | `GuardrailConfig` | ✅ | ✅ | low | ✅ DONE |
+| `HandoffCycleError` | ✅ | ✅ | low | ✅ DONE |
+| `HandoffDepthError` | ✅ | ✅ | low | ✅ DONE |
+| `HandoffError` | ✅ | ✅ | low | ✅ DONE |
+| `HandoffTimeoutError` | ✅ | ✅ | low | ✅ DONE |
 | `HookPluginProtocol` | ✅ | ✅ | medium | ✅ DONE |
 | `HooksConfig` | ✅ | ✅ | low | ✅ DONE |
 | `KNOWLEDGE\_PRESETS` | ✅ | ✅ | low | ✅ DONE |
@@ -358,10 +364,10 @@
 **Path:** `/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents`
 
 <details>
-<summary><strong>agent</strong> (47 exports)</summary>
+<summary><strong>agent</strong> (42 exports)</summary>
 
 ```python
-from praisonaiagents import Agent, AudioAgent, AudioConfig, BudgetExceededError, CodeAgent, CodeConfig, CodeExecutionStep, ContextAgent, ContextPolicy, DeepResearchAgent...
+from praisonaiagents import Agent, AudioAgent, AudioConfig, CodeAgent, CodeConfig, CodeExecutionStep, ContextAgent, ContextPolicy, DeepResearchAgent, DeepResearchResponse...
 ```
 
 </details>
@@ -520,10 +526,10 @@ from praisonaiagents import obs
 </details>
 
 <details>
-<summary><strong>other</strong> (22 exports)</summary>
+<summary><strong>other</strong> (33 exports)</summary>
 
 ```python
-from praisonaiagents import Agents, AsyncLearnProtocol, AutonomyConfig, DoomLoopDetector, EscalationPipeline, EscalationStage, Heartbeat, HeartbeatConfig, LearnManager, LearnManagerProtocol...
+from praisonaiagents import Agents, AsyncLearnProtocol, AutonomyConfig, BudgetExceededError, DoomLoopDetector, ErrorContextProtocol, EscalationPipeline, EscalationStage, HandoffCycleError, HandoffDepthError...
 ```
 
 </details>
