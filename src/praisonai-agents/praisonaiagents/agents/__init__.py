@@ -6,7 +6,10 @@ AgentManager, Agents, PraisonAIAgents are silent aliases for backward compatibil
 from .agents import AgentTeam, AgentManager, Agents, PraisonAIAgents
 from .autoagents import AutoAgents
 from .auto_rag_agent import AutoRagAgent, AutoRagConfig, RetrievalPolicy
-from .protocols import MergeStrategyProtocol, FirstWinsMerge, ConcatMerge, DictMerge
+from .protocols import (
+    MergeStrategyProtocol, FirstWinsMerge, ConcatMerge, DictMerge,
+    TaskExecutorProtocol, ExecutionContext, TaskResult
+)
 
 __all__ = [
     'AgentTeam',  # Primary class (v1.0+)
@@ -16,4 +19,5 @@ __all__ = [
     'AutoAgents',
     'AutoRagAgent', 'AutoRagConfig', 'RetrievalPolicy',
     'MergeStrategyProtocol', 'FirstWinsMerge', 'ConcatMerge', 'DictMerge',
+    'TaskExecutorProtocol', 'ExecutionContext', 'TaskResult',
 ]

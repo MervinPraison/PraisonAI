@@ -1,5 +1,6 @@
 """Agent protocols for extensibility."""
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Awaitable, Dict, List, Optional, Protocol, runtime_checkable
+from dataclasses import dataclass
 
 
 @runtime_checkable
@@ -113,3 +114,72 @@ class DictMerge:
             else:
                 result[key] = value
         return result
+
+
+@dataclass
+class ExecutionContext:
+    """Unified context for task execution across sync/async boundaries.
+    
+    Contains all data needed for task execution to eliminate duplication
+    between sync and async execution paths.
+    """
+    task_id: int
+    task: Any  # Task object
+    executor_agent: Any  # Agent object
+    tools: List[Any]
+    task_description: str
+    context_text: str
+    task_prompt: str
+    llm: Any  # LLM instance
+    verbose: int = 0
+    stream: bool = False
+    user_id: Optional[str] = None
+
+
+@dataclass
+class TaskResult:
+    """Standardized result from task execution."""
+    task_output: Any  # TaskOutput object
+    success: bool
+    error: Optional[str] = None
+
+
+@runtime_checkable
+class TaskExecutorProtocol(Protocol):
+    """Protocol for unified task execution engine.
+    
+    Defines the interface for executing tasks in a unified way,
+    eliminating duplication between async and sync execution paths.
+    
+    The implementation should handle all business logic including:
+    - Task validation and status management
+    - Memory initialization and storage
+    - Agent execution with tools
+    - Output processing and result creation
+    
+    Example:
+        class MyTaskExecutor:
+            def execute_task_impl(self, context: ExecutionContext) -> TaskResult:
+                # Single implementation handles all execution logic
+                return TaskResult(task_output=result, success=True)
+                
+        # Check protocol compliance
+        assert isinstance(MyTaskExecutor(), TaskExecutorProtocol)
+    """
+    
+    def execute_task_impl(
+        self, 
+        context: ExecutionContext
+    ) -> Awaitable[TaskResult]:
+        """Execute a task with unified business logic.
+        
+        This method contains the single source of truth for task execution
+        logic, eliminating duplication between sync/async paths.
+        
+        Args:
+            context: All context data needed for execution
+            
+        Returns:
+            TaskResult containing the output and execution status
+        """
+        ...
