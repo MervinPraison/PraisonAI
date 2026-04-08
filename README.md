@@ -68,7 +68,6 @@ PraisonAI 🦞 — **Hire a 24/7 AI Workforce.** Stop writing boilerplate and st
 
 ---
 
-## ⚡ Performance
 ## 🚀 Meet your first Agent (Under 1 Minute)
 
 1. Install the lightweight core SDK:
@@ -598,6 +597,8 @@ agent.start('Write a movie script about a robot in Mars');
 ```
 
 ---
+
+## ⚡ Performance
 
 PraisonAI is built for speed, with agent instantiation in under 4μs. This reduces overhead, improves responsiveness, and helps multi-agent systems scale efficiently in real-world production workloads.
 
