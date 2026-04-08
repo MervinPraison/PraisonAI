@@ -59,6 +59,7 @@ _LAZY_IMPORTS = {
     # Protocols
     "ContextBuilderProtocol": ("praisonaiagents.rag.protocols", "ContextBuilderProtocol"),
     "CitationFormatterProtocol": ("praisonaiagents.rag.protocols", "CitationFormatterProtocol"),
+    "RetrievalStrategyProtocol": ("praisonaiagents.rag.protocols", "RetrievalStrategyProtocol"),
     # Pipeline (internal - use Agent for primary access)
     "RAG": ("praisonaiagents.rag.pipeline", "RAG"),
     # Context utilities
@@ -95,6 +96,6 @@ __all__ = list(_LAZY_IMPORTS.keys())
 
 if TYPE_CHECKING:
     from .models import Citation, ContextPack, RAGResult, RAGConfig
-    from .protocols import ContextBuilderProtocol, CitationFormatterProtocol
+    from .protocols import ContextBuilderProtocol, CitationFormatterProtocol, RetrievalStrategyProtocol
     from .pipeline import RAG
     from .context import build_context, truncate_context, deduplicate_chunks
