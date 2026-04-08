@@ -368,8 +368,16 @@ class TestGlobalPluginManager:
 class TestEntryPointsDiscovery:
     """Tests for entry_points plugin discovery."""
     
-    def test_discover_entry_points_no_plugins(self):
+    def test_discover_entry_points_no_plugins(self, monkeypatch):
         """Test entry_points discovery with no plugins installed."""
+        import importlib.metadata as metadata
+
+        def mock_entry_points(*args, **kwargs):
+            if kwargs.get("group") == "praisonaiagents.plugins":
+                return []
+            return {"praisonaiagents.plugins": []}
+
+        monkeypatch.setattr(metadata, "entry_points", mock_entry_points)
         manager = PluginManager()
         
         # Should return 0 when no entry_points exist for our group
@@ -379,13 +387,68 @@ class TestEntryPointsDiscovery:
     
     def test_discover_entry_points_import_error(self, monkeypatch):
         """Test graceful handling when importlib.metadata is not available."""
-        # Simulate ImportError by patching the import
-        def mock_import(*args, **kwargs):
-            raise ImportError("No module named importlib.metadata")
+        import sys
         
-        monkeypatch.setattr("builtins.__import__", mock_import)
+        # Remove importlib.metadata from sys.modules to simulate import failure
+        original_module = sys.modules.pop("importlib.metadata", None)
+        
+        # Mock the import to raise ImportError
+        import builtins
+        real_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "importlib.metadata":
+                raise ImportError("No module named importlib.metadata")
+            return real_import(name, *args, **kwargs)
+        
+        monkeypatch.setattr(builtins, "__import__", mock_import)
+        
+        try:
+            manager = PluginManager()
+            loaded = manager.discover_entry_points()
+            
+            assert loaded == 0
+        finally:
+            # Restore the module if it existed
+            if original_module is not None:
+                sys.modules["importlib.metadata"] = original_module
+    
+    def test_discover_entry_points_success(self, monkeypatch):
+        """Test successful entry_points discovery and plugin loading."""
+        import importlib.metadata as metadata
+        from praisonaiagents.plugins.base import Plugin, PluginInfo
+        
+        # Create a mock plugin class
+        class MockPlugin(Plugin):
+            @property
+            def info(self) -> PluginInfo:
+                return PluginInfo(
+                    name="test_plugin",
+                    version="1.0.0",
+                    description="Test plugin"
+                )
+        
+        # Create a mock entry point
+        class MockEntryPoint:
+            def __init__(self, name, plugin_class):
+                self.name = name
+                self._plugin_class = plugin_class
+            
+            def load(self):
+                return self._plugin_class
+        
+        mock_ep = MockEntryPoint("test_plugin", MockPlugin)
+        
+        def mock_entry_points(*args, **kwargs):
+            if kwargs.get("group") == "praisonaiagents.plugins":
+                return [mock_ep]
+            return {"praisonaiagents.plugins": [mock_ep]}
+        
+        monkeypatch.setattr(metadata, "entry_points", mock_entry_points)
         
         manager = PluginManager()
         loaded = manager.discover_entry_points()
         
-        assert loaded == 0
+        assert loaded == 1
+        assert "test_plugin" in manager._plugins
+        assert manager._plugins["test_plugin"].__class__ == MockPlugin

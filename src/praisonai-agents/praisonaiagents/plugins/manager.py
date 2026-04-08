@@ -57,23 +57,24 @@ class PluginManager:
         Returns:
             True if registered successfully
         """
-        try:
-            info = plugin.info
-            if info.name in self._plugins:
-                logger.warning(f"Plugin '{info.name}' already registered")
+        with self._lock:
+            try:
+                info = plugin.info
+                if info.name in self._plugins:
+                    logger.warning(f"Plugin '{info.name}' already registered")
+                    return False
+                
+                self._plugins[info.name] = plugin
+                self._enabled[info.name] = True
+                
+                # Initialize plugin
+                plugin.on_init({})
+                
+                logger.info(f"Registered plugin: {info.name} v{info.version}")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to register plugin: {e}")
                 return False
-            
-            self._plugins[info.name] = plugin
-            self._enabled[info.name] = True
-            
-            # Initialize plugin
-            plugin.on_init({})
-            
-            logger.info(f"Registered plugin: {info.name} v{info.version}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to register plugin: {e}")
-            return False
     
     def unregister(self, name: str) -> bool:
         """
@@ -434,27 +435,43 @@ class PluginManager:
         Returns:
             Number of plugins loaded
         """
-        try:
-            if sys.version_info >= (3, 10):
-                from importlib.metadata import entry_points
-                eps = entry_points(group="praisonaiagents.plugins")
-            else:
-                from importlib.metadata import entry_points
-                eps = entry_points().get("praisonaiagents.plugins", [])
-        except ImportError:
-            logger.warning("importlib.metadata not available - cannot discover entry_points plugins")
+        # Lazy import to reduce startup time
+        def _get_entry_points():
+            try:
+                from importlib.metadata import entry_points as _ep
+                return _ep
+            except ImportError:
+                logger.warning("importlib.metadata not available - cannot discover entry_points plugins")
+                return None
+        
+        get_ep = _get_entry_points()
+        if get_ep is None:
             return 0
+            
+        try:
+            # Python 3.10+ style - try group= first
+            eps = get_ep(group="praisonaiagents.plugins")
+        except TypeError:
+            # Python 3.9 fallback - call then get group
+            try:
+                all_eps = get_ep()
+                eps = all_eps.get("praisonaiagents.plugins", [])
+            except Exception:
+                eps = []
 
         loaded = 0
-        for ep in eps:
-            try:
-                plugin_class = ep.load()
-                plugin = plugin_class()
-                if self.register(plugin):
-                    loaded += 1
-                    logger.info(f"Loaded entry_point plugin: {ep.name}")
-            except Exception as e:
-                logger.error(f"Failed to load entry_point plugin {ep.name}: {e}")
+        # Use lock to ensure thread-safe discovery of multiple entry points
+        with self._lock:
+            for ep in eps:
+                try:
+                    plugin_class = ep.load()
+                    plugin = plugin_class()
+                    # register() also acquires lock but that's fine (RLock allows re-entry)
+                    if self.register(plugin):
+                        loaded += 1
+                        logger.info(f"Loaded entry_point plugin: {ep.name}")
+                except Exception as e:
+                    logger.error(f"Failed to load entry_point plugin {ep.name}: {e}")
         
         return loaded
 
