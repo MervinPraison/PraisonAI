@@ -98,6 +98,38 @@ def __getattr__(name):
         from .llm import TokenUsage
         _lazy_cache[name] = TokenUsage
         return TokenUsage
+    elif name == "LLMProviderProtocol":
+        from .protocols import LLMProviderProtocol
+        _lazy_cache[name] = LLMProviderProtocol
+        return LLMProviderProtocol
+    elif name == "ModelCapabilitiesProtocol":
+        from .protocols import ModelCapabilitiesProtocol
+        _lazy_cache[name] = ModelCapabilitiesProtocol
+        return ModelCapabilitiesProtocol
+    elif name == "LLMRateLimiterProtocol":
+        from .protocols import LLMRateLimiterProtocol
+        _lazy_cache[name] = LLMRateLimiterProtocol
+        return LLMRateLimiterProtocol
+    elif name == "LLMFailoverProtocol":
+        from .protocols import LLMFailoverProtocol
+        _lazy_cache[name] = LLMFailoverProtocol
+        return LLMFailoverProtocol
+    elif name == "LLMProviderError":
+        from .protocols import LLMProviderError
+        _lazy_cache[name] = LLMProviderError
+        return LLMProviderError
+    elif name == "RateLimitError":
+        from .protocols import RateLimitError
+        _lazy_cache[name] = RateLimitError
+        return RateLimitError
+    elif name == "ModelNotAvailableError":
+        from .protocols import ModelNotAvailableError
+        _lazy_cache[name] = ModelNotAvailableError
+        return ModelNotAvailableError
+    elif name == "ContextLengthExceededError":
+        from .protocols import ContextLengthExceededError
+        _lazy_cache[name] = ContextLengthExceededError
+        return ContextLengthExceededError
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -122,5 +154,15 @@ __all__ = [
     "TaskComplexity",
     "create_routing_agent",
     "RateLimiter",
-    "TokenUsage"
+    "TokenUsage",
+    # Protocols
+    "LLMProviderProtocol",
+    "ModelCapabilitiesProtocol",
+    "LLMRateLimiterProtocol",
+    "LLMFailoverProtocol",
+    # Exceptions
+    "LLMProviderError",
+    "RateLimitError",
+    "ModelNotAvailableError",
+    "ContextLengthExceededError"
 ]
