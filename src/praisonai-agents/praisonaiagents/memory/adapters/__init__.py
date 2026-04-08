@@ -24,11 +24,22 @@ from .registry import (
     get_memory_adapter,
     list_memory_adapters,
     get_first_available_memory_adapter,
+    has_memory_adapter,
+)
+from .factories import (
+    create_mem0_memory_adapter,
+    create_chroma_memory_adapter,
+    create_mongodb_memory_adapter,
 )
 
 # Register core adapters
 register_memory_adapter("sqlite", SqliteMemoryAdapter)
 register_memory_adapter("in_memory", InMemoryAdapter)
+
+# Register heavy adapter factories (lazy-loaded)
+register_memory_factory("mem0", create_mem0_memory_adapter)
+register_memory_factory("chroma", create_chroma_memory_adapter)
+register_memory_factory("mongodb", create_mongodb_memory_adapter)
 
 __all__ = [
     'SqliteMemoryAdapter',
@@ -38,4 +49,5 @@ __all__ = [
     'get_memory_adapter',
     'list_memory_adapters',
     'get_first_available_memory_adapter',
+    'has_memory_adapter',
 ]

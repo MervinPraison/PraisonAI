@@ -14,159 +14,20 @@ from .storage import StorageMixin
 from .search import SearchMixin
 from .core import MemoryCoreMixin
 
+# Protocol-driven imports (AGENTS.md compliant)
+from .protocols import MemoryProtocol
+from .adapters import get_memory_adapter, get_first_available_memory_adapter
+from .adapters.sqlite_adapter import SqliteMemoryAdapter
+
 # Disable litellm telemetry before any imports
 os.environ["LITELLM_TELEMETRY"] = "False"
 
 # Set up logger using centralized logging utility
-# Keep existing custom TRACE level functionality for this module
-from .._logging import get_logger
 logger = get_logger(__name__, extra_data={"subsystem": "memory"})
 
 # Add custom TRACE level (below DEBUG)
 TRACE_LEVEL = 5
 logging.addLevelName(TRACE_LEVEL, 'TRACE')
-
-# Thread-safe lazy imports using proper thread synchronization
-import threading
-
-# Thread-safe import cache
-_import_lock = threading.Lock()
-_module_cache = {}
-
-def _check_chromadb():
-    """Thread-safe lazy check for chromadb availability."""
-    if "chromadb" in _module_cache:
-        return _module_cache["chromadb"]["available"]
-    
-    with _import_lock:
-        if "chromadb" in _module_cache:
-            return _module_cache["chromadb"]["available"]
-        
-        try:
-            import chromadb
-            from chromadb.config import Settings as ChromaSettings
-            _module_cache["chromadb"] = {
-                "available": True,
-                "module": chromadb,
-                "settings": ChromaSettings
-            }
-        except ImportError:
-            _module_cache["chromadb"] = {"available": False}
-        
-        return _module_cache["chromadb"]["available"]
-
-def _get_chromadb():
-    """Get chromadb module and settings (thread-safe lazy load)."""
-    if not _check_chromadb():
-        raise ImportError("chromadb is required. Install with: pip install chromadb")
-    return _module_cache["chromadb"]["module"], _module_cache["chromadb"]["settings"]
-
-def _check_mem0():
-    """Thread-safe lazy check for mem0 availability."""
-    if "mem0" in _module_cache:
-        return _module_cache["mem0"]["available"]
-    
-    with _import_lock:
-        if "mem0" in _module_cache:
-            return _module_cache["mem0"]["available"]
-        
-        try:
-            import mem0
-            _module_cache["mem0"] = {
-                "available": True,
-                "module": mem0
-            }
-        except ImportError:
-            _module_cache["mem0"] = {"available": False}
-        
-        return _module_cache["mem0"]["available"]
-
-def _get_mem0():
-    """Get mem0 module (thread-safe lazy load)."""
-    if not _check_mem0():
-        raise ImportError("mem0 is required. Install with: pip install mem0ai")
-    return _module_cache["mem0"]["module"]
-
-def _check_openai():
-    """Thread-safe lazy check for openai availability."""
-    if "openai" in _module_cache:
-        return _module_cache["openai"]["available"]
-    
-    with _import_lock:
-        if "openai" in _module_cache:
-            return _module_cache["openai"]["available"]
-        
-        try:
-            import openai
-            _module_cache["openai"] = {
-                "available": True,
-                "module": openai
-            }
-        except ImportError:
-            _module_cache["openai"] = {"available": False}
-        
-        return _module_cache["openai"]["available"]
-
-def _get_openai():
-    """Get openai module (thread-safe lazy load)."""
-    if not _check_openai():
-        raise ImportError("openai is required. Install with: pip install openai")
-    return _module_cache["openai"]["module"]
-
-def _check_litellm():
-    """Thread-safe lazy check for litellm availability."""
-    if "litellm" in _module_cache:
-        return _module_cache["litellm"]["available"]
-    
-    with _import_lock:
-        if "litellm" in _module_cache:
-            return _module_cache["litellm"]["available"]
-        
-        try:
-            import litellm
-            litellm.telemetry = False
-            _module_cache["litellm"] = {
-                "available": True,
-                "module": litellm
-            }
-        except ImportError:
-            _module_cache["litellm"] = {"available": False}
-        
-        return _module_cache["litellm"]["available"]
-
-def _get_litellm():
-    """Get litellm module (thread-safe lazy load)."""
-    if not _check_litellm():
-        raise ImportError("litellm is required. Install with: pip install litellm")
-    return _module_cache["litellm"]["module"]
-
-def _check_pymongo():
-    """Thread-safe lazy check for pymongo availability."""
-    if "pymongo" in _module_cache:
-        return _module_cache["pymongo"]["available"]
-    
-    with _import_lock:
-        if "pymongo" in _module_cache:
-            return _module_cache["pymongo"]["available"]
-        
-        try:
-            import pymongo
-            from pymongo import MongoClient
-            _module_cache["pymongo"] = {
-                "available": True,
-                "module": pymongo,
-                "client": MongoClient
-            }
-        except ImportError:
-            _module_cache["pymongo"] = {"available": False}
-        
-        return _module_cache["pymongo"]["available"]
-
-def _get_pymongo():
-    """Get pymongo module and MongoClient (thread-safe lazy load)."""
-    if not _check_pymongo():
-        raise ImportError("pymongo is required. Install with: pip install pymongo")
-    return _module_cache["pymongo"]["module"], _module_cache["pymongo"]["client"]
 
 
 
@@ -236,41 +97,96 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
         self.cfg = config or {}
         self.verbose = verbose
         
-        # Thread-local storage for SQLite connections (thread-safe)
-        self._local = threading.local()
-        
-        # Write lock for serializing database modifications (thread-safe)
-        self._write_lock = threading.Lock()
-        
-        # Connection registry for cleanup across threads (use regular set with careful cleanup)
-        self._all_connections = set()
-        self._connection_lock = threading.Lock()  # Protect the connection registry
-        
         # Set logger level based on verbose
         if verbose >= 5:
             logger.setLevel(10)  # DEBUG
         else:
             logger.setLevel(30)  # WARNING
 
-        # Also set ChromaDB and OpenAI client loggers to WARNING
-        import logging as _logging
-        get_logger('chromadb').setLevel(_logging.WARNING)
-        get_logger('openai').setLevel(_logging.WARNING)
-        get_logger('httpx').setLevel(_logging.WARNING)
-        get_logger('httpcore').setLevel(_logging.WARNING)
-        get_logger('chromadb.segment.impl.vector.local_persistent_hnsw').setLevel(_logging.ERROR)
-        get_logger('utils').setLevel(_logging.WARNING)
-        get_logger('litellm.utils').setLevel(logging.WARNING)
-            
-        self.provider = self.cfg.get("provider", "rag")
-        self.use_mem0 = (self.provider.lower() == "mem0") and _check_mem0()
-        self.use_rag = (self.provider.lower() == "rag") and _check_chromadb() and self.cfg.get("use_embedding", False)
-        self.use_mongodb = (self.provider.lower() == "mongodb") and _check_pymongo()
-        self.graph_enabled = False  # Initialize graph support flag
+        # Suppress noisy loggers from dependencies
+        self._configure_dependency_logging()
+        
+        # Initialize core protocol-driven memory system
+        self._init_protocol_driven_memory()
+        
+        # Backward compatibility: Initialize SQLite-based STM/LTM for legacy API
+        self._init_legacy_compatibility()
+        
+        # Initialize learning manager if configured
         self._learn_manager = None  # Lazy-loaded LearnManager
         self._learn_config = self.cfg.get("learn", None)  # Learn configuration
+
+    def _configure_dependency_logging(self):
+        """Suppress verbose logging from heavy dependencies."""
+        import logging as _logging
+        for logger_name in [
+            'chromadb', 'openai', 'httpx', 'httpcore', 'litellm.utils',
+            'chromadb.segment.impl.vector.local_persistent_hnsw', 'utils'
+        ]:
+            get_logger(logger_name).setLevel(_logging.WARNING)
+
+    def _init_protocol_driven_memory(self):
+        """Initialize memory using adapter registry (protocol-driven approach)."""
+        # Determine provider preference
+        provider = self.cfg.get("provider", "rag").lower()
+        self._log_verbose(f"Requested memory provider: {provider}")
         
-        # Extract embedding model from config
+        # Map legacy provider names to adapter names
+        provider_mapping = {
+            "rag": "chroma",  # Legacy "rag" provider uses ChromaDB
+            "mem0": "mem0",
+            "mongodb": "mongodb",
+            "sqlite": "sqlite",
+            "none": "in_memory"
+        }
+        
+        adapter_name = provider_mapping.get(provider, provider)
+        
+        # Try to get preferred adapter, fallback to available ones
+        try:
+            adapter_config = self._get_adapter_config_for_provider(adapter_name)
+            adapter = get_memory_adapter(adapter_name, **adapter_config)
+        except RuntimeError as exc:
+            self._log_verbose(
+                f"Failed to initialize '{adapter_name}': {exc}",
+                logging.WARNING,
+            )
+            adapter = None
+        
+        if adapter is None:
+            # Fallback to first available adapter
+            self._log_verbose(f"Provider '{adapter_name}' not available, trying fallbacks")
+            # Try each fallback preference individually
+            for fallback_provider in ["sqlite", "in_memory"]:
+                try:
+                    fallback_config = self._get_adapter_config_for_provider(fallback_provider)
+                    adapter = get_memory_adapter(fallback_provider, **fallback_config)
+                    if adapter:
+                        adapter_name = fallback_provider
+                        self._log_verbose(f"Using fallback adapter: {adapter_name}")
+                        break
+                except Exception as e:
+                    self._log_verbose(f"Fallback {fallback_provider} failed: {e}")
+                    continue
+            
+            if not adapter:
+                raise RuntimeError("No memory adapters available")
+        
+        # Store adapter and metadata
+        self.memory_adapter = adapter
+        self.provider = adapter_name
+        self._log_verbose(f"Initialized memory adapter: {adapter_name}")
+        
+        # Set legacy flags for backward compatibility
+        self.use_mem0 = (adapter_name == "mem0")
+        self.use_rag = (adapter_name == "chroma") 
+        self.use_mongodb = (adapter_name == "mongodb")
+        self.use_embedding = adapter_name in ['chroma', 'mongodb']
+        
+        # Check if adapter supports advanced features
+        self.graph_enabled = hasattr(adapter, 'graph_enabled') and adapter.graph_enabled
+        
+        # Extract embedding model for legacy compatibility
         self.embedder_config = self.cfg.get("embedder", {})
         if isinstance(self.embedder_config, dict):
             embedder_model_config = self.embedder_config.get("config", {})
@@ -278,32 +194,86 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
         else:
             self.embedding_model = "text-embedding-3-small"
         
-        self._log_verbose(f"Using embedding model: {self.embedding_model}")
-
-        # Determine embedding dimensions based on model
+        # Determine embedding dimensions for legacy compatibility
         self.embedding_dimensions = self._get_embedding_dimensions(self.embedding_model)
-        self._log_verbose(f"Using embedding dimensions: {self.embedding_dimensions}")
 
-        # Create project data directory if it doesn't exist
+    def _get_adapter_config(self) -> Dict[str, Any]:
+        """Get configuration for adapter initialization."""
+        # Only include adapter-relevant configuration
+        config = {}
+        
+        # Add embedding model configuration
+        embedder_config = self.cfg.get("embedder", {})
+        if isinstance(embedder_config, dict):
+            embedder_model_config = embedder_config.get("config", {})
+            config["embedding_model"] = embedder_model_config.get("model", "text-embedding-3-small")
+        else:
+            config["embedding_model"] = "text-embedding-3-small"
+        
+        # Add project data directory paths for file-based adapters
         from ..paths import get_project_data_dir
-        _project_data = str(get_project_data_dir())
-        os.makedirs(_project_data, exist_ok=True)
+        project_data = str(get_project_data_dir())
+        os.makedirs(project_data, exist_ok=True)
+        
+        config["short_db"] = self.cfg.get("short_db", os.path.join(project_data, "short_term.db"))
+        config["long_db"] = self.cfg.get("long_db", os.path.join(project_data, "long_term.db"))
+        config["rag_db_path"] = self.cfg.get("rag_db_path", os.path.join(project_data, "chroma_db"))
+        config["verbose"] = self.verbose
+        
+        # Add specific configurations for different adapters
+        if "config" in self.cfg:
+            config["config"] = self.cfg["config"]
+        
+        return config
 
-        # Short-term DB
-        self.short_db = self.cfg.get("short_db", os.path.join(_project_data, "short_term.db"))
-        self._init_stm()
+    def _get_adapter_config_for_provider(self, provider_name: str) -> Dict[str, Any]:
+        """Get configuration tailored for specific provider."""
+        base_config = self._get_adapter_config()
+        
+        # Filter configuration based on provider requirements
+        if provider_name == "sqlite":
+            return {
+                "short_db": base_config["short_db"],
+                "long_db": base_config["long_db"],
+                "verbose": base_config["verbose"]
+            }
+        elif provider_name == "in_memory":
+            return {
+                "verbose": base_config.get("verbose", 0)
+            }
+        elif provider_name in ["mem0", "chroma", "mongodb"]:
+            # Factory-based adapters accept full config
+            return base_config
+        else:
+            # Default: return base config and let adapter handle filtering
+            return base_config
 
-        # Long-term DB
-        self.long_db = self.cfg.get("long_db", os.path.join(_project_data, "long_term.db"))
-        self._init_ltm()
-
-        # Conditionally init Mem0, MongoDB, or local RAG
-        if self.use_mem0:
-            self._init_mem0()
-        elif self.use_mongodb:
-            self._init_mongodb()
-        elif self.use_rag:
-            self._init_chroma()
+    def _init_legacy_compatibility(self):
+        """Initialize legacy compatibility layer for direct SQLite access."""
+        # For backward compatibility, maintain direct SQLite connections
+        # This ensures existing code that accesses _get_stm_conn() still works
+        from ..paths import get_project_data_dir
+        project_data = str(get_project_data_dir())
+        
+        self.short_db = self.cfg.get("short_db", os.path.join(project_data, "short_term.db"))
+        self.long_db = self.cfg.get("long_db", os.path.join(project_data, "long_term.db"))
+        
+        # Only create separate SQLite adapter if primary adapter is not SQLite
+        if self.provider != "sqlite":
+            self._sqlite_adapter = SqliteMemoryAdapter(
+                short_db=self.short_db,
+                long_db=self.long_db,
+                verbose=self.verbose
+            )
+        else:
+            # Reuse the primary adapter
+            self._sqlite_adapter = self.memory_adapter
+        
+        # Thread-local storage and locks (for legacy compatibility)
+        self._local = self._sqlite_adapter._local
+        self._write_lock = self._sqlite_adapter._write_lock
+        self._all_connections = self._sqlite_adapter._all_connections
+        self._connection_lock = self._sqlite_adapter._connection_lock
 
     def _get_stm_conn(self):
         """Get thread-local short-term memory SQLite connection."""

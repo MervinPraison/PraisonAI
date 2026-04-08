@@ -70,14 +70,18 @@ class Knowledge:
             
             # Disable OpenAI API request logging
             get_logger('openai').setLevel(logging.WARNING)
+            
+        # Initialize provider using protocol-driven approach
+        self._provider = None
 
-    @cached_property
+    @cached_property 
     def _deps(self):
+        """Lazy load dependencies only when needed (backward compatibility)."""
+        # This is kept for backward compatibility with existing code
+        # The new protocol-driven approach uses adapters via registry
         try:
             from markitdown import MarkItDown
-            import chromadb
             return {
-                'chromadb': chromadb,
                 'markdown': MarkItDown()
             }
         except ImportError:
@@ -94,14 +98,13 @@ class Knowledge:
         from ..paths import get_project_data_dir
         persist_dir = str(get_project_data_dir())
 
-        # Create persistent client config
+        # Create persistent client config (protocol-driven)
         base_config = {
             "vector_store": {
                 "provider": "chroma",
                 "config": {
                     "collection_name": default_collection,
                     "path": persist_dir,
-                    "client": self._deps['chromadb'].PersistentClient(path=persist_dir),
                     "host": None,
                     "port": None
                 }
@@ -190,16 +193,51 @@ class Knowledge:
 
     @cached_property
     def memory(self):
-        # Check if MongoDB provider is specified
-        if (self.config.get("vector_store", {}).get("provider") == "mongodb"):
-            try:
-                from .adapters import MongoDBKnowledgeAdapter
-                return MongoDBKnowledgeAdapter(self.config)
-            except Exception as e:
-                logger.error(f"Failed to initialize MongoDB adapter: {e}")
-                # Fall back to default memory
-                pass
+        """Initialize knowledge adapter using protocol-driven approach."""
+        # Import registry functions
+        from .adapters import get_knowledge_adapter, get_first_available_knowledge_adapter
         
+        # Determine provider preference
+        provider = self.config.get("vector_store", {}).get("provider", "mem0")
+        self._log(f"Requested knowledge provider: {provider}")
+        
+        # Map legacy provider names to adapter names
+        provider_mapping = {
+            "chroma": "chroma",
+            "mongodb": "mongodb", 
+            "mem0": "mem0",
+            "sqlite": "sqlite"
+        }
+        
+        adapter_name = provider_mapping.get(provider, "mem0")
+        
+        # Try to get preferred adapter, fallback to available ones
+        try:
+            adapter = get_knowledge_adapter(adapter_name, config=self.config, verbose=self._verbose)
+        except Exception as e:
+            self._log(f"Failed to initialize '{adapter_name}': {e}")
+            adapter = None
+        
+        if adapter is None:
+            # Fallback to first available adapter
+            self._log(f"Provider '{adapter_name}' not available, trying fallbacks")
+            fallback_result = get_first_available_knowledge_adapter(
+                preferences=["sqlite", "mem0"],
+                config=self.config,
+                verbose=self._verbose
+            )
+            if fallback_result:
+                adapter_name, adapter = fallback_result
+                self._log(f"Using fallback knowledge adapter: {adapter_name}")
+            else:
+                # Final fallback: try legacy mem0 approach for backward compatibility
+                return self._init_legacy_memory()
+        
+        self._log(f"Initialized knowledge adapter: {adapter_name}")
+        return adapter
+        
+    def _init_legacy_memory(self):
+        """Legacy fallback memory initialization for backward compatibility."""
         # Prepare config for mem0 (strip PraisonAI-specific fields)
         mem0_config = self._prepare_mem0_config(self.config)
         
@@ -500,10 +538,16 @@ class Knowledge:
                             elif isinstance(memory_result, list):
                                 all_results.extend(memory_result)
                             else:
-                                # Log warning for unexpected types but don't break
-                                import logging
-                                logging.warning(f"Unexpected memory_result type: {type(memory_result)}, skipping")
-                        progress.advance(store_task)
+                                from .models import AddResult
+                                if isinstance(memory_result, AddResult):
+                                    all_results.append(memory_result.id)
+                                elif hasattr(memory_result, 'results'):
+                                    all_results.extend(memory_result.results)
+                                else:
+                                    # Log warning for unexpected types but don't break
+                                    import logging
+                                    logging.warning(f"Unexpected memory_result type: {type(memory_result)}, skipping")
+                            progress.advance(store_task)
 
             # Emit trace event for knowledge add
             self._emit_knowledge_event("add", source=input_path, chunk_count=len(memories), 

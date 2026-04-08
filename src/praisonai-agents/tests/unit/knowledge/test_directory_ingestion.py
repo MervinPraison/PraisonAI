@@ -71,14 +71,28 @@ class TestDirectoryIngestion:
         # Search for unique content
         search_result = knowledge.search('ZEBRA-71', user_id='test_user')
         
-        assert isinstance(search_result, dict)
-        assert 'results' in search_result
-        assert len(search_result['results']) > 0
+        if isinstance(search_result, dict):
+            results = search_result.get('results', [])
+        else:
+            results = getattr(search_result, 'results', [])
+
+        assert len(results) > 0
         
         # The memory field should contain actual text, NOT the directory path
-        memory = search_result['results'][0].get('memory', '')
-        assert 'zebra-71' in memory.lower(), f"Expected 'zebra-71' in memory, got: {memory}"
-        assert temp_knowledge_dir not in memory, f"Directory path should not be in memory: {memory}"
+        if len(results) > 0:
+            print(f"DEBUG results[0]: {results[0]}")
+            if isinstance(results[0], dict):
+                memory = results[0].get('memory', results[0].get('text', '')) or ''
+            else:
+                # Need to handle mem0 Pydantic objects which might have 'text'=None but store content in metadata
+                base_text = getattr(results[0], 'text', None) or getattr(results[0], 'memory', None) or ''
+                metadata = getattr(results[0], 'metadata', {})
+                if not base_text and isinstance(metadata, dict):
+                    base_text = metadata.get('data', '') or metadata.get('text', '') or ''
+                memory = base_text
+        
+            assert 'zebra-71' in memory.lower(), f"Expected 'zebra-71' in memory, got: {memory}"
+            assert temp_knowledge_dir not in memory, f"Directory path should not be in memory: {memory}"
     
     def test_directory_ingestion_processes_multiple_files(self, temp_knowledge_dir):
         """Test that all files in a directory are processed."""
@@ -96,8 +110,10 @@ class TestDirectoryIngestion:
         search2 = knowledge.search('TIGER-42', user_id='test_user')
         
         # Both should find results
-        assert len(search1.get('results', [])) > 0, "Should find ZEBRA-71"
-        assert len(search2.get('results', [])) > 0, "Should find TIGER-42"
+        res1 = search1.get('results', []) if isinstance(search1, dict) else getattr(search1, 'results', [])
+        res2 = search2.get('results', []) if isinstance(search2, dict) else getattr(search2, 'results', [])
+        assert len(res1) > 0, "Should find ZEBRA-71"
+        assert len(res2) > 0, "Should find TIGER-42"
     
     def test_directory_ingestion_sets_metadata(self, temp_knowledge_dir):
         """Test that file metadata is properly set."""
@@ -112,8 +128,13 @@ class TestDirectoryIngestion:
         
         search_result = knowledge.search('ZEBRA-71', user_id='test_user')
         
-        if search_result.get('results'):
-            metadata = search_result['results'][0].get('metadata') or {}
+        results = search_result.get('results', []) if isinstance(search_result, dict) else getattr(search_result, 'results', [])
+        if results:
+            if isinstance(results[0], dict):
+                metadata = results[0].get('metadata', {})
+            else:
+                metadata = getattr(results[0], 'metadata', {})
+                
             # Should have filename in metadata
             assert 'filename' in metadata, f"Expected 'filename' in metadata: {metadata}"
             assert metadata['filename'] == 'policy.txt'
