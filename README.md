@@ -118,6 +118,119 @@ Start simple with the core SDK, or expand to full visual builders and dashboards
 npm install praisonai
 ```
 
+## 🧠 Supported Providers & Features
+
+Powered by 100+ LLMs (OpenAI, Anthropic, Gemini & local models).
+
+<p align="center">
+<img src="https://img.shields.io/badge/OpenAI-412991?style=flat&logo=openai&logoColor=white" alt="OpenAI" />
+<img src="https://img.shields.io/badge/Anthropic-191919?style=flat&logo=anthropic&logoColor=white" alt="Anthropic" />
+<img src="https://img.shields.io/badge/Google_Gemini-4285F4?style=flat&logo=google&logoColor=white" alt="Google Gemini" />
+<img src="https://img.shields.io/badge/DeepSeek-566AB2?style=flat" alt="DeepSeek" />
+<img src="https://img.shields.io/badge/Azure-0078D4?style=flat&logo=microsoftazure&logoColor=white" alt="Azure" />
+<img src="https://img.shields.io/badge/Ollama-000000?style=flat" alt="Ollama" />
+<img src="https://img.shields.io/badge/Groq-F05237?style=flat" alt="Groq" />
+<img src="https://img.shields.io/badge/Mistral-FF7000?style=flat" alt="Mistral" />
+<img src="https://img.shields.io/badge/Cerebras-F05A28?style=flat" alt="Cerebras" />
+<img src="https://img.shields.io/badge/Cohere-39594D?style=flat" alt="Cohere" />
+<img src="https://img.shields.io/badge/OpenRouter-6467F2?style=flat" alt="OpenRouter" />
+<img src="https://img.shields.io/badge/Perplexity-20808D?style=flat" alt="Perplexity" />
+<img src="https://img.shields.io/badge/Fireworks-FF6B35?style=flat" alt="Fireworks" />
+<img src="https://img.shields.io/badge/AWS_Bedrock-FF9900?style=flat&logo=amazonaws&logoColor=white" alt="AWS Bedrock" />
+<img src="https://img.shields.io/badge/xAI_Grok-000000?style=flat" alt="xAI Grok" />
+<img src="https://img.shields.io/badge/Vertex_AI-4285F4?style=flat&logo=googlecloud&logoColor=white" alt="Vertex AI" />
+<img src="https://img.shields.io/badge/HuggingFace-FFD21E?style=flat&logo=huggingface&logoColor=black" alt="HuggingFace" />
+<img src="https://img.shields.io/badge/Together_AI-000000?style=flat" alt="Together AI" />
+<img src="https://img.shields.io/badge/Databricks-FF3621?style=flat&logo=databricks&logoColor=white" alt="Databricks" />
+<img src="https://img.shields.io/badge/Replicate-262626?style=flat" alt="Replicate" />
+<img src="https://img.shields.io/badge/Cloudflare-F38020?style=flat&logo=cloudflare&logoColor=white" alt="Cloudflare" />
+</p>
+
+<details>
+<summary><strong>View all 24 providers with examples</strong></summary>
+
+| Provider | Example |
+|----------|:-------:|
+| OpenAI | [Example](examples/python/providers/openai/openai_gpt4_example.py) |
+| Anthropic | [Example](examples/python/providers/anthropic/anthropic_claude_example.py) |
+| Google Gemini | [Example](examples/python/providers/google/google_gemini_example.py) |
+| Ollama | [Example](examples/python/providers/ollama/ollama-agents.py) |
+| Groq | [Example](examples/python/providers/groq/kimi_with_groq_example.py) |
+| DeepSeek | [Example](examples/python/providers/deepseek/deepseek_example.py) |
+| xAI Grok | [Example](examples/python/providers/xai/xai_grok_example.py) |
+| Mistral | [Example](examples/python/providers/mistral/mistral_example.py) |
+| Cohere | [Example](examples/python/providers/cohere/cohere_example.py) |
+| Perplexity | [Example](examples/python/providers/perplexity/perplexity_example.py) |
+| Fireworks | [Example](examples/python/providers/fireworks/fireworks_example.py) |
+| Together AI | [Example](examples/python/providers/together/together_ai_example.py) |
+| OpenRouter | [Example](examples/python/providers/openrouter/openrouter_example.py) |
+| HuggingFace | [Example](examples/python/providers/huggingface/huggingface_example.py) |
+| Azure OpenAI | [Example](examples/python/providers/azure/azure_openai_example.py) |
+| AWS Bedrock | [Example](examples/python/providers/aws/aws_bedrock_example.py) |
+| Google Vertex | [Example](examples/python/providers/vertex/vertex_example.py) |
+| Databricks | [Example](examples/python/providers/databricks/databricks_example.py) |
+| Cloudflare | [Example](examples/python/providers/cloudflare/cloudflare_example.py) |
+| AI21 | [Example](examples/python/providers/ai21/ai21_example.py) |
+| Replicate | [Example](examples/python/providers/replicate/replicate_example.py) |
+| SageMaker | [Example](examples/python/providers/sagemaker/sagemaker_example.py) |
+| Moonshot | [Example](examples/python/providers/moonshot/moonshot_example.py) |
+| vLLM | [Example](examples/python/providers/vllm/vllm_example.py) |
+
+</details>
+
+<div align="center">
+  <a href="https://x.com/elonmusk/status/1893870468249141688" target="_blank">
+    <img src=".github/images/elon_musk_praisonai.png" alt="Highlighted by Elon Musk" width="600" />
+  </a>
+  <p><em>"Grok 3 customer support" — <a href="https://x.com/elonmusk/status/1893870468249141688">Elon Musk quoting PraisonAI's tutorial</a></em></p>
+</div>
+<br>
+
+---
+
+## 🌟 Why PraisonAI?
+
+| | Feature | How |
+|--|---------|-----|
+| 🔌 | **MCP Protocol** — stdio, HTTP, WebSocket, SSE | `tools=MCP("npx ...")` |
+| 🧠 | **Planning Mode** — plan → execute → reason | `planning=True` |
+| 🔍 | **Deep Research** — multi-step autonomous research | [Docs](https://docs.praison.ai/docs/agents/deep-research) |
+| 🤖 | **External Agents** — orchestrate Claude Code, Gemini CLI, Codex | [Docs](https://docs.praison.ai/docs/code/external-agents) |
+| 🔄 | **Agent Handoffs** — seamless conversation passing | `handoff=True` |
+| 🛡️ | **Guardrails** — input/output validation | [Docs](https://docs.praison.ai/docs/concepts/guardrails) |
+|  | **Web Search + Fetch** — native browsing | `web_search=True` |
+| 🪞 | **Self Reflection** — agent reviews its own output | [Docs](https://docs.praison.ai/docs/concepts/reflection) |
+| 🔀 | **Workflow Patterns** — route, parallel, loop, repeat | [Docs](https://docs.praison.ai/docs/concepts/agentflow) |
+| 🧠 | **Memory (zero deps)** — works out of the box | `memory=True` |
+
+<details>
+<summary><strong>View all 25 features</strong></summary>
+
+| | Feature | How |
+|--|---------|-----|
+| 💡 | **Prompt Caching** — reduce latency + cost | `prompt_caching=True` |
+| 💾 | **Sessions + Auto-Save** — persistent state across restarts | `auto_save="my-project"` |
+| 💭 | **Thinking Budgets** — control reasoning depth | `thinking_budget=1024` |
+| 📚 | **RAG + Quality-Based RAG** — auto quality scoring retrieval | [Docs](https://docs.praison.ai/docs/concepts/rag) |
+| 📊 | **Model Router** — auto-routes to cheapest capable model | [Docs](https://docs.praison.ai/docs/features/model-router) |
+| 🧊 | **Shadow Git Checkpoints** — auto-rollback on failure | [Docs](https://docs.praison.ai/docs/features/checkpoints) |
+| 📡 | **A2A Protocol** — agent-to-agent interop | [Docs](https://docs.praison.ai/docs/features/a2a) |
+| 📏 | **Context Compaction** — never hit token limits | [Docs](https://docs.praison.ai/docs/features/context-compaction) |
+| 📡 | **Telemetry** — OpenTelemetry traces, spans, metrics | [Docs](https://docs.praison.ai/docs/features/telemetry) |
+| 📜 | **Policy Engine** — declarative agent behavior control | [Docs](https://docs.praison.ai/docs/features/policy-engine) |
+| 🔄 | **Background Tasks** — fire-and-forget agents | [Docs](https://docs.praison.ai/docs/features/background-tasks) |
+| 🔁 | **Doom Loop Detection** — auto-recovery from stuck agents | [Docs](https://docs.praison.ai/docs/features/doom-loop-detection) |
+| 🕸️ | **Graph Memory** — Neo4j-style relationship tracking | [Docs](https://docs.praison.ai/docs/features/graph-memory) |
+| 🏖️ | **Sandbox Execution** — isolated code execution | [Docs](https://docs.praison.ai/docs/features/sandbox) |
+| 🖥️ | **Bot Gateway** — multi-agent routing across channels | [Docs](https://docs.praison.ai/docs/features/bot-gateway) |
+
+</details>
+
+
+
+
+---
+
 ## 📘 Using Python Code
 
 ### 1. Single Agent
@@ -622,116 +735,6 @@ PraisonAI is built for speed, with agent instantiation in under 4μs. This reduc
 | Avg Instantiation Time | **3.77 μs** |
 
 ---
-
-
-
-## 🧠 Supported Providers & Features
-
-Powered by 100+ LLMs (OpenAI, Anthropic, Gemini & local models).
-
-<p align="center">
-<img src="https://img.shields.io/badge/OpenAI-412991?style=flat&logo=openai&logoColor=white" alt="OpenAI" />
-<img src="https://img.shields.io/badge/Anthropic-191919?style=flat&logo=anthropic&logoColor=white" alt="Anthropic" />
-<img src="https://img.shields.io/badge/Google_Gemini-4285F4?style=flat&logo=google&logoColor=white" alt="Google Gemini" />
-<img src="https://img.shields.io/badge/DeepSeek-566AB2?style=flat" alt="DeepSeek" />
-<img src="https://img.shields.io/badge/Azure-0078D4?style=flat&logo=microsoftazure&logoColor=white" alt="Azure" />
-<img src="https://img.shields.io/badge/Ollama-000000?style=flat" alt="Ollama" />
-<img src="https://img.shields.io/badge/Groq-F05237?style=flat" alt="Groq" />
-<img src="https://img.shields.io/badge/Mistral-FF7000?style=flat" alt="Mistral" />
-<img src="https://img.shields.io/badge/Cerebras-F05A28?style=flat" alt="Cerebras" />
-<img src="https://img.shields.io/badge/Cohere-39594D?style=flat" alt="Cohere" />
-<img src="https://img.shields.io/badge/OpenRouter-6467F2?style=flat" alt="OpenRouter" />
-<img src="https://img.shields.io/badge/Perplexity-20808D?style=flat" alt="Perplexity" />
-<img src="https://img.shields.io/badge/Fireworks-FF6B35?style=flat" alt="Fireworks" />
-<img src="https://img.shields.io/badge/AWS_Bedrock-FF9900?style=flat&logo=amazonaws&logoColor=white" alt="AWS Bedrock" />
-<img src="https://img.shields.io/badge/xAI_Grok-000000?style=flat" alt="xAI Grok" />
-<img src="https://img.shields.io/badge/Vertex_AI-4285F4?style=flat&logo=googlecloud&logoColor=white" alt="Vertex AI" />
-<img src="https://img.shields.io/badge/HuggingFace-FFD21E?style=flat&logo=huggingface&logoColor=black" alt="HuggingFace" />
-<img src="https://img.shields.io/badge/Together_AI-000000?style=flat" alt="Together AI" />
-<img src="https://img.shields.io/badge/Databricks-FF3621?style=flat&logo=databricks&logoColor=white" alt="Databricks" />
-<img src="https://img.shields.io/badge/Replicate-262626?style=flat" alt="Replicate" />
-<img src="https://img.shields.io/badge/Cloudflare-F38020?style=flat&logo=cloudflare&logoColor=white" alt="Cloudflare" />
-</p>
-
-<details>
-<summary><strong>View all 24 providers with examples</strong></summary>
-
-| Provider | Example |
-|----------|:-------:|
-| OpenAI | [Example](examples/python/providers/openai/openai_gpt4_example.py) |
-| Anthropic | [Example](examples/python/providers/anthropic/anthropic_claude_example.py) |
-| Google Gemini | [Example](examples/python/providers/google/google_gemini_example.py) |
-| Ollama | [Example](examples/python/providers/ollama/ollama-agents.py) |
-| Groq | [Example](examples/python/providers/groq/kimi_with_groq_example.py) |
-| DeepSeek | [Example](examples/python/providers/deepseek/deepseek_example.py) |
-| xAI Grok | [Example](examples/python/providers/xai/xai_grok_example.py) |
-| Mistral | [Example](examples/python/providers/mistral/mistral_example.py) |
-| Cohere | [Example](examples/python/providers/cohere/cohere_example.py) |
-| Perplexity | [Example](examples/python/providers/perplexity/perplexity_example.py) |
-| Fireworks | [Example](examples/python/providers/fireworks/fireworks_example.py) |
-| Together AI | [Example](examples/python/providers/together/together_ai_example.py) |
-| OpenRouter | [Example](examples/python/providers/openrouter/openrouter_example.py) |
-| HuggingFace | [Example](examples/python/providers/huggingface/huggingface_example.py) |
-| Azure OpenAI | [Example](examples/python/providers/azure/azure_openai_example.py) |
-| AWS Bedrock | [Example](examples/python/providers/aws/aws_bedrock_example.py) |
-| Google Vertex | [Example](examples/python/providers/vertex/vertex_example.py) |
-| Databricks | [Example](examples/python/providers/databricks/databricks_example.py) |
-| Cloudflare | [Example](examples/python/providers/cloudflare/cloudflare_example.py) |
-| AI21 | [Example](examples/python/providers/ai21/ai21_example.py) |
-| Replicate | [Example](examples/python/providers/replicate/replicate_example.py) |
-| SageMaker | [Example](examples/python/providers/sagemaker/sagemaker_example.py) |
-| Moonshot | [Example](examples/python/providers/moonshot/moonshot_example.py) |
-| vLLM | [Example](examples/python/providers/vllm/vllm_example.py) |
-
-</details>
-
-<div align="center">
-  <a href="https://x.com/elonmusk/status/1893870468249141688" target="_blank">
-    <img src=".github/images/elon_musk_praisonai.png" alt="Highlighted by Elon Musk" width="600" />
-  </a>
-  <p><em>"Grok 3 customer support" — <a href="https://x.com/elonmusk/status/1893870468249141688">Elon Musk quoting PraisonAI's tutorial</a></em></p>
-</div>
-<br>
-
----
-
-## 🌟 Why PraisonAI?
-
-| | Feature | How |
-|--|---------|-----|
-| 🔌 | **MCP Protocol** — stdio, HTTP, WebSocket, SSE | `tools=MCP("npx ...")` |
-| 🧠 | **Planning Mode** — plan → execute → reason | `planning=True` |
-| 🔍 | **Deep Research** — multi-step autonomous research | [Docs](https://docs.praison.ai/docs/agents/deep-research) |
-| 🤖 | **External Agents** — orchestrate Claude Code, Gemini CLI, Codex | [Docs](https://docs.praison.ai/docs/code/external-agents) |
-| 🔄 | **Agent Handoffs** — seamless conversation passing | `handoff=True` |
-| 🛡️ | **Guardrails** — input/output validation | [Docs](https://docs.praison.ai/docs/concepts/guardrails) |
-|  | **Web Search + Fetch** — native browsing | `web_search=True` |
-| 🪞 | **Self Reflection** — agent reviews its own output | [Docs](https://docs.praison.ai/docs/concepts/reflection) |
-| 🔀 | **Workflow Patterns** — route, parallel, loop, repeat | [Docs](https://docs.praison.ai/docs/concepts/agentflow) |
-| 🧠 | **Memory (zero deps)** — works out of the box | `memory=True` |
-
-<details>
-<summary><strong>View all 25 features</strong></summary>
-
-| | Feature | How |
-|--|---------|-----|
-| 💡 | **Prompt Caching** — reduce latency + cost | `prompt_caching=True` |
-| 💾 | **Sessions + Auto-Save** — persistent state across restarts | `auto_save="my-project"` |
-| 💭 | **Thinking Budgets** — control reasoning depth | `thinking_budget=1024` |
-| 📚 | **RAG + Quality-Based RAG** — auto quality scoring retrieval | [Docs](https://docs.praison.ai/docs/concepts/rag) |
-| 📊 | **Model Router** — auto-routes to cheapest capable model | [Docs](https://docs.praison.ai/docs/features/model-router) |
-| 🧊 | **Shadow Git Checkpoints** — auto-rollback on failure | [Docs](https://docs.praison.ai/docs/features/checkpoints) |
-| 📡 | **A2A Protocol** — agent-to-agent interop | [Docs](https://docs.praison.ai/docs/features/a2a) |
-| 📏 | **Context Compaction** — never hit token limits | [Docs](https://docs.praison.ai/docs/features/context-compaction) |
-| 📡 | **Telemetry** — OpenTelemetry traces, spans, metrics | [Docs](https://docs.praison.ai/docs/features/telemetry) |
-| 📜 | **Policy Engine** — declarative agent behavior control | [Docs](https://docs.praison.ai/docs/features/policy-engine) |
-| 🔄 | **Background Tasks** — fire-and-forget agents | [Docs](https://docs.praison.ai/docs/features/background-tasks) |
-| 🔁 | **Doom Loop Detection** — auto-recovery from stuck agents | [Docs](https://docs.praison.ai/docs/features/doom-loop-detection) |
-| 🕸️ | **Graph Memory** — Neo4j-style relationship tracking | [Docs](https://docs.praison.ai/docs/features/graph-memory) |
-| 🏖️ | **Sandbox Execution** — isolated code execution | [Docs](https://docs.praison.ai/docs/features/sandbox) |
-| 🖥️ | **Bot Gateway** — multi-agent routing across channels | [Docs](https://docs.praison.ai/docs/features/bot-gateway) |
-
-</details>
 
 
 
