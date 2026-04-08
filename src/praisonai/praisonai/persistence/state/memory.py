@@ -97,8 +97,9 @@ class MemoryStateStore(StateStore):
     def _maybe_save(self) -> None:
         """Save if auto_save is enabled and interval has passed."""
         if self.auto_save and self.path:
-            if time.time() - self._last_save >= self.save_interval:
-                self._save()
+            with self._lock:
+                if time.time() - self._last_save >= self.save_interval:
+                    self._save()
     
     def _check_ttl(self, key: str) -> bool:
         """Check if key is expired. Returns True if valid, False if expired."""

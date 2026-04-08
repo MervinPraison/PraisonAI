@@ -8,6 +8,7 @@ Install: pip install asyncpg
 import asyncio
 import json
 import logging
+import threading
 import time
 from typing import List, Optional
 
@@ -63,35 +64,43 @@ class AsyncPostgresConversationStore(ConversationStore):
         self.pool_size = pool_size
         self._pool = None
         self._initialized = False
+        self._init_lock = None
+        self._lock_creation_lock = threading.Lock()
     
     async def init(self):
         """Initialize connection pool and create tables."""
-        if self._initialized:
-            return
+        if self._init_lock is None:
+            with self._lock_creation_lock:
+                if self._init_lock is None:  # Double-checked locking
+                    self._init_lock = asyncio.Lock()
         
-        try:
-            import asyncpg
-        except ImportError:
-            raise ImportError(
-                "asyncpg is required for async PostgreSQL support. "
-                "Install with: pip install asyncpg"
-            )
-        
-        if self.url:
-            self._pool = await asyncpg.create_pool(self.url, min_size=1, max_size=self.pool_size)
-        else:
-            self._pool = await asyncpg.create_pool(
-                host=self.host,
-                port=self.port,
-                database=self.database,
-                user=self.user,
-                password=self.password,
-                min_size=1,
-                max_size=self.pool_size
-            )
-        
-        await self._create_tables()
-        self._initialized = True
+        async with self._init_lock:
+            if self._initialized:
+                return
+            
+            try:
+                import asyncpg
+            except ImportError as err:
+                raise ImportError(
+                    "asyncpg is required for async PostgreSQL support. "
+                    "Install with: pip install asyncpg"
+                ) from err
+            
+            if self.url:
+                self._pool = await asyncpg.create_pool(self.url, min_size=1, max_size=self.pool_size)
+            else:
+                self._pool = await asyncpg.create_pool(
+                    host=self.host,
+                    port=self.port,
+                    database=self.database,
+                    user=self.user,
+                    password=self.password,
+                    min_size=1,
+                    max_size=self.pool_size
+                )
+            
+            await self._create_tables()
+            self._initialized = True
     
     async def _create_tables(self):
         """Create required tables if they don't exist."""
