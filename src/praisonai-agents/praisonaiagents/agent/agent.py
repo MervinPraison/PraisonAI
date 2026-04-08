@@ -187,23 +187,8 @@ if TYPE_CHECKING:
     from ..rag.models import RAGResult, ContextPack
     from ..eval.results import EvaluationLoopResult
 
-class BudgetExceededError(Exception):
-    """Raised when an agent exceeds its max_budget.
-
-    Usage:
-        try:
-            agent.start("...")
-        except BudgetExceededError as e:
-            print(f"Agent '{e.agent_name}' spent ${e.total_cost:.4f} of ${e.max_budget:.4f}")
-    """
-    def __init__(self, agent_name: str, total_cost: float, max_budget: float):
-        self.agent_name = agent_name
-        self.total_cost = total_cost
-        self.max_budget = max_budget
-        super().__init__(
-            f"Agent '{agent_name}' exceeded budget: "
-            f"${total_cost:.4f} >= ${max_budget:.4f}"
-        )
+# Import structured error from central errors module
+from ..errors import BudgetExceededError
 
 class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin):
     # Class-level counter for generating unique display names for nameless agents

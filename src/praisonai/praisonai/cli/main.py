@@ -928,6 +928,8 @@ class PraisonAI:
         parser.add_argument("--web", "--web-search", action="store_true", help="Enable native web search (OpenAI, Gemini, Anthropic, xAI, Perplexity)")
         parser.add_argument("--web-fetch", action="store_true", help="Enable web fetch to retrieve URL content (Anthropic only)")
         parser.add_argument("--prompt-caching", action="store_true", help="Enable prompt caching to reduce costs (OpenAI, Anthropic, Bedrock, Deepseek)")
+        parser.add_argument("--stream", action="store_true", help="Enable real-time streaming for agent responses")
+        parser.add_argument("--stream-metrics", action="store_true", help="Enable streaming with token metrics display")
         
         # Planning Mode arguments
         parser.add_argument("--planning", action="store_true", help="Enable planning mode - create plan before execution")
@@ -4016,6 +4018,14 @@ Do NOT add any explanations or formatting."""
         approval_timeout = getattr(self.args, 'approval_timeout', None)
         if approval_timeout is not None:
             cli_config['approval_timeout'] = approval_timeout
+            
+        # Extract streaming configuration for YAML CLI parity
+        stream = getattr(self.args, 'stream', False)
+        stream_metrics = getattr(self.args, 'stream_metrics', False)
+        if stream or stream_metrics:
+            cli_config['stream'] = stream or stream_metrics
+            if stream_metrics:
+                cli_config['stream_metrics'] = True
             
         return cli_config
 

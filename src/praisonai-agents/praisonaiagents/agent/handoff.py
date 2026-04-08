@@ -97,29 +97,13 @@ class HandoffConfig:
             data["context_policy"] = ContextPolicy(data["context_policy"])
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
-class HandoffError(Exception):
-    """Base exception for handoff errors."""
-    pass
-
-class HandoffCycleError(HandoffError):
-    """Raised when a cycle is detected in handoff chain."""
-    def __init__(self, chain: List[str]):
-        self.chain = chain
-        super().__init__(f"Handoff cycle detected: {' -> '.join(chain)}")
-
-class HandoffDepthError(HandoffError):
-    """Raised when max handoff depth is exceeded."""
-    def __init__(self, depth: int, max_depth: int):
-        self.depth = depth
-        self.max_depth = max_depth
-        super().__init__(f"Max handoff depth exceeded: {depth} > {max_depth}")
-
-class HandoffTimeoutError(HandoffError):
-    """Raised when handoff times out."""
-    def __init__(self, timeout: float, agent_name: str):
-        self.timeout = timeout
-        self.agent_name = agent_name
-        super().__init__(f"Handoff to {agent_name} timed out after {timeout}s")
+# Import structured error hierarchy from central errors module
+from ..errors import (
+    HandoffError, 
+    HandoffCycleError, 
+    HandoffDepthError, 
+    HandoffTimeoutError
+)
 
 # Thread-local storage for tracking handoff chains
 _handoff_context = threading.local()
@@ -267,12 +251,26 @@ class Handoff:
         if self.config.detect_cycles:
             chain = _get_handoff_chain()
             if target_name in chain:
-                raise HandoffCycleError(chain + [target_name])
+                cycle_path = chain + [target_name]
+                raise HandoffCycleError(
+                    f"Handoff cycle detected: {' -> '.join(cycle_path)}",
+                    source_agent=source_agent.name if hasattr(source_agent, 'name') else 'unknown',
+                    target_agent=target_name,
+                    agent_id=source_agent.name if hasattr(source_agent, 'name') else 'unknown',
+                    cycle_path=cycle_path
+                )
         
         # Check depth
         current_depth = _get_handoff_depth()
         if current_depth >= self.config.max_depth:
-            raise HandoffDepthError(current_depth + 1, self.config.max_depth)
+            raise HandoffDepthError(
+                f"Max handoff depth exceeded: {current_depth + 1} > {self.config.max_depth}",
+                source_agent=source_agent.name if hasattr(source_agent, 'name') else 'unknown',
+                target_agent=target_name,
+                agent_id=source_agent.name if hasattr(source_agent, 'name') else 'unknown',
+                max_depth=self.config.max_depth,
+                current_depth=current_depth + 1
+            )
     
     def _prepare_context(self, source_agent: 'Agent', kwargs: Dict[str, Any]) -> HandoffInputData:
         """
