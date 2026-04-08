@@ -17,10 +17,10 @@ unified configuration schema for consistent behavior.
 import os
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
-from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
 
-from .unified_schema import rag_schema_provider
+from .schema_provider import rag_schema_provider
 
 logger = logging.getLogger(__name__)
 

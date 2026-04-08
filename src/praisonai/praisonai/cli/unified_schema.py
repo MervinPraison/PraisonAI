@@ -21,13 +21,12 @@ except ImportError:
     yaml = None
 
 try:
-    from pydantic import BaseModel, Field, ValidationError, validator
-    from pydantic.fields import FieldInfo
+    from pydantic import BaseModel, Field, ValidationError, field_validator
 except ImportError:
     BaseModel = None
     Field = None
     ValidationError = None
-    validator = None
+    field_validator = None
 
 from praisonaiagents.config.protocols import (
     ConfigSchemaProtocol,
@@ -39,150 +38,155 @@ from praisonaiagents.config.protocols import (
 from praisonaiagents.rag.models import RAGConfig, RetrievalStrategy
 
 
-class UnifiedRAGSchema(BaseModel if BaseModel else object):
-    """
-    Unified RAG schema that serves as single source of truth.
-    
-    This Pydantic model provides:
-    - Schema validation for all three interfaces
-    - Auto-generation of CLI flags from field annotations
-    - Field mapping between CLI/YAML/Python naming conventions
-    - Strong validation with user-friendly error messages
-    """
-    
-    # Collection settings
-    collection: str = Field(
-        default="default",
-        description="Collection/index name for vector storage"
-    )
-    
-    # Retrieval settings
-    top_k: int = Field(
-        default=5,
-        ge=1,
-        le=100,
-        description="Number of documents to retrieve"
-    )
-    
-    hybrid: bool = Field(
-        default=False,
-        description="Enable hybrid retrieval (dense + sparse)"
-    )
-    
-    rerank: bool = Field(
-        default=False,
-        description="Enable reranking of retrieved results"
-    )
-    
-    min_score: float = Field(
-        default=0.0,
-        ge=0.0,
-        le=1.0,
-        description="Minimum relevance score threshold"
-    )
-    
-    # RAG settings
-    include_citations: bool = Field(
-        default=True,
-        description="Include source citations in responses"
-    )
-    
-    max_context_tokens: int = Field(
-        default=4000,
-        ge=100,
-        le=100000,
-        description="Maximum tokens for context window"
-    )
-    
-    # Vector store settings
-    vector_store_provider: str = Field(
-        default="chroma",
-        description="Vector store provider (chroma, pinecone, etc.)"
-    )
-    
-    vector_store_path: Optional[str] = Field(
-        default=None,
-        description="Path to vector store data"
-    )
-    
-    # Server settings
-    host: str = Field(
-        default="127.0.0.1",
-        description="Server host address"
-    )
-    
-    port: int = Field(
-        default=8080,
-        ge=1000,
-        le=65535,
-        description="Server port number"
-    )
-    
-    openai_compat: bool = Field(
-        default=False,
-        description="Enable OpenAI-compatible API endpoint"
-    )
-    
-    # LLM settings
-    model: Optional[str] = Field(
-        default=None,
-        description="LLM model to use (defaults to gpt-4o-mini)"
-    )
-    
-    # Misc
-    verbose: bool = Field(
-        default=False,
-        description="Enable verbose output"
-    )
-    
-    @validator('vector_store_provider')
-    def validate_provider(cls, v):
-        valid_providers = ['chroma', 'pinecone', 'weaviate', 'qdrant']
-        if v not in valid_providers:
-            raise ValueError(f"Invalid provider '{v}'. Valid options: {', '.join(valid_providers)}")
-        return v
-    
-    @validator('model')
-    def validate_model(cls, v):
-        if v is not None and not isinstance(v, str):
-            raise ValueError("Model must be a string")
-        return v
-    
-    def to_rag_config(self) -> 'RAGConfig':
-        """Convert to core SDK RAGConfig."""
-        # Map unified schema to core SDK format
-        strategy = RetrievalStrategy.HYBRID if self.hybrid else RetrievalStrategy.BASIC
+
+if BaseModel is not None:
+    class UnifiedRAGSchema(BaseModel):
+        """
+        Unified RAG schema that serves as single source of truth.
         
-        return RAGConfig(
-            top_k=self.top_k,
-            min_score=self.min_score,
-            max_context_tokens=self.max_context_tokens,
-            include_citations=self.include_citations,
-            retrieval_strategy=strategy,
-            rerank=self.rerank,
-            model=self.model,
+        This Pydantic model provides:
+        - Schema validation for all three interfaces
+        - Auto-generation of CLI flags from field annotations
+        - Field mapping between CLI/YAML/Python naming conventions
+        - Strong validation with user-friendly error messages
+        """
+        
+        # Collection settings
+        collection: str = Field(
+            default="default",
+            description="Collection/index name for vector storage"
         )
-    
-    def to_knowledge_config(self) -> Dict[str, Any]:
-        """Convert to knowledge config format."""
-        path = self.vector_store_path or f"./.praison/knowledge/{self.collection}"
         
-        config = {
-            "vector_store": {
-                "provider": self.vector_store_provider,
-                "config": {
-                    "collection_name": self.collection,
-                    "path": path,
+        # Retrieval settings
+        top_k: int = Field(
+            default=5,
+            ge=1,
+            le=100,
+            description="Number of documents to retrieve"
+        )
+        
+        hybrid: bool = Field(
+            default=False,
+            description="Enable hybrid retrieval (dense + sparse)"
+        )
+        
+        rerank: bool = Field(
+            default=False,
+            description="Enable reranking of retrieved results"
+        )
+        
+        min_score: float = Field(
+            default=0.0,
+            ge=0.0,
+            le=1.0,
+            description="Minimum relevance score threshold"
+        )
+        
+        # RAG settings
+        include_citations: bool = Field(
+            default=True,
+            description="Include source citations in responses"
+        )
+        
+        max_context_tokens: int = Field(
+            default=4000,
+            ge=100,
+            le=100000,
+            description="Maximum tokens for context window"
+        )
+        
+        # Vector store settings
+        vector_store_provider: str = Field(
+            default="chroma",
+            description="Vector store provider (chroma, pinecone, etc.)"
+        )
+        
+        vector_store_path: Optional[str] = Field(
+            default=None,
+            description="Path to vector store data"
+        )
+        
+        # Server settings
+        host: str = Field(
+            default="127.0.0.1",
+            description="Server host address"
+        )
+        
+        port: int = Field(
+            default=8080,
+            ge=1000,
+            le=65535,
+            description="Server port number"
+        )
+        
+        openai_compat: bool = Field(
+            default=False,
+            description="Enable OpenAI-compatible API endpoint"
+        )
+        
+        # LLM settings
+        model: Optional[str] = Field(
+            default=None,
+            description="LLM model to use (defaults to gpt-4o-mini)"
+        )
+        
+        # Misc
+        verbose: bool = Field(
+            default=False,
+            description="Enable verbose output"
+        )
+        
+        @field_validator('vector_store_provider')
+        @classmethod
+        def validate_provider(cls, v):
+            valid_providers = ['chroma', 'pinecone', 'weaviate', 'qdrant']
+            if v not in valid_providers:
+                raise ValueError(f"Invalid provider '{v}'. Valid options: {', '.join(valid_providers)}")
+            return v
+        
+        @field_validator('model')
+        @classmethod
+        def validate_model(cls, v):
+            if v is not None and not isinstance(v, str):
+                raise ValueError("Model must be a string")
+            return v
+        
+        def to_rag_config(self) -> 'RAGConfig':
+            """Convert to core SDK RAGConfig."""
+            strategy = RetrievalStrategy.HYBRID if self.hybrid else RetrievalStrategy.BASIC
+            
+            return RAGConfig(
+                top_k=self.top_k,
+                min_score=self.min_score,
+                max_context_tokens=self.max_context_tokens,
+                include_citations=self.include_citations,
+                retrieval_strategy=strategy,
+                rerank=self.rerank,
+                model=self.model,
+            )
+        
+        def to_knowledge_config(self) -> Dict[str, Any]:
+            """Convert to knowledge config format."""
+            path = self.vector_store_path or f"./.praison/knowledge/{self.collection}"
+            
+            config = {
+                "vector_store": {
+                    "provider": self.vector_store_provider,
+                    "config": {
+                        "collection_name": self.collection,
+                        "path": path,
+                    }
                 }
             }
-        }
-        
-        if self.hybrid:
-            config["retrieval"] = {
-                "strategy": "hybrid",
-            }
-        
-        return config
+            
+            if self.hybrid:
+                config["retrieval"] = {
+                    "strategy": "hybrid",
+                }
+            
+            return config
+else:
+    UnifiedRAGSchema = None
 
 
 class RAGSchemaProvider:
@@ -253,7 +257,7 @@ class RAGSchemaProvider:
         try:
             # Create schema instance to validate
             schema_instance = self.schema_class(**config)
-            normalized = schema_instance.dict()
+            normalized = schema_instance.model_dump()
             
             return ValidationResult(
                 is_valid=True,
@@ -291,16 +295,20 @@ class RAGSchemaProvider:
             # Fallback without Pydantic
             return self._get_fallback_cli_mapping()
         
-        for field_name, field_info in self.schema_class.__fields__.items():
+        for field_name, field_info in self.schema_class.model_fields.items():
             cli_flag = self._field_to_cli_flag(field_name)
             env_var = self._field_to_env_var(field_name)
+            from pydantic_core import PydanticUndefinedType
+            default = field_info.default
+            if isinstance(default, PydanticUndefinedType):
+                default = None
             
             mapping = CliMapping(
                 field_name=field_name,
                 cli_flag=cli_flag,
                 description=field_info.description or f"Set {field_name}",
                 type_hint=self._get_python_type(field_info),
-                default=field_info.default,
+                default=default,
                 env_var=env_var
             )
             
@@ -329,7 +337,7 @@ class RAGSchemaProvider:
         if BaseModel:
             try:
                 schema_instance = self.schema_class(**normalized)
-                return schema_instance.dict()
+                return schema_instance.model_dump()
             except ValidationError:
                 pass  # Fall through to manual defaults
         
@@ -365,11 +373,15 @@ class RAGSchemaProvider:
         }
         
         if BaseModel:
-            for field_name, field_info in self.schema_class.__fields__.items():
+            from pydantic_core import PydanticUndefinedType
+            for field_name, field_info in self.schema_class.model_fields.items():
+                default = field_info.default
+                if isinstance(default, PydanticUndefinedType):
+                    default = None
                 info["fields"][field_name] = {
-                    "type": str(field_info.type_),
+                    "type": str(field_info.annotation),
                     "description": field_info.description,
-                    "default": field_info.default,
+                    "default": default,
                 }
                 info["cli_mappings"][self._field_to_cli_flag(field_name)] = field_name
         
@@ -438,22 +450,22 @@ class RAGSchemaProvider:
         return None
     
     def _get_python_type(self, field_info) -> type:
-        """Extract Python type from Pydantic field info."""
+        """Extract Python type from Pydantic v2 field info."""
         if not BaseModel:
             return str
-            
-        if hasattr(field_info, 'type_'):
-            field_type = field_info.type_
-            if hasattr(field_type, '__origin__'):
-                # Handle Union types (like Optional)
-                if field_type.__origin__ is Union:
-                    args = field_type.__args__
-                    # Return first non-None type
-                    for arg in args:
-                        if arg is not type(None):
-                            return arg
-            return field_type
-        return str
+        
+        annotation = getattr(field_info, 'annotation', None)
+        if annotation is None:
+            return str
+        
+        origin = getattr(annotation, '__origin__', None)
+        if origin is Union:
+            # Handle Optional types (Union[X, None])
+            args = annotation.__args__
+            for arg in args:
+                if arg is not type(None):
+                    return arg
+        return annotation
     
     def _apply_field_mappings(self, config: Dict[str, Any], mapping: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """Apply field name mappings."""
