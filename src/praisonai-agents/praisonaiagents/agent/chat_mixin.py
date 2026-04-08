@@ -539,12 +539,8 @@ Your Goal: {self.goal}"""
             # NEW: Unified protocol dispatch path (Issue #1304)
             # Check if unified dispatch is enabled (opt-in for backward compatibility)
             if getattr(self, '_use_unified_llm_dispatch', False):
-                from .unified_chat_mixin import UnifiedChatMixin
-                if not isinstance(self, UnifiedChatMixin):
-                    # Dynamically add the mixin
-                    self.__class__ = type(self.__class__.__name__ + 'Unified', (UnifiedChatMixin, self.__class__), {})
-                
-                return self._unified_chat_completion(
+                # Use composition instead of runtime class mutation for safety
+                final_response = self._execute_unified_chat_completion(
                     messages=messages,
                     temperature=temperature,
                     tools=formatted_tools,
@@ -557,8 +553,7 @@ Your Goal: {self.goal}"""
                 )
             
             # LEGACY: Maintain existing dual execution paths for backward compatibility
-            # Use the custom LLM instance if available
-            if self._using_custom_llm and hasattr(self, 'llm_instance'):
+            elif self._using_custom_llm and hasattr(self, 'llm_instance'):
                 if stream:
                     # Debug logs for tool info
                     if formatted_tools:
@@ -773,6 +768,130 @@ Your Goal: {self.goal}"""
             )
             _get_display_functions()['display_error'](f"Error in chat completion: {e}")
             return None
+
+    def _execute_unified_chat_completion(
+        self, 
+        messages, 
+        temperature=1.0, 
+        tools=None, 
+        stream=True,
+        reasoning_steps=False,
+        task_name=None,
+        task_description=None,
+        task_id=None,
+        response_format=None
+    ):
+        """
+        Execute unified chat completion using composition instead of runtime class mutation.
+        
+        This method provides the same functionality as UnifiedChatMixin but uses
+        composition for safety and maintainability.
+        """
+        from ..llm import create_llm_dispatcher
+        
+        # Get or create unified dispatcher
+        if not hasattr(self, '_unified_dispatcher') or self._unified_dispatcher is None:
+            # Provider selection based on existing agent configuration
+            if self._using_custom_llm and hasattr(self, 'llm_instance'):
+                dispatcher = create_llm_dispatcher(llm_instance=self.llm_instance)
+            else:
+                # Initialize OpenAI client if not present
+                if not hasattr(self, '_openai_client') or self._openai_client is None:
+                    from ..llm import get_openai_client
+                    self._openai_client = get_openai_client(api_key=getattr(self, 'api_key', None))
+                dispatcher = create_llm_dispatcher(openai_client=self._openai_client, model=self.llm)
+            
+            # Cache the dispatcher
+            self._unified_dispatcher = dispatcher
+        
+        # Execute unified dispatch with all necessary parameters
+        try:
+            final_response = self._unified_dispatcher.chat_completion(
+                messages=messages,
+                tools=tools,
+                temperature=temperature,
+                max_tokens=getattr(self, 'max_tokens', None),
+                stream=stream,
+                response_format=response_format,
+                execute_tool_fn=getattr(self, 'execute_tool', None),
+                console=self.console if (self.verbose or stream) else None,
+                display_fn=self._display_generating if self.verbose else None,
+                stream_callback=getattr(self.stream_emitter, 'emit', None) if hasattr(self, 'stream_emitter') else None,
+                emit_events=True,
+                verbose=self.verbose,
+                max_iterations=10,
+                reasoning_steps=reasoning_steps,
+                task_name=task_name,
+                task_description=task_description,
+                task_id=task_id
+            )
+            return final_response
+            
+        except Exception as e:
+            logging.error(f"Unified chat completion failed: {e}")
+            raise
+
+    async def _execute_unified_achat_completion(
+        self, 
+        messages, 
+        temperature=1.0, 
+        tools=None, 
+        stream=True,
+        reasoning_steps=False,
+        task_name=None,
+        task_description=None,
+        task_id=None,
+        response_format=None
+    ):
+        """
+        Execute unified async chat completion using composition instead of runtime class mutation.
+        
+        This method provides the same functionality as UnifiedChatMixin but uses
+        composition for safety and maintainability.
+        """
+        from ..llm import create_llm_dispatcher
+        
+        # Get or create unified dispatcher
+        if not hasattr(self, '_unified_dispatcher') or self._unified_dispatcher is None:
+            # Provider selection based on existing agent configuration
+            if self._using_custom_llm and hasattr(self, 'llm_instance'):
+                dispatcher = create_llm_dispatcher(llm_instance=self.llm_instance)
+            else:
+                # Initialize OpenAI client if not present
+                if not hasattr(self, '_openai_client') or self._openai_client is None:
+                    from ..llm import get_openai_client
+                    self._openai_client = get_openai_client(api_key=getattr(self, 'api_key', None))
+                dispatcher = create_llm_dispatcher(openai_client=self._openai_client, model=self.llm)
+            
+            # Cache the dispatcher
+            self._unified_dispatcher = dispatcher
+        
+        # Execute unified async dispatch with all necessary parameters
+        try:
+            final_response = await self._unified_dispatcher.achat_completion(
+                messages=messages,
+                tools=tools,
+                temperature=temperature,
+                max_tokens=getattr(self, 'max_tokens', None),
+                stream=stream,
+                response_format=response_format,
+                execute_tool_fn=getattr(self, 'execute_tool', None),
+                console=self.console if (self.verbose or stream) else None,
+                display_fn=self._display_generating if self.verbose else None,
+                stream_callback=getattr(self.stream_emitter, 'emit', None) if hasattr(self, 'stream_emitter') else None,
+                emit_events=True,
+                verbose=self.verbose,
+                max_iterations=10,
+                reasoning_steps=reasoning_steps,
+                task_name=task_name,
+                task_description=task_description,
+                task_id=task_id
+            )
+            return final_response
+            
+        except Exception as e:
+            logging.error(f"Unified async chat completion failed: {e}")
+            raise
 
     def _execute_callback_and_display(self, prompt: str, response: str, generation_time: float, task_name=None, task_description=None, task_id=None):
         """Helper method to execute callbacks and display interaction.
@@ -1722,13 +1841,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # NEW: Unified protocol dispatch path (Issue #1304) - Async version
                     # Check if unified dispatch is enabled (opt-in for backward compatibility)
                     if getattr(self, '_use_unified_llm_dispatch', False):
-                        from .unified_chat_mixin import UnifiedChatMixin
-                        if not isinstance(self, UnifiedChatMixin):
-                            # Dynamically add the mixin
-                            self.__class__ = type(self.__class__.__name__ + 'Unified', (UnifiedChatMixin, self.__class__), {})
-                        
-                        # Use unified async dispatch
-                        response = await self._unified_achat_completion(
+                        # Use composition instead of runtime class mutation for safety
+                        response = await self._execute_unified_achat_completion(
                             messages=messages,
                             temperature=temperature,
                             tools=formatted_tools,
@@ -1737,70 +1851,58 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             task_name=task_name,
                             task_description=task_description,
                             task_id=task_id,
-                            response_format=None  # Handle response_format in unified path
+                            response_format=response_format
                         )
-                        
-                        # Process the unified response 
-                        if tools:
-                            result = await self._achat_completion(response, tools)
-                        else:
-                            result = response.choices[0].message.content if response and response.choices else ""
-                        
-                        if get_logger().getEffectiveLevel() == logging.DEBUG:
-                            total_time = time.time() - start_time
-                            logging.debug(f"Agent.achat (unified) completed in {total_time:.2f} seconds")
-                        
-                        # Execute callback after completion
-                        self._execute_callback_and_display(original_prompt, result, time.time() - start_time, task_name, task_description, task_id)
-                        return await self._atrigger_after_agent_hook(original_prompt, result, start_time)
-                    
-                    # LEGACY: Check if OpenAI client is available
-                    if self._openai_client is None:
-                        error_msg = "OpenAI client is not initialized. Please provide OPENAI_API_KEY or use a custom LLM provider."
-                        _get_display_functions()['display_error'](error_msg)
-                        return None
-
-                    # Make the API call based on the type of request
-                    if tools:
-                        effective_tool_choice = tool_choice or getattr(self, '_yaml_tool_choice', None)
-                        tool_call_kwargs = dict(
-                            model=self.llm,
-                            messages=messages,
-                            temperature=temperature,
-                            tools=formatted_tools,
-                        )
-                        if effective_tool_choice:
-                            tool_call_kwargs['tool_choice'] = effective_tool_choice
-                        response = await self._openai_client.async_client.chat.completions.create(
-                            **tool_call_kwargs
-                        )
-                        result = await self._achat_completion(response, tools)
-                        if get_logger().getEffectiveLevel() == logging.DEBUG:
-                            total_time = time.time() - start_time
-                            logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
-                        # Execute callback after tool completion
-                        self._execute_callback_and_display(original_prompt, result, time.time() - start_time, task_name, task_description, task_id)
-                        return await self._atrigger_after_agent_hook(original_prompt, result, start_time)
-                    elif output_json or output_pydantic:
-                        response = await self._openai_client.async_client.chat.completions.create(
-                            model=self.llm,
-                            messages=messages,
-                            temperature=temperature,
-                            response_format={"type": "json_object"}
-                        )
-                        response_text = response.choices[0].message.content
-                        if get_logger().getEffectiveLevel() == logging.DEBUG:
-                            total_time = time.time() - start_time
-                            logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
-                        # Execute callback after JSON/Pydantic completion
-                        self._execute_callback_and_display(original_prompt, response_text, time.time() - start_time, task_name, task_description, task_id)
-                        return await self._atrigger_after_agent_hook(original_prompt, response_text, start_time)
+                        # Continue to handle structured outputs and other processing
+                        # Don't return immediately - fall through to existing logic
                     else:
-                        response = await self._openai_client.async_client.chat.completions.create(
-                            model=self.llm,
-                            messages=messages,
-                            temperature=temperature
-                        )
+                        # LEGACY: Check if OpenAI client is available
+                        if self._openai_client is None:
+                            error_msg = "OpenAI client is not initialized. Please provide OPENAI_API_KEY or use a custom LLM provider."
+                            _get_display_functions()['display_error'](error_msg)
+                            return None
+
+                        # Make the API call based on the type of request
+                        if tools:
+                            effective_tool_choice = tool_choice or getattr(self, '_yaml_tool_choice', None)
+                            tool_call_kwargs = dict(
+                                model=self.llm,
+                                messages=messages,
+                                temperature=temperature,
+                                tools=formatted_tools,
+                            )
+                            if effective_tool_choice:
+                                tool_call_kwargs['tool_choice'] = effective_tool_choice
+                            response = await self._openai_client.async_client.chat.completions.create(
+                                **tool_call_kwargs
+                            )
+                            result = await self._achat_completion(response, tools)
+                            if get_logger().getEffectiveLevel() == logging.DEBUG:
+                                total_time = time.time() - start_time
+                                logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
+                            # Execute callback after tool completion
+                            self._execute_callback_and_display(original_prompt, result, time.time() - start_time, task_name, task_description, task_id)
+                            return await self._atrigger_after_agent_hook(original_prompt, result, start_time)
+                        elif output_json or output_pydantic:
+                            response = await self._openai_client.async_client.chat.completions.create(
+                                model=self.llm,
+                                messages=messages,
+                                temperature=temperature,
+                                response_format={"type": "json_object"}
+                            )
+                            response_text = response.choices[0].message.content
+                            if get_logger().getEffectiveLevel() == logging.DEBUG:
+                                total_time = time.time() - start_time
+                                logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
+                            # Execute callback after JSON/Pydantic completion
+                            self._execute_callback_and_display(original_prompt, response_text, time.time() - start_time, task_name, task_description, task_id)
+                            return await self._atrigger_after_agent_hook(original_prompt, response_text, start_time)
+                        else:
+                            response = await self._openai_client.async_client.chat.completions.create(
+                                model=self.llm,
+                                messages=messages,
+                                temperature=temperature
+                            )
                         
                         response_text = response.choices[0].message.content
                         

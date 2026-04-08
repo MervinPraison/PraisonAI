@@ -45,18 +45,25 @@ class LiteLLMAdapter:
         
         This consolidates the custom-LLM path into the unified protocol.
         """
-        # Convert messages to prompt format expected by existing LLM
-        prompt = self._convert_messages_to_prompt(messages)
-        
-        # Extract system prompt if present
+        # Extract system prompt, chat history, and current prompt from messages
         system_prompt = None
+        conversation_messages = messages
+        
         if messages and messages[0].get('role') == 'system':
             system_prompt = messages[0].get('content')
-            # Use remaining messages as chat history
-            chat_history = messages[1:] if len(messages) > 1 else None
-        else:
-            chat_history = messages[:-1] if len(messages) > 1 else None
-            prompt = messages[-1].get('content', '') if messages else ''
+            conversation_messages = messages[1:]
+
+        prompt = ""
+        chat_history = None
+        
+        if conversation_messages:
+            prompt = conversation_messages[-1].get('content', '')
+            if len(conversation_messages) > 1:
+                chat_history = conversation_messages[:-1]
+        
+        # Extract verbose before passing kwargs to avoid duplicate parameter
+        verbose = kwargs.pop('verbose', False)
+        max_tokens = kwargs.pop('max_tokens', None)
         
         # Call existing async method
         response = await self.llm.get_response_async(
@@ -66,7 +73,8 @@ class LiteLLMAdapter:
             temperature=temperature,
             tools=tools,
             stream=stream,
-            verbose=kwargs.get('verbose', False),
+            verbose=verbose,
+            max_tokens=max_tokens,
             **kwargs
         )
         
@@ -83,29 +91,55 @@ class LiteLLMAdapter:
         **kwargs: Any
     ) -> Union[Dict[str, Any], Iterator[Dict[str, Any]]]:
         """
-        Sync wrapper around async chat completion.
+        Sync chat completion using existing sync LLM methods.
         
-        Uses asyncio.run to execute async method, following the pattern
-        of sync methods being thin wrappers around async implementations.
+        Implements a native sync path without calling asyncio.run() to comply
+        with UnifiedLLMProtocol requirements.
         """
-        # Check if we're already in an event loop
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # No running loop, safe to use asyncio.run
-            return asyncio.run(self.achat_completion(messages, **kwargs))
-        else:
-            # Already in a loop, we need to handle this differently
-            # Create a new event loop in a thread
-            import concurrent.futures
-            import threading
-            
-            def run_in_thread():
-                return asyncio.run(self.achat_completion(messages, **kwargs))
-            
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(run_in_thread)
-                return future.result()
+        # Extract system prompt, chat history, and current prompt from messages
+        system_prompt = None
+        conversation_messages = messages
+        
+        if messages and messages[0].get('role') == 'system':
+            system_prompt = messages[0].get('content')
+            conversation_messages = messages[1:]
+
+        prompt = ""
+        chat_history = None
+        
+        if conversation_messages:
+            prompt = conversation_messages[-1].get('content', '')
+            if len(conversation_messages) > 1:
+                chat_history = conversation_messages[:-1]
+        
+        # Extract parameters to avoid kwargs conflicts
+        tools = kwargs.get('tools')
+        temperature = kwargs.get('temperature', 0.0)
+        stream = kwargs.get('stream', False)
+        verbose = kwargs.pop('verbose', False) if 'verbose' in kwargs else False
+        max_tokens = kwargs.pop('max_tokens', None) if 'max_tokens' in kwargs else None
+        
+        # For streaming, explicitly disallow as it violates protocol sync contract
+        if stream:
+            raise ValueError(
+                "Streaming is not supported in sync LiteLLMAdapter. "
+                "Use achat_completion() for streaming support."
+            )
+        
+        # Use existing sync method
+        response = self.llm.get_response(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            chat_history=chat_history,
+            temperature=temperature,
+            tools=tools,
+            stream=False,
+            verbose=verbose,
+            max_tokens=max_tokens,
+            **{k: v for k, v in kwargs.items() if k not in ['tools', 'temperature', 'stream', 'verbose', 'max_tokens']}
+        )
+        
+        return self._convert_response_to_standard_format(response)
     
     def _convert_messages_to_prompt(self, messages: List[Dict[str, Any]]) -> str:
         """Convert OpenAI-style messages to prompt string."""
@@ -195,6 +229,7 @@ class OpenAIAdapter:
             model=self.model,
             tools=tools,
             temperature=temperature,
+            max_tokens=max_tokens,
             stream=stream,
             execute_tool_fn=kwargs.get('execute_tool_fn'),
             console=kwargs.get('console'),
@@ -202,7 +237,7 @@ class OpenAIAdapter:
             reasoning_steps=kwargs.get('reasoning_steps', False),
             verbose=kwargs.get('verbose', True),
             max_iterations=kwargs.get('max_iterations', 10),
-            **{k: v for k, v in kwargs.items() if k not in ['execute_tool_fn', 'console', 'display_fn', 'reasoning_steps', 'verbose', 'max_iterations']}
+            **{k: v for k, v in kwargs.items() if k not in ['max_tokens', 'execute_tool_fn', 'console', 'display_fn', 'reasoning_steps', 'verbose', 'max_iterations']}
         )
     
     def chat_completion(
@@ -211,24 +246,35 @@ class OpenAIAdapter:
         **kwargs: Any
     ) -> Union[Dict[str, Any], Iterator[Dict[str, Any]]]:
         """
-        Sync chat completion using OpenAI client.
+        Sync chat completion as thin wrapper around async implementation.
         
-        Uses the existing sync method from OpenAIClient.
+        Delegates to async method following protocol requirements for
+        sync methods to be wrappers around the canonical async implementation.
         """
-        return self.client.chat_completion_with_tools(
-            messages=messages,
-            model=self.model,
-            tools=kwargs.get('tools'),
-            temperature=kwargs.get('temperature', 1.0),
-            stream=kwargs.get('stream', True),
-            execute_tool_fn=kwargs.get('execute_tool_fn'),
-            console=kwargs.get('console'),
-            display_fn=kwargs.get('display_fn'),
-            reasoning_steps=kwargs.get('reasoning_steps', False),
-            verbose=kwargs.get('verbose', True),
-            max_iterations=kwargs.get('max_iterations', 10),
-            **{k: v for k, v in kwargs.items() if k not in ['tools', 'temperature', 'stream', 'execute_tool_fn', 'console', 'display_fn', 'reasoning_steps', 'verbose', 'max_iterations']}
-        )
+        import asyncio
+        
+        # For streaming, explicitly disallow as it violates sync protocol contract
+        if kwargs.get('stream', False):
+            raise ValueError(
+                "Streaming is not supported in sync OpenAIAdapter. "
+                "Use achat_completion() for streaming support."
+            )
+        
+        # Check if we're already in an event loop
+        try:
+            loop = asyncio.get_running_loop()
+            # In event loop - use thread pool to avoid nesting
+            import concurrent.futures
+            
+            def run_in_thread():
+                return asyncio.run(self.achat_completion(messages, **kwargs))
+            
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(run_in_thread)
+                return future.result()
+        except RuntimeError:
+            # No running loop, safe to use asyncio.run
+            return asyncio.run(self.achat_completion(messages, **kwargs))
 
 
 class UnifiedLLMDispatcher:
