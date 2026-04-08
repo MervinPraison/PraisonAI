@@ -170,6 +170,7 @@ _LAZY_IMPORTS = {
     'Handoff': ('praisonaiagents.agent.handoff', 'Handoff'),
     'handoff': ('praisonaiagents.agent.handoff', 'handoff'),
     'handoff_filters': ('praisonaiagents.agent.handoff', 'handoff_filters'),
+    'parallel_handoffs': ('praisonaiagents.agent.handoff', 'parallel_handoffs'),
     'RECOMMENDED_PROMPT_PREFIX': ('praisonaiagents.agent.handoff', 'RECOMMENDED_PROMPT_PREFIX'),
     'prompt_with_handoff_instructions': ('praisonaiagents.agent.handoff', 'prompt_with_handoff_instructions'),
     'HandoffConfig': ('praisonaiagents.agent.handoff', 'HandoffConfig'),

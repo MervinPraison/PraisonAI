@@ -130,7 +130,7 @@ class SubagentDelegator:
         """
         warnings.warn(
             "SubagentDelegator is deprecated. Use Agent.handoff_to() or "
-            "parallel_handoffs() instead. See: https://docs.praison.ai/concepts/handoff",
+            "parallel_handoffs() instead.",
             DeprecationWarning,
             stacklevel=2,
         )

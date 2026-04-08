@@ -63,7 +63,7 @@ class HandoffConfig:
     
     # Execution control
     timeout_seconds: float = 300.0
-    max_concurrent: int = 3
+    max_concurrent: int = 5
     
     # Safety
     detect_cycles: bool = True
@@ -856,25 +856,41 @@ async def parallel_handoffs(
     if not hasattr(source, 'handoff_to_async'):
         raise ValueError("Source agent must support async handoffs")
     
-    # Create semaphore for concurrency control
-    semaphore = asyncio.Semaphore(max_concurrent)
+    # Check if parallel execution is allowed by config
+    if config and not config.allow_parallel:
+        raise ValueError("Parallel handoffs are disabled in the provided HandoffConfig")
+    
+    # Use config's max_concurrent if max_concurrent wasn't explicitly set and config is provided
+    if config and max_concurrent == 5:  # Check if default value
+        effective_max_concurrent = config.max_concurrent
+    else:
+        effective_max_concurrent = max_concurrent
+    
+    # Create semaphore for concurrency control (0 or negative = unlimited)
+    semaphore = asyncio.Semaphore(effective_max_concurrent) if effective_max_concurrent > 0 else None
     
     async def _run_one(agent, prompt):
-        async with semaphore:
+        async def _do_handoff():
             try:
                 return await source.handoff_to_async(agent, prompt, config=config)
             except Exception as e:
-                logger.error(f"Parallel handoff failed to {agent.name if hasattr(agent, 'name') else str(agent)}: {e}")
+                logger.error(f"Parallel handoff failed to {getattr(agent, 'name', str(agent))}: {e}")
                 # Return a failed HandoffResult object
                 return HandoffResult(
                     success=False,
                     response="",
-                    target_agent=agent.name if hasattr(agent, 'name') else str(agent),
-                    source_agent=source.name if hasattr(source, 'name') else str(source),
+                    target_agent=getattr(agent, 'name', str(agent)),
+                    source_agent=getattr(source, 'name', str(source)),
                     duration_seconds=0.0,
                     error=str(e),
                     handoff_depth=0
                 )
+        
+        if semaphore:
+            async with semaphore:
+                return await _do_handoff()
+        else:
+            return await _do_handoff()
     
     # Execute all handoffs concurrently
     tasks = [_run_one(agent, prompt) for agent, prompt in targets]
@@ -883,19 +899,20 @@ async def parallel_handoffs(
     # Convert any exceptions to failed results
     processed_results = []
     for i, result in enumerate(results):
-        if isinstance(result, Exception):
-            agent, prompt = targets[i]
+        if isinstance(result, HandoffResult):
+            processed_results.append(result)
+        else:
+            # Handle Exception, BaseException (like CancelledError), or any other unexpected result
+            agent, _prompt = targets[i]  # Prefix with _ to mark intentionally unused
             processed_results.append(HandoffResult(
                 success=False,
                 response="",
-                target_agent=agent.name if hasattr(agent, 'name') else str(agent),
-                source_agent=source.name if hasattr(source, 'name') else str(source),
+                target_agent=getattr(agent, 'name', str(agent)),
+                source_agent=getattr(source, 'name', str(source)),
                 duration_seconds=0.0,
                 error=str(result),
                 handoff_depth=0
             ))
-        else:
-            processed_results.append(result)
     
     return processed_results
 
