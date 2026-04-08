@@ -412,11 +412,11 @@ Respond with ONLY a valid JSON tool call in this format:
         self.max_tool_repairs = extra_settings.get('max_tool_repairs', 0)  # Will be set to 2 for Ollama if not explicit
         self.force_tool_usage = extra_settings.get('force_tool_usage', 'never')  # Will be set to 'auto' for Ollama if not explicit
         
-        # Apply Ollama-specific defaults after model is set
-        self._apply_ollama_defaults()
-        
         # Initialize provider adapter for dispatch logic
         self._provider_adapter = self._initialize_provider_adapter()
+        
+        # Apply provider-specific defaults after adapter is initialized
+        self._apply_provider_defaults()
         
         # Token tracking
         self.last_token_metrics: Optional[TokenMetrics] = None
@@ -492,29 +492,31 @@ Respond with ONLY a valid JSON tool call in this format:
         
         model_lower = self.model.lower()
         
-        # Direct model prefixes
-        if self.model.startswith("ollama/"):
-            return "ollama"
+        # Parse route prefix for explicit provider routing
+        provider_prefix = model_lower.split("/", 1)[0] if "/" in model_lower else None
         
-        # Check base_url for provider hints
-        if self.base_url and "ollama" in self.base_url.lower():
+        # Explicit provider prefixes take priority
+        if provider_prefix == "ollama":
             return "ollama"
-        
-        # Check model name patterns
-        if any(prefix in model_lower for prefix in ['claude', 'anthropic/']):
+        if provider_prefix in {"anthropic", "claude"}:
             return "anthropic"
-        
-        if any(prefix in model_lower for prefix in ['gemini', 'gemini/', 'google/gemini']):
+        if provider_prefix in {"gemini", "google"} and "gemini" in model_lower:
             return "gemini"
         
-        # Check for Ollama models without prefix
-        ollama_patterns = [
-            'llama', 'llama2', 'llama3', 'mistral', 'mixtral', 'phi', 'vicuna',
-            'wizardlm', 'orca', 'falcon', 'alpaca', 'wizard-coder', 'starcoder',
-            'codellama', 'phind-codellama', 'deepseek-coder', 'magicoder',
-            'qwen', 'qwen2'
-        ]
-        if any(pattern in model_lower for pattern in ollama_patterns):
+        # Use existing robust Ollama detection logic first
+        if self._is_ollama_provider():
+            return "ollama"
+        
+        # Check for direct model name patterns (not substrings)
+        if model_lower.startswith("claude"):
+            return "anthropic"
+        
+        if model_lower.startswith("gemini") or model_lower.startswith("google/gemini"):
+            return "gemini"
+        
+        # Check base_url for provider hints
+        base_urls = [self.base_url, os.getenv("OPENAI_BASE_URL", ""), os.getenv("OPENAI_API_BASE", "")]
+        if any(url and ("ollama" in url.lower() or ":11434" in url) for url in base_urls):
             return "ollama"
         
         # Default fallback
@@ -531,15 +533,19 @@ Respond with ONLY a valid JSON tool call in this format:
         logging.debug(f"[ADAPTER] Initialized {provider} adapter: {adapter.__class__.__name__}")
         return adapter
     
-    def _apply_ollama_defaults(self):
-        """Apply Ollama-specific defaults for tool calling reliability."""
-        if self._detect_provider() == "ollama":
-            # Apply defaults only if not explicitly set by user
-            if not self._max_tool_repairs_explicit:
-                self.max_tool_repairs = 2
-            if not self._force_tool_usage_explicit:
-                self.force_tool_usage = 'auto'
-            logging.debug(f"[OLLAMA_RELIABILITY] Applied Ollama defaults: max_tool_repairs={self.max_tool_repairs}, force_tool_usage={self.force_tool_usage}")
+    def _apply_provider_defaults(self):
+        """Apply provider-specific defaults via adapter pattern."""
+        if hasattr(self, '_provider_adapter') and self._provider_adapter:
+            defaults = self._provider_adapter.get_default_settings()
+            if defaults:
+                # Apply defaults only if not explicitly set by user
+                if not self._max_tool_repairs_explicit and 'max_tool_repairs' in defaults:
+                    self.max_tool_repairs = defaults['max_tool_repairs']
+                if not self._force_tool_usage_explicit and 'force_tool_usage' in defaults:
+                    self.force_tool_usage = defaults['force_tool_usage']
+                
+                if defaults:  # Only log if there were actual defaults
+                    logging.debug(f"[PROVIDER_DEFAULTS] Applied {self._provider_adapter.__class__.__name__} defaults: {defaults}")
 
     def _is_ollama_provider(self) -> bool:
         """Detect if this is an Ollama provider regardless of naming convention"""
@@ -818,9 +824,14 @@ Respond with ONLY a valid JSON tool call in this format:
             bool: True if the model supports prompt caching, False otherwise
         """
         if hasattr(self, '_provider_adapter') and self._provider_adapter:
-            return self._provider_adapter.supports_prompt_caching()
+            adapter_support = self._provider_adapter.supports_prompt_caching()
+            if adapter_support:
+                return True
+            # If adapter says False and is not the default, trust the adapter
+            if self._provider_adapter.__class__.__name__ != 'DefaultAdapter':
+                return False
         
-        # Fallback to model capabilities if adapter not initialized
+        # Fallback to model capabilities for DefaultAdapter or uninitialized
         from .model_capabilities import supports_prompt_caching
         return supports_prompt_caching(self.model)
 
@@ -1331,11 +1342,12 @@ Now provide your final answer using this result. Summarize the information natur
                 - iteration_count: Updated iteration count
         """
         # Use provider adapter to determine if tool summarization should occur
+        # Adapter should always be initialized, but provide safe fallback
         if hasattr(self, '_provider_adapter') and self._provider_adapter:
             should_summarize = self._provider_adapter.should_summarize_tools(iteration_count)
         else:
-            # Fallback to original Ollama logic if adapter not initialized
-            should_summarize = self._detect_provider() == "ollama" and iteration_count >= self.OLLAMA_SUMMARY_ITERATION_THRESHOLD
+            # Conservative fallback without provider detection
+            should_summarize = iteration_count >= 5  # Conservative default
             
         if not should_summarize:
             return False, None, iteration_count

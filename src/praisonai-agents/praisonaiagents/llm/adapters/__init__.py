@@ -7,9 +7,9 @@ scattered provider dispatch logic throughout the core.
 This demonstrates the protocol-driven approach for Gap 2.
 """
 
-from ..protocols import LLMProviderProtocol
+from ..protocols import LLMProviderAdapterProtocol
 from ..model_capabilities import GEMINI_INTERNAL_TOOLS
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 
 class DefaultAdapter:
@@ -39,16 +39,24 @@ class DefaultAdapter:
     def get_max_iteration_threshold(self) -> int:
         return 10  # Conservative default
     
-    def format_tool_result_message(self, function_name: str, tool_result: Any) -> Dict[str, Any]:
+    def format_tool_result_message(self, function_name: str, tool_result: Any, tool_call_id: Optional[str] = None) -> Dict[str, Any]:
         # Standard OpenAI-style tool result message
-        return {
+        message = {
             "role": "tool",
             "content": str(tool_result),
-            "tool_call_id": getattr(tool_result, 'tool_call_id', f"call_{function_name}")
         }
+        if tool_call_id is not None:
+            message["tool_call_id"] = tool_call_id
+        else:
+            # Fallback for backward compatibility
+            message["tool_call_id"] = f"call_{function_name}"
+        return message
     
     def handle_empty_response_with_tools(self, state: Dict[str, Any]) -> bool:
         return False  # No special handling by default
+    
+    def get_default_settings(self) -> Dict[str, Any]:
+        return {}  # No provider-specific defaults
 
 
 class OllamaAdapter(DefaultAdapter):
@@ -74,7 +82,7 @@ class OllamaAdapter(DefaultAdapter):
     def get_max_iteration_threshold(self) -> int:
         return 1  # Ollama-specific threshold
     
-    def format_tool_result_message(self, function_name: str, tool_result: Any) -> Dict[str, Any]:
+    def format_tool_result_message(self, function_name: str, tool_result: Any, tool_call_id: Optional[str] = None) -> Dict[str, Any]:
         # Ollama uses natural language format for tool results
         return {
             "role": "user", 
@@ -98,6 +106,12 @@ class OllamaAdapter(DefaultAdapter):
             state.get('iteration_count') == 0):
             # Add Ollama-specific summary logic here
             state['needs_summary'] = True
+    
+    def get_default_settings(self) -> Dict[str, Any]:
+        return {
+            'max_tool_repairs': 2,
+            'force_tool_usage': 'auto'
+        }
 
 
 class AnthropicAdapter(DefaultAdapter):
@@ -144,7 +158,7 @@ class GeminiAdapter(DefaultAdapter):
 
 
 # Provider adapter registry - public for extension
-_provider_adapters: Dict[str, LLMProviderProtocol] = {}
+_provider_adapters: Dict[str, LLMProviderAdapterProtocol] = {}
 
 # Register core adapters at import time
 _default_adapter = DefaultAdapter()
@@ -155,7 +169,7 @@ _provider_adapters['claude'] = AnthropicAdapter()  # Alias
 _provider_adapters['gemini'] = GeminiAdapter()
 
 
-def add_provider_adapter(name: str, adapter: LLMProviderProtocol) -> None:
+def add_provider_adapter(name: str, adapter: LLMProviderAdapterProtocol) -> None:
     """
     Register a provider adapter by name.
     
@@ -168,7 +182,7 @@ def add_provider_adapter(name: str, adapter: LLMProviderProtocol) -> None:
     _provider_adapters[name] = adapter
 
 
-def get_provider_adapter(name: str) -> LLMProviderProtocol:
+def get_provider_adapter(name: str) -> LLMProviderAdapterProtocol:
     """
     Get provider adapter by name with fallback to default.
     

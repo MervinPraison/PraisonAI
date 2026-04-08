@@ -11,7 +11,7 @@ from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Protocol,
 
 
 @runtime_checkable
-class LLMClientProtocol(Protocol):
+class LLMProviderProtocol(Protocol):
     """
     Protocol defining the interface that LLM clients must implement.
     
@@ -256,7 +256,7 @@ class ContextLengthExceededError(LLMProviderError):
 
 
 @runtime_checkable
-class LLMProviderProtocol(Protocol):
+class LLMProviderAdapterProtocol(Protocol):
     """
     Protocol for provider-specific LLM adaptations.
     
@@ -315,12 +315,16 @@ class LLMProviderProtocol(Protocol):
         """Get provider-specific maximum iteration count."""
         ...
     
-    def format_tool_result_message(self, function_name: str, tool_result: Any) -> Dict[str, Any]:
+    def format_tool_result_message(self, function_name: str, tool_result: Any, tool_call_id: Optional[str] = None) -> Dict[str, Any]:
         """Format tool result message for this provider's requirements."""
         ...
     
     def handle_empty_response_with_tools(self, state: Dict[str, Any]) -> bool:
         """Handle provider-specific empty response with tools logic."""
+        ...
+    
+    def get_default_settings(self) -> Dict[str, Any]:
+        """Get provider-specific default settings."""
         ...
 
 
