@@ -394,9 +394,11 @@ class SubprocessSandbox:
             )
             
         try:
+            # Use shell=False with shlex.split for safer execution
+            args = shlex.split(command)
             result = subprocess.run(
-                command,
-                shell=True,
+                args,
+                shell=False,  # Use shell=False for security
                 cwd=self.working_dir,
                 capture_output=capture_output,
                 text=True,

@@ -1261,9 +1261,12 @@ def cli_run_all(
             )
         
         try:
+            # Use shell=False with shlex.split for safer execution
+            import shlex
+            args = shlex.split(test_cmd)
             result = subprocess.run(
-                test_cmd,
-                shell=True,
+                args,
+                shell=False,  # Use shell=False for security
                 capture_output=True,
                 text=True,
                 timeout=timeout,

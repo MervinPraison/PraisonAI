@@ -240,8 +240,11 @@ class JobWorkflowExecutor:
             
         cwd = step.get("cwd", self._cwd)
         env = self._build_env(step)
+        # Use shell=False with shlex.split for safer execution
+        import shlex
+        args = shlex.split(cmd)
         result = subprocess.run(
-            cmd, shell=True, cwd=cwd, env=env,
+            args, shell=False, cwd=cwd, env=env,
             capture_output=True, text=True,
             timeout=step.get("timeout", 300),
         )

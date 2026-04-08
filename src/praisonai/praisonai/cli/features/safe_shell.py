@@ -203,9 +203,11 @@ def safe_execute(
     
     try:
         # Execute command
+        # Use shell=False with shlex.split for safer execution
+        args = shlex.split(command)
         process = subprocess.Popen(
-            command,
-            shell=True,
+            args,
+            shell=False,  # Use shell=False for security
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=cwd,
@@ -297,8 +299,10 @@ async def safe_execute_async(
         )
     
     try:
-        process = await asyncio.create_subprocess_shell(
-            command,
+        # Use create_subprocess_exec instead of create_subprocess_shell for security
+        args = shlex.split(command)
+        process = await asyncio.create_subprocess_exec(
+            *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,

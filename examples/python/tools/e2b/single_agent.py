@@ -40,7 +40,10 @@ def run_terminal_command(command: str):
     Run a terminal command and return its output.
     """
     try:
-        result = subprocess.run(command, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # Use shell=False with shlex.split for safer execution
+        import shlex
+        args = shlex.split(command)
+        result = subprocess.run(args, shell=False, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         print(f"Command output: {result}")
         return {"stdout": result.stdout, "stderr": result.stderr}
     except subprocess.CalledProcessError as e:

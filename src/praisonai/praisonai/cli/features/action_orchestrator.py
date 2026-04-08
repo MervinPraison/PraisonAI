@@ -455,9 +455,12 @@ class ActionOrchestrator:
                     "returncode": -1
                 }
                 
+            # Use shell=False with shlex.split for safer execution
+            import shlex
+            args = shlex.split(step.target)
             result = subprocess.run(
-                step.target,
-                shell=True,
+                args,
+                shell=False,  # Use shell=False for security
                 capture_output=True,
                 text=True,
                 cwd=str(workspace),

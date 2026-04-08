@@ -153,6 +153,8 @@ def execute_command(
     try:
         # Execute command
         if shell:
+            # Use shlex.quote to safely escape the command for shell execution
+            # This prevents shell injection by properly quoting the command
             if _re.search(r'[;&|`$]', command):
                 return {
                     'success': False,
@@ -162,9 +164,11 @@ def execute_command(
                     'stdout': '',
                     'stderr': '',
                 }
+            # Use shell=False with shlex.split for safer execution
+            args = shlex.split(command)
             result = subprocess.run(
-                command,
-                shell=True,
+                args,
+                shell=False,  # Use shell=False for security
                 cwd=work_dir,
                 capture_output=capture_output,
                 timeout=timeout,

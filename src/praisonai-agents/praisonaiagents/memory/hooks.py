@@ -300,9 +300,12 @@ class HooksManager:
                 command = str(self.workspace_path / command)
             
             # Execute
+            # Use shell=False with shlex.split for safer execution
+            import shlex
+            args = shlex.split(command)
             result = subprocess.run(
-                command,
-                shell=True,
+                args,
+                shell=False,  # Use shell=False for security
                 cwd=str(self.workspace_path),
                 env=env,
                 capture_output=True,
