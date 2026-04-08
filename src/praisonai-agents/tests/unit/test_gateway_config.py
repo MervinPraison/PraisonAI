@@ -53,7 +53,7 @@ class TestGatewayConfig:
         config = GatewayConfig()
         assert config.host == "127.0.0.1"
         assert config.port == 8765
-        assert config.cors_origins == ["*"]
+        assert config.cors_origins == []
         assert config.auth_token is None
         assert config.max_connections == 1000
         assert config.max_sessions_per_agent == 0

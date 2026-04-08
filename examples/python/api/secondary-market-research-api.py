@@ -43,14 +43,34 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Add CORS middleware with secure configuration
+cors_origins = os.getenv("API_CORS_ORIGINS", "").split(",")
+cors_origins = [origin.strip() for origin in cors_origins if origin.strip()]
+
+# Default secure origins if none specified
+if not cors_origins:
+    # Secure defaults for different environments
+    if os.getenv("ENVIRONMENT") == "production":
+        # In production, require explicit configuration
+        cors_origins = []
+    else:
+        # Development defaults - restrict to local origins
+        cors_origins = [
+            "http://localhost:3000",   # Development frontend
+            "http://localhost:8000",   # Local development
+            "http://127.0.0.1:3000",   # Local development
+            "http://127.0.0.1:8000",   # Local development
+        ]
+
+# Only add CORS middleware if origins are specified
+if cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Origin", "Accept"],
+    )
 
 # Create directories for storing reports
 REPORTS_DIR = Path("generated_reports")

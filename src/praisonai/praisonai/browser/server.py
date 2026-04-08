@@ -7,6 +7,7 @@ import asyncio
 import logging
 import signal
 import sys
+import os
 from typing import Dict, Optional, Set
 from dataclasses import dataclass
 
@@ -82,13 +83,27 @@ class BrowserServer:
             version="1.0.0",
         )
         
-        # Enable CORS for extension
+        # Configure CORS origins based on environment
+        cors_origins = os.getenv("BROWSER_CORS_ORIGINS", "").split(",")
+        cors_origins = [origin.strip() for origin in cors_origins if origin.strip()]
+        
+        # Default secure origins if none specified
+        if not cors_origins:
+            cors_origins = [
+                "chrome-extension://*",  # Allow Chrome extension origins
+                "http://localhost:3000",  # Development frontend
+                "http://localhost:8000",  # Local development
+                "http://127.0.0.1:3000",  # Local development
+                "http://127.0.0.1:8000",  # Local development
+            ]
+        
+        # Enable CORS for extension with secure origins
         app.add_middleware(
             CORSMiddleware,
-            allow_origins=["*"],
+            allow_origins=cors_origins,
             allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
+            allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "Origin", "Accept"],
         )
         
         @app.get("/health")

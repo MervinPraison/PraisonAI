@@ -71,7 +71,16 @@ class HTTPStreamTransport:
         self.host = host
         self.port = port
         self.endpoint = endpoint
-        self.cors_origins = cors_origins or ["*"]
+        # Default to localhost origins for security
+        if cors_origins is None:
+            self.cors_origins = [
+                "http://localhost:3000",
+                "http://127.0.0.1:3000", 
+                "http://localhost:8000",
+                "http://127.0.0.1:8000"
+            ]
+        else:
+            self.cors_origins = cors_origins
         self.api_key = api_key
         self.session_ttl = session_ttl
         self.allow_client_termination = allow_client_termination

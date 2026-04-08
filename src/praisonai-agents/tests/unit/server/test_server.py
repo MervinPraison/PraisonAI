@@ -22,7 +22,7 @@ class TestServerConfig:
         
         assert config.host == "127.0.0.1"
         assert config.port == 8765
-        assert config.cors_origins == ["*"]
+        assert config.cors_origins == []
         assert config.auth_token is None
     
     def test_config_custom(self):

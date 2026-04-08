@@ -27,7 +27,7 @@ class ServerConfig:
     
     host: str = DEFAULT_HOST
     port: int = DEFAULT_PORT
-    cors_origins: List[str] = field(default_factory=lambda: ["*"])
+    cors_origins: List[str] = field(default_factory=lambda: [])
     auth_token: Optional[str] = None
     max_connections: int = 100
     

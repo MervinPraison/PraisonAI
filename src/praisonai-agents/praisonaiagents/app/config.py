@@ -21,7 +21,7 @@ class AgentAppConfig:
         host: Host address to bind to (default: "0.0.0.0")
         port: Port number to listen on (default: 8000)
         reload: Enable auto-reload for development (default: False)
-        cors_origins: List of allowed CORS origins (default: ["*"])
+        cors_origins: List of allowed CORS origins (default: [])
         api_prefix: API route prefix (default: "/api")
         docs_url: URL for API documentation (default: "/docs")
         openapi_url: URL for OpenAPI schema (default: "/openapi.json")
@@ -44,7 +44,7 @@ class AgentAppConfig:
     host: str = "0.0.0.0"
     port: int = 8000
     reload: bool = False
-    cors_origins: List[str] = field(default_factory=lambda: ["*"])
+    cors_origins: List[str] = field(default_factory=lambda: [])
     api_prefix: str = "/api"
     docs_url: str = "/docs"
     openapi_url: str = "/openapi.json"

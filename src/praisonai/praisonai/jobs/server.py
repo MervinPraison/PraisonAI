@@ -86,15 +86,36 @@ def create_app(
         lifespan=lifespan
     )
     
-    # Add CORS middleware
-    origins = cors_origins or ["*"]
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # Add CORS middleware with secure defaults
+    if cors_origins is None:
+        # Default secure origins based on environment
+        default_origins = os.getenv("JOBS_CORS_ORIGINS", "").split(",")
+        default_origins = [origin.strip() for origin in default_origins if origin.strip()]
+        
+        if not default_origins:
+            # Secure defaults for different environments
+            if os.getenv("ENVIRONMENT") == "production":
+                origins = []  # No origins allowed in production without explicit config
+            else:
+                origins = [
+                    "http://localhost:3000",   # Development frontend
+                    "http://localhost:8000",   # Local development
+                    "http://127.0.0.1:3000",   # Local development
+                    "http://127.0.0.1:8000",   # Local development
+                ]
+        else:
+            origins = default_origins
+    else:
+        origins = cors_origins
+    
+    if origins:  # Only add CORS middleware if origins are specified
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "Origin", "Accept"],
+        )
     
     # Add jobs router
     jobs_router = create_router(get_store(), get_executor())
