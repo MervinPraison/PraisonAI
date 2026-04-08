@@ -37,14 +37,65 @@ except ImportError:
     field_validator = None
     PYDANTIC_V2 = False
 
-from praisonaiagents.config.protocols import (
-    ConfigSchemaProtocol,
-    ConfigMappingProtocol,
-    ValidationResult,
-    CliMapping,
-    PrecedenceChain,
-)
-from praisonaiagents.rag.models import RAGConfig, RetrievalStrategy
+try:
+    from praisonaiagents.config.protocols import (
+        ConfigSchemaProtocol,
+        ConfigMappingProtocol,
+        ValidationResult,
+        CliMapping,
+        PrecedenceChain,
+    )
+    from praisonaiagents.rag.models import RAGConfig, RetrievalStrategy
+except ImportError:
+    # Fallback when praisonaiagents not available
+    from dataclasses import dataclass
+    from typing import Protocol, runtime_checkable
+    from enum import Enum
+    
+    @dataclass
+    class ValidationResult:
+        is_valid: bool
+        errors: List[str]
+        warnings: List[str]
+        normalized: Optional[Dict[str, Any]]
+    
+    @dataclass
+    class CliMapping:
+        field_name: str
+        cli_flag: str
+        description: str
+        type_hint: type
+        default: Any = None
+        choices: Optional[List[str]] = None
+        env_var: Optional[str] = None
+    
+    @dataclass
+    class PrecedenceChain:
+        chain: List[str]
+        descriptions: Dict[str, str]
+    
+    @runtime_checkable
+    class ConfigSchemaProtocol(Protocol):
+        def validate(self, config: Dict[str, Any]) -> ValidationResult: ...
+        def get_cli_mapping(self) -> List[CliMapping]: ...
+        def get_precedence_chain(self) -> PrecedenceChain: ...
+        def normalize_config(self, config: Dict[str, Any]) -> Dict[str, Any]: ...
+    
+    @runtime_checkable
+    class ConfigMappingProtocol(Protocol):
+        def cli_to_python(self, cli_config: Dict[str, Any]) -> Dict[str, Any]: ...
+        def yaml_to_python(self, yaml_config: Dict[str, Any]) -> Dict[str, Any]: ...
+    
+    # Lightweight enum fallbacks
+    class RetrievalStrategy(Enum):
+        semantic = "semantic"
+        keyword = "keyword"
+        hybrid = "hybrid"
+    
+    # Placeholder for RAGConfig
+    @dataclass
+    class RAGConfig:
+        collection: str = "default"
 
 
 if BaseModel:

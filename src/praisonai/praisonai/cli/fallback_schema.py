@@ -8,12 +8,46 @@ where Pydantic is not available.
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from praisonaiagents.config.protocols import (
-    ConfigSchemaProtocol,
-    ValidationResult,
-    CliMapping, 
-    PrecedenceChain,
-)
+try:
+    from praisonaiagents.config.protocols import (
+        ConfigSchemaProtocol,
+        ValidationResult,
+        CliMapping, 
+        PrecedenceChain,
+    )
+except ImportError:
+    # Fallback when praisonaiagents not available
+    from dataclasses import dataclass
+    from typing import Protocol, runtime_checkable
+    
+    @dataclass
+    class ValidationResult:
+        is_valid: bool
+        errors: List[str]
+        warnings: List[str]
+        normalized: Optional[Dict[str, Any]]
+    
+    @dataclass
+    class CliMapping:
+        field_name: str
+        cli_flag: str
+        description: str
+        type_hint: type
+        default: Any = None
+        choices: Optional[List[str]] = None
+        env_var: Optional[str] = None
+    
+    @dataclass
+    class PrecedenceChain:
+        chain: List[str]
+        descriptions: Dict[str, str]
+    
+    @runtime_checkable
+    class ConfigSchemaProtocol(Protocol):
+        def validate(self, config: Dict[str, Any]) -> ValidationResult: ...
+        def get_cli_mapping(self) -> List[CliMapping]: ...
+        def get_precedence_chain(self) -> PrecedenceChain: ...
+        def normalize_config(self, config: Dict[str, Any]) -> Dict[str, Any]: ...
 
 
 @dataclass
@@ -104,12 +138,10 @@ class BasicRAGSchemaProvider:
         }
         unknown_fields = set(config.keys()) - known_fields
         if unknown_fields:
-            for field in unknown_fields:
-                errors.append(f"Unknown field '{field}'. Valid fields: {', '.join(sorted(known_fields))}")
+            for fld in unknown_fields:
+                errors.append(f"Unknown field '{fld}'. Valid fields: {', '.join(sorted(known_fields))}")
         
-        # Check required fields
-        if "collection" not in config:
-            errors.append("collection is required")
+        # Collection has a default, so it's not required to be present in input
         
         # Check value ranges
         if "top_k" in config:
@@ -267,10 +299,10 @@ class BasicRAGSchemaProvider:
     def get_precedence_chain(self) -> PrecedenceChain:
         """Get documented precedence chain."""
         return PrecedenceChain(
-            chain=["cli_flags", "env_vars", "config_file", "defaults"],
+            chain=["env_vars", "cli_flags", "config_file", "defaults"],
             descriptions={
-                "cli_flags": "Command line arguments (highest priority)",
-                "env_vars": "Environment variables (PRAISONAI_*)",
+                "env_vars": "Environment variables (PRAISONAI_*) (highest priority)",
+                "cli_flags": "Command line arguments",
                 "config_file": "YAML configuration file",
                 "defaults": "Built-in default values (lowest priority)"
             }
