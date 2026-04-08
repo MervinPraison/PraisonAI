@@ -120,24 +120,22 @@ class AICoder:
         except:
             return None
 
-    def get_shell_command(self, command: str) -> str:
+    def get_shell_command(self, command: str) -> list:
         """
         Convert command to be cross-platform compatible.
-        On Windows, use cmd /c for shell commands.
-        On Unix-like systems, use the command as-is.
+        Returns a list of arguments for create_subprocess_exec.
         """
+        import shlex
         if platform.system() == "Windows":
-            # For Windows, escape quotes and wrap command in cmd /c
-            escaped_command = command.replace('"', '\\"')
-            return f'cmd /c "{escaped_command}"'
-        return command
+            return ["cmd", "/c", command]
+        return shlex.split(command)
 
     async def execute_command(self, command: str):
         try:
-            # Make command cross-platform compatible
-            shell_command = self.get_shell_command(command)
-            process = await asyncio.create_subprocess_shell(
-                shell_command,
+            # Parameterize command
+            cmd_args = self.get_shell_command(command)
+            process = await asyncio.create_subprocess_exec(
+                *cmd_args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.cwd

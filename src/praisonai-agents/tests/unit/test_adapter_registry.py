@@ -67,16 +67,19 @@ class TestAdapterRegistry:
         reg = self._make_registry()
         assert reg.get_adapter("nonexistent") is None
 
-    def test_returns_none_when_factory_raises(self):
+    def test_raises_when_factory_fails(self):
+        import pytest
         reg = self._make_registry()
 
         def bad_factory(**kw):
             raise RuntimeError("intentional failure")
 
         reg.register_factory("bad", bad_factory)
-        assert reg.get_adapter("bad") is None
+        with pytest.raises(RuntimeError):
+            reg.get_adapter("bad")
 
-    def test_returns_none_when_class_raises(self):
+    def test_raises_when_class_fails(self):
+        import pytest
         reg = self._make_registry()
 
         class BadAdapter:
@@ -84,7 +87,8 @@ class TestAdapterRegistry:
                 raise ValueError("intentional failure")
 
         reg.register_adapter("bad", BadAdapter)
-        assert reg.get_adapter("bad") is None
+        with pytest.raises(RuntimeError):
+            reg.get_adapter("bad")
 
     def test_list_adapters_sorted(self):
         reg = self._make_registry()
@@ -310,15 +314,15 @@ class TestLLMProviderAdapters:
 
     def test_default_adapter_implements_protocol(self):
         from praisonaiagents.llm.adapters import DefaultAdapter
-        from praisonaiagents.llm.protocols import LLMProviderAdapter
+        from praisonaiagents.llm.protocols import LLMProviderAdapterProtocol
         adapter = DefaultAdapter()
-        assert isinstance(adapter, LLMProviderAdapter)
+        assert isinstance(adapter, LLMProviderAdapterProtocol)
 
     def test_ollama_adapter_implements_protocol(self):
         from praisonaiagents.llm.adapters import OllamaAdapter
-        from praisonaiagents.llm.protocols import LLMProviderAdapter
+        from praisonaiagents.llm.protocols import LLMProviderAdapterProtocol
         adapter = OllamaAdapter()
-        assert isinstance(adapter, LLMProviderAdapter)
+        assert isinstance(adapter, LLMProviderAdapterProtocol)
 
     def test_anthropic_adapter_prompt_caching(self):
         from praisonaiagents.llm.adapters import AnthropicAdapter

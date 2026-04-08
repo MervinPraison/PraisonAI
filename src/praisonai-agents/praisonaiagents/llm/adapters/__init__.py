@@ -192,7 +192,21 @@ def get_provider_adapter(name: str) -> LLMProviderAdapterProtocol:
     Returns:
         Provider adapter instance (default if name not found)
     """
-    return _provider_adapters.get(name, _provider_adapters['default'])
+    name_lower = name.lower()
+    
+    # Exact match first
+    if name_lower in _provider_adapters:
+        return _provider_adapters[name_lower]
+        
+    # Provider prefixes or substrings
+    if "ollama" in name_lower:
+        return _provider_adapters["ollama"]
+    if "claude" in name_lower or "anthropic" in name_lower:
+        return _provider_adapters["anthropic"]
+    if "gemini" in name_lower:
+        return _provider_adapters["gemini"]
+        
+    return _provider_adapters["default"]
 
 
 def list_provider_adapters() -> List[str]:

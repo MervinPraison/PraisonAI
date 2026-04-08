@@ -373,9 +373,9 @@ class TestEntryPointsDiscovery:
         import importlib.metadata as metadata
 
         def mock_entry_points(*args, **kwargs):
-            if kwargs.get("group") == "praisonaiagents.plugins":
+            if kwargs.get("group") == "praisonai.plugins":
                 return []
-            return {"praisonaiagents.plugins": []}
+            return {"praisonai.plugins": []}
 
         monkeypatch.setattr(metadata, "entry_points", mock_entry_points)
         manager = PluginManager()
@@ -416,7 +416,7 @@ class TestEntryPointsDiscovery:
     def test_discover_entry_points_success(self, monkeypatch):
         """Test successful entry_points discovery and plugin loading."""
         import importlib.metadata as metadata
-        from praisonaiagents.plugins.base import Plugin, PluginInfo
+        from praisonaiagents.plugins.plugin import Plugin, PluginInfo
         
         # Create a mock plugin class
         class MockPlugin(Plugin):
@@ -440,9 +440,9 @@ class TestEntryPointsDiscovery:
         mock_ep = MockEntryPoint("test_plugin", MockPlugin)
         
         def mock_entry_points(*args, **kwargs):
-            if kwargs.get("group") == "praisonaiagents.plugins":
+            if kwargs.get("group") == "praisonai.plugins":
                 return [mock_ep]
-            return {"praisonaiagents.plugins": [mock_ep]}
+            return {"praisonai.plugins": [mock_ep]}
         
         monkeypatch.setattr(metadata, "entry_points", mock_entry_points)
         

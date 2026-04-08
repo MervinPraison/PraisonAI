@@ -23,14 +23,13 @@
 
 </div>
 
-PraisonAI 🦞 — Automate and solve complex challenges with AI agent teams that plan, research, code, and deliver results to Telegram, Discord, and WhatsApp — running 24/7. A low-code, production-ready multi-agent framework with handoffs, guardrails, memory, RAG, and 100+ LLM providers, built around simplicity, customisation, and effective human-agent collaboration.
+PraisonAI 🦞 — **Hire a 24/7 AI Workforce.** Stop writing boilerplate and start shipping autonomous agents that research, plan, and execute tasks across your apps. From one agent to an entire organization, deployed in 5 lines of code.
 
 <div align="center">
   <br>
   <a href="https://x.com/elonmusk/status/1893870468249141688" target="_blank">
     <img src="https://img.shields.io/badge/Highlighted_by_Elon_Musk-000000?style=for-the-badge&logo=x&logoColor=white" alt="Highlighted by Elon Musk" />
   </a>
-  <p><em>"Grok 3 customer support" — <a href="https://x.com/elonmusk/status/1893870468249141688">Elon Musk quoting PraisonAI's tutorial</a></em></p>
   <br>
 </div>
 
@@ -69,26 +68,6 @@ PraisonAI 🦞 — Automate and solve complex challenges with AI agent teams tha
 
 ---
 
-> **Quick Paths:**
-> - 🆕 **New here?** → [Quick Start](#-quick-start) *(1 minute to first agent)*
-> - 📦 **Installing?** → [Installation](#-installation)
-> - 🐍 **Python SDK?** → [Python Examples](#-using-python-code)
-> - 📄 **YAML/No-Code?** → [YAML Examples](#-using-yaml-no-code)
-> - 🎯 **CLI user?** → [CLI Quick Reference](#-cli-quick-reference)
-> - 🤝 **Contributing?** → [Contributing](#-contributing)
-
----
-
-## ⚡ Performance
-
-PraisonAI is built for speed, with agent instantiation in under 4μs. This reduces overhead, improves responsiveness, and helps multi-agent systems scale efficiently in real-world production workloads.
-
-| Performance Metric | PraisonAI |
-|--------------------|-----------|
-| Avg Instantiation Time | **3.77 μs** |
-
----
-
 ## 🎯 Use Cases
 
 AI agents solving real-world problems across industries:
@@ -104,9 +83,44 @@ AI agents solving real-world problems across industries:
 
 ---
 
-##  Supported Providers
+## 🚀 Meet your first Agent (Under 1 Minute)
 
-PraisonAI supports 100+ LLM providers through seamless integration:
+1. Install the lightweight core SDK:
+```bash
+pip install praisonaiagents
+export OPENAI_API_KEY="your-api-key"
+```
+
+2. Run your first autonomous agent:
+```python
+from praisonaiagents import Agent
+
+# Give your agent a goal, and watch it work.
+agent = Agent(instructions="You are a senior data analyst.")
+agent.start("Analyze the top 3 tech trends of 2026 and format as a markdown table.")
+```
+
+---
+
+## 🌌 The PraisonAI Ecosystem
+
+Start simple with the core SDK, or expand to full visual builders and dashboards when you're ready.
+
+*   **Core SDK (`praisonaiagents`)**: For pure Python development. `pip install praisonaiagents`
+*   💻 **PraisonAI CLI (`praisonai`)**: For terminal-based developers. `pip install praisonai`
+*   🦞 **Claw Dashboard**: Connect agents directly to Telegram, Slack, or Discord. `pip install "praisonai[claw]"`
+*   🔗 **Flow Visual Builder**: Drag-and-drop workflow creation. `pip install "praisonai[flow]"`
+*   🤖 **PraisonAI UI**: Clean chat interface. `pip install "praisonai[ui]"`
+
+### JavaScript SDK
+
+```bash
+npm install praisonai
+```
+
+## 🧠 Supported Providers & Features
+
+Powered by 100+ LLMs (OpenAI, Anthropic, Gemini & local models).
 
 <p align="center">
 <img src="https://img.shields.io/badge/OpenAI-412991?style=flat&logo=openai&logoColor=white" alt="OpenAI" />
@@ -164,6 +178,14 @@ PraisonAI supports 100+ LLM providers through seamless integration:
 
 </details>
 
+<div align="center">
+  <a href="https://x.com/elonmusk/status/1893870468249141688" target="_blank">
+    <img src=".github/images/elon_musk_praisonai.png" alt="Highlighted by Elon Musk" width="600" />
+  </a>
+  <p><em>"Grok 3 customer support" — <a href="https://x.com/elonmusk/status/1893870468249141688">Elon Musk quoting PraisonAI's tutorial</a></em></p>
+</div>
+<br>
+
 ---
 
 ## 🌟 Why PraisonAI?
@@ -204,78 +226,6 @@ PraisonAI supports 100+ LLM providers through seamless integration:
 
 </details>
 
-
-<div align="center">
-  <a href="https://x.com/elonmusk/status/1893870468249141688" target="_blank">
-    <img src=".github/images/elon_musk_praisonai.png" alt="Highlighted by Elon Musk" width="600" />
-  </a>
-  <p><em>"Grok 3 customer support" — <a href="https://x.com/elonmusk/status/1893870468249141688">Elon Musk quoting PraisonAI's tutorial</a></em></p>
-</div>
-<br>
-
----
-
-## 🚀 Quick Start
-
-Get started with PraisonAI in under 1 minute:
-
-```bash
-# Install
-pip install praisonaiagents
-
-# Set API key
-export OPENAI_API_KEY=your_key_here
-
-# Create a simple agent
-python -c "from praisonaiagents import Agent; Agent(instructions='You are a helpful AI assistant').start('Write a haiku about AI')"
-```
-
-> **Next Steps:** [Single Agent Example](#1-single-agent) | [Multi Agents](#2-multi-agents) | [Full Docs](https://docs.praison.ai)
-
----
-
-## 📦 Installation
-
-### Python SDK
-
-Lightweight package dedicated for coding:
-
-```bash
-pip install praisonaiagents
-```
-
-For the full framework with CLI support:
-
-```bash
-pip install praisonai
-```
-
-🦞 **PraisonAI Claw** — full UI with bots, memory, knowledge, and gateway:
-
-```bash
-pip install "praisonai[claw]"
-praisonai claw
-```
-
-🔗 **PraisonAI Flow** — Langflow Visual Flow Builder:
-
-```bash
-pip install "praisonai[flow]"
-praisonai flow
-```
-
-🤖 **PraisonAI UI** — Clean chat interface:
-
-```bash
-pip install "praisonai[ui]"
-praisonai ui
-```
-
-### JavaScript SDK
-
-```bash
-npm install praisonai
-```
 
 
 
@@ -773,6 +723,20 @@ const { Agent } = require('praisonai');
 const agent = new Agent({ instructions: 'You are a helpful AI assistant' });
 agent.start('Write a movie script about a robot in Mars');
 ```
+
+---
+
+## ⚡ Performance
+
+PraisonAI is built for speed, with agent instantiation in under 4μs. This reduces overhead, improves responsiveness, and helps multi-agent systems scale efficiently in real-world production workloads.
+
+| Performance Metric | PraisonAI |
+|--------------------|-----------|
+| Avg Instantiation Time | **3.77 μs** |
+
+---
+
+
 
 ---
 

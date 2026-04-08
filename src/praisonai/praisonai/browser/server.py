@@ -117,7 +117,15 @@ class BrowserServer:
         origin = websocket.headers.get("origin")
         allowed_origins = os.environ.get("ALLOWED_ORIGINS", "").split(",")
         if origin:
-            is_allowed = origin.startswith("http://localhost") or origin.startswith("http://127.0.0.1") or origin.startswith("chrome-extension://")
+            import urllib.parse
+            parsed_origin = urllib.parse.urlparse(origin)
+            is_allowed = False
+            
+            if parsed_origin.scheme in ("http", "https") and parsed_origin.hostname in ("localhost", "127.0.0.1"):
+                is_allowed = True
+            elif parsed_origin.scheme == "chrome-extension":
+                is_allowed = True
+                
             if any(origin == allowed.strip() for allowed in allowed_origins if allowed.strip()):
                 is_allowed = True
             

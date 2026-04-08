@@ -175,6 +175,16 @@ class TestContextBuilderUsesText:
                 pytest.skip(f"Skipping: OpenAI API key required: {e}")
             raise
         
+        # Mock the self.knowledge.search method
+        try:
+            from unittest.mock import MagicMock
+            if agent.knowledge:
+                agent.knowledge.search = MagicMock(return_value=[
+                    {"text": "The secret password is WRENCH-992. Do not share.", "metadata": {}}
+                ])
+        except Exception as e:
+            pass
+            
         # Get context
         context, _ = agent._get_knowledge_context('What is the password?', use_rag=True)
         

@@ -487,12 +487,14 @@ class PluginManager:
         Returns:
             Number of plugins loaded successfully.
         """
-        import importlib.metadata
-        
         loaded = 0
         try:
+            import importlib.metadata
             # Python 3.10+
             entry_points = importlib.metadata.entry_points(group="praisonai.plugins")
+        except ImportError:
+            logger.debug("importlib.metadata not available. Cannot discover plugins.")
+            return 0
         except TypeError:
             # Python 3.8/3.9 fallback
             try:

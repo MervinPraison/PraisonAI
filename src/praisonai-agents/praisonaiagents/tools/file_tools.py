@@ -49,8 +49,8 @@ class FileTools:
         absolute = os.path.realpath(normalized)
         
         # Prevent path traversal outside current workspace / allowed directories
-        cwd = os.getcwd()
-        if not absolute.startswith(cwd):
+        cwd = os.path.abspath(os.getcwd())
+        if os.path.commonpath([absolute, cwd]) != cwd:
             raise ValueError(f"Path traversal detected: {filepath} escapes workspace {cwd}")
         
         return absolute
