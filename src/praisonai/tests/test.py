@@ -1,5 +1,6 @@
 import unittest
 import subprocess
+import shlex
 import os
 import pytest
 from praisonai.cli import PraisonAI
@@ -61,7 +62,6 @@ class TestPraisonAICommandLine(unittest.TestCase):
             
         try:
             # Use shell=False with shlex.split for safer execution  
-            import shlex
             args = shlex.split(command)
             result = subprocess.run(args, shell=False, capture_output=True, text=True, env=env, timeout=120)
             return result.stdout + result.stderr

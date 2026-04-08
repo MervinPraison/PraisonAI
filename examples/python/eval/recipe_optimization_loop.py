@@ -14,13 +14,13 @@ import subprocess
 import sys
 import os
 import json
+import shlex
 from pathlib import Path
 
 
 def run_cli(cmd: str, cwd: str = None) -> tuple[int, str, str]:
     """Run a CLI command and return (exit_code, stdout, stderr)."""
     # Use shell=False with shlex.split for safer execution
-    import shlex
     args = shlex.split(cmd)
     result = subprocess.run(
         args,

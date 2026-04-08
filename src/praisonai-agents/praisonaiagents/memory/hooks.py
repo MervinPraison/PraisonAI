@@ -37,6 +37,7 @@ Hook Events:
 import os
 import json
 import logging
+import shlex
 from praisonaiagents._logging import get_logger
 import subprocess
 from pathlib import Path
@@ -301,7 +302,6 @@ class HooksManager:
             
             # Execute
             # Use shell=False with shlex.split for safer execution
-            import shlex
             args = shlex.split(command)
             result = subprocess.run(
                 args,

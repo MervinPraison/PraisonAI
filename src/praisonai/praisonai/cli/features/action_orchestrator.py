@@ -444,6 +444,7 @@ class ActionOrchestrator:
         
         elif step.action_type == ActionType.SHELL_COMMAND:
             import subprocess
+            import shlex
             
             # Block shell injection characters
             banned_chars = [';', '&', '|', '$', '`']
@@ -456,7 +457,6 @@ class ActionOrchestrator:
                 }
                 
             # Use shell=False with shlex.split for safer execution
-            import shlex
             args = shlex.split(step.target)
             result = subprocess.run(
                 args,

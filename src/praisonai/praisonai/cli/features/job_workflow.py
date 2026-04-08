@@ -25,6 +25,7 @@ import ast
 import operator
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -241,7 +242,6 @@ class JobWorkflowExecutor:
         cwd = step.get("cwd", self._cwd)
         env = self._build_env(step)
         # Use shell=False with shlex.split for safer execution
-        import shlex
         args = shlex.split(cmd)
         result = subprocess.run(
             args, shell=False, cwd=cwd, env=env,

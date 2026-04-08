@@ -1,5 +1,6 @@
 from praisonaiagents import Agent, Task, AgentTeam
 import subprocess
+import shlex
 import os
 
 def run_terminal_command(command: str):
@@ -8,7 +9,6 @@ def run_terminal_command(command: str):
     """
     try:
         # Use shell=False with shlex.split for safer execution
-        import shlex
         args = shlex.split(command)
         result = subprocess.run(args, shell=False, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         print(f"Command output: {result}")
