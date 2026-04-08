@@ -301,6 +301,47 @@ praisonai agents.yaml
 
 ---
 
+## 🚀 24/7 Production Deployment
+
+Deploy PraisonAI for always-on operation with automatic restarts and process supervision.
+
+<div align="center">
+  <a href="https://docs.praison.ai/docs/guides/deployment/production-minimal">
+    <img src="https://img.shields.io/badge/🚀_Deploy_24/7-Production_Ready-green?style=for-the-badge&logo=rocket&logoColor=white" alt="24/7 Deployment Guide" />
+  </a>
+</div>
+
+### Quick Deploy Options
+
+| Method | Best For | Setup Time | Guide |
+|--------|----------|------------|-------|
+| **Docker Compose** | Most users | 5 minutes | [📖 Guide](https://docs.praison.ai/docs/guides/deployment/production-minimal#docker-compose-production) |
+| **Linux systemd** | Native integration | 10 minutes | [📖 Guide](https://docs.praison.ai/docs/guides/deployment/production-minimal#linux-systemd) |
+| **macOS launchd** | Mac users | 10 minutes | [📖 Guide](https://docs.praison.ai/docs/guides/deployment/production-minimal#macos-launchd) |
+| **Windows Service** | Windows servers | 15 minutes | [📖 Guide](https://docs.praison.ai/docs/guides/deployment/production-minimal#windows-service) |
+
+### Docker Compose (Recommended)
+
+```bash
+# 1. Create deployment directory
+mkdir praisonai-deploy && cd praisonai-deploy
+
+# 2. Download docker-compose.yml
+curl -o docker-compose.yml https://raw.githubusercontent.com/MervinPraison/PraisonAI/main/docker/docker-compose.yml
+
+# 3. Set your API key
+echo "OPENAI_API_KEY=your_openai_api_key_here" > .env
+
+# 4. Deploy 24/7
+docker-compose up -d
+
+# ✅ Running at http://localhost:8082 (Claw Dashboard)
+```
+
+> 📖 **Full Guide**: [24/7 Production Minimal Deployment](https://docs.praison.ai/docs/guides/deployment/production-minimal)
+
+---
+
 ## 🎯 CLI Quick Reference
 
 | Category | Commands |
