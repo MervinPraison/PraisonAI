@@ -475,6 +475,47 @@ class PluginManager:
         
         return loaded
 
+    # =========================================================================
+    # Entry Point Discovery Support (External Packages)
+    # =========================================================================
+
+    def discover_entry_points(self) -> int:
+        """
+        Auto-discover and load protocol-driven plugins installed via pip
+        that register in the 'praisonai.plugins' entry-point group.
+        
+        Returns:
+            Number of plugins loaded successfully.
+        """
+        import importlib.metadata
+        
+        loaded = 0
+        try:
+            # Python 3.10+
+            entry_points = importlib.metadata.entry_points(group="praisonai.plugins")
+        except TypeError:
+            # Python 3.8/3.9 fallback
+            try:
+                entry_points = importlib.metadata.entry_points().get("praisonai.plugins", [])
+            except Exception as e:
+                logger.error(f"Failed to get entry points: {e}")
+                return 0
+                
+        for ep in entry_points:
+            try:
+                plugin_cls = ep.load()
+                # Duck-type check or inheritance check isn't strictly necessary if it conforms to Plugin interface at runtime
+                if callable(plugin_cls):
+                    plugin = plugin_cls()
+                    if self.register(plugin):
+                        loaded += 1
+                else:
+                    logger.warning(f"Entry point {ep.name} is not callable")
+            except Exception as e:
+                logger.error(f"Failed to load plugin from entry point {ep.name}: {e}")
+                
+        return loaded
+
 # Global plugin manager instance
 _default_manager: Optional[PluginManager] = None
 
