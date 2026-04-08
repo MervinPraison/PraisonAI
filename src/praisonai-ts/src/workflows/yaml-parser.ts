@@ -36,6 +36,12 @@ export interface ParsedWorkflow {
   errors: string[];
 }
 
+// Whitelist of allowed step keys to prevent injection
+const ALLOWED_STEP_KEYS = new Set([
+  'type', 'agent', 'tool', 'input', 'output', 'condition',
+  'onError', 'maxRetries', 'timeout', 'loopCondition', 'maxIterations',
+]);
+
 /**
  * Parse YAML string into workflow definition
  */
@@ -85,10 +91,6 @@ export function parseYAMLWorkflow(yamlContent: string): YAMLWorkflowDefinition {
       };
     } else if (currentStep) {
       // Step properties — whitelist allowed keys to prevent injection
-      const ALLOWED_STEP_KEYS = new Set([
-        'type', 'agent', 'tool', 'input', 'output', 'condition',
-        'onError', 'maxRetries', 'timeout', 'loopCondition', 'maxIterations',
-      ]);
       if (!ALLOWED_STEP_KEYS.has(key)) {
         // Ignore unknown keys — do not allow arbitrary property injection
         continue;
@@ -282,10 +284,13 @@ export async function loadWorkflowFromFile(
 
   // SECURITY: Prevent path traversal
   const normalizedPath = path.normalize(filePath);
-  if (normalizedPath.includes('..')) {
-    throw new Error('Path traversal detected: ".." is not allowed in file paths');
+  // Check for '..' as path segments (not just substring)
+  const pathSegments = normalizedPath.split(path.sep);
+  if (pathSegments.includes('..')) {
+    throw new Error('Path traversal detected: ".." path segments are not allowed');
   }
 
+  let effectivePath: string;
   // If basePath is specified, ensure resolvedPath stays within it
   if (options.basePath) {
     const resolvedBase = path.resolve(options.basePath);
@@ -293,16 +298,19 @@ export async function loadWorkflowFromFile(
     if (!resolvedFile.startsWith(resolvedBase + path.sep) && resolvedFile !== resolvedBase) {
       throw new Error(`File path must be within base directory: ${options.basePath}`);
     }
+    effectivePath = resolvedFile;
+  } else {
+    effectivePath = path.resolve(normalizedPath);
   }
 
   // SECURITY: Enforce file size limit (default 1 MB)
   const maxSize = options.maxFileSizeBytes ?? 1_048_576;
-  const stat = await fs.stat(filePath);
+  const stat = await fs.stat(effectivePath);
   if (stat.size > maxSize) {
     throw new Error(`File too large: ${stat.size} bytes exceeds limit of ${maxSize} bytes`);
   }
 
-  const content = await fs.readFile(filePath, 'utf-8');
+  const content = await fs.readFile(effectivePath, 'utf-8');
   const definition = parseYAMLWorkflow(content);
   return createWorkflowFromYAML(definition, agents, tools);
 }

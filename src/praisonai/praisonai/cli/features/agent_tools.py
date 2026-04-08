@@ -8,7 +8,7 @@ making the Agent the central orchestrator for all actions.
 import asyncio
 import json
 import logging
-from typing import Callable, Dict, List, TYPE_CHECKING
+from typing import Callable, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .interactive_runtime import InteractiveRuntime
@@ -16,12 +16,12 @@ if TYPE_CHECKING:
     from .action_orchestrator import ActionOrchestrator
 
 import os
-import re
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
-def _sanitize_filepath(filepath: str, workspace: str = None) -> str:
+def _sanitize_filepath(filepath: str, workspace: Optional[str] = None) -> str:
     """Validate and sanitize a filepath against injection attacks.
     
     Raises ValueError if the path is unsafe.
@@ -45,9 +45,11 @@ def _sanitize_filepath(filepath: str, workspace: str = None) -> str:
     
     # If we have a workspace, ensure the resolved path stays within it
     if workspace:
-        resolved = os.path.realpath(os.path.join(workspace, normalized))
-        ws_resolved = os.path.realpath(workspace)
-        if not resolved.startswith(ws_resolved + os.sep) and resolved != ws_resolved:
+        resolved = Path(os.path.realpath(os.path.join(workspace, normalized)))
+        ws_resolved = Path(os.path.realpath(workspace))
+        try:
+            resolved.relative_to(ws_resolved)
+        except ValueError:
             raise ValueError(
                 f"Path {filepath!r} resolves outside workspace {workspace!r}"
             )
@@ -70,9 +72,9 @@ def _sanitize_command(command: str) -> str:
     DANGEROUS_PATTERNS = [
         '$(', '`',      # Command substitution
         '&&', '||',     # Command chaining
-        ';',            # Command separator
-        '>>', '> ',     # Output redirection
-        '| ',           # Pipe
+        '>>', '>',      # Output redirection
+        '|', ';', '&',  # Pipe and separators
+        '\n', '\r'      # Line breaks
     ]
     for pattern in DANGEROUS_PATTERNS:
         if pattern in command:
@@ -513,7 +515,9 @@ def create_agent_centric_tools(
             # SECURITY: Ensure resolved path stays within workspace
             resolved = path.resolve()
             ws_resolved = Path(runtime.config.workspace).resolve()
-            if not str(resolved).startswith(str(ws_resolved) + os.sep) and resolved != ws_resolved:
+            try:
+                resolved.relative_to(ws_resolved)
+            except ValueError:
                 return json.dumps({"error": f"Path escapes workspace: {filepath}"})
             
             if not resolved.exists():
@@ -556,7 +560,9 @@ def create_agent_centric_tools(
             # SECURITY: Ensure resolved path stays within workspace
             resolved = path.resolve()
             ws_resolved = Path(runtime.config.workspace).resolve()
-            if not str(resolved).startswith(str(ws_resolved) + os.sep) and resolved != ws_resolved:
+            try:
+                resolved.relative_to(ws_resolved)
+            except ValueError:
                 return json.dumps({"error": f"Directory escapes workspace: {directory}"})
             
             if not resolved.exists():
