@@ -8,6 +8,7 @@ This demonstrates the protocol-driven approach for Gap 2.
 """
 
 from ..protocols import LLMProviderAdapter
+from ..model_capabilities import GEMINI_INTERNAL_TOOLS
 from typing import Dict, Any, List
 
 
@@ -43,7 +44,8 @@ class OllamaAdapter(DefaultAdapter):
     
     def should_summarize_tools(self, iter_count: int) -> bool:
         # Replaces: OLLAMA_SUMMARY_ITERATION_THRESHOLD logic
-        return iter_count >= 3
+        # Must match LLM.OLLAMA_SUMMARY_ITERATION_THRESHOLD = 1
+        return iter_count >= 1
     
     def post_tool_iteration(self, state: Dict[str, Any]) -> None:
         # Replaces: Ollama-specific post-tool summary branches
@@ -69,9 +71,10 @@ class GeminiAdapter(DefaultAdapter):
     
     def format_tools(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         # Replaces: gemini_internal_tools handling in llm.py
+        # Internal tool names match GEMINI_INTERNAL_TOOLS: {'googleSearch', 'urlContext', 'codeExecution'}
         formatted = []
         for tool in tools:
-            if tool.get('name') in ['gemini_search', 'gemini_code_execution']:
+            if tool.get('name') in GEMINI_INTERNAL_TOOLS:
                 # Convert to Gemini internal tool format
                 formatted.append({
                     'type': 'function',
