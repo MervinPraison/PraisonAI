@@ -121,9 +121,9 @@ class TestApiMdGenerator:
             agent_info = generator.agents_symbols["Agent"]
             assert len(agent_info.methods) > 0, "Agent class should have methods"
             
-            # Check for common methods
+            # Check for common methods that are directly in Agent class (not in mixins)
             method_names = [m.name for m in agent_info.methods]
-            assert "start" in method_names or "run" in method_names or "chat" in method_names
+            assert "__init__" in method_names or "agent_id" in method_names or "analyze_prompt" in method_names
 
 
 class TestTypescriptDiscovery:

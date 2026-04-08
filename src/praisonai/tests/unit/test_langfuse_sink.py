@@ -135,38 +135,39 @@ class TestLangfuseSinkEmit:
     def test_emit_agent_start_creates_trace_and_span(self):
         """AGENT_START event creates a trace and root span."""
         sink = _make_sink_with_mock_client()
-        mock_trace = MagicMock()
-        sink._client.trace.return_value = mock_trace
+        mock_span = MagicMock()
+        sink._client.start_observation.return_value = mock_span
 
         event = _make_event(ActionEventType.AGENT_START.value)
         sink.emit(event)
 
-        sink._client.trace.assert_called_once()
-        mock_trace.span.assert_called_once()
-        assert "agent1" in sink._traces
-        assert "agent1" in sink._spans
+        sink._client.start_observation.assert_called_once()
+        call_kwargs = sink._client.start_observation.call_args.kwargs
+        assert call_kwargs.get("as_type") == "span"
+        assert "agent1-agent1" in sink._traces
+        assert "agent1-agent1" in sink._spans
 
     def test_emit_agent_end_ends_span(self):
         """AGENT_END event ends the root span."""
         sink = _make_sink_with_mock_client()
         mock_span = MagicMock()
-        sink._spans["agent1"] = mock_span
-        sink._traces["agent1"] = MagicMock()
+        sink._spans["agent1-agent1"] = mock_span
+        sink._traces["agent1-agent1"] = MagicMock()
 
         event = _make_event(ActionEventType.AGENT_END.value, status="ok")
         sink.emit(event)
 
         mock_span.end.assert_called_once()
-        assert "agent1" not in sink._spans
-        assert "agent1" not in sink._traces
+        assert "agent1-agent1" not in sink._spans
+        assert "agent1-agent1" not in sink._traces
 
     def test_emit_tool_start_creates_child_span(self):
         """TOOL_START creates a child span under the parent agent span."""
         sink = _make_sink_with_mock_client()
         mock_parent_span = MagicMock()
         mock_tool_span = MagicMock()
-        mock_parent_span.span.return_value = mock_tool_span
-        sink._spans["agent1"] = mock_parent_span
+        sink._client.start_observation.return_value = mock_tool_span
+        sink._spans["agent1-agent1"] = mock_parent_span
 
         event = _make_event(
             ActionEventType.TOOL_START.value,
@@ -175,8 +176,11 @@ class TestLangfuseSinkEmit:
         )
         sink.emit(event)
 
-        mock_parent_span.span.assert_called_once()
-        tool_keys = [k for k in sink._spans if k.startswith("agent1:search_tool:")]
+        sink._client.start_observation.assert_called_once()
+        call_kwargs = sink._client.start_observation.call_args.kwargs
+        assert call_kwargs.get("name") == "search_tool"
+        
+        tool_keys = [k for k in sink._spans if k.startswith("agent1-agent1:search_tool:")]
         assert len(tool_keys) == 1
 
     def test_emit_tool_end_closes_tool_span(self):
@@ -184,7 +188,7 @@ class TestLangfuseSinkEmit:
         sink = _make_sink_with_mock_client()
         mock_tool_span = MagicMock()
         ts = str(time.time())
-        sink._spans[f"agent1:search_tool:{ts}"] = mock_tool_span
+        sink._spans[f"agent1-agent1:search_tool:{ts}"] = mock_tool_span
 
         event = _make_event(
             ActionEventType.TOOL_END.value,
@@ -200,8 +204,6 @@ class TestLangfuseSinkEmit:
     def test_emit_error_creates_error_event(self):
         """ERROR event creates a Langfuse event with level=ERROR."""
         sink = _make_sink_with_mock_client()
-        mock_trace = MagicMock()
-        sink._traces["agent1"] = mock_trace
 
         event = _make_event(
             ActionEventType.ERROR.value,
@@ -209,15 +211,14 @@ class TestLangfuseSinkEmit:
         )
         sink.emit(event)
 
-        mock_trace.event.assert_called_once()
-        call_kwargs = mock_trace.event.call_args.kwargs
+        sink._client.start_observation.assert_called_once()
+        call_kwargs = sink._client.start_observation.call_args.kwargs
+        assert call_kwargs.get("as_type") == "event"
         assert call_kwargs.get("level") == "ERROR"
 
     def test_emit_output_creates_output_event(self):
         """OUTPUT event creates a Langfuse event."""
         sink = _make_sink_with_mock_client()
-        mock_trace = MagicMock()
-        sink._traces["agent1"] = mock_trace
 
         event = _make_event(
             ActionEventType.OUTPUT.value,
@@ -225,7 +226,10 @@ class TestLangfuseSinkEmit:
         )
         sink.emit(event)
 
-        mock_trace.event.assert_called_once()
+        sink._client.start_observation.assert_called_once()
+        call_kwargs = sink._client.start_observation.call_args.kwargs
+        assert call_kwargs.get("as_type") == "event"
+        assert call_kwargs.get("name") == "output"
 
     def test_emit_when_disabled_is_noop(self):
         """emit() does nothing when sink is disabled."""
@@ -278,7 +282,7 @@ class TestLangfuseSinkLifecycle:
     def test_close_flushes_and_closes_remaining_spans(self):
         sink = _make_sink_with_mock_client()
         mock_span = MagicMock()
-        sink._spans["agent1"] = mock_span
+        sink._spans["agent1-agent1"] = mock_span
 
         sink.close()
 
