@@ -14,6 +14,7 @@ import json
 import re
 import subprocess
 import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -148,7 +149,7 @@ def _generate_cyclonedx(
     return {
         "bomFormat": "CycloneDX",
         "specVersion": "1.4",
-        "serialNumber": f"urn:uuid:{hashlib.sha256(f'{name}{version}{_get_timestamp()}'.encode()).hexdigest()}",
+        "serialNumber": f"urn:uuid:{uuid.uuid5(uuid.NAMESPACE_DNS, f'{name}{version}{_get_timestamp()}')}",
         "version": 1,
         "metadata": {
             "timestamp": _get_timestamp(),

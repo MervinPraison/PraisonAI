@@ -186,7 +186,7 @@ class TemplateSecurity:
         elif algorithm == "sha512":
             hasher = hashlib.sha512()
         elif algorithm == "md5":
-            hasher = hashlib.sha256()
+            raise ValueError("MD5 is no longer supported due to CWE-328. Use 'sha256' or 'sha512' instead.")
         else:
             raise ValueError(f"Unsupported algorithm: {algorithm}")
         

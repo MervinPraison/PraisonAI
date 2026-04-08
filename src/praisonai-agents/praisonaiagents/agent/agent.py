@@ -1139,7 +1139,17 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
         elif _history_enabled and session_id is None and _history_session_id is None:
             import hashlib as _hl
             _agent_hash = _hl.sha256((name or "agent").encode()).hexdigest()[:8]
-            session_id = f"history_{_agent_hash}"
+            # Backward compat: check if legacy md5-based session exists first
+            _legacy_hash = _hl.md5((name or "agent").encode()).hexdigest()[:8]
+            _legacy_id = f"history_{_legacy_hash}"
+            _new_id = f"history_{_agent_hash}"
+            # Prefer legacy if it exists on disk, else use new SHA-256 ID
+            import os as _os
+            _session_dir = _os.path.join(_os.path.expanduser("~"), ".praisonai", "sessions")
+            if _os.path.exists(_os.path.join(_session_dir, f"{_legacy_id}.json")):
+                session_id = _legacy_id  # preserve existing history
+            else:
+                session_id = _new_id
             _history_session_id = session_id
         
         # ─────────────────────────────────────────────────────────────────────
