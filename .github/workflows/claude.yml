@@ -180,9 +180,9 @@ jobs:
             - CORE vs WRAPPER vs TOOLS vs DOCS vs PLUGINS ROUTING:
               1. Core SDK (praisonaiagents/): Only core protocols, base classes, decorators. No heavy implementations.
               2. Wrapper (praisonai/): CLI, heavy implementations, optional dependencies.
-              3. Tools (PraisonAI-Tools): Specific integrations, external tools (e.g. SurrealDB, Slack), and community extensions.
+              3. Tools (PraisonAI-Tools): Capabilities Agents actively call during execution (e.g. SurrealDB tool, Slack tool).
               4. Documentation (PraisonAIDocs): Documentation pages, guides, API references.
-              5. Plugins (PraisonAI-Plugins): Full plugin packages and extensions.
+              5. Plugins (PraisonAI-Plugins): Framework lifecycle extensions replacing systemic behavior (e.g. tracing, logging, metrics).
               For items routed to an EXTERNAL repository (Tools, Docs, Plugins), follow STEP 3-ALT below.
             - Does it duplicate existing functionality? Check if Agent already supports this via existing params (reflection, planning, tools, hooks, memory).
             - Does it inherit from Agent properly? New agent types MUST inherit Agent, not wrap it with composition.
