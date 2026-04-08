@@ -129,9 +129,17 @@ class FileSnapshot:
         self.session_id = session_id
         
         # Create unique shadow repo path based on project path hash
-        project_hash = hashlib.md5(self.project_path.encode()).hexdigest()[:12]
         base_dir = snapshot_dir or DEFAULT_SNAPSHOT_DIR
-        self.shadow_path = os.path.join(base_dir, project_hash)
+        project_hash = hashlib.sha256(self.project_path.encode()).hexdigest()[:12]
+        new_shadow_path = os.path.join(base_dir, project_hash)
+        # Backward compat: adopt legacy snapshot directory if present
+        legacy_hash = hashlib.md5(self.project_path.encode()).hexdigest()[:12]  # noqa: S324
+        legacy_shadow_path = os.path.join(base_dir, legacy_hash)
+        self.shadow_path = (
+            legacy_shadow_path
+            if (not os.path.exists(new_shadow_path) and os.path.exists(legacy_shadow_path))
+            else new_shadow_path
+        )
         
         self._initialized = False
     

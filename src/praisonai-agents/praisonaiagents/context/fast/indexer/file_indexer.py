@@ -196,7 +196,7 @@ class FileIndexer:
             return None
         
         try:
-            hasher = hashlib.md5()
+            hasher = hashlib.sha256()
             with open(filepath, 'rb') as f:
                 for chunk in iter(lambda: f.read(8192), b''):
                     hasher.update(chunk)

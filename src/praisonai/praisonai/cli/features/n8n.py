@@ -311,7 +311,7 @@ class N8nHandler(FlagHandler):
         
         # Build the complete workflow
         # Generate a unique ID based on workflow name
-        workflow_id = hashlib.md5(workflow_name.encode()).hexdigest()[:8]
+        workflow_id = hashlib.sha256(workflow_name.encode()).hexdigest()[:8]
         
         workflow = {
             "id": workflow_id,
@@ -367,7 +367,7 @@ class N8nHandler(FlagHandler):
         """
         if use_webhook:
             # Generate a unique webhook ID
-            webhook_id = hashlib.md5(webhook_path.encode()).hexdigest()[:16]
+            webhook_id = hashlib.sha256(webhook_path.encode()).hexdigest()[:16]
             return {
                 "id": "trigger",
                 "name": "Webhook",

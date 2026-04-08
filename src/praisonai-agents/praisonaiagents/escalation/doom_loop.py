@@ -180,7 +180,7 @@ class DoomLoopDetector:
         chunk_size = self.config.content_chunk_size
         for i in range(0, len(text) - chunk_size + 1, chunk_size):
             chunk = text[i:i + chunk_size]
-            chunk_hash = hashlib.md5(chunk.encode()).hexdigest()[:16]
+            chunk_hash = hashlib.sha256(chunk.encode()).hexdigest()[:16]
             self._content_chunk_counts[chunk_hash] = self._content_chunk_counts.get(chunk_hash, 0) + 1
     
     def mark_progress(self, marker: str):
@@ -326,18 +326,18 @@ class DoomLoopDetector:
     def _hash_action(self, action_type: str, args: Dict[str, Any]) -> str:
         """Create hash for action + args."""
         content = f"{action_type}:{self._hash_dict(args)}"
-        return hashlib.md5(content.encode()).hexdigest()[:16]
+        return hashlib.sha256(content.encode()).hexdigest()[:16]
     
     def _hash_dict(self, d: Dict[str, Any]) -> str:
         """Create hash for dictionary."""
         # Sort keys for consistent hashing
         content = str(sorted(d.items()))
-        return hashlib.md5(content.encode()).hexdigest()[:16]
+        return hashlib.sha256(content.encode()).hexdigest()[:16]
     
     def _hash_result(self, result: Any) -> str:
         """Create hash for result."""
         content = str(result)[:1000]  # Limit size
-        return hashlib.md5(content.encode()).hexdigest()[:16]
+        return hashlib.sha256(content.encode()).hexdigest()[:16]
     
     def _check_repeated_identical(self) -> bool:
         """Check for repeated identical actions."""

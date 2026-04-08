@@ -31,7 +31,7 @@ def _chunk_hash(text: str, source: Optional[str] = None) -> str:
         Hash string for deduplication
     """
     content = f"{source or ''}:{text}"
-    return hashlib.md5(content.encode()).hexdigest()[:16]
+    return hashlib.sha256(content.encode()).hexdigest()[:16]
 
 
 def deduplicate_chunks(

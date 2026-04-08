@@ -355,7 +355,7 @@ class FileTracker:
         # Calculate hash for small files, use mtime+size for large files
         if stat.st_size < 1024 * 1024:  # 1MB
             with open(filepath, "rb") as f:
-                file_hash = hashlib.md5(f.read()).hexdigest()
+                file_hash = hashlib.sha256(f.read()).hexdigest()
         else:
             # For large files, use mtime + size as proxy
             file_hash = f"{stat.st_mtime}:{stat.st_size}"

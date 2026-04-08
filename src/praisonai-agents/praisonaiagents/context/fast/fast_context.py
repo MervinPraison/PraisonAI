@@ -180,7 +180,7 @@ class FastContext:
             **kwargs
         }
         key_str = json.dumps(key_data, sort_keys=True)
-        return hashlib.md5(key_str.encode()).hexdigest()
+        return hashlib.sha256(key_str.encode()).hexdigest()
     
     def _get_cached(self, cache_key: str) -> Optional[FastContextResult]:
         """Get cached result if valid."""

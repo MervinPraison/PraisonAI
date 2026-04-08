@@ -300,7 +300,7 @@ class AutoMemory:
         
         # Check if already processed
         import hashlib
-        text_hash = hashlib.md5(text.encode()).hexdigest()[:16]
+        text_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
         if text_hash in self._processed_hashes:
             return []
         self._processed_hashes.add(text_hash)

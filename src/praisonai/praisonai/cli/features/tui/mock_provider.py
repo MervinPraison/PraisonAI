@@ -179,7 +179,7 @@ class MockProvider:
             return MockResponse(content="", error="Random simulated error")
         
         # Generate deterministic response based on input hash
-        input_hash = hashlib.md5(input_content.encode()).hexdigest()
+        input_hash = hashlib.sha256(input_content.encode()).hexdigest()
         seed = int(input_hash[:8], 16)
         rng = random.Random(seed)
         

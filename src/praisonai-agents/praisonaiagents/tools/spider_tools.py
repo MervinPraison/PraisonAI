@@ -350,7 +350,7 @@ class SpiderTools:
                 
                 # Save to file if requested
                 if output_dir:
-                    filename = hashlib.md5(url.encode()).hexdigest() + '.json'
+                    filename = hashlib.sha256(url.encode()).hexdigest() + '.json'
                     filepath = os.path.join(output_dir, filename)
                     with open(filepath, 'w', encoding='utf-8') as f:
                         json.dump(result, f, indent=2, ensure_ascii=False)
