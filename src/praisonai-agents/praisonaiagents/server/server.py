@@ -200,8 +200,8 @@ class AgentServer:
         app = CORSMiddleware(
             app,
             allow_origins=self.config.cors_origins,
-            allow_methods=["*"],
-            allow_headers=["*"],
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "Origin", "Accept"],
         )
         
         return app

@@ -361,7 +361,7 @@ class HTTPStreamTransport:
                 CORSMiddleware,
                 allow_origins=self.cors_origins,
                 allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-                allow_headers=["*"],
+                allow_headers=["Authorization", "Content-Type", "Origin", "Accept", "Mcp-Session-Id", "Last-Event-Id"],
             ),
         ]
         

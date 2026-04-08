@@ -90,17 +90,21 @@ class BrowserServer:
         # Default secure origins if none specified
         if not cors_origins:
             cors_origins = [
-                "chrome-extension://*",  # Allow Chrome extension origins
                 "http://localhost:3000",  # Development frontend
                 "http://localhost:8000",  # Local development
                 "http://127.0.0.1:3000",  # Local development
                 "http://127.0.0.1:8000",  # Local development
             ]
         
-        # Enable CORS for extension with secure origins
+        # Enable CORS for extension with secure origins.
+        # allow_origin_regex enables Chrome extension support since extension IDs
+        # (chrome-extension://<32-char-id>) cannot be listed as exact strings
+        # and the glob pattern chrome-extension://* is NOT supported by CORSMiddleware.
+        # Set BROWSER_CORS_ORIGINS to restrict to a specific extension ID.
         app.add_middleware(
             CORSMiddleware,
             allow_origins=cors_origins,
+            allow_origin_regex=r"chrome-extension://[a-z0-9]{32}",
             allow_credentials=True,
             allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
             allow_headers=["Authorization", "Content-Type", "Origin", "Accept"],
