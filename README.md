@@ -201,6 +201,8 @@ praisonai claw
 Open **http://localhost:8082** — the dashboard comes with 13 built-in pages: Chat, Agents, Memory, Knowledge, Channels, Guardrails, Cron, and more. Add messaging channels directly from the UI.
 
 > 📖 [Full Claw docs](https://docs.praison.ai/docs/concepts/claw) — platform tokens, CLI options, Docker, and YAML agent mode
+> 
+> 🌐 [Gateway & Control Plane](https://docs.praison.ai/docs/gateway) — unified server architecture, port matrix, and deployment patterns
 
 ### 7. Langflow Integration 🔗 (Visual Flow Builder)
 
@@ -314,10 +316,11 @@ praisonai agents.yaml
 | **Sessions** | `session list`, `session resume`, `session delete` |
 | **Tools** | `tools list`, `tools info`, `tools search` |
 | **MCP** | `mcp list`, `mcp create`, `mcp enable` |
+| **Servers** | `serve unified`, `serve gateway`, `serve agents`, `serve mcp` |
 | **Development** | `commit`, `docs`, `checkpoint`, `hooks` |
 | **Scheduling** | `schedule start`, `schedule list`, `schedule stop` |
 
-> 📖 [Full CLI reference](https://docs.praison.ai/docs/cli/cli-reference)
+> 📖 [Full CLI reference](https://docs.praison.ai/docs/cli/cli-reference) • [Gateway & Control Plane](https://docs.praison.ai/docs/gateway)
 
 ---
 
