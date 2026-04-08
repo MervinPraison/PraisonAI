@@ -55,6 +55,7 @@ class TestRateLimiter:
         assert elapsed < 0.1
 
     @pytest.mark.asyncio
+    @pytest.mark.allow_sleep
     async def test_rate_limiter_acquire_waits_when_exhausted(self):
         """Test that acquire waits when tokens exhausted."""
         from praisonai.bots._rate_limit import RateLimiter, RateLimitConfig
@@ -73,6 +74,7 @@ class TestRateLimiter:
         assert elapsed >= 0.05  # Allow some tolerance
 
     @pytest.mark.asyncio
+    @pytest.mark.allow_sleep
     async def test_rate_limiter_per_channel_delay(self):
         """Test per-channel delay enforcement."""
         from praisonai.bots._rate_limit import RateLimiter, RateLimitConfig

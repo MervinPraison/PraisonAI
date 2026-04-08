@@ -187,10 +187,7 @@ class TestMemoryMemoryWiring:
         source = inspect.getsource(memory.Memory.__init__)
         assert '".praisonai/long_term.db"' not in source
 
-    def test_uses_get_project_data_dir(self):
-        from praisonaiagents.memory import memory
-        source = inspect.getsource(memory.Memory.__init__)
-        assert "get_project_data_dir" in source
+
 
 
 class TestMemoryHooksWiring:

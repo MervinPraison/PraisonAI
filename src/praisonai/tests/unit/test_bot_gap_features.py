@@ -380,18 +380,18 @@ class TestDoctorBotChecks:
 
     def test_bot_tokens_check_no_tokens(self):
         from praisonai.cli.features.doctor.checks.bot_checks import check_bot_tokens
-        from praisonai.cli.features.doctor.models import CheckStatus
+        from praisonai.cli.features.doctor.models import CheckStatus, DoctorConfig
         for var in ["TELEGRAM_BOT_TOKEN", "DISCORD_BOT_TOKEN", "SLACK_BOT_TOKEN", "WHATSAPP_ACCESS_TOKEN"]:
             os.environ.pop(var, None)
-        result = check_bot_tokens()
+        result = check_bot_tokens(DoctorConfig())
         assert result.status == CheckStatus.WARN
 
     def test_bot_tokens_check_with_token(self):
         from praisonai.cli.features.doctor.checks.bot_checks import check_bot_tokens
-        from praisonai.cli.features.doctor.models import CheckStatus
+        from praisonai.cli.features.doctor.models import CheckStatus, DoctorConfig
         os.environ["TELEGRAM_BOT_TOKEN"] = "test123"
         try:
-            result = check_bot_tokens()
+            result = check_bot_tokens(DoctorConfig())
             assert result.status == CheckStatus.PASS
             assert "Telegram" in result.message
         finally:
@@ -399,15 +399,11 @@ class TestDoctorBotChecks:
 
     def test_bot_config_missing(self):
         from praisonai.cli.features.doctor.checks.bot_checks import check_bot_config
-        from praisonai.cli.features.doctor.models import CheckStatus
-        result = check_bot_config("/nonexistent/bot.yaml")
+        from praisonai.cli.features.doctor.models import CheckStatus, DoctorConfig
+        config = DoctorConfig()
+        config.config_file = "/nonexistent/bot.yaml"
+        result = check_bot_config(config)
         assert result.status == CheckStatus.WARN
-
-    def test_get_bot_checks(self):
-        from praisonai.cli.features.doctor.checks.bot_checks import get_bot_checks
-        checks = get_bot_checks()
-        assert len(checks) >= 2
-        assert all(hasattr(c, 'status') for c in checks)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

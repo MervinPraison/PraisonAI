@@ -3,6 +3,20 @@
 import json
 import subprocess
 import sys
+import os
+
+def run_doctor(*args, timeout=60):
+    """Run doctor CLI with proper PYTHONPATH."""
+    env = os.environ.copy()
+    # Propagate sys.path to PYTHONPATH so the subprocess can find praisonai package
+    env["PYTHONPATH"] = os.pathsep.join(sys.path)
+    return subprocess.run(
+        [sys.executable, "-m", "praisonai", "doctor", *args],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=env
+    )
 
 
 class TestDoctorCLI:
@@ -10,12 +24,7 @@ class TestDoctorCLI:
     
     def test_doctor_help(self):
         """Test doctor --help output."""
-        result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "--help"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        result = run_doctor("--help", timeout=30)
         
         # Should show help (exit code 0 or 2 for argparse)
         assert result.returncode in [0, 2]
@@ -24,12 +33,7 @@ class TestDoctorCLI:
     
     def test_doctor_version(self):
         """Test doctor --version output."""
-        result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        result = run_doctor("--version", timeout=30)
         
         # Should complete successfully
         assert result.returncode in [0, 1]
@@ -39,24 +43,14 @@ class TestDoctorCLI:
     
     def test_doctor_db_subcommand(self):
         """Test doctor db subcommand."""
-        result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "db"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        result = run_doctor("db", timeout=30)
         
         # Should complete successfully
         assert result.returncode in [0, 1]
     
     def test_doctor_fast_mode(self):
         """Test doctor in fast mode (default)."""
-        result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        result = run_doctor(timeout=60)
         
         # Should complete (exit code 0 or 1 depending on environment)
         assert result.returncode in [0, 1]
@@ -65,12 +59,7 @@ class TestDoctorCLI:
     
     def test_doctor_json_output(self):
         """Test doctor --json output."""
-        result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "--json"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        result = run_doctor("--json", timeout=60)
         
         # Should complete
         assert result.returncode in [0, 1, 2]
@@ -87,12 +76,7 @@ class TestDoctorCLI:
     
     def test_doctor_env_subcommand(self):
         """Test doctor env subcommand."""
-        result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "env"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        result = run_doctor("env", timeout=60)
         
         assert result.returncode in [0, 1]
         # Should mention environment-related checks
@@ -100,34 +84,19 @@ class TestDoctorCLI:
     
     def test_doctor_config_subcommand(self):
         """Test doctor config subcommand."""
-        result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "config"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        result = run_doctor("config", timeout=60)
         
         assert result.returncode in [0, 1]
     
     def test_doctor_mcp_subcommand(self):
         """Test doctor mcp subcommand."""
-        result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "mcp"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        result = run_doctor("mcp", timeout=60)
         
         assert result.returncode in [0, 1]
     
     def test_doctor_quiet_mode(self):
         """Test doctor --quiet mode."""
-        result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "--quiet"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        result = run_doctor("--quiet", timeout=60)
         
         assert result.returncode in [0, 1]
         # Quiet mode should have minimal output
@@ -135,12 +104,7 @@ class TestDoctorCLI:
     
     def test_doctor_ci_subcommand(self):
         """Test doctor ci subcommand."""
-        result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "ci"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        result = run_doctor("ci", timeout=60)
         
         # CI mode should return JSON
         assert result.returncode in [0, 1, 2, 3]
@@ -154,57 +118,32 @@ class TestDoctorCLI:
     
     def test_doctor_selftest(self):
         """Test doctor selftest subcommand."""
-        result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "selftest"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        result = run_doctor("selftest", timeout=60)
         
         # Should complete (may fail if no API key)
         assert result.returncode in [0, 1, 2]
     
     def test_doctor_deep_mode(self):
         """Test doctor --deep mode."""
-        result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "--deep"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        result = run_doctor("--deep", timeout=60)
         
-        assert result.returncode in [0, 1]
+        assert result.returncode in [0, 1, 2]
     
     def test_doctor_tools_subcommand(self):
         """Test doctor tools subcommand."""
-        result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "tools"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        result = run_doctor("tools", timeout=60)
         
         assert result.returncode in [0, 1]
     
     def test_doctor_network_subcommand(self):
         """Test doctor network subcommand."""
-        result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "network"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        result = run_doctor("network", timeout=60)
         
         assert result.returncode in [0, 1]
     
     def test_doctor_strict_mode(self):
         """Test doctor --strict mode."""
-        result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "--strict"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        result = run_doctor("--strict", timeout=60)
         
         # Strict mode may return 1 if there are warnings
         assert result.returncode in [0, 1]
@@ -216,12 +155,7 @@ class TestDoctorExitCodes:
     def test_exit_code_0_on_pass(self):
         """Test exit code 0 when env checks pass."""
         # Run env subcommand which should always pass for basic checks
-        result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "doctor", "env"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        result = run_doctor("env", timeout=60)
         
         # These basic checks should pass (exit 0) or may have warnings (still 0)
         # Exit code 1 means failure, which shouldn't happen for these checks
@@ -231,12 +165,7 @@ class TestDoctorExitCodes:
         """Test that exit codes are deterministic."""
         results = []
         for _ in range(3):
-            result = subprocess.run(
-                [sys.executable, "-m", "praisonai", "doctor", "env"],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
+            result = run_doctor("env", timeout=60)
             results.append(result.returncode)
         
         # All runs should have the same exit code

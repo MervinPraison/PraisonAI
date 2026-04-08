@@ -50,7 +50,7 @@ class TestHandoffConfig:
         assert config.max_context_messages == 10
         assert config.preserve_system is True
         assert config.timeout_seconds == 300.0
-        assert config.max_concurrent == 3
+        assert config.max_concurrent == 5
         assert config.detect_cycles is True
         assert config.max_depth == 10
         assert config.async_mode is False
@@ -163,14 +163,14 @@ class TestHandoffErrors:
     def test_cycle_error(self):
         """Test HandoffCycleError."""
         chain = ["AgentA", "AgentB", "AgentA"]
-        error = HandoffCycleError(chain)
+        error = HandoffCycleError("AgentA -> AgentB -> AgentA", cycle_path=chain)
         
         assert error.chain == chain
         assert "AgentA -> AgentB -> AgentA" in str(error)
     
     def test_depth_error(self):
         """Test HandoffDepthError."""
-        error = HandoffDepthError(depth=11, max_depth=10)
+        error = HandoffDepthError("11 > 10", current_depth=11, max_depth=10)
         
         assert error.depth == 11
         assert error.max_depth == 10
@@ -178,10 +178,10 @@ class TestHandoffErrors:
     
     def test_timeout_error(self):
         """Test HandoffTimeoutError."""
-        error = HandoffTimeoutError(timeout=60.0, agent_name="TestAgent")
+        error = HandoffTimeoutError("timeout 60", timeout_seconds=60.0, agent_id="TestAgent")
         
         assert error.timeout == 60.0
-        assert error.agent_name == "TestAgent"
+        assert error.agent_id == "TestAgent"
         assert "60" in str(error)
         assert "TestAgent" in str(error)
 
