@@ -121,9 +121,12 @@ class TestEnhancedYAMLGeneration:
         from praisonai.auto import AutoGenerator
         
         # Test that the generator has tool discovery capability
+        import os
+        fixture_path = os.path.join(os.path.dirname(__file__), "..", "fixtures", "test_agents.yaml")
+        
         generator = AutoGenerator(
             topic="Search the web for AI news and write a summary",
-            agent_file="test_agents.yaml",
+            agent_file=fixture_path,
             framework="praisonai"
         )
         
