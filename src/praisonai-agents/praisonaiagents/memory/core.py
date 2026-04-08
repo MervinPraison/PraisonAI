@@ -17,9 +17,9 @@ class MemoryCoreMixin:
     """Mixin class containing core memory functionality for the Memory class."""
     
     def store_short_term(self, content: str, metadata: Optional[Dict] = None, quality_score: Optional[float] = None, 
-                        user_id: Optional[str] = None, auto_promote: bool = True) -> str:
+                        user_id: Optional[str] = None, auto_promote: bool = True, **kwargs) -> str:
         """
-        Store content in short-term memory.
+        Store content in short-term memory using protocol-driven approach.
         
         Args:
             content: The content to store
@@ -27,6 +27,7 @@ class MemoryCoreMixin:
             quality_score: Optional pre-calculated quality score
             user_id: Optional user identifier
             auto_promote: Whether to automatically promote to LTM if quality is high
+            **kwargs: Additional provider-specific arguments
             
         Returns:
             The memory ID of the stored content
@@ -46,37 +47,35 @@ class MemoryCoreMixin:
             metadata['user_id'] = user_id
         
         metadata['timestamp'] = datetime.now().isoformat()
+        metadata['quality'] = quality_score
         
         # Sanitize metadata for storage
         clean_metadata = self._sanitize_metadata(metadata)
         
+        # Protocol-driven storage: Delegate to adapter first
         memory_id = None
-        
-        # Store in vector store if available
-        if self.use_rag and hasattr(self, 'stm_collection'):
-            try:
-                memory_id = self._store_vector_stm(content, clean_metadata, quality_score)
-            except Exception as e:
-                logging.warning(f"Failed to store in vector STM: {e}")
-        
-        if self.use_mongodb and hasattr(self, 'stm_collection'):
-            try:
-                memory_id = self._store_mongodb_stm(content, clean_metadata, quality_score)
-            except Exception as e:
-                logging.warning(f"Failed to store in MongoDB STM: {e}")
-        
-        # Always store in SQLite as fallback
         try:
-            if not memory_id:
-                memory_id = self._store_sqlite_stm(content, clean_metadata, quality_score)
+            if hasattr(self, 'memory_adapter') and self.memory_adapter:
+                memory_id = self.memory_adapter.store_short_term(content, metadata=clean_metadata, **kwargs)
+                self._log_verbose(f"Stored in {self.provider} STM via adapter: {content[:100]}...")
         except Exception as e:
-            logging.error(f"Failed to store in SQLite STM: {e}")
-            return ""
+            self._log_verbose(f"Failed to store in {self.provider} STM: {e}", logging.WARNING)
+        
+        # Backward compatibility: Also store in SQLite if not using SQLite adapter
+        if hasattr(self, '_sqlite_adapter') and self._sqlite_adapter != getattr(self, 'memory_adapter', None):
+            try:
+                fallback_id = self._sqlite_adapter.store_short_term(content, metadata=clean_metadata, **kwargs)
+                if not memory_id:
+                    memory_id = fallback_id
+            except Exception as e:
+                logging.error(f"Failed to store in SQLite STM fallback: {e}")
+                if not memory_id:
+                    return ""
         
         # Auto-promote to long-term memory if quality is high
         if auto_promote and quality_score >= 7.5:  # High quality threshold
             try:
-                self.store_long_term(content, clean_metadata, quality_score, user_id)
+                self.store_long_term(content, clean_metadata, quality_score, user_id, **kwargs)
                 self._log_verbose(f"Auto-promoted STM content to LTM (score: {quality_score:.2f})")
             except Exception as e:
                 logging.warning(f"Failed to auto-promote to LTM: {e}")
@@ -84,20 +83,19 @@ class MemoryCoreMixin:
         # Emit memory event
         self._emit_memory_event("store", "short_term", content, clean_metadata)
         
-        self._log_verbose(f"Stored in STM: {content[:100]}... (quality: {quality_score:.2f})")
-        
         return memory_id or ""
     
     def store_long_term(self, content: str, metadata: Optional[Dict] = None, quality_score: Optional[float] = None,
-                       user_id: Optional[str] = None) -> str:
+                       user_id: Optional[str] = None, **kwargs) -> str:
         """
-        Store content in long-term memory.
+        Store content in long-term memory using protocol-driven approach.
         
         Args:
             content: The content to store
             metadata: Optional metadata dictionary
             quality_score: Optional pre-calculated quality score
             user_id: Optional user identifier
+            **kwargs: Additional provider-specific arguments
             
         Returns:
             The memory ID of the stored content
@@ -123,37 +121,33 @@ class MemoryCoreMixin:
         
         metadata['timestamp'] = datetime.now().isoformat()
         metadata['promoted_at'] = datetime.now().isoformat()
+        metadata['quality'] = quality_score
         
         # Sanitize metadata for storage
         clean_metadata = self._sanitize_metadata(metadata)
         
+        # Protocol-driven storage: Delegate to adapter first
         memory_id = None
-        
-        # Store in vector store if available
-        if self.use_rag and hasattr(self, 'ltm_collection'):
-            try:
-                memory_id = self._store_vector_ltm(content, clean_metadata, quality_score)
-            except Exception as e:
-                logging.warning(f"Failed to store in vector LTM: {e}")
-        
-        if self.use_mongodb and hasattr(self, 'ltm_collection'):
-            try:
-                memory_id = self._store_mongodb_ltm(content, clean_metadata, quality_score)
-            except Exception as e:
-                logging.warning(f"Failed to store in MongoDB LTM: {e}")
-        
-        # Always store in SQLite as fallback
         try:
-            if not memory_id:
-                memory_id = self._store_sqlite_ltm(content, clean_metadata, quality_score)
+            if hasattr(self, 'memory_adapter') and self.memory_adapter:
+                memory_id = self.memory_adapter.store_long_term(content, metadata=clean_metadata, **kwargs)
+                self._log_verbose(f"Stored in {self.provider} LTM via adapter: {content[:100]}...")
         except Exception as e:
-            logging.error(f"Failed to store in SQLite LTM: {e}")
-            return ""
+            self._log_verbose(f"Failed to store in {self.provider} LTM: {e}", logging.WARNING)
+        
+        # Backward compatibility: Also store in SQLite if not using SQLite adapter  
+        if hasattr(self, '_sqlite_adapter') and self._sqlite_adapter != getattr(self, 'memory_adapter', None):
+            try:
+                fallback_id = self._sqlite_adapter.store_long_term(content, metadata=clean_metadata, **kwargs)
+                if not memory_id:
+                    memory_id = fallback_id
+            except Exception as e:
+                logging.error(f"Failed to store in SQLite LTM fallback: {e}")
+                if not memory_id:
+                    return ""
         
         # Emit memory event
         self._emit_memory_event("store", "long_term", content, clean_metadata)
-        
-        self._log_verbose(f"Stored in LTM: {content[:100]}... (quality: {quality_score:.2f})")
         
         return memory_id or ""
     

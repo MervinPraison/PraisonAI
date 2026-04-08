@@ -15,9 +15,9 @@ class SearchMixin:
     """Mixin class containing search and retrieval methods for the Memory class."""
     
     def search_short_term(self, query: str, limit: int = 5, metadata_filter: Optional[Dict] = None, 
-                         min_quality: Optional[float] = None, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+                         min_quality: Optional[float] = None, user_id: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]:
         """
-        Search short-term memory for relevant content.
+        Search short-term memory for relevant content using protocol-driven approach.
         
         Args:
             query: Search query string
@@ -25,38 +25,58 @@ class SearchMixin:
             metadata_filter: Optional metadata filter
             min_quality: Minimum quality score threshold
             user_id: Optional user ID for filtering
+            **kwargs: Additional provider-specific arguments
             
         Returns:
             List of relevant memory entries
         """
         results = []
         
-        # Search in vector store (ChromaDB/MongoDB) if available
-        if self.use_rag and hasattr(self, 'stm_collection'):
-            try:
-                results.extend(self._search_vector_stm(query, limit))
-            except Exception as e:
-                logging.warning(f"Vector STM search failed: {e}")
-        
-        if self.use_mongodb and hasattr(self, 'stm_collection'):
-            try:
-                results.extend(self._search_mongodb_stm(query, limit, metadata_filter, min_quality, user_id))
-            except Exception as e:
-                logging.warning(f"MongoDB STM search failed: {e}")
-        
-        # Search in SQLite as fallback
+        # Protocol-driven search: Delegate to adapter first
         try:
-            sqlite_results = self._search_sqlite_stm(query, limit, metadata_filter, min_quality, user_id)
-            results.extend(sqlite_results)
+            if hasattr(self, 'memory_adapter') and self.memory_adapter:
+                adapter_results = self.memory_adapter.search_short_term(
+                    query, limit=limit, user_id=user_id, agent_id=kwargs.get('agent_id'), 
+                    run_id=kwargs.get('run_id'), **kwargs
+                )
+                # Convert adapter results to legacy format
+                if isinstance(adapter_results, list):
+                    for result in adapter_results:
+                        if hasattr(result, 'text') and hasattr(result, 'metadata'):
+                            # SearchResult from protocol
+                            results.append({
+                                "id": getattr(result, 'id', ''),
+                                "text": result.text,
+                                "metadata": result.metadata or {},
+                                "score": getattr(result, 'score', 1.0)
+                            })
+                        elif isinstance(result, dict):
+                            # Already in legacy format
+                            results.append(result)
+                
+                self._log_verbose(f"Found {len(results)} results in {self.provider} STM via adapter")
         except Exception as e:
-            logging.warning(f"SQLite STM search failed: {e}")
+            self._log_verbose(f"Failed to search {self.provider} STM: {e}", logging.WARNING)
+        
+        # Apply quality filtering if specified
+        if min_quality is not None:
+            results = [r for r in results if r.get("metadata", {}).get("quality", 0.0) >= min_quality]
+        
+        # Apply metadata filtering if specified
+        if metadata_filter:
+            filtered_results = []
+            for result in results:
+                metadata = result.get("metadata", {})
+                if all(metadata.get(k) == v for k, v in metadata_filter.items()):
+                    filtered_results.append(result)
+            results = filtered_results
         
         return self._deduplicate_and_rank_results(results, limit)
     
     def search_long_term(self, query: str, limit: int = 10, metadata_filter: Optional[Dict] = None,
-                        min_quality: Optional[float] = None, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+                        min_quality: Optional[float] = None, user_id: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]:
         """
-        Search long-term memory for relevant content.
+        Search long-term memory for relevant content using protocol-driven approach.
         
         Args:
             query: Search query string
@@ -64,31 +84,51 @@ class SearchMixin:
             metadata_filter: Optional metadata filter
             min_quality: Minimum quality score threshold
             user_id: Optional user ID for filtering
+            **kwargs: Additional provider-specific arguments
             
         Returns:
             List of relevant memory entries
         """
         results = []
         
-        # Search in vector store (ChromaDB/MongoDB) if available
-        if self.use_rag and hasattr(self, 'ltm_collection'):
-            try:
-                results.extend(self._search_vector_ltm(query, limit))
-            except Exception as e:
-                logging.warning(f"Vector LTM search failed: {e}")
-        
-        if self.use_mongodb and hasattr(self, 'ltm_collection'):
-            try:
-                results.extend(self._search_mongodb_ltm(query, limit, metadata_filter, min_quality, user_id))
-            except Exception as e:
-                logging.warning(f"MongoDB LTM search failed: {e}")
-        
-        # Search in SQLite as fallback
+        # Protocol-driven search: Delegate to adapter first
         try:
-            sqlite_results = self._search_sqlite_ltm(query, limit, metadata_filter, min_quality, user_id)
-            results.extend(sqlite_results)
+            if hasattr(self, 'memory_adapter') and self.memory_adapter:
+                adapter_results = self.memory_adapter.search_long_term(
+                    query, limit=limit, user_id=user_id, agent_id=kwargs.get('agent_id'), 
+                    run_id=kwargs.get('run_id'), **kwargs
+                )
+                # Convert adapter results to legacy format
+                if isinstance(adapter_results, list):
+                    for result in adapter_results:
+                        if hasattr(result, 'text') and hasattr(result, 'metadata'):
+                            # SearchResult from protocol
+                            results.append({
+                                "id": getattr(result, 'id', ''),
+                                "text": result.text,
+                                "metadata": result.metadata or {},
+                                "score": getattr(result, 'score', 1.0)
+                            })
+                        elif isinstance(result, dict):
+                            # Already in legacy format
+                            results.append(result)
+                
+                self._log_verbose(f"Found {len(results)} results in {self.provider} LTM via adapter")
         except Exception as e:
-            logging.warning(f"SQLite LTM search failed: {e}")
+            self._log_verbose(f"Failed to search {self.provider} LTM: {e}", logging.WARNING)
+        
+        # Apply quality filtering if specified
+        if min_quality is not None:
+            results = [r for r in results if r.get("metadata", {}).get("quality", 0.0) >= min_quality]
+        
+        # Apply metadata filtering if specified
+        if metadata_filter:
+            filtered_results = []
+            for result in results:
+                metadata = result.get("metadata", {})
+                if all(metadata.get(k) == v for k, v in metadata_filter.items()):
+                    filtered_results.append(result)
+            results = filtered_results
         
         return self._deduplicate_and_rank_results(results, limit)
     
