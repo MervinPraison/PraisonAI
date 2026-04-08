@@ -1201,23 +1201,25 @@ class AgentsGenerator:
             guardrails_config = details.get('guardrails')
             
             # Extract streaming configuration - YAML takes precedence over CLI
+            has_streaming_config = 'streaming' in details
+            has_legacy_stream = 'stream' in details
             streaming_config = details.get('streaming')
             stream_enabled = False
             stream_metrics = False
             
-            if streaming_config:
+            if has_streaming_config:
                 if isinstance(streaming_config, bool):
                     stream_enabled = streaming_config
                 elif isinstance(streaming_config, dict):
                     stream_enabled = streaming_config.get('enabled', False)
                     stream_metrics = streaming_config.get('emit_metrics', False)
                     # Future: can add callbacks, etc. from streaming_config
-            elif 'stream' in details:  # Also support direct 'stream: true' format
+            elif has_legacy_stream:  # Also support direct 'stream: true' format
                 stream_enabled = details.get('stream', False)
             
             # CLI streaming flags override if YAML doesn't specify
             cli_config = getattr(self, 'cli_config', {}) or {}
-            if not streaming_config and not details.get('stream'):
+            if not has_streaming_config and not has_legacy_stream:
                 stream_enabled = cli_config.get('stream', False)
                 stream_metrics = cli_config.get('stream_metrics', False)
             

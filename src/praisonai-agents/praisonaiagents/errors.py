@@ -120,7 +120,9 @@ class BudgetExceededError(PraisonAIError):
     
     def __init__(
         self, 
-        message: str, 
+        message_or_agent_name, 
+        total_cost_or_budget_type = None,
+        max_budget_or_limit = None,
         budget_type: str = "tokens",
         limit: Optional[float] = None,
         used: Optional[float] = None,
@@ -128,23 +130,69 @@ class BudgetExceededError(PraisonAIError):
         run_id: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None
     ):
-        context = context or {}
-        context.update({
-            "budget_type": budget_type,
-            "limit": limit,
-            "used": used
-        })
-        super().__init__(
-            message, 
-            agent_id=agent_id, 
-            run_id=run_id, 
-            error_category="budget",
-            is_retryable=False,  # Budget errors require intervention
-            context=context
-        )
-        self.budget_type = budget_type
-        self.limit = limit
-        self.used = used
+        # Handle backward compatibility: old constructor BudgetExceededError(agent_name, total_cost, max_budget)
+        if (isinstance(message_or_agent_name, str) and 
+            isinstance(total_cost_or_budget_type, (int, float)) and 
+            isinstance(max_budget_or_limit, (int, float)) and
+            budget_type == "tokens"):  # Default value indicates old constructor
+            
+            # Old constructor format
+            agent_name = message_or_agent_name
+            total_cost = float(total_cost_or_budget_type)
+            max_budget = float(max_budget_or_limit)
+            message = f"Agent '{agent_name}' exceeded budget: ${total_cost:.4f} >= ${max_budget:.4f}"
+            
+            context = context or {}
+            context.update({
+                "budget_type": "cost",  # Legacy errors are cost-based
+                "limit": max_budget,
+                "used": total_cost
+            })
+            super().__init__(
+                message, 
+                agent_id=agent_name, 
+                run_id=run_id, 
+                error_category="budget",
+                is_retryable=False,
+                context=context
+            )
+            self.budget_type = "cost"
+            self.limit = max_budget
+            self.used = total_cost
+            self.agent_name = agent_name
+            self.total_cost = total_cost
+            self.max_budget = max_budget
+        else:
+            # New constructor format
+            message = str(message_or_agent_name)
+            if total_cost_or_budget_type is not None and isinstance(total_cost_or_budget_type, str):
+                budget_type = total_cost_or_budget_type
+            if max_budget_or_limit is not None:
+                if limit is None:
+                    limit = max_budget_or_limit
+            
+            context = context or {}
+            context.update({
+                "budget_type": budget_type,
+                "limit": limit,
+                "used": used
+            })
+            super().__init__(
+                message, 
+                agent_id=agent_id, 
+                run_id=run_id, 
+                error_category="budget",
+                is_retryable=False,
+                context=context
+            )
+            self.budget_type = budget_type
+            self.limit = limit
+            self.used = used
+            
+            # Legacy attributes for backward compatibility
+            self.agent_name = agent_id
+            self.total_cost = used
+            self.max_budget = limit
 
 
 class ValidationError(PraisonAIError):
@@ -252,6 +300,8 @@ class HandoffCycleError(HandoffError):
         super().__init__(message, **kwargs)
         if cycle_path:
             self.context["cycle_path"] = cycle_path
+        # Backward compatibility alias
+        self.chain = cycle_path
 
 
 class HandoffDepthError(HandoffError):
@@ -263,6 +313,9 @@ class HandoffDepthError(HandoffError):
             "max_depth": max_depth,
             "current_depth": current_depth
         })
+        # Backward compatibility aliases
+        self.max_depth = max_depth
+        self.depth = current_depth
 
 
 class HandoffTimeoutError(HandoffError):
@@ -272,6 +325,8 @@ class HandoffTimeoutError(HandoffError):
         super().__init__(message, is_retryable=True, **kwargs)  # Timeouts may be retryable
         if timeout_seconds:
             self.context["timeout_seconds"] = timeout_seconds
+        # Backward compatibility alias
+        self.timeout = timeout_seconds
 
 
 # Export all error types for easy importing

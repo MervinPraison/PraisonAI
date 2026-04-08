@@ -536,7 +536,13 @@ class Handoff:
                 handoff_depth=_get_handoff_depth(),
             )
             self._execute_callback(self.config.on_error, source_agent, kwargs, result)
-            raise HandoffTimeoutError(self.config.timeout_seconds, self.agent.name)
+            raise HandoffTimeoutError(
+                f"Handoff to {self.agent.name} timed out after {self.config.timeout_seconds}s",
+                timeout_seconds=self.config.timeout_seconds,
+                source_agent=source_agent.name if hasattr(source_agent, "name") else "unknown",
+                target_agent=self.agent.name,
+                agent_id=source_agent.name if hasattr(source_agent, "name") else "unknown"
+            )
         except Exception as e:
             result = HandoffResult(
                 success=False,
