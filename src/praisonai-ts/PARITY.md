@@ -7,21 +7,22 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 314 |
+| Python Core Features | 315 |
 | Python Wrapper Features | 99 |
 | TypeScript Features | 1192 |
-| **Gap Count** | **21** |
-| P0 (Critical) | 0 |
+| **Gap Count** | **22** |
+| P0 (Critical) | 1 |
 | P1 (High) | 0 |
 | P2 (Medium) | 0 |
 | P3 (Low) | 21 |
 
 ## Gap Matrix
 
-### P0_CoreParity (57 done, 0 todo)
+### P0_CoreParity (57 done, 1 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
+| `parallel\_handoffs` | ✅ | ❌ | low | ⏳ TODO |
 | `Agent` | ✅ | ✅ | high | ✅ DONE |
 | `AudioAgent` | ✅ | ✅ | high | ✅ DONE |
 | `AudioConfig` | ✅ | ✅ | low | ✅ DONE |
@@ -357,7 +358,7 @@
 **Path:** `/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents`
 
 <details>
-<summary><strong>agent</strong> (46 exports)</summary>
+<summary><strong>agent</strong> (47 exports)</summary>
 
 ```python
 from praisonaiagents import Agent, AudioAgent, AudioConfig, BudgetExceededError, CodeAgent, CodeConfig, CodeExecutionStep, ContextAgent, ContextPolicy, DeepResearchAgent...

@@ -1,16 +1,16 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 314 | **Rust Features:** 667 | **Parity:** 90.8%
+> **Python Features:** 315 | **Rust Features:** 667 | **Parity:** 90.5%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 314 |
+| Python Core Features | 315 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **29** |
+| **Actual Gap Count** | **30** |
 | Language Limitations (N/A) | 6 |
-| **Parity** | **90.8%** |
+| **Parity** | **90.5%** |
 
 ## Implemented Features
 
@@ -722,6 +722,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `get_logger`
 - ❌ `get_registry`
 - ❌ `get_tool`
+- ❌ `parallel_handoffs`
 - ❌ `register_tool`
 - ❌ `validate_tool`
 

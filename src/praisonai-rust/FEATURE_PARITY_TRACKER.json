@@ -5,10 +5,10 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 314,
+    "pythonCoreFeatures": 315,
     "rustFeatures": 667,
-    "gapCount": 36,
-    "parityPercentage": 212.4
+    "gapCount": 37,
+    "parityPercentage": 211.7
   },
   "pythonCoreSDK": {
     "exports": [
@@ -292,6 +292,7 @@
       "memory",
       "obs",
       "parallel",
+      "parallel_handoffs",
       "parse_plugin_header",
       "parse_plugin_header_from_file",
       "parse_policy_string",
@@ -2235,6 +2236,15 @@
         "priority": "P0",
         "effort": "low",
         "status": "DONE",
+        "category": "agent"
+      },
+      {
+        "feature": "parallel_handoffs",
+        "python": true,
+        "rust": false,
+        "priority": "P0",
+        "effort": "low",
+        "status": "TODO",
         "category": "agent"
       },
       {

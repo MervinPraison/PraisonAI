@@ -4,11 +4,11 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 314,
+    "pythonCoreFeatures": 315,
     "pythonWrapperFeatures": 99,
     "typescriptFeatures": 1192,
-    "gapCount": 21,
-    "priorityP0": 0,
+    "gapCount": 22,
+    "priorityP0": 1,
     "priorityP1": 0,
     "priorityP2": 0,
     "priorityP3": 21
@@ -296,6 +296,7 @@
       "memory",
       "obs",
       "parallel",
+      "parallel_handoffs",
       "parse_plugin_header",
       "parse_plugin_header_from_file",
       "parse_policy_string",
@@ -378,6 +379,7 @@
         "create_context_agent",
         "handoff",
         "handoff_filters",
+        "parallel_handoffs",
         "prompt_with_handoff_instructions"
       ],
       "agents": [
@@ -3307,6 +3309,15 @@
         "priority": "P0",
         "effort": "low",
         "status": "DONE",
+        "category": "agent"
+      },
+      {
+        "feature": "parallel_handoffs",
+        "python": true,
+        "typescript": false,
+        "priority": "P0",
+        "effort": "low",
+        "status": "TODO",
         "category": "agent"
       },
       {
