@@ -131,9 +131,9 @@ class BasicRAGSchemaProvider:
         
         # Type checking
         bool_fields = ["hybrid", "rerank", "include_citations", "openai_compat", "verbose"]
-        for field in bool_fields:
-            if field in config and not isinstance(config[field], bool):
-                errors.append(f"{field} must be a boolean (true/false)")
+        for field_name in bool_fields:
+            if field_name in config and not isinstance(config[field_name], bool):
+                errors.append(f"{field_name} must be a boolean (true/false)")
         
         is_valid = len(errors) == 0
         normalized = self.normalize_config(config) if is_valid else None
