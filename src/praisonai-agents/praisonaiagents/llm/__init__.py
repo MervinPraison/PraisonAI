@@ -130,6 +130,26 @@ def __getattr__(name):
         from .protocols import ContextLengthExceededError
         _lazy_cache[name] = ContextLengthExceededError
         return ContextLengthExceededError
+    elif name == "UnifiedLLMProtocol":
+        from .protocols import UnifiedLLMProtocol
+        _lazy_cache[name] = UnifiedLLMProtocol
+        return UnifiedLLMProtocol
+    elif name == "LiteLLMAdapter":
+        from .unified_adapters import LiteLLMAdapter
+        _lazy_cache[name] = LiteLLMAdapter
+        return LiteLLMAdapter
+    elif name == "OpenAIAdapter":
+        from .unified_adapters import OpenAIAdapter
+        _lazy_cache[name] = OpenAIAdapter
+        return OpenAIAdapter
+    elif name == "UnifiedLLMDispatcher":
+        from .unified_adapters import UnifiedLLMDispatcher
+        _lazy_cache[name] = UnifiedLLMDispatcher
+        return UnifiedLLMDispatcher
+    elif name == "create_llm_dispatcher":
+        from .unified_adapters import create_llm_dispatcher
+        _lazy_cache[name] = create_llm_dispatcher
+        return create_llm_dispatcher
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -160,6 +180,12 @@ __all__ = [
     "ModelCapabilitiesProtocol",
     "LLMRateLimiterProtocol",
     "LLMFailoverProtocol",
+    "UnifiedLLMProtocol",
+    # Adapters
+    "LiteLLMAdapter",
+    "OpenAIAdapter",
+    "UnifiedLLMDispatcher",
+    "create_llm_dispatcher",
     # Exceptions
     "LLMProviderError",
     "RateLimitError",

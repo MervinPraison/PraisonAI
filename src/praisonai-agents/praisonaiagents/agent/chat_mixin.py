@@ -536,6 +536,27 @@ Your Goal: {self.goal}"""
         formatted_tools = self._format_tools_for_completion(tools)
 
         try:
+            # NEW: Unified protocol dispatch path (Issue #1304)
+            # Check if unified dispatch is enabled (opt-in for backward compatibility)
+            if getattr(self, '_use_unified_llm_dispatch', False):
+                from .unified_chat_mixin import UnifiedChatMixin
+                if not isinstance(self, UnifiedChatMixin):
+                    # Dynamically add the mixin
+                    self.__class__ = type(self.__class__.__name__ + 'Unified', (UnifiedChatMixin, self.__class__), {})
+                
+                return self._unified_chat_completion(
+                    messages=messages,
+                    temperature=temperature,
+                    tools=formatted_tools,
+                    stream=stream,
+                    reasoning_steps=reasoning_steps,
+                    task_name=task_name,
+                    task_description=task_description,
+                    task_id=task_id,
+                    response_format=response_format
+                )
+            
+            # LEGACY: Maintain existing dual execution paths for backward compatibility
             # Use the custom LLM instance if available
             if self._using_custom_llm and hasattr(self, 'llm_instance'):
                 if stream:
@@ -1698,7 +1719,42 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # Use the new _format_tools_for_completion helper method
                     formatted_tools = self._format_tools_for_completion(tools)
                     
-                    # Check if OpenAI client is available
+                    # NEW: Unified protocol dispatch path (Issue #1304) - Async version
+                    # Check if unified dispatch is enabled (opt-in for backward compatibility)
+                    if getattr(self, '_use_unified_llm_dispatch', False):
+                        from .unified_chat_mixin import UnifiedChatMixin
+                        if not isinstance(self, UnifiedChatMixin):
+                            # Dynamically add the mixin
+                            self.__class__ = type(self.__class__.__name__ + 'Unified', (UnifiedChatMixin, self.__class__), {})
+                        
+                        # Use unified async dispatch
+                        response = await self._unified_achat_completion(
+                            messages=messages,
+                            temperature=temperature,
+                            tools=formatted_tools,
+                            stream=stream,
+                            reasoning_steps=reasoning_steps,
+                            task_name=task_name,
+                            task_description=task_description,
+                            task_id=task_id,
+                            response_format=None  # Handle response_format in unified path
+                        )
+                        
+                        # Process the unified response 
+                        if tools:
+                            result = await self._achat_completion(response, tools)
+                        else:
+                            result = response.choices[0].message.content if response and response.choices else ""
+                        
+                        if get_logger().getEffectiveLevel() == logging.DEBUG:
+                            total_time = time.time() - start_time
+                            logging.debug(f"Agent.achat (unified) completed in {total_time:.2f} seconds")
+                        
+                        # Execute callback after completion
+                        self._execute_callback_and_display(original_prompt, result, time.time() - start_time, task_name, task_description, task_id)
+                        return await self._atrigger_after_agent_hook(original_prompt, result, start_time)
+                    
+                    # LEGACY: Check if OpenAI client is available
                     if self._openai_client is None:
                         error_msg = "OpenAI client is not initialized. Please provide OPENAI_API_KEY or use a custom LLM provider."
                         _get_display_functions()['display_error'](error_msg)
