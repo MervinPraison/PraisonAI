@@ -30,6 +30,11 @@ PraisonAI 🦞 — **Hire a 24/7 AI Workforce.** Stop writing boilerplate and st
   <a href="https://x.com/elonmusk/status/1893870468249141688" target="_blank">
     <img src="https://img.shields.io/badge/Highlighted_by_Elon_Musk-000000?style=for-the-badge&logo=x&logoColor=white" alt="Highlighted by Elon Musk" />
   </a>
+  <br>
+  <br>
+  <a href="https://x.com/elonmusk/status/1893870468249141688" target="_blank">
+    <img src=".github/images/elon_musk_praisonai.png" alt="Highlighted by Elon Musk" width="600" />
+  </a>
   <p><em>"Grok 3 customer support" — <a href="https://x.com/elonmusk/status/1893870468249141688">Elon Musk quoting PraisonAI's tutorial</a></em></p>
   <br>
 </div>
@@ -93,11 +98,11 @@ agent.start("Analyze the top 3 tech trends of 2026 and format as a markdown tabl
 
 Start simple with the core SDK, or expand to full visual builders and dashboards when you're ready.
 
-*   **Core SDK (`praisonaiagents`)**: For pure Python development (Used in the quick start).
-*   💻 **PraisonAI CLI (`praisonai`)**: For terminal-based developers and YAML no-code execution.
-*   🦞 **Claw Dashboard (`praisonai[claw]`)**: Connect agents directly to Telegram, Slack, or Discord.
-*   🔗 **Flow Visual Builder (`praisonai[flow]`)**: Drag-and-drop workflow creation.
-*   🤖 **PraisonAI UI (`praisonai[ui]`)**: Clean chat interface.
+*   **Core SDK (`praisonaiagents`)**: For pure Python development. `pip install praisonaiagents`
+*   💻 **PraisonAI CLI (`praisonai`)**: For terminal-based developers. `pip install praisonai`
+*   🦞 **Claw Dashboard**: Connect agents directly to Telegram, Slack, or Discord. `pip install "praisonai[claw]"`
+*   🔗 **Flow Visual Builder**: Drag-and-drop workflow creation. `pip install "praisonai[flow]"`
+*   🤖 **PraisonAI UI**: Clean chat interface. `pip install "praisonai[ui]"`
 
 ### JavaScript SDK
 
@@ -723,13 +728,7 @@ Powered by 100+ LLMs (OpenAI, Anthropic, Gemini & local models).
 
 </details>
 
-<div align="center">
-  <a href="https://x.com/elonmusk/status/1893870468249141688" target="_blank">
-    <img src=".github/images/elon_musk_praisonai.png" alt="Highlighted by Elon Musk" width="600" />
-  </a>
-  <p><em>"Grok 3 customer support" — <a href="https://x.com/elonmusk/status/1893870468249141688">Elon Musk quoting PraisonAI's tutorial</a></em></p>
-</div>
-<br>
+
 
 ---
 
