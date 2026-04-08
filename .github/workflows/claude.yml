@@ -155,6 +155,7 @@ jobs:
 
       - uses: anthropics/claude-code-action@beta
         with:
+          allowed_bots: 'praisonai-triage-agent[bot]'
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ steps.app-token.outputs.token }}
           trigger_phrase: "@claude"
