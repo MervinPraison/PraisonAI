@@ -68,6 +68,21 @@ PraisonAI 🦞 — **Hire a 24/7 AI Workforce.** Stop writing boilerplate and st
 
 ---
 
+## 🎯 Use Cases
+
+AI agents solving real-world problems across industries:
+
+| Use Case | Description |
+|----------|-------------|
+| 🔍 **Research & Analysis** | Conduct deep research, gather information, and generate insights from multiple sources automatically |
+| 💻 **Code Generation** | Write, debug, and refactor code with AI agents that understand your codebase and requirements |
+| ✍️ **Content Creation** | Generate blog posts, documentation, marketing copy, and technical writing with multi-agent teams |
+| 📊 **Data Pipelines** | Extract, transform, and analyze data from APIs, databases, and web sources automatically |
+| 🤖 **Customer Support** | Deploy 24/7 support bots on Telegram, Discord, Slack with memory and knowledge-backed responses |
+| ⚙️ **Workflow Automation** | Automate multi-step business processes with agents that hand off tasks, verify results, and self-correct |
+
+---
+
 ## 🚀 Meet your first Agent (Under 1 Minute)
 
 1. Install the lightweight core SDK:
@@ -608,20 +623,7 @@ PraisonAI is built for speed, with agent instantiation in under 4μs. This reduc
 
 ---
 
-## 🎯 Use Cases
 
-AI agents solving real-world problems across industries:
-
-| Use Case | Description |
-|----------|-------------|
-| 🔍 **Research & Analysis** | Conduct deep research, gather information, and generate insights from multiple sources automatically |
-| 💻 **Code Generation** | Write, debug, and refactor code with AI agents that understand your codebase and requirements |
-| ✍️ **Content Creation** | Generate blog posts, documentation, marketing copy, and technical writing with multi-agent teams |
-| 📊 **Data Pipelines** | Extract, transform, and analyze data from APIs, databases, and web sources automatically |
-| 🤖 **Customer Support** | Deploy 24/7 support bots on Telegram, Discord, Slack with memory and knowledge-backed responses |
-| ⚙️ **Workflow Automation** | Automate multi-step business processes with agents that hand off tasks, verify results, and self-correct |
-
----
 
 ## 🧠 Supported Providers & Features
 
