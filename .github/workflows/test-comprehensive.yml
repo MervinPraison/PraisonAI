@@ -67,9 +67,11 @@ jobs:
         fi
 
     - name: Run Comprehensive Test Suite
+      env:
+        INPUT_TEST_TYPE: ${{ github.event.inputs.test_type || 'all' }}
       run: |
         # Determine test type from input or default to 'all'
-        TEST_TYPE="${{ github.event.inputs.test_type || 'all' }}"
+        TEST_TYPE="$INPUT_TEST_TYPE"
         
         echo "🧪 Running comprehensive test suite (type: $TEST_TYPE)"
         
@@ -102,11 +104,13 @@ jobs:
 
     - name: Generate Comprehensive Test Report
       if: always()
+      env:
+        INPUT_TEST_TYPE: ${{ github.event.inputs.test_type || 'all' }}
       run: |
         echo "# 📋 Comprehensive Test Report" > comprehensive_report.md
         echo "" >> comprehensive_report.md
         echo "**Python Version:** ${{ matrix.python-version }}" >> comprehensive_report.md
-        echo "**Test Type:** ${{ github.event.inputs.test_type || 'all' }}" >> comprehensive_report.md
+        echo "**Test Type:** $INPUT_TEST_TYPE" >> comprehensive_report.md
         echo "**Trigger:** ${{ github.event_name }}" >> comprehensive_report.md
         echo "**Date:** $(date -u)" >> comprehensive_report.md
         echo "" >> comprehensive_report.md

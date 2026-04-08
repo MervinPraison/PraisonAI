@@ -57,13 +57,15 @@ runs:
 
     - name: Install Gemini CLI
       id: install
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
       run: |
-        if [[ "${{ inputs.version }}" == "latest" || "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9\.-]+)?(\+[a-zA-Z0-9\.-]+)?$ ]]; then
-          echo "Installing Gemini CLI from npm: @google/gemini-cli@${{ inputs.version }}"
-          npm install -g @google/gemini-cli@${{ inputs.version }}
+        if [[ "$INPUT_VERSION" == "latest" || "$INPUT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9\.-]+)?(\+[a-zA-Z0-9\.-]+)?$ ]]; then
+          echo "Installing Gemini CLI from npm: @google/gemini-cli@$INPUT_VERSION"
+          npm install -g @google/gemini-cli@$INPUT_VERSION
         else
-          echo "Installing Gemini CLI from GitHub: github:google-gemini/gemini-cli#${{ inputs.version }}"
-          npm install -g github:google-gemini/gemini-cli#${{ inputs.version }}
+          echo "Installing Gemini CLI from GitHub: github:google-gemini/gemini-cli#$INPUT_VERSION"
+          npm install -g github:google-gemini/gemini-cli#$INPUT_VERSION
         fi
         echo "Verifying installation:"
         if command -v gemini >/dev/null 2>&1; then

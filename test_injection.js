@@ -1,2 +1,0 @@
-const expr = "github.event.action != 'opened' && (github.event.action != 'labeled' || github.event.label.name == 'claude') && (github.event_name != 'issue_comment' || '@claude verify this PR'.includes('@claude')) && ( !'[bot]'.includes('[bot]') || 'MervinPraison' == 'github-actions[bot]' || 'MervinPraison' == 'praisonai-triage-agent[bot]' ) && 'MervinPraison' != 'dependabot[bot]' && 'MervinPraison' != 'cursor[bot]' && 'MervinPraison' != 'renovate[bot]'";
-console.log(eval(expr.replace(/github.event.action/g, "'created'").replace(/github.event_name/g, "'issue_comment'")));

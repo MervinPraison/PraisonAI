@@ -34,10 +34,12 @@ jobs:
     # Get the commit hash from the tag
     - name: Get commit hash
       id: get_commit
+      env:
+        INPUT_TAG: ${{ github.event.inputs.tag }}
       run: |
         COMMIT_HASH=$(git rev-parse HEAD)
         echo "commit_hash=$COMMIT_HASH" >> $GITHUB_OUTPUT
-        echo "Found commit: $COMMIT_HASH for tag ${{ github.event.inputs.tag }}"
+        echo "Found commit: $COMMIT_HASH for tag $INPUT_TAG"
 
     # Now checkout the fork at main branch
     - name: Checkout fork
@@ -445,42 +447,48 @@ jobs:
     # Add upstream and get commit from tag
     - name: Get upstream tag commit
       id: get_upstream_commit
+      env:
+        INPUT_TAG: ${{ github.event.inputs.tag }}
       run: |
         # Add upstream remote
         git remote add upstream https://github.com/MervinPraison/PraisonAI.git
         
         # Delete local tag if it exists
-        git tag -d ${{ github.event.inputs.tag }} || true
+        git tag -d "$INPUT_TAG" || true
         
         # Fetch from upstream including tags with force
         git fetch upstream --tags --force
         
         # Verify tag exists in upstream
-        if ! git ls-remote --tags upstream | grep -q "refs/tags/${{ github.event.inputs.tag }}$"; then
-          echo "::error::Tag ${{ github.event.inputs.tag }} not found in upstream repository"
+        if ! git ls-remote --tags upstream | grep -q "refs/tags/$INPUT_TAG$"; then
+          echo "::error::Tag $INPUT_TAG not found in upstream repository"
           exit 1
         fi
         
         # Get the commit hash from the upstream tag
-        UPSTREAM_COMMIT=$(git rev-list -n 1 refs/tags/${{ github.event.inputs.tag }})
+        UPSTREAM_COMMIT=$(git rev-list -n 1 refs/tags/"$INPUT_TAG")
         if [ -z "$UPSTREAM_COMMIT" ]; then
-          echo "::error::Could not find commit for tag ${{ github.event.inputs.tag }}"
+          echo "::error::Could not find commit for tag $INPUT_TAG"
           exit 1
         fi
         echo "upstream_commit=$UPSTREAM_COMMIT" >> $GITHUB_OUTPUT
-        echo "Found commit: $UPSTREAM_COMMIT for tag ${{ github.event.inputs.tag }}"
+        echo "Found commit: $UPSTREAM_COMMIT for tag $INPUT_TAG"
 
     # Create tag at the same commit
     - name: Create tag at commit
+      env:
+        GIT_ASKPASS: /bin/echo
+        PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+        INPUT_TAG: ${{ github.event.inputs.tag }}
       run: |
         git config --global user.name "MervinPraison"
         git config --global user.email "454862+MervinPraison@users.noreply.github.com"
         
         # Remove tag if it exists locally
-        git tag -d ${{ github.event.inputs.tag }} || true
+        git tag -d "$INPUT_TAG" || true
         
         # Remove tag if it exists remotely
-        git push origin :refs/tags/${{ github.event.inputs.tag }} || true
+        git push origin :refs/tags/"$INPUT_TAG" || true
         
         # Fetch the specific commit from upstream
         git fetch upstream ${{ steps.get_upstream_commit.outputs.upstream_commit }} --force
@@ -489,11 +497,8 @@ jobs:
         git reset --hard ${{ steps.get_upstream_commit.outputs.upstream_commit }}
         
         # Create and push tag
-        git tag -a ${{ github.event.inputs.tag }} -m "Release ${{ github.event.inputs.tag }} (synced from upstream MervinPraison/PraisonAI@${{ github.event.inputs.tag }})"
-        git push origin ${{ github.event.inputs.tag }}
-      env:
-        GIT_ASKPASS: /bin/echo
-        PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+        git tag -a "$INPUT_TAG" -m "Release $INPUT_TAG (synced from upstream MervinPraison/PraisonAI@$INPUT_TAG)"
+        git push origin "$INPUT_TAG"
 
     # Create the release
     - name: Create Release
