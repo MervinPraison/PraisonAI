@@ -31,12 +31,6 @@ PraisonAI 🦞 — **Hire a 24/7 AI Workforce.** Stop writing boilerplate and st
     <img src="https://img.shields.io/badge/Highlighted_by_Elon_Musk-000000?style=for-the-badge&logo=x&logoColor=white" alt="Highlighted by Elon Musk" />
   </a>
   <br>
-  <br>
-  <a href="https://x.com/elonmusk/status/1893870468249141688" target="_blank">
-    <img src=".github/images/elon_musk_praisonai.png" alt="Highlighted by Elon Musk" width="600" />
-  </a>
-  <p><em>"Grok 3 customer support" — <a href="https://x.com/elonmusk/status/1893870468249141688">Elon Musk quoting PraisonAI's tutorial</a></em></p>
-  <br>
 </div>
 
 <p align="center">
@@ -687,6 +681,14 @@ Powered by 100+ LLMs (OpenAI, Anthropic, Gemini & local models).
 | vLLM | [Example](examples/python/providers/vllm/vllm_example.py) |
 
 </details>
+
+<div align="center">
+  <a href="https://x.com/elonmusk/status/1893870468249141688" target="_blank">
+    <img src=".github/images/elon_musk_praisonai.png" alt="Highlighted by Elon Musk" width="600" />
+  </a>
+  <p><em>"Grok 3 customer support" — <a href="https://x.com/elonmusk/status/1893870468249141688">Elon Musk quoting PraisonAI's tutorial</a></em></p>
+</div>
+<br>
 
 ---
 
