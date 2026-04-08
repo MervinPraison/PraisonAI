@@ -685,6 +685,12 @@ def describe(name: str, offline: bool = False) -> Optional[RecipeConfig]:
 
 def _load_recipe(name: str, offline: bool = False) -> Optional[RecipeConfig]:
     """Load a recipe by name or URI or path."""
+    # Prevent path traversal vulnerabilities
+    if ".." in name:
+        import logging
+        logging.getLogger(__name__).error(f"Path traversal is not allowed in recipe name: {name}")
+        return None
+        
     try:
         from praisonai.templates import TemplateDiscovery, TemplateLoader
         
