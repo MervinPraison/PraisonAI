@@ -233,23 +233,23 @@ class LLMProviderError(Exception):
 class RateLimitError(LLMProviderError):
     """Raised when rate limit is exceeded."""
     
-    def __init__(self, message: str = None, retry_after: Optional[float] = None):
+    def __init__(self, message: Optional[str] = None, retry_after: Optional[float] = None, provider: Optional[str] = None, model: Optional[str] = None):
         self.retry_after = retry_after
-        super().__init__(message or "Rate limit exceeded")
+        super().__init__(message or "Rate limit exceeded", provider=provider, model=model)
 
 
 class ModelNotAvailableError(LLMProviderError):
     """Raised when requested model is not available."""
     
     def __init__(self, model: str, provider: Optional[str] = None):
-        self.model = model
-        super().__init__(f"Model '{model}' is not available{f' from provider {provider}' if provider else ''}")
+        message = f"Model '{model}' is not available{f' from provider {provider}' if provider else ''}"
+        super().__init__(message, provider=provider, model=model)
 
 
 class ContextLengthExceededError(LLMProviderError):
     """Raised when input exceeds model's context length."""
     
-    def __init__(self, tokens: int, max_tokens: int):
+    def __init__(self, tokens: int, max_tokens: int, provider: Optional[str] = None, model: Optional[str] = None):
         self.tokens = tokens
         self.max_tokens = max_tokens
-        super().__init__(f"Input length ({tokens} tokens) exceeds model limit ({max_tokens} tokens)")
+        super().__init__(f"Input length ({tokens} tokens) exceeds model limit ({max_tokens} tokens)", provider=provider, model=model)

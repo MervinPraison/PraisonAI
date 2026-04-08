@@ -153,6 +153,30 @@ class RetrievalStrategyProtocol(Protocol):
             List of retrieved documents with metadata
         """
         ...
+    
+    async def aretrieve(
+        self,
+        query: str,
+        knowledge_store: Any,  # KnowledgeStoreProtocol
+        *,
+        limit: int = 10,
+        filters: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> List[Dict[str, Any]]:
+        """
+        Async version of retrieve.
+        
+        Args:
+            query: Search query string
+            knowledge_store: Knowledge store to search
+            limit: Maximum number of results
+            filters: Optional metadata filters
+            **kwargs: Strategy-specific options
+            
+        Returns:
+            List of retrieved documents with metadata
+        """
+        ...
 
 
 @runtime_checkable
