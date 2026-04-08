@@ -1,20 +1,26 @@
 """
 Shared configuration loader for PraisonAI CLI commands.
 
-Implements strict precedence:
-1. CLI flags (highest priority)
-2. Environment variables
-3. Config file (YAML)
-4. Defaults (lowest priority)
+UPDATED: Now uses unified schema for true CLI/YAML/Python consistency.
+Implements single documented precedence chain with strong validation.
 
-This module is DRY - used by both knowledge and rag commands.
+Precedence (highest to lowest):
+1. CLI flags
+2. Environment variables (PRAISONAI_*)
+3. Config file (YAML)
+4. Defaults
+
+This module provides backward compatibility while leveraging the new
+unified configuration schema for consistent behavior.
 """
 
 import os
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
+
+from .schema_provider import rag_schema_provider
 
 logger = logging.getLogger(__name__)
 
@@ -266,13 +272,146 @@ def load_cli_config(
     return RAGCliConfig(**{k: v for k, v in merged.items() if k in RAGCliConfig.__dataclass_fields__})
 
 
+def load_unified_config(
+    config_file: Optional[Path] = None,
+    cli_overrides: Optional[Dict[str, Any]] = None,
+    validate: bool = True,
+) -> Dict[str, Any]:
+    """
+    Load configuration using the unified schema with strong validation.
+    
+    Args:
+        config_file: Optional path to YAML config file
+        cli_overrides: Dict of CLI flag values (only non-None values)
+        validate: Whether to perform schema validation
+        
+    Returns:
+        Unified configuration dict with validation
+        
+    Raises:
+        ValueError: If configuration is invalid and validate=True
+    """
+    # Load from different sources
+    env_config = rag_schema_provider.load_env_config()
+    
+    file_config = {}
+    if config_file:
+        raw_config = load_config_file(config_file)
+        # Flatten nested config sections for backward compatibility
+        if "knowledge" in raw_config:
+            file_config.update(raw_config["knowledge"])
+        if "rag" in raw_config:
+            file_config.update(raw_config["rag"])
+        if "retrieval" in raw_config:
+            file_config.update(raw_config["retrieval"])
+        if "server" in raw_config:
+            file_config.update(raw_config["server"])
+        
+        # Also include top-level keys
+        for key, value in raw_config.items():
+            if key not in ["knowledge", "rag", "retrieval", "server"]:
+                file_config[key] = value
+        
+        # Apply YAML to Python field mapping
+        file_config = rag_schema_provider.yaml_to_python(file_config)
+    
+    cli_config = {}
+    if cli_overrides:
+        # Apply CLI to Python field mapping
+        cli_config = rag_schema_provider.cli_to_python(cli_overrides)
+    
+    # Get defaults from schema
+    defaults = rag_schema_provider.normalize_config({})
+    
+    # Merge with documented precedence
+    merged_config = rag_schema_provider.merge_with_precedence(
+        cli_config=cli_config,
+        env_config=env_config,
+        file_config=file_config,
+        defaults=defaults
+    )
+    
+    # Validate if requested
+    if validate:
+        result = rag_schema_provider.validate(merged_config)
+        if not result.is_valid:
+            # Add source attribution for better error messages
+            error_lines = ["Configuration validation failed:"]
+            for error in result.errors:
+                # Try to identify which source provided the invalid value
+                field_name = error.split(":")[0] if ":" in error else "unknown"
+                sources = []
+                if field_name in env_config:
+                    sources.append("ENV")
+                if field_name in cli_config:
+                    sources.append("CLI")
+                if field_name in file_config:
+                    sources.append(f"file '{config_file}'" if config_file else "file")
+                
+                source_info = f" (from {', '.join(sources)})" if sources else ""
+                error_lines.append(f"  • {error}{source_info}")
+            
+            if result.warnings:
+                error_lines.append("Warnings:")
+                for warning in result.warnings:
+                    error_lines.append(f"  • {warning}")
+            
+            raise ValueError("\n".join(error_lines))
+        
+        # Log warnings even if validation passes
+        if result.warnings:
+            for warning in result.warnings:
+                logger.warning(warning)
+        
+        # Use normalized config from validation
+        if result.normalized:
+            merged_config = result.normalized
+    
+    return merged_config
+
+
+def get_cli_flags() -> List[Dict[str, Any]]:
+    """
+    Get CLI flag definitions from unified schema.
+    
+    Returns:
+        List of CLI flag definitions for argparse
+    """
+    mappings = rag_schema_provider.get_cli_mapping()
+    flags = []
+    
+    for mapping in mappings:
+        flag_def = {
+            "name": f"--{mapping.cli_flag}",
+            "dest": mapping.field_name,
+            "help": mapping.description,
+            "default": None,  # Don't set defaults - preserves precedence
+        }
+        
+        # Handle boolean flags specially
+        if mapping.type_hint == bool:
+            flag_def["action"] = "store_true"
+            # Don't set type for boolean flags
+        else:
+            flag_def["type"] = mapping.type_hint
+        
+        # Add environment variable to help text
+        if mapping.env_var:
+            flag_def["help"] += f" (env: {mapping.env_var})"
+        
+        flags.append(flag_def)
+    
+    return flags
+
+
 def get_config_schema() -> Dict[str, Any]:
     """
     Get the configuration schema for documentation.
     
     Returns:
-        Dict describing the configuration schema
+        Dict describing the configuration schema in legacy format for backward compatibility
     """
+    # Return legacy nested structure to maintain backward compatibility
     return {
         "knowledge": {
             "collection": "Collection/index name (default: 'default')",
