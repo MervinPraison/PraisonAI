@@ -8,6 +8,7 @@ and context. Inspired by Gemini CLI's delegate-to-agent pattern.
 import logging
 from praisonaiagents._logging import get_logger
 import asyncio
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Callable
 from enum import Enum
@@ -127,6 +128,12 @@ class SubagentDelegator:
             agent_factory: Factory function to create agents
             on_task_complete: Callback when task completes
         """
+        warnings.warn(
+            "SubagentDelegator is deprecated. Use Agent.handoff_to() or "
+            "parallel_handoffs() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.config = config or DelegationConfig()
         self.agent_factory = agent_factory
         self.on_task_complete = on_task_complete
