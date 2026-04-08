@@ -10,11 +10,20 @@ import os
 import time
 from typing import List
 
-from ..models import CheckResult, CheckStatus, CheckCategory
+from ..models import CheckResult, CheckStatus, CheckCategory, CheckSeverity, DoctorConfig
+from ..registry import register_check
 
 
-def check_bot_tokens() -> CheckResult:
+@register_check(
+    id="bot_tokens",
+    title="Bot Tokens",
+    description="Check bot token environment variables",
+    category=CheckCategory.BOTS,
+    severity=CheckSeverity.MEDIUM,
+)
+def check_bot_tokens(config: DoctorConfig) -> CheckResult:
     """Check bot token environment variables."""
+    config_path = getattr(config, 'config_file', None) or "bot.yaml"
     token_vars = {
         "TELEGRAM_BOT_TOKEN": "Telegram",
         "DISCORD_BOT_TOKEN": "Discord",
@@ -44,9 +53,17 @@ def check_bot_tokens() -> CheckResult:
     )
 
 
-def check_bot_config(config_path: str = "bot.yaml") -> CheckResult:
+@register_check(
+    id="bot_config",
+    title="Bot Config",
+    description="Check bot.yaml exists and is valid",
+    category=CheckCategory.BOTS,
+    severity=CheckSeverity.MEDIUM,
+)
+def check_bot_config(config: DoctorConfig) -> CheckResult:
     """Check bot.yaml exists and is valid."""
     start = time.time()
+    config_path = getattr(config, 'config_file', None) or "bot.yaml"
     if not os.path.exists(config_path):
         return CheckResult(
             id="bot_config",
@@ -80,11 +97,19 @@ def check_bot_config(config_path: str = "bot.yaml") -> CheckResult:
         )
 
 
-def check_bot_security(config_path: str = "bot.yaml") -> CheckResult:
+@register_check(
+    id="bot_security",
+    title="Bot Security Config", 
+    description="Check bot security configuration for safe defaults",
+    category=CheckCategory.BOTS,
+    severity=CheckSeverity.HIGH,
+)
+def check_bot_security(config: DoctorConfig) -> CheckResult:
     """Check bot security configuration for safe defaults."""
     start = time.time()
-    warnings = []
-    issues = []
+    config_path = getattr(config, 'config_file', None) or "bot.yaml"
+    channel_warnings = []
+    global_warnings = []
     
     # Check if bot.yaml exists
     if not os.path.exists(config_path):
@@ -105,37 +130,37 @@ def check_bot_security(config_path: str = "bot.yaml") -> CheckResult:
         for channel_name, channel_config in config.channels.items():
             # Check for missing allowlists in production-like setups
             if not channel_config.allowlist and not channel_config.blocklist:
-                warnings.append(f"{channel_name}: No allowlist/blocklist configured")
+                channel_warnings.append(f"{channel_name}: No allowlist/blocklist configured")
             
             # Check for overly permissive group policies
             if channel_config.group_policy == "respond_all":
-                warnings.append(f"{channel_name}: group_policy='respond_all' - consider 'mention_only' for security")
+                channel_warnings.append(f"{channel_name}: group_policy='respond_all' - consider 'mention_only' for security")
         
         # Check for missing gateway pairing settings 
         gateway_secret = os.environ.get("PRAISONAI_GATEWAY_SECRET")
         if not gateway_secret:
-            warnings.append("PRAISONAI_GATEWAY_SECRET not set - pairing codes will not persist across restarts")
+            global_warnings.append("PRAISONAI_GATEWAY_SECRET not set - pairing codes will not persist across restarts")
         
         # Determine status
-        if issues:
-            return CheckResult(
-                id="bot_security",
-                title="Bot Security Config",
-                category=CheckCategory.BOTS,
-                status=CheckStatus.FAIL,
-                message=f"Security issues found: {'; '.join(issues[:3])}",
-                details='\n'.join(issues + warnings) if warnings else '\n'.join(issues),
-                remediation="Review bot.yaml security settings and OpenClaw-style pairing documentation",
-                duration_ms=(time.time() - start) * 1000,
-            )
-        elif warnings:
+        all_warnings = channel_warnings + global_warnings
+        if all_warnings:
+            channel_count = len(channel_warnings)
+            global_count = len(global_warnings)
+            
+            if channel_count > 0 and global_count > 0:
+                message = f"Security recommendations: {channel_count} channel(s) and {global_count} global setting(s) could be improved"
+            elif channel_count > 0:
+                message = f"Security recommendations: {channel_count} channel(s) could use stricter defaults"
+            else:
+                message = f"Security recommendations: {global_count} global setting(s) could be improved"
+            
             return CheckResult(
                 id="bot_security",
                 title="Bot Security Config",
                 category=CheckCategory.BOTS,
                 status=CheckStatus.WARN,
-                message=f"Security recommendations: {len(warnings)} channel(s) could use stricter defaults",
-                details='\n'.join(warnings),
+                message=message,
+                details='\n'.join(all_warnings),
                 remediation="Consider allowlists for DM security and 'mention_only' group policy. See security docs for safe defaults.",
                 duration_ms=(time.time() - start) * 1000,
             )
@@ -149,6 +174,17 @@ def check_bot_security(config_path: str = "bot.yaml") -> CheckResult:
                 duration_ms=(time.time() - start) * 1000,
             )
             
+    except ValueError as e:
+        return CheckResult(
+            id="bot_security",
+            title="Bot Security Config",
+            category=CheckCategory.BOTS,
+            status=CheckStatus.FAIL,
+            message=f"Invalid bot security config: {str(e)[:100]}",
+            details=str(e)[:200],
+            remediation="Fix bot.yaml security settings and re-run doctor",
+            duration_ms=(time.time() - start) * 1000,
+        )
     except Exception as e:
         return CheckResult(
             id="bot_security",
@@ -161,10 +197,3 @@ def check_bot_security(config_path: str = "bot.yaml") -> CheckResult:
         )
 
 
-def get_bot_checks() -> List[CheckResult]:
-    """Run all bot-specific checks and return results."""
-    return [
-        check_bot_tokens(),
-        check_bot_config(),
-        check_bot_security(),
-    ]
