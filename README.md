@@ -323,19 +323,17 @@ Deploy PraisonAI for always-on operation with automatic restarts and process sup
 ### Docker Compose (Recommended)
 
 ```bash
-# 1. Create deployment directory
-mkdir praisonai-deploy && cd praisonai-deploy
+# 1. Clone the repository
+git clone https://github.com/MervinPraison/PraisonAI.git
+cd PraisonAI/docker
 
-# 2. Download docker-compose.yml
-curl -o docker-compose.yml https://raw.githubusercontent.com/MervinPraison/PraisonAI/main/docker/docker-compose.yml
-
-# 3. Set your API key
+# 2. Set your API key
 echo "OPENAI_API_KEY=your_openai_api_key_here" > .env
 
-# 4. Deploy 24/7
-docker-compose up -d
+# 3. Deploy 24/7
+docker-compose up -d claw
 
-# ✅ Running at http://localhost:8082 (Claw Dashboard)
+# ✅ Running at http://localhost:8082
 ```
 
 > 📖 **Full Guide**: [24/7 Production Minimal Deployment](https://docs.praison.ai/docs/guides/deployment/production-minimal)
