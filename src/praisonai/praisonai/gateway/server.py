@@ -325,6 +325,15 @@ class WebSocketGateway:
             auth_err = _check_auth(request)
             if auth_err:
                 return auth_err
+
+            client_ip = request.client.host if request.client else "unknown"
+            if not _approval_rate.allow("approval_pending", client_ip):
+                retry = _approval_rate.time_until_allowed("approval_pending", client_ip)
+                return JSONResponse(
+                    {"error": "Rate limited", "retry_after_seconds": round(retry)},
+                    status_code=429,
+                )
+
             return JSONResponse({
                 "pending": _approval_mgr.list_pending(),
                 "allow_list": _approval_mgr.allowlist.list(),
@@ -388,6 +397,14 @@ class WebSocketGateway:
             auth_err = _check_auth(request)
             if auth_err:
                 return auth_err
+
+            client_ip = request.client.host if request.client else "unknown"
+            if not _approval_rate.allow("approval_allowlist", client_ip):
+                retry = _approval_rate.time_until_allowed("approval_allowlist", client_ip)
+                return JSONResponse(
+                    {"error": "Rate limited", "retry_after_seconds": round(retry)},
+                    status_code=429,
+                )
 
             if request.method == "GET":
                 return JSONResponse({

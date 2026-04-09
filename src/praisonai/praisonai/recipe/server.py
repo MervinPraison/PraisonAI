@@ -551,6 +551,15 @@ def create_wsgi_app(
             content_length = int(environ.get("CONTENT_LENGTH", 0))
         except (ValueError, TypeError):
             content_length = 0
+            
+        max_upload_size = int(os.environ.get("PRAISONAI_MAX_UPLOAD_SIZE", 50 * 1024 * 1024))
+        if content_length > max_upload_size:
+            start_response("413 Payload Too Large", [("Content-Type", "application/json")])
+            return [json.dumps({
+                "ok": False, 
+                "error": f"Payload too large (max {max_upload_size} bytes)", 
+                "code": "payload_too_large"
+            }).encode("utf-8")]
         
         body = environ["wsgi.input"].read(content_length) if content_length > 0 else b""
         

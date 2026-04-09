@@ -155,7 +155,7 @@ def _get_interactive_tools():
             from praisonai.cli.features.interactive_tools import get_interactive_tools, ToolConfig
             config = ToolConfig.from_env()
             config.workspace = os.environ.get("PRAISONAI_CODE_REPO_PATH", os.getcwd())
-            config.approval_mode = "auto"  # Trust mode - auto-approve all tool executions
+            # Do not hardcode approval_mode to "auto" to respect environment configuration
             tools = get_interactive_tools(config=config)
             _cached_modules['interactive_tools'] = tools
             _profile_end("load_interactive_tools")

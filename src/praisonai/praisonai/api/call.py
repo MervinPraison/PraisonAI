@@ -14,6 +14,8 @@ from rich import print
 import argparse
 import logging
 import importlib.util
+import time
+from collections import defaultdict
 
 load_dotenv()
 
@@ -36,6 +38,15 @@ LOG_EVENT_TYPES = [
     'input_audio_buffer.committed', 'input_audio_buffer.speech_stopped',
     'input_audio_buffer.speech_started', 'session.created'
 ]
+
+# Security and Rate Limiting
+CALL_SERVER_TOKEN = os.getenv('CALL_SERVER_TOKEN')
+MAX_CONCURRENT_CONNECTIONS = int(os.getenv('MAX_CONCURRENT_CONNECTIONS', '5'))
+MAX_REQUESTS_PER_WINDOW = int(os.getenv('MAX_REQUESTS_PER_WINDOW', '100'))
+RATE_LIMIT_WINDOW = 3600
+
+active_connections = 0
+client_ips = defaultdict(list)
 
 app = FastAPI()
 
@@ -92,36 +103,87 @@ async def index_page():
     </html>
     """
 
+from fastapi import HTTPException, status
+
 @app.api_route("/", methods=["GET", "POST"])
 async def handle_incoming_call(request: Request):
     """Handle incoming call and return TwiML response to connect to Media Stream."""
+    if CALL_SERVER_TOKEN:
+        token = request.query_params.get("token")
+        if not token:
+            auth = request.headers.get("Authorization", "")
+            if auth.startswith("Bearer "):
+                token = auth.split(" ")[1]
+            elif auth.startswith("Basic "):
+                try:
+                    import base64
+                    decoded = base64.b64decode(auth[6:]).decode("utf-8")
+                    if ":" in decoded:
+                        token = decoded.split(":", 1)[1]  # Use Password as token
+                    else:
+                        token = decoded
+                except Exception:
+                    pass
+        if token != CALL_SERVER_TOKEN:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+
     response = VoiceResponse()
     response.say("")
     response.pause(length=1)
     # response.say("")
     host = request.url.hostname
     connect = Connect()
-    connect.stream(url=f'wss://{host}/media-stream')
+    
+    stream_url = f'wss://{host}/media-stream'
+    if CALL_SERVER_TOKEN:
+        stream_url += f'?token={CALL_SERVER_TOKEN}'
+    
+    connect.stream(url=stream_url)
     response.append(connect)
     return HTMLResponse(content=str(response), media_type="application/xml")
 
 @app.websocket("/media-stream")
 async def handle_media_stream(websocket: WebSocket):
     """Handle WebSocket connections between Twilio and OpenAI."""
-    print("Client connected")
-    await websocket.accept()
+    global active_connections
+    
+    # 1. Authentication
+    if CALL_SERVER_TOKEN:
+        token = websocket.query_params.get("token")
+        if token != CALL_SERVER_TOKEN:
+            await websocket.close(code=4003, reason="Unauthorized")
+            return
+            
+    # 2. Rate Limiting Request Rate
+    client_ip = websocket.client.host if websocket.client else "unknown"
+    now = time.time()
+    client_ips[client_ip] = [t for t in client_ips[client_ip] if now - t < RATE_LIMIT_WINDOW]
+    if len(client_ips[client_ip]) >= MAX_REQUESTS_PER_WINDOW:
+        await websocket.close(code=4029, reason="Rate limit exceeded")
+        return
+    client_ips[client_ip].append(now)
+    
+    # 3. Connection Limiting
+    if active_connections >= MAX_CONCURRENT_CONNECTIONS:
+        await websocket.close(code=1013, reason="Server busy")
+        return
+        
+    active_connections += 1
+    try:
+        print("Client connected")
+        await websocket.accept()
 
-    async with websockets.connect(
-        'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01',
-        extra_headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "OpenAI-Beta": "realtime=v1"
-        }
-    ) as openai_ws:
-        await send_session_update(openai_ws)
-        stream_sid = None
+        async with websockets.connect(
+            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01',
+            extra_headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "OpenAI-Beta": "realtime=v1"
+            }
+        ) as openai_ws:
+            await send_session_update(openai_ws)
+            stream_sid = None
 
-        async def receive_from_twilio():
+            async def receive_from_twilio():
             """Receive audio data from Twilio and send it to the OpenAI Realtime API."""
             nonlocal stream_sid
             try:
@@ -173,6 +235,8 @@ async def handle_media_stream(websocket: WebSocket):
                 print(f"Error in Sending to Phone: {e}")
 
         await asyncio.gather(receive_from_twilio(), send_to_twilio())
+    finally:
+        active_connections -= 1
 
 async def handle_response_done(response, openai_ws):
     """Handle the response.done event and process any function calls."""

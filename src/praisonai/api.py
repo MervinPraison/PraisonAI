@@ -9,9 +9,10 @@ try:
         """Sanitize HTML to prevent XSS from markdown-generated content."""
         return nh3.clean(html)
 except ImportError:
-    def _sanitize_html(html: str) -> str:
-        """Fallback: no nh3, return as-is (install nh3 for XSS protection)."""
-        return html
+    def _sanitize_html(html_str: str) -> str:
+        """Fallback: no nh3, return escaped HTML. Install nh3 for rich HTML rendering."""
+        import html
+        return html.escape(html_str)
 
 def basic():
     from praisonai import PraisonAI

@@ -125,6 +125,7 @@ class SkillTools:
         except Exception as e:
             return f"Error executing script: {str(e)}"
     
+    @require_approval(risk_level="low")
     def read_skill_file(
         self,
         skill_path: str,
@@ -149,6 +150,10 @@ class SkillTools:
                 skill_path = os.path.join(self._working_directory, skill_path)
             skill_path = os.path.abspath(skill_path)
             
+            working_dir = os.path.abspath(self._working_directory)
+            if os.path.commonpath([skill_path, working_dir]) != working_dir:
+                return f"Error: Workspace boundary violation - skill directory escapes workspace"
+            
             if not os.path.exists(skill_path):
                 return f"Error: Skill directory not found at {skill_path}"
             
@@ -160,7 +165,7 @@ class SkillTools:
             full_path = os.path.abspath(full_path)
             
             # Security check: ensure file is within skill directory
-            if not full_path.startswith(skill_path):
+            if os.path.commonpath([full_path, skill_path]) != skill_path:
                 return f"Error: Path traversal detected - {file_path} is outside skill directory"
             
             if not os.path.exists(full_path):
@@ -239,6 +244,7 @@ def run_skill_script(script_path: str, args: str = "", timeout: int = 60) -> str
     return _skill_tools.run_skill_script(script_path, args, timeout)
 
 
+@require_approval(risk_level="low")
 def read_skill_file(skill_path: str, file_path: str, encoding: str = 'utf-8') -> str:
     """
     Read a file from a skill directory.

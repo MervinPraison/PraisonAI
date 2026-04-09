@@ -8,7 +8,10 @@ import uuid
 from enum import Enum
 from typing import Optional, Dict, Any, List
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+import socket
+import ipaddress
+from urllib.parse import urlparse
 
 
 class JobStatus(str, Enum):
@@ -34,6 +37,33 @@ class JobSubmitRequest(BaseModel):
     session_id: Optional[str] = Field(None, description="Session ID for conversation continuity")
     idempotency_key: Optional[str] = Field(None, description="Idempotency key to prevent duplicate submissions")
     idempotency_scope: Optional[str] = Field("none", description="Idempotency scope: none, session, global")
+
+    @field_validator("webhook_url")
+    @classmethod
+    def validate_webhook_url(cls, v: Optional[str]) -> Optional[str]:
+        if not v:
+            return v
+        
+        parsed = urlparse(v)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError("Webhook URL must use http or https scheme")
+            
+        hostname = parsed.hostname
+        if not hostname:
+            raise ValueError("Invalid webhook URL")
+            
+        if hostname.lower() in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+            raise ValueError("Webhook URL cannot be a localhost address")
+            
+        try:
+            ip = socket.gethostbyname(hostname)
+            ip_obj = ipaddress.ip_address(ip)
+            if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_multicast:
+                raise ValueError("Webhook URL resolves to a private or restricted network address")
+        except socket.gaierror:
+            pass
+            
+        return v
 
 
 class JobSubmitResponse(BaseModel):
@@ -108,6 +138,33 @@ class Job(BaseModel):
     session_id: Optional[str] = Field(None)
     idempotency_key: Optional[str] = Field(None)
     idempotency_scope: str = Field("none")
+    
+    @field_validator("webhook_url")
+    @classmethod
+    def validate_webhook_url(cls, v: Optional[str]) -> Optional[str]:
+        if not v:
+            return v
+        
+        parsed = urlparse(v)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError("Webhook URL must use http or https scheme")
+            
+        hostname = parsed.hostname
+        if not hostname:
+            raise ValueError("Invalid webhook URL")
+            
+        if hostname.lower() in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+            raise ValueError("Webhook URL cannot be a localhost address")
+            
+        try:
+            ip = socket.gethostbyname(hostname)
+            ip_obj = ipaddress.ip_address(ip)
+            if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_multicast:
+                raise ValueError("Webhook URL resolves to a private or restricted network address")
+        except socket.gaierror:
+            pass
+            
+        return v
     
     # Progress tracking
     progress_percentage: float = Field(0.0)

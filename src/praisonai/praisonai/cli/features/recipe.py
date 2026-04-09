@@ -1154,22 +1154,25 @@ OPENAI_API_KEY=your-api-key
             
             output_dir = Path(parsed["output"])
             
+            from praisonai.recipe.registry import _safe_extractall
+            
             with tarfile.open(bundle_path, "r:gz") as tar:
                 # Read manifest
-                manifest_file = tar.extractfile("manifest.json")
-                if manifest_file:
-                    manifest = json.load(manifest_file)
-                    recipe_name = manifest.get("name", "recipe")
-                else:
+                try:
+                    manifest_file = tar.extractfile("manifest.json")
+                    if manifest_file:
+                        manifest = json.load(manifest_file)
+                        recipe_name = manifest.get("name", "recipe")
+                    else:
+                        recipe_name = bundle_path.stem.split("-")[0]
+                except Exception:
                     recipe_name = bundle_path.stem.split("-")[0]
                 
                 # Extract to recipe directory
                 recipe_dir = output_dir / recipe_name
                 recipe_dir.mkdir(parents=True, exist_ok=True)
                 
-                for member in tar.getmembers():
-                    if member.name != "manifest.json":
-                        tar.extract(member, recipe_dir)
+                _safe_extractall(tar, recipe_dir)
             
             if parsed["json"]:
                 self._print_json({

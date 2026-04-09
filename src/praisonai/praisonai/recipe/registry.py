@@ -129,18 +129,34 @@ def _validate_version(version: str) -> bool:
 
 
 def _safe_extractall(tar: tarfile.TarFile, dest_dir: Path) -> None:
-    """Safely extract tar members, rejecting path traversal attempts.
+    """Safely extract tar members, rejecting path traversal attempts and decompression bombs.
     
     Validates every member name to prevent:
     - Absolute paths
     - '..' traversal sequences
     - Resolved paths that escape dest_dir
+    - Decompression bombs (size/file limits)
     
     Raises:
-        RegistryError: If any member attempts path traversal.
+        RegistryError: If any member attempts path traversal or exceeds limits.
     """
+    MAX_SIZE = 100 * 1024 * 1024  # 100 MB limit
+    MAX_FILES = 1000  # 1000 files limit
+    
+    total_size = 0
+    file_count = 0
+    
     dest_resolved = dest_dir.resolve()
     for member in tar.getmembers():
+        file_count += 1
+        if file_count > MAX_FILES:
+            raise RegistryError(f"Archive contains too many files (>{MAX_FILES})")
+            
+        total_size += member.size
+        # Protect against decompression bombs
+        if total_size > MAX_SIZE:
+            raise RegistryError(f"Archive is too large uncompressed (>{MAX_SIZE} bytes)")
+            
         member_path = Path(member.name)
         # Reject absolute paths
         if member_path.is_absolute():

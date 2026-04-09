@@ -204,10 +204,47 @@ def web_crawl(
     single_url = isinstance(urls, str)
     if single_url and ',' in urls:
         # LLM may pass comma-separated URLs as a single string
-        url_list = [u.strip() for u in urls.split(',') if u.strip()]
-        single_url = len(url_list) == 1
+        raw_url_list = [u.strip() for u in urls.split(',') if u.strip()]
+        single_url = len(raw_url_list) == 1
     else:
-        url_list = [urls] if single_url else urls
+        raw_url_list = [urls] if single_url else urls
+
+    # Validate URLs to prevent SSRF and Local File Read
+    import urllib.parse
+    import socket
+    import ipaddress
+    
+    url_list = []
+    for u in raw_url_list:
+        try:
+            parsed = urllib.parse.urlparse(u)
+            if parsed.scheme not in ('http', 'https'):
+                logger.warning(f"Rejected non-http/https URL: {u}")
+                continue
+            hostname = parsed.hostname
+            if not hostname:
+                continue
+                
+            # Allow opting out of SSRF protection for advanced use cases
+            if os.environ.get("ALLOW_LOCAL_CRAWL") != "true":
+                try:
+                    ip_str = socket.gethostbyname(hostname)
+                    ip = ipaddress.ip_address(ip_str)
+                    if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_multicast or ip.is_unspecified:
+                        logger.warning(f"Rejected SSRF or private IP attempt: {u}")
+                        continue
+                except socket.gaierror:
+                    logger.warning(f"Could not resolve hostname for: {u}")
+                    continue
+                
+            url_list.append(u)
+        except Exception as e:
+            logger.warning(f"URL validation failed for {u}: {e}")
+            continue
+            
+    if not url_list:
+        return {"error": "No valid or safe URLs provided. Local and non-http(s) URLs are blocked for security."}
+
     
     # Get available providers
     available = _get_available_crawl_providers()

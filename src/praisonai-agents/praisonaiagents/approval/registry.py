@@ -147,6 +147,8 @@ class ApprovalRegistry:
         self._approved_context.set(approved)
 
     def is_already_approved(self, tool_name: str) -> bool:
+        if self.get_risk_level(tool_name) == "critical":
+            return False
         return tool_name in self._approved_context.get(set())
 
     def clear_approved(self) -> None:
