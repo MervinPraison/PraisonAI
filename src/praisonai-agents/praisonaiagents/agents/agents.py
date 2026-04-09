@@ -2336,6 +2336,22 @@ class AgentTeam:
             border_style="cyan"
         ))
         
+        # Emit planning event for trace observers
+        try:
+            from ..trace.protocol import get_default_emitter, ActionEvent
+            import time
+            
+            emitter = get_default_emitter()
+            if emitter and emitter.enabled:
+                emitter.emit(ActionEvent(
+                    event_type="plan_created",
+                    timestamp=time.time(),
+                    agent_name="PlanningAgent",
+                    metadata={"plan": self._todo_list.to_markdown()}
+                ))
+        except Exception:
+            pass
+        
         # Step 4: Create proper Task objects from plan steps
         console.print("\n[bold blue]🚀 EXECUTION PHASE[/bold blue]\n")
         

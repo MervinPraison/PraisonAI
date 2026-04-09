@@ -148,6 +148,9 @@ def github_triage(
                     agent_logs.append(f"✅ Agent completed: {event.agent_name}")
                 elif event.event_type == "output":
                     agent_logs.append(f"✅ Agent output generated")
+                elif event.event_type == "plan_created":
+                    plan_data = event.metadata.get("plan", "")
+                    agent_logs.append(f"📋 **Implementation Plan Created:**\n\n```markdown\n{plan_data}\n```")
                 else:
                     return
                 trigger_comment_update()
@@ -171,6 +174,8 @@ def github_triage(
         
         original_argv = sys.argv
         sys.argv = ['praisonai', 'workflow', 'run', agent_file, '--var', f'ISSUE_NUMBER={issue}']
+        if os.environ.get("PRAISONAI_AUTO_APPROVE", "").lower() in ("true", "1", "yes"):
+            sys.argv.append('--trust')
         try:
             praison = PraisonAI()
             praison.main()

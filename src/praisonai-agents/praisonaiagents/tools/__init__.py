@@ -165,6 +165,12 @@ TOOL_MAPPINGS = {
     'SkillTools': ('.skill_tools', 'SkillTools'),
     'skill_tools': ('.skill_tools', None),
     
+    # Github Tools
+    'github_create_branch': ('.github_tools', None),
+    'github_commit_and_push': ('.github_tools', None),
+    'github_create_pull_request': ('.github_tools', None),
+    'github_tools': ('.github_tools', None),
+    
     # Schedule Tools (agent-centric scheduling)
     'schedule_add': ('.schedule_tools', None),
     'schedule_list': ('.schedule_tools', None),
@@ -322,6 +328,7 @@ def __getattr__(name: str) -> Any:
             'search_web', 'web_search', 'get_available_providers',
             'web_crawl', 'crawl_web', 'get_available_crawl_providers',
             'run_skill_script', 'read_skill_file', 'list_skill_scripts', 'create_skill_tools',
+            'github_create_branch', 'github_commit_and_push', 'github_create_pull_request',
             'schedule_add', 'schedule_list', 'schedule_remove',
             'ast_grep_search', 'ast_grep_rewrite', 'ast_grep_scan', 'is_ast_grep_available', 'get_ast_grep_tools',
             'store_memory', 'search_memory',
@@ -330,7 +337,7 @@ def __getattr__(name: str) -> Any:
             'smtp_send_email', 'smtp_read_inbox'
         ]:
             return getattr(module, name)
-        if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools', 'schedule_tools', 'ast_grep_tools', 'email_tools']:
+        if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools', 'github_tools', 'schedule_tools', 'ast_grep_tools', 'email_tools']:
             return module  # Returns the callable module
         return getattr(module, name)
     else:

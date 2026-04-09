@@ -1,5 +1,6 @@
 framework: "praisonai"
 topic: "Autonomous Issue Resolution and PR Creation"
+planning: true
 
 roles:
   issue_analyst:
@@ -15,12 +16,16 @@ roles:
     backstory: "You are a senior software engineer who writes flawless code. You branch off main, use terminal commands to rewrite files using sed, echo, or other secure tools, and verify that your changes perfectly address the analyst's findings."
     tools:
       - "execute_command"
+      - "github_create_branch"
       
   release_manager:
     role: "Release and CI Manager"
     goal: "Commit the changes, push the branch to remote, and create the Pull Request linking back to the issue"
     backstory: "You are a DevOps Release Engineer. Your job is strictly to ensure that any code changes are properly committed, pushed to the GitHub repository, and framed as a clean Pull Request that automatically links to the issue."
     tools:
+      - "github_create_pull_request"
+      - "github_create_branch"
+      - "github_commit_and_push"
       - "execute_command"
 
 steps:
@@ -40,7 +45,7 @@ steps:
     action: |
       Implement the changes required to solve the issue:
       1. Review the analyst's plan.
-      2. Check out a dedicated fix branch by calling `execute_command` with `command` set to `git checkout -b praisonai/issue-{{ISSUE_NUMBER}}`. Do NOT provide a `cwd` argument.
+      2. Check out a dedicated fix branch by using the `github_create_branch` tool with `branch_name` set to `praisonai/issue-{{ISSUE_NUMBER}}`.
       3. Carefully modify the necessary files in the repository using bash commands (e.g. `cat`, `sed`, `echo`, or small inline scripts). 
       4. Double-check your edits by inspecting the file outputs or running `git diff` to ensure you changed what was required.
     expected_output: "Confirmation that the git branch was successfully created and the files were reliably modified without syntax errors."
@@ -49,10 +54,12 @@ steps:
     agent: release_manager
     action: |
       Push the code and submit the PR:
-      1. Stage the files with `execute_command` where `command` is `git add .`. Do NOT provide a `cwd` argument.
-      2. Commit the changes: `git commit -m "PraisonAI Automated Fix"`
-      3. Push the branch to GitHub: `git push -u origin HEAD`
-      4. Create the Pull Request back to main: `gh pr create --title "Fix Issue {{ISSUE_NUMBER}}" --body "Automated triage by PraisonAI Native Issue Triage." --head "praisonai/issue-{{ISSUE_NUMBER}}" --base main`
-      5. Post a comment on the original issue letting the user know: `gh issue comment {{ISSUE_NUMBER}} -b "I have autonomously analyzed the codebase and written a fix for this issue! I've opened a Pull Request for your review."`
+      1. Use the native `github_commit_and_push` tool and provide a commit message like "PraisonAI Automated Fix".
+      2. Use the native `github_create_pull_request` tool with the arguments:
+         - title: "Fix Issue {{ISSUE_NUMBER}}"
+         - body: "Automated triage by PraisonAI Native Issue Triage."
+         - head_branch: "praisonai/issue-{{ISSUE_NUMBER}}"
+         - base_branch: "main"
+      3. Post a comment on the original issue letting the user know: `execute_command`: `gh issue comment {{ISSUE_NUMBER}} -b "I have autonomously analyzed the codebase and written a fix for this issue! I've opened a Pull Request for your review."`
     expected_output: "The URL of the successfully created Pull Request."
     dependencies: [analyze_issue, implement_fix]
