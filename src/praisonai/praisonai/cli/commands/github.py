@@ -100,8 +100,12 @@ def github_triage(
     last_update_time = [time.time()]
     update_timer = [None]
     
+    context_title = issue_data.get('title', f'Issue #{issue}')
+    is_pr = "pull_request" in issue_data
+    task_type = "Pull Request" if is_pr else "Issue"
+
     def _sync_push_comment():
-        md_body = f"🚀 **PraisonAI is working**...\n{run_url}\n\n"
+        md_body = f"🚀 **PraisonAI is working on {task_type} #{issue}: {context_title}**...\n[View Live Execution]({run_url})\n\n"
         for log in agent_logs[-15:]: # keep last 15 steps
             md_body += f"- {log}\n"
             
@@ -175,9 +179,13 @@ def github_triage(
         finally:
             sys.argv = original_argv
 
-        final_body = f"✅ **PraisonAI Triager Completed Successfully!**\n{run_url}\n\nResolved natively using PraisonAI Event Hooks."
+        final_body = f"✅ **PraisonAI Triager Completed Successfully!**\n{task_type} #{issue}: {context_title}\n[View Live Execution]({run_url})\n\nResolved natively using PraisonAI Event Hooks."
+        if agent_logs:
+            final_body += "\n\n### Execution Logs\n"
+            for log in agent_logs:
+                final_body += f"- {log}\n"
     except Exception as e:
-        final_body = f"❌ **PraisonAI Triager Failed**\n{run_url}\n\nError: {e}"
+        final_body = f"❌ **PraisonAI Triager Failed** on {task_type} #{issue}\n[View Live Execution]({run_url})\n\nError: {e}"
 
     # 5. Final Update
     try:
