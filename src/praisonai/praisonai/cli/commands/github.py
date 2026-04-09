@@ -79,6 +79,8 @@ class StickyComment:
         self._last_push = 0.0
         self._timer: Optional[threading.Timer] = None
         self._lock = threading.Lock()
+        # Populated by _load_yaml_steps_as_todos: role_name.lower() -> step index
+        self._step_agent_map: Dict[str, int] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -118,12 +120,26 @@ class StickyComment:
         with self._lock:
             self._current_agent = agent_name
             self._logs.append(f"🤖 Agent starting: **{agent_name}**")
+            # Mark matching step as in_progress
+            idx = self._step_agent_map.get(agent_name.lower())
+            if idx is not None and idx < len(self._todos):
+                for t in self._todos:
+                    if t["status"] == "in_progress":
+                        t["status"] = "completed"
+                self._todos[idx]["status"] = "in_progress"
         self._schedule_push()
 
     def on_agent_end(self, agent_name: str) -> None:
         with self._lock:
             self._logs.append(f"✅ Agent completed: **{agent_name}**")
             self._current_agent = None
+            # Mark matching step as completed
+            idx = self._step_agent_map.get(agent_name.lower())
+            if idx is not None and idx < len(self._todos):
+                self._todos[idx]["status"] = "completed"
+                # Mark next step as in_progress if it exists
+                if idx + 1 < len(self._todos) and self._todos[idx + 1]["status"] == "pending":
+                    self._todos[idx + 1]["status"] = "in_progress"
         self._schedule_push()
 
     def on_tool_start(self, agent_name: str, tool_name: str, tool_args: dict) -> None:
@@ -311,6 +327,61 @@ def _make_context_sink(sticky: StickyComment):
 
 
 # ---------------------------------------------------------------------------
+# YAML step → todo pre-loader
+# ---------------------------------------------------------------------------
+
+def _load_yaml_steps_as_todos(agent_file: str, sticky: StickyComment) -> None:
+    """Parse the agent YAML and populate todos from step names/agents."""
+    try:
+        import yaml  # type: ignore
+    except ImportError:
+        return
+    try:
+        with open(agent_file) as f:
+            cfg = yaml.safe_load(f)
+    except Exception:
+        return
+    if not isinstance(cfg, dict):
+        return
+
+    steps = cfg.get("steps", [])
+    roles = cfg.get("roles", {})
+    if not steps:
+        return
+
+    todos = []
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        # Prefer explicit step name; fall back to role display name or agent key
+        step_name = step.get("name", "")
+        agent_key = step.get("agent", "")
+        if not step_name and agent_key:
+            role_cfg = roles.get(agent_key, {})
+            step_name = role_cfg.get("role", agent_key).title()
+        if step_name:
+            # Humanize snake_case → Title Case
+            human_name = step_name.replace("_", " ").title()
+            todos.append({"content": human_name, "status": "pending"})
+
+    if todos:
+        # Mark first as in_progress
+        todos[0]["status"] = "in_progress"
+        with sticky._lock:
+            sticky._todos = todos
+
+    # Build a reverse map: agent role name → step index for the sink to use
+    sticky._step_agent_map = {}
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            continue
+        agent_key = step.get("agent", "")
+        role_cfg = roles.get(agent_key, {})
+        role_name = role_cfg.get("role", agent_key)
+        sticky._step_agent_map[role_name.lower()] = i
+
+
+# ---------------------------------------------------------------------------
 # CLI command
 # ---------------------------------------------------------------------------
 
@@ -375,6 +446,10 @@ def github_triage(
         task_type=task_type, title=ctx_title, run_url=run_url,
     )
     sticky._logs.append(f"Context fetched for {task_type} #{issue}")
+
+    # Pre-populate todo list from YAML steps
+    _load_yaml_steps_as_todos(agent_file, sticky)
+
     sticky.post_initial()
 
     # ------------------------------------------------------------------
