@@ -55,6 +55,7 @@ jobs:
           GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
           GH_TOKEN: ${{ steps.generate_token.outputs.token }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PRAISONAI_AUTO_APPROVE: "true"
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             export ISSUE_NUMBER="${{ inputs.issue_number }}"
