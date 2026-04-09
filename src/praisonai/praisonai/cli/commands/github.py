@@ -367,7 +367,7 @@ def _make_context_sink(sticky: StickyComment):
 
                 elif et_val == "tool_call_end":
                     tool_name = data.get("tool_name", "")
-                    tool_result = data.get("tool_result") or {}
+                    tool_result = data.get("result") or data.get("tool_result") or {}
                     if tool_name != "TodoWrite":
                         sticky.on_tool_end(event.agent_name or "", tool_name)
                     # Capture PR URL from result

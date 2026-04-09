@@ -5,7 +5,8 @@ from typing import Dict, Any, Optional
 import logging
 from .decorator import tool
 
-logger = logging.getLogger(__name__)
+@tool
+def github_commit_and_push(commit_message: str) -> str:
 
 @tool
 def github_create_branch(branch_name: str) -> str:
