@@ -13,8 +13,8 @@ This guide explains how to set up PraisonAI as an automated pull request reviewe
 ## Setup Steps
 
 1. Configure GitHub Secrets for your repository:
-   - `APP_ID`: The App ID of your GitHub App.
-   - `PRIVATE_KEY`: The generated Private Key (PEM format).
+   - `PRAISONAI_APP_ID`: The App ID of your GitHub App.
+   - `PRAISONAI_APP_PRIVATE_KEY`: The generated Private Key (PEM format).
    - `OPENAI_API_KEY` (or other LLM key) for PraisonAI to use.
 
 2. Ensure `.github/workflows/praisonai-pr-review.yml` is present in your default branch.
