@@ -858,6 +858,7 @@ Methods:
 * <code title="cli">praisonai gateway send <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway start <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway status <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
+* <code title="cli">praisonai github triage <a href="./src/praisonai/praisonai/cli/commands/github.py">--help</a></code>
 * <code title="cli">praisonai hooks add <a href="./src/praisonai/praisonai/cli/commands/hooks.py">--help</a></code>
 * <code title="cli">praisonai hooks list <a href="./src/praisonai/praisonai/cli/commands/hooks.py">--help</a></code>
 * <code title="cli">praisonai hooks remove <a href="./src/praisonai/praisonai/cli/commands/hooks.py">--help</a></code>
