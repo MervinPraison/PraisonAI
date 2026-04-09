@@ -90,9 +90,8 @@ def github_triage(
     # 3. Setup Observer Sink to EventBus
     try:
         from praisonaiagents.bus.bus import get_default_bus
-        from praisonaiagents.hooks.events import EventType
-    except ImportError:
-        print("[red]PraisonAIAgents SDK not found.[/red]")
+    except ImportError as e:
+        print(f"[red]PraisonAIAgents SDK not found: {e}[/red]")
         raise typer.Exit(1)
 
     bus = get_default_bus()
