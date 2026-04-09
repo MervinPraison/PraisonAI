@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 def github_create_branch(branch_name: str) -> str:
     """Create and checkout a new git branch.
     
+logger.debug(f"Branch '{branch_name}' checked out successfully.")
     Args:
         branch_name: The name of the branch to create and checkout.
     """

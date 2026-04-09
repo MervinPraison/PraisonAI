@@ -1,3 +1,3 @@
-# GitHub Issue #1348: Add logging to github_create_branch on success
+# GitHub Issue #1350: Add debug log on successful branch checkout
 
-The github_create_branch function in src/praisonai-agents/praisonaiagents/tools/github_tools.py should log a debug message on successful branch creation using logger.debug.
+The github_create_branch function in src/praisonai-agents/praisonaiagents/tools/github_tools.py should call logger.debug after a successful checkout.
