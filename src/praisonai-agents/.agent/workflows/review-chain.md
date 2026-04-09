@@ -13,9 +13,11 @@ CodeRabbit (@coderabbitai) ─── auto for human PRs, triggered via comment f
 Qodo (/review)             ─── auto for human PRs, triggered via comment for bot PRs
 <!-- Gemini (@gemini)           ─── triggered via comment for bot PRs/Issues
   ↓ (~3-5 min)                  ↓ (auto triggers Claude on completion) -->
+PraisonAI (@praisonai)     ─── triggered via comment
+  ↓ (~3-5 min)                  ↓ (auto triggers Claude on completion)
 Copilot (@copilot)         ─── triggered ONLY after CodeRabbit or Qodo post their review
   ↓
-Claude (@claude)           ─── triggered ONLY after Copilot OR Gemini finishes (final reviewer)
+Claude (@claude)           ─── triggered ONLY after Copilot OR Gemini OR PraisonAI finishes (final reviewer)
 ```
 
 ## Workflow Files
@@ -23,12 +25,24 @@ Claude (@claude)           ─── triggered ONLY after Copilot OR Gemini fini
 | File | Trigger | Does what |
 |------|---------|-----------|
 | `auto-pr-comment.yml` | `issue_comment`, `pull_request_review`, `pull_request:opened` | Triggers Copilot after CodeRabbit/Qodo finish. For bot PRs: triggers CodeRabbit+Qodo+Gemini first. |
+| `praisonai-pr-review.yml` | `issue_comment`, `workflow_dispatch` | PraisonAI multi-agent PR review triggered by @praisonai mentions. |
 | `chain-claude-after-copilot.yml` | `pull_request_review:submitted`, `issue_comment` | Triggers Claude after Copilot reviews, AND automatically after Gemini Code Assist finishes fixing issues/PRs. |
 | `claude.yml` | `issue_comment`, `pull_request_review_comment`, `issues:assigned/labeled` | Claude responds to @claude mentions. |
 
 ## Bot PR fix
 
 CodeRabbit and Qodo skip `github-actions[bot]` authored PRs by default. The `bot-pr-trigger-reviews` job in `auto-pr-comment.yml` explicitly triggers them via comments.
+
+## PraisonAI Integration
+
+PraisonAI provides multi-agent PR review capabilities through the native PraisonAI agent framework. When triggered with `@praisonai`, it deploys a team of specialized agents:
+
+- **Security Reviewer**: Analyzes for vulnerabilities, authentication issues, and unsafe code practices
+- **Performance Reviewer**: Identifies bottlenecks, inefficient algorithms, and resource usage issues  
+- **Maintainability Reviewer**: Evaluates code quality, documentation, and adherence to best practices
+- **Lead Reviewer**: Synthesizes feedback and posts comprehensive review comments
+
+The workflow uses the agent configuration at `.github/praisonai-reviewer.yaml` and leverages the `praisonai` CLI for execution.
 
 ## Key rules
 

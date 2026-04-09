@@ -1,0 +1,68 @@
+name: PraisonAI PR Reviewer
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Pull Request Number'
+        required: true
+        type: string
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    if: >
+      (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' && 
+       github.event.issue.pull_request && 
+       contains(github.event.comment.body, '@praisonai') &&
+       github.actor != 'github-actions[bot]' &&
+       github.event.comment.user.type != 'Bot' &&
+       (github.event.comment.author_association == 'OWNER' ||
+        github.event.comment.author_association == 'MEMBER' ||
+        github.event.comment.author_association == 'COLLABORATOR'))
+    
+    steps:
+      - name: Determine checkout ref
+        id: dest
+        run: |
+          if [ "${{ github.event_name }}" = "issue_comment" ]; then
+            echo "ref=refs/pull/${{ github.event.issue.number }}/head" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "ref=refs/pull/${{ inputs.pr_number }}/head" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.dest.outputs.ref }}
+          fetch-depth: 0
+          
+      - name: Generate GitHub App Token
+        id: generate_token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.PRAISONAI_APP_ID }}
+          private_key: ${{ secrets.PRAISONAI_APP_PRIVATE_KEY }}
+          
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - name: Install PraisonAI
+        run: pip install "praisonai[all]"
+        
+      - name: Run PraisonAI PR Review
+        env:
+          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          praisonai agents --file .github/praisonai-reviewer.yaml
