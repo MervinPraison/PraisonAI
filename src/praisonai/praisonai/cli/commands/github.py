@@ -251,6 +251,34 @@ class StickyComment:
         lines.append(f"**{self._task_type} #{self._issue}: {self._title}**")
         lines.append("")
 
+        # --- Visual Flow Diagram (Mermaid) ---
+        if self._todos:
+            lines.append("**Progress**")
+            lines.append("")
+            lines.append("```mermaid")
+            lines.append("flowchart LR")
+            # Build nodes for each step
+            for i, t in enumerate(self._todos):
+                s = t["status"]
+                node_id = f"S{i}"
+                label = t["content"].replace('"', '\\"')
+                # Color coding: pending=gray, in_progress=orange, completed=green
+                if s == "completed":
+                    lines.append(f'    {node_id}["{label}"]:::done')
+                elif s == "in_progress":
+                    lines.append(f'    {node_id}["🔄 {label}"]:::active')
+                else:
+                    lines.append(f'    {node_id}["{label}"]:::pending')
+            # Connect nodes with arrows
+            for i in range(len(self._todos) - 1):
+                lines.append(f"    S{i} --> S{i+1}")
+            # Style classes
+            lines.append("    classDef done fill:#22c55e,stroke:#16a34a,stroke-width:2px,color:#fff")
+            lines.append("    classDef active fill:#f59e0b,stroke:#d97706,stroke-width:3px,color:#fff")
+            lines.append("    classDef pending fill:#6b7280,stroke:#4b5563,stroke-width:1px,color:#e5e7eb")
+            lines.append("```")
+            lines.append("")
+
         # --- Todo list ---
         if self._todos:
             lines.append("**Todo List**")

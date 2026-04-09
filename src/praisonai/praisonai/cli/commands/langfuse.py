@@ -169,8 +169,24 @@ def langfuse_start(
             subprocess.run(cmd, cwd=repo_path)
             
     except subprocess.CalledProcessError as e:
-        console.print(f"[red]❌ Failed to start Langfuse: {e}[/red]")
-        console.print("[yellow]Check Docker logs with: docker compose logs[/yellow]")
+        error_output = str(e)
+        if hasattr(e, 'stderr') and e.stderr:
+            error_output += e.stderr
+        if hasattr(e, 'stdout') and e.stdout:
+            error_output += e.stdout
+        
+        # Check for port conflicts
+        from praisonai.cli.commands.port import _is_port_conflict_error, _extract_port_from_error, _show_port_conflict_help
+        if _is_port_conflict_error(error_output):
+            port = _extract_port_from_error(error_output)
+            if port:
+                _show_port_conflict_help(port, console)
+            else:
+                console.print(f"[red]❌ Failed to start Langfuse: Port conflict detected[/red]")
+                console.print("[yellow]Run [cyan]praisonai port list[/cyan] to see ports in use[/yellow]")
+        else:
+            console.print(f"[red]❌ Failed to start Langfuse: {e}[/red]")
+            console.print("[yellow]Check Docker logs with: docker compose logs[/yellow]")
         raise typer.Abort()
     except KeyboardInterrupt:
         console.print("\n[yellow]⏹️  Stopping Langfuse...[/yellow]")
