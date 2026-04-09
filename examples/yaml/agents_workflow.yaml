@@ -18,9 +18,8 @@ workflow:
   planning: true
   reasoning: true
   verbose: true
-  memory_config:
-    provider: chroma
-    persist: true
+  memory:
+    backend: chroma
 
 # Variables for template substitution
 variables:
