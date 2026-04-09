@@ -4469,39 +4469,44 @@ Answer:"""
     # -------------------------------------------------------------------------
     
     def close(self) -> None:
-        """
-        Close and cleanup all agent resources.
-        
-        Properly tears down memory connections, MCP sessions, server registrations,
-        and background threads to prevent resource leaks in long-running services.
-        """
+        """Synchronously close the agent and clean up resources."""
+        if getattr(self, '_closed', False):
+            return
+
+        # Memory cleanup
         try:
-            # Close memory connections
-            if hasattr(self, 'memory') and self.memory and hasattr(self.memory, 'close_connections'):
-                self.memory.close_connections()
-            
-            # Close MCP sessions if any
+            memory = getattr(self, "_memory_instance", None)
+            if memory and hasattr(memory, 'close_connections'):
+                memory.close_connections()
+        except Exception as e:
+            logger.warning(f"Memory cleanup failed: {e}")
+
+        # MCP cleanup  
+        try:
             if hasattr(self, '_mcp_clients') and self._mcp_clients:
-                for client in self._mcp_clients.values():
+                for client_name, client in self._mcp_clients.items():
                     if hasattr(client, 'close'):
                         client.close()
                 self._mcp_clients.clear()
-            
-            # Deregister from global server registry
-            self._cleanup_server_registrations()
-            
-            # Clean up any scheduled tasks or background threads
-            if hasattr(self, '_background_tasks'):
-                for task in self._background_tasks:
-                    if hasattr(task, 'cancel'):
-                        task.cancel()
-            
-            # Mark as closed
-            self._closed = True
-            
         except Exception as e:
-            # Log cleanup errors but don't raise - cleanup should be best-effort
-            logger.warning(f"Error during agent cleanup: {e}")
+            logger.warning(f"MCP cleanup failed: {e}")
+
+        # Server registry cleanup
+        try:
+            self._cleanup_server_registrations()
+        except Exception as e:
+            logger.warning(f"Server cleanup failed: {e}")
+
+        # Background tasks cleanup
+        try:
+            for task in getattr(self, '_background_tasks', []):
+                if hasattr(task, 'cancel'):
+                    task.cancel()
+        except Exception as e:
+            logger.warning(f"Task cleanup failed: {e}")
+
+        # Always set closed flag
+        self._closed = True
     
     async def aclose(self) -> None:
         """Async version of close() for async context managers."""
@@ -4543,7 +4548,7 @@ Answer:"""
     def _cleanup_server_registrations(self) -> None:
         """Clean up global server registry entries for this agent."""
         try:
-            agent_id = id(self)
+            agent_id = self.agent_id
             with _server_lock:
                 # Remove from _registered_agents
                 ports_to_clean = []

@@ -55,24 +55,12 @@ class ExecutionMixin:
     """Mixin providing execution methods for the Agent class."""
 
     def _safe_sleep(self, duration: float) -> None:
-        """
-        Sleep in an async-safe manner.
-        
-        Uses asyncio.sleep() if running in an async context,
-        otherwise falls back to time.sleep() for sync contexts.
-        """
-        try:
-            # Check if we're in an async context
-            loop = asyncio.get_running_loop()
-            # If we get here, we're in an async context but this method is sync
-            # We can't call asyncio.sleep() from sync code, so we use threading
-            # to avoid blocking the event loop
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                executor.submit(time.sleep, duration).result()
-        except RuntimeError:
-            # No event loop running, safe to use time.sleep()
-            time.sleep(duration)
+        """Synchronous sleep - safe for sync contexts only."""
+        time.sleep(duration)
+
+    async def _safe_sleep_async(self, duration: float) -> None:
+        """Async sleep - use this in async contexts."""
+        await asyncio.sleep(duration)
 
     def generate_task(self) -> 'Task':
         """Generate a Task object from the agent's instructions"""

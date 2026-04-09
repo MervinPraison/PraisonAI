@@ -34,7 +34,8 @@ class StructuredWorkflowExecutor:
         handler: Optional[callable] = None,
         context: Optional[Dict[str, Any]] = None,
         error_strategy: ErrorStrategy = ErrorStrategy.STOP,
-        max_retries: int = 0
+        max_retries: int = 0,
+        fallback_output: Optional[str] = None
     ) -> StepResult:
         """
         Execute a single workflow step with structured error handling.
@@ -79,7 +80,8 @@ class StructuredWorkflowExecutor:
                         exception=ValueError("No agent or handler provided"),
                         step_name=step_name,
                         error_strategy=ErrorStrategy.STOP,
-                        is_retryable=False
+                        is_retryable=False,
+                        fallback_output=fallback_output
                     )
                     return StepResult.failed_result(error, step_name)
                 
@@ -105,6 +107,7 @@ class StructuredWorkflowExecutor:
                     max_retries=max_retries,
                     is_retryable=is_retryable,
                     error_strategy=error_strategy,
+                    fallback_output=fallback_output,
                     context=context or {}
                 )
                 
@@ -126,6 +129,7 @@ class StructuredWorkflowExecutor:
             max_retries=max_retries,
             is_retryable=False,
             error_strategy=error_strategy,
+            fallback_output=fallback_output,
             context=context or {}
         )
         
@@ -181,10 +185,15 @@ class StructuredWorkflowExecutor:
             action = step_config.get('action', '')
             agent = step_config.get('agent')
             handler = step_config.get('handler')
-            step_error_strategy = ErrorStrategy(
-                step_config.get('on_error', error_strategy.value)
-            )
+            try:
+                on_error = step_config.get('on_error', error_strategy.value)
+                step_error_strategy = ErrorStrategy(on_error) if not isinstance(on_error, ErrorStrategy) else on_error
+            except ValueError:
+                logging.warning(f"Invalid error strategy '{on_error}', using default")
+                step_error_strategy = error_strategy
+                
             max_retries = step_config.get('max_retries', 0)
+            fallback_output = step_config.get('fallback_output')
             
             # Substitute variables in action
             action = self._substitute_variables(action, all_variables, previous_output)
@@ -197,7 +206,8 @@ class StructuredWorkflowExecutor:
                 handler=handler,
                 context=all_variables,
                 error_strategy=step_error_strategy,
-                max_retries=max_retries
+                max_retries=max_retries,
+                fallback_output=fallback_output
             )
             
             step_results.append(step_result)

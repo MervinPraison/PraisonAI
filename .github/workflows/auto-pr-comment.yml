@@ -409,7 +409,7 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - name: Trigger CodeRabbit, Qodo, and Gemini reviews
+      - name: Trigger CodeRabbit and Qodo reviews
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GH_TOKEN }}
@@ -432,12 +432,12 @@ jobs:
             });
             console.log(`Triggered Qodo for bot PR #${pr}`);
 
-            // 3. Trigger Gemini review
-            await github.rest.issues.createComment({
-              issue_number: pr, owner, repo,
-              body: '@gemini review this PR'
-            });
-            console.log(`Triggered Gemini for bot PR #${pr}`);
+            // 3. Trigger Gemini review (commented out)
+            // await github.rest.issues.createComment({
+            //   issue_number: pr, owner, repo,
+            //   body: '@gemini review this PR'
+            // });
+            // console.log(`Triggered Gemini for bot PR #${pr}`);
 
             // NOTE: @copilot is NOT triggered here.
             // It will be triggered by copilot-after-coderabbit or copilot-after-qodo

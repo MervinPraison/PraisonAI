@@ -112,7 +112,7 @@ class MemoryCoreMixin:
         
         # Calculate quality score if not provided
         if quality_score is None:
-            quality_score = self._calculate_quality_score(content)
+            quality_score = self.compute_quality_score(content, metadata)
         
         # Prepare metadata with quality score
         metadata = metadata or {}
@@ -393,7 +393,7 @@ class MemoryCoreMixin:
             try:
                 from ..bus import get_default_bus
                 bus = get_default_bus()
-                bus.emit(f"memory.{event_type}.{memory_type}", event_data)
+                bus.publish(f"memory.{event_type}.{memory_type}", event_data)
             except ImportError:
                 # EventBus not available, fall back to logging
                 logging.debug(f"Memory event: {event_type}.{memory_type} - {event_data}")
