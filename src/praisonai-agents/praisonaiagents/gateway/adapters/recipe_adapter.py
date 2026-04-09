@@ -7,6 +7,7 @@ duck-typing interface, enabling recipes to be used with Gateway and BotOS.
 
 import asyncio
 import logging
+import uuid
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -56,15 +57,16 @@ class RecipeBotAdapter:
         """
         self.recipe_name = recipe_name
         self.recipe_config = recipe_config or {}
-        self.session_id = session_id or f"recipe-session-{id(self)}"
+        self.session_id = session_id or f"recipe-session-{uuid.uuid4().hex[:12]}"
         self.recipe_options = recipe_options
         
         # Agent-like properties
         self.name = recipe_name
         self.agent_id = f"recipe-{recipe_name}"
         
-        # Context variables for human-in-the-loop
-        self.context_variables: Dict[str, Any] = {}
+        # Context variables for human-in-the-loop (per-session)
+        self._context_by_session: Dict[str, Dict[str, Any]] = {}
+        self.context_variables: Dict[str, Any] = {}  # Default session context
         
         # Optional streaming support
         self._stream_emitter: Optional["StreamEventEmitter"] = None
@@ -87,7 +89,7 @@ class RecipeBotAdapter:
         """Get the stream emitter for Gateway integration."""
         return self._stream_emitter
     
-    def chat(self, message: str) -> str:
+    def chat(self, prompt: str, **kwargs) -> str:
         """
         Process a message through the recipe execution.
         
@@ -95,36 +97,44 @@ class RecipeBotAdapter:
         with Agent expectations.
         
         Args:
-            message: User input message
+            prompt: User input message
+            **kwargs: Additional options (session_id, etc.)
             
         Returns:
             Recipe execution result as string
         """
+        # Extract session ID from kwargs if provided
+        session_id = kwargs.get('session_id', self.session_id)
+        
         try:
             # Lazy import to prevent circular dependencies
             from praisonai.recipe.core import run
             
-            # Prepare input with message and context
+            # Get session-specific context
+            session_context = self._context_by_session.get(session_id, {})
+            combined_context = {**self.context_variables, **session_context}
+            
+            # Prepare input with message and context (separate from config)
             recipe_input = {
-                "user_input": message,
-                "message": message,  # Alternative key
-                **self.context_variables,
+                "user_input": prompt,
+                "message": prompt,  # Alternative key
+                **combined_context,
             }
             
-            # Merge with any provided config
-            merged_config = {**self.recipe_config, **recipe_input}
+            # Keep config separate from input to prevent corruption
+            config = dict(self.recipe_config) if self.recipe_config else {}
             
             # Execute recipe
             result = run(
                 name=self.recipe_name,
                 input=recipe_input,
-                config=merged_config,
-                session_id=self.session_id,
+                config=config,
+                session_id=session_id,
                 options=self.recipe_options,
             )
             
             # Extract output based on recipe result structure
-            if hasattr(result, 'output') and result.output:
+            if hasattr(result, 'output') and result.output is not None:
                 if isinstance(result.output, dict):
                     # Try common output keys
                     for key in ["response", "reply", "result", "output"]:
@@ -137,30 +147,53 @@ class RecipeBotAdapter:
                     return str(result.output)
                 else:
                     return str(result.output)
-            elif hasattr(result, 'error') and result.error:
+            elif hasattr(result, 'error') and result.error is not None:
                 return f"Recipe error: {result.error}"
             else:
                 return "Recipe executed successfully"
                 
-        except ImportError as e:
-            error_msg = f"Recipe execution not available: {e}"
-            logger.error(error_msg)
-            return error_msg
-        except Exception as e:
-            error_msg = f"Recipe execution failed: {e}"
-            logger.error(error_msg)
-            return error_msg
+        except ImportError:
+            logger.exception(
+                "Recipe runtime import failed (recipe=%s, session_id=%s)",
+                self.recipe_name, session_id
+            )
+            return (
+                "Recipe execution is unavailable. Install extras with "
+                "`pip install praisonaiagents[extras]`."
+            )
+        except Exception:
+            logger.exception(
+                "Recipe execution failed (recipe=%s, session_id=%s)",
+                self.recipe_name, session_id
+            )
+            return (
+                f"Recipe execution failed for '{self.recipe_name}' "
+                f"(session_id={session_id})."
+            )
+    
+    async def achat(self, prompt: str, **kwargs) -> str:
+        """
+        Asynchronous chat with the agent (AgentProtocol compliance).
+        
+        Args:
+            prompt: The user prompt or message
+            **kwargs: Additional optional parameters (session_id, etc.)
+            
+        Returns:
+            The agent's response as a string
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.chat, prompt, **kwargs)
     
     async def chat_async(self, message: str) -> str:
         """
-        Async version of chat method.
+        Backward compatibility alias for achat.
         
         Runs the recipe in an executor to avoid blocking the event loop.
         """
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.chat, message)
+        return await self.achat(message)
     
-    def inject_context(self, key: str, value: Any) -> None:
+    def inject_context(self, key: str, value: Any, session_id: Optional[str] = None) -> None:
         """
         Inject context variables into the recipe execution.
         
@@ -170,17 +203,36 @@ class RecipeBotAdapter:
         Args:
             key: Context variable name
             value: Context variable value
+            session_id: Optional session ID for session-specific context
         """
-        self.context_variables[key] = value
-        logger.debug(f"Injected context variable '{key}' into recipe '{self.recipe_name}'")
+        if session_id:
+            if session_id not in self._context_by_session:
+                self._context_by_session[session_id] = {}
+            # Use copy-on-write to prevent race conditions
+            self._context_by_session[session_id] = {
+                **self._context_by_session[session_id],
+                key: value
+            }
+        else:
+            # Use copy-on-write for default context
+            self.context_variables = {**self.context_variables, key: value}
+        logger.debug(f"Injected context variable '{key}' into recipe '{self.recipe_name}' (session={session_id or 'default'})")
     
-    def clear_context(self) -> None:
-        """Clear all context variables."""
-        self.context_variables.clear()
-        logger.debug(f"Cleared context variables for recipe '{self.recipe_name}'")
+    def clear_context(self, session_id: Optional[str] = None) -> None:
+        """Clear context variables for a session or all sessions."""
+        if session_id:
+            self._context_by_session[session_id] = {}
+            logger.debug(f"Cleared context variables for recipe '{self.recipe_name}' (session={session_id})")
+        else:
+            self.context_variables = {}
+            self._context_by_session.clear()
+            logger.debug(f"Cleared all context variables for recipe '{self.recipe_name}'")
     
-    def get_context(self) -> Dict[str, Any]:
-        """Get current context variables."""
+    def get_context(self, session_id: Optional[str] = None) -> Dict[str, Any]:
+        """Get current context variables for a session or default."""
+        if session_id:
+            session_context = self._context_by_session.get(session_id, {})
+            return {**self.context_variables, **session_context}
         return dict(self.context_variables)
     
     def set_recipe_config(self, config: Dict[str, Any]) -> None:
@@ -202,7 +254,10 @@ class RecipeBotAdapter:
                     "tags": recipe_info.tags,
                 }
         except Exception:
-            pass
+            logger.debug(
+                "Failed to describe recipe (recipe=%s, session_id=%s)",
+                self.recipe_name, self.session_id, exc_info=True
+            )
         
         return {
             "name": self.recipe_name,
