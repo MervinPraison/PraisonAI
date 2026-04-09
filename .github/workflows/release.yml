@@ -62,8 +62,11 @@ jobs:
         # Fetch from upstream
         git fetch upstream --tags --force
         
-        # Reset to upstream commit
-        git reset --hard ${{ steps.get_commit.outputs.commit_hash }}
+    - name: Hard reset to tag commit
+      env:
+        COMMIT_HASH: ${{ steps.get_commit.outputs.commit_hash }}
+      run: |
+        git reset --hard $COMMIT_HASH
 
     - name: Setup Python
       uses: actions/setup-python@v5
@@ -490,11 +493,17 @@ jobs:
         # Remove tag if it exists remotely
         git push origin :refs/tags/"$INPUT_TAG" || true
         
-        # Fetch the specific commit from upstream
-        git fetch upstream ${{ steps.get_upstream_commit.outputs.upstream_commit }} --force
+    - name: Fetch tag from upstream
+      env:
+        UPSTREAM_COMMIT: ${{ steps.get_upstream_commit.outputs.upstream_commit }}
+      run: |
+        git fetch upstream $UPSTREAM_COMMIT --force
         
-        # Reset to upstream commit
-        git reset --hard ${{ steps.get_upstream_commit.outputs.upstream_commit }}
+    - name: Reset to upstream commit
+      env:
+        UPSTREAM_COMMIT: ${{ steps.get_upstream_commit.outputs.upstream_commit }}
+      run: |
+        git reset --hard $UPSTREAM_COMMIT
         
         # Create and push tag
         git tag -a "$INPUT_TAG" -m "Release $INPUT_TAG (synced from upstream MervinPraison/PraisonAI@$INPUT_TAG)"

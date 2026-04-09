@@ -106,7 +106,7 @@ jobs:
         echo "**Framework Tested:** $INPUT_FRAMEWORK" >> real_test_report.md
         echo "**Python Version:** ${{ matrix.python-version }}" >> real_test_report.md
         echo "**Date:** $(date -u)" >> real_test_report.md
-        echo "**Triggered by:** ${{ github.actor }}" >> real_test_report.md
+        echo "**Triggered by:** $GITHUB_ACTOR" >> real_test_report.md
         echo "" >> real_test_report.md
         
         echo "## 🧪 Test Results" >> real_test_report.md
