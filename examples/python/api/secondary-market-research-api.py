@@ -45,7 +45,7 @@ app = FastAPI(
 
 # Add CORS middleware with secure configuration
 cors_origins = os.getenv("API_CORS_ORIGINS", "").split(",")
-cors_origins = [origin.strip() for origin in cors_origins if origin.strip()]
+cors_origins = [origin.strip() for origin in cors_origins if origin.strip() and origin.strip() != "*"]
 
 # Default secure origins if none specified
 if not cors_origins:

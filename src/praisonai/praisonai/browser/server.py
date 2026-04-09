@@ -85,16 +85,22 @@ class BrowserServer:
         
         # Configure CORS origins based on environment
         cors_origins = os.getenv("BROWSER_CORS_ORIGINS", "").split(",")
-        cors_origins = [origin.strip() for origin in cors_origins if origin.strip()]
+        cors_origins = [origin.strip() for origin in cors_origins if origin.strip() and origin.strip() != "*"]
         
         # Default secure origins if none specified
         if not cors_origins:
-            cors_origins = [
-                "http://localhost:3000",  # Development frontend
-                "http://localhost:8000",  # Local development
-                "http://127.0.0.1:3000",  # Local development
-                "http://127.0.0.1:8000",  # Local development
-            ]
+            # Environment-specific defaults for security
+            if os.getenv("ENVIRONMENT") == "production":
+                # In production, require explicit configuration
+                cors_origins = []
+            else:
+                # Development defaults - restrict to local origins
+                cors_origins = [
+                    "http://localhost:3000",  # Development frontend
+                    "http://localhost:8000",  # Local development
+                    "http://127.0.0.1:3000",  # Local development
+                    "http://127.0.0.1:8000",  # Local development
+                ]
         
         # Enable CORS for extension with secure origins.
         # allow_origin_regex enables Chrome extension support since extension IDs
@@ -132,20 +138,32 @@ class BrowserServer:
         import time
         import uuid
         import os
+        import re
+        
+        # Use same CORS origins configuration for WebSocket validation
+        cors_origins = os.getenv("BROWSER_CORS_ORIGINS", "").split(",")
+        cors_origins = [origin.strip() for origin in cors_origins if origin.strip() and origin.strip() != "*"]
+        
+        if not cors_origins:
+            if os.getenv("ENVIRONMENT") == "production":
+                cors_origins = []
+            else:
+                cors_origins = [
+                    "http://localhost:3000", "http://localhost:8000",
+                    "http://127.0.0.1:3000", "http://127.0.0.1:8000"
+                ]
         
         origin = websocket.headers.get("origin")
-        allowed_origins = os.environ.get("ALLOWED_ORIGINS", "").split(",")
         if origin:
             import urllib.parse
             parsed_origin = urllib.parse.urlparse(origin)
             is_allowed = False
             
-            if parsed_origin.scheme in ("http", "https") and parsed_origin.hostname in ("localhost", "127.0.0.1"):
+            # Check exact origin matches
+            if origin in cors_origins:
                 is_allowed = True
-            elif parsed_origin.scheme == "chrome-extension":
-                is_allowed = True
-                
-            if any(origin == allowed.strip() for allowed in allowed_origins if allowed.strip()):
+            # Check chrome extension regex pattern (same as CORS middleware)
+            elif parsed_origin.scheme == "chrome-extension" and re.match(r"chrome-extension://[a-z0-9]{32}", origin):
                 is_allowed = True
             
             if not is_allowed:

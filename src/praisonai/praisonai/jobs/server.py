@@ -90,7 +90,7 @@ def create_app(
     if cors_origins is None:
         # Default secure origins based on environment
         default_origins = os.getenv("JOBS_CORS_ORIGINS", "").split(",")
-        default_origins = [origin.strip() for origin in default_origins if origin.strip()]
+        default_origins = [origin.strip() for origin in default_origins if origin.strip() and origin.strip() != "*"]
         
         if not default_origins:
             # Secure defaults for different environments
@@ -114,7 +114,7 @@ def create_app(
             allow_origins=origins,
             allow_credentials=True,
             allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            allow_headers=["Authorization", "Content-Type", "Origin", "Accept"],
+            allow_headers=["Authorization", "Content-Type", "Origin", "Accept", "Idempotency-Key"],
         )
     
     # Add jobs router

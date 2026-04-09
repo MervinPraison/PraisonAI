@@ -71,16 +71,23 @@ class HTTPStreamTransport:
         self.host = host
         self.port = port
         self.endpoint = endpoint
-        # Default to localhost origins for security
+        # Environment-aware CORS origins for security
         if cors_origins is None:
-            self.cors_origins = [
-                "http://localhost:3000",
-                "http://127.0.0.1:3000", 
-                "http://localhost:8000",
-                "http://127.0.0.1:8000"
-            ]
+            import os
+            if os.getenv("ENVIRONMENT") == "production":
+                # In production, require explicit configuration
+                self.cors_origins = []
+            else:
+                # Development defaults - restrict to local origins
+                self.cors_origins = [
+                    "http://localhost:3000",
+                    "http://127.0.0.1:3000", 
+                    "http://localhost:8000",
+                    "http://127.0.0.1:8000"
+                ]
         else:
-            self.cors_origins = cors_origins
+            # Validate provided origins to reject wildcards
+            self.cors_origins = [origin for origin in cors_origins if origin != "*"]
         self.api_key = api_key
         self.session_ttl = session_ttl
         self.allow_client_termination = allow_client_termination
