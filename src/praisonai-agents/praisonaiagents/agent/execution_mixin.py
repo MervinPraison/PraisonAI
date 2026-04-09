@@ -54,6 +54,14 @@ if TYPE_CHECKING:
 class ExecutionMixin:
     """Mixin providing execution methods for the Agent class."""
 
+    def _safe_sleep(self, duration: float) -> None:
+        """Synchronous sleep - safe for sync contexts only."""
+        time.sleep(duration)
+
+    async def _safe_sleep_async(self, duration: float) -> None:
+        """Async sleep - use this in async contexts."""
+        await asyncio.sleep(duration)
+
     def generate_task(self) -> 'Task':
         """Generate a Task object from the agent's instructions"""
         from ..task.task import Task
@@ -954,10 +962,10 @@ Write the complete compiled report:"""
                 server_thread.start()
 
                 # Wait for a moment to allow the server to start and register endpoints
-                time.sleep(0.5)
+                self._safe_sleep(0.5)
             else:
                 # If server is already running, wait a moment to make sure the endpoint is registered
-                time.sleep(0.1)
+                self._safe_sleep(0.1)
                 print(f"🔌 Available endpoints on port {port}: {', '.join(list(_registered_agents[port].keys()))}")
             
             # Get the stack frame to check if this is the last launch() call in the script
@@ -986,7 +994,7 @@ Write the complete compiled report:"""
                         try:
                             print("\nAll agents registered for HTTP mode. Press Ctrl+C to stop the servers.")
                             while True:
-                                time.sleep(1)
+                                self._safe_sleep(1)
                         except KeyboardInterrupt:
                             print("\nServers stopped")
                 except Exception as e:
@@ -995,7 +1003,7 @@ Write the complete compiled report:"""
                     try:
                         print("\nKeeping HTTP servers alive. Press Ctrl+C to stop.")
                         while True:
-                            time.sleep(1)
+                            self._safe_sleep(1)
                     except KeyboardInterrupt:
                         print("\nServers stopped")
             return None
@@ -1055,12 +1063,12 @@ Write the complete compiled report:"""
 
             server_thread = threading.Thread(target=run_mcp_server, daemon=True)
             server_thread.start()
-            time.sleep(0.5)
+            self._safe_sleep(0.5)
 
             try:
                 print("\nKeeping MCP server alive. Press Ctrl+C to stop.")
                 while True:
-                    time.sleep(1)
+                    self._safe_sleep(1)
             except KeyboardInterrupt:
                 print("\nMCP Server stopped")
             return None
