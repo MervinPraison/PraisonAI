@@ -184,6 +184,13 @@ class WebSocketGateway:
             config: Optional gateway configuration
         """
         self.config = config or GatewayConfig(host=host, port=port)
+        if hasattr(self.config, 'auth_token') and not self.config.auth_token:
+            self.config.auth_token = secrets.token_hex(16)
+            logger.warning(
+                f"No auth_token provided for Gateway server. Generated temporary token: {self.config.auth_token}. "
+                "For production, set GATEWAY_AUTH_TOKEN."
+            )
+        
         self._host = self.config.host
         self._port = self.config.port
         

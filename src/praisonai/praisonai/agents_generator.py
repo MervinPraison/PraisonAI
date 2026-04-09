@@ -1119,7 +1119,7 @@ class AgentsGenerator:
                     workspace=os.getcwd(),
                     acp_enabled=acp_enabled,
                     lsp_enabled=lsp_enabled,
-                    approval_mode="auto"
+                    approval_mode=os.environ.get("PRAISONAI_APPROVAL_MODE", "prompt")
                 )
                 interactive_runtime = InteractiveRuntime(runtime_config)
                 self.logger.info(f"Starting InteractiveRuntime (ACP: {acp_enabled}, LSP: {lsp_enabled})")

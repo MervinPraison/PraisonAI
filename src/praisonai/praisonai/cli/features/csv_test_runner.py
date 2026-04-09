@@ -437,7 +437,7 @@ class CSVTestRunner:
             exec_result = harness.run(
                 prompts=test_case.prompts,
                 model=self.model,
-                approval_mode="auto",
+                approval_mode=os.environ.get("PRAISONAI_APPROVAL_MODE", "prompt"),
                 agents=test_case.agents if test_case.agents else None,
                 workflow=test_case.workflow if test_case.workflow else None,
             )
