@@ -117,8 +117,23 @@ class AgentOS:
     
     def _register_routes(self, app: Any) -> None:
         """Register API routes."""
-        from fastapi import HTTPException
+        from fastapi import HTTPException, Request
         from pydantic import BaseModel
+        import os
+        
+        def _check_auth(request: Request):
+            token = os.environ.get("AGENTOS_AUTH_TOKEN") or os.environ.get("PRAISONAI_AUTH_TOKEN")
+            if token:
+                auth_header = request.headers.get("Authorization")
+                if not auth_header or not auth_header.startswith("Bearer ") or auth_header.split(" ")[1] != token:
+                    raise HTTPException(status_code=401, detail="Unauthorized")
+            else:
+                client_host = request.client.host if request.client else ""
+                if client_host not in ("127.0.0.1", "::1", "localhost"):
+                    raise HTTPException(
+                        status_code=403, 
+                        detail="Access denied. Configure AGENTOS_AUTH_TOKEN for remote access."
+                    )
         
         class ChatRequest(BaseModel):
             message: str
@@ -145,7 +160,8 @@ class AgentOS:
             return {"status": "healthy"}
         
         @app.get(f"{self.config.api_prefix}/agents")
-        async def list_agents():
+        async def list_agents(request: Request):
+            _check_auth(request)
             return {
                 "agents": [
                     {
@@ -160,16 +176,17 @@ class AgentOS:
             }
         
         @app.post(f"{self.config.api_prefix}/chat", response_model=ChatResponse)
-        async def chat(request: ChatRequest):
+        async def chat(request_obj: ChatRequest, request: Request):
+            _check_auth(request)
             # Find the agent
             agent = None
-            if request.agent_name:
+            if request_obj.agent_name:
                 for a in self.agents:
-                    if getattr(a, 'name', None) == request.agent_name:
+                    if getattr(a, 'name', None) == request_obj.agent_name:
                         agent = a
                         break
                 if agent is None:
-                    raise HTTPException(status_code=404, detail=f"Agent '{request.agent_name}' not found")
+                    raise HTTPException(status_code=404, detail=f"Agent '{request_obj.agent_name}' not found")
             elif self.agents:
                 agent = self.agents[0]
             else:
@@ -177,7 +194,7 @@ class AgentOS:
             
             # Call the agent
             try:
-                response = agent.chat(request.message)
+                response = agent.chat(request_obj.message)
                 return ChatResponse(
                     response=str(response),
                     agent_name=getattr(agent, 'name', 'unknown'),

@@ -158,6 +158,11 @@ def _safe_extractall(tar: tarfile.TarFile, dest_dir: Path) -> None:
             raise RegistryError(f"Archive is too large uncompressed (>{MAX_SIZE} bytes)")
             
         member_path = Path(member.name)
+        # Protect against symlink attacks
+        if member.issym() or member.islnk():
+            raise RegistryError(
+                f"Refusing to extract symlink/hardlink in archive: {member.name}"
+            )
         # Reject absolute paths
         if member_path.is_absolute():
             raise RegistryError(

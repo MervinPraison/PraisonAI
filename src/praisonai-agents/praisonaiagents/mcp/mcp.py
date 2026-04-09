@@ -329,6 +329,9 @@ class MCP:
         env = kwargs.get('env', {})
         if not env:
             env = os.environ.copy()
+            # Sanitize environment to prevent leaking caller credentials
+            sensitive_pattern = re.compile(r'(?i)(api_key|token|secret|password|credential)')
+            env = {k: v for k, v in env.items() if not sensitive_pattern.search(k)}
         
         # Always set Python encoding
         env['PYTHONIOENCODING'] = 'utf-8'

@@ -282,6 +282,33 @@ class JobWorkflowExecutor:
 
     def _exec_inline_python(self, code: str, step: Dict, flags: Dict) -> Dict:
         """Execute inline Python code in an isolated namespace."""
+        import ast
+        
+        # Security validation (prevent sandbox escape)
+        try:
+            tree = ast.parse(code)
+            blocked_attrs = {
+                '__subclasses__', '__bases__', '__mro__', '__globals__',
+                '__code__', '__class__', '__dict__', '__builtins__',
+                '__import__', '__loader__', '__spec__', '__init_subclass__',
+                '__set_name__', '__reduce__', '__reduce_ex__',
+                '__traceback__', '__qualname__', '__module__',
+            }
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    return {"ok": False, "error": "Import statements are not allowed in script steps"}
+                if isinstance(node, ast.Attribute) and node.attr in blocked_attrs:
+                    return {"ok": False, "error": f"Access to attribute '{node.attr}' is restricted"}
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                    if node.func.id in ('exec', 'eval', 'compile', '__import__', 'open', 'input', 'breakpoint', 'setattr', 'getattr', 'delattr'):
+                        return {"ok": False, "error": f"Call to '{node.func.id}' is not allowed"}
+                if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    if any(attr in node.value for attr in blocked_attrs):
+                        return {"ok": False, "error": "String constant contains restricted attribute name"}
+        except SyntaxError as e:
+            return {"ok": False, "error": f"Syntax Error: {str(e)}"}
+        except Exception as e:
+            return {"ok": False, "error": f"Validation Error: {str(e)}"}
         _safe_builtins = {
             "True": True, "False": False, "None": None,
             "int": int, "float": float, "str": str, "bool": bool,

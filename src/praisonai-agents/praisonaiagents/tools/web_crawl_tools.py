@@ -139,14 +139,18 @@ def _crawl_with_httpx(urls: List[str]) -> List[Dict[str, Any]]:
             # Try httpx first
             try:
                 import httpx
-                with httpx.Client(follow_redirects=True, timeout=30.0) as client:
+                with httpx.Client(follow_redirects=False, timeout=30.0) as client:
                     response = client.get(url)
                     response.raise_for_status()
                     content = response.text
             except ImportError:
                 # Fallback to urllib
                 import urllib.request
-                with urllib.request.urlopen(url, timeout=30) as response:
+                class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+                    def redirect_request(self, req, fp, code, msg, headers, newurl):
+                        return None # Disable redirects for security
+                opener = urllib.request.build_opener(NoRedirectHandler())
+                with opener.open(url, timeout=30) as response:
                     content = response.read().decode('utf-8', errors='ignore')
             
             # Basic HTML to text extraction

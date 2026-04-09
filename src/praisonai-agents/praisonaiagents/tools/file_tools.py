@@ -126,13 +126,24 @@ class FileTools:
             # Validate directory path
             safe_dir = FileTools._validate_path(directory)
             path = Path(safe_dir)
+            resolved_base = path.resolve()
+            
             if pattern:
+                if '..' in pattern:
+                    raise ValueError("Pattern cannot contain '..'")
+                if Path(pattern).is_absolute() or pattern.startswith('/'):
+                    raise ValueError("Pattern cannot be an absolute path")
                 files = path.glob(pattern)
             else:
                 files = path.iterdir()
 
             result = []
             for file in files:
+                try:
+                    file.resolve().relative_to(resolved_base)
+                except ValueError:
+                    continue
+                    
                 if file.is_file():
                     stat = file.stat()
                     result.append({

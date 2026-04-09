@@ -117,13 +117,30 @@ class AGUI:
     
     def _attach_routes(self, router: "APIRouter") -> None:
         """Attach AG-UI routes to the router."""
+        from fastapi import Request, HTTPException
         from fastapi.responses import StreamingResponse
+        import os
         
         encoder = EventEncoder()
         
+        def _check_auth(request: Request):
+            token = os.environ.get("AGUI_AUTH_TOKEN") or os.environ.get("PRAISONAI_AUTH_TOKEN")
+            if token:
+                auth_header = request.headers.get("Authorization")
+                if not auth_header or not auth_header.startswith("Bearer ") or auth_header.split(" ")[1] != token:
+                    raise HTTPException(status_code=401, detail="Unauthorized")
+            else:
+                client_host = request.client.host if request.client else ""
+                if client_host not in ("127.0.0.1", "::1", "localhost"):
+                    raise HTTPException(
+                        status_code=403, 
+                        detail="Access denied. Configure AGUI_AUTH_TOKEN for remote access."
+                    )
+        
         @router.post("/agui")
-        async def run_agent_agui(run_input: RunAgentInput):
+        async def run_agent_agui(request: Request, run_input: RunAgentInput):
             """Run the agent via AG-UI protocol."""
+            _check_auth(request)
             async def event_generator():
                 async for event in self._run_agent(run_input):
                     yield encoder.encode(event)
@@ -134,15 +151,13 @@ class AGUI:
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-                    "Access-Control-Allow-Headers": "*",
                 },
             )
         
         @router.get("/status")
-        async def get_status():
+        async def get_status(request: Request):
             """Get agent status."""
+            _check_auth(request)
             return {"status": "available"}
     
     async def _run_agent(self, run_input: RunAgentInput) -> AsyncIterator[BaseEvent]:

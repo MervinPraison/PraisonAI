@@ -68,12 +68,12 @@ def import_tools_from_file(file_path):
     return custom_tools_module
 
 try:
-    if os.path.exists(tools_path):
+    if tools_path and os.path.exists(tools_path):
         # tools.py exists in the root directory, import from file
         custom_tools_module = import_tools_from_file(tools_path)
         logger.debug("Successfully imported custom tools from root tools.py")
     else:
-        logger.debug("No custom tools.py file found in the root directory")
+        logger.debug("No custom tools file found or specified")
         custom_tools_module = None
 
     if custom_tools_module:

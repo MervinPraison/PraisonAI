@@ -59,14 +59,13 @@ class ShellTools:
             else:
                 command = shlex.split(command)
             
-            # Expand tilde and environment variables in command arguments
+            # Expand tilde in command arguments
             # (shell=False means the shell won't do this for us)
-            command = [os.path.expanduser(os.path.expandvars(arg)) for arg in command]
+            command = [os.path.expanduser(arg) for arg in command]
             
             # Expand tilde in cwd (subprocess doesn't do this)
             if cwd:
                 cwd = os.path.expanduser(cwd)
-                cwd = os.path.expandvars(cwd)  # Also expand $HOME, $USER, etc.
                 if not os.path.isdir(cwd):
                     # Fallback: try home directory, then current working directory
                     fallback = os.path.expanduser("~") if os.path.isdir(os.path.expanduser("~")) else os.getcwd()

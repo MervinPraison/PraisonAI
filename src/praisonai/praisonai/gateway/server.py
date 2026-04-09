@@ -243,7 +243,15 @@ class WebSocketGateway:
         def _check_auth(request) -> Optional[JSONResponse]:
             """Validate auth token if configured. Returns error response or None."""
             if not self.config.auth_token:
+                # If no token is configured, restrict sensitive routes to localhost
+                client_ip = request.client.host if request.client else "127.0.0.1"
+                if client_ip not in ("127.0.0.1", "::1", "localhost"):
+                    return JSONResponse(
+                        {"error": "Authentication token not configured. Remote access denied."},
+                        status_code=403,
+                    )
                 return None
+            
             auth_header = request.headers.get("authorization", "")
             if not auth_header.startswith("Bearer "):
                 return JSONResponse(
