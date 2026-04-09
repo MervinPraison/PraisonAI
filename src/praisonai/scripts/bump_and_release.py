@@ -237,7 +237,29 @@ def release(version: str, use_frozen_lock: bool = False):
     
     # 4. Git add and commit
     print("\n📝 Committing changes...")
-    run(["git", "add", "-A"], cwd=root)
+    
+    release_files = [
+        "src/praisonai/praisonai/version.py",
+        "src/praisonai/praisonai/deploy.py",
+        "docker/Dockerfile", 
+        "docker/Dockerfile.chat",
+        "docker/Dockerfile.dev", 
+        "docker/Dockerfile.ui",
+        "src/praisonai/praisonai.rb",
+        "src/praisonai/pyproject.toml",
+        "src/praisonai/uv.lock",
+        "src/praisonai/README.md",
+        "src/praisonai-agents/pyproject.toml",
+        "src/praisonai-agents/uv.lock"
+    ]
+    
+    # Filter to only existing files to avoid git errors
+    files_to_add = []
+    for f in release_files:
+        if (root / f).exists():
+            files_to_add.append(f)
+            
+    run(["git", "add"] + files_to_add, cwd=root)
     run(["git", "commit", "-m", f"Release {tag}"], cwd=root, check=False)
     
     # 5. Create git tag
@@ -353,9 +375,10 @@ Examples:
     if not args.force:
         print("\n🔍 Pre-flight checks...")
         
-        # Check for uncommitted changes (warning only)
         if check_git_status():
-            print("  ⚠️  Warning: You have uncommitted changes")
+            print("  ❌ Error: Working directory has uncommitted changes.")
+            print("  💡 Stash or commit your feature changes before releasing, or use --force.")
+            sys.exit(1)
         else:
             print("  ✅ Git working directory is clean")
     

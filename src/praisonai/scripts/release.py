@@ -20,6 +20,14 @@ import sys
 from pathlib import Path
 
 
+def check_git_status(root: Path) -> bool:
+    """Check if there are uncommitted changes."""
+    result = subprocess.run(["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True)
+    if result.stdout.strip():
+        return True
+    return False
+
+
 def get_project_root() -> Path:
     """Get the project root directory (praisonai-package)."""
     return Path(__file__).parent.parent.parent.parent
@@ -62,6 +70,11 @@ def main():
     
     print(f"\n🚀 Releasing PraisonAI {tag}\n")
     
+    if check_git_status(root):
+        print("❌ Error: Working directory has uncommitted changes.")
+        print("💡 Stash or commit your feature changes before releasing.")
+        sys.exit(1)
+    
     # 1. Copy root README.md to package dir for PyPI
     print("📄 Copying README.md...")
     root_readme = root / "README.md"
@@ -84,7 +97,20 @@ def main():
     
     # 3. Git add and commit
     print("\n📝 Committing changes...")
-    run(["git", "add", "-A"], cwd=root)
+    
+    release_files = [
+        "src/praisonai/README.md",
+        "src/praisonai/uv.lock"
+    ]
+    
+    files_to_add = []
+    for f in release_files:
+        if (root / f).exists():
+            files_to_add.append(f)
+            
+    if files_to_add:
+        run(["git", "add"] + files_to_add, cwd=root)
+        
     run(["git", "commit", "-m", f"Release {tag}"], cwd=root, check=False)
     
     # 4. Create git tag
