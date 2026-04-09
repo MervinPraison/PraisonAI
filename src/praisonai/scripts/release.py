@@ -70,10 +70,20 @@ def main():
     
     print(f"\n🚀 Releasing PraisonAI {tag}\n")
     
+    no_add_all = "--no-add-all" in sys.argv
+    force = "--force" in sys.argv
+    
+    print("\n🔍 Pre-flight checks...")
     if check_git_status(root):
-        print("❌ Error: Working directory has uncommitted changes.")
-        print("💡 Stash or commit your feature changes before releasing.")
-        sys.exit(1)
+        if no_add_all and not force:
+            print("  ❌ Error: Working directory has uncommitted changes.")
+            print("  💡 Stash or commit your feature changes before releasing, or use --force.")
+            sys.exit(1)
+        else:
+            print("  ⚠️  Warning: You have uncommitted changes. These WILL be included in the release commit by default.")
+            print("  💡 Use --no-add-all to prevent this.")
+    else:
+        print("  ✅ Git working directory is clean")
     
     # 1. Copy root README.md to package dir for PyPI
     print("📄 Copying README.md...")
@@ -108,8 +118,12 @@ def main():
         if (root / f).exists():
             files_to_add.append(f)
             
-    if files_to_add:
-        run(["git", "add"] + files_to_add, cwd=root)
+    if no_add_all:
+        print("  ℹ️  --no-add-all flag detected: Only explicitly modified release files will be staged.")
+        if files_to_add:
+            run(["git", "add"] + files_to_add, cwd=root)
+    else:
+        run(["git", "add", "-A"], cwd=root)
         
     run(["git", "commit", "-m", f"Release {tag}"], cwd=root, check=False)
     

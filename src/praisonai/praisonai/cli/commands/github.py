@@ -94,24 +94,38 @@ def github_triage(
         print(f"[red]PraisonAIAgents SDK not found: {e}[/red]")
         raise typer.Exit(1)
 
+    import threading
     bus = get_default_bus()
     agent_logs = []
     last_update_time = [time.time()]
+    update_timer = [None]
     
-    def async_update_comment():
-        # Software debouncer to prevent GitHub API rate limit (5 second throttle)
-        if time.time() - last_update_time[0] < 5.0:
-            return
-        last_update_time[0] = time.time()
-        
+    def _sync_push_comment():
         md_body = f"🚀 **PraisonAI is working**...\n{run_url}\n\n"
-        for log in agent_logs[-10:]: # keep last 10 steps to avoid massive comment
+        for log in agent_logs[-15:]: # keep last 15 steps
             md_body += f"- {log}\n"
             
         try:
             fetch_github_api(f"{api_base}/issues/comments/{comment_id}", token=token, method="PATCH", data={"body": md_body})
         except:
             pass
+        finally:
+            last_update_time[0] = time.time()
+            update_timer[0] = None
+
+    def trigger_comment_update():
+        if update_timer[0] is not None:
+            return # already scheduled
+        
+        elapsed = time.time() - last_update_time[0]
+        if elapsed >= 3.0:
+            # Execute inline if throttle expired
+            _sync_push_comment()
+        else:
+            # Schedule deferred update
+            delay = 3.0 - elapsed
+            update_timer[0] = threading.Timer(delay, _sync_push_comment)
+            update_timer[0].start()
             
     async def track_agent_step(event):
         try:
@@ -122,8 +136,8 @@ def github_triage(
             elif event.type == "agent_complete":
                 agent_logs.append(f"✅ Agent completed: {event.data.get('agent_name')}")
             else:
-                agent_logs.append(f"🔄 Executing: {event.type}")
-            async_update_comment()
+                return # skip spam
+            trigger_comment_update()
         except:
             pass
 
@@ -136,7 +150,7 @@ def github_triage(
         import sys
         
         original_argv = sys.argv
-        sys.argv = ['praisonai', 'workflow', 'run', agent_file]
+        sys.argv = ['praisonai', 'workflow', 'run', agent_file, '--var', f'ISSUE_NUMBER={issue}']
         try:
             praison = PraisonAI()
             praison.main()
