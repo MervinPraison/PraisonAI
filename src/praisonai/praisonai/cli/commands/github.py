@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import json
 import time
@@ -59,14 +60,22 @@ class StickyComment:
     WORKING = "🔄"
 
     def __init__(self, api_base: str, issue: int, token: str,
-                 task_type: str, title: str, run_url: str):
+                 task_type: str, title: str, run_url: str,
+                 repo_name: str = ""):
         self._api_base  = api_base
         self._issue     = issue
         self._token     = token
         self._task_type = task_type
         self._title     = title
         self._run_url   = run_url
+        self._repo_name = repo_name
         self._comment_id: Optional[int] = None
+
+        # Branch and PR tracking
+        self._branch_name: Optional[str] = None
+        self._pr_url: Optional[str] = None
+        self._pr_number: Optional[int] = None
+        self._summary_lines: List[str] = []
 
         # Todo list: list of dicts {content, status}  status ∈ pending/in_progress/completed
         self._todos: List[Dict[str, Any]] = []
@@ -154,6 +163,25 @@ class StickyComment:
             self._current_tool = None
         # no extra log for tool end – keeps comment clean
 
+    def set_branch(self, branch_name: str) -> None:
+        """Called when a branch is successfully created."""
+        with self._lock:
+            self._branch_name = branch_name
+        self._schedule_push()
+
+    def set_pr(self, pr_url: str, pr_number: Optional[int] = None) -> None:
+        """Called when a PR is explicitly created."""
+        with self._lock:
+            self._pr_url = pr_url
+            self._pr_number = pr_number
+        self._schedule_push()
+
+    def add_summary_line(self, line: str) -> None:
+        """Append a line to the Summary section."""
+        with self._lock:
+            self._summary_lines.append(line)
+        self._schedule_push()
+
     def finalize(self, success: bool, summary: str) -> None:
         """Push the final state synchronously."""
         if self._timer:
@@ -164,7 +192,8 @@ class StickyComment:
             for t in self._todos:
                 if t["status"] == "in_progress":
                     t["status"] = "completed"
-            self._logs.append(summary)
+            if summary:
+                self._summary_lines.append(summary)
         self._push_now(final=success)
 
     # ------------------------------------------------------------------
@@ -190,24 +219,37 @@ class StickyComment:
         return f"`{tool_name}`"
 
     def _build_body(self, final: Optional[bool] = None) -> str:
-        """Render the full Markdown comment body."""
+        """Render the full Markdown comment body (Claude Code style)."""
         if final is True:
-            icon = self.DONE
+            status_icon = self.DONE
+            verb = "finished"
         elif final is False:
-            icon = self.FAIL
+            status_icon = self.FAIL
+            verb = "failed on"
         else:
-            icon = self.SPINNER
+            status_icon = self.SPINNER
+            verb = "is working on"
 
         lines: List[str] = []
 
-        # Title line
-        lines.append(f"**{self._task_type} #{self._issue}: {self._title}** {icon}")
-        lines.append("")
-
-        # Job link
+        # --- Header line (Claude Code style) ---
+        meta_parts: List[str] = []
         if self._run_url:
-            lines.append(f"[View job run]({self._run_url})")
-            lines.append("")
+            meta_parts.append(f"[View job]({self._run_url})")
+        if self._branch_name and self._repo_name:
+            branch_url = f"https://github.com/{self._repo_name}/tree/{self._branch_name}"
+            meta_parts.append(f"[`{self._branch_name}`]({branch_url})")
+            if self._pr_url:
+                meta_parts.append(f"[View PR →]({self._pr_url})")
+            else:
+                compare_url = f"https://github.com/{self._repo_name}/compare/main...{self._branch_name}?quick_pull=1"
+                meta_parts.append(f"[Create PR →]({compare_url})")
+
+        header = f"**PraisonAI {verb} #{self._issue}** {status_icon}"
+        lines.append(" · ".join([header] + meta_parts) if meta_parts else header)
+        lines.append("")
+        lines.append(f"**{self._task_type} #{self._issue}: {self._title}**")
+        lines.append("")
 
         # --- Todo list ---
         if self._todos:
@@ -215,26 +257,26 @@ class StickyComment:
             lines.append("")
             for t in self._todos:
                 s = t["status"]
-                if s == "completed":
-                    box = "- [x]"
-                elif s == "in_progress":
-                    box = "- [x]"   # GitHub renders in_progress same as done; use ✅ marker
-                else:
-                    box = "- [ ]"
+                box = "- [x]" if s == "completed" else "- [ ]"
                 content = t["content"]
                 if s == "in_progress":
                     content = f"{content} 🔄"
-                elif s == "completed":
-                    content = f"~~{content}~~" if final else content
                 lines.append(f"{box} {content}")
             lines.append("")
 
-        # --- Activity log (last 15 items) ---
-        recent = self._logs[-15:]
-        if recent:
+        # --- Summary section ---
+        if self._summary_lines:
+            lines.append("**Summary**")
+            lines.append("")
+            for entry in self._summary_lines[-10:]:
+                lines.append(f"{entry}")
+            lines.append("")
+
+        # --- Activity log (only while running, last 8 items) ---
+        if final is None and self._logs:
             lines.append("**Activity**")
             lines.append("")
-            for entry in recent:
+            for entry in self._logs[-8:]:
                 lines.append(f"- {entry}")
 
         return "\n".join(lines)
@@ -283,7 +325,6 @@ def _make_context_sink(sticky: StickyComment):
         def emit(self, event) -> None:
             try:
                 et = event.event_type
-                # Normalise enum vs string
                 et_val = et.value if hasattr(et, "value") else str(et)
                 data = event.data or {}
 
@@ -298,7 +339,6 @@ def _make_context_sink(sticky: StickyComment):
                     tool_args = data.get("tool_args") or {}
                     agent_name = event.agent_name or ""
 
-                    # TodoWrite → extract plan and build checkbox list
                     if tool_name == "TodoWrite":
                         todos = tool_args.get("todos", [])
                         if todos:
@@ -308,11 +348,35 @@ def _make_context_sink(sticky: StickyComment):
                                 sticky.set_todos(todos)
                     else:
                         sticky.on_tool_start(agent_name, tool_name, tool_args)
+                        # Capture branch name eagerly from args
+                        if tool_name == "github_create_branch":
+                            bn = tool_args.get("branch_name", "")
+                            if bn:
+                                sticky.set_branch(bn)
 
                 elif et_val == "tool_call_end":
                     tool_name = data.get("tool_name", "")
+                    tool_result = data.get("result") or data.get("tool_result") or {}
+                    result_str = str(tool_result)
                     if tool_name != "TodoWrite":
                         sticky.on_tool_end(event.agent_name or "", tool_name)
+                    # Capture branch from push result (fallback)
+                    if tool_name == "github_commit_and_push" and not sticky._branch_name:
+                        m = re.search(r"branch '([^']+)'", result_str)
+                        if m:
+                            sticky.set_branch(m.group(1))
+                    # Capture PR URL only when explicitly created
+                    if tool_name == "github_create_pull_request":
+                        m = re.search(r'https://github\.com/[^\s"\)]+/pull/\d+', result_str)
+                        if m:
+                            pr_url = m.group(0)
+                            pr_num = re.search(r'/pull/(\d+)', pr_url)
+                            sticky.set_pr(pr_url, int(pr_num.group(1)) if pr_num else None)
+                        if isinstance(tool_result, dict):
+                            url = tool_result.get("url") or tool_result.get("html_url", "")
+                            if url and "/pull/" in url:
+                                pr_num = re.search(r'/pull/(\d+)', url)
+                                sticky.set_pr(url, int(pr_num.group(1)) if pr_num else None)
 
             except Exception:
                 pass
@@ -370,15 +434,18 @@ def _load_yaml_steps_as_todos(agent_file: str, sticky: StickyComment) -> None:
         with sticky._lock:
             sticky._todos = todos
 
-    # Build a reverse map: agent role name → step index for the sink to use
+    # Build a reverse map: role name / step name / agent key → step index
     sticky._step_agent_map = {}
     for i, step in enumerate(steps):
         if not isinstance(step, dict):
             continue
         agent_key = step.get("agent", "")
+        step_name = step.get("name", "")
         role_cfg = roles.get(agent_key, {})
         role_name = role_cfg.get("role", agent_key)
-        sticky._step_agent_map[role_name.lower()] = i
+        for name in (role_name, step_name, agent_key):
+            if name:
+                sticky._step_agent_map[name.lower()] = i
 
 
 # ---------------------------------------------------------------------------
@@ -444,6 +511,7 @@ def github_triage(
     sticky = StickyComment(
         api_base=api_base, issue=issue, token=token,
         task_type=task_type, title=ctx_title, run_url=run_url,
+        repo_name=repo_name,
     )
     sticky._logs.append(f"Context fetched for {task_type} #{issue}")
 
@@ -505,9 +573,9 @@ def github_triage(
             pass
 
     if success:
-        summary = f"✅ **Completed** – {task_type} #{issue} triaged successfully."
+        summary = f"✅ Completed – {task_type} #{issue} triaged successfully."
     else:
-        summary = f"❌ **Failed** – {error_msg[:200]}"
+        summary = f"❌ Failed – {error_msg[:200]}"
 
     sticky.finalize(success=success, summary=summary)
     print("[green]✅ Final sticky comment updated.[/green]")

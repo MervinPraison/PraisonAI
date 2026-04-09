@@ -1,7 +1,4 @@
-import os
 import subprocess
-from pydantic import BaseModel, Field
-from typing import Dict, Any, Optional
 import logging
 from .decorator import tool
 
@@ -17,7 +14,7 @@ def github_create_branch(branch_name: str) -> str:
     try:
         # Check if we are in a git repository
         subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], check=True, capture_output=True)
-        subprocess.run(["git", "checkout", "-b", branch_name], check=True, capture_output=True, text=True)
+        subprocess.run(["git", "checkout", "-B", branch_name], check=True, capture_output=True, text=True)
         return f"Successfully created and checked out branch '{branch_name}'"
     except subprocess.CalledProcessError as e:
         logger.error(f"Failed to create branch: {e.stderr}")
