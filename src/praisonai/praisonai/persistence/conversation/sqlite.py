@@ -46,6 +46,12 @@ class SQLiteConversationStore(ConversationStore):
             check_same_thread: SQLite check_same_thread parameter
         """
         self.path = path
+        
+        # Prevent SQL injection in table identifiers
+        import re
+        if not re.match(r'^[a-zA-Z0-9_]*$', table_prefix):
+            raise ValueError("table_prefix must contain only alphanumeric characters and underscores")
+            
         self.table_prefix = table_prefix
         self.sessions_table = f"{table_prefix}sessions"
         self.messages_table = f"{table_prefix}messages"
