@@ -19,6 +19,7 @@ Server Types:
 - a2a: Agent-to-Agent protocol
 - a2u: Agent-to-User event stream
 - unified: All providers combined
+- openai: OpenAI API compatibility layer
 """
 
 from typing import Optional
@@ -125,6 +126,7 @@ Start any PraisonAI server with: praisonai serve <type>
   [green]a2a[/green]         Agent-to-Agent protocol (port 8001)
   [green]a2u[/green]         Agent-to-User events (port 8002)
   [green]unified[/green]     All providers combined (port 8765)
+  [green]openai[/green]      OpenAI API compatibility layer (port 8765)
 
 [bold]Management:[/bold]
   [yellow]start[/yellow]       Start legacy API server
@@ -577,3 +579,127 @@ def serve_unified(
         output = get_output_controller()
         output.print_error(f"Unified serve module not available: {e}")
         raise typer.Exit(4)
+
+
+@app.command("openai")
+def serve_openai(
+    host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host to bind to"),
+    port: int = typer.Option(8765, "--port", "-p", help="Port to bind to"),
+    api_key: Optional[str] = typer.Option(None, "--api-key", help="API key for authentication"),
+    reload: bool = typer.Option(False, "--reload", help="Enable auto-reload"),
+):
+    """Start OpenAI API compatibility server.
+    
+    Provides OpenAI-compatible endpoints like /v1/chat/completions for
+    drop-in compatibility with OpenAI client libraries.
+    
+    Examples:
+        praisonai serve openai
+        praisonai serve openai --port 8765 --api-key mykey
+    """
+    output = get_output_controller()
+    
+    try:
+        import uvicorn
+        from fastapi import FastAPI
+        from praisonai.endpoints.providers import OpenAICompatProvider, AgentsAPIProvider
+        from praisonai.endpoints.server import create_server, register_provider
+        
+        output.print_info(f"Starting OpenAI-compatible server on {host}:{port}")
+        
+        # Create providers
+        agents_provider = AgentsAPIProvider(base_url=f"http://{host}:{port}")
+        openai_provider = OpenAICompatProvider(
+            base_url=f"http://{host}:{port}",
+            api_key=api_key,
+            agent_provider=agents_provider
+        )
+        
+        # Create server and register OpenAI provider
+        app = create_server(title="PraisonAI OpenAI API", version="1.0.0")
+        register_provider(app, openai_provider, prefix="/v1")
+        
+        # Add OpenAI-style route mappings
+        from fastapi import Request, Response
+        from fastapi.responses import StreamingResponse
+        import json
+        
+        @app.post("/v1/chat/completions")
+        async def chat_completions(request: Request):
+            body = await request.json()
+            result = openai_provider.invoke("chat_completions", body, stream=body.get("stream", False))
+            
+            if not result.ok:
+                return Response(
+                    content=json.dumps({"error": {"message": result.error, "type": "api_error"}}),
+                    status_code=400,
+                    media_type="application/json"
+                )
+            
+            if body.get("stream", False):
+                def generate():
+                    for chunk in openai_provider.invoke_stream("chat_completions", body):
+                        if chunk["event"] == "data":
+                            yield f"data: {json.dumps(chunk['data'])}\n\n"
+                        elif chunk["event"] == "done":
+                            yield "data: [DONE]\n\n"
+                
+                return StreamingResponse(generate(), media_type="text/plain")
+            
+            return result.data
+        
+        @app.post("/v1/completions")
+        async def completions(request: Request):
+            body = await request.json()
+            result = openai_provider.invoke("completions", body)
+            
+            if not result.ok:
+                return Response(
+                    content=json.dumps({"error": {"message": result.error, "type": "api_error"}}),
+                    status_code=400,
+                    media_type="application/json"
+                )
+            
+            return result.data
+        
+        @app.get("/v1/models")
+        async def models():
+            result = openai_provider.invoke("models")
+            return result.data if result.ok else {"error": result.error}
+        
+        @app.post("/v1/tools/invoke")
+        async def tools_invoke(request: Request):
+            body = await request.json()
+            result = openai_provider.invoke("tools_invoke", body)
+            
+            if not result.ok:
+                return Response(
+                    content=json.dumps({"error": {"message": result.error, "type": "api_error"}}),
+                    status_code=400,
+                    media_type="application/json"
+                )
+            
+            return result.data
+        
+        output.print("OpenAI-compatible endpoints available:")
+        output.print("  POST /v1/chat/completions")
+        output.print("  POST /v1/completions") 
+        output.print("  GET /v1/models")
+        output.print("  POST /v1/tools/invoke")
+        
+        # Start server
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            reload=reload,
+            access_log=False,
+        )
+        
+    except ImportError as e:
+        output.print_error(f"OpenAI compatibility module not available: {e}")
+        output.print("Install with: pip install praisonai[api]")
+        raise typer.Exit(4)
+    except Exception as e:
+        output.print_error(f"Failed to start OpenAI server: {e}")
+        raise typer.Exit(1)
