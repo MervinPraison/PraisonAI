@@ -18,6 +18,7 @@ def github_create_branch(branch_name: str) -> str:
         # Check if we are in a git repository
         subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], check=True, capture_output=True)
         subprocess.run(["git", "checkout", "-b", branch_name], check=True, capture_output=True, text=True)
+        logger.debug(f"Successfully checked out branch '{branch_name}'")
         return f"Successfully created and checked out branch '{branch_name}'"
     except subprocess.CalledProcessError as e:
         logger.error(f"Failed to create branch: {e.stderr}")
