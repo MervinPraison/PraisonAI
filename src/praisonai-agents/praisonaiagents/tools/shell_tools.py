@@ -30,9 +30,7 @@ class ShellTools:
         pass
     
     @require_approval(risk_level="critical")
-# shell command execution
     def execute_command(
-    # shell command execution
         self,
         command: str,
         cwd: Optional[str] = None,
@@ -52,6 +50,7 @@ class ShellTools:
         Returns:
             Dictionary with execution results
         """
+        # shell command execution
         try:
             # Strip wrapping quotes the LLM sometimes adds around the whole command string
             if command and len(command) >= 2 and command[0] == command[-1] and command[0] in ("'", '"'):

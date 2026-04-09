@@ -58,14 +58,14 @@ steps:
   - name: Implement Fix
     agent: software_engineer
     action: >
-      You are working inside the repository at /Users/praison/praisonai-package.
+      You are working inside the cloned repository. Determine the repository root by running
+      execute_command with command='git rev-parse --show-toplevel'.
       Do NOT ask for confirmation. Do NOT use placeholder paths. Act immediately.
 
       Step 1 — Create branch: call github_create_branch with branch_name=praisonai/issue-{{ISSUE_NUMBER}}.
 
       Step 2 — Implement changes. Use execute_command (no cwd argument) to write files.
-      To append a line to a file run: sed -i '' '3s/^/# shell command execution\n/' path/to/file
-      To overwrite a file run: python3 -c "content=open('file').read(); open('file','w').write(content.replace('OLD','NEW'))"
+      To replace text in a file run: python3 -c "content=open('file').read(); open('file','w').write(content.replace('OLD','NEW'))"
       After each edit verify with execute_command: git diff
 
       Step 3 — Run tests: execute_command with command=python3 -m pytest src/praisonai-agents/tests/ -x -q --timeout=30 -p no:warnings
