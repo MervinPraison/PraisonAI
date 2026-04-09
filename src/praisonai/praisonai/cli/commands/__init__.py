@@ -26,6 +26,7 @@ __all__ = [
     'test_app',
     'examples_app',
     'replay_app',
+    'github_app',
 ]
 
 
@@ -88,4 +89,7 @@ def __getattr__(name: str):
     elif name == 'replay_app':
         from .replay import app as replay_app
         return replay_app
+    elif name == 'github_app':
+        from .github import app as github_app
+        return github_app
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

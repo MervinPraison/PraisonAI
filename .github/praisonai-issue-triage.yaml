@@ -28,8 +28,8 @@ steps:
     agent: issue_analyst
     action: |
       Thoroughly analyze the Issue and the repository:
-      0. CRITICAL: The issue number is seamlessly injected into your shell environment natively. You MUST NOT ask the user for it. You MUST discover it by echoing $ISSUE_NUMBER locally.
-      1. View the issue details using: `gh issue view $ISSUE_NUMBER --json title,body`
+      0. CRITICAL: Your wrapper has already pre-fetched the complete issue description and Pull Request diff securely.
+      1. Read the pre-fetched context natively: `cat .github/triage-context.md`
       2. Identify the exact problem or feature request.
       3. Use tools like `grep`, `find`, or `cat` to explore the codebase and find the specific files that need modification.
       4. Create a specific, file-level plan of what needs to change.

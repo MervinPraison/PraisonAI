@@ -61,4 +61,4 @@ jobs:
           else
             export ISSUE_NUMBER="${{ github.event.issue.number }}"
           fi
-          praisonai workflow run .github/praisonai-issue-triage.yaml
+          praisonai github triage --issue $ISSUE_NUMBER --agent-file .github/praisonai-issue-triage.yaml
