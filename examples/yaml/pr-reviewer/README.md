@@ -70,8 +70,8 @@ Add the following secrets to your repository (`Settings > Secrets and variables 
 
 | Secret | Description | Required |
 |--------|-------------|----------|
-| `APP_ID` | GitHub App ID | Yes (if using GitHub App) |
-| `PRIVATE_KEY` | GitHub App private key | Yes (if using GitHub App) |
+| `PRAISONAI_APP_ID` | GitHub App ID | Yes (if using GitHub App) |
+| `PRAISONAI_APP_PRIVATE_KEY` | GitHub App private key | Yes (if using GitHub App) |
 | `OPENAI_API_KEY` | OpenAI API key for LLM access | Yes |
 
 **Alternative**: Use `GH_TOKEN` instead of GitHub App if you prefer PAT authentication.
@@ -149,7 +149,7 @@ PraisonAI integrates seamlessly with the existing review chain:
 ### Common Issues
 
 1. **Authentication Errors**:
-   - Verify `APP_ID` and `PRIVATE_KEY` secrets are correctly set
+   - Verify `PRAISONAI_APP_ID` and `PRAISONAI_APP_PRIVATE_KEY` secrets are correctly set
    - Ensure GitHub App has required permissions
 
 2. **PraisonAI Installation Fails**:
