@@ -4547,8 +4547,11 @@ Answer:"""
     
     def _cleanup_server_registrations(self) -> None:
         """Clean up global server registry entries for this agent."""
+        if getattr(self, '_agent_id', None) is None:
+            return  # No ID generated, nothing registered
+            
         try:
-            agent_id = self.agent_id
+            agent_id = self._agent_id
             with _server_lock:
                 # Remove from _registered_agents
                 ports_to_clean = []
@@ -4572,7 +4575,12 @@ Answer:"""
                     # Note: We don't clean up _shared_apps here as other agents might be using them
                     
         except Exception as e:
-            logger.warning(f"Error cleaning up server registrations: {e}")
+            import sys
+            if sys.meta_path is not None:
+                try:
+                    logger.warning(f"Error cleaning up server registrations: {e}")
+                except Exception:
+                    pass
     
     def __enter__(self):
         """Context manager entry."""
@@ -4591,14 +4599,9 @@ Answer:"""
         await self.aclose()
     
     def __del__(self):
-        """Destructor - ensure resources are cleaned up."""
-        try:
-            if not getattr(self, '_closed', False):
-                self.close()
-        except Exception:
-            # Ignore errors in destructor to avoid issues during shutdown
-            pass
-    
+        """Destructor safely does nothing to avoid GC pollution in test loops."""
+        pass
+        
     @property
     def is_closed(self) -> bool:
         """Returns True if the agent has been closed."""

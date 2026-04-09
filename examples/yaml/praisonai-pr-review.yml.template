@@ -65,4 +65,4 @@ jobs:
           GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          praisonai agents --file .github/praisonai-reviewer.yaml
+          praisonai workflow run .github/praisonai-reviewer.yaml
