@@ -48,7 +48,9 @@ jobs:
           git config --local user.name "PraisonAI Bot"
           
       - name: Install PraisonAI
-        run: pip install "praisonai[all]"
+        run: |
+          cd src/praisonai-agents && pip install -e ".[all]"
+          cd ../praisonai && pip install -e ".[all]"
         
       - name: Run PraisonAI Issue Triage
         env:
