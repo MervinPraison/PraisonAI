@@ -1,3 +1,3 @@
-# GitHub Issue #1337: Big Task: Document CLI Router Architecture
+# GitHub Issue #1343: Add type hint to github_create_branch return type
 
-Please thoroughly trace how src/praisonai/praisonai/cli/main.py interfaces with typer across all command modules. Produce a detailed architecture document in a new file docs/cli_architecture_test.md.
+The github_create_branch function in src/praisonai-agents/praisonaiagents/tools/github_tools.py is missing a return type annotation. Please add -> str to the function signature.

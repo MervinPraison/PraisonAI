@@ -1,65 +1,71 @@
 framework: "praisonai"
-topic: "Autonomous Issue Resolution and PR Creation"
-planning: true
+process: workflow
+topic: "Autonomous Issue Resolution"
+planning: false
 
 roles:
   issue_analyst:
     role: "GitHub Issue Analyst"
     goal: "Read the GitHub issue, understand the required changes, and map the problem to the local codebase"
-    backstory: "You are an expert software analyst who reads bug reports and feature requests. You excel at taking a problem description and finding exactly which files in the codebase need to be modified. Your primary job is discovery."
+    backstory: "You are an expert software analyst who reads bug reports and feature requests. You excel at taking a problem description and finding exactly which files in the codebase need to be modified. Your primary job is discovery and planning."
     tools:
-      - "execute_command"
-    
-  software_engineer:
-    role: "Autonomous Software Engineer" 
-    goal: "Checkout a new branch, rewrite the code to fix the issue, and ensure the changes are correct locally"
-    backstory: "You are a senior software engineer who writes flawless code. You branch off main, use terminal commands to rewrite files using sed, echo, or other secure tools, and verify that your changes perfectly address the analyst's findings."
-    tools:
-      - "execute_command"
-      - "github_create_branch"
-      
-  release_manager:
-    role: "Release and CI Manager"
-    goal: "Commit the changes, push the branch to remote, and create the Pull Request linking back to the issue"
-    backstory: "You are a DevOps Release Engineer. Your job is strictly to ensure that any code changes are properly committed, pushed to the GitHub repository, and framed as a clean Pull Request that automatically links to the issue."
-    tools:
-      - "github_create_pull_request"
-      - "github_create_branch"
-      - "github_commit_and_push"
       - "execute_command"
 
+  software_engineer:
+    role: "Autonomous Software Engineer"
+    goal: "Implement required code changes on a branch, run tests, commit, push, and open a PR only if changes were made"
+    backstory: "You are a senior software engineer. You always branch first, implement changes using shell commands, verify with git diff, run tests, then commit and push. You only open a Pull Request when you have actually committed code changes."
+    tools:
+      - "execute_command"
+      - "github_create_branch"
+      - "github_commit_and_push"
+      - "github_create_pull_request"
+
 steps:
-  - name: analyze_issue
+  - name: Analyze Issue
     agent: issue_analyst
-    action: |
-      Thoroughly analyze the Issue and the repository:
-      0. CRITICAL: Your wrapper has already pre-fetched the complete issue description and Pull Request diff securely.
-      1. Read the pre-fetched context natively using `execute_command` with the `command` argument set to `cat .github/triage-context.md`. Do NOT provide a `cwd` argument.
-      2. Identify the exact problem or feature request.
-      3. Use tools like `grep`, `find`, or `cat` to explore the codebase and find the specific files that need modification.
-      4. Create a specific, file-level plan of what needs to change.
-    expected_output: "A detailed analysis report including the files that must be changed and exactly what lines or logic must be altered to solve the Issue."
-    
-  - name: implement_fix
+    action: >
+      Thoroughly analyze the issue and the repository. Follow these steps in order.
+
+      First, set up git identity: execute_command 'git config user.name PraisonAI' then
+      execute_command 'git config user.email praison@users.noreply.github.com'. Do NOT pass cwd.
+
+      Second, read the issue: execute_command 'cat .github/triage-context.md'. Do NOT pass cwd.
+
+      Third, read architecture guidelines: execute_command 'cat src/praisonai-agents/AGENTS.md'.
+
+      Fourth, decide if this issue requires code changes:
+      - If YES: identify the exact files and lines that must change. Output a concrete file-level plan.
+      - If NO (question, discussion, duplicate, invalid): say so clearly. No code changes needed.
+
+      Output: routing decision (Core SDK / Wrapper / Tools / No-change), validation result, and exact files/lines to change.
+    expected_output: A decision on whether code changes are needed, and if so a concrete file-level plan.
+
+  - name: Implement Fix
     agent: software_engineer
-    action: |
-      Implement the changes required to solve the issue:
-      1. Review the analyst's plan.
-      2. Check out a dedicated fix branch by using the `github_create_branch` tool with `branch_name` set to `praisonai/issue-{{ISSUE_NUMBER}}`.
-      3. Carefully modify the necessary files in the repository using bash commands (e.g. `cat`, `sed`, `echo`, or small inline scripts). 
-      4. Double-check your edits by inspecting the file outputs or running `git diff` to ensure you changed what was required.
-    expected_output: "Confirmation that the git branch was successfully created and the files were reliably modified without syntax errors."
-    
-  - name: create_pull_request
-    agent: release_manager
-    action: |
-      Push the code and submit the PR:
-      1. Use the native `github_commit_and_push` tool and provide a commit message like "PraisonAI Automated Fix".
-      2. Use the native `github_create_pull_request` tool with the arguments:
-         - title: "Fix Issue {{ISSUE_NUMBER}}"
-         - body: "Automated triage by PraisonAI Native Issue Triage."
-         - head_branch: "praisonai/issue-{{ISSUE_NUMBER}}"
-         - base_branch: "main"
-      3. Post a comment on the original issue letting the user know: `execute_command`: `gh issue comment {{ISSUE_NUMBER}} -b "I have autonomously analyzed the codebase and written a fix for this issue! I've opened a Pull Request for your review."`
-    expected_output: "The URL of the successfully created Pull Request."
-    dependencies: [analyze_issue, implement_fix]
+    action: >
+      You are working inside the repository at /Users/praison/praisonai-package.
+      Do NOT ask for confirmation. Do NOT use placeholder paths. Act immediately.
+
+      Read the analyst's output first. If the analyst said NO code changes are needed, stop here and
+      output a brief explanation — do NOT create a branch or PR.
+
+      If code changes ARE needed, follow these steps:
+
+      Step 1 — Create branch: github_create_branch with branch_name=praisonai/issue-{{ISSUE_NUMBER}}.
+
+      Step 2 — Implement changes using execute_command (no cwd argument).
+      To insert a line: python3 -c "lines=open('FILE').readlines(); lines.insert(N,'LINE\n'); open('FILE','w').writelines(lines)"
+      To replace text: python3 -c "t=open('FILE').read(); open('FILE','w').write(t.replace('OLD','NEW'))"
+      After each edit verify: execute_command 'git diff'
+
+      Step 3 — Run tests: execute_command 'python3 -m pytest src/praisonai-agents/tests/ -x -q --timeout=30 -p no:warnings'
+
+      Step 4 — Commit and push: github_commit_and_push with a descriptive commit_message.
+
+      Step 5 — ONLY if commits were pushed: create PR using github_create_pull_request with
+      title='fix: resolve issue #{{ISSUE_NUMBER}}',
+      body='Fixes #{{ISSUE_NUMBER}}.\n\nAutonomously resolved by PraisonAI.',
+      head_branch=praisonai/issue-{{ISSUE_NUMBER}}, base_branch=main.
+    expected_output: Either "No code changes needed" or confirmation that branch was created, changes committed, pushed, and PR opened.
+    dependencies: [Analyze Issue]

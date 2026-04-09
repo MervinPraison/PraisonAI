@@ -51,6 +51,12 @@ class ShellTools:
             Dictionary with execution results
         """
         try:
+            # Strip wrapping quotes the LLM sometimes adds around the whole command string
+            if command and len(command) >= 2 and command[0] == command[-1] and command[0] in ("'", '"'):
+                command = command[1:-1]
+            # Treat empty-string cwd same as None to avoid subprocess failure
+            if not cwd:
+                cwd = None
             # Always split command for safety (no shell execution)
             # Use shlex.split with appropriate posix flag
             if platform.system() == 'Windows':
@@ -58,6 +64,9 @@ class ShellTools:
                 command = shlex.split(command, posix=False)
             else:
                 command = shlex.split(command)
+            # Guard against empty command list (e.g. LLM passed empty string)
+            if not command:
+                return {"error": "Empty command", "stdout": "", "stderr": "", "exit_code": 1}
             
             # Expand tilde and environment variables in command arguments
             # (shell=False means the shell won't do this for us)
