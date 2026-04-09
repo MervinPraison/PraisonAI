@@ -107,14 +107,12 @@ class TestQuoteNormalisation:
         assert "normal" in result["stdout"]
 
     def test_mismatched_quotes_not_stripped(self):
-        """Mismatched quotes (e.g. 'cmd") should NOT be stripped."""
+        """Mismatched quotes (e.g. 'cmd") are not stripped; shlex raises ValueError which is caught."""
         shell = _make_shell()
-        # The command is malformed; we just check we don't crash and shape is right.
-        try:
-            result = _run(shell, "'echo bad\"")
-            _assert_shape(result)
-        except Exception:
-            pass  # shlex may raise ValueError for malformed input – that is acceptable
+        # The outer try/except in execute_command catches ValueError from shlex.split
+        result = _run(shell, "'echo bad\"")
+        _assert_shape(result)
+        assert result["success"] is False
 
 
 # ---------------------------------------------------------------------------
