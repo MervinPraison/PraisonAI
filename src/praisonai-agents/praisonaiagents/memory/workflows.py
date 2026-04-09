@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable
 from dataclasses import dataclass, field
 from ..task.task import Task
+from ..workflows.results import StepResult, StepError, WorkflowResult, StepStatus, ErrorStrategy
 
 logger = get_logger(__name__)
 

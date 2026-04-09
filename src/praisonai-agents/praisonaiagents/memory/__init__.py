@@ -106,6 +106,16 @@ def __getattr__(name):
     if name == "repeat":
         from ..workflows import repeat
         return repeat
+    # Structured result types for better error handling
+    if name == "MemoryResult":
+        from .results import MemoryResult
+        return MemoryResult
+    if name == "MemoryResultStatus":
+        from .results import MemoryResultStatus
+        return MemoryResultStatus
+    if name == "SearchResult":
+        from .results import SearchResult
+        return SearchResult
     # Backward compatibility aliases
     if name == "StepInput":
         from ..workflows import WorkflowContext
