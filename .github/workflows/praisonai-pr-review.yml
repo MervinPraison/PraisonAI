@@ -58,7 +58,7 @@ jobs:
           python-version: '3.11'
           
       - name: Install PraisonAI
-        run: pip install praisonaiagents[all]
+        run: pip install "praisonai[all]"
         
       - name: Run PraisonAI PR Review
         env:
