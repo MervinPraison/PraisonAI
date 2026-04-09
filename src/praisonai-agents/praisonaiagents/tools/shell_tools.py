@@ -61,16 +61,22 @@ class ShellTools:
             # Use shlex.split with appropriate posix flag
             if platform.system() == 'Windows':
                 # Use shlex with posix=False for Windows to handle quotes properly
-                command = shlex.split(command, posix=False)
+                cmd_parts = shlex.split(command, posix=False)
             else:
-                command = shlex.split(command)
+                cmd_parts = shlex.split(command)
             # Guard against empty command list (e.g. LLM passed empty string)
-            if not command:
-                return {"error": "Empty command", "stdout": "", "stderr": "", "exit_code": 1}
+            if not cmd_parts:
+                return {
+                    'stdout': '',
+                    'stderr': 'Empty command',
+                    'exit_code': 1,
+                    'success': False,
+                    'execution_time': 0.0,
+                }
             
             # Expand tilde and environment variables in command arguments
             # (shell=False means the shell won't do this for us)
-            command = [os.path.expanduser(os.path.expandvars(arg)) for arg in command]
+            cmd_parts = [os.path.expanduser(os.path.expandvars(arg)) for arg in cmd_parts]
             
             # Expand tilde in cwd (subprocess doesn't do this)
             if cwd:
@@ -90,7 +96,7 @@ class ShellTools:
             # Start process
             start_time = time.time()
             process = subprocess.Popen(
-                command,
+                cmd_parts,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 cwd=cwd,
