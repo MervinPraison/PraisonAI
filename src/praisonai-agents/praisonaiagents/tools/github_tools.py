@@ -58,10 +58,26 @@ def github_create_pull_request(title: str, body: str, head_branch: str, base_bra
     """Create a Pull Request on GitHub using the gh CLI.
     
     Args:
-        title: The title of the Pull Request.
-        body: The description body of the Pull Request.
-        head_branch: The name of the branch where your changes are implemented.
-        base_branch: The name of the branch you want your changes pulled into (default is main).
+        title: The title/summary of the Pull Request that will appear in the GitHub UI. 
+               Should be descriptive and concise (e.g., "Fix login validation bug").
+        body: The detailed description/content of the Pull Request. Can include markdown 
+              formatting, issue references (#123), and explanations of changes made.
+        head_branch: The source branch containing your changes that you want to merge. 
+                     This is typically the feature branch you've been working on.
+        base_branch: The target branch to merge your changes into. Usually the main 
+                     development branch like "main", "master", or "develop". Defaults to "main".
+    
+    Returns:
+        str: Success message with PR URL if created successfully, or error message if failed.
+    
+    Example:
+        >>> github_create_pull_request(
+        ...     title="Add user authentication feature", 
+        ...     body="Implements secure login with JWT tokens\\n\\nFixes #123",
+        ...     head_branch="feature/auth",
+        ...     base_branch="main"
+        ... )
+        'Successfully created Pull Request:\nhttps://github.com/user/repo/pull/456'
     """
     try:
         # Verify gh CLI is installed and authenticated
