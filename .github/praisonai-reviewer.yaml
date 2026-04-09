@@ -1,0 +1,122 @@
+framework: "praisonai"
+topic: "Pull Request Code Review Analysis"
+
+roles:
+  security_reviewer:
+    role: "Security Code Reviewer"
+    goal: "Identify security vulnerabilities, authentication issues, input validation problems, and unsafe code practices in the PR changes"
+    backstory: "You are a cybersecurity expert specializing in code analysis. You have extensive experience in identifying common security flaws like injection attacks, authentication bypasses, exposed secrets, and unsafe data handling patterns."
+    tools:
+      - "run_shell_command"
+    
+  performance_reviewer:
+    role: "Performance Code Reviewer" 
+    goal: "Analyze code changes for performance implications, identify bottlenecks, inefficient algorithms, and resource usage issues"
+    backstory: "You are a performance optimization specialist with deep knowledge of algorithm efficiency, memory management, and system performance. You excel at spotting code that could cause performance degradation."
+    tools:
+      - "run_shell_command"
+      
+  maintainability_reviewer:
+    role: "Code Quality & Maintainability Reviewer"
+    goal: "Evaluate code structure, readability, documentation, naming conventions, and adherence to best practices"
+    backstory: "You are a software engineering expert focused on code quality and maintainability. You ensure code follows established patterns, is well-documented, and will be easy for future developers to understand and modify."
+    tools:
+      - "run_shell_command"
+
+  lead_reviewer:
+    role: "Lead Technical Reviewer"
+    goal: "Synthesize all review feedback, make final recommendations, and post comprehensive review comments to the GitHub PR"
+    backstory: "You are a senior technical lead responsible for final review decisions. You coordinate input from security, performance, and maintainability reviewers to provide balanced, actionable feedback to the development team."
+    tools:
+      - "run_shell_command"
+
+tasks:
+  security_analysis:
+    description: |
+      Analyze the PR diff for security issues:
+      1. Extract PR details: `echo "$PR_DATA"`
+      2. Get changed files: `echo "$CHANGED_FILES"`  
+      3. Review full diff: `gh pr diff ${PR_NUMBER}`
+      4. Look for:
+         - Hardcoded secrets, API keys, passwords
+         - SQL injection vulnerabilities
+         - XSS vulnerabilities  
+         - Authentication/authorization bypasses
+         - Unsafe file operations
+         - Command injection risks
+         - Missing input validation
+         - Exposed sensitive data
+      5. Document findings with file paths and line numbers
+    expected_output: "Detailed security analysis report with specific vulnerabilities found, severity levels, and remediation suggestions"
+    agent: security_reviewer
+    
+  performance_analysis:
+    description: |
+      Analyze the PR diff for performance issues:
+      1. Review algorithm complexity changes
+      2. Check for inefficient database queries
+      3. Identify memory leaks or excessive allocations
+      4. Look for hot-path regressions
+      5. Check for blocking I/O operations
+      6. Analyze module-level imports that could slow startup
+      7. Review caching implementations
+      8. Check for recursive operations without termination
+      9. Document performance concerns with impact estimates
+    expected_output: "Performance analysis report highlighting bottlenecks, efficiency concerns, and optimization recommendations"
+    agent: performance_reviewer
+    
+  maintainability_analysis:
+    description: |
+      Analyze the PR diff for code quality and maintainability:
+      1. Check naming conventions consistency
+      2. Evaluate code structure and organization
+      3. Review documentation completeness
+      4. Check for DRY violations
+      5. Analyze error handling patterns
+      6. Review test coverage for changes
+      7. Check adherence to repository coding standards
+      8. Evaluate API design consistency
+      9. Look for technical debt introduction
+    expected_output: "Code quality analysis with specific recommendations for improving maintainability and readability"
+    agent: maintainability_reviewer
+    
+  final_review:
+    description: |
+      Synthesize all reviews and post final comprehensive feedback:
+      1. Collect input from security, performance, and maintainability reviews
+      2. Prioritize findings by severity (Critical, High, Medium, Low)
+      3. Create structured review comment using this format:
+      
+      ## 📋 Review Summary
+      [2-3 sentence overview and assessment]
+      
+      ## 🔍 General Feedback  
+      [Overall patterns and observations]
+      
+      ## 🎯 Specific Feedback
+      ### 🔴 Critical (if any)
+      [Security vulnerabilities, breaking changes, major bugs]
+      
+      ### 🟡 High (if any) 
+      [Performance issues, design flaws, significant bugs]
+      
+      ### 🟢 Medium (if any)
+      [Code quality improvements, minor optimizations]
+      
+      ### 🔵 Low (if any)
+      [Documentation, naming suggestions, minor refactoring]
+      
+      ## ✅ Highlights (if any)
+      [Positive aspects worth mentioning]
+      
+      4. Post comprehensive review: `gh pr comment ${PR_NUMBER} -b "[REVIEW_CONTENT]"`
+      5. If critical issues found, suggest not merging until resolved
+    expected_output: "Final review comment posted to GitHub PR with comprehensive analysis from all reviewers"
+    agent: lead_reviewer
+    dependencies: [security_analysis, performance_analysis, maintainability_analysis]
+
+dependencies:
+  - security_analysis
+  - performance_analysis  
+  - maintainability_analysis
+  - final_review
