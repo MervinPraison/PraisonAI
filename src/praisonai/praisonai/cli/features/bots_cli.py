@@ -59,6 +59,9 @@ class BotCapabilities:
     exec_enabled: bool = False
     auto_approve: bool = False
     
+    # Optional primitive override
+    recipe: Optional[str] = None
+    
     # Model settings
     model: Optional[str] = None
     thinking: Optional[str] = None  # off, minimal, low, medium, high
@@ -750,6 +753,11 @@ class BotHandler:
         """
         from praisonaiagents import Agent
         
+        # Intercept Recipe Adapter
+        if capabilities and capabilities.recipe:
+            from praisonaiagents.gateway.adapters.recipe_adapter import RecipeBotAdapter
+            return RecipeBotAdapter(recipe_name=capabilities.recipe)
+            
         # Build tools list from capabilities
         tools = self._build_tools(capabilities) if capabilities else []
         
@@ -977,6 +985,7 @@ def _add_capability_args(parser) -> None:
     """Add capability arguments to a parser."""
     # Agent configuration
     parser.add_argument("--agent", help="Path to agent YAML configuration file")
+    parser.add_argument("--recipe", help="Recipe name to execute as the bot")
     parser.add_argument("--model", "-m", help="LLM model to use")
     
     # Browser
@@ -1050,6 +1059,7 @@ def _build_capabilities_from_args(args) -> BotCapabilities:
         stt_model=getattr(args, "stt_model", None),
         session_id=getattr(args, "session_id", None),
         user_id=getattr(args, "user_id", None),
+        recipe=getattr(args, "recipe", None),
     )
 
 
