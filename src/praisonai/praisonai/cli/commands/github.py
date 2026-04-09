@@ -127,7 +127,7 @@ def github_triage(
         except:
             pass
 
-    bus.subscribe(track_agent_step, is_async=True)
+    bus.subscribe(track_agent_step)
     
     # 4. Trigger Normal PraisonAI Execution
     print(f"[cyan]▶️ Starting YAML Agent via `praisonai workflow run` equivalent...[/cyan]")
