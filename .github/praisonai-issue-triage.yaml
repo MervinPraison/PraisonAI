@@ -1,0 +1,57 @@
+framework: "praisonai"
+topic: "Autonomous Issue Resolution and PR Creation"
+
+roles:
+  issue_analyst:
+    role: "GitHub Issue Analyst"
+    goal: "Read the GitHub issue, understand the required changes, and map the problem to the local codebase"
+    backstory: "You are an expert software analyst who reads bug reports and feature requests. You excel at taking a problem description and finding exactly which files in the codebase need to be modified. Your primary job is discovery."
+    tools:
+      - "execute_command"
+    
+  software_engineer:
+    role: "Autonomous Software Engineer" 
+    goal: "Checkout a new branch, rewrite the code to fix the issue, and ensure the changes are correct locally"
+    backstory: "You are a senior software engineer who writes flawless code. You branch off main, use terminal commands to rewrite files using sed, echo, or other secure tools, and verify that your changes perfectly address the analyst's findings."
+    tools:
+      - "execute_command"
+      
+  release_manager:
+    role: "Release and CI Manager"
+    goal: "Commit the changes, push the branch to remote, and create the Pull Request linking back to the issue"
+    backstory: "You are a DevOps Release Engineer. Your job is strictly to ensure that any code changes are properly committed, pushed to the GitHub repository, and framed as a clean Pull Request that automatically links to the issue."
+    tools:
+      - "execute_command"
+
+steps:
+  - name: analyze_issue
+    agent: issue_analyst
+    action: |
+      Thoroughly analyze the Issue and the repository:
+      1. View the issue details using: `gh issue view ${ISSUE_NUMBER} --json title,body`
+      2. Identify the exact problem or feature request.
+      3. Use tools like `grep`, `find`, or `cat` to explore the codebase and find the specific files that need modification.
+      4. Create a specific, file-level plan of what needs to change.
+    expected_output: "A detailed analysis report including the files that must be changed and exactly what lines or logic must be altered to solve Issue #${ISSUE_NUMBER}."
+    
+  - name: implement_fix
+    agent: software_engineer
+    action: |
+      Implement the changes required to solve the issue:
+      1. Review the analyst's plan.
+      2. Check out a dedicated fix branch: `git checkout -b praisonai/issue-${ISSUE_NUMBER}`
+      3. Carefully modify the necessary files in the repository using bash commands (e.g. `cat`, `sed`, `echo`, or small inline scripts). 
+      4. Double-check your edits by inspecting the file outputs or running `git diff` to ensure you only changed what was required.
+    expected_output: "Confirmation that the git branch was successfully created and the files were reliably modified without syntax errors."
+    
+  - name: create_pull_request
+    agent: release_manager
+    action: |
+      Push the code and submit the PR:
+      1. Stage the files: `git add .`
+      2. Commit the changes: `git commit -m "PraisonAI Automated Fix for Issue #${ISSUE_NUMBER}"`
+      3. Push the branch to GitHub: `git push -u origin HEAD`
+      4. Create the Pull Request back to main: `gh pr create --title "Fix Issue #${ISSUE_NUMBER}" --body "Automated triage and resolution for #${ISSUE_NUMBER} by PraisonAI Native Issue Triage." --head "praisonai/issue-${ISSUE_NUMBER}" --base main`
+      5. Post a comment on the original issue letting the user know: `gh issue comment ${ISSUE_NUMBER} -b "I have autonomously analyzed the codebase and written a fix for this issue! I've opened a Pull Request for your review."`
+    expected_output: "The URL of the successfully created Pull Request."
+    dependencies: [analyze_issue, implement_fix]

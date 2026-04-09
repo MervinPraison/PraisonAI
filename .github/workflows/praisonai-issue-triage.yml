@@ -1,0 +1,64 @@
+name: PraisonAI Issue Triage
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue Number'
+        required: true
+        type: string
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' && 
+      !github.event.issue.pull_request && 
+      contains(github.event.comment.body, '@praisonai') &&
+      github.actor != 'github-actions[bot]' &&
+      github.event.comment.user.type != 'Bot' &&
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'MEMBER' ||
+       github.event.comment.author_association == 'COLLABORATOR'))
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Generate GitHub App Token
+        id: generate_token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.PRAISONAI_APP_ID }}
+          private_key: ${{ secrets.PRAISONAI_APP_PRIVATE_KEY }}
+          
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - name: Set up Git
+        run: |
+          git config --local user.email "bot@praison.ai"
+          git config --local user.name "PraisonAI Bot"
+          
+      - name: Install PraisonAI
+        run: pip install "praisonai[all]"
+        
+      - name: Run PraisonAI Issue Triage
+        env:
+          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
+          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            export ISSUE_NUMBER="${{ inputs.issue_number }}"
+          else
+            export ISSUE_NUMBER="${{ github.event.issue.number }}"
+          fi
+          praisonai workflow run .github/praisonai-issue-triage.yaml
