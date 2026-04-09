@@ -38,6 +38,7 @@ class ShellTools:
         env: Optional[Dict[str, str]] = None,
         max_output_size: int = 10000
     ) -> Dict[str, Union[str, int, bool]]:
+        # shell command execution
         """Execute a shell command safely.
         
         Args:
