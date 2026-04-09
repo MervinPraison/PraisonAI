@@ -355,7 +355,7 @@ class TestExecuteCommand:
         """Test command that fails."""
         from praisonai.code.tools.execute_command import execute_command
         
-        result = execute_command("exit 1", shell=True)
+        result = execute_command("false", shell=False)
         
         assert result['success'] is False
         assert result['exit_code'] == 1

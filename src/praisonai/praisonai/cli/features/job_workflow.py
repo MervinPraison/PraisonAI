@@ -25,6 +25,7 @@ import ast
 import operator
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -240,8 +241,15 @@ class JobWorkflowExecutor:
             
         cwd = step.get("cwd", self._cwd)
         env = self._build_env(step)
+        # Use shell=False with shlex.split for safer execution
+        try:
+            args = shlex.split(cmd, posix=(os.name == 'posix'))
+            if not args:
+                return {"ok": False, "error": "Empty command after parsing"}
+        except ValueError as e:
+            return {"ok": False, "error": f"Invalid command syntax: {str(e)}"}
         result = subprocess.run(
-            cmd, shell=True, cwd=cwd, env=env,
+            args, shell=False, cwd=cwd, env=env,
             capture_output=True, text=True,
             timeout=step.get("timeout", 300),
         )
@@ -717,7 +725,17 @@ class JobWorkflowExecutor:
         env = os.environ.copy()
         step_env = step.get("env", {})
         if step_env:
-            env.update({k: str(v) for k, v in step_env.items()})
+            # Filter out potentially dangerous environment variables
+            dangerous_env_vars = {
+                'LD_PRELOAD', 'LD_LIBRARY_PATH', 'DYLD_INSERT_LIBRARIES', 
+                'PYTHONPATH', 'NODE_PATH', 'PATH', 'SHELL', 'HOME',
+                'TEMP', 'TMP', 'TMPDIR'
+            }
+            filtered_env = {}
+            for k, v in step_env.items():
+                if k.upper() not in dangerous_env_vars:
+                    filtered_env[k] = str(v)
+            env.update(filtered_env)
         return env
 
     # ------------------------------------------------------------------

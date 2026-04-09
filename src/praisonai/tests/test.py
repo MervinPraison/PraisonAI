@@ -1,5 +1,6 @@
 import unittest
 import subprocess
+import shlex
 import os
 import pytest
 from praisonai.cli import PraisonAI
@@ -60,7 +61,9 @@ class TestPraisonAICommandLine(unittest.TestCase):
             print("Warning: OPENAI_API_KEY not found in CLI test environment. API calls might fail if not mocked.")
             
         try:
-            result = subprocess.run(command, shell=True, capture_output=True, text=True, env=env, timeout=120)
+            # Use shell=False with shlex.split for safer execution  
+            args = shlex.split(command)
+            result = subprocess.run(args, shell=False, capture_output=True, text=True, env=env, timeout=120)
             return result.stdout + result.stderr
         except subprocess.TimeoutExpired:
             return "TIMEOUT: Command exceeded 120 seconds"
