@@ -26,8 +26,8 @@ class RecipeBotAdapter:
     - Any system expecting an Agent-like interface
     
     Key features:
-    - Implements .chat(message: str) -> str
-    - Provides .stream_emitter for Gateway streaming support
+    - Implements .chat(prompt: str, **kwargs) -> str (matches AgentProtocol)
+    - Implements async .achat(prompt: str, **kwargs) (matches AgentProtocol)
     - Maintains conversation context via Recipe variables
     - Supports Human-in-The-Loop via context injection
     
@@ -183,7 +183,14 @@ class RecipeBotAdapter:
             The agent's response as a string
         """
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self.chat, prompt, **kwargs)
+        import functools
+        try:
+            from praisonaiagents.trace.context_events import copy_context_to_callable
+            fn = copy_context_to_callable(functools.partial(self.chat, prompt, **kwargs))
+        except Exception:
+            logger.debug("Context propagation unavailable, falling back to direct call", exc_info=True)
+            fn = functools.partial(self.chat, prompt, **kwargs)
+        return await loop.run_in_executor(None, fn)
     
     async def chat_async(self, message: str) -> str:
         """
