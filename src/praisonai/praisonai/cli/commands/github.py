@@ -127,21 +127,37 @@ def github_triage(
             update_timer[0] = threading.Timer(delay, _sync_push_comment)
             update_timer[0].start()
             
-    async def track_agent_step(event):
-        try:
-            if event.type == "agent_start":
-                agent_logs.append(f"🤖 Agent starting: {event.data.get('agent_name', 'Agent')}")
-            elif event.type == "tool_start":
-                agent_logs.append(f"🔧 Using tool: {event.data.get('tool_name')}")
-            elif event.type == "agent_complete":
-                agent_logs.append(f"✅ Agent completed: {event.data.get('agent_name')}")
-            else:
-                return # skip spam
-            trigger_comment_update()
-        except:
-            pass
+    try:
+        from praisonaiagents.trace.protocol import TraceSinkProtocol, ActionEvent, set_default_emitter, TraceEmitter
+    except ImportError:
+        TraceSinkProtocol = object
+        ActionEvent = None
 
-    bus.subscribe(track_agent_step)
+    class GithubTrackerSink(TraceSinkProtocol):
+        def emit(self, event: ActionEvent) -> None:
+            try:
+                if event.event_type == "agent_start":
+                    agent_logs.append(f"🤖 Agent starting: {event.agent_name or 'Agent'}")
+                elif event.event_type == "tool_start":
+                    agent_logs.append(f"🔧 Using tool: {event.tool_name}")
+                elif event.event_type == "agent_end":
+                    agent_logs.append(f"✅ Agent completed: {event.agent_name}")
+                elif event.event_type == "output":
+                    agent_logs.append(f"✅ Agent output generated")
+                else:
+                    return
+                trigger_comment_update()
+            except:
+                pass
+                
+        def flush(self): pass
+        def close(self): pass
+        
+    try:
+        tracker_sink = GithubTrackerSink()
+        set_default_emitter(TraceEmitter(sink=tracker_sink, enabled=True))
+    except Exception:
+        pass
     
     # 4. Trigger Normal PraisonAI Execution
     print(f"[cyan]▶️ Starting YAML Agent via `praisonai workflow run` equivalent...[/cyan]")
