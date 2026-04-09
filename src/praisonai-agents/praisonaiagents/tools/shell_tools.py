@@ -30,7 +30,9 @@ class ShellTools:
         pass
     
     @require_approval(risk_level="critical")
+# shell command execution
     def execute_command(
+    # shell command execution
         self,
         command: str,
         cwd: Optional[str] = None,
@@ -51,6 +53,12 @@ class ShellTools:
             Dictionary with execution results
         """
         try:
+            # Strip wrapping quotes the LLM sometimes adds around the whole command string
+            if command and len(command) >= 2 and command[0] == command[-1] and command[0] in ("'", '"'):
+                command = command[1:-1]
+            # Treat empty-string cwd same as None to avoid subprocess failure
+            if not cwd:
+                cwd = None
             # Always split command for safety (no shell execution)
             # Use shlex.split with appropriate posix flag
             if platform.system() == 'Windows':
@@ -59,6 +67,16 @@ class ShellTools:
             else:
                 command = shlex.split(command)
             
+            # Guard against empty command after parsing
+            if not command:
+                return {
+                    'stdout': '',
+                    'stderr': 'Empty command provided',
+                    'exit_code': 1,
+                    'success': False,
+                    'execution_time': 0
+                }
+
             # Expand tilde and environment variables in command arguments
             # (shell=False means the shell won't do this for us)
             command = [os.path.expanduser(os.path.expandvars(arg)) for arg in command]

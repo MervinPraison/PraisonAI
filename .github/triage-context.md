@@ -1,3 +1,3 @@
-# GitHub Issue #1337: Big Task: Document CLI Router Architecture
+# GitHub Issue #1341: Add a comment to shell_tools.py execute_command
 
-Please thoroughly trace how src/praisonai/praisonai/cli/main.py interfaces with typer across all command modules. Produce a detailed architecture document in a new file docs/cli_architecture_test.md.
+Please add a single-line comment '# shell command execution' at the top of the execute_command method docstring in src/praisonai-agents/praisonaiagents/tools/shell_tools.py
