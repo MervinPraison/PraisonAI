@@ -27,7 +27,7 @@ class ServerConfig:
     
     host: str = DEFAULT_HOST
     port: int = DEFAULT_PORT
-    cors_origins: List[str] = field(default_factory=lambda: ["*"])
+    cors_origins: List[str] = field(default_factory=lambda: [])
     auth_token: Optional[str] = None
     max_connections: int = 100
     
@@ -200,8 +200,8 @@ class AgentServer:
         app = CORSMiddleware(
             app,
             allow_origins=self.config.cors_origins,
-            allow_methods=["*"],
-            allow_headers=["*"],
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "Origin", "Accept"],
         )
         
         return app

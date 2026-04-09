@@ -57,7 +57,7 @@ class GatewayConfig:
     
     host: str = "127.0.0.1"
     port: int = 8765
-    cors_origins: List[str] = field(default_factory=lambda: ["*"])
+    cors_origins: List[str] = field(default_factory=lambda: [])
     auth_token: Optional[str] = None
     max_connections: int = 1000
     max_sessions_per_agent: int = 0  # 0 = unlimited
@@ -204,7 +204,7 @@ class MultiChannelGatewayConfig:
         gateway_config = GatewayConfig(
             host=gw_data.get("host", "127.0.0.1"),
             port=gw_data.get("port", 8765),
-            cors_origins=gw_data.get("cors_origins", ["*"]),
+            cors_origins=gw_data.get("cors_origins", []),
             auth_token=gw_data.get("auth_token"),
             max_connections=gw_data.get("max_connections", 1000),
         )

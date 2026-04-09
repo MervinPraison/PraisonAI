@@ -31,7 +31,7 @@ recipes:
   - my-recipe
   - another-recipe
 preload: true
-cors_origins: "*"
+cors_origins: "http://localhost:3000,http://localhost:8000"
 rate_limit: 100           # requests per minute (0 = disabled)
 max_request_size: 10485760  # 10MB default
 enable_metrics: false     # Enable /metrics endpoint
