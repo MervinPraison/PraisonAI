@@ -131,14 +131,20 @@ def github_triage(
     
     # 4. Trigger Normal PraisonAI Execution
     print(f"[cyan]▶️ Starting YAML Agent via `praisonai workflow run` equivalent...[/cyan]")
-    from praisonai.cli.features.run import _run_yaml_with_agents_generator
     try:
-        class DummyArgs:
+        from praisonai.cli.main import PraisonAI
+        import sys
+        
+        original_argv = sys.argv
+        sys.argv = ['praisonai', 'workflow', 'run', agent_file]
+        try:
+            praison = PraisonAI()
+            praison.main()
+        except SystemExit:
             pass
-        args = DummyArgs()
-        args.framework = ""
-        args.file = agent_file
-        _run_yaml_with_agents_generator(agent_file, getattr(args, 'framework', ''), [])
+        finally:
+            sys.argv = original_argv
+
         final_body = f"✅ **PraisonAI Triager Completed Successfully!**\n{run_url}\n\nResolved natively using PraisonAI Event Hooks."
     except Exception as e:
         final_body = f"❌ **PraisonAI Triager Failed**\n{run_url}\n\nError: {e}"
