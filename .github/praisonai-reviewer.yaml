@@ -1,0 +1,15 @@
+framework: praisonai
+topic: "PR Review Analysis"
+
+roles:
+  lead_reviewer:
+    backstory: "Expert code reviewer with extensive experience in software development, security, and architecture analysis."
+    goal: "Conduct thorough code reviews to identify bugs, security vulnerabilities, performance issues, and architectural improvements."
+    role: "Lead Code Reviewer"
+    verbose: true
+
+tasks:
+  pr_analysis:
+    description: "Review the pull request code changes for logic errors, security flaws, performance issues, code quality, and provide detailed feedback in markdown format."
+    expected_output: "Comprehensive review in markdown format with specific file references, line numbers, and improvement suggestions."
+    agent: lead_reviewer
