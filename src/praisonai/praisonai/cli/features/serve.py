@@ -310,34 +310,33 @@ Launch PraisonAI servers with unified discovery support.
         return app
     
     def cmd_recipe(self, args: List[str]) -> int:
-        """Launch recipe runner server."""
+        """Launch recipe runner server via WebSocketGateway."""
         spec = {
             "host": {"default": self.DEFAULT_HOST},
             "port": {"default": self.DEFAULT_PORT, "type": "int"},
-            "config": {"default": None},
+            "recipe": {"default": None},
             "reload": {"flag": True, "default": False},
-            "api_key": {"default": None},
-            "preload": {"flag": True, "default": False},
         }
         parsed = self._parse_args(args, spec)
         
+        recipe_name = parsed.get("recipe")
+        if not recipe_name:
+            self._print_error("A recipe name is required (e.g. --recipe my-recipe)")
+            return self.EXIT_VALIDATION_ERROR
+            
         try:
-            self._print_success(f"Starting recipe server on {parsed['host']}:{parsed['port']}")
-            print("  Discovery: /__praisonai__/discovery")
+            self._print_success(f"Starting recipe gateway on {parsed['host']}:{parsed['port']}")
+            import asyncio
+            from praisonai.gateway import WebSocketGateway
+            from praisonaiagents.gateway.adapters.recipe_adapter import RecipeBotAdapter
             
-            from praisonai.recipe.serve import serve, load_config
-            
-            # Load config
-            config = load_config(parsed["config"]) if parsed["config"] else {}
-            if parsed["api_key"]:
-                config["api_key"] = parsed["api_key"]
-            
-            serve(
-                host=parsed["host"],
-                port=parsed["port"],
-                reload=parsed["reload"],
-                config=config,
-            )
+            async def _run():
+                gateway = WebSocketGateway(host=parsed['host'], port=parsed['port'])
+                agent = RecipeBotAdapter(recipe_name=recipe_name)
+                gateway.register_agent(agent)
+                await gateway.start()
+                
+            asyncio.run(_run())
             
         except ImportError as e:
             self._print_error(f"Missing dependency: {e}")

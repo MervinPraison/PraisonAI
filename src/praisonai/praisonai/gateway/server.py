@@ -44,6 +44,10 @@ class GatewaySession:
     _messages: List[GatewayMessage] = field(default_factory=list)
     _max_messages: int = 1000
     
+    # Stepper & Concurrency logic
+    _inbox: asyncio.Queue = field(default_factory=asyncio.Queue)
+    _is_executing: bool = False
+    
     @property
     def session_id(self) -> str:
         return self._session_id
@@ -88,6 +92,20 @@ class GatewaySession:
     
     def close(self) -> None:
         self._is_active = False
+
+    async def queue_message(self, message: str) -> None:
+        """Queue a user message for execution after the current operation."""
+        await self._inbox.put(message)
+        
+    def get_next_message(self) -> Optional[str]:
+        """Fetch the next queued message if available without blocking."""
+        if self._inbox.empty():
+            return None
+        return self._inbox.get_nowait()
+        
+    def mark_executing(self, status: bool) -> None:
+        """Mark the session as currently executing an agent workflow."""
+        self._is_executing = status
 
 
 class WebSocketGateway:
@@ -184,6 +202,13 @@ class WebSocketGateway:
             config: Optional gateway configuration
         """
         self.config = config or GatewayConfig(host=host, port=port)
+        if hasattr(self.config, 'auth_token') and not self.config.auth_token:
+            self.config.auth_token = secrets.token_hex(16)
+            logger.warning(
+                f"No auth_token provided for Gateway server. Generated temporary token: {self.config.auth_token}. "
+                "For production, set GATEWAY_AUTH_TOKEN."
+            )
+        
         self._host = self.config.host
         self._port = self.config.port
         
@@ -557,40 +582,72 @@ class WebSocketGateway:
             return "Agent not available"
         
         client_id = session.client_id
+        content = message.content if isinstance(message.content, str) else str(message.content)
         
-        try:
-            content = message.content if isinstance(message.content, str) else str(message.content)
-            
-            # Wire streaming relay if agent has a stream_emitter
-            relay_callback = None
-            emitter = getattr(agent, 'stream_emitter', None)
-            if emitter is not None and client_id:
-                relay_callback = self._make_stream_relay(client_id, session)
-                emitter.add_callback(relay_callback)
-            
-            try:
-                loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(None, agent.chat, content)
-            finally:
-                # Always clean up the relay callback
-                if relay_callback and emitter is not None:
-                    try:
-                        emitter.remove_callback(relay_callback)
-                    except (ValueError, AttributeError):
-                        pass
-            
-            response_message = GatewayMessage(
-                content=response,
-                sender_id=session.agent_id,
-                session_id=session.session_id,
-                reply_to=message.message_id,
+        # Inbox & Stepper logic
+        if session._is_executing:
+            # Send an ephemeral status event
+            await self._send_to_client(
+                client_id,
+                {
+                    "type": "status",
+                    "source": session.agent_id,
+                    "message": "Thinking... (I've added your new message to the queue to process next)."
+                }
             )
-            session.add_message(response_message)
+            await session.queue_message(content)
+            return "Message queued."
             
-            return response
-        except Exception as e:
-            logger.error(f"Agent error: {e}")
-            return f"Error: {str(e)}"
+        session.mark_executing(True)
+        await session.queue_message(content)
+        
+        # Start background task to process the queue
+        asyncio.create_task(self._run_session_queue(session, agent, client_id))
+        return "Started processing."
+
+    async def _run_session_queue(self, session: GatewaySession, agent: Any, client_id: str) -> None:
+        """Background task loop that constantly pulls from `_inbox` and executes the agent task."""
+        try:
+            while True:
+                content = session.get_next_message()
+                if not content:
+                    break  # Queue is empty, exit loop
+                
+                # Wire streaming relay if agent has a stream_emitter
+                relay_callback = None
+                emitter = getattr(agent, 'stream_emitter', None)
+                if emitter is not None and client_id:
+                    relay_callback = self._make_stream_relay(client_id, session)
+                    emitter.add_callback(relay_callback)
+                
+                try:
+                    loop = asyncio.get_event_loop()
+                    response = await loop.run_in_executor(None, agent.chat, content)
+                except Exception as e:
+                    logger.error(f"Agent error in queue processor: {e}")
+                    response = f"Error: {str(e)}"
+                finally:
+                    # Always clean up the relay callback
+                    if relay_callback and emitter is not None:
+                        try:
+                            emitter.remove_callback(relay_callback)
+                        except (ValueError, AttributeError):
+                            pass
+                
+                response_message = GatewayMessage(
+                    content=response,
+                    sender_id=session.agent_id,
+                    session_id=session.session_id,
+                )
+                session.add_message(response_message)
+                
+                await self._send_to_client(client_id, {
+                    "type": "response",
+                    "content": response,
+                    "session_id": session.session_id,
+                })
+        finally:
+            session.mark_executing(False)
 
     def _make_stream_relay(
         self, client_id: str, session: "GatewaySession"

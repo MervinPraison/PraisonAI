@@ -11,8 +11,9 @@ PR opened
   ↓
 CodeRabbit (@coderabbitai) ─── auto for human PRs, triggered via comment for bot PRs
 Qodo (/review)             ─── auto for human PRs, triggered via comment for bot PRs
-Gemini (@gemini)           ─── triggered via comment for bot PRs/Issues
-PraisonAI (@praisonai)     ─── triggered via comment (parallel with Gemini)
+<!-- Gemini (@gemini)           ─── triggered via comment for bot PRs/Issues
+  ↓ (~3-5 min)                  ↓ (auto triggers Claude on completion) -->
+PraisonAI (@praisonai)     ─── triggered via comment
   ↓ (~3-5 min)                  ↓ (auto triggers Claude on completion)
 Copilot (@copilot)         ─── triggered ONLY after CodeRabbit or Qodo post their review
   ↓

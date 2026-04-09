@@ -478,6 +478,7 @@ def serve_scheduler(
 def serve_recipe(
     host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host to bind to"),
     port: int = typer.Option(8765, "--port", "-p", help="Port to bind to"),
+    recipe: Optional[str] = typer.Option(None, "--recipe", "-r", help="Recipe name to execute"),
     config: Optional[str] = typer.Option(None, "--config", "-c", help="Config file path"),
     reload: bool = typer.Option(False, "--reload", help="Enable auto-reload"),
 ):
@@ -490,6 +491,8 @@ def serve_recipe(
     try:
         from ..features.serve import handle_serve_command
         args = ["recipe", "--host", host, "--port", str(port)]
+        if recipe:
+            args.extend(["--recipe", recipe])
         if config:
             args.extend(["--config", config])
         if reload:

@@ -206,16 +206,16 @@ class TestApprovalRegistry:
     def test_mark_and_check_approved(self):
         from praisonaiagents.approval.registry import ApprovalRegistry
         reg = ApprovalRegistry()
-        assert not reg.is_already_approved("execute_command")
-        reg.mark_approved("execute_command")
-        assert reg.is_already_approved("execute_command")
+        assert not reg.is_already_approved("write_file")
+        reg.mark_approved("write_file")
+        assert reg.is_already_approved("write_file")
 
     def test_already_approved_skips_backend(self):
         """Once approved, no backend call needed."""
         from praisonaiagents.approval.registry import ApprovalRegistry
         reg = ApprovalRegistry()
-        reg.mark_approved("execute_command")
-        decision = reg.approve_sync("agent", "execute_command", {})
+        reg.mark_approved("write_file")
+        decision = reg.approve_sync("agent", "write_file", {})
         assert decision.approved is True
         assert "already" in decision.reason.lower()
 

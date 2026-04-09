@@ -24,8 +24,10 @@ except ImportError:
 
 # Logging is already configured in _logging.py via __init__.py
 
-# Global list to store error logs
-error_logs = []
+# Global list to store error logs - with bounded size to prevent memory leaks
+from collections import deque
+MAX_ERROR_LOGS = 1000  # Maximum number of error logs to keep in memory
+error_logs = deque(maxlen=MAX_ERROR_LOGS)  # Ring buffer that auto-evicts old errors
 _error_logs_lock = threading.Lock()
 
 # Separate registries for sync and async callbacks

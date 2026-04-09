@@ -4464,6 +4464,146 @@ Answer:"""
     @contextlib.contextmanager
     
 
+    # -------------------------------------------------------------------------
+    #                       Resource Lifecycle Management
+    # -------------------------------------------------------------------------
+    
+    def close(self) -> None:
+        """Synchronously close the agent and clean up resources."""
+        if getattr(self, '_closed', False):
+            return
+
+        # Memory cleanup
+        try:
+            memory = getattr(self, "_memory_instance", None)
+            if memory and hasattr(memory, 'close_connections'):
+                memory.close_connections()
+        except Exception as e:
+            logger.warning(f"Memory cleanup failed: {e}")
+
+        # MCP cleanup  
+        try:
+            if hasattr(self, '_mcp_clients') and self._mcp_clients:
+                for client_name, client in self._mcp_clients.items():
+                    if hasattr(client, 'close'):
+                        client.close()
+                self._mcp_clients.clear()
+        except Exception as e:
+            logger.warning(f"MCP cleanup failed: {e}")
+
+        # Server registry cleanup
+        try:
+            self._cleanup_server_registrations()
+        except Exception as e:
+            logger.warning(f"Server cleanup failed: {e}")
+
+        # Background tasks cleanup
+        try:
+            for task in getattr(self, '_background_tasks', []):
+                if hasattr(task, 'cancel'):
+                    task.cancel()
+        except Exception as e:
+            logger.warning(f"Task cleanup failed: {e}")
+
+        # Always set closed flag
+        self._closed = True
+    
+    async def aclose(self) -> None:
+        """Async version of close() for async context managers."""
+        try:
+            # Close memory connections asynchronously if supported
+            if hasattr(self, 'memory') and self.memory:
+                if hasattr(self.memory, 'aclose'):
+                    await self.memory.aclose()
+                elif hasattr(self.memory, 'close_connections'):
+                    self.memory.close_connections()
+            
+            # Close MCP sessions asynchronously if supported
+            if hasattr(self, '_mcp_clients') and self._mcp_clients:
+                for client in self._mcp_clients.values():
+                    if hasattr(client, 'aclose'):
+                        await client.aclose()
+                    elif hasattr(client, 'close'):
+                        client.close()
+                self._mcp_clients.clear()
+            
+            # Clean up server registrations and tasks
+            self._cleanup_server_registrations()
+            
+            if hasattr(self, '_background_tasks'):
+                for task in self._background_tasks:
+                    if hasattr(task, 'cancel'):
+                        task.cancel()
+                    # Wait for cancellation to complete
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+            
+            self._closed = True
+            
+        except Exception as e:
+            logger.warning(f"Error during async agent cleanup: {e}")
+    
+    def _cleanup_server_registrations(self) -> None:
+        """Clean up global server registry entries for this agent."""
+        try:
+            agent_id = self.agent_id
+            with _server_lock:
+                # Remove from _registered_agents
+                ports_to_clean = []
+                for port, path_dict in _registered_agents.items():
+                    paths_to_remove = []
+                    for path, registered_id in path_dict.items():
+                        if registered_id == agent_id:
+                            paths_to_remove.append(path)
+                    
+                    for path in paths_to_remove:
+                        del path_dict[path]
+                    
+                    # If no paths left for this port, mark port for cleanup
+                    if not path_dict:
+                        ports_to_clean.append(port)
+                
+                # Clean up empty port entries
+                for port in ports_to_clean:
+                    _registered_agents.pop(port, None)
+                    _server_started.pop(port, None)
+                    # Note: We don't clean up _shared_apps here as other agents might be using them
+                    
+        except Exception as e:
+            logger.warning(f"Error cleaning up server registrations: {e}")
+    
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - clean up resources."""
+        self.close()
+    
+    async def __aenter__(self):
+        """Async context manager entry.""" 
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit - clean up resources."""
+        await self.aclose()
+    
+    def __del__(self):
+        """Destructor - ensure resources are cleaned up."""
+        try:
+            if not getattr(self, '_closed', False):
+                self.close()
+        except Exception:
+            # Ignore errors in destructor to avoid issues during shutdown
+            pass
+    
+    @property
+    def is_closed(self) -> bool:
+        """Returns True if the agent has been closed."""
+        return getattr(self, '_closed', False)
+
     def __str__(self):
         return f"Agent(name='{self.name}', role='{self.role}', goal='{self.goal}')"
 
