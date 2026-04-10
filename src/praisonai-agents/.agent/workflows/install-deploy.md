@@ -90,7 +90,11 @@ on:
 ```
 
 **What it does:**
-1. **Syncs install.sh** from praisonai-package repository (only if changed!)
+1. **Syncs install.sh** from PraisonAI repository (only if changed!)
+   - Checks out `MervinPraison/PraisonAI`
+   - Compares `install.sh` and `install.ps1` with existing web files
+   - **Only copies if files have actually changed** (avoids unnecessary redeploys)
+   - This ensures `https://praison.ai/install.sh` is always latest
 2. Downloads env files from Azure Storage
 3. Builds multi-arch Docker images (linux/amd64, linux/arm64)
 4. Pushes to Azure Container Registry: `praison.azurecr.io/pa/`
@@ -730,13 +734,13 @@ Developer Push ─────────────────────�
 
 ### Automatic install.sh Sync
 
-**Key Point**: The workflow automatically syncs `install.sh` from `praisonai-package` repository **only if changed**:
+**Key Point**: The workflow automatically syncs `install.sh` from `MervinPraison/PraisonAI` repository **only if changed**:
 
 ```yaml
-- name: Checkout praisonai-package for install.sh
+- name: Checkout PraisonAI for install.sh
   uses: actions/checkout@v2
   with:
-    repository: praison/praisonai-package
+    repository: MervinPraison/PraisonAI
     path: praisonai-package
 
 - name: Sync install.sh to web folder (if changed)
