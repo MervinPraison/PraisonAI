@@ -113,8 +113,6 @@ class PraisonAIExternalAgent(BaseAgent):
                 ),
                 tools=[bash_tool],
                 llm=self.model_name or "openai/gpt-4o",
-                verbose=False,  # Harbor handles output display
-                memory=False,   # Stateless execution for benchmarking
             )
 
             # Execute the agent

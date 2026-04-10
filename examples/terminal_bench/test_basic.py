@@ -111,6 +111,30 @@ def test_multi_agent_import():
         print(f"❌ Multi-agent example import failed: {e}")
         return False
 
+def test_wrapper_agent_import():
+    """Test that wrapper agent can be imported."""
+    try:
+        import sys
+        from unittest.mock import MagicMock
+        
+        # Mock Harbor for testing
+        sys.modules['harbor'] = MagicMock()
+        sys.modules['harbor.agents'] = MagicMock()
+        sys.modules['harbor.agents.base'] = MagicMock()
+        sys.modules['harbor.environments'] = MagicMock()
+        sys.modules['harbor.environments.base'] = MagicMock()
+        sys.modules['harbor.models'] = MagicMock()
+        sys.modules['harbor.models.agent'] = MagicMock()
+        sys.modules['harbor.models.agent.context'] = MagicMock()
+        
+        import praisonai_wrapper_agent
+        print("✅ Wrapper agent import successful (CLI-based approach)")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Wrapper agent import failed: {e}")
+        return False
+
 if __name__ == "__main__":
     print("PraisonAI Terminal-Bench Integration - Basic Tests")
     print("=" * 55)
@@ -121,6 +145,7 @@ if __name__ == "__main__":
         ("Approval System", test_approval_system),
         ("External Agent Import", test_external_agent_import),
         ("Multi-Agent Import", test_multi_agent_import),
+        ("Wrapper Agent Import", test_wrapper_agent_import),
     ]
     
     passed = 0

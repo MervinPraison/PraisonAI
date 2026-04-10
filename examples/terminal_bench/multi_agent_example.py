@@ -102,7 +102,6 @@ class MultiAgentPraisonAI(BaseAgent):
                     "Output your plan as a numbered list of specific actions."
                 ),
                 llm=self.model_name or "openai/gpt-4o",
-                verbose=False,
             )
             
             executor = Agent(
@@ -116,7 +115,6 @@ class MultiAgentPraisonAI(BaseAgent):
                 ),
                 tools=[bash_tool],
                 llm=self.model_name or "openai/gpt-4o", 
-                verbose=False,
             )
             
             verifier = Agent(
@@ -130,7 +128,6 @@ class MultiAgentPraisonAI(BaseAgent):
                 ),
                 tools=[bash_tool],
                 llm=self.model_name or "openai/gpt-4o",
-                verbose=False,
             )
 
             print(f"🚀 Multi-Agent PraisonAI starting: {instruction[:100]}...")

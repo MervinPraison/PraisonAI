@@ -144,9 +144,6 @@ def main():
     instruction = sys.argv[1]
     model = sys.argv[2] if len(sys.argv) > 2 else "openai/gpt-4o"
     max_turns = int(sys.argv[3]) if len(sys.argv) > 3 else 30
-    verbose = sys.argv[4].lower() == "true" if len(sys.argv) > 4 else False
-    memory = sys.argv[5].lower() == "true" if len(sys.argv) > 5 else False
-    
     try:
         from praisonaiagents import Agent
         from praisonaiagents.tools import execute_command
@@ -166,8 +163,6 @@ def main():
             ),
             tools=[execute_command],
             llm=model,
-            verbose=verbose,
-            memory=memory,
         )
         
         # Execute the instruction
@@ -223,8 +218,6 @@ if __name__ == "__main__":
         """
         model = self.model_name or "openai/gpt-4o"
         max_turns = getattr(self, 'max_turns', 30)
-        verbose = str(getattr(self, 'verbose', False)).lower()
-        memory = str(getattr(self, 'memory', False)).lower()
         
         # Build command to run PraisonAI
         cmd_args = [
@@ -232,8 +225,6 @@ if __name__ == "__main__":
             shlex.quote(instruction),
             shlex.quote(model),
             str(max_turns),
-            verbose,
-            memory,
         ]
         
         command = " ".join(cmd_args)

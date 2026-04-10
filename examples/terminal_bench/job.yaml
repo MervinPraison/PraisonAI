@@ -44,6 +44,24 @@ n_attempts: 1          # Single attempt per task (benchmark standard)
 
 ---
 
+# Alternative configuration using wrapper agent (CLI-based approach)
+# Uses `praisonai "TASK"` pattern instead of direct Agent class
+# Uncomment to use the wrapper approach:
+
+# dataset: terminal-bench/terminal-bench-2
+#
+# agent:
+#   import_path: examples.terminal_bench.praisonai_wrapper_agent:PraisonAIWrapperAgent
+#   model_name: openai/gpt-4o
+#
+# n_concurrent: 8
+# n_attempts: 1
+#
+# env:
+#   OPENAI_API_KEY: "${OPENAI_API_KEY}"
+
+---
+
 # Alternative configuration using installed agent (requires Harbor integration)
 # Uncomment this section once PraisonAI is integrated into Harbor's codebase
 
