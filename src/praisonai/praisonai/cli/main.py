@@ -4775,8 +4775,9 @@ Now, {final_instruction.lower()}:"""
                         "request_count": agent_metrics.get('llm_calls', 0),
                     }
                     print(json.dumps(metrics_out))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    import sys
+                    print(f"[metrics-json] warning: could not extract metrics: {exc}", file=sys.stderr)
             
             return result
         elif CREWAI_AVAILABLE:

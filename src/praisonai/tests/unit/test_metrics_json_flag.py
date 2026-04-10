@@ -26,7 +26,7 @@ def _build_metrics_out(agent_metrics, agent_config):
     """
     Mirror of the JSON-assembly block in handle_direct_prompt().
 
-    Centralised here so tests can validate logic without importing main.py.
+    Centralized here so tests can validate logic without importing main.py.
     """
     model_name = agent_metrics.get("model")
     if not model_name:
