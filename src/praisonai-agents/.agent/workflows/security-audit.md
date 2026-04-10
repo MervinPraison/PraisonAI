@@ -35,23 +35,31 @@ gh api repos/MervinPraison/PraisonAI/security-advisories/<GHSA_ID> --jq '{ghsa: 
    - Classify: `real` | `already-fixed` | `not-reproducible`
    - Reference the official repository for latest source: https://github.com/MervinPraison/PraisonAI
 
-## PHASE 2 — FIX
+## PHASE 2 — VALIDATE & FIX
 
-4. For each `real` vulnerability, fix the code LOCALLY on `main` branch.
+4. **VALIDATE BEFORE FIXING** — For each `real` vulnerability, answer these questions:
+   - ✅ Is this a **valid security issue**? (Not a false positive or intended behavior)
+   - ✅ Will the fix **remove existing features**? (If yes, STOP and escalate)
+   - ✅ Will the fix **bloat the SDK**? (Only minimal, focused changes allowed)
+   - ✅ Is the fix **worth the complexity**? (Low-risk issues may not need fixing)
+   
+   **ONLY PROCEED IF ALL CHECKS PASS.** If any check fails, document why and move to next advisory.
+
+5. For each validated vulnerability, fix the code LOCALLY on `main` branch.
    - NEVER create public GitHub issues with exploit details
    - NEVER create public PRs that expose the attack vector
    - Use generic commit messages: `refactor: harden input validation`
    - Keep fixes minimal and backward-compatible
 
-5. Run tests to verify fixes don't break anything:
+6. Run tests to verify fixes don't break anything:
 ```bash
 cd /Users/praison/praisonai-package/src/praisonai-agents
 PYTHONPATH=. pytest tests/unit/ -q --timeout=30
 ```
 
-6. Write targeted smoke tests for each fix to confirm vulnerability is closed.
+7. Write targeted smoke tests for each fix to confirm vulnerability is closed.
 
-7. Commit and push with generic message:
+8. Commit and push with generic message:
 ```bash
 cd /Users/praison/praisonai-package
 git add -A
@@ -61,20 +69,20 @@ git push origin main
 
 ## PHASE 3 — PUBLISH PACKAGES (MUST complete before Phase 4)
 
-8. Publish praisonaiagents (Core SDK):
+9. Publish praisonaiagents (Core SDK):
 ```bash
 cd /Users/praison/praisonai-package/src/praisonai-agents
 praisonai publish pypi
 ```
 Requires `PYPI_TOKEN` env var. Uses uv internally (uv lock → uv build → uv publish). Auto-bumps patch version.
 
-9. Commit version bump, push:
+10. Commit version bump, push:
 ```bash
 cd /Users/praison/praisonai-package
 git add -A && git commit -m "chore: bump praisonaiagents to <NEW_VERSION>" && git push origin main
 ```
 
-10. Publish praisonai (Wrapper):
+11. Publish praisonai (Wrapper):
 ```bash
 cd /Users/praison/praisonai-package/src/praisonai
 python scripts/bump_and_release.py <WRAPPER_VERSION> --agents <AGENTS_VERSION> --wait
@@ -85,7 +93,7 @@ Script waits for agents on PyPI, bumps all version files, builds, commits, tags,
 rm -rf dist/ && uv build && uv publish --token $PYPI_TOKEN
 ```
 
-11. Verify both packages on PyPI:
+12. Verify both packages on PyPI:
 ```bash
 pip index versions praisonaiagents | head -1
 pip index versions praisonai | head -1
