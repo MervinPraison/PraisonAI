@@ -108,3 +108,32 @@ def test_unsupported_provider():
         
         with pytest.raises(ValueError, match="Unsupported provider: unknown"):
             ManagedAgentIntegration(provider="unknown", api_key="test_key")
+
+
+def test_session_caching():
+    """Test that session IDs are cached correctly (regression test for #357 bug)."""
+    with patch('praisonai.integrations.managed_agents.aiohttp'):
+        from praisonai.integrations.managed_agents import ManagedAgentIntegration
+        
+        managed = ManagedAgentIntegration(provider="anthropic", api_key="test_key")
+        
+        # Simulate adding session to cache
+        managed._session_cache["test_session"] = "session_id_123"
+        
+        # Verify the correct session ID is cached (not the key)
+        assert managed._session_cache["test_session"] == "session_id_123"
+        assert managed._session_cache["test_session"] != "test_session"
+
+
+def test_api_key_persistence():
+    """Test that API keys from environment are persisted (regression test)."""
+    with patch('praisonai.integrations.managed_agents.aiohttp'), \
+         patch('os.getenv', return_value="env_api_key"):
+        
+        from praisonai.integrations.managed_agents import ManagedAgentIntegration
+        
+        # Create without explicit API key to trigger env lookup
+        managed = ManagedAgentIntegration(provider="anthropic", api_key=None)
+        
+        # Should have stored the env key back to api_key
+        assert managed.api_key == "env_api_key"

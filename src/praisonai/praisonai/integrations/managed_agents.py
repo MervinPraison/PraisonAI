@@ -84,7 +84,7 @@ class ManagedBackendProtocol(ABC):
         pass
 
 
-class AnthropicManagedProvider:
+class AnthropicManagedProvider(ManagedBackendProtocol):
     """
     Anthropic Managed Agents API provider implementation.
     
@@ -101,9 +101,10 @@ class AnthropicManagedProvider:
         """Get or create aiohttp session."""
         if self.session is None:
             headers = {
-                "Authorization": f"Bearer {self.api_key}",
+                "x-api-key": self.api_key,
                 "Content-Type": "application/json",
-                "managed-agents": "2026-04-01"  # Beta header
+                "anthropic-version": "2023-06-01",
+                "anthropic-beta": "managed-agents-2026-04-01"
             }
             self.session = aiohttp.ClientSession(headers=headers)
         return self.session
@@ -168,8 +169,11 @@ class AnthropicManagedProvider:
         async with session.get(url) as response:
             response.raise_for_status()
             
-            async for line in response.content:
-                line = line.decode('utf-8').strip()
+            while True:
+                line_bytes = await response.content.readline()
+                if not line_bytes:
+                    break
+                line = line_bytes.decode('utf-8').strip()
                 if line.startswith('data: '):
                     try:
                         event_data = json.loads(line[6:])  # Remove 'data: ' prefix
@@ -191,7 +195,7 @@ class AnthropicManagedProvider:
             elif event.get("type") == "session.complete":
                 break
         
-        return "\n".join(response_parts)
+        return "".join(response_parts)
     
     async def close(self):
         """Close the HTTP session."""
@@ -278,6 +282,7 @@ class ManagedAgentIntegration(BaseCLIIntegration):
             import os
             if provider == "anthropic":
                 api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY")
+            self.api_key = api_key
         
         if api_key is None:
             return None
@@ -329,8 +334,14 @@ class ManagedAgentIntegration(BaseCLIIntegration):
         # Send message
         await self.backend.send_message(session_id, prompt)
         
-        # Collect response
-        return await self.backend.collect_response(session_id)
+        # Collect response with timeout
+        try:
+            return await asyncio.wait_for(
+                self.backend.collect_response(session_id),
+                timeout=self.timeout
+            )
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"Managed agent execution timed out after {self.timeout}s")
     
     async def stream(self, prompt: str, **options) -> AsyncIterator[Dict[str, Any]]:
         """
@@ -354,14 +365,20 @@ class ManagedAgentIntegration(BaseCLIIntegration):
             agent_id = await self._ensure_agent()
             environment_id = await self._ensure_environment()
             session_id = await self.backend.create_session(agent_id, environment_id)
-            self._session_cache[session_key] = session_key
+            self._session_cache[session_key] = session_id
         
         # Send message
         await self.backend.send_message(session_id, prompt)
         
-        # Stream events
-        async for event in self.backend.stream_events(session_id):
-            yield event
+        # Stream events with timeout
+        try:
+            async for event in asyncio.wait_for(
+                self.backend.stream_events(session_id),
+                timeout=self.timeout
+            ):
+                yield event
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"Managed agent streaming timed out after {self.timeout}s")
     
     def reset_session(self, session_key: str = 'default'):
         """Reset a specific session."""
