@@ -32,8 +32,8 @@ Usage:
 """
 
 import json
-import asyncio
-from typing import AsyncIterator, Dict, Any, Optional, List, Union
+import os
+from typing import AsyncIterator, Dict, Any, Optional, List
 from abc import ABC, abstractmethod
 
 # Use existing aiohttp for HTTP requests (no new dependencies)
@@ -279,13 +279,15 @@ class ManagedAgentIntegration(BaseCLIIntegration):
         
         if api_key is None:
             # Try to get from environment
-            import os
             if provider == "anthropic":
                 api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY")
             self.api_key = api_key
         
         if api_key is None:
             return None
+        
+        # Persist resolved key so is_available reflects correct state
+        self.api_key = api_key
         
         if provider == "anthropic":
             return AnthropicManagedProvider(api_key)
