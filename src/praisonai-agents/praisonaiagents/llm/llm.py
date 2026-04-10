@@ -3589,7 +3589,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         for tool_call in tool_calls:
                             function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call)
                             logging.debug(f"[RESPONSES_API_ASYNC] Executing tool {function_name}")
-                            tool_result = execute_tool_fn(function_name, arguments, tool_call_id=tool_call_id)
+                            if asyncio.iscoroutinefunction(execute_tool_fn):
+                                tool_result = await execute_tool_fn(function_name, arguments, tool_call_id=tool_call_id)
+                            else:
+                                tool_result = execute_tool_fn(function_name, arguments, tool_call_id=tool_call_id)
                             accumulated_tool_results.append(tool_result)
 
                             if verbose:
