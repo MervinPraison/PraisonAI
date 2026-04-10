@@ -1,0 +1,65 @@
+# Harbor Job Configuration for PraisonAI on Terminal-Bench 2.0
+# 
+# Usage:
+#   harbor run -c examples/terminal_bench/job.yaml
+#
+# This configuration runs PraisonAI external agent on Terminal-Bench 2.0 tasks
+# with 8 concurrent trials using GPT-4o.
+
+# Dataset: Terminal-Bench 2.0 (89 carefully curated terminal tasks)
+dataset: terminal-bench/terminal-bench-2
+
+# Agent configuration
+agent:
+  # Use import path for external agent
+  import_path: examples.terminal_bench.praisonai_external_agent:PraisonAIExternalAgent
+  
+  # Model configuration
+  model_name: openai/gpt-4o
+  
+  # Environment variables (API keys)
+  env:
+    OPENAI_API_KEY: "${OPENAI_API_KEY}"
+    # Optional: Add other API keys if using different models
+    # ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+    # GEMINI_API_KEY: "${GEMINI_API_KEY}"
+
+# Execution configuration
+n_concurrent: 8        # Run 8 trials in parallel
+n_attempts: 1          # Single attempt per task (benchmark standard)
+
+# Optional: Environment configuration for cloud execution
+# environment:
+#   provider: daytona    # Options: local, daytona, e2b, modal, runloop, gke
+#   n_concurrent: 32     # Higher concurrency on cloud
+
+# Optional: Filter to specific tasks for testing
+# task_filter:
+#   task_names: ["compile_simple_c", "install_python_package", "create_directory"]
+
+# Optional: Advanced configuration
+# timeout_sec: 600       # 10 minute timeout per task
+# save_logs: true        # Save execution logs
+# save_artifacts: true   # Save container artifacts
+
+---
+
+# Alternative configuration using installed agent (requires Harbor integration)
+# Uncomment this section once PraisonAI is integrated into Harbor's codebase
+
+# dataset: terminal-bench/terminal-bench-2
+# 
+# agent:
+#   name: praisonai
+#   model_name: openai/gpt-4o
+#   flags:
+#     max_turns: 30
+#     verbose: false
+#     memory: false
+#     auto_approval: true
+# 
+# n_concurrent: 8
+# n_attempts: 1
+# 
+# env:
+#   OPENAI_API_KEY: "${OPENAI_API_KEY}"
