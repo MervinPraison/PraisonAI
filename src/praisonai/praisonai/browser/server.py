@@ -37,7 +37,7 @@ class BrowserServer:
     
     def __init__(
         self,
-        host: str = "0.0.0.0",
+        host: str = "127.0.0.1",  # Security: Default to localhost only
         port: int = 8765,
         model: str = "gpt-4o-mini",
         max_steps: int = 20,
@@ -46,12 +46,22 @@ class BrowserServer:
         """Initialize browser server.
         
         Args:
-            host: Host to bind to
+            host: Host to bind to (default: 127.0.0.1 for security)
             port: Port to listen on
             model: LLM model for browser agent
             max_steps: Maximum steps per session
             verbose: Enable verbose logging
         """
+        # Security: Require explicit opt-in for non-loopback binding
+        if host not in ("127.0.0.1", "localhost", "::1"):
+            if os.environ.get("PRAISONAI_BROWSER_ALLOW_REMOTE", "").lower() != "true":
+                logger.warning(
+                    f"SECURITY: Blocking remote host '{host}'. "
+                    f"Set PRAISONAI_BROWSER_ALLOW_REMOTE=true to allow non-loopback binding. "
+                    f"Falling back to 127.0.0.1"
+                )
+                host = "127.0.0.1"
+        
         self.host = host
         self.port = port
         self.model = model
@@ -154,7 +164,17 @@ class BrowserServer:
                 ]
         
         origin = websocket.headers.get("origin")
-        if origin:
+        
+        # Security: Reject connections without Origin header (unless from localhost CLI)
+        if not origin:
+            # Only allow missing Origin from localhost (CLI clients)
+            client_host = websocket.client.host if websocket.client else None
+            if client_host not in ("127.0.0.1", "localhost", "::1"):
+                logger.warning(f"[SECURITY] Rejecting WebSocket without Origin from {client_host}")
+                await websocket.close(code=1008)
+                return
+            logger.debug(f"[SECURITY] Allowing missing Origin from localhost {client_host}")
+        else:
             import urllib.parse
             parsed_origin = urllib.parse.urlparse(origin)
             is_allowed = False
@@ -167,6 +187,7 @@ class BrowserServer:
                 is_allowed = True
             
             if not is_allowed:
+                logger.warning(f"[SECURITY] Rejecting WebSocket with invalid Origin: {origin}")
                 await websocket.close(code=1008)
                 return
 

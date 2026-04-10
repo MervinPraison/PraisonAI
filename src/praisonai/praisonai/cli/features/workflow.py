@@ -380,14 +380,23 @@ Example:
                 raw_data = yaml.safe_load(f)
             if isinstance(raw_data, dict):
                 workflow_type = raw_data.get("type")
-                if workflow_type == "job":
-                    from .job_workflow import JobWorkflowExecutor
-                    executor = JobWorkflowExecutor(raw_data, file_path)
-                    return executor.run(args)
-                elif workflow_type == "hybrid":
-                    from .hybrid_workflow import HybridWorkflowExecutor
-                    executor = HybridWorkflowExecutor(raw_data, file_path)
-                    return executor.run(args)
+                # Security: Block job/hybrid workflows unless explicitly allowed
+                if workflow_type in ("job", "hybrid"):
+                    if os.environ.get("PRAISONAI_ALLOW_JOB_WORKFLOWS", "").lower() != "true":
+                        self.print_status(
+                            "Security: Job/hybrid workflows disabled. Set PRAISONAI_ALLOW_JOB_WORKFLOWS=true", 
+                            "error"
+                        )
+                        return None
+                    
+                    if workflow_type == "job":
+                        from .job_workflow import JobWorkflowExecutor
+                        executor = JobWorkflowExecutor(raw_data, file_path)
+                        return executor.run(args)
+                    elif workflow_type == "hybrid":
+                        from .hybrid_workflow import HybridWorkflowExecutor
+                        executor = HybridWorkflowExecutor(raw_data, file_path)
+                        return executor.run(args)
         except Exception:
             pass  # Fall through to agent workflow
         

@@ -82,6 +82,19 @@ class JobWorkflowExecutor:
 
         console = Console()
         dry_run = "--dry-run" in args
+        
+        # Security: Require explicit opt-in for job workflows (RCE prevention)
+        if not dry_run and os.environ.get("PRAISONAI_ALLOW_JOB_WORKFLOWS", "").lower() != "true":
+            console.print(Panel(
+                "[bold red]Security Block[/bold red]\n\n"
+                "Job workflows are disabled by default. Set environment variable:\n"
+                "[green]PRAISONAI_ALLOW_JOB_WORKFLOWS=true[/green]\n\n"
+                "Or use --dry-run to preview without execution.",
+                title="⚠️  Security",
+                border_style="red",
+            ))
+            return {"ok": False, "error": "Job workflows disabled. Set PRAISONAI_ALLOW_JOB_WORKFLOWS=true or use --dry-run"}
+        
         flags = self._parse_flags(args)
 
         # Header

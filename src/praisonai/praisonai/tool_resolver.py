@@ -23,6 +23,7 @@ Usage:
 """
 
 import logging
+import os
 import importlib.util
 import inspect
 from pathlib import Path
@@ -57,6 +58,9 @@ class ToolResolver:
     def _load_local_tools(self) -> Dict[str, Callable]:
         """Load tools from local tools.py file.
         
+        Security: Requires PRAISONAI_ALLOW_LOCAL_TOOLS=true to prevent
+        arbitrary code execution from untrusted working directories.
+        
         Returns:
             Dict mapping tool names to callables
         """
@@ -64,6 +68,11 @@ class ToolResolver:
             return self._local_tools_cache
         
         self._local_tools_loaded = True
+        
+        # Security: Require explicit opt-in for local tools loading
+        if os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS", "").lower() != "true":
+            logger.debug("Local tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.")
+            return self._local_tools_cache
         
         tools_path = Path(self._tools_py_path)
         if not tools_path.exists():

@@ -68,7 +68,11 @@ def import_tools_from_file(file_path):
     return custom_tools_module
 
 try:
-    if os.path.exists(tools_path):
+    # Security: Require explicit opt-in for local tools loading
+    if os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS", "").lower() != "true":
+        logger.debug("Local tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.")
+        custom_tools_module = None
+    elif os.path.exists(tools_path):
         # tools.py exists in the root directory, import from file
         custom_tools_module = import_tools_from_file(tools_path)
         logger.debug("Successfully imported custom tools from root tools.py")
@@ -184,24 +188,24 @@ async def handle_media_stream(websocket: WebSocket):
             stream_sid = None
 
             async def receive_from_twilio():
-            """Receive audio data from Twilio and send it to the OpenAI Realtime API."""
-            nonlocal stream_sid
-            try:
-                async for message in websocket.iter_text():
-                    data = json.loads(message)
-                    if data['event'] == 'media' and openai_ws.open:
-                        audio_append = {
-                            "type": "input_audio_buffer.append",
-                            "audio": data['media']['payload']
-                        }
-                        await openai_ws.send(json.dumps(audio_append))
-                    elif data['event'] == 'start':
-                        stream_sid = data['start']['streamSid']
-                        print(f"Incoming stream has started {stream_sid}")
-            except WebSocketDisconnect:
-                print("Client disconnected.")
-                if openai_ws.open:
-                    await openai_ws.close()
+                """Receive audio data from Twilio and send it to the OpenAI Realtime API."""
+                nonlocal stream_sid
+                try:
+                    async for message in websocket.iter_text():
+                        data = json.loads(message)
+                        if data['event'] == 'media' and openai_ws.open:
+                            audio_append = {
+                                "type": "input_audio_buffer.append",
+                                "audio": data['media']['payload']
+                            }
+                            await openai_ws.send(json.dumps(audio_append))
+                        elif data['event'] == 'start':
+                            stream_sid = data['start']['streamSid']
+                            print(f"Incoming stream has started {stream_sid}")
+                except WebSocketDisconnect:
+                    print("Client disconnected.")
+                    if openai_ws.open:
+                        await openai_ws.close()
 
         async def send_to_twilio():
             """Receive events from the OpenAI Realtime API, send audio back to Twilio."""

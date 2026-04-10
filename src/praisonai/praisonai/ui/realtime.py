@@ -177,7 +177,11 @@ def import_tools_from_file(file_path):
     return custom_tools_module
 
 try:
-    if os.path.exists(tools_path):
+    # Security: Require explicit opt-in for local tools loading
+    if os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS", "").lower() != "true":
+        logger.info("Local tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.")
+        custom_tools_module = None
+    elif os.path.exists(tools_path):
         # tools.py exists in the root directory, import from file
         custom_tools_module = import_tools_from_file(tools_path)
         logger.info("Successfully imported custom tools from root tools.py")
