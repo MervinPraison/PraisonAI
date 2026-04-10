@@ -657,10 +657,6 @@ praisonai agents.yaml
 
 </details>
 
-<p align="center">
-  <img src=".github/images/langfuse.png" alt="PraisonAI Langfuse Tracing" width="800" />
-</p>
-
 <details>
 <summary><strong>🖥️ CLI Features</strong></summary>
 
@@ -748,6 +744,19 @@ PraisonAI is built for speed, with agent instantiation in under 4μs. This reduc
 ## ⭐ Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=MervinPraison/PraisonAI&type=Date)](https://docs.praison.ai)
+
+---
+
+## 🔍 Langfuse Tracing
+
+```bash
+pip install "praisonai[langfuse]"
+praisonai langfuse
+```
+
+<p align="center">
+  <img src=".github/images/langfuse.png" alt="PraisonAI Langfuse Tracing" width="800" />
+</p>
 
 ---
 

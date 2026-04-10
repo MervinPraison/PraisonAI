@@ -116,8 +116,8 @@ class FileSnapshot:
         project_path: str,
         snapshot_dir: Optional[str] = None,
         session_id: Optional[str] = None,
-        user_name: str = "PraisonAI Snapshot",
-        user_email: str = "praison@snapshot.local",
+        user_name: Optional[str] = None,
+        user_email: Optional[str] = None,
     ):
         """
         Initialize the file snapshot manager.
@@ -126,13 +126,13 @@ class FileSnapshot:
             project_path: Path to the project to track
             snapshot_dir: Optional custom snapshot directory
             session_id: Optional session ID for grouping snapshots
-            user_name: Git user.name for commits (default: "PraisonAI Snapshot")
-            user_email: Git user.email for commits (default: "praison@snapshot.local")
+            user_name: Git user.name for commits (default: from env PRAISONAI_GIT_USER_NAME or "PraisonAI Snapshot")
+            user_email: Git user.email for commits (default: from env PRAISONAI_GIT_USER_EMAIL or "praison@snapshot.local")
         """
         self.project_path = os.path.abspath(project_path)
         self.session_id = session_id
-        self.user_name = user_name
-        self.user_email = user_email
+        self.user_name = user_name or os.getenv("PRAISONAI_GIT_USER_NAME", "PraisonAI Snapshot")
+        self.user_email = user_email or os.getenv("PRAISONAI_GIT_USER_EMAIL", "praison@snapshot.local")
         
         # Create unique shadow repo path based on project path hash
         base_dir = snapshot_dir or DEFAULT_SNAPSHOT_DIR
