@@ -2,9 +2,14 @@
 import logging
 logging.getLogger('crewai.cli.config').setLevel(logging.ERROR)
 
-# Disable OpenTelemetry SDK
+# Disable OpenTelemetry SDK only when Langfuse is NOT configured
+# (Langfuse v4 requires OTel internally for tracing)
 import os
-os.environ["OTEL_SDK_DISABLED"] = "true"
+_langfuse_configured = bool(os.getenv("LANGFUSE_PUBLIC_KEY") or os.path.exists(
+    os.path.expanduser("~/.praisonai/langfuse.env")
+))
+if not _langfuse_configured:
+    os.environ.setdefault("OTEL_SDK_DISABLED", "true")
 os.environ["EC_TELEMETRY"] = "false"
 
 # Version is lightweight, import directly

@@ -146,7 +146,6 @@ class LangfuseSink:
             name=trace_name,
             as_type="span",
             input=trace_input,
-            start_time=event.timestamp,
             metadata={
                 "agent_id": event.agent_id,
                 "agent_name": agent_name,
@@ -164,7 +163,6 @@ class LangfuseSink:
         span = self._spans.get(agent_key)
         if span:
             span.update(
-                end_time=event.timestamp,
                 output=event.metadata.get("output") if event.metadata else None,
                 status_message=event.status or "completed",
                 level="ERROR" if event.status == "error" else "DEFAULT",
@@ -191,7 +189,6 @@ class LangfuseSink:
         tool_span = self._client.start_observation(
             name=tool_name,
             as_type="span",
-            start_time=event.timestamp,
             input=event.tool_args,
             metadata={
                 "tool_name": tool_name,
@@ -221,7 +218,6 @@ class LangfuseSink:
         tool_span = self._spans.pop(tool_key, None)
         if tool_span:
             tool_span.update(
-                end_time=event.timestamp,
                 output=event.tool_result_summary,
                 status_message=event.status or "completed",
                 level="ERROR" if event.status == "error" else "DEFAULT",
@@ -239,7 +235,6 @@ class LangfuseSink:
         error_event = self._client.start_observation(
             name="error",
             as_type="event",
-            start_time=event.timestamp,
             level="ERROR",
             status_message=event.error_message,
             input=event.tool_args,
@@ -256,7 +251,6 @@ class LangfuseSink:
         output_event = self._client.start_observation(
             name="output",
             as_type="event",
-            start_time=event.timestamp,
             output=event.tool_result_summary,
             metadata={
                 "agent_name": agent_name,

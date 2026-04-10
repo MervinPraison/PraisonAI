@@ -116,6 +116,8 @@ class FileSnapshot:
         project_path: str,
         snapshot_dir: Optional[str] = None,
         session_id: Optional[str] = None,
+        user_name: str = "PraisonAI Snapshot",
+        user_email: str = "praison@snapshot.local",
     ):
         """
         Initialize the file snapshot manager.
@@ -124,9 +126,13 @@ class FileSnapshot:
             project_path: Path to the project to track
             snapshot_dir: Optional custom snapshot directory
             session_id: Optional session ID for grouping snapshots
+            user_name: Git user.name for commits (default: "PraisonAI Snapshot")
+            user_email: Git user.email for commits (default: "praison@snapshot.local")
         """
         self.project_path = os.path.abspath(project_path)
         self.session_id = session_id
+        self.user_name = user_name
+        self.user_email = user_email
         
         # Create unique shadow repo path based on project path hash
         base_dir = snapshot_dir or DEFAULT_SNAPSHOT_DIR
@@ -168,8 +174,8 @@ class FileSnapshot:
         if not os.path.exists(self.shadow_path):
             os.makedirs(self.shadow_path, exist_ok=True)
             self._run_git("init", cwd=self.shadow_path)
-            self._run_git("config", "user.email", "praison@snapshot.local")
-            self._run_git("config", "user.name", "PraisonAI Snapshot")
+            self._run_git("config", "user.email", self.user_email)
+            self._run_git("config", "user.name", self.user_name)
             
             # Create initial empty commit
             self._run_git("commit", "--allow-empty", "-m", "Initial snapshot")

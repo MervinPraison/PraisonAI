@@ -37,6 +37,8 @@ class CheckpointConfig:
     enabled: bool = True
     auto_checkpoint: bool = True  # Auto-checkpoint before file modifications
     max_checkpoints: int = 100  # Maximum checkpoints to keep
+    user_name: str = "PraisonAI"  # Git user.name for commits
+    user_email: str = "checkpoints@praison.ai"  # Git user.email for commits
     exclude_patterns: List[str] = field(default_factory=lambda: [
         ".git",
         ".praisonai",
