@@ -35,6 +35,8 @@ Methods:
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">auto_memory</a>(value: Optional[bool]) -> None</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">background</a>() -> Optional[bool]</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">background</a>(value: Optional[bool]) -> None</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">chat_history</a>()</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">chat_history</a>(value)</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">chat_with_context</a>(message: str, context: 'ContextPack', **kwargs) -> str</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">checkpoints</a>() -> Optional[bool]</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">checkpoints</a>(value: Optional[bool]) -> None</code>
@@ -362,6 +364,9 @@ Methods:
 
 * <code title="class GuardrailConfig">GuardrailConfig.<a href="./src/praisonai-agents/praisonaiagents/config/feature_configs.py">to_dict</a>() -> Dict[str, Any]</code>
 * <code title="class LLMGuardrail">LLMGuardrail.<a href="./src/praisonai-agents/praisonaiagents/guardrails/llm_guardrail.py">__call__</a>(task_output) -> Tuple[bool, Union[str, 'TaskOutput']]</code>
+* <code title="class LLMGuardrail">LLMGuardrail.<a href="./src/praisonai-agents/praisonaiagents/guardrails/llm_guardrail.py">validate_input</a>(content: str, **kwargs) -> Tuple[bool, str]</code>
+* <code title="class LLMGuardrail">LLMGuardrail.<a href="./src/praisonai-agents/praisonaiagents/guardrails/llm_guardrail.py">validate_output</a>(content: str, **kwargs) -> Tuple[bool, str]</code>
+* <code title="class LLMGuardrail">LLMGuardrail.<a href="./src/praisonai-agents/praisonaiagents/guardrails/llm_guardrail.py">validate_tool_call</a>(tool_name: str, arguments: Dict[str, Any], **kwargs) -> Tuple[bool, Dict[str, Any]]</code>
 
 # Planning
 
