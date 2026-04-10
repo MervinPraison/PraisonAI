@@ -1,15 +1,15 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 321 | **Rust Features:** 667 | **Parity:** 89.1%
+> **Python Features:** 320 | **Rust Features:** 667 | **Parity:** 89.1%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 321 |
+| Python Core Features | 320 |
 | Rust Features | 667 |
 | **Actual Gap Count** | **35** |
-| Language Limitations (N/A) | 6 |
+| Language Limitations (N/A) | 5 |
 | **Parity** | **89.1%** |
 
 ## Implemented Features
@@ -689,7 +689,6 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ⚠️ `config` → Use `parity_config` instead
 - ⚠️ `db` → Use `parity_db` instead
 - ⚠️ `memory` (Rust reserved/module conflict)
-- ⚠️ `obs` → Use `parity_obs` instead
 - ⚠️ `tools` (Rust reserved/module conflict)
 - ⚠️ `workflows` (Rust reserved/module conflict)
 

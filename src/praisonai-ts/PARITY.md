@@ -1,13 +1,13 @@
 # Feature Parity Tracker
 
-> **Version:** 1.5.87 | **Last Updated:** 2026-04-09
+> **Version:** 1.5.87 | **Last Updated:** 2026-04-10
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 321 |
+| Python Core Features | 320 |
 | Python Wrapper Features | 99 |
 | TypeScript Features | 1192 |
 | **Gap Count** | **28** |
@@ -147,7 +147,7 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (180 done, 27 todo)
+### P3_Advanced (179 done, 27 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -330,7 +330,6 @@
 | `is\_policy\_string` | ✅ | ✅ | low | ✅ DONE |
 | `load\_plugin` | ✅ | ✅ | low | ✅ DONE |
 | `memory` | ✅ | ✅ | low | ✅ DONE |
-| `obs` | ✅ | ✅ | low | ✅ DONE |
 | `parse\_plugin\_header` | ✅ | ✅ | low | ✅ DONE |
 | `parse\_plugin\_header\_from\_file` | ✅ | ✅ | low | ✅ DONE |
 | `parse\_policy\_string` | ✅ | ✅ | low | ✅ DONE |
@@ -512,15 +511,6 @@ from praisonaiagents import MCP
 
 ```python
 from praisonaiagents import Memory
-```
-
-</details>
-
-<details>
-<summary><strong>obs</strong> (1 exports)</summary>
-
-```python
-from praisonaiagents import obs
 ```
 
 </details>

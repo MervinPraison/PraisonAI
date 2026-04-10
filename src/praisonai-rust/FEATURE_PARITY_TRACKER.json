@@ -1,14 +1,14 @@
 {
   "version": "1.5.87",
-  "lastUpdated": "2026-04-09",
+  "lastUpdated": "2026-04-10",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 321,
+    "pythonCoreFeatures": 320,
     "rustFeatures": 667,
-    "gapCount": 42,
-    "parityPercentage": 207.8
+    "gapCount": 41,
+    "parityPercentage": 208.4
   },
   "pythonCoreSDK": {
     "exports": [
@@ -296,7 +296,6 @@
       "load_plugin",
       "loop",
       "memory",
-      "obs",
       "parallel",
       "parallel_handoffs",
       "parse_plugin_header",
@@ -1712,7 +1711,6 @@
       "planning": [],
       "plugins": [
         "PluginRegistry",
-        "ToolDefinition",
         "disable_plugins",
         "enable_plugins",
         "get_plugin_manager",
@@ -1737,6 +1735,7 @@
       "tools": [
         "FunctionTool",
         "Tool",
+        "ToolDefinition",
         "ToolRegistry",
         "ToolResult"
       ],
@@ -4409,15 +4408,6 @@
         "effort": "low",
         "status": "TODO",
         "category": "other"
-      },
-      {
-        "feature": "obs",
-        "python": true,
-        "rust": false,
-        "priority": "P3",
-        "effort": "low",
-        "status": "TODO",
-        "category": "obs"
       },
       {
         "feature": "parse_plugin_header",
