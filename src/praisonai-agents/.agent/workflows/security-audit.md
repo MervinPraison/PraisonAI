@@ -101,7 +101,7 @@ pip index versions praisonai | head -1
 
 ## PHASE 4 — UPDATE ADVISORIES (only after packages are on PyPI)
 
-12. For each advisory, reopen to draft state and set patched versions + credits:
+13. For each advisory, reopen to draft state and set patched versions + credits:
 ```bash
 gh api repos/MervinPraison/PraisonAI/security-advisories/<GHSA_ID> \
   --method PATCH \
@@ -124,19 +124,19 @@ EOF
 - `<FIRST_PATCHED_VERSION>`: the version just published with the fix
 - Always include credits for the reporter
 
-13. Publish each advisory:
+14. Publish each advisory:
 ```bash
 gh api repos/MervinPraison/PraisonAI/security-advisories/<GHSA_ID> \
   --method PATCH --field state=published
 ```
 
-14. Request CVE for each published advisory:
+15. Request CVE for each published advisory:
 ```bash
 gh api repos/MervinPraison/PraisonAI/security-advisories/<GHSA_ID>/cve --method POST
 ```
 GitHub reviews and assigns CVE IDs within 1-3 business days.
 
-15. Verify final state:
+16. Verify final state:
 ```bash
 gh api repos/MervinPraison/PraisonAI/security-advisories --jq '.[] | "\(.ghsa_id)  \(.state)  \(.cve_id // "pending")  \(.severity)  \([.credits[].login] | join(",") )  \(.summary | .[0:50])"'
 ```
