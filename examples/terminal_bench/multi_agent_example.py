@@ -68,7 +68,8 @@ class MultiAgentPraisonAI(BaseAgent):
         
         # Set auto-approval for container safety
         registry = get_approval_registry()
-        registry.set_backend(AutoApproveBackend())
+        original_backend = registry.get_backend()
+        registry.set_backend(AutoApproveBackend(), agent_name="multi-agent-planner")
         
         try:
             # Create bash tool that wraps Harbor environment
@@ -136,19 +137,19 @@ class MultiAgentPraisonAI(BaseAgent):
             
             # Phase 1: Planning
             print("📋 Phase 1: Task Planning")
-            plan = planner.start(f"Create a detailed plan for: {instruction}")
+            plan = await planner.astart(f"Create a detailed plan for: {instruction}")
             print(f"Plan created: {len(plan.split('.')) if plan else 0} steps")
             
             # Phase 2: Execution
             print("⚡ Phase 2: Task Execution") 
             execution_prompt = f"Execute this plan step by step:\n\nOriginal task: {instruction}\n\nPlan:\n{plan}"
-            execution_result = executor.start(execution_prompt)
+            execution_result = await executor.astart(execution_prompt)
             print("Execution completed")
             
             # Phase 3: Verification
             print("✅ Phase 3: Solution Verification")
             verification_prompt = f"Verify this solution works correctly:\n\nOriginal task: {instruction}\n\nSolution: {execution_result}\n\nRun tests to confirm it works."
-            verification_result = verifier.start(verification_prompt)
+            verification_result = await verifier.astart(verification_prompt)
             print("Verification completed")
             
             # Combine results
@@ -168,8 +169,11 @@ class MultiAgentPraisonAI(BaseAgent):
             context.metadata = {"error": str(e)}
             raise
         finally:
-            # Reset approval backend (optional)
-            pass
+            # Restore original approval backend to avoid global state pollution
+            if original_backend:
+                registry.set_backend(original_backend)
+            else:
+                registry.remove_backend(agent_name="multi-agent-planner")
 
     def _populate_context(self, agents: list, context: AgentContext, result: Dict[str, Any]) -> None:
         """Populate Harbor context with multi-agent metrics."""
@@ -180,11 +184,10 @@ class MultiAgentPraisonAI(BaseAgent):
             total_cost = 0.0
             
             for agent in agents:
-                if hasattr(agent, '_usage') and agent._usage:
-                    total_input_tokens += getattr(agent._usage, 'input_tokens', 0) or 0
-                    total_output_tokens += getattr(agent._usage, 'output_tokens', 0) or 0
-                if hasattr(agent, '_cost') and agent._cost:
-                    total_cost += agent._cost
+                # Use agent's actual metrics properties
+                total_input_tokens += getattr(agent, '_total_tokens_in', 0)
+                total_output_tokens += getattr(agent, '_total_tokens_out', 0)
+                total_cost += agent.total_cost or 0.0
             
             context.n_input_tokens = total_input_tokens if total_input_tokens > 0 else None
             context.n_output_tokens = total_output_tokens if total_output_tokens > 0 else None
@@ -232,7 +235,8 @@ class AgentTeamPraisonAI(BaseAgent):
         """Run structured AgentTeam workflow."""
         
         registry = get_approval_registry()
-        registry.set_backend(AutoApproveBackend())
+        original_backend = registry.get_backend()
+        registry.set_backend(AutoApproveBackend(), agent_name="agent-team")
         
         try:
             # Create bash tool
@@ -283,7 +287,7 @@ class AgentTeamPraisonAI(BaseAgent):
             )
             
             print(f"🚀 AgentTeam starting: {instruction[:100]}...")
-            result = team.start(instruction)
+            result = await team.astart(instruction)
             print("✅ AgentTeam completed")
             
             # Populate context
@@ -296,8 +300,11 @@ class AgentTeamPraisonAI(BaseAgent):
             }
             
         finally:
-            # Reset approval backend (optional)
-            pass
+            # Restore original approval backend to avoid global state pollution
+            if original_backend:
+                registry.set_backend(original_backend)
+            else:
+                registry.remove_backend(agent_name="agent-team")
 
 
 if __name__ == "__main__":

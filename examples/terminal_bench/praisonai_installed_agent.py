@@ -18,11 +18,12 @@ For now, this serves as a reference implementation that could be contributed
 to the Harbor project via PR.
 """
 
+import os
 import shlex
 import json
 import asyncio
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 try:
     # These imports would work if this file was in Harbor's codebase
@@ -149,10 +150,10 @@ def main():
     try:
         from praisonaiagents import Agent
         from praisonaiagents.tools import execute_command
-        from praisonaiagents.approval import set_approval_backend, AutoApproveBackend
+        from praisonaiagents.approval import get_approval_registry, AutoApproveBackend
         
         # Set auto-approval for container-isolated execution
-        set_approval_backend(AutoApproveBackend())
+        get_approval_registry().set_backend(AutoApproveBackend())
         
         # Create terminal agent with shell execution capabilities
         agent = Agent(
@@ -278,19 +279,45 @@ if __name__ == "__main__":
         JSON output of the headless runner script.
         """
         try:
-            # Get the last execution result
-            # This would need to be implemented based on Harbor's execution model
-            # For now, this is a placeholder that shows the structure
+            # Parse the last stdout output for JSON metrics
+            # In Harbor's model, the last execution output should contain our JSON
+            last_output = getattr(context, '_last_stdout', None)
             
-            # In a real implementation, you'd parse the stdout from the runner script
-            # and extract the JSON metrics
-            
-            context.metadata = {
-                "framework": "praisonai",
-                "agent_type": "installed",
-                "version": self.version() if hasattr(self, 'version') else None,
-            }
-            
+            if last_output:
+                try:
+                    metrics = json.loads(last_output.strip())
+                    
+                    # Extract metrics with safe defaults
+                    context.n_input_tokens = metrics.get('input_tokens') 
+                    context.n_output_tokens = metrics.get('output_tokens')
+                    context.cost_usd = metrics.get('cost_usd')
+                    
+                    # Store additional metadata
+                    context.metadata = {
+                        "framework": "praisonai",
+                        "agent_type": "installed",
+                        "agent_name": metrics.get('agent_name', 'terminal-agent'),
+                        "model": metrics.get('model'),
+                        "tools_used": metrics.get('tools_used', []),
+                        "version": self.get_version() if hasattr(self, 'get_version') else None,
+                    }
+                    
+                except (json.JSONDecodeError, ValueError) as e:
+                    # If JSON parsing fails, store basic metadata
+                    context.metadata = {
+                        "framework": "praisonai", 
+                        "agent_type": "installed",
+                        "parse_error": str(e),
+                        "raw_output": str(last_output)[:200] if last_output else None,
+                    }
+            else:
+                # No output to parse
+                context.metadata = {
+                    "framework": "praisonai",
+                    "agent_type": "installed", 
+                    "status": "no_output",
+                }
+                
         except Exception as e:
             context.metadata = {"context_population_error": str(e)}
 

@@ -64,7 +64,7 @@ harbor run -d terminal-bench/terminal-bench-2 \
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────┐
 │            Harbor Framework             │
 │   (Terminal-Bench 2.0 Evaluation)      │

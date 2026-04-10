@@ -71,10 +71,11 @@ class PraisonAIExternalAgent(BaseAgent):
         This method bridges Harbor's BaseEnvironment.exec() to PraisonAI's tool system.
         """
         
-        # Set auto-approval for container-isolated execution
+        # Set auto-approval for container-isolated execution  
         # Harbor's container provides isolation, so we can safely auto-approve shell commands
         registry = get_approval_registry()
-        registry.set_backend(AutoApproveBackend())
+        original_backend = registry.get_backend()
+        registry.set_backend(AutoApproveBackend(), agent_name="terminal-agent")
         
         try:
             # Create bash tool that wraps Harbor's environment.exec()
@@ -118,7 +119,7 @@ class PraisonAIExternalAgent(BaseAgent):
 
             # Execute the agent
             print(f"🚀 PraisonAI Agent starting task: {instruction[:100]}...")
-            result = agent.start(instruction)
+            result = await agent.astart(instruction)
             print(f"✅ PraisonAI Agent completed task")
             
             # Populate Harbor context with metadata
@@ -129,8 +130,11 @@ class PraisonAIExternalAgent(BaseAgent):
             context.metadata = {"error": str(e)}
             raise
         finally:
-            # Reset approval backend (optional - could leave auto-approve for future runs)
-            pass
+            # Restore original approval backend to avoid global state pollution
+            if original_backend:
+                registry.set_backend(original_backend)
+            else:
+                registry.remove_backend(agent_name="terminal-agent")
 
     def _populate_context(self, agent: Agent, context: AgentContext, result: Any) -> None:
         """
@@ -139,16 +143,17 @@ class PraisonAIExternalAgent(BaseAgent):
         Harbor tracks: n_input_tokens, n_output_tokens, cost_usd, metadata
         """
         try:
-            # Extract token usage from agent if available
-            usage = getattr(agent, '_usage', None)
-            if usage:
-                context.n_input_tokens = getattr(usage, 'input_tokens', None)
-                context.n_output_tokens = getattr(usage, 'output_tokens', None)
-                
-            # Extract cost if available  
-            cost = getattr(agent, '_cost', None)
-            if cost:
-                context.cost_usd = cost
+            # Extract token usage and cost from agent
+            summary = agent.cost_summary()
+            if summary:
+                context.n_input_tokens = summary.get('tokens_in')
+                context.n_output_tokens = summary.get('tokens_out')
+                context.cost_usd = summary.get('cost')
+            else:
+                # Fallback to direct properties
+                context.n_input_tokens = getattr(agent, '_total_tokens_in', 0)
+                context.n_output_tokens = getattr(agent, '_total_tokens_out', 0) 
+                context.cost_usd = agent.total_cost
                 
             # Store result summary and agent info
             context.metadata = {
