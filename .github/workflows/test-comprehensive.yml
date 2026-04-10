@@ -37,6 +37,10 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+        with:
+          persist-credentials: false
 
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5

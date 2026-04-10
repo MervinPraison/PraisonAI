@@ -36,6 +36,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
+        with:
+          persist-credentials: false
+        with:
           token: ${{ steps.generate_token.outputs.token }}
 
       - name: Set up Git

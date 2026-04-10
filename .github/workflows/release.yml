@@ -26,6 +26,10 @@ jobs:
     # First checkout the upstream repo at the specified tag
     - name: Checkout upstream repo
       uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+        with:
+          persist-credentials: false
       with:
         repository: MervinPraison/PraisonAI
         ref: ${{ github.event.inputs.tag }}
@@ -44,6 +48,10 @@ jobs:
     # Now checkout the fork at main branch
     - name: Checkout fork
       uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+        with:
+          persist-credentials: false
       with:
         repository: ${{ github.event.inputs.fork_owner }}/PraisonAI
         ref: main
@@ -441,6 +449,10 @@ jobs:
     # First checkout the fork's main branch
     - name: Checkout fork repo
       uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+        with:
+          persist-credentials: false
       with:
         fetch-depth: 0
         token: ${{ secrets.PAT_TOKEN }}
