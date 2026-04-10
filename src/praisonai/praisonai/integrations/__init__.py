@@ -1,19 +1,23 @@
 """
-PraisonAI Integrations - External CLI tool integrations.
+PraisonAI Integrations - External CLI tool and managed agent integrations.
 
-This module provides integrations with external AI coding CLI tools:
+This module provides integrations with external AI coding tools:
 - Claude Code CLI
 - Gemini CLI
 - OpenAI Codex CLI
 - Cursor CLI
+- Managed Agent Backends (Anthropic Managed Agents API)
 
 All integrations use lazy loading to avoid performance impact.
 
 Usage:
-    from praisonai.integrations import ClaudeCodeIntegration, GeminiCLIIntegration
+    from praisonai.integrations import ClaudeCodeIntegration, ManagedAgentIntegration
     
-    # Create integration
+    # CLI tool integration
     claude = ClaudeCodeIntegration(workspace="/path/to/project")
+    
+    # Managed agent integration
+    managed = ManagedAgentIntegration(provider="anthropic", api_key="...")
     
     # Use as agent tool
     tool = claude.as_tool()
@@ -29,6 +33,7 @@ __all__ = [
     'GeminiCLIIntegration',
     'CodexCLIIntegration',
     'CursorCLIIntegration',
+    'ManagedAgentIntegration',
     'get_available_integrations',
 ]
 
@@ -50,6 +55,9 @@ def __getattr__(name):
     elif name == 'CursorCLIIntegration':
         from .cursor_cli import CursorCLIIntegration
         return CursorCLIIntegration
+    elif name == 'ManagedAgentIntegration':
+        from .managed_agents import ManagedAgentIntegration
+        return ManagedAgentIntegration
     elif name == 'get_available_integrations':
         from .base import get_available_integrations
         return get_available_integrations
