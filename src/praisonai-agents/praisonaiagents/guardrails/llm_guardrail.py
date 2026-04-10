@@ -164,7 +164,8 @@ Your response:"""
         
         This is the main validation method, reusing existing logic.
         """
-        return self.validate(content)
+        output_description = f"Validate this output: {self.description}"
+        return self._llm_validate(content, output_description)
     
     def validate_tool_call(self, tool_name: str, arguments: Dict[str, Any], **kwargs) -> Tuple[bool, Dict[str, Any]]:
         """

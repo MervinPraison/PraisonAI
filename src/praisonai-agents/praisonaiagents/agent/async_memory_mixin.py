@@ -43,17 +43,17 @@ class AsyncMemoryMixin:
         Returns:
             Memory ID if successful, None otherwise
         """
-        if not hasattr(self, '_memory') or self._memory is None:
+        if not hasattr(self, '_memory_instance') or self._memory_instance is None:
             logger.debug("No memory configured for async storage")
             return None
             
         # Check if memory adapter supports async operations
-        if isinstance(self._memory, AsyncMemoryProtocol):
+        if isinstance(self._memory_instance, AsyncMemoryProtocol):
             try:
                 if memory_type == "long_term":
-                    return await self._memory.astore_long_term(content, metadata, **kwargs)
+                    return await self._memory_instance.astore_long_term(content, metadata, **kwargs)
                 else:
-                    return await self._memory.astore_short_term(content, metadata, **kwargs)
+                    return await self._memory_instance.astore_short_term(content, metadata, **kwargs)
             except Exception as e:
                 logger.error(f"Error in async memory storage: {e}")
                 return None
@@ -82,17 +82,17 @@ class AsyncMemoryMixin:
         Returns:
             List of memory entries
         """
-        if not hasattr(self, '_memory') or self._memory is None:
+        if not hasattr(self, '_memory_instance') or self._memory_instance is None:
             logger.debug("No memory configured for async search")
             return []
             
         # Check if memory adapter supports async operations
-        if isinstance(self._memory, AsyncMemoryProtocol):
+        if isinstance(self._memory_instance, AsyncMemoryProtocol):
             try:
                 if memory_type == "long_term":
-                    return await self._memory.asearch_long_term(query, limit, **kwargs)
+                    return await self._memory_instance.asearch_long_term(query, limit, **kwargs)
                 else:
-                    return await self._memory.asearch_short_term(query, limit, **kwargs)
+                    return await self._memory_instance.asearch_short_term(query, limit, **kwargs)
             except Exception as e:
                 logger.error(f"Error in async memory search: {e}")
                 return []
@@ -125,30 +125,30 @@ class AsyncMemoryMixin:
         Returns:
             Result of the memory operation
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         
         try:
             if operation == "store":
-                if memory_type == "long_term" and hasattr(self._memory, 'store_long_term'):
+                if memory_type == "long_term" and hasattr(self._memory_instance, 'store_long_term'):
                     return await loop.run_in_executor(
                         None, 
-                        lambda: self._memory.store_long_term(content, metadata, **kwargs)
+                        lambda: self._memory_instance.store_long_term(content, metadata, **kwargs)
                     )
-                elif hasattr(self._memory, 'store_short_term'):
+                elif hasattr(self._memory_instance, 'store_short_term'):
                     return await loop.run_in_executor(
                         None,
-                        lambda: self._memory.store_short_term(content, metadata, **kwargs)
+                        lambda: self._memory_instance.store_short_term(content, metadata, **kwargs)
                     )
             elif operation == "search":
-                if memory_type == "long_term" and hasattr(self._memory, 'search_long_term'):
+                if memory_type == "long_term" and hasattr(self._memory_instance, 'search_long_term'):
                     return await loop.run_in_executor(
                         None,
-                        lambda: self._memory.search_long_term(content, limit, **kwargs)
+                        lambda: self._memory_instance.search_long_term(content, limit, **kwargs)
                     )
-                elif hasattr(self._memory, 'search_short_term'):
+                elif hasattr(self._memory_instance, 'search_short_term'):
                     return await loop.run_in_executor(
                         None,
-                        lambda: self._memory.search_short_term(content, limit, **kwargs)
+                        lambda: self._memory_instance.search_short_term(content, limit, **kwargs)
                     )
                     
         except Exception as e:
@@ -208,10 +208,10 @@ class AsyncMemoryMixin:
         Logs warnings if memory adapter doesn't support async operations
         and will fall back to thread pool execution.
         """
-        if hasattr(self, '_memory') and self._memory is not None:
-            if not isinstance(self._memory, AsyncMemoryProtocol):
+        if hasattr(self, '_memory_instance') and self._memory_instance is not None:
+            if not isinstance(self._memory_instance, AsyncMemoryProtocol):
                 logger.info(
-                    f"Memory adapter {type(self._memory).__name__} doesn't implement "
+                    f"Memory adapter {type(self._memory_instance).__name__} doesn't implement "
                     f"AsyncMemoryProtocol, falling back to thread pool execution"
                 )
                 return False

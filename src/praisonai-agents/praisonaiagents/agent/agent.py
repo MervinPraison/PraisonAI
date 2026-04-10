@@ -1819,6 +1819,11 @@ Your Goal: {self.goal}
         """Get chat history (read-only access, use context managers for modifications)."""
         return self.__chat_history_state.get()
     
+    @chat_history.setter 
+    def chat_history(self, value):
+        """Set chat history (updates the underlying async-safe state)."""
+        self.__chat_history_state.value = value
+    
     @property
     def _history_lock(self):
         """Get appropriate lock for chat history based on execution context."""

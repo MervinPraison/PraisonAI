@@ -65,6 +65,9 @@ class DualLock:
     @asynccontextmanager
     async def async_lock(self):
         """Acquire lock in asynchronous context using asyncio.Lock."""
+        # NOTE: This implementation provides async safety within the same thread/event loop
+        # but does NOT provide mutual exclusion between sync and async contexts.
+        # For true dual-mode mutual exclusion, a more complex implementation would be needed.
         async_lock = self._get_async_lock()
         async with async_lock:
             yield
@@ -94,12 +97,37 @@ class AsyncSafeState:
         # Async usage
         async with state.async_lock():
             state.value.append("item")
+            
+        # Direct context manager (backward compatibility)
+        with state:
+            state.value.append("item")
         ```
     """
     
     def __init__(self, initial_value: Any = None):
         self.value = initial_value
         self._lock = DualLock()
+        
+    def __enter__(self):
+        """Synchronous context manager entry (for backward compatibility)."""
+        self._thread_lock = self._lock._thread_lock
+        self._thread_lock.acquire()
+        return self.value
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Synchronous context manager exit."""
+        self._thread_lock.release()
+        return False
+        
+    async def __aenter__(self):
+        """Async context manager entry."""
+        self._async_lock = self._lock._get_async_lock()
+        await self._async_lock.__aenter__()
+        return self.value
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        return await self._async_lock.__aexit__(exc_type, exc_val, exc_tb)
         
     @contextmanager 
     def lock(self):
