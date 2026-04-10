@@ -113,6 +113,86 @@ jobs:
             core.setOutput('pr_number', context.issue.number.toString());
 
   # ================================================================
+  # FALLBACK: Claude trigger for cases where Copilot chain fails/skips
+  # Ensures Claude always runs after sufficient review time
+  # ================================================================
+  claude-fallback-timeout:
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.action == 'opened'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Wait for review window (15 min)
+        run: sleep 900
+        
+      - name: Check if Claude already triggered
+        id: check_claude
+        uses: actions/github-script@v7
+        env:
+          TRIGGER_LOGINS: ${{ env.CLAUDE_TRIGGER_LOGINS }}
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            const triggerLogins = JSON.parse(process.env.TRIGGER_LOGINS);
+            const comments = await github.rest.issues.listComments({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            });
+            const alreadyPosted = comments.data.some(c =>
+              c.body.includes('@claude') && triggerLogins.includes(c.user.login)
+            );
+            core.setOutput('already_triggered', alreadyPosted ? 'true' : 'false');
+            core.setOutput('comments_count', comments.data.length.toString());
+            
+            // Collect all bot reviewer comments for context
+            const botReviews = comments.data.filter(c => 
+              ['coderabbitai[bot]', 'qodo-code-review[bot]', 'gemini-code-assist[bot]', 
+               'copilot-swe-agent', 'Copilot', 'greptile-apps[bot]'].some(bot => 
+                c.user.login.toLowerCase().includes(bot.toLowerCase())
+              )
+            );
+            core.setOutput('review_count', botReviews.length.toString());
+            
+      - name: Aggregate reviews and trigger Claude
+        if: steps.check_claude.outputs.already_triggered != 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            const comments = await github.rest.issues.listComments({issue_number: context.issue.number, owner: context.repo.owner, repo: context.repo.repo, per_page: 100});
+            const reviews = {coderabbit: [], qodo: [], gemini: [], copilot: [], greptile: [], others: []};
+            comments.data.forEach(c => {
+              const login = c.user.login.toLowerCase();
+              const body = c.body.substring(0, 500);
+              if (login.includes('coderabbit')) reviews.coderabbit.push(body);
+              else if (login.includes('qodo')) reviews.qodo.push(body);
+              else if (login.includes('gemini')) reviews.gemini.push(body);
+              else if (login.includes('copilot')) reviews.copilot.push(body);
+              else if (login.includes('greptile')) reviews.greptile.push(body);
+              else if (c.user.type === 'Bot') reviews.others.push(body);
+            });
+            const summaryParts = [];
+            if (reviews.coderabbit.length) summaryParts.push('CodeRabbit: ' + reviews.coderabbit.length + ' comments');
+            if (reviews.qodo.length) summaryParts.push('Qodo: ' + reviews.qodo.length + ' comments');
+            if (reviews.gemini.length) summaryParts.push('Gemini: ' + reviews.gemini.length + ' comments');
+            if (reviews.copilot.length) summaryParts.push('Copilot: ' + reviews.copilot.length + ' comments');
+            if (reviews.greptile.length) summaryParts.push('Greptile: ' + reviews.greptile.length + ' comments');
+            const reviewSummary = summaryParts.length ? summaryParts.join(' | ') : 'No bot reviews detected';
+            const claudeBody = '@claude You are the FINAL architecture reviewer. ' + reviewSummary + '.\n\n' +
+              'Review Context: ' + comments.data.length + ' total comments, ' + 
+              (reviews.coderabbit.length + reviews.qodo.length + reviews.gemini.length + reviews.copilot.length + reviews.greptile.length) + ' bot reviews.\n\n' +
+              'Phase 1: Review per AGENTS.md principles (protocol-driven, backward compatible, no perf impact).\n' +
+              'Phase 2: FIX valid issues found by prior reviewers.\n' +
+              'Phase 3: Provide final verdict (approve or request changes).';
+            await github.rest.issues.createComment({issue_number: context.issue.number, owner: context.repo.owner, repo: context.repo.repo, body: claudeBody});
+            console.log('Claude fallback triggered on PR #' + context.issue.number + ' with ' + reviewSummary);
+
+  # ================================================================
   # Claude FINAL review — polls for Copilot's response, then triggers
   # This runs IN-BAND under the PAT context (MervinPraison), avoiding
   # the action_required approval gate that blocks bot-triggered workflows.

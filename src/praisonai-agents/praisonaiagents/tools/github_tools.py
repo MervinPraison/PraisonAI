@@ -1,7 +1,4 @@
-import os
 import subprocess
-from pydantic import BaseModel, Field
-from typing import Dict, Any, Optional
 import logging
 from .decorator import tool
 
@@ -11,13 +8,14 @@ logger = logging.getLogger(__name__)
 def github_create_branch(branch_name: str) -> str:
     """Create and checkout a new git branch.
     
+logger.debug(f"Branch '{branch_name}' checked out successfully.")
     Args:
         branch_name: The name of the branch to create and checkout.
     """
     try:
         # Check if we are in a git repository
         subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], check=True, capture_output=True)
-        subprocess.run(["git", "checkout", "-b", branch_name], check=True, capture_output=True, text=True)
+        subprocess.run(["git", "checkout", "-B", branch_name], check=True, capture_output=True, text=True)
         return f"Successfully created and checked out branch '{branch_name}'"
     except subprocess.CalledProcessError as e:
         logger.error(f"Failed to create branch: {e.stderr}")

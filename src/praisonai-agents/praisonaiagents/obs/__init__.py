@@ -190,9 +190,30 @@ class _LazyObsModule:
         Auto-detect observability provider from environment variables.
         
         Checks for common env vars like LANGFUSE_PUBLIC_KEY, LANGSMITH_API_KEY, etc.
+        Also loads configuration from ~/.praisonai/langfuse.env if it exists.
         Returns None if no provider is detected.
         """
         import os
+        from pathlib import Path
+        
+        # First, try to load from praisonai config file if present
+        # This bridges the gap between CLI config and Agent observability
+        config_file = Path.home() / ".praisonai" / "langfuse.env"
+        if config_file.exists():
+            try:
+                with open(config_file, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            key, value = line.split("=", 1)
+                            key = key.strip()
+                            value = value.strip()
+                            # Only set if not already in environment
+                            if not os.environ.get(key):
+                                os.environ[key] = value
+            except Exception:
+                # Silently fail if config file can't be read
+                pass
         
         # Check for common provider env vars
         provider_env_map = {

@@ -1,3 +1,3 @@
-# GitHub Issue #1337: Big Task: Document CLI Router Architecture
+# GitHub Issue #1350: Add debug log on successful branch checkout
 
-Please thoroughly trace how src/praisonai/praisonai/cli/main.py interfaces with typer across all command modules. Produce a detailed architecture document in a new file docs/cli_architecture_test.md.
+The github_create_branch function in src/praisonai-agents/praisonaiagents/tools/github_tools.py should call logger.debug after a successful checkout.

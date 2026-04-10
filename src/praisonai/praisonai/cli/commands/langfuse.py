@@ -9,11 +9,15 @@ import json
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import typer
 from rich.console import Console
 from rich.table import Table
+from rich.panel import Panel
+from rich import box
 
 app = typer.Typer(name="langfuse", help="🔍 Langfuse observability platform")
 
@@ -47,6 +51,12 @@ def langfuse_start(
     data_dir: str = typer.Option(
         None, "--data-dir", help="Data directory (default: ~/.praisonai/langfuse)"
     ),
+    email: str = typer.Option(
+        None, "--email", "-e", help="Initial admin email (default: admin@langfuse.com)"
+    ),
+    password: str = typer.Option(
+        None, "--password", "-pw", help="Initial admin password (default: admin12345)"
+    ),
 ):
     """Start local Langfuse server (Docker).
     
@@ -57,6 +67,7 @@ def langfuse_start(
         praisonai langfuse
         praisonai langfuse --port 8080
         praisonai langfuse --no-detach
+        praisonai langfuse --email admin@example.com --password mypassword123
     """
     if ctx.invoked_subcommand is not None:
         return
@@ -119,6 +130,41 @@ def langfuse_start(
             content = content.replace("3000:3000", f"{port}:3000")
             compose_file.write_text(content)
     
+    # Set up initial credentials via .env file
+    env_file = repo_path / ".env"
+    env_vars = {}
+    
+    # Read existing .env if present
+    if env_file.exists():
+        for line in env_file.read_text().strip().split('\n'):
+            if '=' in line and not line.startswith('#'):
+                key, value = line.split('=', 1)
+                env_vars[key.strip()] = value.strip()
+    
+    # Set default or custom credentials
+    default_email = email or "admin@langfuse.com"
+    default_password = password or "admin12345"
+    default_name = "Admin User"
+    
+    # Update with Langfuse init user environment variables
+    env_vars["LANGFUSE_INIT_USER_EMAIL"] = default_email
+    env_vars["LANGFUSE_INIT_USER_PASSWORD"] = default_password
+    env_vars["LANGFUSE_INIT_USER_NAME"] = default_name
+    env_vars["LANGFUSE_INIT_ORG_NAME"] = "Default Org"
+    env_vars["LANGFUSE_INIT_PROJECT_NAME"] = "Default Project"
+    
+    # Write .env file
+    env_content = "# Langfuse Initial User Configuration\n"
+    env_content += f"LANGFUSE_INIT_USER_EMAIL={default_email}\n"
+    env_content += f"LANGFUSE_INIT_USER_PASSWORD={default_password}\n"
+    env_content += f"LANGFUSE_INIT_USER_NAME={default_name}\n"
+    env_content += f"LANGFUSE_INIT_ORG_NAME=Default Org\n"
+    env_content += f"LANGFUSE_INIT_PROJECT_NAME=Default Project\n"
+    env_content += "LANGFUSE_INIT_PROJECT_ID=default-project\n"
+    env_file.write_text(env_content)
+    
+    console.print(f"[dim]📄 Initial user: {default_email}[/dim]")
+    
     # Start Docker Compose
     console.print(f"[blue]🚀 Starting Langfuse on {host}:{port}[/blue]")
     console.print("[dim]This may take a few minutes on first run (downloading images)...[/dim]")
@@ -157,20 +203,37 @@ def langfuse_start(
             console.print()
             console.print("[bold green]🎉 Langfuse is ready![/bold green]")
             console.print(f"[blue]🌐 Web UI: http://{host}:{port}[/blue]")
-            console.print("[dim]Default login: admin@langfuse.com / admin[/dim]")
+            console.print(f"[dim]Login: {default_email} / {default_password[:3]}***[/dim]")
             console.print()
-            console.print("Next steps:")
-            console.print("1. Open the web UI and create your first project")
+            console.print("[bold]Next steps:[/bold]")
+            console.print("1. Open the web UI and login")
             console.print("2. Get API keys from Settings > API Keys")
-            console.print(f"3. Run: praisonai langfuse config --public-key pk-... --secret-key sk-...")
-            console.print("4. Test: praisonai langfuse test")
+            console.print("3. Configure PraisonAI:")
+            console.print(f"   [green]praisonai langfuse config --public-key pk-... --secret-key sk-...[/green]")
+            console.print("4. Test: [green]praisonai langfuse test[/green]")
             
         else:
             subprocess.run(cmd, cwd=repo_path)
             
     except subprocess.CalledProcessError as e:
-        console.print(f"[red]❌ Failed to start Langfuse: {e}[/red]")
-        console.print("[yellow]Check Docker logs with: docker compose logs[/yellow]")
+        error_output = str(e)
+        if hasattr(e, 'stderr') and e.stderr:
+            error_output += e.stderr
+        if hasattr(e, 'stdout') and e.stdout:
+            error_output += e.stdout
+        
+        # Check for port conflicts
+        from praisonai.cli.commands.port import _is_port_conflict_error, _extract_port_from_error, _show_port_conflict_help
+        if _is_port_conflict_error(error_output):
+            port = _extract_port_from_error(error_output)
+            if port:
+                _show_port_conflict_help(port, console)
+            else:
+                console.print(f"[red]❌ Failed to start Langfuse: Port conflict detected[/red]")
+                console.print("[yellow]Run [cyan]praisonai port list[/cyan] to see ports in use[/yellow]")
+        else:
+            console.print(f"[red]❌ Failed to start Langfuse: {e}[/red]")
+            console.print("[yellow]Check Docker logs with: docker compose logs[/yellow]")
         raise typer.Abort()
     except KeyboardInterrupt:
         console.print("\n[yellow]⏹️  Stopping Langfuse...[/yellow]")
@@ -202,6 +265,62 @@ def langfuse_stop(
     except subprocess.CalledProcessError as e:
         console.print(f"[red]❌ Failed to stop Langfuse: {e}[/red]")
         raise typer.Abort()
+
+
+@app.command("init")
+def langfuse_init(
+    email: str = typer.Option(
+        "admin@langfuse.com", "--email", "-e", help="Admin email address"
+    ),
+    password: str = typer.Option(
+        None, "--password", "-p", help="Admin password (will prompt if not provided)"
+    ),
+    port: int = typer.Option(3000, "--port", "-p", help="Port to listen on"),
+    data_dir: str = typer.Option(
+        None, "--data-dir", help="Data directory (default: ~/.praisonai/langfuse)"
+    ),
+):
+    """Initialize Langfuse with custom admin credentials.
+    
+    First-time setup with configurable admin user. Sets up the Docker
+    environment and creates initial user account.
+    
+    Examples:
+        praisonai langfuse init
+        praisonai langfuse init --email admin@example.com --password mypass123
+        praisonai langfuse init --email user@company.com --port 8080
+    """
+    console = Console()
+    
+    # Prompt for password if not provided
+    if password is None:
+        password = typer.prompt("Enter admin password", hide_input=True)
+        password_confirm = typer.prompt("Confirm password", hide_input=True)
+        if password != password_confirm:
+            console.print("[red]❌ Passwords do not match[/red]")
+            raise typer.Abort()
+    
+    # Validate password length (Langfuse requires 8+ characters)
+    if len(password) < 8:
+        console.print("[red]❌ Password must be at least 8 characters long[/red]")
+        raise typer.Abort()
+    
+    console.print("[bold]🚀 Initializing Langfuse...[/bold]")
+    console.print(f"[dim]Email: {email}[/dim]")
+    console.print(f"[dim]Port: {port}[/dim]")
+    console.print()
+    
+    # Reuse the start logic with explicit credentials
+    ctx = typer.Context(langfuse_start)
+    langfuse_start(
+        ctx=ctx,
+        port=port,
+        host="127.0.0.1",
+        detach=True,
+        data_dir=data_dir,
+        email=email,
+        password=password
+    )
 
 
 @app.command("status")
@@ -362,8 +481,23 @@ def langfuse_config(
     
     # Set configuration
     if not any([public_key, secret_key, host]):
-        console.print("[red]❌ At least one option must be provided[/red]")
-        console.print("Use --show to view current configuration")
+        console.print("[yellow]ℹ️  No configuration options provided[/yellow]")
+        console.print()
+        console.print("[bold]Quick Setup Guide:[/bold]")
+        console.print()
+        console.print("1. [bold cyan]Get your API keys from Langfuse Cloud:[/bold cyan]")
+        console.print("   [blue]https://cloud.langfuse.com[/blue]")
+        console.print("   → Sign up → Create project → Project Settings → API Keys")
+        console.print()
+        console.print("2. [bold cyan]Configure PraisonAI:[/bold cyan]")
+        console.print("   [dim]praisonai langfuse config[/dim]")
+        console.print("     [dim]--public-key pk-...[/dim]")
+        console.print("     [dim]--secret-key sk-...[/dim]")
+        console.print()
+        console.print("3. [bold cyan]Verify your setup:[/bold cyan]")
+        console.print("   [green]praisonai langfuse test[/green]")
+        console.print()
+        console.print("[dim]Use --show to view current configuration[/dim]")
         raise typer.Abort()
     
     # Read existing config
@@ -442,9 +576,21 @@ def langfuse_test():
     config = LangfuseSinkConfig()
     
     if not config.enabled:
-        console.print("[yellow]⚠️  Langfuse tracing is disabled[/yellow]")
-        console.print("Set LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY environment variables")
-        return
+        console.print("[yellow]⚠️  Langfuse credentials not configured[/yellow]")
+        console.print()
+        console.print("[bold]How to get your Langfuse API keys:[/bold]")
+        console.print("1. Go to [blue]https://cloud.langfuse.com[/blue] and sign up/login")
+        console.print("2. Create a new project (or open existing)")
+        console.print("3. Go to Project Settings → API Keys")
+        console.print("4. Click 'Create new API keys'")
+        console.print()
+        console.print("[bold]Then configure PraisonAI:[/bold]")
+        console.print("  [green]praisonai langfuse config --public-key=pk-... --secret-key=sk-...[/green]")
+        console.print()
+        console.print("Or set environment variables:")
+        console.print("  [green]export LANGFUSE_PUBLIC_KEY=pk-...[/green]")
+        console.print("  [green]export LANGFUSE_SECRET_KEY=sk-...[/green]")
+        raise typer.Abort()
     
     console.print("[blue]🧪 Testing Langfuse connectivity...[/blue]")
     console.print(f"[dim]Host: {config.host}[/dim]")
@@ -522,3 +668,317 @@ def langfuse_version():
                 console.print(f"[bold]Local Langfuse[/bold]: {version}")
         except Exception:
             pass
+
+
+@app.command("traces")
+def langfuse_traces(
+    limit: int = typer.Option(20, "--limit", "-n", help="Maximum number of traces to show"),
+    session_id: Optional[str] = typer.Option(None, "--session", "-s", help="Filter by session ID"),
+    agent: Optional[str] = typer.Option(None, "--agent", "-a", help="Filter by agent name"),
+):
+    """
+    List traces from Langfuse.
+    
+    Fetches and displays traces from the Langfuse API without opening the web UI.
+    Shows trace ID, name, timestamp, session, and metadata.
+    
+    Examples:
+        praisonai langfuse traces
+        praisonai langfuse traces --limit 10
+        praisonai langfuse traces --session abc-123
+        praisonai langfuse traces --agent MyAgent
+    """
+    console = Console()
+    
+    # Import the client
+    try:
+        from ..langfuse_client import LangfuseClient, LangfuseAPIError
+    except ImportError:
+        console.print("[red]❌ Langfuse client not available[/red]")
+        raise typer.Abort()
+    
+    # Load client from config
+    try:
+        client = LangfuseClient.from_config_file()
+    except FileNotFoundError as e:
+        console.print(f"[red]❌ {e}[/red]")
+        console.print("[yellow]Run 'praisonai langfuse config --public-key ... --secret-key ...' first[/yellow]")
+        raise typer.Abort()
+    except ValueError as e:
+        console.print(f"[red]❌ {e}[/red]")
+        raise typer.Abort()
+    
+    # Fetch traces
+    try:
+        console.print(f"[blue]📊 Fetching traces from {client.host}...[/blue]")
+        traces = client.get_traces(limit=limit, session_id=session_id, name=agent)
+        
+        if not traces:
+            console.print("[yellow]No traces found[/yellow]")
+            if session_id:
+                console.print(f"[dim]Filter: session_id={session_id}[/dim]")
+            if agent:
+                console.print(f"[dim]Filter: agent={agent}[/dim]")
+            return
+        
+        # Create table
+        table = Table(title=f"Recent Traces ({len(traces)})")
+        table.add_column("Trace ID", style="cyan", no_wrap=True)
+        table.add_column("Name", style="green")
+        table.add_column("Timestamp", style="blue")
+        table.add_column("Session", style="yellow")
+        table.add_column("Observations", style="magenta")
+        
+        for trace in traces:
+            trace_id = trace.get("id", "unknown")[:12] + "..."
+            name = trace.get("name", "unnamed")
+            
+            # Parse timestamp
+            ts = trace.get("timestamp", "")
+            if ts:
+                try:
+                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    timestamp = dt.strftime("%Y-%m-%d %H:%M")
+                except Exception:
+                    timestamp = str(ts)[:16]
+            else:
+                timestamp = "unknown"
+            
+            session = trace.get("sessionId", "")[:8] + "..." if trace.get("sessionId") else "-"
+            obs_count = len(trace.get("observations", []))
+            
+            table.add_row(trace_id, name, timestamp, session, str(obs_count))
+        
+        console.print(table)
+        
+        # Show hint for viewing details
+        if traces:
+            console.print(f"[dim]View details: praisonai langfuse show {traces[0].get('id')}[/dim]")
+        
+    except LangfuseAPIError as e:
+        console.print(f"[red]❌ API Error: {e}[/red]")
+        if "401" in str(e):
+            console.print("[yellow]Check your LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY[/yellow]")
+        elif "connection" in str(e).lower():
+            console.print("[yellow]Ensure Langfuse is running: praisonai langfuse status[/yellow]")
+        raise typer.Abort()
+    except Exception as e:
+        console.print(f"[red]❌ Error: {e}[/red]")
+        raise typer.Abort()
+
+
+@app.command("sessions")
+def langfuse_sessions(
+    limit: int = typer.Option(20, "--limit", "-n", help="Maximum number of sessions to show"),
+):
+    """
+    List sessions from Langfuse.
+    
+    Fetches and displays sessions (conversation threads) from the Langfuse API.
+    Shows session ID, creation time, and number of traces in each session.
+    
+    Examples:
+        praisonai langfuse sessions
+        praisonai langfuse sessions --limit 10
+    """
+    console = Console()
+    
+    # Import the client
+    try:
+        from ..langfuse_client import LangfuseClient, LangfuseAPIError
+    except ImportError:
+        console.print("[red]❌ Langfuse client not available[/red]")
+        raise typer.Abort()
+    
+    # Load client from config
+    try:
+        client = LangfuseClient.from_config_file()
+    except FileNotFoundError as e:
+        console.print(f"[red]❌ {e}[/red]")
+        console.print("[yellow]Run 'praisonai langfuse config --public-key ... --secret-key ...' first[/yellow]")
+        raise typer.Abort()
+    except ValueError as e:
+        console.print(f"[red]❌ {e}[/red]")
+        raise typer.Abort()
+    
+    # Fetch sessions
+    try:
+        console.print(f"[blue]📊 Fetching sessions from {client.host}...[/blue]")
+        sessions = client.get_sessions(limit=limit)
+        
+        if not sessions:
+            console.print("[yellow]No sessions found[/yellow]")
+            return
+        
+        # Create table
+        table = Table(title=f"Sessions ({len(sessions)})")
+        table.add_column("Session ID", style="cyan", no_wrap=True)
+        table.add_column("Created", style="blue")
+        table.add_column("Traces", style="green", justify="right")
+        
+        for session in sessions:
+            session_id = session.get("id", "unknown")[:16] + "..."
+            
+            # Parse timestamp
+            ts = session.get("createdAt", "")
+            if ts:
+                try:
+                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    created = dt.strftime("%Y-%m-%d %H:%M")
+                except Exception:
+                    created = str(ts)[:16]
+            else:
+                created = "unknown"
+            
+            trace_count = session.get("traceCount", len(session.get("traces", [])))
+            
+            table.add_row(session_id, created, str(trace_count))
+        
+        console.print(table)
+        
+        # Show hint
+        if sessions:
+            console.print(f"[dim]View traces in session: praisonai langfuse traces --session {sessions[0].get('id')}[/dim]")
+        
+    except LangfuseAPIError as e:
+        console.print(f"[red]❌ API Error: {e}[/red]")
+        if "401" in str(e):
+            console.print("[yellow]Check your LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY[/yellow]")
+        elif "connection" in str(e).lower():
+            console.print("[yellow]Ensure Langfuse is running: praisonai langfuse status[/yellow]")
+        raise typer.Abort()
+    except Exception as e:
+        console.print(f"[red]❌ Error: {e}[/red]")
+        raise typer.Abort()
+
+
+@app.command("show")
+def langfuse_show(
+    trace_id: str = typer.Argument(..., help="Trace ID to display"),
+):
+    """
+    Show detailed information about a specific trace.
+    
+    Displays full trace details including metadata, input/output, and all
+    observations (spans, events, generations) without opening the web UI.
+    
+    Examples:
+        praisonai langfuse show trace-abc-123
+        praisonai langfuse show --help
+    """
+    console = Console()
+    
+    # Import the client
+    try:
+        from ..langfuse_client import LangfuseClient, LangfuseAPIError
+    except ImportError:
+        console.print("[red]❌ Langfuse client not available[/red]")
+        raise typer.Abort()
+    
+    # Load client from config
+    try:
+        client = LangfuseClient.from_config_file()
+    except FileNotFoundError as e:
+        console.print(f"[red]❌ {e}[/red]")
+        console.print("[yellow]Run 'praisonai langfuse config --public-key ... --secret-key ...' first[/yellow]")
+        raise typer.Abort()
+    except ValueError as e:
+        console.print(f"[red]❌ {e}[/red]")
+        raise typer.Abort()
+    
+    # Fetch trace details
+    try:
+        console.print(f"[blue]🔍 Fetching trace {trace_id}...[/blue]")
+        trace = client.get_trace(trace_id)
+        
+        # Display trace info
+        console.print()
+        console.print(Panel(f"[bold cyan]Trace: {trace.get('name', 'unnamed')}[/bold cyan]", 
+                           subtitle=f"ID: {trace_id}"))
+        
+        # Metadata
+        meta_table = Table(show_header=False, box=None)
+        meta_table.add_column("Key", style="yellow")
+        meta_table.add_column("Value", style="white")
+        
+        # Parse timestamp
+        ts = trace.get("timestamp", "")
+        if ts:
+            try:
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                timestamp = dt.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                timestamp = str(ts)
+        else:
+            timestamp = "unknown"
+        
+        meta_table.add_row("Timestamp:", timestamp)
+        meta_table.add_row("Session:", trace.get("sessionId", "-"))
+        meta_table.add_row("User:", trace.get("userId", "-"))
+        
+        if trace.get("metadata"):
+            meta_str = json.dumps(trace.get("metadata"), indent=2)
+            meta_table.add_row("Metadata:", meta_str)
+        
+        console.print(meta_table)
+        
+        # Observations
+        observations = trace.get("observations", [])
+        if observations:
+            console.print()
+            console.print(f"[bold]Observations ({len(observations)}):[/bold]")
+            
+            obs_table = Table()
+            obs_table.add_column("Type", style="cyan")
+            obs_table.add_column("Name", style="green")
+            obs_table.add_column("Start Time", style="blue")
+            obs_table.add_column("Status", style="yellow")
+            
+            for obs in observations:
+                obs_type = obs.get("type", "unknown")
+                name = obs.get("name", "unnamed")
+                
+                # Parse start time
+                start_ts = obs.get("startTime", "")
+                if start_ts:
+                    try:
+                        dt = datetime.fromisoformat(start_ts.replace("Z", "+00:00"))
+                        start_time = dt.strftime("%H:%M:%S")
+                    except Exception:
+                        start_time = str(start_ts)[11:19]
+                else:
+                    start_time = "-"
+                
+                status = obs.get("level", "DEFAULT")
+                if obs.get("statusMessage"):
+                    status = f"{status} ({obs.get('statusMessage')})"
+                
+                obs_table.add_row(obs_type, name, start_time, status)
+            
+            console.print(obs_table)
+        
+        # Input/Output (if available)
+        if trace.get("input"):
+            console.print()
+            console.print("[bold]Input:[/bold]")
+            input_str = json.dumps(trace.get("input"), indent=2)
+            console.print(f"[dim]{input_str[:500]}[/dim]")
+        
+        if trace.get("output"):
+            console.print()
+            console.print("[bold]Output:[/bold]")
+            output_str = json.dumps(trace.get("output"), indent=2)
+            console.print(f"[dim]{output_str[:500]}[/dim]")
+        
+        console.print()
+        console.print(f"[dim]View in UI: {client.host}/trace/{trace_id}[/dim]")
+        
+    except LangfuseAPIError as e:
+        if "404" in str(e) or "not found" in str(e).lower():
+            console.print(f"[red]❌ Trace not found: {trace_id}[/red]")
+        else:
+            console.print(f"[red]❌ API Error: {e}[/red]")
+        raise typer.Abort()
+    except Exception as e:
+        console.print(f"[red]❌ Error: {e}[/red]")
+        raise typer.Abort()
