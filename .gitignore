@@ -94,7 +94,6 @@ Cargo.lock
 **/*.rs.bk
 *.pdb
 .windsurf
-.agent
 
 src/praisonai/build*.egg-info/
 src/praisonai/PraisonAI.egg-info/

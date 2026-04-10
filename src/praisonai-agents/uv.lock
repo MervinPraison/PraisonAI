@@ -2951,7 +2951,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.5.137"
+version = "1.5.139"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
