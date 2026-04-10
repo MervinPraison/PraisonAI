@@ -4,6 +4,7 @@ import sys
 import argparse
 import warnings
 import os
+import json
 
 # Suppress Pydantic serialization warnings from LiteLLM BEFORE any imports
 # These warnings occur when LiteLLM's response objects have field mismatches
@@ -4756,11 +4757,12 @@ Now, {final_instruction.lower()}:"""
             
             # Metrics JSON - Output structured cost data
             if hasattr(self, 'args') and getattr(self.args, 'metrics_json', False):
-                import json
                 try:
                     from .features.metrics import MetricsHandler
                     _mh = MetricsHandler(verbose=getattr(self.args, 'verbose', False))
-                    agent_metrics = _mh.extract_metrics_from_agent(agent)
+                    # Extract from final_agent if it was used, otherwise from original agent
+                    active_agent = final_agent if 'final_agent' in locals() else agent
+                    agent_metrics = _mh.extract_metrics_from_agent(active_agent)
                     # Resolve model name: prefer what the agent reported, fall back to config
                     model_name = agent_metrics.get('model')
                     if not model_name:
@@ -4776,8 +4778,9 @@ Now, {final_instruction.lower()}:"""
                     }
                     print(json.dumps(metrics_out))
                 except Exception as exc:
-                    import sys
                     print(f"[metrics-json] warning: could not extract metrics: {exc}", file=sys.stderr)
+                    # CRITICAL: Always emit JSON when --metrics-json is set
+                    print(json.dumps({"cost_usd": 0.0, "tokens_in": 0, "tokens_out": 0, "model": "unknown", "request_count": 0}))
             
             return result
         elif CREWAI_AVAILABLE:
