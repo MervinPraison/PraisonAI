@@ -31,6 +31,7 @@ Usage:
     result = agent.start("Create a FastAPI app")
 """
 
+import asyncio
 import json
 import os
 from typing import AsyncIterator, Dict, Any, Optional, List
@@ -342,8 +343,8 @@ class ManagedAgentIntegration(BaseCLIIntegration):
                 self.backend.collect_response(session_id),
                 timeout=self.timeout
             )
-        except asyncio.TimeoutError:
-            raise RuntimeError(f"Managed agent execution timed out after {self.timeout}s")
+        except asyncio.TimeoutError as err:
+            raise RuntimeError(f"Managed agent execution timed out after {self.timeout}s") from err
     
     async def stream(self, prompt: str, **options) -> AsyncIterator[Dict[str, Any]]:
         """
@@ -373,14 +374,16 @@ class ManagedAgentIntegration(BaseCLIIntegration):
         await self.backend.send_message(session_id, prompt)
         
         # Stream events with timeout
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + self.timeout
+        
         try:
-            async for event in asyncio.wait_for(
-                self.backend.stream_events(session_id),
-                timeout=self.timeout
-            ):
+            async for event in self.backend.stream_events(session_id):
+                if loop.time() > deadline:
+                    raise asyncio.TimeoutError()
                 yield event
-        except asyncio.TimeoutError:
-            raise RuntimeError(f"Managed agent streaming timed out after {self.timeout}s")
+        except asyncio.TimeoutError as err:
+            raise RuntimeError(f"Managed agent streaming timed out after {self.timeout}s") from err
     
     def reset_session(self, session_key: str = 'default'):
         """Reset a specific session."""
