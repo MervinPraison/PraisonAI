@@ -273,7 +273,7 @@ def langfuse_init(
         "admin@langfuse.com", "--email", "-e", help="Admin email address"
     ),
     password: str = typer.Option(
-        None, "--password", "-p", help="Admin password (will prompt if not provided)"
+        None, "--password", "-pw", help="Admin password (will prompt if not provided)"
     ),
     port: int = typer.Option(3000, "--port", "-p", help="Port to listen on"),
     data_dir: str = typer.Option(

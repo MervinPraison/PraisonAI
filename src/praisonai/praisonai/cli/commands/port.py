@@ -508,7 +508,7 @@ def port_kill(
         else:
             console.print(f"[red]✗ Failed to kill process {proc['pid']}[/red]")
             if not force:
-                console.print("[yellow]Try: praisonai port kill {port} --force[/yellow]")
+                console.print(f"[yellow]Try: praisonai port kill {port} --force[/yellow]")
         raise typer.Exit(1)
 
 
