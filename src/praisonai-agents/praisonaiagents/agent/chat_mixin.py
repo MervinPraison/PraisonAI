@@ -1049,6 +1049,27 @@ Your Goal: {self.goal}"""
                         'required' forces the LLM to call a tool before responding.
             ...other args...
         """
+        # Check if external managed backend is configured
+        if hasattr(self, 'backend') and self.backend is not None:
+            # Extract kwargs for delegation, excluding 'self' and function locals
+            delegation_kwargs = {
+                'temperature': temperature,
+                'tools': tools,
+                'output_json': output_json,
+                'output_pydantic': output_pydantic,
+                'reasoning_steps': reasoning_steps,
+                'stream': stream,
+                'task_name': task_name,
+                'task_description': task_description,
+                'task_id': task_id,
+                'config': config,
+                'force_retrieval': force_retrieval,
+                'skip_retrieval': skip_retrieval,
+                'attachments': attachments,
+                'tool_choice': tool_choice
+            }
+            return self._delegate_to_backend(prompt, **delegation_kwargs)
+        
         # Emit context trace event (zero overhead when not set)
         from ..trace.context_events import get_context_emitter
         _trace_emitter = get_context_emitter()

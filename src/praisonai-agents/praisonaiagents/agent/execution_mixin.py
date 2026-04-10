@@ -251,6 +251,10 @@ class ExecutionMixin:
             - Background processing
             - API endpoints
         """
+        # Check if external managed backend is configured
+        if hasattr(self, 'backend') and self.backend is not None:
+            return self._delegate_to_backend(prompt, **kwargs)
+        
         # Production defaults: no streaming, no display
         if 'stream' not in kwargs:
             kwargs['stream'] = False
@@ -273,6 +277,168 @@ class ExecutionMixin:
         self._auto_save_session()
         
         return result
+
+    def _delegate_to_backend(self, prompt: str, **kwargs) -> Optional[str]:
+        """Delegate execution to external managed backend (e.g., ManagedAgentIntegration)."""
+        import asyncio
+        
+        # Check if backend has required methods
+        if not hasattr(self.backend, 'execute'):
+            raise RuntimeError(f"Backend {type(self.backend).__name__} does not support execute() method")
+        
+        # Handle streaming vs non-streaming
+        stream_requested = kwargs.get('stream', False)
+        
+        if stream_requested:
+            # For streaming, delegate to backend's stream method if available
+            if hasattr(self.backend, 'stream'):
+                return self._delegate_streaming_to_backend(prompt, **kwargs)
+            else:
+                # Fallback: execute non-streaming even if stream was requested
+                return self._execute_backend_sync(prompt, **kwargs)
+        else:
+            # Non-streaming execution
+            return self._execute_backend_sync(prompt, **kwargs)
+    
+    def _execute_backend_sync(self, prompt: str, **kwargs) -> Optional[str]:
+        """Execute backend in sync mode, handling async backends."""
+        try:
+            # Try to run in existing event loop
+            loop = asyncio.get_running_loop()
+            # If we're already in an async context, we can't use asyncio.run()
+            # Create a new task instead
+            import concurrent.futures
+            import threading
+            
+            def run_async():
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    return new_loop.run_until_complete(self.backend.execute(prompt, **kwargs))
+                finally:
+                    new_loop.close()
+            
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(run_async)
+                return future.result()
+                
+        except RuntimeError:
+            # No event loop running, safe to use asyncio.run()
+            return asyncio.run(self.backend.execute(prompt, **kwargs))
+    
+    def _delegate_streaming_to_backend(self, prompt: str, **kwargs):
+        """Delegate to backend's streaming method."""
+        try:
+            # For streaming, we need to return an iterator/generator
+            # The backend's stream method is async, so we need to handle that
+            import asyncio
+            
+            async def stream_wrapper():
+                async for chunk in self.backend.stream(prompt, **kwargs):
+                    yield chunk
+            
+            # Convert async generator to sync generator
+            def sync_stream():
+                try:
+                    loop = asyncio.get_running_loop()
+                    # Already in async context - need to handle differently
+                    import concurrent.futures
+                    import threading
+                    import queue
+                    
+                    result_queue = queue.Queue()
+                    exception_holder = [None]
+                    
+                    def run_in_thread():
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        try:
+                            async def collect():
+                                try:
+                                    async for item in self.backend.stream(prompt, **kwargs):
+                                        result_queue.put(('item', item))
+                                    result_queue.put(('done', None))
+                                except Exception as e:
+                                    exception_holder[0] = e
+                                    result_queue.put(('error', e))
+                            
+                            new_loop.run_until_complete(collect())
+                        finally:
+                            new_loop.close()
+                    
+                    thread = threading.Thread(target=run_in_thread)
+                    thread.start()
+                    
+                    while True:
+                        msg_type, data = result_queue.get()
+                        if msg_type == 'item':
+                            # For managed backends, we might get event objects
+                            # Convert to string format expected by Agent
+                            if isinstance(data, dict):
+                                if data.get('type') == 'agent.message':
+                                    content = data.get('content', [])
+                                    if isinstance(content, list):
+                                        text_parts = []
+                                        for block in content:
+                                            if isinstance(block, dict) and block.get('type') == 'text':
+                                                text_parts.append(block.get('text', ''))
+                                            elif isinstance(block, str):
+                                                text_parts.append(block)
+                                        if text_parts:
+                                            yield ''.join(text_parts)
+                                    elif isinstance(content, str):
+                                        yield content
+                                # Skip other event types (session.status_idle, etc.)
+                            elif isinstance(data, str):
+                                yield data
+                        elif msg_type == 'done':
+                            break
+                        elif msg_type == 'error':
+                            raise data
+                    
+                    thread.join()
+                    
+                except RuntimeError:
+                    # No event loop - can run directly
+                    async def run_stream():
+                        async for item in self.backend.stream(prompt, **kwargs):
+                            yield item
+                    
+                    # Use asyncio.run for each item (not ideal but works)
+                    async_gen = run_stream()
+                    
+                    async def collect_all():
+                        results = []
+                        async for item in async_gen:
+                            results.append(item)
+                        return results
+                    
+                    results = asyncio.run(collect_all())
+                    for item in results:
+                        # Similar conversion logic
+                        if isinstance(item, dict):
+                            if item.get('type') == 'agent.message':
+                                content = item.get('content', [])
+                                if isinstance(content, list):
+                                    text_parts = []
+                                    for block in content:
+                                        if isinstance(block, dict) and block.get('type') == 'text':
+                                            text_parts.append(block.get('text', ''))
+                                        elif isinstance(block, str):
+                                            text_parts.append(block)
+                                    if text_parts:
+                                        yield ''.join(text_parts)
+                                elif isinstance(content, str):
+                                    yield content
+                        elif isinstance(item, str):
+                            yield item
+            
+            return sync_stream()
+            
+        except Exception as e:
+            # Fallback to non-streaming
+            logger.warning(f"Backend streaming failed, falling back to non-streaming: {e}")
+            return self._execute_backend_sync(prompt, **kwargs)
 
     def _get_planning_agent(self):
         """Lazy load PlanningAgent for planning mode."""
@@ -452,6 +618,10 @@ Write the complete compiled report:"""
         if prompt and "{{" in prompt:
             from praisonaiagents.utils.variables import substitute_variables
             prompt = substitute_variables(prompt, {})
+        
+        # Check if external managed backend is configured
+        if hasattr(self, 'backend') and self.backend is not None:
+            return self._delegate_to_backend(prompt, **kwargs)
         
         # ─────────────────────────────────────────────────────────────────────
         # UNIFIED AUTONOMY API: If autonomy is enabled, route to run_autonomous
