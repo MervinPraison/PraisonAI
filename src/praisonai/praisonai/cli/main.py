@@ -3633,8 +3633,16 @@ class PraisonAI:
         """
         try:
             import subprocess
+            import os
             from rich import print
             from praisonaiagents import Agent
+            
+            # Get custom git author from environment variables
+            git_user_name = os.getenv("PRAISONAI_GIT_USER_NAME")
+            git_user_email = os.getenv("PRAISONAI_GIT_USER_EMAIL")
+            git_author = None
+            if git_user_name and git_user_email:
+                git_author = f"{git_user_name} <{git_user_email}>"
             
             # Check if we're in a git repository
             try:
@@ -3759,7 +3767,10 @@ Do NOT add any explanations or formatting."""
             
             # In auto mode, skip confirmation and commit + push
             if auto_mode:
-                subprocess.run(["git", "commit", "-m", commit_message], check=True)
+                commit_cmd = ["git", "commit", "-m", commit_message]
+                if git_author:
+                    commit_cmd.extend(["--author", git_author])
+                subprocess.run(commit_cmd, check=True)
                 print("[green]✅ Committed successfully![/green]")
                 subprocess.run(["git", "push"], check=True)
                 print("[green]✅ Pushed to remote![/green]")
@@ -3775,7 +3786,10 @@ Do NOT add any explanations or formatting."""
             
             if choice == 'y':
                 # Commit with the generated message
-                subprocess.run(["git", "commit", "-m", commit_message], check=True)
+                commit_cmd = ["git", "commit", "-m", commit_message]
+                if git_author:
+                    commit_cmd.extend(["--author", git_author])
+                subprocess.run(commit_cmd, check=True)
                 print("[green]✅ Committed successfully![/green]")
                 
                 # Check if --push was passed
@@ -3799,7 +3813,10 @@ Do NOT add any explanations or formatting."""
                 os.unlink(temp_path)
                 
                 if edited_message:
-                    subprocess.run(["git", "commit", "-m", edited_message], check=True)
+                    commit_cmd = ["git", "commit", "-m", edited_message]
+                    if git_author:
+                        commit_cmd.extend(["--author", git_author])
+                    subprocess.run(commit_cmd, check=True)
                     print("[green]✅ Committed successfully![/green]")
                 else:
                     print("[yellow]Empty message, commit cancelled.[/yellow]")
