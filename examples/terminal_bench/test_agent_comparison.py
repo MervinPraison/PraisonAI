@@ -109,56 +109,84 @@ class DirectAgentRunner:
 
 
 class WrapperAgentRunner:
-    """Runs tasks using CLI wrapper approach."""
+    """Runs tasks using CLI wrapper approach via subprocess."""
     
     def __init__(self):
         self.results = []
     
     def run_task(self, task: dict) -> dict:
-        """Run a single task using praisonai CLI."""
+        """Run a single task using praisonai CLI via subprocess."""
         print(f"\n🎯 Wrapper Agent - Running: {task['name']}")
         print(f"   Instruction: {task['instruction'][:60]}...")
         
         start_time = time.time()
         
         try:
-            # Import here to avoid issues if not installed
-            from praisonai import PraisonAI
+            import subprocess
+            import shlex
             
-            # Create a minimal config for single task
-            config = {
-                "agent": {
-                    "instructions": "You are a terminal task agent. Complete the given task."
+            # Build the praisonai CLI command
+            # Format: praisonai "TASK" --model MODEL
+            cmd = [
+                "praisonai",
+                task['instruction'],
+                "--model", "gpt-4o-mini"
+            ]
+            
+            # Run the command
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=300,  # 5 minute timeout
+                env={**os.environ, "LOGLEVEL": "WARNING"}
+            )
+            
+            elapsed = time.time() - start_time
+            
+            if result.returncode == 0:
+                print(f"   ✅ Completed in {elapsed:.2f}s")
+                return {
+                    "task": task['name'],
+                    "success": True,
+                    "time": elapsed,
+                    "cost": 0,  # Cost tracking not available in CLI mode
+                    "result_preview": result.stdout[:100] if result.stdout else "No output",
+                    "error": None
                 }
-            }
+            else:
+                print(f"   ❌ Failed with exit code {result.returncode} in {elapsed:.2f}s")
+                return {
+                    "task": task['name'],
+                    "success": False,
+                    "time": elapsed,
+                    "cost": 0,
+                    "result_preview": None,
+                    "error": f"Exit code {result.returncode}: {result.stderr[:200]}"
+                }
             
-            praison = PraisonAI(config=config)
-            
-            # Run the task
-            result = praison.run(task=task['instruction'])
+        except subprocess.TimeoutExpired:
             elapsed = time.time() - start_time
-            
-            print(f"   ✅ Completed in {elapsed:.2f}s")
-            
-            return {
-                "task": task['name'],
-                "success": True,
-                "time": elapsed,
-                "cost": 0,  # Cost tracking not available in wrapper mode
-                "result_preview": str(result)[:100] if result else "No output",
-                "error": None
-            }
-            
-        except ImportError as e:
-            elapsed = time.time() - start_time
-            print(f"   ⚠️ Wrapper not available: {e}")
+            print(f"   ⏱️  Timeout after {elapsed:.2f}s")
             return {
                 "task": task['name'],
                 "success": False,
                 "time": elapsed,
                 "cost": 0,
                 "result_preview": None,
-                "error": f"PraisonAI wrapper not installed: {e}"
+                "error": "Timeout after 300s"
+            }
+            
+        except FileNotFoundError:
+            elapsed = time.time() - start_time
+            print(f"   ⚠️ praisonai CLI not found")
+            return {
+                "task": task['name'],
+                "success": False,
+                "time": elapsed,
+                "cost": 0,
+                "result_preview": None,
+                "error": "praisonai CLI not installed (pip install praisonai)"
             }
             
         except Exception as e:

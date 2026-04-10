@@ -740,7 +740,7 @@ Write the complete compiled report:"""
         task_id = getattr(task, 'id', None)
         return await self.achat(prompt, task_name=task_name, task_description=task_description, task_id=task_id)
 
-    async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any]) -> Any:
+    async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None) -> Any:
         """Async version of execute_tool"""
         try:
             logging.info(f"Executing async tool: {function_name} with arguments: {arguments}")

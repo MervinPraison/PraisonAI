@@ -1,0 +1,22 @@
+# Harbor Job Configuration for PraisonAI - 5 Task Test
+# Run with: harbor run -c examples/terminal_bench/job_test_5.yaml -n 1
+
+dataset: terminal-bench/terminal-bench-2
+
+agent:
+  import_path: examples.terminal_bench.praisonai_external_agent:PraisonAIExternalAgent
+  model_name: openai/gpt-4o-mini
+  env:
+    OPENAI_API_KEY: "${OPENAI_API_KEY}"
+
+n_concurrent: 1
+n_attempts: 1
+
+# Filter to 5 specific simple tasks
+task_filter:
+  task_names:
+    - "hello-world"
+    - "fix-permissions"
+    - "create-bucket"
+    - "csv-to-parquet"
+    - "simple-web-scraper"
