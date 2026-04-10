@@ -7,5 +7,13 @@ including both function-based and LLM-based guardrails.
 
 from .guardrail_result import GuardrailResult
 from .llm_guardrail import LLMGuardrail
+from .protocols import GuardrailProtocol, StructuralGuardrailProtocol, PolicyGuardrailProtocol, GuardrailChain
 
-__all__ = ["GuardrailResult", "LLMGuardrail"]
+__all__ = [
+    "GuardrailResult", 
+    "LLMGuardrail", 
+    "GuardrailProtocol", 
+    "StructuralGuardrailProtocol", 
+    "PolicyGuardrailProtocol", 
+    "GuardrailChain"
+]

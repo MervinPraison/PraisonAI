@@ -7,12 +7,18 @@ using natural language descriptions, similar to CrewAI's implementation.
 
 import logging
 from praisonaiagents._logging import get_logger
-from typing import Any, Tuple, Union, Optional
+from typing import Any, Tuple, Union, Optional, Dict
 from pydantic import BaseModel
 from ..output.models import TaskOutput
+from .protocols import GuardrailProtocol
 
 class LLMGuardrail:
-    """An LLM-powered guardrail that validates task outputs using natural language."""
+    """
+    An LLM-powered guardrail that validates task outputs using natural language.
+    
+    Implements GuardrailProtocol to provide input, output, and tool call validation
+    using LLM reasoning. Defaults to fail-closed behavior for production safety.
+    """
     
     def __init__(self, description: str, llm: Any = None):
         """Initialize the LLM guardrail.
@@ -132,5 +138,117 @@ Your response:"""
                 
         except Exception as e:
             self.logger.error(f"Error in LLM guardrail validation: {str(e)}")
-            # On error, pass through the original output
-            return True, task_output
+            # Fail-closed: On error, block the output for safety
+            return False, f"Guardrail validation error: {str(e)}"
+    
+    # GuardrailProtocol implementation methods
+    
+    def validate_input(self, content: str, **kwargs) -> Tuple[bool, str]:
+        """
+        Validate input content using LLM reasoning.
+        
+        Args:
+            content: Input text to validate
+            **kwargs: Additional context
+            
+        Returns:
+            Tuple of (is_valid: bool, processed_content: str)
+        """
+        # Adapt the description for input validation
+        input_description = f"Validate this input: {self.description}"
+        return self._llm_validate(content, input_description)
+    
+    def validate_output(self, content: str, **kwargs) -> Tuple[bool, str]:
+        """
+        Validate output content using LLM reasoning.
+        
+        This is the main validation method, reusing existing logic.
+        """
+        return self.validate(content)
+    
+    def validate_tool_call(self, tool_name: str, arguments: Dict[str, Any], **kwargs) -> Tuple[bool, Dict[str, Any]]:
+        """
+        Validate tool call arguments using LLM reasoning.
+        
+        Args:
+            tool_name: Name of the tool being called
+            arguments: Tool arguments to validate
+            **kwargs: Additional context
+            
+        Returns:
+            Tuple of (is_valid: bool, processed_arguments: Dict[str, Any])
+        """
+        # Convert tool call to text for LLM validation
+        tool_text = f"Tool: {tool_name}, Arguments: {arguments}"
+        tool_description = f"Validate this tool call: {self.description}"
+        
+        is_valid, result = self._llm_validate(tool_text, tool_description)
+        return is_valid, arguments  # Return original arguments (LLM doesn't modify them)
+    
+    def _llm_validate(self, content: str, description: str) -> Tuple[bool, str]:
+        """
+        Internal method to perform LLM validation with custom description.
+        
+        Args:
+            content: Content to validate
+            description: Validation description/prompt
+            
+        Returns:
+            Tuple of (is_valid: bool, response: str)
+        """
+        try:
+            if self.llm is None:
+                self.logger.warning("No LLM configured for guardrail validation")
+                return False, "No LLM available for validation"
+            
+            # Create validation prompt
+            prompt = f"""
+You are a content validator. Your task is to validate content based on the following criteria:
+
+{description}
+
+Content to validate:
+{content}
+
+Please respond with either:
+- "PASS" if the content meets the criteria
+- "FAIL: [reason]" if the content does not meet the criteria
+
+Your response:"""
+
+            # Get LLM response
+            if hasattr(self.llm, 'complete'):
+                response = self.llm.complete(prompt)
+            elif hasattr(self.llm, 'invoke'):
+                response = self.llm.invoke(prompt)
+            elif hasattr(self.llm, '__call__'):
+                response = self.llm(prompt)
+            else:
+                return False, "Invalid LLM instance"
+            
+            # Extract text from response
+            if hasattr(response, 'content'):
+                response_text = response.content
+            elif hasattr(response, 'text'):
+                response_text = response.text  
+            elif isinstance(response, str):
+                response_text = response
+            else:
+                response_text = str(response)
+            
+            response_text = response_text.strip()
+            
+            # Parse response
+            if response_text.upper().startswith("PASS"):
+                return True, content
+            elif response_text.upper().startswith("FAIL"):
+                reason = response_text[5:].strip(": ")
+                return False, f"Validation failed: {reason}"
+            else:
+                self.logger.warning(f"Unclear guardrail response: {response_text}")
+                # Fail-closed on unclear response for safety
+                return False, f"Unclear validation response: {response_text}"
+                
+        except Exception as e:
+            self.logger.error(f"Error in LLM validation: {str(e)}")
+            return False, f"Validation error: {str(e)}"

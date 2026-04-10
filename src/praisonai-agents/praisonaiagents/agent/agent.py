@@ -15,9 +15,11 @@ import inspect
 from .chat_mixin import ChatMixin
 from .execution_mixin import ExecutionMixin
 from .memory_mixin import MemoryMixin
+from .async_memory_mixin import AsyncMemoryMixin
 from .tool_execution import ToolExecutionMixin
 from .chat_handler import ChatHandlerMixin
 from .session_manager import SessionManagerMixin
+from .async_safety import AsyncSafeState
 
 # Module-level logger for thread safety errors and debugging
 logger = get_logger(__name__)
@@ -190,7 +192,7 @@ if TYPE_CHECKING:
 # Import structured error from central errors module
 from ..errors import BudgetExceededError
 
-class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin):
+class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin, AsyncMemoryMixin):
     # Class-level counter for generating unique display names for nameless agents
     _agent_counter = 0
     _agent_counter_lock = threading.Lock()
@@ -1569,12 +1571,11 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
         self.embedder_config = embedder_config
         self.knowledge = knowledge
         self.use_system_prompt = use_system_prompt
-        # Thread-safe chat_history with eager lock initialization
-        self.chat_history = []
-        self.__history_lock = threading.Lock()  # Eager initialization to prevent race conditions
+        # Async-safe chat_history with dual-lock protection
+        self.__chat_history_state = AsyncSafeState([])
         
-        # Thread-safe snapshot/redo stack lock - always available even when autonomy is disabled
-        self.__snapshot_lock = threading.Lock()
+        # Async-safe snapshot/redo stack lock - always available even when autonomy is disabled
+        self.__snapshot_state = AsyncSafeState(None)
         self.markdown = markdown
         self.stream = stream
         self.metrics = metrics
@@ -1814,9 +1815,14 @@ Your Goal: {self.goal}
         return self.__telemetry
 
     @property
+    def chat_history(self):
+        """Get chat history (read-only access, use context managers for modifications)."""
+        return self.__chat_history_state.get()
+    
+    @property
     def _history_lock(self):
-        """Thread-safe chat history lock."""
-        return self.__history_lock
+        """Get appropriate lock for chat history based on execution context."""
+        return self.__chat_history_state
 
     @property
     def _cache_lock(self):
@@ -1825,8 +1831,8 @@ Your Goal: {self.goal}
 
     @property
     def _snapshot_lock(self):
-        """Thread-safe snapshot/redo stack lock."""
-        return self.__snapshot_lock
+        """Async-safe snapshot/redo stack lock."""
+        return self.__snapshot_state
     
     
     @property
