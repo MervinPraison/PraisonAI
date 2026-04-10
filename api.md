@@ -550,7 +550,7 @@ Methods:
 
 Types:
 ```python
-from praisonaiagents import FlowDisplay, obs, track_workflow
+from praisonaiagents import FlowDisplay, track_workflow
 ```
 
 Methods:
@@ -868,10 +868,14 @@ Methods:
 * <code title="cli">praisonai knowledge search <a href="./src/praisonai/praisonai/cli/commands/knowledge.py">--help</a></code>
 * <code title="cli">praisonai langfuse config <a href="./src/praisonai/praisonai/cli/commands/langfuse.py">--help</a></code>
 * <code title="cli">praisonai langfuse connect <a href="./src/praisonai/praisonai/cli/commands/langfuse.py">--help</a></code>
+* <code title="cli">praisonai langfuse init <a href="./src/praisonai/praisonai/cli/commands/langfuse.py">--help</a></code>
 * <code title="cli">praisonai langfuse langfuse-start <a href="./src/praisonai/praisonai/cli/commands/langfuse.py">--help</a></code>
+* <code title="cli">praisonai langfuse sessions <a href="./src/praisonai/praisonai/cli/commands/langfuse.py">--help</a></code>
+* <code title="cli">praisonai langfuse show <a href="./src/praisonai/praisonai/cli/commands/langfuse.py">--help</a></code>
 * <code title="cli">praisonai langfuse status <a href="./src/praisonai/praisonai/cli/commands/langfuse.py">--help</a></code>
 * <code title="cli">praisonai langfuse stop <a href="./src/praisonai/praisonai/cli/commands/langfuse.py">--help</a></code>
 * <code title="cli">praisonai langfuse test <a href="./src/praisonai/praisonai/cli/commands/langfuse.py">--help</a></code>
+* <code title="cli">praisonai langfuse traces <a href="./src/praisonai/praisonai/cli/commands/langfuse.py">--help</a></code>
 * <code title="cli">praisonai langfuse version <a href="./src/praisonai/praisonai/cli/commands/langfuse.py">--help</a></code>
 * <code title="cli">praisonai loop help <a href="./src/praisonai/praisonai/cli/commands/loop.py">--help</a></code>
 * <code title="cli">praisonai loop loop-main <a href="./src/praisonai/praisonai/cli/commands/loop.py">--help</a></code>
@@ -912,6 +916,10 @@ Methods:
 * <code title="cli">praisonai plugins list <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
 * <code title="cli">praisonai plugins plugins-callback <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
 * <code title="cli">praisonai plugins remove <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
+* <code title="cli">praisonai port check <a href="./src/praisonai/praisonai/cli/commands/port.py">--help</a></code>
+* <code title="cli">praisonai port kill <a href="./src/praisonai/praisonai/cli/commands/port.py">--help</a></code>
+* <code title="cli">praisonai port list <a href="./src/praisonai/praisonai/cli/commands/port.py">--help</a></code>
+* <code title="cli">praisonai port port-callback <a href="./src/praisonai/praisonai/cli/commands/port.py">--help</a></code>
 * <code title="cli">praisonai profile imports <a href="./src/praisonai/praisonai/cli/commands/profile.py">--help</a></code>
 * <code title="cli">praisonai profile optimize <a href="./src/praisonai/praisonai/cli/commands/profile.py">--help</a></code>
 * <code title="cli">praisonai profile profile-callback <a href="./src/praisonai/praisonai/cli/commands/profile.py">--help</a></code>
