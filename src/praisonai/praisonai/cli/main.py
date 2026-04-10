@@ -4,6 +4,7 @@ import sys
 import argparse
 import warnings
 import os
+import json
 
 # Suppress Pydantic serialization warnings from LiteLLM BEFORE any imports
 # These warnings occur when LiteLLM's response objects have field mismatches
@@ -963,6 +964,7 @@ class PraisonAI:
         
         # Metrics - token/cost tracking
         parser.add_argument("--metrics", action="store_true", help="Display token usage and cost metrics")
+        parser.add_argument("--metrics-json", action="store_true", help="Output structured cost and token data as JSON")
         
         # Image Description (Vision) - analyze existing images
         parser.add_argument("--image", type=str, help="Path to image file for vision-based description/analysis")
@@ -4752,6 +4754,33 @@ Now, {final_instruction.lower()}:"""
             # Save output if --save is enabled
             if hasattr(self, 'args') and getattr(self.args, 'save', False):
                 self._save_output(prompt, result)
+            
+            # Metrics JSON - Output structured cost data
+            if hasattr(self, 'args') and getattr(self.args, 'metrics_json', False):
+                try:
+                    from .features.metrics import MetricsHandler
+                    _mh = MetricsHandler(verbose=getattr(self.args, 'verbose', False))
+                    # Extract from final_agent if it was used, otherwise from original agent
+                    active_agent = final_agent if 'final_agent' in locals() else agent
+                    agent_metrics = _mh.extract_metrics_from_agent(active_agent)
+                    # Resolve model name: prefer what the agent reported, fall back to config
+                    model_name = agent_metrics.get('model')
+                    if not model_name:
+                        model_name = agent_config.get('llm', 'unknown')
+                        if isinstance(model_name, dict):
+                            model_name = model_name.get('model', 'unknown')
+                    metrics_out = {
+                        "cost_usd": agent_metrics.get('cost', 0.0),
+                        "tokens_in": agent_metrics.get('prompt_tokens', 0),
+                        "tokens_out": agent_metrics.get('completion_tokens', 0),
+                        "model": model_name or 'unknown',
+                        "request_count": agent_metrics.get('llm_calls', 0),
+                    }
+                    print(json.dumps(metrics_out))
+                except Exception as exc:
+                    print(f"[metrics-json] warning: could not extract metrics: {exc}", file=sys.stderr)
+                    # CRITICAL: Always emit JSON when --metrics-json is set
+                    print(json.dumps({"cost_usd": 0.0, "tokens_in": 0, "tokens_out": 0, "model": "unknown", "request_count": 0}))
             
             return result
         elif CREWAI_AVAILABLE:
