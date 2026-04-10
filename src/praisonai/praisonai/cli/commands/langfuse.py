@@ -47,6 +47,12 @@ def langfuse_start(
     data_dir: str = typer.Option(
         None, "--data-dir", help="Data directory (default: ~/.praisonai/langfuse)"
     ),
+    email: str = typer.Option(
+        None, "--email", "-e", help="Initial admin email (default: admin@langfuse.com)"
+    ),
+    password: str = typer.Option(
+        None, "--password", "-pw", help="Initial admin password (default: admin12345)"
+    ),
 ):
     """Start local Langfuse server (Docker).
     
@@ -57,6 +63,7 @@ def langfuse_start(
         praisonai langfuse
         praisonai langfuse --port 8080
         praisonai langfuse --no-detach
+        praisonai langfuse --email admin@example.com --password mypassword123
     """
     if ctx.invoked_subcommand is not None:
         return
@@ -119,6 +126,41 @@ def langfuse_start(
             content = content.replace("3000:3000", f"{port}:3000")
             compose_file.write_text(content)
     
+    # Set up initial credentials via .env file
+    env_file = repo_path / ".env"
+    env_vars = {}
+    
+    # Read existing .env if present
+    if env_file.exists():
+        for line in env_file.read_text().strip().split('\n'):
+            if '=' in line and not line.startswith('#'):
+                key, value = line.split('=', 1)
+                env_vars[key.strip()] = value.strip()
+    
+    # Set default or custom credentials
+    default_email = email or "admin@langfuse.com"
+    default_password = password or "admin12345"
+    default_name = "Admin User"
+    
+    # Update with Langfuse init user environment variables
+    env_vars["LANGFUSE_INIT_USER_EMAIL"] = default_email
+    env_vars["LANGFUSE_INIT_USER_PASSWORD"] = default_password
+    env_vars["LANGFUSE_INIT_USER_NAME"] = default_name
+    env_vars["LANGFUSE_INIT_ORG_NAME"] = "Default Org"
+    env_vars["LANGFUSE_INIT_PROJECT_NAME"] = "Default Project"
+    
+    # Write .env file
+    env_content = "# Langfuse Initial User Configuration\n"
+    env_content += f"LANGFUSE_INIT_USER_EMAIL={default_email}\n"
+    env_content += f"LANGFUSE_INIT_USER_PASSWORD={default_password}\n"
+    env_content += f"LANGFUSE_INIT_USER_NAME={default_name}\n"
+    env_content += f"LANGFUSE_INIT_ORG_NAME=Default Org\n"
+    env_content += f"LANGFUSE_INIT_PROJECT_NAME=Default Project\n"
+    env_content += "LANGFUSE_INIT_PROJECT_ID=default-project\n"
+    env_file.write_text(env_content)
+    
+    console.print(f"[dim]📄 Initial user: {default_email}[/dim]")
+    
     # Start Docker Compose
     console.print(f"[blue]🚀 Starting Langfuse on {host}:{port}[/blue]")
     console.print("[dim]This may take a few minutes on first run (downloading images)...[/dim]")
@@ -157,13 +199,14 @@ def langfuse_start(
             console.print()
             console.print("[bold green]🎉 Langfuse is ready![/bold green]")
             console.print(f"[blue]🌐 Web UI: http://{host}:{port}[/blue]")
-            console.print("[dim]Default login: admin@langfuse.com / admin[/dim]")
+            console.print(f"[dim]Login: {default_email} / {default_password[:3]}***[/dim]")
             console.print()
-            console.print("Next steps:")
-            console.print("1. Open the web UI and create your first project")
+            console.print("[bold]Next steps:[/bold]")
+            console.print("1. Open the web UI and login")
             console.print("2. Get API keys from Settings > API Keys")
-            console.print(f"3. Run: praisonai langfuse config --public-key pk-... --secret-key sk-...")
-            console.print("4. Test: praisonai langfuse test")
+            console.print("3. Configure PraisonAI:")
+            console.print(f"   [green]praisonai langfuse config --public-key pk-... --secret-key sk-...[/green]")
+            console.print("4. Test: [green]praisonai langfuse test[/green]")
             
         else:
             subprocess.run(cmd, cwd=repo_path)
@@ -218,6 +261,62 @@ def langfuse_stop(
     except subprocess.CalledProcessError as e:
         console.print(f"[red]❌ Failed to stop Langfuse: {e}[/red]")
         raise typer.Abort()
+
+
+@app.command("init")
+def langfuse_init(
+    email: str = typer.Option(
+        "admin@langfuse.com", "--email", "-e", help="Admin email address"
+    ),
+    password: str = typer.Option(
+        None, "--password", "-p", help="Admin password (will prompt if not provided)"
+    ),
+    port: int = typer.Option(3000, "--port", "-p", help="Port to listen on"),
+    data_dir: str = typer.Option(
+        None, "--data-dir", help="Data directory (default: ~/.praisonai/langfuse)"
+    ),
+):
+    """Initialize Langfuse with custom admin credentials.
+    
+    First-time setup with configurable admin user. Sets up the Docker
+    environment and creates initial user account.
+    
+    Examples:
+        praisonai langfuse init
+        praisonai langfuse init --email admin@example.com --password mypass123
+        praisonai langfuse init --email user@company.com --port 8080
+    """
+    console = Console()
+    
+    # Prompt for password if not provided
+    if password is None:
+        password = typer.prompt("Enter admin password", hide_input=True)
+        password_confirm = typer.prompt("Confirm password", hide_input=True)
+        if password != password_confirm:
+            console.print("[red]❌ Passwords do not match[/red]")
+            raise typer.Abort()
+    
+    # Validate password length (Langfuse requires 8+ characters)
+    if len(password) < 8:
+        console.print("[red]❌ Password must be at least 8 characters long[/red]")
+        raise typer.Abort()
+    
+    console.print("[bold]🚀 Initializing Langfuse...[/bold]")
+    console.print(f"[dim]Email: {email}[/dim]")
+    console.print(f"[dim]Port: {port}[/dim]")
+    console.print()
+    
+    # Reuse the start logic with explicit credentials
+    ctx = typer.Context(langfuse_start)
+    langfuse_start(
+        ctx=ctx,
+        port=port,
+        host="127.0.0.1",
+        detach=True,
+        data_dir=data_dir,
+        email=email,
+        password=password
+    )
 
 
 @app.command("status")
@@ -378,8 +477,23 @@ def langfuse_config(
     
     # Set configuration
     if not any([public_key, secret_key, host]):
-        console.print("[red]❌ At least one option must be provided[/red]")
-        console.print("Use --show to view current configuration")
+        console.print("[yellow]ℹ️  No configuration options provided[/yellow]")
+        console.print()
+        console.print("[bold]Quick Setup Guide:[/bold]")
+        console.print()
+        console.print("1. [bold cyan]Get your API keys from Langfuse Cloud:[/bold cyan]")
+        console.print("   [blue]https://cloud.langfuse.com[/blue]")
+        console.print("   → Sign up → Create project → Project Settings → API Keys")
+        console.print()
+        console.print("2. [bold cyan]Configure PraisonAI:[/bold cyan]")
+        console.print("   [dim]praisonai langfuse config[/dim]")
+        console.print("     [dim]--public-key pk-...[/dim]")
+        console.print("     [dim]--secret-key sk-...[/dim]")
+        console.print()
+        console.print("3. [bold cyan]Verify your setup:[/bold cyan]")
+        console.print("   [green]praisonai langfuse test[/green]")
+        console.print()
+        console.print("[dim]Use --show to view current configuration[/dim]")
         raise typer.Abort()
     
     # Read existing config
@@ -458,9 +572,21 @@ def langfuse_test():
     config = LangfuseSinkConfig()
     
     if not config.enabled:
-        console.print("[yellow]⚠️  Langfuse tracing is disabled[/yellow]")
-        console.print("Set LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY environment variables")
-        return
+        console.print("[yellow]⚠️  Langfuse credentials not configured[/yellow]")
+        console.print()
+        console.print("[bold]How to get your Langfuse API keys:[/bold]")
+        console.print("1. Go to [blue]https://cloud.langfuse.com[/blue] and sign up/login")
+        console.print("2. Create a new project (or open existing)")
+        console.print("3. Go to Project Settings → API Keys")
+        console.print("4. Click 'Create new API keys'")
+        console.print()
+        console.print("[bold]Then configure PraisonAI:[/bold]")
+        console.print("  [green]praisonai langfuse config --public-key=pk-... --secret-key=sk-...[/green]")
+        console.print()
+        console.print("Or set environment variables:")
+        console.print("  [green]export LANGFUSE_PUBLIC_KEY=pk-...[/green]")
+        console.print("  [green]export LANGFUSE_SECRET_KEY=sk-...[/green]")
+        raise typer.Abort()
     
     console.print("[blue]🧪 Testing Langfuse connectivity...[/blue]")
     console.print(f"[dim]Host: {config.host}[/dim]")

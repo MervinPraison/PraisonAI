@@ -77,12 +77,19 @@ class StickyComment:
         self._pr_number: Optional[int] = None
         self._summary_lines: List[str] = []
 
-        # Todo list: list of dicts {content, status}  status ∈ pending/in_progress/completed
+        # Todo list: list of dicts {content, status, details}  status ∈ pending/in_progress/completed
         self._todos: List[Dict[str, Any]] = []
         # Free-form activity log shown below the todo list (last N lines)
         self._logs: List[str] = []
         self._current_agent: Optional[str] = None
         self._current_tool:  Optional[str] = None
+
+        # Enhanced tracking for better UX
+        self._files_modified: List[Dict[str, str]] = []  # {path: str, description: str}
+        self._features: List[str] = []  # List of feature descriptions
+        self._usage_examples: List[str] = []  # Usage code snippets
+        self._progress_percent: float = 0.0
+        self._start_time: float = time.time()
 
         # Throttle: max one GitHub PATCH per 3 s
         self._last_push = 0.0
@@ -156,12 +163,86 @@ class StickyComment:
             self._current_tool = tool_name
             label = self._tool_label(tool_name, tool_args)
             self._logs.append(f"🔧 {label}")
+            # Extract file modifications from commands
+            if tool_name == "execute_command":
+                self._extract_file_from_command(tool_args.get("command", ""))
         self._schedule_push()
 
-    def on_tool_end(self, agent_name: str, tool_name: str) -> None:
+    def on_tool_end(self, agent_name: str, tool_name: str, result: Any = None) -> None:
         with self._lock:
             self._current_tool = None
+            # Extract features from tool results
+            if result and isinstance(result, str):
+                self._extract_features_from_output(result)
         # no extra log for tool end – keeps comment clean
+
+    def _extract_file_from_command(self, command: str) -> None:
+        """Extract file paths from shell commands to track modifications."""
+        # Match patterns like: open('file'), sed -i 'file', cat > file, etc.
+        patterns = [
+            r"open\(['\"]([^'\"]+)['\"]",
+            r"sed\s+-i\s+['\"]?.*?['\"]?\s+['\"]([^'\"]+)['\"]",
+            r"cat\s+>\s+['\"]?([^\s'\"]+)['\"]?",
+            r"echo\s+.*?\s*>\s*['\"]?([^\s'\"]+)['\"]?",
+            r"\.*/([^/]+\.(py|yaml|yml|json|md|txt))",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, command)
+            if match:
+                file_path = match.group(1)
+                # Avoid duplicates
+                if not any(f["path"] == file_path for f in self._files_modified):
+                    self._files_modified.append({
+                        "path": file_path,
+                        "description": f"Modified via {command[:40]}..." if len(command) > 40 else f"Modified via {command}"
+                    })
+
+    def _extract_features_from_output(self, output: str) -> None:
+        """Extract feature descriptions from agent output."""
+        # Look for patterns like: "- ✅ Feature name", "Added: Feature", "Implemented: Feature"
+        patterns = [
+            r"[-*]\s*✅\s*(.+)",
+            r"(?:Added|Implemented|Created|Fixed):?\s*[-*]?\s*(.+)",
+            r"\*\*([^*]+)\*\*\s*[–-]\s*(.+)",
+        ]
+        for pattern in patterns:
+            matches = re.finditer(pattern, output, re.MULTILINE | re.IGNORECASE)
+            for match in matches:
+                if match.lastindex and match.lastindex >= 1:
+                    feature = match.group(1).strip()
+                    if feature and len(feature) > 5 and feature not in self._features:
+                        self._features.append(feature)
+
+    def add_file_modified(self, path: str, description: str = "") -> None:
+        """Track a file that was modified."""
+        with self._lock:
+            if not any(f["path"] == path for f in self._files_modified):
+                self._files_modified.append({
+                    "path": path,
+                    "description": description or f"Modified `{path}`"
+                })
+        self._schedule_push()
+
+    def add_feature(self, feature: str) -> None:
+        """Track a feature that was implemented."""
+        with self._lock:
+            if feature and feature not in self._features:
+                self._features.append(feature)
+        self._schedule_push()
+
+    def add_usage_example(self, example: str) -> None:
+        """Add a usage example code snippet."""
+        with self._lock:
+            if example and example not in self._usage_examples:
+                self._usage_examples.append(example)
+        self._schedule_push()
+
+    def _update_progress(self) -> None:
+        """Calculate completion percentage based on todos."""
+        if not self._todos:
+            return
+        completed = sum(1 for t in self._todos if t["status"] == "completed")
+        self._progress_percent = (completed / len(self._todos)) * 100
 
     def set_branch(self, branch_name: str) -> None:
         """Called when a branch is successfully created."""
@@ -194,6 +275,7 @@ class StickyComment:
                     t["status"] = "completed"
             if summary:
                 self._summary_lines.append(summary)
+            self._update_progress()
         self._push_now(final=success)
 
     # ------------------------------------------------------------------
@@ -219,93 +301,154 @@ class StickyComment:
         return f"`{tool_name}`"
 
     def _build_body(self, final: Optional[bool] = None) -> str:
-        """Render the full Markdown comment body (Claude Code style)."""
+        """Render the full Markdown comment body (PraisonAI enhanced style)."""
         if final is True:
             status_icon = self.DONE
-            verb = "finished"
+            verb = "completed"
+            status_text = "COMPLETE"
         elif final is False:
             status_icon = self.FAIL
-            verb = "failed on"
+            verb = "failed"
+            status_text = "FAILED"
         else:
             status_icon = self.SPINNER
-            verb = "is working on"
+            verb = "working on"
+            status_text = "IN PROGRESS"
 
         lines: List[str] = []
+        elapsed = time.time() - self._start_time
+        elapsed_str = f"{int(elapsed // 60)}m {int(elapsed % 60)}s"
 
-        # --- Header line (Claude Code style) ---
+        # --- Progress Bar (text-based for universal rendering) ---
+        if self._todos:
+            self._update_progress()
+            pct = int(self._progress_percent)
+            filled = "█" * (pct // 10)
+            empty = "░" * (10 - pct // 10)
+            lines.append(f"**Progress:** {filled}{empty} {pct}% • ⏱️ {elapsed_str}")
+            lines.append("")
+
+        # --- Header line with status ---
         meta_parts: List[str] = []
         if self._run_url:
-            meta_parts.append(f"[View job]({self._run_url})")
+            meta_parts.append(f"[▶️ View job]({self._run_url})")
         if self._branch_name and self._repo_name:
             branch_url = f"https://github.com/{self._repo_name}/tree/{self._branch_name}"
-            meta_parts.append(f"[`{self._branch_name}`]({branch_url})")
+            meta_parts.append(f"[🌿 `{self._branch_name}`]({branch_url})")
             if self._pr_url:
-                meta_parts.append(f"[View PR →]({self._pr_url})")
+                meta_parts.append(f"[👁️ View PR →]({self._pr_url})")
             else:
                 compare_url = f"https://github.com/{self._repo_name}/compare/main...{self._branch_name}?quick_pull=1"
-                meta_parts.append(f"[Create PR →]({compare_url})")
+                meta_parts.append(f"[➕ Create PR →]({compare_url})")
 
-        header = f"**PraisonAI {verb} #{self._issue}** {status_icon}"
+        header = f"**🤖 PraisonAI {verb} #{self._issue}** {status_icon}"
         lines.append(" · ".join([header] + meta_parts) if meta_parts else header)
         lines.append("")
-        lines.append(f"**{self._task_type} #{self._issue}: {self._title}**")
+
+        # --- Status Banner ---
+        lines.append(f"### {self._task_type} #{self._issue}: {self._title} {status_icon} **{status_text}**")
         lines.append("")
 
         # --- Visual Flow Diagram (Mermaid) ---
         if self._todos:
-            lines.append("**Progress**")
+            lines.append("**📊 Workflow Visualization**")
             lines.append("")
             lines.append("```mermaid")
             lines.append("flowchart LR")
-            # Build nodes for each step
             for i, t in enumerate(self._todos):
                 s = t["status"]
                 node_id = f"S{i}"
-                label = t["content"].replace('"', '\\"')
-                # Color coding: pending=gray, in_progress=orange, completed=green
+                label = t["content"].replace('"', '\\"')[:40]  # Truncate long labels
                 if s == "completed":
-                    lines.append(f'    {node_id}["{label}"]:::done')
+                    lines.append(f'    {node_id}["✓ {label}"]:::done')
                 elif s == "in_progress":
-                    lines.append(f'    {node_id}["🔄 {label}"]:::active')
+                    lines.append(f'    {node_id}["▶ {label}"]:::active')
                 else:
-                    lines.append(f'    {node_id}["{label}"]:::pending')
-            # Connect nodes with arrows
+                    lines.append(f'    {node_id}["○ {label}"]:::pending')
             for i in range(len(self._todos) - 1):
                 lines.append(f"    S{i} --> S{i+1}")
-            # Style classes
             lines.append("    classDef done fill:#22c55e,stroke:#16a34a,stroke-width:2px,color:#fff")
-            lines.append("    classDef active fill:#f59e0b,stroke:#d97706,stroke-width:3px,color:#fff")
+            lines.append("    classDef active fill:#3b82f6,stroke:#2563eb,stroke-width:3px,color:#fff")
             lines.append("    classDef pending fill:#6b7280,stroke:#4b5563,stroke-width:1px,color:#e5e7eb")
             lines.append("```")
             lines.append("")
 
-        # --- Todo list ---
+        # --- Detailed Todo List with Icons ---
         if self._todos:
-            lines.append("**Todo List**")
+            lines.append("**✅ Tasks Completed**")
             lines.append("")
-            for t in self._todos:
+            for i, t in enumerate(self._todos, 1):
                 s = t["status"]
-                box = "- [x]" if s == "completed" else "- [ ]"
+                icon = "✅" if s == "completed" else "🔄" if s == "in_progress" else "⬜"
                 content = t["content"]
-                if s == "in_progress":
-                    content = f"{content} 🔄"
-                lines.append(f"{box} {content}")
+                lines.append(f"{i}. {icon} {content}")
             lines.append("")
+
+        # --- Files Modified Section (progressive) ---
+        if self._files_modified:
+            lines.append("**📝 Files Modified**")
+            lines.append("")
+            for i, f in enumerate(self._files_modified[:10], 1):  # Limit to 10 files
+                path = f["path"]
+                desc = f.get("description", "")
+                # Make path clickable if we have repo info
+                if self._repo_name and self._branch_name:
+                    file_url = f"https://github.com/{self._repo_name}/blob/{self._branch_name}/{path}"
+                    lines.append(f"{i}. [`{path}`]({file_url}) — {desc}")
+                else:
+                    lines.append(f"{i}. `{path}` — {desc}")
+            if len(self._files_modified) > 10:
+                lines.append(f"*... and {len(self._files_modified) - 10} more files*")
+            lines.append("")
+
+        # --- Features Implemented Section ---
+        if self._features:
+            lines.append("**⭐ Key Features Implemented**")
+            lines.append("")
+            for feature in self._features[:8]:  # Limit to 8 features
+                lines.append(f"- ✨ {feature}")
+            lines.append("")
+
+        # --- Usage Examples Section ---
+        if self._usage_examples and final is not None:
+            lines.append("**💡 Usage**")
+            lines.append("")
+            for example in self._usage_examples[:3]:  # Limit to 3 examples
+                lines.append("```python")
+                lines.append(example)
+                lines.append("```")
+                lines.append("")
 
         # --- Summary section ---
         if self._summary_lines:
-            lines.append("**Summary**")
+            lines.append("**📝 Summary**")
             lines.append("")
-            for entry in self._summary_lines[-10:]:
-                lines.append(f"{entry}")
+            for entry in self._summary_lines[-5:]:
+                lines.append(f"> {entry}")
             lines.append("")
 
-        # --- Activity log (only while running, last 8 items) ---
+        # --- Activity log (only while running, last 5 items) ---
         if final is None and self._logs:
-            lines.append("**Activity**")
+            lines.append("**🔍 Live Activity**")
             lines.append("")
-            for entry in self._logs[-8:]:
+            for entry in self._logs[-5:]:
                 lines.append(f"- {entry}")
+            lines.append("")
+            lines.append("*⏳ Updating in real-time...*")
+
+        # --- Footer ---
+        if final is not None:
+            lines.append("---")
+            footer_parts = []
+            if self._run_url:
+                footer_parts.append(f"[📊 Job Details]({self._run_url})")
+            if self._branch_name:
+                branch_url = f"https://github.com/{self._repo_name}/tree/{self._branch_name}" if self._repo_name else "#"
+                footer_parts.append(f"[🌿 Branch: `{self._branch_name}`]({branch_url})")
+            if footer_parts:
+                lines.append(" · ".join(footer_parts))
+            lines.append("")
+            lines.append("*Powered by [PraisonAI](https://praison.ai) 🤖*")
 
         return "\n".join(lines)
 
@@ -387,7 +530,7 @@ def _make_context_sink(sticky: StickyComment):
                     tool_result = data.get("result") or data.get("tool_result") or {}
                     result_str = str(tool_result)
                     if tool_name != "TodoWrite":
-                        sticky.on_tool_end(event.agent_name or "", tool_name)
+                        sticky.on_tool_end(event.agent_name or "", tool_name, result_str)
                     # Capture branch from push result (fallback)
                     if tool_name == "github_commit_and_push" and not sticky._branch_name:
                         m = re.search(r"branch '([^']+)'", result_str)
