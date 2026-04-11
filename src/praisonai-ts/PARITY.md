@@ -7,14 +7,14 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 320 |
+| Python Core Features | 322 |
 | Python Wrapper Features | 99 |
 | TypeScript Features | 1192 |
-| **Gap Count** | **28** |
+| **Gap Count** | **30** |
 | P0 (Critical) | 1 |
 | P1 (High) | 0 |
 | P2 (Medium) | 0 |
-| P3 (Low) | 27 |
+| P3 (Low) | 29 |
 
 ## Gap Matrix
 
@@ -147,7 +147,7 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (179 done, 27 todo)
+### P3_Advanced (179 done, 29 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -169,6 +169,8 @@
 | `LearnMode` | ✅ | ❌ | high | ⏳ TODO |
 | `LearnProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `LearnScope` | ✅ | ❌ | high | ⏳ TODO |
+| `ManagedBackendConfig` | ✅ | ❌ | low | ⏳ TODO |
+| `ManagedBackendProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `NetworkError` | ✅ | ❌ | low | ⏳ TODO |
 | `ObservabilityEventType` | ✅ | ❌ | high | ⏳ TODO |
 | `ObservabilityHooks` | ✅ | ❌ | high | ⏳ TODO |
@@ -516,7 +518,7 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (33 exports)</summary>
+<summary><strong>other</strong> (35 exports)</summary>
 
 ```python
 from praisonaiagents import Agents, AsyncLearnProtocol, AutonomyConfig, BudgetExceededError, DoomLoopDetector, ErrorContextProtocol, EscalationPipeline, EscalationStage, HandoffCycleError, HandoffDepthError...

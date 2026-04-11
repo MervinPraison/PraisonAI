@@ -4,14 +4,14 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 320,
+    "pythonCoreFeatures": 322,
     "pythonWrapperFeatures": 99,
     "typescriptFeatures": 1192,
-    "gapCount": 28,
+    "gapCount": 30,
     "priorityP0": 1,
     "priorityP1": 0,
     "priorityP2": 0,
-    "priorityP3": 27
+    "priorityP3": 29
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -147,6 +147,8 @@
       "MEMORY_URL_SCHEMES",
       "MULTI_AGENT_EXECUTION_PRESETS",
       "MULTI_AGENT_OUTPUT_PRESETS",
+      "ManagedBackendConfig",
+      "ManagedBackendProtocol",
       "ManagerConfig",
       "Memory",
       "MemoryBackend",
@@ -581,6 +583,8 @@
         "LearnManager",
         "LearnManagerProtocol",
         "LearnProtocol",
+        "ManagedBackendConfig",
+        "ManagedBackendProtocol",
         "NetworkError",
         "ObservabilityEventType",
         "ObservabilityHooks",
@@ -4683,6 +4687,24 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "ManagedBackendConfig",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "ManagedBackendProtocol",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "medium",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "MemoryBackend",

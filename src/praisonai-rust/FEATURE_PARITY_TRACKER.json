@@ -5,10 +5,10 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 320,
+    "pythonCoreFeatures": 322,
     "rustFeatures": 667,
-    "gapCount": 41,
-    "parityPercentage": 208.4
+    "gapCount": 43,
+    "parityPercentage": 207.1
   },
   "pythonCoreSDK": {
     "exports": [
@@ -143,6 +143,8 @@
       "MEMORY_URL_SCHEMES",
       "MULTI_AGENT_EXECUTION_PRESETS",
       "MULTI_AGENT_OUTPUT_PRESETS",
+      "ManagedBackendConfig",
+      "ManagedBackendProtocol",
       "ManagerConfig",
       "Memory",
       "MemoryBackend",
@@ -3607,6 +3609,24 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "ManagedBackendConfig",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "ManagedBackendProtocol",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "medium",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "MemoryBackend",
