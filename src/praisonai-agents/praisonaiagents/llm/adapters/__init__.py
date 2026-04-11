@@ -209,9 +209,6 @@ class GeminiAdapter(DefaultAdapter):
     def supports_streaming_with_tools(self) -> bool:
         # Gemini has issues with streaming + tools
         return False
-    
-    def supports_structured_output(self) -> bool:
-        return True
 
 
 # Provider adapter registry - public for extension

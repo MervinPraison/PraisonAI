@@ -211,6 +211,21 @@ class ServerRegistry:
         with self._lock:
             return self._registered_agents.get(port, {}).copy()
 
+    def cleanup_agent_registrations(self, agent_id: str) -> None:
+        """Remove all registrations for an agent ID and clean empty port state."""
+        with self._lock:
+            ports_to_clean = []
+            for port, path_dict in self._registered_agents.items():
+                paths_to_remove = [path for path, registered_id in path_dict.items() if registered_id == agent_id]
+                for path in paths_to_remove:
+                    del path_dict[path]
+                if not path_dict:
+                    ports_to_clean.append(port)
+
+            for port in ports_to_clean:
+                self._registered_agents.pop(port, None)
+                self._server_started.pop(port, None)
+
 # Backward compatibility - use default instance
 def _get_default_server_registry() -> ServerRegistry:
     return ServerRegistry.get_default_instance()
@@ -4611,28 +4626,7 @@ Answer:"""
             return  # No ID generated, nothing registered
             
         try:
-            agent_id = self._agent_id
-            with _server_lock:
-                # Remove from _registered_agents
-                ports_to_clean = []
-                for port, path_dict in _registered_agents.items():
-                    paths_to_remove = []
-                    for path, registered_id in path_dict.items():
-                        if registered_id == agent_id:
-                            paths_to_remove.append(path)
-                    
-                    for path in paths_to_remove:
-                        del path_dict[path]
-                    
-                    # If no paths left for this port, mark port for cleanup
-                    if not path_dict:
-                        ports_to_clean.append(port)
-                
-                # Clean up empty port entries
-                for port in ports_to_clean:
-                    _registered_agents.pop(port, None)
-                    _server_started.pop(port, None)
-                    # Note: We don't clean up _shared_apps here as other agents might be using them
+            _get_default_server_registry().cleanup_agent_registrations(self._agent_id)
                     
         except Exception as e:
             import sys
@@ -4669,4 +4663,3 @@ Answer:"""
 
     def __str__(self):
         return f"Agent(name='{self.name}', role='{self.role}', goal='{self.goal}')"
-

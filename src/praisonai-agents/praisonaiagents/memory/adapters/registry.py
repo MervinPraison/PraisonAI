@@ -74,7 +74,7 @@ def add_memory_factory(name: str, factory_func: Callable[..., MemoryProtocol]) -
 
 def has_memory_adapter(name: str) -> bool:
     """Canonical alias for is_available (preferred naming per AGENTS.md)."""
-    return _memory_registry.is_available(name)
+    return get_default_memory_registry().is_available(name)
 
 
 def get_first_available_memory_adapter(
@@ -93,7 +93,7 @@ def get_first_available_memory_adapter(
     if preferences is None:
         preferences = ["sqlite", "in_memory"]
 
-    return _memory_registry.get_first_available(preferences, **kwargs)
+    return get_default_memory_registry().get_first_available(preferences, **kwargs)
 
 
 __all__ = [
