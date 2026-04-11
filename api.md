@@ -741,7 +741,7 @@ Methods:
 
 Types:
 ```python
-from praisonai import AgentApp, AgentOS, CloudProvider, Deploy, DeployConfig, DeployType, PraisonAI, __version__
+from praisonai import AgentApp, AgentOS, CloudProvider, Deploy, DeployConfig, DeployType, ManagedAgent, ManagedConfig, PraisonAI, __version__
 ```
 
 # CLI
@@ -889,6 +889,16 @@ Methods:
 * <code title="cli">praisonai lsp start <a href="./src/praisonai/praisonai/cli/commands/lsp.py">--help</a></code>
 * <code title="cli">praisonai lsp status <a href="./src/praisonai/praisonai/cli/commands/lsp.py">--help</a></code>
 * <code title="cli">praisonai lsp stop <a href="./src/praisonai/praisonai/cli/commands/lsp.py">--help</a></code>
+* <code title="cli">praisonai managed get <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
+* <code title="cli">praisonai managed list <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
+* <code title="cli">praisonai managed managed-callback <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
+* <code title="cli">praisonai managed multi <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
+* <code title="cli">praisonai managed restore <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
+* <code title="cli">praisonai managed resume <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
+* <code title="cli">praisonai managed run <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
+* <code title="cli">praisonai managed save <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
+* <code title="cli">praisonai managed show <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
+* <code title="cli">praisonai managed update <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
 * <code title="cli">praisonai mcp add <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
 * <code title="cli">praisonai mcp auth <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
 * <code title="cli">praisonai mcp describe <a href="./src/praisonai/praisonai/cli/commands/mcp.py">--help</a></code>
