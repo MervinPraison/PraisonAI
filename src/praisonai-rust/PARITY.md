@@ -1,16 +1,16 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 322 | **Rust Features:** 667 | **Parity:** 88.5%
+> **Python Features:** 321 | **Rust Features:** 667 | **Parity:** 88.8%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 322 |
+| Python Core Features | 321 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **37** |
+| **Actual Gap Count** | **36** |
 | Language Limitations (N/A) | 5 |
-| **Parity** | **88.5%** |
+| **Parity** | **88.8%** |
 
 ## Implemented Features
 
@@ -715,7 +715,6 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `LearnMode`
 - ❌ `LearnProtocol`
 - ❌ `LearnScope`
-- ❌ `ManagedBackendConfig`
 - ❌ `ManagedBackendProtocol`
 - ❌ `NetworkError`
 - ❌ `ObservabilityEventType`
