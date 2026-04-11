@@ -57,6 +57,25 @@ class DefaultAdapter:
     
     def get_default_settings(self) -> Dict[str, Any]:
         return {}  # No provider-specific defaults
+    
+    def parse_tool_calls(self, raw_response: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+        """Default tool call parsing - use OpenAI-style format."""
+        if "choices" in raw_response and len(raw_response["choices"]) > 0:
+            message = raw_response["choices"][0].get("message", {})
+            return message.get("tool_calls")
+        return None
+    
+    def should_skip_streaming_with_tools(self) -> bool:
+        return False  # Most providers support streaming with tools
+    
+    def recover_tool_calls_from_text(self, response_text: str, tools: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+        return None  # No text recovery by default
+    
+    def inject_cache_control(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return messages  # No cache control by default
+    
+    def extract_reasoning_tokens(self, response: Dict[str, Any]) -> int:
+        return 0  # No reasoning tokens by default
 
 
 class OllamaAdapter(DefaultAdapter):
@@ -98,6 +117,29 @@ class OllamaAdapter(DefaultAdapter):
         if iteration_count >= 1 and has_tool_results and not response_text:
             return True  # Signal that special handling is needed
         return False
+    
+    def recover_tool_calls_from_text(self, response_text: str, tools: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+        """Ollama-specific tool call recovery from response text."""
+        if not response_text or not tools:
+            return None
+        
+        try:
+            import json
+            response_json = json.loads(response_text.strip())
+            if isinstance(response_json, dict) and "name" in response_json:
+                # Convert Ollama format to standard tool_calls format
+                return [{
+                    "id": f"call_{response_json['name']}_{hash(response_text) % 10000}",
+                    "type": "function",
+                    "function": {
+                        "name": response_json["name"],
+                        "arguments": json.dumps(response_json.get("arguments", {}))
+                    }
+                }]
+        except (json.JSONDecodeError, TypeError, KeyError):
+            pass
+        
+        return None
     
     def post_tool_iteration(self, state: Dict[str, Any]) -> None:
         # Replaces: Ollama-specific post-tool summary branches
@@ -141,6 +183,13 @@ class GeminiAdapter(DefaultAdapter):
     - Doesn't support streaming with tools reliably
     - Supports structured output
     """
+    
+    def should_skip_streaming_with_tools(self) -> bool:
+        """Gemini should skip streaming when tools are present."""
+        return True
+    
+    def supports_structured_output(self) -> bool:
+        return True
     
     def format_tools(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         # Replaces: gemini_internal_tools handling in llm.py
