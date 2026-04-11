@@ -259,7 +259,7 @@ class ManagedAgent:
     # ------------------------------------------------------------------
     # Event processing helpers
     # ------------------------------------------------------------------
-    def _process_events(self, client, session_id, stream, *, collect: bool = True):
+    def _process_events(self, client, session_id, stream, *, collect: bool = True, stream_live: bool = False):
         """Walk the SSE stream and return (text_parts, tool_log).
 
         Handles:
@@ -269,7 +269,12 @@ class ManagedAgent:
         - ``session.status_idle``    → break (turn is done)
         - tool confirmation requests → call ``on_tool_confirmation``
         - usage tracking             → accumulate token counts
+
+        Args:
+            stream_live: If True, print text chunks to stdout as they arrive.
         """
+        import sys as _sys
+
         text_parts: List[str] = []
         tool_log: List[str] = []
 
@@ -281,11 +286,17 @@ class ManagedAgent:
                     text = getattr(block, "text", None)
                     if text and collect:
                         text_parts.append(text)
+                    if text and stream_live:
+                        _sys.stdout.write(text)
+                        _sys.stdout.flush()
 
             elif etype == "agent.tool_use":
                 name = getattr(event, "name", "unknown")
                 tool_log.append(name)
                 logger.debug("[managed] tool_use: %s", name)
+                if stream_live:
+                    _sys.stdout.write(f"\n[Using tool: {name}]\n")
+                    _sys.stdout.flush()
 
                 # Handle tool confirmation (always_ask policy)
                 if getattr(event, "needs_confirmation", False):
@@ -363,8 +374,15 @@ class ManagedAgent:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._execute_sync, prompt)
 
-    def _execute_sync(self, prompt: str) -> str:
-        """Synchronous execution using the SDK's native streaming."""
+    def _execute_sync(self, prompt: str, stream_live: bool = False) -> str:
+        """Synchronous execution using the SDK's native streaming.
+
+        Args:
+            stream_live: If True, print text chunks to stdout as they arrive
+                         (token-by-token streaming). The full text is still returned.
+        """
+        import sys
+
         client = self._get_client()
         session_id = self._ensure_session()
 
@@ -377,8 +395,13 @@ class ManagedAgent:
                 }],
             )
             text_parts, _ = self._process_events(
-                client, session_id, stream, collect=True
+                client, session_id, stream, collect=True,
+                stream_live=stream_live,
             )
+
+        if stream_live:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
 
         return "".join(text_parts)
 
@@ -525,11 +548,91 @@ class ManagedAgent:
         return result
 
     # ------------------------------------------------------------------
+    # Session resume — attach to a known Anthropic session ID
+    # ------------------------------------------------------------------
+    def resume_session(self, session_id: str) -> None:
+        """Resume an existing Anthropic session by ID.
+
+        Anthropic assigns session IDs (``sesn_...``).  You cannot pick your own.
+        But if you saved the ID from a previous run, pass it here to continue
+        that session and preserve its context/memory.
+
+        Also calls ``_ensure_agent()`` and ``_ensure_environment()`` so that
+        agent_id and environment_id are populated (needed for list_sessions etc.).
+        They are fetched lazily on the next real API call.
+
+        Example::
+
+            managed = ManagedAgent()
+            managed.resume_session("sesn_01AbCdEf...")
+            agent = Agent(name="coder", backend=managed)
+            result = agent.start("Continue where we left off", stream=True)
+        """
+        self._session_id = session_id
+        logger.info("[managed] resuming session: %s", session_id)
+
+    # ------------------------------------------------------------------
+    # ID persistence helpers — save/restore all Anthropic-assigned IDs
+    # ------------------------------------------------------------------
+    def save_ids(self) -> Dict[str, Any]:
+        """Return a dict of all current Anthropic-assigned IDs.
+
+        Anthropic assigns all IDs (agent, environment, session) — you cannot
+        define your own.  Use this to snapshot them after the first run so you
+        can restore them in a later process and avoid re-creating resources.
+
+        Example::
+
+            ids = managed.save_ids()
+            # persist ids however you like: json file, env var, DB, etc.
+            import json, pathlib
+            pathlib.Path("managed_ids.json").write_text(json.dumps(ids))
+        """
+        return {
+            "agent_id": self.agent_id,
+            "agent_version": self.agent_version,
+            "environment_id": self.environment_id,
+            "session_id": self._session_id,
+        }
+
+    def restore_ids(self, ids: Dict[str, Any]) -> None:
+        """Restore previously saved Anthropic-assigned IDs.
+
+        Lets you skip agent/environment/session creation on subsequent runs
+        by reusing IDs from ``save_ids()``.
+
+        Args:
+            ids: Dict returned by a previous ``save_ids()`` call.
+
+        Example::
+
+            import json, pathlib
+            ids = json.loads(pathlib.Path("managed_ids.json").read_text())
+            managed = ManagedAgent(config=cfg)
+            managed.restore_ids(ids)
+            agent = Agent(name="coder", backend=managed)
+            result = agent.start("Continue the previous task", stream=True)
+        """
+        self.agent_id = ids.get("agent_id")
+        self.agent_version = ids.get("agent_version")
+        self.environment_id = ids.get("environment_id")
+        self._session_id = ids.get("session_id")
+        logger.info(
+            "[managed] IDs restored — agent: %s  env: %s  session: %s",
+            self.agent_id, self.environment_id, self._session_id,
+        )
+
+    # ------------------------------------------------------------------
     # PraisonAI session linkage
     # ------------------------------------------------------------------
     @property
+    def session_id(self) -> Optional[str]:
+        """The current Anthropic session ID (``sesn_...``)."""
+        return self._session_id
+
+    @property
     def managed_session_id(self) -> Optional[str]:
-        """Expose the current managed session ID for external linkage."""
+        """Backward-compatible alias for ``session_id``."""
         return self._session_id
 
 

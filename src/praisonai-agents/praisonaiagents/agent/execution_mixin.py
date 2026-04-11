@@ -295,7 +295,10 @@ class ExecutionMixin:
         # Handle streaming vs non-streaming
         stream_requested = kwargs.get('stream', False)
         
-        if stream_requested:
+        if stream_requested and hasattr(self.backend, '_execute_sync'):
+            # Fast path: backend supports sync streaming (prints token-by-token)
+            result = self.backend._execute_sync(prompt, stream_live=True)
+        elif stream_requested:
             if hasattr(self.backend, 'stream'):
                 result = self._delegate_streaming_to_backend(prompt, **kwargs)
             else:
@@ -305,7 +308,7 @@ class ExecutionMixin:
         
         # ── Chat history & session linkage ──
         # Record prompt+response in chat_history so SessionStore/auto_save works
-        if result is not None and not stream_requested:
+        if result is not None:
             self.chat_history.append({"role": "user", "content": prompt})
             self.chat_history.append({"role": "assistant", "content": str(result)})
             # Link managed session ID into SessionStore gateway_session_id
@@ -643,6 +646,12 @@ Write the complete compiled report:"""
         
         # Check if external managed backend is configured
         if hasattr(self, 'backend') and self.backend is not None:
+            # Detect streaming preference BEFORE delegating (same logic as normal path)
+            if 'stream' not in kwargs:
+                if getattr(self, 'stream', None) is not None:
+                    kwargs['stream'] = self.stream
+                else:
+                    kwargs['stream'] = sys.stdout.isatty()
             return self._delegate_to_backend(prompt, **kwargs)
         
         # ─────────────────────────────────────────────────────────────────────
