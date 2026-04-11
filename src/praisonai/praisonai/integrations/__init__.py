@@ -11,13 +11,13 @@ This module provides integrations with external AI coding tools:
 All integrations use lazy loading to avoid performance impact.
 
 Usage:
-    from praisonai.integrations import ClaudeCodeIntegration, ManagedAgentIntegration
+    from praisonai.integrations import ClaudeCodeIntegration, ManagedAgent
     
     # CLI tool integration
     claude = ClaudeCodeIntegration(workspace="/path/to/project")
     
     # Managed agent integration
-    managed = ManagedAgentIntegration(provider="anthropic", api_key="...")
+    managed = ManagedAgent(config={"model": "claude-sonnet-4-6"})
     
     # Use as agent tool
     tool = claude.as_tool()
@@ -33,7 +33,10 @@ __all__ = [
     'GeminiCLIIntegration',
     'CodexCLIIntegration',
     'CursorCLIIntegration',
-    'ManagedAgentIntegration',
+    'ManagedAgent',
+    'ManagedConfig',
+    'ManagedAgentIntegration',  # backward compat alias
+    'ManagedBackendConfig',     # backward compat alias
     'get_available_integrations',
 ]
 
@@ -55,9 +58,12 @@ def __getattr__(name):
     elif name == 'CursorCLIIntegration':
         from .cursor_cli import CursorCLIIntegration
         return CursorCLIIntegration
-    elif name == 'ManagedAgentIntegration':
-        from .managed_agents import ManagedAgentIntegration
-        return ManagedAgentIntegration
+    elif name in ('ManagedAgent', 'ManagedAgentIntegration'):
+        from .managed_agents import ManagedAgent
+        return ManagedAgent
+    elif name in ('ManagedConfig', 'ManagedBackendConfig'):
+        from .managed_agents import ManagedConfig
+        return ManagedConfig
     elif name == 'get_available_integrations':
         from .base import get_available_integrations
         return get_available_integrations

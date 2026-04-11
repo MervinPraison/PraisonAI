@@ -28,6 +28,8 @@ __all__ = [
     'recipe',
     'embed',
     'embedding',
+    'ManagedAgent',
+    'ManagedConfig',
 ]
 
 
@@ -76,6 +78,12 @@ def __getattr__(name):
         # Silent alias for AgentOS (backward compatibility)
         from .app import AgentOS
         return AgentOS
+    elif name in ('ManagedAgent', 'ManagedAgentIntegration'):
+        from .integrations.managed_agents import ManagedAgent
+        return ManagedAgent
+    elif name in ('ManagedConfig', 'ManagedBackendConfig'):
+        from .integrations.managed_agents import ManagedConfig
+        return ManagedConfig
     
     # Try praisonaiagents exports
     try:

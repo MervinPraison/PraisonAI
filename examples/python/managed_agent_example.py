@@ -35,11 +35,10 @@ def example_1_standalone():
     print("Example 1: Standalone ManagedAgentIntegration")
     print("=" * 60)
 
-    from praisonai.integrations import ManagedAgentIntegration
-    from praisonaiagents import ManagedBackendConfig
+    from praisonai.integrations.managed_agents import ManagedAgent, ManagedConfig
 
-    managed = ManagedAgentIntegration(
-        config=ManagedBackendConfig(
+    managed = ManagedAgent(
+        config=ManagedConfig(
             model="claude-sonnet-4-6",
             name="Standalone Test Agent",
             system="You are a concise assistant. Answer in one sentence.",
@@ -60,11 +59,11 @@ def example_2_with_agent():
     print("Example 2: PraisonAI Agent with managed backend")
     print("=" * 60)
 
-    from praisonaiagents import Agent, ManagedBackendConfig
-    from praisonai.integrations import ManagedAgentIntegration
+    from praisonaiagents import Agent
+    from praisonai.integrations.managed_agents import ManagedAgent, ManagedConfig
 
-    managed = ManagedAgentIntegration(
-        config=ManagedBackendConfig(
+    managed = ManagedAgent(
+        config=ManagedConfig(
             model="claude-sonnet-4-6",
             name="PraisonAI Backend Agent",
             system="You are a helpful coding assistant. Be concise.",
@@ -90,11 +89,11 @@ def example_3_with_tools():
     print("Example 3: Managed agent with built-in tools")
     print("=" * 60)
 
-    from praisonaiagents import Agent, ManagedBackendConfig
-    from praisonai.integrations import ManagedAgentIntegration
+    from praisonaiagents import Agent
+    from praisonai.integrations.managed_agents import ManagedAgent, ManagedConfig
 
-    managed = ManagedAgentIntegration(
-        config=ManagedBackendConfig(
+    managed = ManagedAgent(
+        config=ManagedConfig(
             model="claude-sonnet-4-6",
             name="Tool-Using Agent",
             system="You are a coding agent with access to bash and file tools.",
@@ -123,11 +122,11 @@ def example_4_with_packages():
     print("Example 4: Managed agent with pip packages")
     print("=" * 60)
 
-    from praisonaiagents import Agent, ManagedBackendConfig
-    from praisonai.integrations import ManagedAgentIntegration
+    from praisonaiagents import Agent
+    from praisonai.integrations.managed_agents import ManagedAgent, ManagedConfig
 
-    managed = ManagedAgentIntegration(
-        config=ManagedBackendConfig(
+    managed = ManagedAgent(
+        config=ManagedConfig(
             model="claude-sonnet-4-6",
             name="Data Agent",
             system="You are a data analysis agent. Use pandas when helpful.",

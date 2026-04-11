@@ -10,7 +10,6 @@ This enables:
 These protocols are lightweight and have zero performance impact.
 """
 from typing import Protocol, runtime_checkable, Optional, Any, AsyncIterator, Dict, List
-from dataclasses import dataclass, field
 
 
 @runtime_checkable
@@ -303,44 +302,6 @@ class McpLauncherProtocol(Protocol):
         ...
 
 
-@dataclass
-class ManagedBackendConfig:
-    """Configuration for managed agent backends.
-    
-    Portable dataclass that describes *what* to create on the managed
-    infrastructure without tying to any provider SDK.
-    
-    Example::
-    
-        cfg = ManagedBackendConfig(
-            model="claude-sonnet-4-6",
-            system="You are a coding assistant.",
-            tools=[{"type": "agent_toolset_20260401"}],
-            packages={"pip": ["pandas", "numpy"]},
-            networking={"type": "unrestricted"},
-        )
-    """
-    # ── Agent fields ──
-    name: str = "PraisonAI Managed Agent"
-    model: str = "claude-sonnet-4-6"
-    system: str = "You are a helpful AI assistant."
-    tools: List[Dict[str, Any]] = field(default_factory=lambda: [{"type": "agent_toolset_20260401"}])
-    mcp_servers: List[Dict[str, Any]] = field(default_factory=list)
-    skills: List[Dict[str, Any]] = field(default_factory=list)
-    callable_agents: List[Dict[str, Any]] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    
-    # ── Environment fields ──
-    env_name: str = "praisonai-env"
-    packages: Optional[Dict[str, List[str]]] = None
-    networking: Dict[str, Any] = field(default_factory=lambda: {"type": "unrestricted"})
-    
-    # ── Session fields ──
-    session_title: str = "PraisonAI session"
-    resources: List[Dict[str, Any]] = field(default_factory=list)
-    vault_ids: List[str] = field(default_factory=list)
-
-
 @runtime_checkable
 class ManagedBackendProtocol(Protocol):
     """Protocol for external managed agent backends.
@@ -354,7 +315,7 @@ class ManagedBackendProtocol(Protocol):
     
     Lifecycle::
     
-        backend = SomeManagedBackend(config=ManagedBackendConfig(...))
+        backend = SomeManagedBackend(config={...})
         agent = Agent(name="coder", backend=backend)
         result = agent.start("Write a script")  # delegates to backend.execute()
     
@@ -429,6 +390,46 @@ class ManagedBackendProtocol(Protocol):
         """
         ...
 
+    # ── Optional methods (default no-ops for backward compat) ──
+
+    def update_agent(self, **kwargs) -> None:
+        """Update an existing managed agent's configuration.
+        
+        Allows changing system prompt, tools, model, etc. on a previously
+        created agent without recreating it.
+        
+        Args:
+            **kwargs: Fields to update (system, tools, model, name, etc.).
+        """
+        ...
+
+    def interrupt(self) -> None:
+        """Send a user interrupt to the active session.
+        
+        Signals the managed agent to stop its current work (equivalent to
+        ``user.interrupt`` event in the Anthropic API).
+        """
+        ...
+
+    def retrieve_session(self) -> Dict[str, Any]:
+        """Retrieve the current managed session's metadata and usage.
+        
+        Returns:
+            Dict with session info (id, status, usage, etc.).
+        """
+        ...
+
+    def list_sessions(self, **kwargs) -> List[Dict[str, Any]]:
+        """List sessions for the current agent.
+        
+        Args:
+            **kwargs: Provider-specific filters (limit, status, etc.).
+            
+        Returns:
+            List of session summary dicts.
+        """
+        ...
+
 
 __all__ = [
     'AgentProtocol',
@@ -440,5 +441,4 @@ __all__ = [
     'HttpLauncherProtocol',
     'McpLauncherProtocol',
     'ManagedBackendProtocol',
-    'ManagedBackendConfig',
 ]

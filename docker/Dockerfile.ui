@@ -16,7 +16,7 @@ RUN mkdir -p /root/.praison
 # Install Python packages (using latest versions)
 RUN pip install --no-cache-dir \
     praisonai_tools \
-    "praisonai>=4.5.147" \
+    "praisonai>=4.5.148" \
     "praisonai[ui]" \
     "praisonai[crewai]"
 

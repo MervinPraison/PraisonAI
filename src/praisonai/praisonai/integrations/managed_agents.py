@@ -9,12 +9,12 @@ Implements ``ManagedBackendProtocol`` from the Core SDK.
 
 Usage::
 
-    from praisonai.integrations import ManagedAgentIntegration
-    from praisonaiagents import Agent, ManagedBackendConfig
+    from praisonai.integrations.managed_agents import ManagedAgent, ManagedConfig
+    from praisonaiagents import Agent
 
     # Create managed backend
-    managed = ManagedAgentIntegration(
-        config=ManagedBackendConfig(
+    managed = ManagedAgent(
+        config=ManagedConfig(
             model="claude-sonnet-4-6",
             system="You are a coding assistant.",
             tools=[{"type": "agent_toolset_20260401"}],
@@ -30,12 +30,58 @@ Usage::
 import asyncio
 import logging
 import os
+from dataclasses import dataclass, field
 from typing import AsyncIterator, Callable, Dict, Any, Optional, List
 
 logger = logging.getLogger(__name__)
 
 
-class ManagedAgentIntegration:
+# ---------------------------------------------------------------------------
+# ManagedConfig — Anthropic-specific configuration dataclass
+# Lives in the Wrapper (not Core SDK) because its fields map directly to
+# the Anthropic Managed Agents API.  The Core SDK only defines the
+# provider-agnostic ManagedBackendProtocol.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ManagedConfig:
+    """Configuration for Anthropic Managed Agent backends.
+
+    Dataclass that describes *what* to create on Anthropic's managed
+    infrastructure.  Provider-specific — not part of the Core SDK.
+
+    Example::
+
+        cfg = ManagedConfig(
+            model="claude-haiku-4-5",
+            system="You are a helpful coding assistant.",
+            tools=[{"type": "agent_toolset_20260401"}],
+            packages={"pip": ["pandas", "numpy"]},
+            networking={"type": "unrestricted"},
+        )
+    """
+    # ── Agent fields ──
+    name: str = "Agent"
+    model: str = "claude-haiku-4-5"
+    system: str = "You are a helpful coding assistant."
+    tools: List[Dict[str, Any]] = field(default_factory=lambda: [{"type": "agent_toolset_20260401"}])
+    mcp_servers: List[Dict[str, Any]] = field(default_factory=list)
+    skills: List[Dict[str, Any]] = field(default_factory=list)
+    callable_agents: List[Dict[str, Any]] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    # ── Environment fields ──
+    env_name: str = "praisonai-env"
+    packages: Optional[Dict[str, List[str]]] = None
+    networking: Dict[str, Any] = field(default_factory=lambda: {"type": "unrestricted"})
+
+    # ── Session fields ──
+    session_title: str = "PraisonAI session"
+    resources: List[Dict[str, Any]] = field(default_factory=list)
+    vault_ids: List[str] = field(default_factory=list)
+
+
+class ManagedAgent:
     """Anthropic Managed Agents backend for PraisonAI.
 
     Satisfies ``ManagedBackendProtocol`` (Core SDK).  All heavy SDK usage
@@ -63,7 +109,7 @@ class ManagedAgentIntegration:
         api_key: Optional[str] = None,
         config: Optional[Any] = None,
         timeout: int = 600,
-        instructions: str = "You are a helpful AI assistant.",
+        instructions: str = "You are a helpful coding assistant.",
         on_tool_confirmation: Optional[Callable[[Dict[str, Any]], bool]] = None,
         on_custom_tool: Optional[Callable[[str, Dict[str, Any]], Any]] = None,
     ):
@@ -78,7 +124,7 @@ class ManagedAgentIntegration:
         self.on_tool_confirmation = on_tool_confirmation
         self.on_custom_tool = on_custom_tool
 
-        # Accept ManagedBackendConfig dataclass *or* plain dict
+        # Accept ManagedConfig dataclass *or* plain dict
         if config is not None and not isinstance(config, dict):
             # Assume dataclass — convert to dict
             from dataclasses import asdict
@@ -113,7 +159,7 @@ class ManagedAgentIntegration:
             if not self.api_key:
                 raise RuntimeError(
                     "ANTHROPIC_API_KEY not set. "
-                    "Export it or pass api_key= to ManagedAgentIntegration."
+                    "Export it or pass api_key= to ManagedAgent."
                 )
             self._client = anthropic.Anthropic(
                 api_key=self.api_key,
@@ -133,8 +179,8 @@ class ManagedAgentIntegration:
         c = self._cfg
 
         kwargs: Dict[str, Any] = {
-            "name": c.get("name", "PraisonAI Managed Agent"),
-            "model": c.get("model", "claude-sonnet-4-6"),
+            "name": c.get("name", "Agent"),
+            "model": c.get("model", "claude-haiku-4-5"),
             "system": c.get("system", self.instructions),
             "tools": c.get("tools", [{"type": "agent_toolset_20260401"}]),
         }
@@ -280,7 +326,7 @@ class ManagedAgentIntegration:
                     session_id,
                     events=[{
                         "type": "user.custom_tool_result",
-                        "tool_use_id": tool_use_id,
+                        "custom_tool_use_id": tool_use_id,
                         "content": [{"type": "text", "text": str(result)}],
                     }],
                 )
@@ -397,6 +443,95 @@ class ManagedAgentIntegration:
         self.total_input_tokens = 0
         self.total_output_tokens = 0
 
+    # ------------------------------------------------------------------
+    # update_agent — ManagedBackendProtocol
+    # ------------------------------------------------------------------
+    def update_agent(self, **kwargs) -> None:
+        """Update an existing managed agent's configuration.
+
+        Wraps ``client.beta.agents.update(agent_id, ...)`` to change the
+        system prompt, tools, model, etc. without recreating the agent.
+        After update, a new session should be created (old one is stale).
+        """
+        if not self.agent_id:
+            logger.warning("[managed] update_agent called but no agent exists yet")
+            return
+        client = self._get_client()
+        if "version" not in kwargs and self.agent_version is not None:
+            kwargs["version"] = self.agent_version
+        updated = client.beta.agents.update(self.agent_id, **kwargs)
+        self.agent_version = getattr(updated, "version", self.agent_version)
+        logger.info(
+            "[managed] agent updated: %s (v%s)", self.agent_id, self.agent_version
+        )
+        # Invalidate session — updated agent needs a fresh session
+        self._session_id = None
+
+    # ------------------------------------------------------------------
+    # interrupt — ManagedBackendProtocol
+    # ------------------------------------------------------------------
+    def interrupt(self) -> None:
+        """Send a user.interrupt event to the active session."""
+        if not self._session_id:
+            logger.warning("[managed] interrupt called but no active session")
+            return
+        client = self._get_client()
+        client.beta.sessions.events.send(
+            self._session_id,
+            events=[{"type": "user.interrupt"}],
+        )
+        logger.info("[managed] interrupt sent to session %s", self._session_id)
+
+    # ------------------------------------------------------------------
+    # retrieve_session — ManagedBackendProtocol
+    # ------------------------------------------------------------------
+    def retrieve_session(self) -> Dict[str, Any]:
+        """Retrieve current session metadata and usage from the API."""
+        if not self._session_id:
+            return {}
+        client = self._get_client()
+        sess = client.beta.sessions.retrieve(self._session_id)
+        result: Dict[str, Any] = {
+            "id": getattr(sess, "id", self._session_id),
+            "status": getattr(sess, "status", None),
+        }
+        usage = getattr(sess, "usage", None)
+        if usage:
+            result["usage"] = {
+                "input_tokens": getattr(usage, "input_tokens", 0),
+                "output_tokens": getattr(usage, "output_tokens", 0),
+            }
+        return result
+
+    # ------------------------------------------------------------------
+    # list_sessions — ManagedBackendProtocol
+    # ------------------------------------------------------------------
+    def list_sessions(self, **kwargs) -> List[Dict[str, Any]]:
+        """List sessions for the current agent."""
+        if not self.agent_id:
+            return []
+        client = self._get_client()
+        params: Dict[str, Any] = {"agent_id": self.agent_id}
+        if "limit" in kwargs:
+            params["limit"] = kwargs["limit"]
+        sessions = client.beta.sessions.list(**params)
+        result: List[Dict[str, Any]] = []
+        for s in getattr(sessions, "data", sessions):
+            result.append({
+                "id": getattr(s, "id", None),
+                "status": getattr(s, "status", None),
+                "title": getattr(s, "title", None),
+            })
+        return result
+
+    # ------------------------------------------------------------------
+    # PraisonAI session linkage
+    # ------------------------------------------------------------------
+    @property
+    def managed_session_id(self) -> Optional[str]:
+        """Expose the current managed session ID for external linkage."""
+        return self._session_id
+
 
 # ---------------------------------------------------------------------------
 # Tool mapping helpers
@@ -416,3 +551,8 @@ TOOL_MAPPING = {
 def map_managed_tools(managed_tools: List[str]) -> List[str]:
     """Map managed agent tool names to PraisonAI tool names."""
     return [TOOL_MAPPING.get(tool, tool) for tool in managed_tools]
+
+
+# ── Backward-compatible aliases ──
+ManagedAgentIntegration = ManagedAgent
+ManagedBackendConfig = ManagedConfig

@@ -456,9 +456,8 @@ _LAZY_IMPORTS = {
     'SandboxConfig': ('praisonaiagents.sandbox.config', 'SandboxConfig'),
     'SecurityPolicy': ('praisonaiagents.sandbox.config', 'SecurityPolicy'),
     
-    # Managed backend protocols (implementations in praisonai wrapper)
+    # Managed backend protocol (implementation + config in praisonai wrapper)
     'ManagedBackendProtocol': ('praisonaiagents.agent.protocols', 'ManagedBackendProtocol'),
-    'ManagedBackendConfig': ('praisonaiagents.agent.protocols', 'ManagedBackendConfig'),
     
     # Model failover
     'AuthProfile': ('praisonaiagents.llm.failover', 'AuthProfile'),

@@ -121,24 +121,22 @@ class PraisonAIExternalAgent(BaseAgent):
             agent = Agent(
                 name="terminal-agent",
                 instructions=(
-                    "You are an expert terminal agent working on coding, security, and system administration tasks. "
-                    "Use the bash_tool to execute shell commands in the sandboxed environment. "
+                    "You are an expert terminal agent. You solve coding, debugging, data analysis, security, "
+                    "and system administration tasks using the bash_tool to run shell commands."
                     "\n\nCRITICAL RULES:"
-                    "\n1. ALWAYS start by reading ALL relevant files: "
-                    "   ls /app/ && ls /tests/ 2>/dev/null && cat /app/*.py 2>/dev/null && cat /tests/*.py 2>/dev/null || true"
-                    "   Read EVERY source file including the test/verifier scripts to understand exactly what passes."
-                    "\n2. Run the test IMMEDIATELY after reading files to see the current failure message: "
-                    "   cd /app && python3 -m pytest /app/test_outputs.py -v 2>&1 | tail -50 || true"
-                    "   The error trace tells you EXACTLY what the test expects."
-                    "\n3. For writing files with special characters (quotes, backslashes, parentheses), "
-                    "   ALWAYS use Python: python3 -c \"with open('/app/out.html','w') as f: f.write('...')\""
-                    "\n4. ITERATE: Try an approach, run the test, read the error, try again. Keep going until the test passes."
-                    "   Never give up after one attempt — try multiple different approaches."
-                    "\n5. Read error messages carefully — they tell you exactly what to fix next."
-                    "\n6. If the task involves bypassing/exploiting/breaking something: "
-                    "   experiment with many different payloads, test each one, and use the test output to guide you."
-                    "\n7. NEVER stop to describe or explain what you plan to do. ALWAYS immediately call "
-                    "   bash_tool to execute commands. Keep using bash_tool until the test PASSES."
+                    "\n1. START by exploring: ls /app/ && cat /app/*.py /app/*.sh /app/*.txt 2>/dev/null | head -200"
+                    "   Read ALL task files to understand what is needed before doing anything."
+                    "\n2. Find and run the test IMMEDIATELY to see what is expected:"
+                    "   find /app -name 'test_*.py' | head -3 && cd /app && python3 -m pytest -v 2>&1 | tail -40 || true"
+                    "   The test error trace tells you EXACTLY what output/behavior is required."
+                    "\n3. ITERATE: implement a solution, run the test, read the error, refine. Repeat until it passes."
+                    "   Never give up after one attempt — try multiple approaches if needed."
+                    "\n4. For writing files with special characters use Python:"
+                    "   python3 -c \"with open('/app/file','w') as f: f.write('content')\""
+                    "   or heredoc: cat > /app/file << 'EOF'\\n...content...\\nEOF"
+                    "\n5. Read ALL error messages — they tell you exactly what to fix next."
+                    "\n6. NEVER just describe your plan. ALWAYS immediately run bash_tool commands."
+                    "   Keep calling bash_tool until the test PASSES or you have exhausted all approaches."
                 ),
                 tools=[bash_tool],
                 llm=self.model_name or "openai/gpt-4o",
@@ -149,17 +147,17 @@ class PraisonAIExternalAgent(BaseAgent):
             result = await agent.achat(instruction)
             for _iter in range(19):
                 result_str = str(result)
-                # Stop if test passed or we have clear completion
+                # Stop if test passed
                 if any(sig in result_str.lower() for sig in [
-                    "passed", "1 passed", "test passed", "all tests"
+                    " passed", "passed ", "test passed", "all tests pass", "1 passed"
                 ]):
                     break
                 result = await agent.achat(
-                    "The task is NOT complete yet. You must keep working. "
-                    "Run bash_tool commands now — do not explain, just act. "
-                    "If you have not yet created /app/out.html, create it now with a JS payload that bypasses the filter. "
-                    "Then run: python3 /app/test_outputs.py to check if it passes. "
-                    "Keep iterating until the test passes."
+                    "The task is NOT complete yet — keep working. Run bash_tool commands now. "
+                    "If you haven't already: (1) read all files in /app/, "
+                    "(2) run the test to see the exact failure, "
+                    "(3) implement a fix, (4) run the test again. "
+                    "Repeat until the test passes. What is your next bash_tool command?"
                 )
             print(f"✅ PraisonAI Agent completed task")
             

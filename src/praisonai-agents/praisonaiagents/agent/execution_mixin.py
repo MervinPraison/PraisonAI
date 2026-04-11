@@ -279,7 +279,12 @@ class ExecutionMixin:
         return result
 
     def _delegate_to_backend(self, prompt: str, **kwargs) -> Optional[str]:
-        """Delegate execution to external managed backend (e.g., ManagedAgentIntegration)."""
+        """Delegate execution to external managed backend (e.g., ManagedAgentIntegration).
+        
+        Also records the prompt and response in the Agent's chat_history so that
+        PraisonAI's session management (SessionStore, auto_save) stays consistent
+        with managed-backend conversations.
+        """
         import asyncio
         
         # Check if backend satisfies ManagedBackendProtocol
@@ -291,15 +296,31 @@ class ExecutionMixin:
         stream_requested = kwargs.get('stream', False)
         
         if stream_requested:
-            # For streaming, delegate to backend's stream method if available
             if hasattr(self.backend, 'stream'):
-                return self._delegate_streaming_to_backend(prompt, **kwargs)
+                result = self._delegate_streaming_to_backend(prompt, **kwargs)
             else:
-                # Fallback: execute non-streaming even if stream was requested
-                return self._execute_backend_sync(prompt, **kwargs)
+                result = self._execute_backend_sync(prompt, **kwargs)
         else:
-            # Non-streaming execution
-            return self._execute_backend_sync(prompt, **kwargs)
+            result = self._execute_backend_sync(prompt, **kwargs)
+        
+        # ── Chat history & session linkage ──
+        # Record prompt+response in chat_history so SessionStore/auto_save works
+        if result is not None and not stream_requested:
+            self.chat_history.append({"role": "user", "content": prompt})
+            self.chat_history.append({"role": "assistant", "content": str(result)})
+            # Link managed session ID into SessionStore gateway_session_id
+            if hasattr(self.backend, 'managed_session_id'):
+                msid = self.backend.managed_session_id
+                if msid and self._session_store is not None:
+                    try:
+                        sid = getattr(self, 'auto_save', None) or getattr(self, '_session_id', None)
+                        if sid and hasattr(self._session_store, 'set_gateway_info'):
+                            self._session_store.set_gateway_info(sid, gateway_session_id=msid)
+                    except Exception:
+                        pass  # Best-effort linkage
+            self._auto_save_session()
+        
+        return result
     
     def _execute_backend_sync(self, prompt: str, **kwargs) -> Optional[str]:
         """Execute backend in sync mode, handling async backends."""
