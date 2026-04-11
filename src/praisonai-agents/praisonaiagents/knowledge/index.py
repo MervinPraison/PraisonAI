@@ -109,7 +109,13 @@ class IndexRegistry:
     def default(cls) -> "IndexRegistry":
         """Get a default global registry instance for convenience."""
         if not hasattr(cls, '_default_instance'):
-            cls._default_instance = cls()
+            import threading
+            # Use lock for thread safety 
+            if not hasattr(cls, '_init_lock'):
+                cls._init_lock = threading.Lock()
+            with cls._init_lock:
+                if not hasattr(cls, '_default_instance'):
+                    cls._default_instance = cls()
         return cls._default_instance
     
     def register(self, name: str, factory: Callable[..., IndexProtocol]) -> None:
@@ -136,7 +142,7 @@ class IndexRegistry:
 
 def get_index_registry() -> IndexRegistry:
     """Get the global index registry instance."""
-    return IndexRegistry()
+    return IndexRegistry.default()
 
 class KeywordIndex:
     """

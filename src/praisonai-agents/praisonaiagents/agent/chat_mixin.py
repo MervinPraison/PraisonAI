@@ -580,9 +580,10 @@ Your Goal: {self.goal}"""
                     )
                 else:
                     # Non-streaming with custom LLM - direct execution
+                    has_system = bool(messages and messages[0].get('role') == 'system')
                     final_response = self.llm_instance.get_response(
-                        prompt=messages[1:],
-                        system_prompt=messages[0]['content'] if messages and messages[0]['role'] == 'system' else None,
+                        prompt=messages[1:] if has_system else messages,
+                        system_prompt=messages[0]['content'] if has_system else None,
                         temperature=temperature,
                         tools=formatted_tools if formatted_tools else None,
                         verbose=self.verbose,
@@ -1834,8 +1835,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     formatted_tools = self._format_tools_for_completion(tools)
                     
                     # NEW: Unified protocol dispatch path (Issue #1304) - Async version
-                    # Check if unified dispatch is enabled (opt-in for backward compatibility)
-                    if getattr(self, '_use_unified_llm_dispatch', False):
+                    # Enable unified dispatch by default for DRY and feature parity (sync/async consistent)
+                    if getattr(self, '_use_unified_llm_dispatch', True):
                         # Use composition instead of runtime class mutation for safety
                         response = await self._execute_unified_achat_completion(
                             messages=messages,

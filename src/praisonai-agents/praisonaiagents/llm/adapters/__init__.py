@@ -126,16 +126,24 @@ class OllamaAdapter(DefaultAdapter):
         try:
             import json
             response_json = json.loads(response_text.strip())
-            if isinstance(response_json, dict) and "name" in response_json:
-                # Convert Ollama format to standard tool_calls format
-                return [{
-                    "id": f"call_{response_json['name']}_{hash(response_text) % 10000}",
-                    "type": "function",
-                    "function": {
-                        "name": response_json["name"],
-                        "arguments": json.dumps(response_json.get("arguments", {}))
-                    }
-                }]
+            
+            # Normalize to list so both single and multi-tool payloads are supported
+            if isinstance(response_json, dict):
+                response_json = [response_json]
+
+            if isinstance(response_json, list):
+                tool_calls: List[Dict[str, Any]] = []
+                for idx, tool_json in enumerate(response_json):
+                    if isinstance(tool_json, dict) and "name" in tool_json:
+                        tool_calls.append({
+                            "id": f"call_{tool_json['name']}_{idx}_{hash(response_text) % 10000}",
+                            "type": "function",
+                            "function": {
+                                "name": tool_json["name"],
+                                "arguments": json.dumps(tool_json.get("arguments", {}))
+                            }
+                        })
+                return tool_calls if tool_calls else None
         except (json.JSONDecodeError, TypeError, KeyError):
             pass
         

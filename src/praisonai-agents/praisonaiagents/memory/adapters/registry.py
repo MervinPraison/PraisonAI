@@ -37,7 +37,13 @@ class MemoryAdapterRegistry(AdapterRegistry[MemoryProtocol]):
 def get_default_memory_registry() -> MemoryAdapterRegistry:
     """Get the default global registry instance for convenience."""
     if not hasattr(get_default_memory_registry, '_default_instance'):
-        get_default_memory_registry._default_instance = MemoryAdapterRegistry()
+        import threading
+        # Use lock for thread safety
+        if not hasattr(get_default_memory_registry, '_init_lock'):
+            get_default_memory_registry._init_lock = threading.Lock()
+        with get_default_memory_registry._init_lock:
+            if not hasattr(get_default_memory_registry, '_default_instance'):
+                get_default_memory_registry._default_instance = MemoryAdapterRegistry()
     return get_default_memory_registry._default_instance
 
 

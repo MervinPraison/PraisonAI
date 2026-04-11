@@ -182,7 +182,11 @@ class ServerRegistry:
     def get_default_instance():
         """Get default global registry for backward compatibility."""
         if not hasattr(ServerRegistry, '_default_instance'):
-            ServerRegistry._default_instance = ServerRegistry()
+            import threading
+            # Double-checked locking pattern for thread safety
+            with threading.Lock():
+                if not hasattr(ServerRegistry, '_default_instance'):
+                    ServerRegistry._default_instance = ServerRegistry()
         return ServerRegistry._default_instance
     
     def is_server_started(self, port: int) -> bool:
