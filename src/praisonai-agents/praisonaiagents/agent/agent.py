@@ -487,6 +487,7 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
         approval: Optional[Union[bool, str, Dict[str, Any], 'ApprovalConfig', 'ApprovalProtocol']] = None,
         tool_timeout: Optional[int] = None,  # P8/G11: Timeout in seconds for each tool call
         learn: Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
+        backend: Optional[Any] = None,  # External managed agent backend (e.g., ManagedAgentIntegration)
     ):
         """Initialize an Agent instance.
 
@@ -574,6 +575,11 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
                 - LearnConfig: Custom configuration
                 Learning is a first-class citizen, peer to memory. It captures patterns,
                 preferences, and insights from interactions to improve future responses.
+            backend: External managed agent backend for hybrid execution. Accepts:
+                - ManagedAgentIntegration: External managed agent service
+                - None: Use local execution (default)
+                When provided, agent can delegate execution to managed infrastructure
+                for long-running tasks or when local resources are constrained.
 
         Raises:
             ValueError: If all of name, role, goal, backstory, and instructions are None.
@@ -1797,6 +1803,9 @@ Your Goal: {self.goal}
         # Output file and template - for auto-saving response to file
         self._output_file = output_file if _output_config else None
         self._output_template = output_template if _output_config else None
+
+        # Backend - external managed agent backend for hybrid execution
+        self.backend = backend
 
         # Telemetry - lazy initialized via property for performance
         self.__telemetry = None
