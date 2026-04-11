@@ -123,6 +123,14 @@ class AnthropicAdapter(DefaultAdapter):
     def supports_structured_output(self) -> bool:
         return True
 
+    def supports_streaming(self) -> bool:
+        # litellm.acompletion with stream=True returns a ModelResponse (not async generator)
+        # for Anthropic in the async path, causing 'async for requires __aiter__' error
+        return False
+
+    def supports_streaming_with_tools(self) -> bool:
+        return False
+
 
 class GeminiAdapter(DefaultAdapter):
     """

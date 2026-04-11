@@ -17,9 +17,8 @@ Dependencies:
     pip install harbor praisonaiagents
 """
 
-import asyncio
-from typing import Any, Dict, Optional
-from pathlib import Path
+import os
+from typing import Any
 
 try:
     from harbor.agents.base import BaseAgent
@@ -51,7 +50,11 @@ class PraisonAIExternalAgent(BaseAgent):
     def version(self) -> str | None:
         try:
             import praisonaiagents
-            return getattr(praisonaiagents, "__version__", None)
+            return (
+                getattr(praisonaiagents, "__version__", None)
+                or getattr(praisonaiagents, "version", None)
+                or "unknown"
+            )
         except ImportError:
             return None
 
@@ -71,6 +74,14 @@ class PraisonAIExternalAgent(BaseAgent):
         This method bridges Harbor's BaseEnvironment.exec() to PraisonAI's tool system.
         """
         
+        # Inject API keys from Harbor's --ae env vars into host os.environ
+        # so litellm can pick them up (--ae only sets them inside Docker, not the host)
+        agent_env = getattr(context, 'env', {}) or {}
+        for key, val in agent_env.items():
+            if key not in os.environ and val:
+                os.environ[key] = val
+                print(f"[ENV] Set {key} from Harbor agent env")
+
         # Set auto-approval for container-isolated execution  
         # Harbor's container provides isolation, so we can safely auto-approve shell commands
         registry = get_approval_registry()
@@ -84,9 +95,10 @@ class PraisonAIExternalAgent(BaseAgent):
                 if not command.strip():
                     return "Error: Empty command provided"
                 
+                print(f"[CMD] {command[:200]}")
                 try:
                     # Execute command in Harbor's container
-                    result = await environment.exec(command=command, timeout_sec=30)
+                    result = await environment.exec(command=command, timeout_sec=300)
                     
                     # Format output similar to PraisonAI's execute_command tool
                     output_parts = []
@@ -97,9 +109,12 @@ class PraisonAIExternalAgent(BaseAgent):
                     if result.return_code != 0:
                         output_parts.append(f"[exit_code]: {result.return_code}")
                         
-                    return "\n".join(output_parts) if output_parts else "(no output)"
+                    output = "\n".join(output_parts) if output_parts else "(no output)"
+                    print(f"[OUT] {output[:300]}")
+                    return output
                     
                 except Exception as e:
+                    print(f"[ERR] {str(e)}")
                     return f"Error executing command: {str(e)}"
 
             # Create PraisonAI agent with the bash tool
@@ -108,16 +123,48 @@ class PraisonAIExternalAgent(BaseAgent):
                 instructions=(
                     "You are an expert terminal agent working on coding and system administration tasks. "
                     "Use the bash_tool to execute shell commands in the sandboxed environment. "
-                    "Be precise, verify your work, and complete the task step by step. "
-                    "Always check if your solution works by running appropriate tests."
+                    "\n\nCRITICAL RULES:"
+                    "\n1. ALWAYS start by running: ls /app/ && ls /tests/ 2>/dev/null && cat /app/instruction.md 2>/dev/null || true"
+                    "   to understand what files exist before doing anything else."
+                    "\n2. For writing files with special characters (quotes, backslashes, parentheses), "
+                    "   ALWAYS use Python or a heredoc instead of echo. Example: "
+                    "   python3 -c \"with open('/app/out.html','w') as f: f.write('<html>...</html>')\" "
+                    "   OR: cat > /app/file.txt << 'HEREDOC'\\n...content...\\nHEREDOC"
+                    "\n3. For long-running commands (compile, install, git clone), they have up to 5 minutes "
+                    "   to complete — be patient and check the result."
+                    "\n4. After completing the task, ALWAYS run the verification script and check its output. "
+                    "   If /app/test_outputs.py exists, run it and show its full output. "
+                    "   Only stop when the test passes or you have exhausted all approaches."
+                    "\n5. Read error messages carefully — they tell you exactly what to fix next."
+                    "\n6. Read ALL relevant source files in /app/ before attempting a solution. "
+                    "   For example: cat /app/*.py to understand exactly how the code works, "
+                    "   what it checks, and what edge cases or quirks you can exploit or work around."
+                    "\n7. NEVER stop to describe or explain what you plan to do. ALWAYS immediately call "
+                    "   bash_tool to execute commands. Do NOT write analysis or explanations without "
+                    "   also running the actual commands. Keep using bash_tool until the task is fully "
+                    "   complete and verified. The task is NOT done until you have run the verification."
                 ),
                 tools=[bash_tool],
                 llm=self.model_name or "openai/gpt-4o",
             )
 
-            # Execute the agent
+            # Execute the agent - loop until done or max iterations
             print(f"🚀 PraisonAI Agent starting task: {instruction[:100]}...")
-            result = await agent.astart(instruction)
+            result = await agent.achat(instruction)
+            for _iter in range(49):
+                done_signals = [
+                    "task complete", "task is complete", "task done",
+                    "verification passed", "test passed", "score:", "reward:",
+                    "DONE", "completed successfully", "all tests pass",
+                ]
+                result_lower = str(result).lower()
+                if any(sig.lower() in result_lower for sig in done_signals):
+                    break
+                result = await agent.achat(
+                    "Continue working on the task. If you haven't completed it yet, "
+                    "keep running bash_tool commands. Only stop when the verification "
+                    "test passes. What is your next action?"
+                )
             print(f"✅ PraisonAI Agent completed task")
             
             # Populate Harbor context with metadata
@@ -142,16 +189,18 @@ class PraisonAIExternalAgent(BaseAgent):
         """
         try:
             # Extract token usage and cost from agent
-            summary = agent.cost_summary()
-            if summary:
-                context.n_input_tokens = summary.get('tokens_in')
-                context.n_output_tokens = summary.get('tokens_out')
-                context.cost_usd = summary.get('cost')
-            else:
-                # Fallback to direct properties
-                context.n_input_tokens = getattr(agent, '_total_tokens_in', 0)
-                context.n_output_tokens = getattr(agent, '_total_tokens_out', 0) 
-                context.cost_usd = agent.total_cost
+            try:
+                summary = agent.cost_summary() if callable(getattr(agent, 'cost_summary', None)) else None
+                if isinstance(summary, dict):
+                    context.n_input_tokens = summary.get('tokens_in')
+                    context.n_output_tokens = summary.get('tokens_out')
+                    context.cost_usd = summary.get('cost')
+                else:
+                    context.n_input_tokens = getattr(agent, '_total_tokens_in', 0)
+                    context.n_output_tokens = getattr(agent, '_total_tokens_out', 0)
+                    context.cost_usd = getattr(agent, 'total_cost', None)
+            except Exception:
+                pass
                 
             # Store result summary and agent info
             context.metadata = {

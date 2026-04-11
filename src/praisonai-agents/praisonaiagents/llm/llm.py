@@ -3675,6 +3675,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if formatted_tools and not self._supports_streaming_tools():
                         # Provider doesn't support streaming with tools, use non-streaming
                         use_streaming = False
+                    # Also disable if provider adapter explicitly disables streaming entirely
+                    if use_streaming and hasattr(self, '_provider_adapter') and self._provider_adapter:
+                        if not self._provider_adapter.supports_streaming():
+                            use_streaming = False
                     
                     if use_streaming:
                         # Streaming approach (with or without tools)
@@ -3897,12 +3901,29 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             interaction_displayed = True
                     else:
                         # Get response after tool calls with streaming if not already handled
-                        if verbose:
+                        _use_stream = stream
+                        if _use_stream and hasattr(self, '_provider_adapter') and self._provider_adapter:
+                            if not self._provider_adapter.supports_streaming():
+                                _use_stream = False
+                        if not _use_stream:
+                            resp = await litellm.acompletion(
+                                **self._build_completion_params(
+                                    messages=messages,
+                                    temperature=temperature,
+                                    stream=False,
+                                    tools=formatted_tools,
+                                    output_json=output_json,
+                                    output_pydantic=output_pydantic,
+                                    **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
+                                )
+                            )
+                            response_text = resp["choices"][0]["message"].get("content") or ""
+                        elif verbose:
                             async for chunk in await litellm.acompletion(
                                 **self._build_completion_params(
                                     messages=messages,
                                     temperature=temperature,
-                                    stream=stream,
+                                    stream=_use_stream,
                                     tools=formatted_tools,
                                     output_json=output_json,
                                     output_pydantic=output_pydantic,
@@ -3920,7 +3941,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 **self._build_completion_params(
                                     messages=messages,
                                     temperature=temperature,
-                                    stream=stream,
+                                    stream=_use_stream,
                                     output_json=output_json,
                                     output_pydantic=output_pydantic,
                                     **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
