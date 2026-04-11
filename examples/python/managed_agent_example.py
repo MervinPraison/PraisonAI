@@ -7,7 +7,7 @@ for a PraisonAI Agent. The agent runs in Anthropic's managed infrastructure.
 
 Prerequisites:
     export ANTHROPIC_API_KEY="your-key"
-    pip install 'anthropic>=0.94.0' praisonaiagents
+    pip install 'anthropic>=0.94.0' praisonaiagents praisonai
 
 Usage:
     python examples/python/managed_agent_example.py
@@ -36,21 +36,21 @@ def example_1_standalone():
     print("=" * 60)
 
     from praisonai.integrations import ManagedAgentIntegration
+    from praisonaiagents import ManagedBackendConfig
 
     managed = ManagedAgentIntegration(
-        provider="anthropic",
-        config={
-            "model": "claude-sonnet-4-6",
-            "name": "Standalone Test Agent",
-            "system": "You are a concise assistant. Answer in one sentence.",
-        },
+        config=ManagedBackendConfig(
+            model="claude-sonnet-4-6",
+            name="Standalone Test Agent",
+            system="You are a concise assistant. Answer in one sentence.",
+        ),
     )
 
-    # _execute_sync is the synchronous entry point
     result = managed._execute_sync("What is 2 + 2? Answer in one sentence.")
     print(f"\nResult: {result}")
+    print(f"Tokens: in={managed.total_input_tokens}, out={managed.total_output_tokens}")
     assert result and len(result) > 0, "Expected non-empty response"
-    print("✓ Standalone execution passed")
+    print("PASS: Standalone execution")
     return result
 
 
@@ -60,16 +60,15 @@ def example_2_with_agent():
     print("Example 2: PraisonAI Agent with managed backend")
     print("=" * 60)
 
-    from praisonaiagents import Agent
+    from praisonaiagents import Agent, ManagedBackendConfig
     from praisonai.integrations import ManagedAgentIntegration
 
     managed = ManagedAgentIntegration(
-        provider="anthropic",
-        config={
-            "model": "claude-sonnet-4-6",
-            "name": "PraisonAI Backend Agent",
-            "system": "You are a helpful coding assistant. Be concise.",
-        },
+        config=ManagedBackendConfig(
+            model="claude-sonnet-4-6",
+            name="PraisonAI Backend Agent",
+            system="You are a helpful coding assistant. Be concise.",
+        ),
     )
 
     agent = Agent(
@@ -81,7 +80,7 @@ def example_2_with_agent():
     result = agent.start("Write a Python one-liner that prints the first 10 Fibonacci numbers.")
     print(f"\nResult: {result}")
     assert result and len(result) > 0, "Expected non-empty response from agent.start()"
-    print("✓ Agent backend execution passed")
+    print("PASS: Agent backend execution")
     return result
 
 
@@ -91,17 +90,16 @@ def example_3_with_tools():
     print("Example 3: Managed agent with built-in tools")
     print("=" * 60)
 
-    from praisonaiagents import Agent
+    from praisonaiagents import Agent, ManagedBackendConfig
     from praisonai.integrations import ManagedAgentIntegration
 
     managed = ManagedAgentIntegration(
-        provider="anthropic",
-        config={
-            "model": "claude-sonnet-4-6",
-            "name": "Tool-Using Agent",
-            "system": "You are a coding agent with access to bash and file tools.",
-            "tools": [{"type": "agent_toolset_20260401"}],
-        },
+        config=ManagedBackendConfig(
+            model="claude-sonnet-4-6",
+            name="Tool-Using Agent",
+            system="You are a coding agent with access to bash and file tools.",
+            tools=[{"type": "agent_toolset_20260401"}],
+        ),
     )
 
     agent = Agent(
@@ -115,7 +113,40 @@ def example_3_with_tools():
     )
     print(f"\nResult: {result}")
     assert result and len(result) > 0, "Expected non-empty response"
-    print("✓ Tool-using agent execution passed")
+    print("PASS: Tool-using agent execution")
+    return result
+
+
+def example_4_with_packages():
+    """Example 4: Managed agent with custom packages installed."""
+    print("\n" + "=" * 60)
+    print("Example 4: Managed agent with pip packages")
+    print("=" * 60)
+
+    from praisonaiagents import Agent, ManagedBackendConfig
+    from praisonai.integrations import ManagedAgentIntegration
+
+    managed = ManagedAgentIntegration(
+        config=ManagedBackendConfig(
+            model="claude-sonnet-4-6",
+            name="Data Agent",
+            system="You are a data analysis agent. Use pandas when helpful.",
+            packages={"pip": ["pandas", "numpy"]},
+        ),
+    )
+
+    agent = Agent(
+        name="data-agent",
+        instructions="You are a data analysis agent.",
+        backend=managed,
+    )
+
+    result = agent.start(
+        "Use bash to run: python3 -c \"import pandas as pd; print(pd.__version__)\""
+    )
+    print(f"\nResult: {result}")
+    assert result and len(result) > 0, "Expected non-empty response"
+    print("PASS: Package installation agent")
     return result
 
 
@@ -123,26 +154,20 @@ if __name__ == "__main__":
     print("Managed Agent Backend — Real End-to-End Tests")
     print("Using Anthropic Managed Agents API (beta)")
 
+    examples = [
+        ("standalone", example_1_standalone),
+        ("agent_backend", example_2_with_agent),
+        ("with_tools", example_3_with_tools),
+        ("with_packages", example_4_with_packages),
+    ]
     results = {}
 
-    # Run examples sequentially
-    try:
-        results["standalone"] = example_1_standalone()
-    except Exception as e:
-        print(f"✗ Example 1 failed: {e}")
-        results["standalone"] = None
-
-    try:
-        results["agent_backend"] = example_2_with_agent()
-    except Exception as e:
-        print(f"✗ Example 2 failed: {e}")
-        results["agent_backend"] = None
-
-    try:
-        results["with_tools"] = example_3_with_tools()
-    except Exception as e:
-        print(f"✗ Example 3 failed: {e}")
-        results["with_tools"] = None
+    for name, fn in examples:
+        try:
+            results[name] = fn()
+        except Exception as e:
+            print(f"FAIL: {name}: {e}")
+            results[name] = None
 
     # Summary
     print("\n" + "=" * 60)
@@ -151,6 +176,6 @@ if __name__ == "__main__":
     passed = sum(1 for v in results.values() if v is not None)
     total = len(results)
     for name, result in results.items():
-        status = "✓ PASS" if result else "✗ FAIL"
+        status = "PASS" if result else "FAIL"
         print(f"  {status}: {name}")
     print(f"\n{passed}/{total} examples passed")

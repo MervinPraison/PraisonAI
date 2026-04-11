@@ -9,7 +9,8 @@ This enables:
 
 These protocols are lightweight and have zero performance impact.
 """
-from typing import Protocol, runtime_checkable, Optional, Any, Dict, List
+from typing import Protocol, runtime_checkable, Optional, Any, AsyncIterator, Dict, List
+from dataclasses import dataclass, field
 
 
 @runtime_checkable
@@ -302,6 +303,133 @@ class McpLauncherProtocol(Protocol):
         ...
 
 
+@dataclass
+class ManagedBackendConfig:
+    """Configuration for managed agent backends.
+    
+    Portable dataclass that describes *what* to create on the managed
+    infrastructure without tying to any provider SDK.
+    
+    Example::
+    
+        cfg = ManagedBackendConfig(
+            model="claude-sonnet-4-6",
+            system="You are a coding assistant.",
+            tools=[{"type": "agent_toolset_20260401"}],
+            packages={"pip": ["pandas", "numpy"]},
+            networking={"type": "unrestricted"},
+        )
+    """
+    # ── Agent fields ──
+    name: str = "PraisonAI Managed Agent"
+    model: str = "claude-sonnet-4-6"
+    system: str = "You are a helpful AI assistant."
+    tools: List[Dict[str, Any]] = field(default_factory=lambda: [{"type": "agent_toolset_20260401"}])
+    mcp_servers: List[Dict[str, Any]] = field(default_factory=list)
+    skills: List[Dict[str, Any]] = field(default_factory=list)
+    callable_agents: List[Dict[str, Any]] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    # ── Environment fields ──
+    env_name: str = "praisonai-env"
+    packages: Optional[Dict[str, List[str]]] = None
+    networking: Dict[str, Any] = field(default_factory=lambda: {"type": "unrestricted"})
+    
+    # ── Session fields ──
+    session_title: str = "PraisonAI session"
+    resources: List[Dict[str, Any]] = field(default_factory=list)
+    vault_ids: List[str] = field(default_factory=list)
+
+
+@runtime_checkable
+class ManagedBackendProtocol(Protocol):
+    """Protocol for external managed agent backends.
+    
+    Defines the contract between PraisonAI Agent's delegation layer
+    (``execution_mixin._delegate_to_backend``) and any managed agent
+    infrastructure provider (Anthropic Managed Agents, etc.).
+    
+    The Core SDK defines *what* — this protocol.
+    The Wrapper implements *how* — the provider-specific adapter.
+    
+    Lifecycle::
+    
+        backend = SomeManagedBackend(config=ManagedBackendConfig(...))
+        agent = Agent(name="coder", backend=backend)
+        result = agent.start("Write a script")  # delegates to backend.execute()
+    
+    Implementations must handle:
+    - Agent/environment/session creation and caching
+    - Event streaming (agent.message, agent.tool_use, session.status_idle)
+    - Custom tool calls (agent.custom_tool_use → user.custom_tool_result)
+    - Tool confirmation (always_ask policy → user.tool_confirmation)
+    - Usage tracking (input_tokens, output_tokens)
+    - Session reset for multi-turn isolation
+    
+    Example::
+    
+        class MockManagedBackend:
+            async def execute(self, prompt: str, **kwargs) -> str:
+                return "mock response"
+            
+            async def stream(self, prompt: str, **kwargs):
+                yield "mock "
+                yield "response"
+            
+            def reset_session(self) -> None:
+                pass
+            
+            def reset_all(self) -> None:
+                pass
+        
+        assert isinstance(MockManagedBackend(), ManagedBackendProtocol)
+    """
+    
+    async def execute(self, prompt: str, **kwargs) -> str:
+        """Execute a prompt on managed infrastructure and return the full response.
+        
+        This is the primary entry point called by Agent._delegate_to_backend().
+        
+        Args:
+            prompt: The user message to send to the managed agent.
+            **kwargs: Provider-specific options (e.g., timeout, metadata).
+            
+        Returns:
+            The agent's complete text response.
+        """
+        ...
+    
+    async def stream(self, prompt: str, **kwargs) -> AsyncIterator[str]:
+        """Stream a prompt response as text chunks.
+        
+        Yields text fragments as the managed agent produces them.
+        Used when Agent is invoked with stream=True.
+        
+        Args:
+            prompt: The user message.
+            **kwargs: Provider-specific options.
+            
+        Yields:
+            Text chunks from the agent's response.
+        """
+        ...
+        yield ""  # type: ignore[misc]
+    
+    def reset_session(self) -> None:
+        """Discard the cached session so the next execute() creates a fresh one.
+        
+        The agent and environment remain cached for reuse.
+        """
+        ...
+    
+    def reset_all(self) -> None:
+        """Discard all cached state (agent, environment, session, client).
+        
+        Next execute() call will re-create everything from scratch.
+        """
+        ...
+
+
 __all__ = [
     'AgentProtocol',
     'RunnableAgentProtocol', 
@@ -311,4 +439,6 @@ __all__ = [
     'ContextEngineerProtocol',
     'HttpLauncherProtocol',
     'McpLauncherProtocol',
+    'ManagedBackendProtocol',
+    'ManagedBackendConfig',
 ]

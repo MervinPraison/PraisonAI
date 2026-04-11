@@ -282,8 +282,9 @@ class ExecutionMixin:
         """Delegate execution to external managed backend (e.g., ManagedAgentIntegration)."""
         import asyncio
         
-        # Check if backend has required methods
-        if not hasattr(self.backend, 'execute'):
+        # Check if backend satisfies ManagedBackendProtocol
+        from praisonaiagents.agent.protocols import ManagedBackendProtocol
+        if not (isinstance(self.backend, ManagedBackendProtocol) or hasattr(self.backend, 'execute')):
             raise RuntimeError(f"Backend {type(self.backend).__name__} does not support execute() method")
         
         # Handle streaming vs non-streaming

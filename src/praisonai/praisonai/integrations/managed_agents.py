@@ -1,21 +1,28 @@
 """
 External Managed Agent Backends Integration.
 
-Provides integration with external managed agent infrastructures as execution backends,
-starting with Anthropic's Managed Agents API. Uses the official Anthropic Python SDK
-(v0.94+) which handles beta headers, auth, and SSE streaming natively.
+Provides integration with Anthropic's Managed Agents API as an execution backend
+for PraisonAI Agents. Uses the official Anthropic Python SDK (v0.94+) which handles
+beta headers, authentication, and SSE streaming natively.
 
-Usage:
+Implements ``ManagedBackendProtocol`` from the Core SDK.
+
+Usage::
+
     from praisonai.integrations import ManagedAgentIntegration
-    
-    # Create managed backend (auto-reads ANTHROPIC_API_KEY)
+    from praisonaiagents import Agent, ManagedBackendConfig
+
+    # Create managed backend
     managed = ManagedAgentIntegration(
-        provider="anthropic",
-        config={"model": "claude-sonnet-4-6"}
+        config=ManagedBackendConfig(
+            model="claude-sonnet-4-6",
+            system="You are a coding assistant.",
+            tools=[{"type": "agent_toolset_20260401"}],
+            packages={"pip": ["pandas"]},
+        )
     )
-    
+
     # Use with PraisonAI Agent
-    from praisonaiagents import Agent
     agent = Agent(name="coder", backend=managed)
     result = agent.start("Create a Python script that prints hello")
 """
@@ -23,45 +30,76 @@ Usage:
 import asyncio
 import logging
 import os
-from typing import Dict, Any, Optional, List
+from typing import AsyncIterator, Callable, Dict, Any, Optional, List
 
 logger = logging.getLogger(__name__)
 
 
 class ManagedAgentIntegration:
+    """Anthropic Managed Agents backend for PraisonAI.
+
+    Satisfies ``ManagedBackendProtocol`` (Core SDK).  All heavy SDK usage
+    (``anthropic`` import) is lazy — import only on first use.
+
+    Lifecycle:
+        1. ``_ensure_agent()``       — create (or reuse) an agent definition
+        2. ``_ensure_environment()``  — create (or reuse) a sandbox environment
+        3. ``_ensure_session()``      — create (or reuse) a running session
+        4. ``execute()`` / ``stream()`` — send user message, collect events
+
+    Supports the full Managed Agents API surface:
+    - Agent: model, system, tools (agent_toolset, mcp_toolset, custom),
+      mcp_servers, skills, callable_agents, metadata
+    - Environment: packages (pip/npm/apt/…), networking (unrestricted/limited)
+    - Session: resources (files, memory_stores), vault_ids
+    - Events: agent.message, agent.tool_use, agent.custom_tool_use,
+      session.status_idle, tool confirmation
+    - Usage tracking: input_tokens, output_tokens per turn
     """
-    Generic integration for managed agent APIs.
-    
-    Uses the official Anthropic Python SDK for the Managed Agents beta API.
-    The SDK handles beta headers, authentication, and SSE streaming natively.
-    
-    Attributes:
-        provider: Provider name ("anthropic")
-        config: Provider-specific configuration (model, tools, packages, etc.)
-        agent_id: Created agent ID (cached for reuse)
-        environment_id: Created environment ID (cached for reuse)
-    """
-    
+
     def __init__(
         self,
         provider: str = "anthropic",
         api_key: Optional[str] = None,
-        config: Optional[Dict[str, Any]] = None,
+        config: Optional[Any] = None,
         timeout: int = 600,
         instructions: str = "You are a helpful AI assistant.",
+        on_tool_confirmation: Optional[Callable[[Dict[str, Any]], bool]] = None,
+        on_custom_tool: Optional[Callable[[str, Dict[str, Any]], Any]] = None,
     ):
         self.provider = provider
-        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY")
-        self.config = config or {}
+        self.api_key = (
+            api_key
+            or os.getenv("ANTHROPIC_API_KEY")
+            or os.getenv("CLAUDE_API_KEY")
+        )
         self.timeout = timeout
         self.instructions = instructions
-        
+        self.on_tool_confirmation = on_tool_confirmation
+        self.on_custom_tool = on_custom_tool
+
+        # Accept ManagedBackendConfig dataclass *or* plain dict
+        if config is not None and not isinstance(config, dict):
+            # Assume dataclass — convert to dict
+            from dataclasses import asdict
+            self._cfg = asdict(config)
+        else:
+            self._cfg: Dict[str, Any] = config or {}
+
         # Cached IDs for reuse across calls
         self.agent_id: Optional[str] = None
+        self.agent_version: Optional[int] = None
         self.environment_id: Optional[str] = None
         self._session_id: Optional[str] = None
-        self._client = None
-    
+        self._client: Any = None
+
+        # Usage tracking (accumulated per instance)
+        self.total_input_tokens: int = 0
+        self.total_output_tokens: int = 0
+
+    # ------------------------------------------------------------------
+    # Client
+    # ------------------------------------------------------------------
     def _get_client(self):
         """Lazy-init Anthropic client."""
         if self._client is None:
@@ -77,90 +115,214 @@ class ManagedAgentIntegration:
                     "ANTHROPIC_API_KEY not set. "
                     "Export it or pass api_key= to ManagedAgentIntegration."
                 )
-            self._client = anthropic.Anthropic(api_key=self.api_key)
+            self._client = anthropic.Anthropic(
+                api_key=self.api_key,
+                timeout=self.timeout,
+            )
         return self._client
-    
+
+    # ------------------------------------------------------------------
+    # Agent
+    # ------------------------------------------------------------------
     def _ensure_agent(self) -> str:
         """Create agent if not cached, return agent_id."""
         if self.agent_id:
             return self.agent_id
-        
+
         client = self._get_client()
-        model = self.config.get("model", "claude-sonnet-4-6")
-        tools = self.config.get("tools", [{"type": "agent_toolset_20260401"}])
-        system = self.config.get("system", self.instructions)
-        name = self.config.get("name", "PraisonAI Managed Agent")
-        
-        agent = client.beta.agents.create(
-            name=name,
-            model=model,
-            system=system,
-            tools=tools,
-        )
+        c = self._cfg
+
+        kwargs: Dict[str, Any] = {
+            "name": c.get("name", "PraisonAI Managed Agent"),
+            "model": c.get("model", "claude-sonnet-4-6"),
+            "system": c.get("system", self.instructions),
+            "tools": c.get("tools", [{"type": "agent_toolset_20260401"}]),
+        }
+        # Optional fields — only send if non-empty
+        if c.get("mcp_servers"):
+            kwargs["mcp_servers"] = c["mcp_servers"]
+        if c.get("skills"):
+            kwargs["skills"] = c["skills"]
+        if c.get("callable_agents"):
+            kwargs["callable_agents"] = c["callable_agents"]
+        if c.get("metadata"):
+            kwargs["metadata"] = c["metadata"]
+
+        agent = client.beta.agents.create(**kwargs)
         self.agent_id = agent.id
-        logger.info(f"Created managed agent: {agent.id} (v{agent.version})")
+        self.agent_version = getattr(agent, "version", None)
+        logger.info(
+            "[managed] agent created: %s (v%s)", agent.id, self.agent_version
+        )
         return self.agent_id
-    
+
+    # ------------------------------------------------------------------
+    # Environment
+    # ------------------------------------------------------------------
     def _ensure_environment(self) -> str:
         """Create environment if not cached, return environment_id."""
         if self.environment_id:
             return self.environment_id
-        
+
         client = self._get_client()
-        env_name = self.config.get("env_name", "praisonai-env")
-        packages = self.config.get("packages")
-        networking = self.config.get("networking", {"type": "unrestricted"})
-        
-        env_config = {"type": "cloud", "networking": networking}
-        if packages:
-            env_config["packages"] = packages
-        
+        c = self._cfg
+
+        env_config: Dict[str, Any] = {
+            "type": "cloud",
+            "networking": c.get("networking", {"type": "unrestricted"}),
+        }
+        if c.get("packages"):
+            env_config["packages"] = c["packages"]
+
         environment = client.beta.environments.create(
-            name=env_name,
+            name=c.get("env_name", "praisonai-env"),
             config=env_config,
         )
         self.environment_id = environment.id
-        logger.info(f"Created managed environment: {environment.id}")
+        logger.info("[managed] environment created: %s", environment.id)
         return self.environment_id
-    
+
+    # ------------------------------------------------------------------
+    # Session
+    # ------------------------------------------------------------------
     def _ensure_session(self) -> str:
         """Create session if not cached, return session_id."""
         if self._session_id:
             return self._session_id
-        
+
         client = self._get_client()
         agent_id = self._ensure_agent()
         env_id = self._ensure_environment()
-        
-        session = client.beta.sessions.create(
-            agent=agent_id,
-            environment_id=env_id,
-            title="PraisonAI session",
-        )
+        c = self._cfg
+
+        kwargs: Dict[str, Any] = {
+            "agent": agent_id,
+            "environment_id": env_id,
+            "title": c.get("session_title", "PraisonAI session"),
+        }
+        if c.get("resources"):
+            kwargs["resources"] = c["resources"]
+        if c.get("vault_ids"):
+            kwargs["vault_ids"] = c["vault_ids"]
+
+        session = client.beta.sessions.create(**kwargs)
         self._session_id = session.id
-        logger.info(f"Created managed session: {session.id}")
+        logger.info("[managed] session created: %s", session.id)
         return self._session_id
-    
+
+    # ------------------------------------------------------------------
+    # Event processing helpers
+    # ------------------------------------------------------------------
+    def _process_events(self, client, session_id, stream, *, collect: bool = True):
+        """Walk the SSE stream and return (text_parts, tool_log).
+
+        Handles:
+        - ``agent.message``          → collect text
+        - ``agent.tool_use``         → log tool invocations
+        - ``agent.custom_tool_use``  → call ``on_custom_tool`` callback
+        - ``session.status_idle``    → break (turn is done)
+        - tool confirmation requests → call ``on_tool_confirmation``
+        - usage tracking             → accumulate token counts
+        """
+        text_parts: List[str] = []
+        tool_log: List[str] = []
+
+        for event in stream:
+            etype = getattr(event, "type", None)
+
+            if etype == "agent.message":
+                for block in getattr(event, "content", []):
+                    text = getattr(block, "text", None)
+                    if text and collect:
+                        text_parts.append(text)
+
+            elif etype == "agent.tool_use":
+                name = getattr(event, "name", "unknown")
+                tool_log.append(name)
+                logger.debug("[managed] tool_use: %s", name)
+
+                # Handle tool confirmation (always_ask policy)
+                if getattr(event, "needs_confirmation", False):
+                    approved = True
+                    if self.on_tool_confirmation:
+                        info = {
+                            "name": name,
+                            "input": getattr(event, "input", {}),
+                            "tool_use_id": getattr(event, "id", None),
+                        }
+                        approved = self.on_tool_confirmation(info)
+                    # Send confirmation back
+                    client.beta.sessions.events.send(
+                        session_id,
+                        events=[{
+                            "type": "user.tool_confirmation",
+                            "tool_use_id": getattr(event, "id", ""),
+                            "allowed": approved,
+                        }],
+                    )
+
+            elif etype == "agent.custom_tool_use":
+                tool_name = getattr(event, "name", "custom_tool")
+                tool_input = getattr(event, "input", {})
+                tool_use_id = getattr(event, "id", "")
+                logger.debug("[managed] custom_tool_use: %s", tool_name)
+
+                result = ""
+                if self.on_custom_tool:
+                    try:
+                        result = self.on_custom_tool(tool_name, tool_input)
+                    except Exception as exc:
+                        result = f"Error: {exc}"
+                        logger.warning("[managed] custom tool error: %s", exc)
+
+                # Return custom tool result
+                client.beta.sessions.events.send(
+                    session_id,
+                    events=[{
+                        "type": "user.custom_tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": [{"type": "text", "text": str(result)}],
+                    }],
+                )
+
+            elif etype == "session.status_idle":
+                logger.debug("[managed] session idle — turn done")
+                break
+
+            elif etype == "session.error":
+                err = getattr(event, "error", None)
+                error_msg = getattr(err, "message", None) or str(err) or "Unknown error"
+                logger.error("[managed] session error: %s", error_msg)
+                break
+
+            # Usage tracking (from event.usage or span.model_usage)
+            usage = getattr(event, "usage", None) or getattr(event, "model_usage", None)
+            if usage:
+                self.total_input_tokens += getattr(usage, "input_tokens", 0)
+                self.total_output_tokens += getattr(usage, "output_tokens", 0)
+
+        if tool_log:
+            logger.info("[managed] tools used: %s", tool_log)
+
+        return text_parts, tool_log
+
+    # ------------------------------------------------------------------
+    # execute() — ManagedBackendProtocol
+    # ------------------------------------------------------------------
     async def execute(self, prompt: str, **kwargs) -> str:
+        """Execute prompt on managed infrastructure and return the full response.
+
+        Runs the synchronous Anthropic SDK in a thread executor to stay async-safe.
         """
-        Execute prompt in managed infrastructure and return the full response.
-        
-        This is the method called by Agent._delegate_to_backend().
-        Uses the SDK's synchronous streaming API in a thread to stay async-safe.
-        """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._execute_sync, prompt)
-    
+
     def _execute_sync(self, prompt: str) -> str:
         """Synchronous execution using the SDK's native streaming."""
         client = self._get_client()
         session_id = self._ensure_session()
-        
-        response_parts = []
-        tool_log = []
-        
+
         with client.beta.sessions.events.stream(session_id) as stream:
-            # Send the user message after opening the stream
             client.beta.sessions.events.send(
                 session_id,
                 events=[{
@@ -168,44 +330,77 @@ class ManagedAgentIntegration:
                     "content": [{"type": "text", "text": prompt}],
                 }],
             )
-            
-            # Process events
-            for event in stream:
-                etype = getattr(event, "type", None)
-                
-                if etype == "agent.message":
-                    for block in getattr(event, "content", []):
-                        text = getattr(block, "text", None)
-                        if text:
-                            response_parts.append(text)
-                
-                elif etype == "agent.tool_use":
-                    name = getattr(event, "name", "unknown")
-                    tool_log.append(name)
-                    logger.debug(f"[managed] tool_use: {name}")
-                
-                elif etype == "session.status_idle":
-                    logger.debug("[managed] session idle — done")
-                    break
-        
-        if tool_log:
-            logger.info(f"[managed] tools used: {tool_log}")
-        
-        return "".join(response_parts)
-    
-    def reset_session(self):
-        """Reset session so next execute creates a fresh one."""
+            text_parts, _ = self._process_events(
+                client, session_id, stream, collect=True
+            )
+
+        return "".join(text_parts)
+
+    # ------------------------------------------------------------------
+    # stream() — ManagedBackendProtocol
+    # ------------------------------------------------------------------
+    async def stream(self, prompt: str, **kwargs) -> AsyncIterator[str]:
+        """Yield text chunks as the managed agent produces them."""
+        loop = asyncio.get_running_loop()
+        import queue
+        import threading
+
+        q: queue.Queue[Optional[str]] = queue.Queue()
+
+        def _producer():
+            try:
+                client = self._get_client()
+                session_id = self._ensure_session()
+                with client.beta.sessions.events.stream(session_id) as s:
+                    client.beta.sessions.events.send(
+                        session_id,
+                        events=[{
+                            "type": "user.message",
+                            "content": [{"type": "text", "text": prompt}],
+                        }],
+                    )
+                    for event in s:
+                        etype = getattr(event, "type", None)
+                        if etype == "agent.message":
+                            for block in getattr(event, "content", []):
+                                text = getattr(block, "text", None)
+                                if text:
+                                    q.put(text)
+                        elif etype == "session.status_idle":
+                            break
+            finally:
+                q.put(None)  # sentinel
+
+        thread = threading.Thread(target=_producer, daemon=True)
+        thread.start()
+
+        while True:
+            chunk = await loop.run_in_executor(None, q.get)
+            if chunk is None:
+                break
+            yield chunk
+
+    # ------------------------------------------------------------------
+    # Session management — ManagedBackendProtocol
+    # ------------------------------------------------------------------
+    def reset_session(self) -> None:
+        """Discard cached session; next execute() creates a fresh one."""
         self._session_id = None
-    
-    def reset_all(self):
-        """Reset all cached IDs (agent, environment, session)."""
+
+    def reset_all(self) -> None:
+        """Discard all cached state (agent, environment, session, client)."""
         self.agent_id = None
+        self.agent_version = None
         self.environment_id = None
         self._session_id = None
         self._client = None
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
 
 
+# ---------------------------------------------------------------------------
 # Tool mapping helpers
+# ---------------------------------------------------------------------------
 TOOL_MAPPING = {
     "bash": "execute_command",
     "read": "read_file",
@@ -219,13 +414,5 @@ TOOL_MAPPING = {
 
 
 def map_managed_tools(managed_tools: List[str]) -> List[str]:
-    """
-    Map managed agent tool names to PraisonAI tool names.
-    
-    Args:
-        managed_tools: List of managed agent tool names
-        
-    Returns:
-        List of corresponding PraisonAI tool names
-    """
+    """Map managed agent tool names to PraisonAI tool names."""
     return [TOOL_MAPPING.get(tool, tool) for tool in managed_tools]

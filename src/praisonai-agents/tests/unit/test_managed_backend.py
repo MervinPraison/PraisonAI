@@ -1,12 +1,83 @@
-"""
-Unit tests for the managed agent backend integration.
+"""Unit tests for the managed agent backend integration.
 
-Tests the delegation path: Agent -> execution_mixin._delegate_to_backend -> ManagedAgentIntegration.execute
+Tests:
+- ManagedBackendProtocol conformance
+- ManagedBackendConfig dataclass
+- Agent -> execution_mixin._delegate_to_backend -> ManagedAgentIntegration.execute
+- Usage tracking, custom tool callbacks, tool confirmation
 Uses mocks to avoid real API calls.
 """
 
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
+
+
+# ── Test ManagedBackendProtocol & ManagedBackendConfig (Core SDK) ──
+
+class TestManagedBackendProtocol:
+    """Verify the protocol and config dataclass in the Core SDK."""
+
+    def test_protocol_importable(self):
+        from praisonaiagents.agent.protocols import ManagedBackendProtocol
+        assert ManagedBackendProtocol is not None
+
+    def test_config_importable(self):
+        from praisonaiagents.agent.protocols import ManagedBackendConfig
+        assert ManagedBackendConfig is not None
+
+    def test_config_defaults(self):
+        from praisonaiagents.agent.protocols import ManagedBackendConfig
+        cfg = ManagedBackendConfig()
+        assert cfg.model == "claude-sonnet-4-6"
+        assert cfg.name == "PraisonAI Managed Agent"
+        assert cfg.tools == [{"type": "agent_toolset_20260401"}]
+        assert cfg.networking == {"type": "unrestricted"}
+        assert cfg.packages is None
+        assert cfg.mcp_servers == []
+        assert cfg.skills == []
+        assert cfg.resources == []
+        assert cfg.vault_ids == []
+
+    def test_config_custom_values(self):
+        from praisonaiagents.agent.protocols import ManagedBackendConfig
+        cfg = ManagedBackendConfig(
+            model="claude-opus-4",
+            name="Custom Agent",
+            packages={"pip": ["pandas"]},
+            networking={"type": "limited", "allowed_hosts": ["example.com"]},
+        )
+        assert cfg.model == "claude-opus-4"
+        assert cfg.packages == {"pip": ["pandas"]}
+
+    def test_config_converts_to_dict(self):
+        from dataclasses import asdict
+        from praisonaiagents.agent.protocols import ManagedBackendConfig
+        cfg = ManagedBackendConfig(model="test-model")
+        d = asdict(cfg)
+        assert isinstance(d, dict)
+        assert d["model"] == "test-model"
+
+    def test_mock_backend_satisfies_protocol(self):
+        """A minimal mock with execute/stream/reset should pass isinstance check."""
+        from praisonaiagents.agent.protocols import ManagedBackendProtocol
+
+        class _MockBackend:
+            async def execute(self, prompt: str, **kwargs) -> str:
+                return "mock"
+            async def stream(self, prompt: str, **kwargs):
+                yield "mock"
+            def reset_session(self) -> None:
+                pass
+            def reset_all(self) -> None:
+                pass
+
+        assert isinstance(_MockBackend(), ManagedBackendProtocol)
+
+    def test_lazy_import_from_top_level(self):
+        """ManagedBackendProtocol should be accessible via praisonaiagents.__getattr__."""
+        from praisonaiagents import ManagedBackendProtocol, ManagedBackendConfig
+        assert ManagedBackendProtocol is not None
+        assert ManagedBackendConfig is not None
 
 
 # ── Test Agent backend delegation (execution_mixin.py) ──
@@ -94,8 +165,8 @@ class TestManagedAgentIntegration:
             assert m.provider == "anthropic"
             assert m.api_key == "test-key"
 
-    def test_init_custom_config(self):
-        """Config should be stored correctly."""
+    def test_init_custom_config_dict(self):
+        """Dict config should be stored correctly."""
         from praisonai.integrations.managed_agents import ManagedAgentIntegration
 
         m = ManagedAgentIntegration(
@@ -103,8 +174,23 @@ class TestManagedAgentIntegration:
             config={"model": "claude-sonnet-4-6"},
             instructions="Be concise.",
         )
-        assert m.config["model"] == "claude-sonnet-4-6"
+        assert m._cfg["model"] == "claude-sonnet-4-6"
         assert m.instructions == "Be concise."
+
+    def test_init_config_dataclass(self):
+        """ManagedBackendConfig dataclass should be auto-converted to dict."""
+        from praisonai.integrations.managed_agents import ManagedAgentIntegration
+        from praisonaiagents.agent.protocols import ManagedBackendConfig
+
+        cfg = ManagedBackendConfig(
+            model="claude-opus-4",
+            name="DC Agent",
+            packages={"pip": ["numpy"]},
+        )
+        m = ManagedAgentIntegration(api_key="test-key", config=cfg)
+        assert m._cfg["model"] == "claude-opus-4"
+        assert m._cfg["name"] == "DC Agent"
+        assert m._cfg["packages"] == {"pip": ["numpy"]}
 
     def test_init_no_api_key_no_env(self):
         """Should not crash without API key — will fail at execute time."""
@@ -143,18 +229,40 @@ class TestManagedAgentIntegration:
         assert m._session_id is None
 
     def test_reset_all(self):
-        """reset_all should clear everything."""
+        """reset_all should clear everything including usage counters."""
         from praisonai.integrations.managed_agents import ManagedAgentIntegration
 
         m = ManagedAgentIntegration(api_key="test-key")
         m.agent_id = "agent-123"
+        m.agent_version = 3
         m.environment_id = "env-123"
         m._session_id = "sess-123"
+        m.total_input_tokens = 100
+        m.total_output_tokens = 200
         m.reset_all()
         assert m.agent_id is None
+        assert m.agent_version is None
         assert m.environment_id is None
         assert m._session_id is None
         assert m._client is None
+        assert m.total_input_tokens == 0
+        assert m.total_output_tokens == 0
+
+    def _make_mock_client(self, events):
+        """Helper: create a mock Anthropic client with given event sequence."""
+        mock_client = MagicMock()
+        mock_agent = MagicMock(id="agent-001", version=1)
+        mock_client.beta.agents.create.return_value = mock_agent
+        mock_env = MagicMock(id="env-001")
+        mock_client.beta.environments.create.return_value = mock_env
+        mock_session = MagicMock(id="sess-001")
+        mock_client.beta.sessions.create.return_value = mock_session
+        mock_stream_ctx = MagicMock()
+        mock_stream_ctx.__enter__ = MagicMock(return_value=iter(events))
+        mock_stream_ctx.__exit__ = MagicMock(return_value=False)
+        mock_client.beta.sessions.events.stream.return_value = mock_stream_ctx
+        mock_client.beta.sessions.events.send = MagicMock()
+        return mock_client
 
     def test_execute_sync_with_mock_sdk(self):
         """_execute_sync should orchestrate create+stream correctly."""
@@ -162,44 +270,12 @@ class TestManagedAgentIntegration:
 
         m = ManagedAgentIntegration(api_key="test-key")
 
-        # Mock the Anthropic client
-        mock_client = MagicMock()
-
-        # Mock agent creation
-        mock_agent = MagicMock()
-        mock_agent.id = "agent-001"
-        mock_agent.version = 1
-        mock_client.beta.agents.create.return_value = mock_agent
-
-        # Mock environment creation
-        mock_env = MagicMock()
-        mock_env.id = "env-001"
-        mock_client.beta.environments.create.return_value = mock_env
-
-        # Mock session creation
-        mock_session = MagicMock()
-        mock_session.id = "sess-001"
-        mock_client.beta.sessions.create.return_value = mock_session
-
-        # Mock streaming events
-        mock_event_msg = MagicMock()
-        mock_event_msg.type = "agent.message"
-        mock_block = MagicMock()
-        mock_block.text = "Hello from managed agent!"
+        mock_event_msg = MagicMock(type="agent.message", usage=None)
+        mock_block = MagicMock(text="Hello from managed agent!")
         mock_event_msg.content = [mock_block]
+        mock_event_idle = MagicMock(type="session.status_idle", usage=None)
 
-        mock_event_idle = MagicMock()
-        mock_event_idle.type = "session.status_idle"
-
-        mock_stream_ctx = MagicMock()
-        mock_stream_ctx.__enter__ = MagicMock(return_value=iter([mock_event_msg, mock_event_idle]))
-        mock_stream_ctx.__exit__ = MagicMock(return_value=False)
-        mock_client.beta.sessions.events.stream.return_value = mock_stream_ctx
-
-        # Mock send
-        mock_client.beta.sessions.events.send = MagicMock()
-
-        # Inject mock
+        mock_client = self._make_mock_client([mock_event_msg, mock_event_idle])
         m._client = mock_client
 
         result = m._execute_sync("test prompt")
@@ -217,32 +293,143 @@ class TestManagedAgentIntegration:
         m.environment_id = "env-cached"
         m._session_id = "sess-cached"
 
-        mock_client = MagicMock()
-
-        # Mock streaming
-        mock_event = MagicMock()
-        mock_event.type = "agent.message"
-        mock_block = MagicMock()
-        mock_block.text = "cached response"
+        mock_event = MagicMock(type="agent.message", usage=None)
+        mock_block = MagicMock(text="cached response")
         mock_event.content = [mock_block]
+        mock_idle = MagicMock(type="session.status_idle", usage=None)
 
-        mock_idle = MagicMock()
-        mock_idle.type = "session.status_idle"
-
-        mock_stream_ctx = MagicMock()
-        mock_stream_ctx.__enter__ = MagicMock(return_value=iter([mock_event, mock_idle]))
-        mock_stream_ctx.__exit__ = MagicMock(return_value=False)
-        mock_client.beta.sessions.events.stream.return_value = mock_stream_ctx
-        mock_client.beta.sessions.events.send = MagicMock()
-
+        mock_client = self._make_mock_client([mock_event, mock_idle])
         m._client = mock_client
 
         result = m._execute_sync("test")
         assert result == "cached response"
-        # Should NOT create new agent/env/session
         mock_client.beta.agents.create.assert_not_called()
         mock_client.beta.environments.create.assert_not_called()
         mock_client.beta.sessions.create.assert_not_called()
+
+    def test_usage_tracking(self):
+        """Token usage should accumulate across events."""
+        from praisonai.integrations.managed_agents import ManagedAgentIntegration
+
+        m = ManagedAgentIntegration(api_key="test-key")
+
+        usage1 = MagicMock(input_tokens=10, output_tokens=20)
+        usage2 = MagicMock(input_tokens=5, output_tokens=15)
+
+        ev1 = MagicMock(type="agent.message", usage=usage1)
+        ev1.content = [MagicMock(text="hi")]
+        ev2 = MagicMock(type="agent.message", usage=usage2)
+        ev2.content = [MagicMock(text=" there")]
+        ev_idle = MagicMock(type="session.status_idle", usage=None)
+
+        mock_client = self._make_mock_client([ev1, ev2, ev_idle])
+        m._client = mock_client
+
+        m._execute_sync("count tokens")
+        assert m.total_input_tokens == 15
+        assert m.total_output_tokens == 35
+
+    def test_custom_tool_callback(self):
+        """on_custom_tool should be called for agent.custom_tool_use events."""
+        from praisonai.integrations.managed_agents import ManagedAgentIntegration
+
+        calls = []
+        def my_tool(name, inp):
+            calls.append((name, inp))
+            return "tool result"
+
+        m = ManagedAgentIntegration(api_key="test-key", on_custom_tool=my_tool)
+
+        ev_custom = MagicMock(type="agent.custom_tool_use", usage=None)
+        ev_custom.name = "lookup_db"
+        ev_custom.input = {"query": "select 1"}
+        ev_custom.id = "tu-001"
+        ev_idle = MagicMock(type="session.status_idle", usage=None)
+
+        mock_client = self._make_mock_client([ev_custom, ev_idle])
+        m._client = mock_client
+
+        m._execute_sync("use custom tool")
+        assert len(calls) == 1
+        assert calls[0] == ("lookup_db", {"query": "select 1"})
+        # Verify result was sent back
+        send_calls = mock_client.beta.sessions.events.send.call_args_list
+        # First call is user.message, second is custom_tool_result
+        assert len(send_calls) >= 2
+
+    def test_tool_confirmation_callback(self):
+        """on_tool_confirmation should be called for needs_confirmation events."""
+        from praisonai.integrations.managed_agents import ManagedAgentIntegration
+
+        confirmations = []
+        def confirm(info):
+            confirmations.append(info)
+            return True
+
+        m = ManagedAgentIntegration(api_key="test-key", on_tool_confirmation=confirm)
+
+        ev_tool = MagicMock(type="agent.tool_use", usage=None)
+        ev_tool.name = "bash"
+        ev_tool.needs_confirmation = True
+        ev_tool.input = {"command": "ls"}
+        ev_tool.id = "tu-002"
+        ev_idle = MagicMock(type="session.status_idle", usage=None)
+
+        mock_client = self._make_mock_client([ev_tool, ev_idle])
+        m._client = mock_client
+
+        m._execute_sync("confirm tool")
+        assert len(confirmations) == 1
+        assert confirmations[0]["name"] == "bash"
+
+    def test_ensure_agent_passes_optional_fields(self):
+        """Optional agent fields (mcp_servers, skills, etc.) should be forwarded."""
+        from praisonai.integrations.managed_agents import ManagedAgentIntegration
+
+        m = ManagedAgentIntegration(
+            api_key="test-key",
+            config={
+                "model": "claude-sonnet-4-6",
+                "mcp_servers": [{"type": "url", "url": "https://mcp.example.com/sse"}],
+                "skills": [{"type": "anthropic", "name": "computer_use"}],
+                "callable_agents": [{"agent_id": "agent-other"}],
+                "metadata": {"team": "eng"},
+            },
+        )
+        mock_client = MagicMock()
+        mock_agent = MagicMock(id="agent-x", version=1)
+        mock_client.beta.agents.create.return_value = mock_agent
+        m._client = mock_client
+
+        m._ensure_agent()
+        call_kwargs = mock_client.beta.agents.create.call_args
+        assert "mcp_servers" in call_kwargs.kwargs
+        assert "skills" in call_kwargs.kwargs
+        assert "callable_agents" in call_kwargs.kwargs
+        assert "metadata" in call_kwargs.kwargs
+
+    def test_ensure_session_passes_resources_and_vaults(self):
+        """resources and vault_ids should be forwarded to session creation."""
+        from praisonai.integrations.managed_agents import ManagedAgentIntegration
+
+        m = ManagedAgentIntegration(
+            api_key="test-key",
+            config={
+                "resources": [{"type": "file", "file_id": "file-123"}],
+                "vault_ids": ["vault-abc"],
+            },
+        )
+        m.agent_id = "agent-pre"
+        m.environment_id = "env-pre"
+        mock_client = MagicMock()
+        mock_session = MagicMock(id="sess-new")
+        mock_client.beta.sessions.create.return_value = mock_session
+        m._client = mock_client
+
+        m._ensure_session()
+        call_kwargs = mock_client.beta.sessions.create.call_args
+        assert "resources" in call_kwargs.kwargs
+        assert "vault_ids" in call_kwargs.kwargs
 
 
 # ── Test tool mapping ──

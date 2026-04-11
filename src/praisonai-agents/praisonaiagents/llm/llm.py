@@ -3512,7 +3512,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             formatted_tools = self._format_tools_for_litellm(tools)
 
             # Initialize variables for iteration loop
-            max_iterations = 10  # Prevent infinite loops
+            max_iterations = 50  # Prevent infinite loops
             iteration_count = 0
             final_response_text = ""
             stored_reasoning_content = None  # Store reasoning content from tool execution
@@ -3918,6 +3918,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 )
                             )
                             response_text = resp["choices"][0]["message"].get("content") or ""
+                            # If the response also contains new tool_calls, treat this as a
+                            # tool-calling round rather than a final answer (Anthropic pattern)
+                            _next_tool_calls = resp["choices"][0]["message"].get("tool_calls") or []
+                            if _next_tool_calls:
+                                tool_calls = _next_tool_calls
                         elif verbose:
                             async for chunk in await litellm.acompletion(
                                 **self._build_completion_params(
@@ -3953,7 +3958,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     response_text = response_text.strip() if response_text else ""
                     
                     # After tool execution, update messages and continue the loop
-                    if response_text:
+                    # Only append as plain assistant message if there are no new tool_calls
+                    # (if tool_calls were set, the tool execution block will format correctly)
+                    if response_text and not tool_calls:
                         messages.append({
                             "role": "assistant",
                             "content": response_text
@@ -3965,8 +3972,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Check if the LLM provided a final answer alongside the tool calls
                     # If response_text contains substantive content, treat it as the final answer
-                    if response_text and len(response_text.strip()) > 10:
-                        # LLM provided a final answer after tool execution, don't continue
+                    if response_text and len(response_text.strip()) > 10 and not tool_calls:
+                        # LLM provided a final answer after tool execution with no further tool calls
                         final_response_text = response_text.strip()
                         break
                     
@@ -3986,7 +3993,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         continue
                     
                     # Safety check: prevent infinite loops for any provider
-                    if iteration_count >= 5:
+                    if iteration_count >= 20:
                         if tool_results:
                             final_response_text = "Task completed successfully based on tool execution results."
                         else:
