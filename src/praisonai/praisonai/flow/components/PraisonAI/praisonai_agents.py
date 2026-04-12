@@ -307,6 +307,9 @@ class PraisonAIAgentsComponent(Component):
     def build_response(self) -> Message:
         """Execute the multi-agent workflow and return the response."""
         agents_instance = self.build_agents()
+        
+        # Wire up observability if configured
+        self._setup_observability()
 
         # Get input value
         input_value = self.input_value
@@ -326,3 +329,19 @@ class PraisonAIAgentsComponent(Component):
     async def build_response_async(self) -> Message:
         """Execute the multi-agent workflow asynchronously."""
         return await asyncio.to_thread(self.build_response)
+    
+    def _setup_observability(self) -> None:
+        """Auto-configure observability from environment variables."""
+        import os
+        observe = os.environ.get("PRAISONAI_OBSERVE", "")
+        if observe == "langfuse":
+            try:
+                from praisonai.observability.langfuse import LangfuseSink
+                from praisonaiagents.trace.context_events import (
+                    ContextTraceEmitter, set_context_emitter
+                )
+                sink = LangfuseSink()
+                emitter = ContextTraceEmitter(sink=sink, enabled=True)
+                set_context_emitter(emitter)
+            except ImportError:
+                pass  # Langfuse not installed, gracefully degrade

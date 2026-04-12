@@ -13,6 +13,32 @@ from .output.console import OutputController, OutputMode, set_output_controller
 from .state.identifiers import create_context
 
 
+def _setup_langfuse_observability() -> None:
+    """Set up Langfuse observability by wiring TraceSink to both action and context emitters."""
+    try:
+        from praisonai.observability.langfuse import LangfuseSink
+        from praisonaiagents.trace.protocol import TraceEmitter, set_default_emitter
+        from praisonaiagents.trace.context_events import ContextTraceEmitter, set_context_emitter
+        
+        # Create LangfuseSink (auto-reads env vars)
+        sink = LangfuseSink()
+        
+        # Set up action-level trace emitter
+        emitter = TraceEmitter(sink=sink, enabled=True)
+        set_default_emitter(emitter)
+        
+        # Set up context-level trace emitter
+        ctx_emitter = ContextTraceEmitter(sink=sink, enabled=True)
+        set_context_emitter(ctx_emitter)
+        
+    except ImportError:
+        # Gracefully degrade if Langfuse not installed
+        pass
+    except Exception:
+        # Silently fail to avoid breaking CLI if observability setup fails
+        pass
+
+
 class OutputFormat(str, Enum):
     """Output format options."""
     text = "text"
@@ -38,6 +64,7 @@ class GlobalState:
     quiet: bool = False
     verbose: bool = False
     screen_reader: bool = False
+    observe: Optional[str] = None
     output_controller: Optional[OutputController] = None
 
 
@@ -98,6 +125,13 @@ def main_callback(
         "--screen-reader",
         help="Screen reader friendly output (no spinners/panels)",
     ),
+    observe: Optional[str] = typer.Option(
+        None,
+        "--observe",
+        "-O",
+        help="Enable observability (langfuse, langsmith, etc.)",
+        envvar="PRAISONAI_OBSERVE",
+    ),
 ):
     """
     PraisonAI - AI Agents Framework CLI.
@@ -110,10 +144,15 @@ def main_callback(
     state.quiet = quiet
     state.verbose = verbose
     state.screen_reader = screen_reader
+    state.observe = observe
     
     # Handle --json alias
     if json_output:
         state.output_format = OutputFormat.json
+    
+    # Set up observability if requested
+    if observe == "langfuse":
+        _setup_langfuse_observability()
     
     # Determine output mode
     if state.quiet:
