@@ -45,16 +45,20 @@ class DualLock:
             current_loop = asyncio.get_running_loop()
             current_loop_id = id(current_loop)
             
-            # Create new lock if loop changed or first time
-            if self._loop_id != current_loop_id:
-                self._async_lock = asyncio.Lock()
-                self._loop_id = current_loop_id
-                
-            return self._async_lock
+            # Atomic check and create: use thread lock to protect async lock creation
+            with self._thread_lock:
+                # Create new lock if loop changed or first time
+                if self._loop_id != current_loop_id:
+                    self._async_lock = asyncio.Lock()
+                    self._loop_id = current_loop_id
+                    
+                return self._async_lock
         except RuntimeError:
             # No event loop running, fall back to thread lock in a new loop
-            self._async_lock = asyncio.Lock() 
-            return self._async_lock
+            with self._thread_lock:
+                if self._async_lock is None:
+                    self._async_lock = asyncio.Lock()
+                return self._async_lock
     
     @contextmanager
     def sync(self):

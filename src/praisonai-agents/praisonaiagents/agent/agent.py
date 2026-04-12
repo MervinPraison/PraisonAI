@@ -4501,6 +4501,15 @@ Answer:"""
         except Exception as e:
             logger.warning(f"Memory cleanup failed: {e}")
 
+        # LLM client cleanup
+        try:
+            if hasattr(self, 'llm') and self.llm:
+                llm_client = getattr(self.llm, '_client', None)
+                if llm_client and hasattr(llm_client, 'close'):
+                    llm_client.close()
+        except Exception as e:
+            logger.warning(f"LLM client cleanup failed: {e}")
+
         # MCP cleanup  
         try:
             if hasattr(self, '_mcp_clients') and self._mcp_clients:

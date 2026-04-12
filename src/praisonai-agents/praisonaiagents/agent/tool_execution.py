@@ -190,18 +190,26 @@ class ToolExecutionMixin:
                 if res.output and res.output.modified_data:
                     arguments.update(res.output.modified_data)
 
-            with with_injection_context(state):
-                # P8/G11: Apply tool timeout if configured
-                tool_timeout = getattr(self, '_tool_timeout', None)
-                if tool_timeout and tool_timeout > 0:
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                        future = executor.submit(self._execute_tool_impl, function_name, arguments)
-                        try:
-                            result = future.result(timeout=tool_timeout)
-                        except concurrent.futures.TimeoutError:
-                            logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
-                            result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True}
-                else:
+            # P8/G11: Apply tool timeout if configured
+            tool_timeout = getattr(self, '_tool_timeout', None)
+            if tool_timeout and tool_timeout > 0:
+                # Use copy_context to preserve injection context in executor thread
+                import contextvars
+                ctx = contextvars.copy_context()
+                
+                def execute_with_context():
+                    with with_injection_context(state):
+                        return self._execute_tool_impl(function_name, arguments)
+                
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(ctx.run, execute_with_context)
+                    try:
+                        result = future.result(timeout=tool_timeout)
+                    except concurrent.futures.TimeoutError:
+                        logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
+                        result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True}
+            else:
+                with with_injection_context(state):
                     result = self._execute_tool_impl(function_name, arguments)
             
             # Apply tool output truncation to prevent context overflow

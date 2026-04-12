@@ -62,16 +62,14 @@ class MemoryCoreMixin:
         except Exception as e:
             self._log_verbose(f"Failed to store in {self.provider} STM: {e}", logging.WARNING)
         
-        # Backward compatibility: Also store in SQLite if not using SQLite adapter
-        if hasattr(self, '_sqlite_adapter') and self._sqlite_adapter != getattr(self, 'memory_adapter', None):
+        # Only use SQLite fallback if primary storage failed completely
+        if not memory_id and hasattr(self, '_sqlite_adapter') and self._sqlite_adapter != getattr(self, 'memory_adapter', None):
             try:
-                fallback_id = self._sqlite_adapter.store_short_term(content, metadata=clean_metadata, **kwargs)
-                if not memory_id:
-                    memory_id = fallback_id
+                memory_id = self._sqlite_adapter.store_short_term(content, metadata=clean_metadata, **kwargs)
+                self._log_verbose(f"Stored in SQLite STM as fallback: {content[:100]}...")
             except Exception as e:
                 logging.error(f"Failed to store in SQLite STM fallback: {e}")
-                if not memory_id:
-                    return ""
+                return ""
         
         # Auto-promote to long-term memory if quality is high
         if auto_promote and quality_score >= 7.5:  # High quality threshold

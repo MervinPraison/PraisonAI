@@ -45,6 +45,8 @@ class Process:
         self.workflow_timeout = workflow_timeout
         self.task_retry_counter: Dict[str, int] = {} # Initialize retry counter
         self.workflow_finished = False # ADDED: Workflow finished flag
+        self.workflow_cancelled = False # ADDED: Workflow cancellation flag for timeout
+        self._state_lock_init = threading.Lock()  # Thread lock for async lock creation
         self._state_lock = None # Lazy-initialized async lock for shared state protection
         
         # Resolve verbose from output= param (takes precedence) or legacy verbose= param
@@ -255,7 +257,10 @@ class Process:
                         continue  # Skip if no valid path exists
                         
                     if self.task_retry_counter.get(task_candidate.id, 0) < self.max_retries:
-                        self.task_retry_counter[task_candidate.id] = self.task_retry_counter.get(task_candidate.id, 0) + 1
+                        # Atomic increment using thread lock to prevent race conditions
+                        with self._state_lock_init:
+                            current_count = self.task_retry_counter.get(task_candidate.id, 0)
+                            self.task_retry_counter[task_candidate.id] = current_count + 1
                         temp_current_task = task_candidate
                         logging.debug(f"Fallback attempt {fallback_attempts}: Found 'not started' task: {temp_current_task.name}, retry count: {self.task_retry_counter[temp_current_task.id]}")
                         return temp_current_task # Return the found task immediately
@@ -429,12 +434,18 @@ class Process:
             if self.workflow_timeout is not None:
                 elapsed = time.monotonic() - workflow_start
                 if elapsed > self.workflow_timeout:
-                    logging.warning(f"Workflow timeout ({self.workflow_timeout}s) exceeded after {elapsed:.1f}s, stopping.")
+                    logging.warning(f"Workflow timeout ({self.workflow_timeout}s) exceeded after {elapsed:.1f}s, cancelling workflow.")
+                    self.workflow_cancelled = True
                     break
 
             # ADDED: Check workflow finished flag at the start of each cycle
             if self.workflow_finished:
                 logging.info("Workflow finished early as all tasks are completed.")
+                break
+                
+            # ADDED: Check workflow cancellation flag
+            if self.workflow_cancelled:
+                logging.warning("Workflow has been cancelled, stopping task execution.")
                 break
 
             # Add task summary at start of each cycle
@@ -597,8 +608,11 @@ Subtask: {st.name}
                     break
 
             # Reset completed task to "not started" so it can run again (atomic operation)
+            # Atomic state lock initialization
             if self._state_lock is None:
-                self._state_lock = asyncio.Lock()
+                with self._state_lock_init:
+                    if self._state_lock is None:  # Double-checked locking pattern
+                        self._state_lock = asyncio.Lock()
             async with self._state_lock:
                 if self.tasks[task_id].status == "completed":
                     # Never reset loop tasks, decision tasks, or their subtasks if rerun is False
@@ -1030,6 +1044,11 @@ Provide a JSON with the structure:
             # ADDED: Check workflow finished flag at the start of each cycle
             if self.workflow_finished:
                 logging.info("Workflow finished early as all tasks are completed.")
+                break
+                
+            # ADDED: Check workflow cancellation flag
+            if self.workflow_cancelled:
+                logging.warning("Workflow has been cancelled, stopping task execution.")
                 break
 
             # Add task summary at start of each cycle
