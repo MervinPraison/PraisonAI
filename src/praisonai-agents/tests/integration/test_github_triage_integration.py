@@ -57,8 +57,9 @@ class TestGitHubTriageIntegration:
         tools = engineer.get("tools", [])
         assert "github_create_pull_request" in tools, "Engineer needs PR tool"
         
-        # Engineer action should mention conditional PR creation
-        action = engineer.get("action", "")
+        # Implementation step action should mention conditional PR creation
+        impl_step = steps[1]
+        action = impl_step.get("action", "")
         assert "create pull request" in action.lower() or "create PR" in action, \
             "Should mention conditional PR creation in action"
 
@@ -80,7 +81,7 @@ class TestGitHubTriageIntegration:
 
     def test_sticky_comment_has_branch_and_pr_links(self):
         """Verify sticky comment renders branch link and Create PR link correctly."""
-        from praisonai.praisonai.cli.commands.github import StickyComment
+        from praisonai.cli.commands.github import StickyComment
         
         sticky = StickyComment(
             api_base="https://api.github.com",
@@ -111,7 +112,7 @@ class TestGitHubTriageIntegration:
 
     def test_sticky_comment_shows_view_pr_when_pr_created(self):
         """Verify sticky comment shows View PR when PR is explicitly created."""
-        from praisonai.praisonai.cli.commands.github import StickyComment
+        from praisonai.cli.commands.github import StickyComment
         
         sticky = StickyComment(
             api_base="https://api.github.com",

@@ -35,6 +35,9 @@ __all__ = [
     'CursorCLIIntegration',
     'ManagedAgent',
     'ManagedConfig',
+    'AnthropicManagedAgent',
+    'LocalManagedAgent',
+    'LocalManagedConfig',
     'ManagedAgentIntegration',  # backward compat alias
     'ManagedBackendConfig',     # backward compat alias
     'get_available_integrations',
@@ -61,6 +64,15 @@ def __getattr__(name):
     elif name in ('ManagedAgent', 'ManagedAgentIntegration'):
         from .managed_agents import ManagedAgent
         return ManagedAgent
+    elif name == 'AnthropicManagedAgent':
+        from .managed_agents import AnthropicManagedAgent
+        return AnthropicManagedAgent
+    elif name == 'LocalManagedAgent':
+        from .managed_local import LocalManagedAgent
+        return LocalManagedAgent
+    elif name == 'LocalManagedConfig':
+        from .managed_local import LocalManagedConfig
+        return LocalManagedConfig
     elif name in ('ManagedConfig', 'ManagedBackendConfig'):
         from .managed_agents import ManagedConfig
         return ManagedConfig

@@ -152,6 +152,8 @@ REASONING: [brief explanation]"""
             name=self.name
         )
         
+        last_error = None
+        success_count = 0
         for i in range(self.num_iterations):
             if self.verbose:
                 logger.info(f"Running iteration {i + 1}/{self.num_iterations}")
@@ -160,10 +162,12 @@ REASONING: [brief explanation]"""
                 output = self._get_output()
                 score = self._judge_output(output)
                 result.evaluations.append(score)
+                success_count += 1
                 
                 if self.verbose:
                     logger.info(f"  Score: {score.score}/10 - {score.reasoning}")
             except Exception as e:
+                last_error = e
                 logger.error(f"Error in iteration {i + 1}: {e}")
                 result.evaluations.append(EvaluationScore(
                     score=0.0,
@@ -172,6 +176,10 @@ REASONING: [brief explanation]"""
                     output_text="",
                     expected_output=self.expected_output
                 ))
+        
+        # If every iteration failed, re-raise so EvalSuite fail_fast can detect it
+        if success_count == 0 and last_error is not None:
+            raise last_error
         
         self.after_run(result)
         

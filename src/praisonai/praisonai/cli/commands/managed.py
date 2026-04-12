@@ -18,13 +18,13 @@ from typing import Optional
 
 import typer
 
-app = typer.Typer(help="Managed Agents (Anthropic cloud-hosted backend)")
+app = typer.Typer(help="Managed Agents (Anthropic cloud or local provider)")
 
 # ── sub-app registrations (defined below, registered after) ──
-sessions_app = typer.Typer(help="Manage Anthropic sessions")
-agents_app   = typer.Typer(help="Manage Anthropic agents")
-envs_app     = typer.Typer(help="Manage Anthropic environments")
-ids_app      = typer.Typer(help="Save / restore Anthropic-assigned IDs")
+sessions_app = typer.Typer(help="Manage sessions")
+agents_app   = typer.Typer(help="Manage agents")
+envs_app     = typer.Typer(help="Manage environments")
+ids_app      = typer.Typer(help="Save / restore assigned IDs")
 
 
 @app.callback()
@@ -43,60 +43,106 @@ def managed_callback(ctx: typer.Context):
     """
 
 
-@app.command("run")
-def managed_main(
-    prompt: str = typer.Argument(..., help="Prompt to send to the managed agent"),
-    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model to use (default: claude-haiku-4-5)"),
-    system: Optional[str] = typer.Option(None, "--system", "-s", help="System prompt"),
-    name: Optional[str] = typer.Option(None, "--name", "-n", help="Agent name"),
-    stream: bool = typer.Option(False, "--stream", help="Stream response token by token"),
-    packages: Optional[str] = typer.Option(None, "--packages", "-p", help="Comma-separated pip packages to install"),
-    networking: bool = typer.Option(True, "--networking/--no-networking", help="Enable unrestricted networking"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+def _build_managed(
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    system: Optional[str] = None,
+    name: Optional[str] = None,
+    packages: Optional[str] = None,
+    networking: bool = True,
+    database_url: Optional[str] = None,
 ):
-    """Run a single prompt on Anthropic Managed Agents.
-
-    Uses sensible defaults — zero config needed.
-
-    Examples:
-        praisonai managed run "Say hello"
-        praisonai managed run "Write fibonacci" --model claude-sonnet-4-6
-        praisonai managed run "Analyze data" --packages pandas,numpy
-        praisonai managed run --stream "Explain Python decorators"
-    """
+    """Build a ManagedAgent instance from CLI arguments."""
     try:
-        from praisonai import Agent, ManagedAgent, ManagedConfig
+        from praisonai import ManagedAgent, ManagedConfig
     except ImportError:
         typer.echo("Error: praisonai with managed agents support is required.")
         typer.echo("Install with: pip install 'praisonai[managed]'")
         raise typer.Exit(1)
 
-    # Build config only with non-default values
-    cfg_kwargs = {}
-    if model:
-        cfg_kwargs["model"] = model
-    if system:
-        cfg_kwargs["system"] = system
-    if name:
-        cfg_kwargs["name"] = name
-    if packages:
-        cfg_kwargs["packages"] = {"pip": [p.strip() for p in packages.split(",")]}
-    if not networking:
-        cfg_kwargs["networking"] = {"type": "limited"}
+    # Build DB adapter if --db URL was provided
+    db_adapter = None
+    if database_url:
+        from praisonai import DB
+        db_adapter = DB(database_url=database_url)
 
-    # Create agent — zero config works, overrides applied if given
-    if cfg_kwargs:
-        managed = ManagedAgent(config=ManagedConfig(**cfg_kwargs))
+    # Determine effective provider
+    resolved_provider = provider
+    if resolved_provider is None:
+        import os
+        if os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"):
+            resolved_provider = "anthropic"
+        else:
+            resolved_provider = "local"
+
+    if resolved_provider == "anthropic":
+        cfg_kwargs = {}
+        if model:
+            cfg_kwargs["model"] = model
+        if system:
+            cfg_kwargs["system"] = system
+        if name:
+            cfg_kwargs["name"] = name
+        if packages:
+            cfg_kwargs["packages"] = {"pip": [p.strip() for p in packages.split(",")]}
+        if not networking:
+            cfg_kwargs["networking"] = {"type": "limited"}
+        config = ManagedConfig(**cfg_kwargs) if cfg_kwargs else None
+        return ManagedAgent(provider="anthropic", config=config, db=db_adapter)
     else:
-        managed = ManagedAgent()
+        from praisonai import LocalManagedConfig
+        cfg_kwargs = {}
+        if model:
+            cfg_kwargs["model"] = model
+        if system:
+            cfg_kwargs["system"] = system
+        if name:
+            cfg_kwargs["name"] = name
+        if packages:
+            cfg_kwargs["packages"] = {"pip": [p.strip() for p in packages.split(",")]}
+        if not networking:
+            cfg_kwargs["networking"] = {"type": "limited"}
+        config = LocalManagedConfig(**cfg_kwargs) if cfg_kwargs else None
+        return ManagedAgent(provider=resolved_provider, config=config, db=db_adapter)
 
+
+@app.command("run")
+def managed_main(
+    prompt: str = typer.Argument(..., help="Prompt to send to the managed agent"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model to use"),
+    system: Optional[str] = typer.Option(None, "--system", "-s", help="System prompt"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="Agent name"),
+    stream: bool = typer.Option(False, "--stream", help="Stream response token by token"),
+    packages: Optional[str] = typer.Option(None, "--packages", "-p", help="Comma-separated pip packages to install"),
+    networking: bool = typer.Option(True, "--networking/--no-networking", help="Enable unrestricted networking"),
+    provider: Optional[str] = typer.Option(None, "--provider", help="Provider: anthropic, local, openai, ollama, gemini (auto-detects if not set)"),
+    database_url: Optional[str] = typer.Option(None, "--db", help="Database URL for persistence (e.g. sqlite:///data.db, postgresql://...)"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+):
+    """Run a single prompt on a managed agent.
+
+    Auto-detects provider: Anthropic if ANTHROPIC_API_KEY is set, local otherwise.
+    Use --provider to override.
+
+    Examples:
+        praisonai managed run "Say hello"
+        praisonai managed run "Write fibonacci" --model claude-sonnet-4-6
+        praisonai managed run "Analyze data" --provider local --model gpt-4o
+        praisonai managed run --stream --provider ollama --model llama3 "Explain decorators"
+    """
+    managed = _build_managed(provider=provider, model=model, system=system, name=name, packages=packages, networking=networking, database_url=database_url)
+
+    from praisonai import Agent
     agent = Agent(name=name or "managed-agent", backend=managed)
 
     if verbose:
-        typer.echo(f"Model: {managed._cfg.get('model', 'claude-haiku-4-5')}")
-        typer.echo(f"System: {managed._cfg.get('system', 'You are a helpful coding assistant.')}")
+        typer.echo(f"Provider: {managed.provider}")
+        typer.echo(f"Model: {managed._cfg.get('model', 'unknown')}")
+        typer.echo(f"System: {managed._cfg.get('system', 'default')}")
         if packages:
             typer.echo(f"Packages: {packages}")
+        if database_url:
+            typer.echo(f"DB: {database_url}")
         typer.echo("")
 
     result = agent.start(prompt, stream=stream)
@@ -106,7 +152,7 @@ def managed_main(
 
     if verbose:
         typer.echo(f"\nAgent ID: {managed.agent_id}")
-        typer.echo(f"Session ID: {managed.session_id}")
+        typer.echo(f"Session ID: {getattr(managed, 'session_id', None)}")
         typer.echo(f"Input tokens: {managed.total_input_tokens}")
         typer.echo(f"Output tokens: {managed.total_output_tokens}")
 
@@ -116,6 +162,8 @@ def managed_multi(
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model to use"),
     system: Optional[str] = typer.Option(None, "--system", "-s", help="System prompt"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="Agent name"),
+    provider: Optional[str] = typer.Option(None, "--provider", help="Provider: anthropic, local, openai, ollama, gemini"),
+    database_url: Optional[str] = typer.Option(None, "--db", help="Database URL for persistence (e.g. sqlite:///data.db, postgresql://...)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """
@@ -124,30 +172,17 @@ def managed_multi(
     Examples:
         praisonai managed multi
         praisonai managed multi --model claude-sonnet-4-6
+        praisonai managed multi --provider local --model gpt-4o
     """
-    try:
-        from praisonai import Agent, ManagedAgent, ManagedConfig
-    except ImportError:
-        typer.echo("Error: praisonai with managed agents support is required.")
-        raise typer.Exit(1)
+    managed = _build_managed(provider=provider, model=model, system=system, name=name, database_url=database_url)
 
-    cfg_kwargs = {}
-    if model:
-        cfg_kwargs["model"] = model
-    if system:
-        cfg_kwargs["system"] = system
-    if name:
-        cfg_kwargs["name"] = name
-
-    if cfg_kwargs:
-        managed = ManagedAgent(config=ManagedConfig(**cfg_kwargs))
-    else:
-        managed = ManagedAgent()
-
+    from praisonai import Agent
     agent = Agent(name=name or "managed-agent", backend=managed)
 
-    typer.echo("Managed Agent multi-turn session (type 'exit' or 'quit' to stop)")
-    typer.echo(f"Model: {managed._cfg.get('model', 'claude-haiku-4-5')}")
+    typer.echo(f"Managed Agent multi-turn session — provider: {managed.provider} (type 'exit' to stop)")
+    typer.echo(f"Model: {managed._cfg.get('model', 'default')}")
+    if database_url:
+        typer.echo(f"DB: {database_url}")
     typer.echo("")
 
     turn = 0

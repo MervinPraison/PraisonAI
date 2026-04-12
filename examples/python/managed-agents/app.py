@@ -1,4 +1,5 @@
 import json
+import pathlib
 from praisonai import Agent, ManagedAgent, ManagedConfig
 
 # 1. Create an agent
@@ -188,6 +189,121 @@ result = interrupt_agent.start("Write a Python script that prints numbers 1 to 1
 interrupt_managed.interrupt()
 print("  [Interrupt sent]")
 
+# 15. Session resume — save IDs, create a fresh ManagedAgent, resume, and verify context
+
+print("\n[15] Session resume demo...")
+
+# Tell the original agent a memorable fact
+result = agent.start("Remember this: my favourite number is 42", stream=True)
+
+# Save IDs to disk
+ids = managed.save_ids()
+ids_file = pathlib.Path("managed_ids.json")
+ids_file.write_text(json.dumps(ids, indent=2))
+print(f"  Saved IDs to {ids_file}: {ids}")
+
+# Create a completely new ManagedAgent and resume the saved session
+resume_managed = ManagedAgent()
+resume_managed.resume_session(ids["session_id"])
+resume_agent = Agent(name="resumed", backend=resume_managed)
+
+# Ask about the fact — proves the session memory was preserved
+result = resume_agent.start("What is my favourite number?", stream=True)
+print(f"  Resumed session: {resume_managed.session_id}")
+
+# Clean up
+ids_file.unlink(missing_ok=True)
+
+# 16. Multi-package managers — pip + npm installed before agent starts
+
+print("\n[16] Multi-package managers...")
+
+multi_pkg_managed = ManagedAgent(
+    config=ManagedConfig(
+        name="Full Stack Agent",
+        model="claude-haiku-4-5",
+        system="You are a full stack developer.",
+        packages={
+            "pip": ["pandas", "numpy", "scikit-learn"],
+            "npm": ["express"],
+        },
+    ),
+)
+
+multi_pkg_agent = Agent(name="fullstack", backend=multi_pkg_managed)
+result = multi_pkg_agent.start(
+    "Verify pandas and express are installed: run python3 -c 'import pandas; print(pandas.__version__)' and node -e 'console.log(require.resolve(\"express\"))'",
+    stream=True,
+)
+
+# 17. Limited networking — restrict container to specific hosts
+
+print("\n[17] Limited networking...")
+
+limited_net_managed = ManagedAgent(
+    config=ManagedConfig(
+        name="Restricted Network Agent",
+        model="claude-haiku-4-5",
+        system="You are a helpful assistant with restricted network access.",
+        networking={
+            "type": "limited",
+            "allowed_hosts": ["api.github.com"],
+            "allow_mcp_servers": False,
+            "allow_package_managers": True,
+        },
+    ),
+)
+
+limited_net_agent = Agent(name="restricted", backend=limited_net_managed)
+result = limited_net_agent.start("Fetch https://api.github.com and report the status", stream=True)
+
+# 18. Environment management — list, retrieve, archive
+
+print("\n[18] Environment management...")
+
+env_client = managed._get_client()
+
+# List all environments
+environments = env_client.beta.environments.list()
+print(f"  Total environments: {len(environments.data)}")
+for env in environments.data[:3]:
+    print(f"    {env.id} | {env.name}")
+
+# Retrieve a specific environment
+env = env_client.beta.environments.retrieve(managed.environment_id)
+print(f"  Retrieved: {env.id} | {env.name}")
+
+# 19. MCP servers — configure agent with remote MCP tool servers
+
+print("\n[19] MCP servers...")
+
+mcp_managed = ManagedAgent(
+    config=ManagedConfig(
+        name="MCP Agent",
+        model="claude-haiku-4-5",
+        system="You are a helpful assistant with access to MCP servers.",
+        tools=[
+            {"type": "agent_toolset_20260401"},
+            {"type": "mcp_toolset", "mcp_server_name": "deepwiki"},
+        ],
+        mcp_servers=[
+            {
+                "type": "url",
+                "url": "https://mcp.deepwiki.com/sse",
+                "name": "deepwiki",
+            },
+        ],
+        networking={
+            "type": "limited",
+            "allow_mcp_servers": True,
+            "allow_package_managers": True,
+        },
+    ),
+)
+
+mcp_agent = Agent(name="mcp-agent", backend=mcp_managed)
+result = mcp_agent.start("Use the deepwiki MCP to read the wiki page for the anthropics/anthropic-cookbook github repo and give a one sentence summary", stream=True)
+
 # Final usage summary
 
 print("\n" + "=" * 60)
@@ -202,6 +318,10 @@ all_backends = [
     ("Search Agent", search_managed),
     ("Data Science Agent", data_managed),
     ("Interruptable Agent", interrupt_managed),
+    ("Resumed Session", resume_managed),
+    ("Full Stack Agent", multi_pkg_managed),
+    ("Restricted Network", limited_net_managed),
+    ("MCP Agent", mcp_managed),
 ]
 
 total_input = 0

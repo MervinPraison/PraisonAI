@@ -28,8 +28,12 @@ __all__ = [
     'recipe',
     'embed',
     'embedding',
+    'DB',  # Short alias for PraisonAIDB — recommended for simplicity
     'ManagedAgent',
     'ManagedConfig',
+    'AnthropicManagedAgent',
+    'LocalManagedAgent',
+    'LocalManagedConfig',
 ]
 
 
@@ -81,9 +85,21 @@ def __getattr__(name):
     elif name in ('ManagedAgent', 'ManagedAgentIntegration'):
         from .integrations.managed_agents import ManagedAgent
         return ManagedAgent
+    elif name == 'AnthropicManagedAgent':
+        from .integrations.managed_agents import AnthropicManagedAgent
+        return AnthropicManagedAgent
+    elif name == 'LocalManagedAgent':
+        from .integrations.managed_local import LocalManagedAgent
+        return LocalManagedAgent
+    elif name == 'LocalManagedConfig':
+        from .integrations.managed_local import LocalManagedConfig
+        return LocalManagedConfig
     elif name in ('ManagedConfig', 'ManagedBackendConfig'):
         from .integrations.managed_agents import ManagedConfig
         return ManagedConfig
+    elif name in ('DB', 'PraisonAIDB', 'PraisonDB'):
+        from .db.adapter import DB
+        return DB
     
     # Try praisonaiagents exports
     try:

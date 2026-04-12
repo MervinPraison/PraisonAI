@@ -81,7 +81,7 @@ class ManagedConfig:
     vault_ids: List[str] = field(default_factory=list)
 
 
-class ManagedAgent:
+class AnthropicManagedAgent:
     """Anthropic Managed Agents backend for PraisonAI.
 
     Satisfies ``ManagedBackendProtocol`` (Core SDK).  All heavy SDK usage
@@ -654,6 +654,57 @@ TOOL_MAPPING = {
 def map_managed_tools(managed_tools: List[str]) -> List[str]:
     """Map managed agent tool names to PraisonAI tool names."""
     return [TOOL_MAPPING.get(tool, tool) for tool in managed_tools]
+
+
+# ---------------------------------------------------------------------------
+# Factory — ManagedAgent routes to the right backend by provider
+# ---------------------------------------------------------------------------
+def ManagedAgent(
+    provider: Optional[str] = None,
+    **kwargs,
+):
+    """Factory that returns the appropriate managed agent backend.
+
+    Provider auto-detection:
+        - ``ANTHROPIC_API_KEY`` set → ``AnthropicManagedAgent``
+        - Otherwise → ``LocalManagedAgent``
+
+    Explicit providers:
+        - ``"anthropic"`` → ``AnthropicManagedAgent``
+        - ``"local"``     → ``LocalManagedAgent`` (any LLM via litellm)
+        - ``"openai"``    → ``LocalManagedAgent`` with OpenAI model
+        - ``"ollama"``    → ``LocalManagedAgent`` with Ollama prefix
+        - ``"gemini"``    → ``LocalManagedAgent`` with Gemini prefix
+
+    Examples::
+
+        # Auto-detect (Anthropic if key set, local otherwise)
+        managed = ManagedAgent()
+
+        # Explicit Anthropic
+        managed = ManagedAgent(provider="anthropic", config=ManagedConfig(...))
+
+        # Explicit local with OpenAI
+        managed = ManagedAgent(provider="openai", config=LocalManagedConfig(model="gpt-4o"))
+
+        # Ollama
+        managed = ManagedAgent(provider="ollama", config=LocalManagedConfig(model="llama3"))
+
+    Returns:
+        An instance satisfying ``ManagedBackendProtocol``.
+    """
+    if provider is None:
+        # Auto-detect
+        if os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"):
+            provider = "anthropic"
+        else:
+            provider = "local"
+
+    if provider == "anthropic":
+        return AnthropicManagedAgent(provider=provider, **kwargs)
+    else:
+        from .managed_local import LocalManagedAgent
+        return LocalManagedAgent(provider=provider, **kwargs)
 
 
 # ── Backward-compatible aliases ──

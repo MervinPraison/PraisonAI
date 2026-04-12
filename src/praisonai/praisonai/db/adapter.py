@@ -1,5 +1,5 @@
 """
-PraisonDB adapter - implements the DbAdapter protocol from praisonaiagents.
+PraisonAIDB adapter - implements the DbAdapter protocol from praisonaiagents.
 
 This module provides the bridge between the core Agent's db interface
 and the wrapper's persistence layer (PersistenceOrchestrator).
@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
-class PraisonDB:
+class PraisonAIDB:
     """
     Universal database adapter for PraisonAI agents.
     
@@ -21,15 +21,15 @@ class PraisonDB:
     
     Example:
         from praisonaiagents import Agent
-        from praisonai.db import PraisonDB
+        from praisonai.db import PraisonAIDB
         
         # Simple usage with PostgreSQL
-        db = PraisonDB(database_url="postgresql://localhost/mydb")
+        db = PraisonAIDB(database_url="postgresql://localhost/mydb")
         agent = Agent(name="Assistant", db=db, session_id="my-session")
         agent.chat("Hello!")
         
         # With multiple backends
-        db = PraisonDB(
+        db = PraisonAIDB(
             database_url="postgresql://localhost/mydb",
             state_url="redis://localhost:6379"
         )
@@ -490,7 +490,7 @@ class PraisonDB:
             self._knowledge_store.close()
 
 
-class PostgresDB(PraisonDB):
+class PostgresDB(PraisonAIDB):
     """PostgreSQL-specific database adapter."""
     
     def __init__(
@@ -506,7 +506,7 @@ class PostgresDB(PraisonDB):
         super().__init__(database_url=url, **options)
 
 
-class SQLiteDB(PraisonDB):
+class SQLiteDB(PraisonAIDB):
     """SQLite-specific database adapter."""
     
     def __init__(self, path: str = "praisonai.db", database_url: str = None, **options):
@@ -518,7 +518,7 @@ class SQLiteDB(PraisonDB):
         return "sqlite"
 
 
-class RedisDB(PraisonDB):
+class RedisDB(PraisonAIDB):
     """Redis-specific database adapter (for state only)."""
     
     def __init__(
@@ -529,3 +529,8 @@ class RedisDB(PraisonDB):
     ):
         url = f"redis://{host}:{port}"
         super().__init__(state_url=url, **options)
+
+
+# Backward-compatible aliases
+PraisonDB = PraisonAIDB
+DB = PraisonAIDB

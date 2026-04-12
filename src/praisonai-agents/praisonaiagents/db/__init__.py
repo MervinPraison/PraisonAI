@@ -15,7 +15,8 @@ Usage (simplest - recommended):
     agent.chat("Hello!")  # auto-persists messages, runs, traces, tool calls
 
 Alternative (explicit backend):
-    db=db.PraisonDB(database_url="...")  # Auto-detect backend
+    db=db.DB(database_url="...")           # Short name (recommended)
+    db=db.PraisonAIDB(database_url="...")  # Auto-detect backend
     db=db.PostgresDB(host="localhost")   # PostgreSQL
     db=db.SQLiteDB(path="data.db")       # SQLite
     db=db.RedisDB(host="localhost")      # Redis (state only)
@@ -41,7 +42,9 @@ class _LazyDbModule:
     """
     
     _BACKENDS = {
-        "PraisonDB": "praisonai.db.adapter",
+        "DB": "praisonai.db.adapter",  # recommended short name
+        "PraisonAIDB": "praisonai.db.adapter",
+        "PraisonDB": "praisonai.db.adapter",  # backward-compatible alias
         "PostgresDB": "praisonai.db.adapter",
         "SQLiteDB": "praisonai.db.adapter",
         "RedisDB": "praisonai.db.adapter",
@@ -65,8 +68,8 @@ class _LazyDbModule:
         return "<module 'praisonaiagents.db' (lazy database backends)>"
     
     def __call__(self, **kwargs):
-        """Shortcut: db(...) is equivalent to db.PraisonDB(...)"""
-        return self.PraisonDB(**kwargs)
+        """Shortcut: db(...) is equivalent to db.DB(...)"""
+        return self.DB(**kwargs)
 
 
 # Singleton lazy module instance
