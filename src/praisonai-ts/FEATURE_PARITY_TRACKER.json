@@ -1,17 +1,17 @@
 {
   "version": "1.5.87",
-  "lastUpdated": "2026-04-11",
+  "lastUpdated": "2026-04-13",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 321,
+    "pythonCoreFeatures": 328,
     "pythonWrapperFeatures": 99,
     "typescriptFeatures": 1192,
-    "gapCount": 29,
+    "gapCount": 36,
     "priorityP0": 1,
     "priorityP1": 0,
     "priorityP2": 0,
-    "priorityP3": 28
+    "priorityP3": 35
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -24,6 +24,7 @@
       "AgentAppProtocol",
       "AgentFlow",
       "AgentManager",
+      "AgentMessageEvent",
       "AgentOSConfig",
       "AgentOSProtocol",
       "AgentPluginProtocol",
@@ -75,6 +76,7 @@
       "ContextTraceEmitter",
       "ContextTraceSink",
       "ContextTraceSinkProtocol",
+      "CustomToolUseEvent",
       "DeepResearchAgent",
       "DeepResearchResponse",
       "DefaultsConfig",
@@ -148,6 +150,7 @@
       "MULTI_AGENT_EXECUTION_PRESETS",
       "MULTI_AGENT_OUTPUT_PRESETS",
       "ManagedBackendProtocol",
+      "ManagedEvent",
       "ManagerConfig",
       "Memory",
       "MemoryBackend",
@@ -219,12 +222,15 @@
       "SecurityPolicy",
       "Session",
       "SessionConfig",
+      "SessionErrorEvent",
+      "SessionIdleEvent",
       "SkillLoader",
       "SkillManager",
       "SkillMetadata",
       "SkillProperties",
       "SkillsConfig",
       "StepResult",
+      "StopReason",
       "StructuredFormatter",
       "Task",
       "TaskOutput",
@@ -236,6 +242,7 @@
       "ToolPluginProtocol",
       "ToolRegistry",
       "ToolResult",
+      "ToolUseEvent",
       "ToolValidationError",
       "Tools",
       "TraceSink",
@@ -519,7 +526,6 @@
         "track_workflow"
       ],
       "gateway": [
-        "EventType",
         "GatewayClientProtocol",
         "GatewayConfig",
         "GatewayEvent",
@@ -564,14 +570,17 @@
         "Memory"
       ],
       "other": [
+        "AgentMessageEvent",
         "Agents",
         "AsyncLearnProtocol",
         "AutonomyConfig",
         "BudgetExceededError",
+        "CustomToolUseEvent",
         "DoomLoopDetector",
         "ErrorContextProtocol",
         "EscalationPipeline",
         "EscalationStage",
+        "EventType",
         "HandoffCycleError",
         "HandoffDepthError",
         "HandoffError",
@@ -583,12 +592,17 @@
         "LearnManagerProtocol",
         "LearnProtocol",
         "ManagedBackendProtocol",
+        "ManagedEvent",
         "NetworkError",
         "ObservabilityEventType",
         "ObservabilityHooks",
         "PraisonAIError",
+        "SessionErrorEvent",
+        "SessionIdleEvent",
+        "StopReason",
         "StructuredFormatter",
         "ToolExecutionError",
+        "ToolUseEvent",
         "ValidationError",
         "config",
         "configure_structured_logging",
@@ -3931,6 +3945,15 @@
         "category": "agents"
       },
       {
+        "feature": "AgentMessageEvent",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "AgentOSConfig",
         "python": true,
         "typescript": true,
@@ -4255,6 +4278,15 @@
         "category": "trace"
       },
       {
+        "feature": "CustomToolUseEvent",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "DefaultsConfig",
         "python": true,
         "typescript": true,
@@ -4333,7 +4365,7 @@
         "priority": "P3",
         "effort": "high",
         "status": "DONE",
-        "category": "gateway"
+        "category": "other"
       },
       {
         "feature": "ExecutionConfig",
@@ -4696,6 +4728,15 @@
         "category": "other"
       },
       {
+        "feature": "ManagedEvent",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "MemoryBackend",
         "python": true,
         "typescript": true,
@@ -5047,6 +5088,24 @@
         "category": "gateway"
       },
       {
+        "feature": "SessionErrorEvent",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "SessionIdleEvent",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "SkillsConfig",
         "python": true,
         "typescript": true,
@@ -5054,6 +5113,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "StopReason",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "StructuredFormatter",
@@ -5108,6 +5176,15 @@
         "effort": "medium",
         "status": "DONE",
         "category": "plugins"
+      },
+      {
+        "feature": "ToolUseEvent",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "TraceSink",

@@ -1,14 +1,14 @@
 {
   "version": "1.5.87",
-  "lastUpdated": "2026-04-11",
+  "lastUpdated": "2026-04-13",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 321,
+    "pythonCoreFeatures": 328,
     "rustFeatures": 667,
-    "gapCount": 42,
-    "parityPercentage": 207.8
+    "gapCount": 49,
+    "parityPercentage": 203.4
   },
   "pythonCoreSDK": {
     "exports": [
@@ -20,6 +20,7 @@
       "AgentAppProtocol",
       "AgentFlow",
       "AgentManager",
+      "AgentMessageEvent",
       "AgentOSConfig",
       "AgentOSProtocol",
       "AgentPluginProtocol",
@@ -71,6 +72,7 @@
       "ContextTraceEmitter",
       "ContextTraceSink",
       "ContextTraceSinkProtocol",
+      "CustomToolUseEvent",
       "DeepResearchAgent",
       "DeepResearchResponse",
       "DefaultsConfig",
@@ -144,6 +146,7 @@
       "MULTI_AGENT_EXECUTION_PRESETS",
       "MULTI_AGENT_OUTPUT_PRESETS",
       "ManagedBackendProtocol",
+      "ManagedEvent",
       "ManagerConfig",
       "Memory",
       "MemoryBackend",
@@ -215,12 +218,15 @@
       "SecurityPolicy",
       "Session",
       "SessionConfig",
+      "SessionErrorEvent",
+      "SessionIdleEvent",
       "SkillLoader",
       "SkillManager",
       "SkillMetadata",
       "SkillProperties",
       "SkillsConfig",
       "StepResult",
+      "StopReason",
       "StructuredFormatter",
       "Task",
       "TaskOutput",
@@ -232,6 +238,7 @@
       "ToolPluginProtocol",
       "ToolRegistry",
       "ToolResult",
+      "ToolUseEvent",
       "ToolValidationError",
       "Tools",
       "TraceSink",
@@ -2854,6 +2861,15 @@
         "category": "agents"
       },
       {
+        "feature": "AgentMessageEvent",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "AgentOSConfig",
         "python": true,
         "rust": true,
@@ -3178,6 +3194,15 @@
         "category": "trace"
       },
       {
+        "feature": "CustomToolUseEvent",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "DefaultsConfig",
         "python": true,
         "rust": true,
@@ -3256,7 +3281,7 @@
         "priority": "P3",
         "effort": "high",
         "status": "DONE",
-        "category": "gateway"
+        "category": "other"
       },
       {
         "feature": "ExecutionConfig",
@@ -3619,6 +3644,15 @@
         "category": "other"
       },
       {
+        "feature": "ManagedEvent",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "MemoryBackend",
         "python": true,
         "rust": true,
@@ -3970,6 +4004,24 @@
         "category": "gateway"
       },
       {
+        "feature": "SessionErrorEvent",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "SessionIdleEvent",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "SkillsConfig",
         "python": true,
         "rust": true,
@@ -3977,6 +4029,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "StopReason",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "StructuredFormatter",
@@ -4031,6 +4092,15 @@
         "effort": "medium",
         "status": "DONE",
         "category": "plugins"
+      },
+      {
+        "feature": "ToolUseEvent",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "TraceSink",

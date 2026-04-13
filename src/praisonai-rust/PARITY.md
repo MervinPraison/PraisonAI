@@ -1,16 +1,16 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 321 | **Rust Features:** 667 | **Parity:** 88.8%
+> **Python Features:** 328 | **Rust Features:** 667 | **Parity:** 86.9%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 321 |
+| Python Core Features | 328 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **36** |
+| **Actual Gap Count** | **43** |
 | Language Limitations (N/A) | 5 |
-| **Parity** | **88.8%** |
+| **Parity** | **86.9%** |
 
 ## Implemented Features
 
@@ -694,6 +694,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 
 ## Missing Features
 
+- ❌ `AgentMessageEvent`
 - ❌ `AsyncLearnProtocol`
 - ❌ `AutoApproveBackend`
 - ❌ `BaseTool`
@@ -701,6 +702,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `BotOSProtocol`
 - ❌ `BudgetExceededError`
 - ❌ `ConsoleBackend`
+- ❌ `CustomToolUseEvent`
 - ❌ `DoomLoopDetector`
 - ❌ `ErrorContextProtocol`
 - ❌ `EscalationPipeline`
@@ -716,12 +718,17 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `LearnProtocol`
 - ❌ `LearnScope`
 - ❌ `ManagedBackendProtocol`
+- ❌ `ManagedEvent`
 - ❌ `NetworkError`
 - ❌ `ObservabilityEventType`
 - ❌ `ObservabilityHooks`
 - ❌ `PraisonAIError`
+- ❌ `SessionErrorEvent`
+- ❌ `SessionIdleEvent`
+- ❌ `StopReason`
 - ❌ `StructuredFormatter`
 - ❌ `ToolExecutionError`
+- ❌ `ToolUseEvent`
 - ❌ `ToolValidationError`
 - ❌ `configure_structured_logging`
 - ❌ `get_logger`

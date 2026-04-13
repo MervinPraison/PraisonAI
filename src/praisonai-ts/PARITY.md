@@ -1,20 +1,20 @@
 # Feature Parity Tracker
 
-> **Version:** 1.5.87 | **Last Updated:** 2026-04-11
+> **Version:** 1.5.87 | **Last Updated:** 2026-04-13
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 321 |
+| Python Core Features | 328 |
 | Python Wrapper Features | 99 |
 | TypeScript Features | 1192 |
-| **Gap Count** | **29** |
+| **Gap Count** | **36** |
 | P0 (Critical) | 1 |
 | P1 (High) | 0 |
 | P2 (Medium) | 0 |
-| P3 (Low) | 28 |
+| P3 (Low) | 35 |
 
 ## Gap Matrix
 
@@ -147,15 +147,17 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (179 done, 28 todo)
+### P3_Advanced (179 done, 35 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
+| `AgentMessageEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `AsyncLearnProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `AutoApproveBackend` | ✅ | ❌ | high | ⏳ TODO |
 | `BotOSConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `BotOSProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `ConsoleBackend` | ✅ | ❌ | high | ⏳ TODO |
+| `CustomToolUseEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `DoomLoopDetector` | ✅ | ❌ | high | ⏳ TODO |
 | `ErrorContextProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `EscalationPipeline` | ✅ | ❌ | high | ⏳ TODO |
@@ -170,12 +172,17 @@
 | `LearnProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `LearnScope` | ✅ | ❌ | high | ⏳ TODO |
 | `ManagedBackendProtocol` | ✅ | ❌ | medium | ⏳ TODO |
+| `ManagedEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `NetworkError` | ✅ | ❌ | low | ⏳ TODO |
 | `ObservabilityEventType` | ✅ | ❌ | high | ⏳ TODO |
 | `ObservabilityHooks` | ✅ | ❌ | high | ⏳ TODO |
 | `PraisonAIError` | ✅ | ❌ | low | ⏳ TODO |
+| `SessionErrorEvent` | ✅ | ❌ | high | ⏳ TODO |
+| `SessionIdleEvent` | ✅ | ❌ | high | ⏳ TODO |
+| `StopReason` | ✅ | ❌ | high | ⏳ TODO |
 | `StructuredFormatter` | ✅ | ❌ | high | ⏳ TODO |
 | `ToolExecutionError` | ✅ | ❌ | low | ⏳ TODO |
+| `ToolUseEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `ValidationError` | ✅ | ❌ | low | ⏳ TODO |
 | `configure\_structured\_logging` | ✅ | ❌ | low | ⏳ TODO |
 | `get\_logger` | ✅ | ❌ | low | ⏳ TODO |
@@ -454,10 +461,10 @@ from praisonaiagents import FlowDisplay, track_workflow
 </details>
 
 <details>
-<summary><strong>gateway</strong> (8 exports)</summary>
+<summary><strong>gateway</strong> (7 exports)</summary>
 
 ```python
-from praisonaiagents import EventType, GatewayClientProtocol, GatewayConfig, GatewayEvent, GatewayMessage, GatewayProtocol, GatewaySessionProtocol, SessionConfig
+from praisonaiagents import GatewayClientProtocol, GatewayConfig, GatewayEvent, GatewayMessage, GatewayProtocol, GatewaySessionProtocol, SessionConfig
 ```
 
 </details>
@@ -517,10 +524,10 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (34 exports)</summary>
+<summary><strong>other</strong> (42 exports)</summary>
 
 ```python
-from praisonaiagents import Agents, AsyncLearnProtocol, AutonomyConfig, BudgetExceededError, DoomLoopDetector, ErrorContextProtocol, EscalationPipeline, EscalationStage, HandoffCycleError, HandoffDepthError...
+from praisonaiagents import AgentMessageEvent, Agents, AsyncLearnProtocol, AutonomyConfig, BudgetExceededError, CustomToolUseEvent, DoomLoopDetector, ErrorContextProtocol, EscalationPipeline, EscalationStage...
 ```
 
 </details>
