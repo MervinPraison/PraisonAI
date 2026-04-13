@@ -290,21 +290,19 @@ class SandlockSandbox:
         stdout = self._decode(result.stdout)
         stderr = self._decode(result.stderr)
 
-        # sandlock surfaces timeouts via result.error containing "timed out".
-        # This is authoritative — wall-clock guesses are unreliable because a
-        # process can legitimately finish just under the limit.
-        err_text = (result.error or "") if not result.success else ""
-        is_timeout = "timed out" in err_text.lower() or "timeout" in err_text.lower()
-
+        # sandlock uses exit_code == -1 as the ExitStatus::Timeout sentinel
+        # (see sandlock's python/src/sandlock/_sdk.py).  This is a
+        # structural signal — Sandbox.run() doesn't populate result.error
+        # for timeouts, so string-matching on it is unreliable.
         if result.success:
             status = SandboxStatus.COMPLETED
             error = None
-        elif is_timeout:
+        elif result.exit_code == -1:
             status = SandboxStatus.TIMEOUT
             error = f"Execution timed out after {limits.timeout_seconds}s"
         else:
             status = SandboxStatus.FAILED
-            error = f"Execution failed with exit code {result.exit_code}: {stderr or err_text}"
+            error = f"Execution failed with exit code {result.exit_code}: {stderr}"
 
         return SandboxResult(
             execution_id=execution_id,

@@ -125,7 +125,7 @@ class TestSandlockSandbox:
 
     @pytest.mark.asyncio
     async def test_sandlock_execution_timeout(self):
-        """Timeout is detected via result.error, not wall-clock heuristics."""
+        """Timeout is detected via exit_code == -1 (ExitStatus::Timeout)."""
         mock_sandlock = Mock()
         mock_sandlock.Policy.return_value = Mock()
         mock_sandlock.Sandbox.return_value = Mock()
@@ -135,11 +135,12 @@ class TestSandlockSandbox:
 
         mock_timeout_result = Mock()
         mock_timeout_result.success = False
-        mock_timeout_result.exit_code = 124
+        # sandlock's timeout sentinel — Sandbox.run() does not populate
+        # result.error on timeout, so we rely on the exit_code instead.
+        mock_timeout_result.exit_code = -1
         mock_timeout_result.stdout = b""
         mock_timeout_result.stderr = b""
-        # sandlock surfaces timeout via the error field.
-        mock_timeout_result.error = "process timed out after 10s"
+        mock_timeout_result.error = None
 
         with patch("asyncio.get_running_loop") as mock_loop:
             mock_loop.return_value.run_in_executor = AsyncMock(
