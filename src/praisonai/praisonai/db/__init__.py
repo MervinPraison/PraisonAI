@@ -30,6 +30,10 @@ __all__ = [
     "PostgresDB", 
     "SQLiteDB",
     "RedisDB",
+    "NeonDB",
+    "CockroachDB",
+    "XataDB",
+    "TursoDB",
 ]
 
 # Deprecation warning message
@@ -72,5 +76,21 @@ def __getattr__(name: str):
         warnings.warn(_DEPRECATION_MSG, DeprecationWarning, stacklevel=2)
         from .adapter import RedisDB
         return RedisDB
+    
+    if name == "NeonDB":
+        from .adapter import NeonDB
+        return NeonDB
+    
+    if name == "CockroachDB":
+        from .adapter import CockroachDB
+        return CockroachDB
+    
+    if name == "XataDB":
+        from .adapter import XataDB
+        return XataDB
+    
+    if name == "TursoDB":
+        from .adapter import TursoDB
+        return TursoDB
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

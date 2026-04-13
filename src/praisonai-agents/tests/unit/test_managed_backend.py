@@ -28,8 +28,8 @@ class TestManagedBackendProtocol:
     def test_config_defaults(self):
         from praisonai.integrations.managed_agents import ManagedConfig
         cfg = ManagedConfig()
-        assert cfg.model == "claude-sonnet-4-6"
-        assert cfg.name == "PraisonAI Managed Agent"
+        assert cfg.model == "claude-haiku-4-5"
+        assert cfg.name == "Agent"
         assert cfg.tools == [{"type": "agent_toolset_20260401"}]
         assert cfg.networking == {"type": "unrestricted"}
         assert cfg.packages is None
@@ -455,7 +455,7 @@ class TestManagedAgent:
         m._client = mock_client
 
         m.update_agent(system="New instructions")
-        mock_client.beta.agents.update.assert_called_once_with("agent-001", system="New instructions")
+        mock_client.beta.agents.update.assert_called_once_with("agent-001", system="New instructions", version=1)
         assert m.agent_version == 2
         assert m._session_id is None  # Session invalidated
 

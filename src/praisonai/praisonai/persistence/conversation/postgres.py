@@ -7,11 +7,23 @@ Install: pip install psycopg2-binary
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+import time as _time
+from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 from .base import ConversationStore, ConversationSession, ConversationMessage
 
 logger = logging.getLogger(__name__)
+
+# Hostnames that indicate serverless/cloud Postgres providers
+_SERVERLESS_HOSTS = (
+    ".neon.tech",
+    ".cockroachlabs.cloud",
+    ".cockroachlabs.com",
+    ".xata.sh",
+    ".supabase.com",
+    ".supabase.co",
+)
 
 
 class PostgresConversationStore(ConversationStore):
@@ -40,6 +52,8 @@ class PostgresConversationStore(ConversationStore):
         table_prefix: str = "praison_",
         auto_create_tables: bool = True,
         pool_size: int = 5,
+        max_retries: int = 3,
+        retry_delay: float = 0.5,
     ):
         """
         Initialize PostgreSQL conversation store.
@@ -55,6 +69,8 @@ class PostgresConversationStore(ConversationStore):
             table_prefix: Prefix for table names
             auto_create_tables: Create tables if they don't exist
             pool_size: Connection pool size
+            max_retries: Max retries on connection error (serverless cold-start)
+            retry_delay: Base delay between retries in seconds
         """
         try:
             import psycopg2
@@ -74,8 +90,22 @@ class PostgresConversationStore(ConversationStore):
         self.sessions_table = f"{schema}.{table_prefix}sessions"
         self.messages_table = f"{schema}.{table_prefix}messages"
         
-        # Build connection params
+        # Serverless-resilient settings
+        self._serverless = self._is_serverless(url) if url else False
+        self._max_retries = max_retries if self._serverless else 1
+        self._retry_delay = retry_delay
+        
+        # Auto-enforce SSL for serverless providers
         if url:
+            url = self._ensure_ssl(url)
+        
+        # Build connection params
+        connect_timeout = 30 if self._serverless else 5
+        if url:
+            # Append connect_timeout for serverless if not already set
+            if self._serverless and "connect_timeout" not in url:
+                separator = "&" if "?" in url else "?"
+                url = f"{url}{separator}connect_timeout={connect_timeout}"
             self._pool = pg_pool.ThreadedConnectionPool(1, pool_size, url)
         else:
             self._pool = pg_pool.ThreadedConnectionPool(
@@ -85,10 +115,62 @@ class PostgresConversationStore(ConversationStore):
                 database=database,
                 user=user,
                 password=password,
+                connect_timeout=connect_timeout,
             )
+        
+        if self._serverless:
+            logger.info("Serverless PostgreSQL detected — retry and SSL enabled")
         
         if auto_create_tables:
             self._create_tables()
+
+    @staticmethod
+    def _is_serverless(url: str) -> bool:
+        """Detect if the URL points to a serverless/cloud Postgres provider."""
+        if not url:
+            return False
+        url_lower = url.lower()
+        return any(host in url_lower for host in _SERVERLESS_HOSTS)
+
+    @staticmethod
+    def _ensure_ssl(url: str) -> str:
+        """Auto-append sslmode=require for serverless providers if not already set."""
+        if not PostgresConversationStore._is_serverless(url):
+            return url
+        if "sslmode=" in url.lower():
+            return url
+        separator = "&" if "?" in url else "?"
+        return f"{url}{separator}sslmode=require"
+
+    def _execute_with_retry(self, operation: Callable, *args, **kwargs):
+        """Execute a database operation with retry logic for serverless cold-start.
+        
+        On OperationalError (stale/broken connection), discards the connection,
+        gets a fresh one from the pool, and retries.
+        """
+        last_error = None
+        for attempt in range(self._max_retries):
+            conn = self._get_conn()
+            try:
+                result = operation(conn, *args, **kwargs)
+                self._put_conn(conn)
+                return result
+            except self._psycopg2.OperationalError as e:
+                last_error = e
+                logger.warning(
+                    f"Connection error (attempt {attempt + 1}/{self._max_retries}): {e}"
+                )
+                # Discard broken connection
+                try:
+                    self._pool.putconn(conn, close=True)
+                except Exception:
+                    pass
+                if attempt < self._max_retries - 1:
+                    _time.sleep(self._retry_delay * (2 ** attempt))
+            except Exception:
+                self._put_conn(conn)
+                raise
+        raise last_error
     
     def _get_conn(self):
         """Get a connection from the pool."""

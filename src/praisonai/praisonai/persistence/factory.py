@@ -80,10 +80,31 @@ def create_conversation_store(
         from .conversation.async_mysql import AsyncMySQLConversationStore
         return AsyncMySQLConversationStore(url=url, **options)
     
+    elif backend in ("turso", "libsql"):
+        from .conversation.turso import TursoConversationStore
+        auth_token = options.pop("auth_token", None)
+        return TursoConversationStore(url=url, auth_token=auth_token, **options)
+    
+    elif backend == "neon":
+        # Neon is PostgreSQL-compatible — use postgres store with serverless defaults
+        from .conversation.postgres import PostgresConversationStore
+        return PostgresConversationStore(url=url, **options)
+    
+    elif backend in ("cockroachdb", "crdb", "cockroach"):
+        # CockroachDB is PostgreSQL-compatible
+        from .conversation.postgres import PostgresConversationStore
+        return PostgresConversationStore(url=url, **options)
+    
+    elif backend == "xata":
+        # Xata is PostgreSQL-compatible
+        from .conversation.postgres import PostgresConversationStore
+        return PostgresConversationStore(url=url, **options)
+    
     else:
         raise ValueError(
             f"Unknown conversation store backend: {backend}. "
             f"Supported: postgres, mysql, sqlite, json, singlestore, supabase, surrealdb, "
+            f"turso, neon, cockroachdb, xata, "
             f"async_postgres, async_sqlite, async_mysql"
         )
 

@@ -12,7 +12,7 @@ dependencies = [
     "rich>=13.7",
     "markdown>=3.5",
     "pyparsing>=3.0.0",
-    "praisonaiagents>=1.6.1",
+    "praisonaiagents>=1.6.2",
     "python-dotenv>=0.19.0",
     "litellm>=1.81.0,<=1.82.6",
     "PyYAML>=6.0",
@@ -162,6 +162,19 @@ postgresql = [
 ]
 dynamodb = [
     "boto3>=1.35.0",
+]
+# Cloud-native serverless databases
+neon = [
+    "psycopg2-binary>=2.9.0",
+]
+turso = [
+    "libsql-experimental>=0.0.50",
+]
+cockroachdb = [
+    "psycopg2-binary>=2.9.0",
+]
+xata = [
+    "psycopg2-binary>=2.9.0",
 ]
 claw = [
     # PraisonAI 🦞 — Full dashboard + bots + memory + knowledge + gateway

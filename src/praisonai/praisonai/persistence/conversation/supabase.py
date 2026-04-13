@@ -5,10 +5,9 @@ Requires: supabase
 Install: pip install supabase
 """
 
-import json
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from .base import ConversationStore, ConversationSession, ConversationMessage
 
@@ -35,7 +34,9 @@ class SupabaseConversationStore(ConversationStore):
         url: Optional[str] = None,
         key: Optional[str] = None,
         table_prefix: str = "praison_",
-        auto_create_tables: bool = False,  # Tables should be created via Supabase dashboard
+        auto_create_tables: bool = False,
+        max_retries: int = 3,
+        retry_delay: float = 2.0,
     ):
         """
         Initialize Supabase conversation store.
@@ -44,7 +45,9 @@ class SupabaseConversationStore(ConversationStore):
             url: Supabase project URL
             key: Supabase anon/service key
             table_prefix: Prefix for table names
-            auto_create_tables: Not supported - use Supabase dashboard
+            auto_create_tables: Create tables via Supabase SQL (requires service key)
+            max_retries: Max retries for paused project wake-up
+            retry_delay: Base delay between retries in seconds
         """
         try:
             from supabase import create_client, Client
@@ -65,9 +68,75 @@ class SupabaseConversationStore(ConversationStore):
         self.table_prefix = table_prefix
         self.sessions_table = f"{table_prefix}sessions"
         self.messages_table = f"{table_prefix}messages"
+        self._max_retries = max_retries
+        self._retry_delay = retry_delay
         
         if auto_create_tables:
-            logger.warning("auto_create_tables not supported for Supabase. Create tables via dashboard.")
+            self._create_tables()
+    
+    def _execute_with_retry(self, operation, *args, **kwargs):
+        """Execute a Supabase operation with retry for paused project wake-up."""
+        last_error = None
+        for attempt in range(self._max_retries):
+            try:
+                return operation(*args, **kwargs)
+            except Exception as e:
+                last_error = e
+                error_str = str(e).lower()
+                if any(kw in error_str for kw in ("connection", "timeout", "503", "502", "unavailable")):
+                    logger.warning(
+                        f"Supabase connection error (attempt {attempt + 1}/{self._max_retries}): {e}"
+                    )
+                    if attempt < self._max_retries - 1:
+                        time.sleep(self._retry_delay * (2 ** attempt))
+                    continue
+                raise
+        raise last_error
+    
+    def _create_tables(self) -> None:
+        """Create tables via Supabase SQL RPC (requires service key)."""
+        sessions_sql = f"""
+            CREATE TABLE IF NOT EXISTS {self.sessions_table} (
+                session_id TEXT PRIMARY KEY,
+                user_id TEXT,
+                agent_id TEXT,
+                name TEXT,
+                state JSONB,
+                metadata JSONB,
+                created_at DOUBLE PRECISION,
+                updated_at DOUBLE PRECISION
+            );
+            CREATE INDEX IF NOT EXISTS idx_{self.table_prefix}sessions_user 
+            ON {self.sessions_table}(user_id);
+            CREATE INDEX IF NOT EXISTS idx_{self.table_prefix}sessions_agent 
+            ON {self.sessions_table}(agent_id);
+        """
+        messages_sql = f"""
+            CREATE TABLE IF NOT EXISTS {self.messages_table} (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL
+                    REFERENCES {self.sessions_table}(session_id) ON DELETE CASCADE,
+                role TEXT NOT NULL,
+                content TEXT,
+                tool_calls JSONB,
+                tool_call_id TEXT,
+                metadata JSONB,
+                created_at DOUBLE PRECISION
+            );
+            CREATE INDEX IF NOT EXISTS idx_{self.table_prefix}messages_session 
+            ON {self.messages_table}(session_id);
+            CREATE INDEX IF NOT EXISTS idx_{self.table_prefix}messages_created 
+            ON {self.messages_table}(session_id, created_at);
+        """
+        try:
+            self._client.rpc("exec_sql", {"query": sessions_sql}).execute()
+            self._client.rpc("exec_sql", {"query": messages_sql}).execute()
+            logger.info(f"Supabase tables created: {self.sessions_table}, {self.messages_table}")
+        except Exception as e:
+            logger.warning(
+                f"Could not auto-create tables via RPC: {e}. "
+                f"Create tables manually via Supabase dashboard or SQL editor."
+            )
     
     def create_session(self, session: ConversationSession) -> ConversationSession:
         data = {

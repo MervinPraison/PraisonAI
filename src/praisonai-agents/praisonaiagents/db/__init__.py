@@ -48,6 +48,10 @@ class _LazyDbModule:
         "PostgresDB": "praisonai.db.adapter",
         "SQLiteDB": "praisonai.db.adapter",
         "RedisDB": "praisonai.db.adapter",
+        "NeonDB": "praisonai.db.adapter",
+        "CockroachDB": "praisonai.db.adapter",
+        "XataDB": "praisonai.db.adapter",
+        "TursoDB": "praisonai.db.adapter",
     }
     
     def __getattr__(self, name: str):

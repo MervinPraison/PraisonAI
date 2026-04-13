@@ -103,10 +103,19 @@ ENV_VARS = {
     # LanceDB
     "lancedb_path": "LANCEDB_PATH",
     "lancedb_uri": "LANCEDB_URI",
+    # Neon (serverless PostgreSQL)
+    "neon_database_url": "NEON_DATABASE_URL",
+    # Turso (libSQL)
+    "turso_database_url": "TURSO_DATABASE_URL",
+    "turso_auth_token": "TURSO_AUTH_TOKEN",
+    # CockroachDB Serverless
+    "cockroachdb_url": "COCKROACHDB_URL",
+    # Xata (serverless PostgreSQL)
+    "xata_database_url": "XATA_DATABASE_URL",
 }
 
 # Supported backends
-CONVERSATION_BACKENDS = ["postgres", "mysql", "sqlite", "singlestore", "supabase", "surrealdb"]
+CONVERSATION_BACKENDS = ["postgres", "mysql", "sqlite", "singlestore", "supabase", "surrealdb", "turso", "neon", "cockroachdb", "xata"]
 KNOWLEDGE_BACKENDS = ["qdrant", "pinecone", "chroma", "weaviate", "lancedb", "milvus", "pgvector", "redis", "cassandra", "clickhouse"]
 STATE_BACKENDS = ["redis", "dynamodb", "firestore", "mongodb", "upstash", "memory"]
 
