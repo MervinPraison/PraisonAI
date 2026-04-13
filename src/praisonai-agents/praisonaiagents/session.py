@@ -51,7 +51,8 @@ class Session:
         agent_url: Optional[str] = None,
         memory_config: Optional[Dict[str, Any]] = None,
         knowledge_config: Optional[Dict[str, Any]] = None,
-        timeout: int = 30
+        timeout: int = 30,
+        session_ttl: Optional[int] = None  # Gap 2b: TTL in seconds
     ):
         """
         Initialize a new session with optional persistence or remote agent connectivity.
@@ -63,6 +64,7 @@ class Session:
             memory_config: Configuration for memory system (defaults to RAG)
             knowledge_config: Configuration for knowledge base system  
             timeout: HTTP timeout for remote agent calls (default: 30 seconds)
+            session_ttl: Time-to-live in seconds after which session expires (Gap 2b)
         """
         self.session_id = session_id or str(uuid.uuid4())[:8]
         self.user_id = user_id or "default_user"
@@ -109,6 +111,10 @@ class Session:
             self._knowledge = None
             self._agents_instance = None
             self._agents = {}  # Track agents and their chat histories
+
+        # Gap 2b: Session TTL and cleanup support  
+        self.session_ttl = session_ttl
+        self._created_at = time.time()  # Track creation time for TTL
 
     def _get_session_dir(self):
         """Return session-specific directory using paths.py."""
@@ -186,8 +192,8 @@ class Session:
 
         agent = Agent(**agent_kwargs)
         
-        # Create a unique key for this agent (using name and role)
-        agent_key = f"{name}:{role}"
+        # Create a unique key for this agent (Gap 2a fix: include session_id for proper isolation)
+        agent_key = f"{self.session_id}:{name}:{role}"
         
         # Restore chat history if it exists from previous sessions
         if agent_key in self._agents:
@@ -270,7 +276,7 @@ class Session:
 
     def _restore_agent_chat_history(self, agent_key: str) -> List[Dict[str, Any]]:
         """
-        Restore agent chat history from memory.
+        Restore agent chat history from SessionStore first, then memory fallback (Gap 2c fix).
         
         Args:
             agent_key: Unique identifier for the agent
@@ -281,7 +287,18 @@ class Session:
         if self.is_remote:
             return []
         
-        # Search for agent chat history in memory
+        # Gap 2c: Try SessionStore first for clean separation
+        try:
+            from .session.store import get_default_session_store
+            session_store = get_default_session_store()
+            session_id = f"{self.session_id}_{agent_key}"
+            chat_history = session_store.get_chat_history(session_id)
+            if chat_history:
+                return chat_history
+        except ImportError:
+            pass
+        
+        # Fallback: Search for agent chat history in memory (backward compatibility)
         results = self.memory.search_short_term(
             query="Agent chat history for",
             limit=10
@@ -350,10 +367,10 @@ class Session:
                 chat_history = agent_data.get("chat_history")
             
             if chat_history is not None:
-                # G-2 FIX: Try SessionStore first for clean separation
+                # G-2 FIX: Use SessionStore for clean separation (Gap 2c fix)
                 session_store = None
                 try:
-                    from .session import get_default_session_store
+                    from .session.store import get_default_session_store
                     session_store = get_default_session_store()
                 except ImportError:
                     pass
@@ -579,6 +596,50 @@ class Session:
             The agent's response
         """
         return self.chat(message, **kwargs)
+
+    def is_expired(self) -> bool:
+        """Check if the session has expired based on TTL (Gap 2b fix)."""
+        if self.session_ttl is None:
+            return False
+        return time.time() - self._created_at > self.session_ttl
+
+    def close(self) -> None:
+        """Close and cleanup the session (Gap 2b fix)."""
+        if self.is_remote:
+            return  # No cleanup needed for remote sessions
+        
+        # Clear memory
+        if self._memory:
+            try:
+                # Clear short-term and long-term memory for this session
+                # Note: This is a basic implementation - specific memory backends
+                # might need more sophisticated cleanup
+                self._memory = None
+            except Exception:
+                pass  # Ignore cleanup errors
+        
+        # Clear knowledge
+        if self._knowledge:
+            try:
+                self._knowledge = None
+            except Exception:
+                pass  # Ignore cleanup errors
+        
+        # Clear agents
+        self._agents.clear()
+        
+        # Clean up session directory (optional - commented out for safety)
+        # import shutil
+        # session_dir = self._get_session_dir()
+        # if session_dir.exists():
+        #     shutil.rmtree(session_dir)
+
+    def time_to_expiry(self) -> Optional[float]:
+        """Get seconds until session expires, or None if no TTL set (Gap 2b)."""
+        if self.session_ttl is None:
+            return None
+        elapsed = time.time() - self._created_at
+        return max(0, self.session_ttl - elapsed)
 
     def __str__(self) -> str:
         if self.is_remote:

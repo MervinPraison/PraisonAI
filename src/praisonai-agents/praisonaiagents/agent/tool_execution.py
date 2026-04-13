@@ -290,8 +290,15 @@ class ToolExecutionMixin:
             _duration_ms = (_time.time() - _tool_start_time) * 1000
             _trace_emitter.tool_call_end(self.name, function_name, None, _duration_ms, str(e))
             
-            # Trigger OnError hook if needed (optional future step)
-            raise
+            # Gap 3a fix: Wrap exceptions in ToolExecutionError for better observability
+            from ..errors import ToolExecutionError
+            is_retryable = not isinstance(e, (ValueError, TypeError, AttributeError))
+            raise ToolExecutionError(
+                f"Tool '{function_name}' failed: {e}",
+                tool_name=function_name,
+                agent_id=self.name,
+                is_retryable=is_retryable,
+            ) from e
 
     def _trigger_after_agent_hook(self, prompt, response, start_time, tools_used=None):
         """Trigger AFTER_AGENT hook and return response."""
