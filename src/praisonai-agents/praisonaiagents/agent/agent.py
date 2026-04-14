@@ -1042,18 +1042,18 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
                 if _memory_config.auto_save is not None:
                     auto_save = _memory_config.auto_save
                 # Convert to internal format
-                backend = _memory_config.backend
-                if hasattr(backend, 'value'):
-                    backend = backend.value
+                memory_backend = _memory_config.backend
+                if hasattr(memory_backend, 'value'):
+                    memory_backend = memory_backend.value
                 # If learn is enabled, pass as dict to trigger full Memory class
                 if _memory_config.learn:
                     memory = _memory_config.to_dict()
-                elif backend == "file":
+                elif memory_backend == "file":
                     memory = True
                 elif _memory_config.config:
                     memory = _memory_config.config
                 else:
-                    memory = backend
+                    memory = memory_backend
             elif hasattr(_memory_config, 'search') and hasattr(_memory_config, 'add'):
                 # Memory instance - pass through
                 pass
