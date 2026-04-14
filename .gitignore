@@ -98,3 +98,4 @@ Cargo.lock
 src/praisonai/build*.egg-info/
 src/praisonai/PraisonAI.egg-info/
 jobs/*
+*.egg-info

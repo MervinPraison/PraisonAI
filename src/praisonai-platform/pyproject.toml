@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "praisonai-platform"
+version = "0.1.0"
+description = "Platform layer for PraisonAI — workspace, auth, issues, projects"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name="Mervin Praison" }
+]
+dependencies = [
+    "praisonaiagents>=1.6.0",
+    "sqlalchemy>=2.0.0",
+    "aiosqlite>=0.20.0",
+    "alembic>=1.14.0",
+    "PyJWT>=2.8.0",
+    "passlib[bcrypt]>=1.7.4",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.34.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.10.0",
+]
+
+[project.optional-dependencies]
+postgres = [
+    "asyncpg>=0.30.0",
+    "psycopg2-binary>=2.9.0",
+]
+
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.27.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["praisonai_platform*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+timeout = 30
