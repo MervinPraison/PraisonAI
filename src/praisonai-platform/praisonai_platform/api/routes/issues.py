@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from praisonaiagents.auth import AuthIdentity
 
-from ..deps import get_current_user, get_db
+from ..deps import get_current_user, get_db, require_workspace_member
 from ..schemas import (
     CommentCreate,
     CommentResponse,
@@ -28,7 +28,7 @@ router = APIRouter(prefix="/workspaces/{workspace_id}/issues", tags=["issues"])
 async def create_issue(
     workspace_id: str,
     body: IssueCreate,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = IssueService(session)
@@ -64,7 +64,7 @@ async def list_issues(
     assignee_id: Optional[str] = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = IssueService(session)
@@ -83,7 +83,7 @@ async def list_issues(
 async def get_issue(
     workspace_id: str,
     issue_id: str,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = IssueService(session)
@@ -98,7 +98,7 @@ async def update_issue(
     workspace_id: str,
     issue_id: str,
     body: IssueUpdate,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = IssueService(session)
@@ -128,7 +128,7 @@ async def update_issue(
 async def delete_issue(
     workspace_id: str,
     issue_id: str,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = IssueService(session)
@@ -145,7 +145,7 @@ async def add_comment(
     workspace_id: str,
     issue_id: str,
     body: CommentCreate,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = CommentService(session)
@@ -163,7 +163,7 @@ async def add_comment(
 async def list_comments(
     workspace_id: str,
     issue_id: str,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = CommentService(session)
