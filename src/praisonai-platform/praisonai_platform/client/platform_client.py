@@ -282,3 +282,251 @@ class PlatformClient:
             )
             resp.raise_for_status()
             return resp.json()
+
+    async def delete_agent(self, workspace_id: str, agent_id: str) -> None:
+        async with httpx.AsyncClient() as c:
+            resp = await c.delete(
+                self._url(f"/workspaces/{workspace_id}/agents/{agent_id}"),
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+
+    # ── Member Operations ────────────────────────────────────────────────
+
+    async def update_member_role(self, workspace_id: str, user_id: str, role: str) -> Dict[str, Any]:
+        async with httpx.AsyncClient() as c:
+            resp = await c.patch(
+                self._url(f"/workspaces/{workspace_id}/members/{user_id}"),
+                json={"role": role},
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def remove_member(self, workspace_id: str, user_id: str) -> None:
+        async with httpx.AsyncClient() as c:
+            resp = await c.delete(
+                self._url(f"/workspaces/{workspace_id}/members/{user_id}"),
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+
+    # ── User Profile ─────────────────────────────────────────────────────
+
+    async def get_me(self) -> Dict[str, Any]:
+        async with httpx.AsyncClient() as c:
+            resp = await c.get(self._url("/auth/me"), headers=self._headers())
+            resp.raise_for_status()
+            return resp.json()
+
+    # ── Project Operations ───────────────────────────────────────────────
+
+    async def get_project(self, workspace_id: str, project_id: str) -> Dict[str, Any]:
+        async with httpx.AsyncClient() as c:
+            resp = await c.get(
+                self._url(f"/workspaces/{workspace_id}/projects/{project_id}"),
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def update_project(
+        self, workspace_id: str, project_id: str, **fields: Any
+    ) -> Dict[str, Any]:
+        async with httpx.AsyncClient() as c:
+            resp = await c.patch(
+                self._url(f"/workspaces/{workspace_id}/projects/{project_id}"),
+                json=fields,
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def delete_project(self, workspace_id: str, project_id: str) -> None:
+        async with httpx.AsyncClient() as c:
+            resp = await c.delete(
+                self._url(f"/workspaces/{workspace_id}/projects/{project_id}"),
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+
+    async def get_project_stats(self, workspace_id: str, project_id: str) -> Dict[str, Any]:
+        async with httpx.AsyncClient() as c:
+            resp = await c.get(
+                self._url(f"/workspaces/{workspace_id}/projects/{project_id}/stats"),
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    # ── Issue Operations ─────────────────────────────────────────────────
+
+    async def delete_issue(self, workspace_id: str, issue_id: str) -> None:
+        async with httpx.AsyncClient() as c:
+            resp = await c.delete(
+                self._url(f"/workspaces/{workspace_id}/issues/{issue_id}"),
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+
+    # ── Workspace Operations ─────────────────────────────────────────────
+
+    async def update_workspace(self, workspace_id: str, **fields: Any) -> Dict[str, Any]:
+        async with httpx.AsyncClient() as c:
+            resp = await c.patch(
+                self._url(f"/workspaces/{workspace_id}"),
+                json=fields,
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def delete_workspace(self, workspace_id: str) -> None:
+        async with httpx.AsyncClient() as c:
+            resp = await c.delete(
+                self._url(f"/workspaces/{workspace_id}"),
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+
+    # ── Labels ───────────────────────────────────────────────────────────
+
+    async def create_label(
+        self, workspace_id: str, name: str, color: str = "#007bff"
+    ) -> Dict[str, Any]:
+        async with httpx.AsyncClient() as c:
+            resp = await c.post(
+                self._url(f"/workspaces/{workspace_id}/labels"),
+                json={"name": name, "color": color},
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def list_labels(self, workspace_id: str) -> List[Dict[str, Any]]:
+        async with httpx.AsyncClient() as c:
+            resp = await c.get(
+                self._url(f"/workspaces/{workspace_id}/labels"),
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def update_label(
+        self, workspace_id: str, label_id: str, name: str = None, color: str = None
+    ) -> Dict[str, Any]:
+        body: Dict[str, Any] = {}
+        if name is not None:
+            body["name"] = name
+        if color is not None:
+            body["color"] = color
+        async with httpx.AsyncClient() as c:
+            resp = await c.patch(
+                self._url(f"/workspaces/{workspace_id}/labels/{label_id}"),
+                json=body,
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def delete_label(self, workspace_id: str, label_id: str) -> None:
+        async with httpx.AsyncClient() as c:
+            resp = await c.delete(
+                self._url(f"/workspaces/{workspace_id}/labels/{label_id}"),
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+
+    async def add_label_to_issue(
+        self, workspace_id: str, issue_id: str, label_id: str
+    ) -> None:
+        async with httpx.AsyncClient() as c:
+            resp = await c.post(
+                self._url(f"/workspaces/{workspace_id}/issues/{issue_id}/labels/{label_id}"),
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+
+    async def remove_label_from_issue(
+        self, workspace_id: str, issue_id: str, label_id: str
+    ) -> None:
+        async with httpx.AsyncClient() as c:
+            resp = await c.delete(
+                self._url(f"/workspaces/{workspace_id}/issues/{issue_id}/labels/{label_id}"),
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+
+    async def list_issue_labels(
+        self, workspace_id: str, issue_id: str
+    ) -> List[Dict[str, Any]]:
+        async with httpx.AsyncClient() as c:
+            resp = await c.get(
+                self._url(f"/workspaces/{workspace_id}/issues/{issue_id}/labels"),
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    # ── Dependencies ─────────────────────────────────────────────────────
+
+    async def create_dependency(
+        self, workspace_id: str, issue_id: str, depends_on_issue_id: str, type: str = "blocks"
+    ) -> Dict[str, Any]:
+        async with httpx.AsyncClient() as c:
+            resp = await c.post(
+                self._url(f"/workspaces/{workspace_id}/issues/{issue_id}/dependencies/"),
+                json={"depends_on_issue_id": depends_on_issue_id, "type": type},
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def list_dependencies(
+        self, workspace_id: str, issue_id: str
+    ) -> List[Dict[str, Any]]:
+        async with httpx.AsyncClient() as c:
+            resp = await c.get(
+                self._url(f"/workspaces/{workspace_id}/issues/{issue_id}/dependencies/"),
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def delete_dependency(
+        self, workspace_id: str, issue_id: str, dep_id: str
+    ) -> None:
+        async with httpx.AsyncClient() as c:
+            resp = await c.delete(
+                self._url(f"/workspaces/{workspace_id}/issues/{issue_id}/dependencies/{dep_id}"),
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+
+    # ── Activity ─────────────────────────────────────────────────────────
+
+    async def list_workspace_activity(
+        self, workspace_id: str, limit: int = 50, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        params = {"limit": str(limit), "offset": str(offset)}
+        async with httpx.AsyncClient() as c:
+            resp = await c.get(
+                self._url(f"/workspaces/{workspace_id}/activity"),
+                params=params,
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def list_issue_activity(
+        self, workspace_id: str, issue_id: str, limit: int = 50, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        params = {"limit": str(limit), "offset": str(offset)}
+        async with httpx.AsyncClient() as c:
+            resp = await c.get(
+                self._url(f"/workspaces/{workspace_id}/issues/{issue_id}/activity"),
+                params=params,
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            return resp.json()
