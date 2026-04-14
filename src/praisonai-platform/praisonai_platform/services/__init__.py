@@ -10,6 +10,7 @@ from .activity_service import ActivityService
 from .agent_service import AgentService
 from .label_service import LabelService
 from .dependency_service import DependencyService
+from .workspace_context import PlatformWorkspaceContext
 
 __all__ = [
     "AuthService",
@@ -22,4 +23,5 @@ __all__ = [
     "AgentService",
     "LabelService",
     "DependencyService",
+    "PlatformWorkspaceContext",
 ]
