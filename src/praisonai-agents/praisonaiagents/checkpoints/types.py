@@ -26,6 +26,7 @@ class CheckpointEvent(str, Enum):
     INITIALIZED = "initialized"
     CHECKPOINT_CREATED = "checkpoint_created"
     CHECKPOINT_RESTORED = "checkpoint_restored"
+    CHECKPOINTS_PRUNED = "checkpoints_pruned"
     ERROR = "error"
 
 

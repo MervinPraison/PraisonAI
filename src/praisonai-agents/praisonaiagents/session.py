@@ -11,6 +11,7 @@ import uuid
 import requests
 import json
 import time
+import threading
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -69,6 +70,7 @@ class Session:
         self.agent_url = agent_url
         self.timeout = timeout
         self.is_remote = agent_url is not None
+        self._state_lock = threading.RLock()  # Reentrant lock for thread-safe state operations
 
         # Validate agent_url format
         if self.is_remote:
@@ -384,19 +386,24 @@ class Session:
 
     def get_state(self, key: str, default: Any = None) -> Any:
         """Get a specific state value"""
-        state = self.restore_state()
-        return state.get(key, default)
+        with self._state_lock:
+            state = self.restore_state()
+            return state.get(key, default)
 
     def set_state(self, key: str, value: Any) -> None:
         """Set a specific state value"""
-        current_state = self.restore_state()
-        current_state[key] = value
-        self.save_state(current_state)
+        with self._state_lock:
+            current_state = self.restore_state()
+            current_state[key] = value
+            self.save_state(current_state)
 
     def increment_state(self, key: str, increment: int = 1, default: int = 0) -> None:
-        """Increment a numeric state value"""
-        current_value = self.get_state(key, default)
-        self.set_state(key, current_value + increment)
+        """Increment a numeric state value atomically"""
+        with self._state_lock:
+            current_state = self.restore_state()
+            current_value = current_state.get(key, default)
+            current_state[key] = current_value + increment
+            self.save_state(current_state)
 
     def add_memory(self, text: str, memory_type: str = "long", **metadata) -> None:
         """

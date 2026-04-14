@@ -62,16 +62,14 @@ class MemoryCoreMixin:
         except Exception as e:
             self._log_verbose(f"Failed to store in {self.provider} STM: {e}", logging.WARNING)
         
-        # Backward compatibility: Also store in SQLite if not using SQLite adapter
-        if hasattr(self, '_sqlite_adapter') and self._sqlite_adapter != getattr(self, 'memory_adapter', None):
+        # Only use SQLite fallback if primary storage failed completely
+        if not memory_id and hasattr(self, '_sqlite_adapter') and self._sqlite_adapter != getattr(self, 'memory_adapter', None):
             try:
-                fallback_id = self._sqlite_adapter.store_short_term(content, metadata=clean_metadata, **kwargs)
-                if not memory_id:
-                    memory_id = fallback_id
+                memory_id = self._sqlite_adapter.store_short_term(content, metadata=clean_metadata, **kwargs)
+                self._log_verbose(f"Stored in SQLite STM as fallback: {content[:100]}...")
             except Exception as e:
                 logging.error(f"Failed to store in SQLite STM fallback: {e}")
-                if not memory_id:
-                    return ""
+                return ""
         
         # Auto-promote to long-term memory if quality is high
         if auto_promote and quality_score >= 7.5:  # High quality threshold
@@ -122,37 +120,38 @@ class MemoryCoreMixin:
         clean_metadata = self._sanitize_metadata(metadata)
         
         # Protocol-driven storage: Try primary adapter first
+        memory_id = ""
         primary_error = None
-        memory_id = None
-        
         try:
             if hasattr(self, 'memory_adapter') and self.memory_adapter:
                 memory_id = self.memory_adapter.store_short_term(content, metadata=clean_metadata, **kwargs)
                 self._log_verbose(f"Stored in {self.provider} STM via adapter: {content[:100]}...")
-                
-                # Auto-promote to long-term memory if quality is high
-                if auto_promote and quality_score >= 7.5:
-                    try:
-                        self.store_long_term(content, clean_metadata, quality_score, user_id, **kwargs)
-                        self._log_verbose(f"Auto-promoted STM content to LTM (score: {quality_score:.2f})")
-                    except Exception as e:
-                        # Auto-promotion failure doesn't affect the primary storage result
-                        logging.warning(f"Failed to auto-promote to LTM: {e}")
-                
-                # Emit memory event for successful storage
-                self._emit_memory_event("store", "short_term", content, clean_metadata)
-                
-                return MemoryResult.success_result(
-                    memory_id=memory_id, 
-                    adapter_used=self.provider,
-                    context={
-                        "quality_score": quality_score,
-                        "auto_promoted": auto_promote and quality_score >= 7.5
-                    }
-                )
         except Exception as e:
             primary_error = str(e)
             self._log_verbose(f"Failed to store in {self.provider} STM: {e}", logging.WARNING)
+        
+        # Only proceed with success if we got a valid memory_id 
+        if memory_id:
+            # Auto-promote to long-term memory if quality is high
+            if auto_promote and quality_score >= 7.5:
+                try:
+                    self.store_long_term(content, clean_metadata, quality_score, user_id, **kwargs)
+                    self._log_verbose(f"Auto-promoted STM content to LTM (score: {quality_score:.2f})")
+                except Exception as e:
+                    # Auto-promotion failure doesn't affect the primary storage result
+                    logging.warning(f"Failed to auto-promote to LTM: {e}")
+            
+            # Emit memory event for successful storage
+            self._emit_memory_event("store", "short_term", content, clean_metadata)
+            
+            return MemoryResult.success_result(
+                memory_id=memory_id, 
+                adapter_used=self.provider,
+                context={
+                    "quality_score": quality_score,
+                    "auto_promoted": auto_promote and quality_score >= 7.5
+                }
+            )
         
         # Fallback to SQLite if available and different from primary adapter
         fallback_error = None
@@ -450,13 +449,25 @@ class MemoryCoreMixin:
             raw_metadata["user_id"] = user_id
         clean_metadata = self._sanitize_metadata(raw_metadata)
 
-        # Store in SQLite STM
+        # Try primary adapter first (async version)
         memory_id = ""
         try:
-            memory_id = await asyncio.to_thread(self._store_sqlite_stm, content, clean_metadata, quality_score)
+            if hasattr(self, 'memory_adapter') and self.memory_adapter:
+                memory_id = await asyncio.to_thread(
+                    self.memory_adapter.store_short_term, content, metadata=clean_metadata, **kwargs
+                )
+                self._log_verbose(f"Stored in {self.provider} async STM via adapter: {content[:100]}...")
         except Exception as e:
-            logging.error(f"Failed to store in SQLite STM: {e}")
-            return ""
+            self._log_verbose(f"Failed to store in {self.provider} async STM: {e}", logging.WARNING)
+        
+        # Only use SQLite fallback if primary storage failed completely
+        if not memory_id and hasattr(self, '_sqlite_adapter') and self._sqlite_adapter != getattr(self, 'memory_adapter', None):
+            try:
+                memory_id = await asyncio.to_thread(self._store_sqlite_stm, content, clean_metadata, quality_score)
+                self._log_verbose(f"Stored in SQLite async STM as fallback: {content[:100]}...")
+            except Exception as e:
+                logging.error(f"Failed to store in SQLite async STM fallback: {e}")
+                return ""
         
         # Auto-promote to long-term memory if quality is high (async)
         if auto_promote and quality_score >= 7.5:  # High quality threshold

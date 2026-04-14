@@ -4501,6 +4501,39 @@ Answer:"""
         except Exception as e:
             logger.warning(f"Memory cleanup failed: {e}")
 
+        # LLM client cleanup - target actual live clients, not model strings
+        try:
+            # Primary cleanup targets - actual live clients
+            if hasattr(self, 'llm_instance') and self.llm_instance:
+                if hasattr(self.llm_instance, 'aclose'):
+                    # Try async close first
+                    try:
+                        import asyncio
+                        if asyncio.iscoroutinefunction(self.llm_instance.aclose):
+                            # We're in sync context, so use asyncio.run() for the cleanup
+                            asyncio.run(self.llm_instance.aclose())
+                        else:
+                            self.llm_instance.aclose()
+                    except Exception:
+                        # Fall back to sync close if async fails
+                        if hasattr(self.llm_instance, 'close'):
+                            self.llm_instance.close()
+                elif hasattr(self.llm_instance, 'close'):
+                    self.llm_instance.close()
+            
+            # Check for OpenAI client (common pattern in agents)
+            if hasattr(self, '_Agent__openai_client') and self._Agent__openai_client:
+                if hasattr(self._Agent__openai_client, 'close'):
+                    self._Agent__openai_client.close()
+            
+            # Legacy fallback - check self.llm._client (but less likely to work)
+            if hasattr(self, 'llm') and self.llm and not isinstance(self.llm, str):
+                llm_client = getattr(self.llm, '_client', None)
+                if llm_client and hasattr(llm_client, 'close'):
+                    llm_client.close()
+        except Exception as e:
+            logger.warning(f"LLM client cleanup failed: {e}")
+
         # MCP cleanup  
         try:
             if hasattr(self, '_mcp_clients') and self._mcp_clients:

@@ -35,26 +35,8 @@ class DualLock:
     """
     
     def __init__(self):
-        self._thread_lock = threading.Lock()
-        self._async_lock: Optional[asyncio.Lock] = None
-        self._loop_id: Optional[int] = None
-        
-    def _get_async_lock(self) -> asyncio.Lock:
-        """Get or create asyncio.Lock for current event loop."""
-        try:
-            current_loop = asyncio.get_running_loop()
-            current_loop_id = id(current_loop)
-            
-            # Create new lock if loop changed or first time
-            if self._loop_id != current_loop_id:
-                self._async_lock = asyncio.Lock()
-                self._loop_id = current_loop_id
-                
-            return self._async_lock
-        except RuntimeError:
-            # No event loop running, fall back to thread lock in a new loop
-            self._async_lock = asyncio.Lock() 
-            return self._async_lock
+        """Initialize with unified thread-safe locking."""
+        self._thread_lock = threading.Lock()  # Single canonical lock for all contexts
     
     @contextmanager
     def sync(self):
@@ -64,10 +46,13 @@ class DualLock:
             
     @asynccontextmanager
     async def async_lock(self):
-        """Acquire lock in asynchronous context using asyncio.Lock."""
-        async_lock = self._get_async_lock()
-        async with async_lock:
+        """Acquire lock in asynchronous context using threading.Lock via asyncio.to_thread()."""
+        # Use asyncio.to_thread to acquire the thread lock without blocking the event loop
+        await asyncio.to_thread(self._thread_lock.acquire)
+        try:
             yield
+        finally:
+            self._thread_lock.release()
             
     def is_async_context(self) -> bool:
         """Check if we're currently in an async context."""
@@ -129,14 +114,12 @@ class AsyncSafeState:
         
     async def __aenter__(self):
         """Support for asynchronous context manager protocol."""
-        async_lock = self._lock._get_async_lock()
-        await async_lock.acquire()
+        await asyncio.to_thread(self._lock._thread_lock.acquire)
         return self.value
         
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Support for asynchronous context manager protocol."""
-        async_lock = self._lock._get_async_lock()
-        async_lock.release()
+        self._lock._thread_lock.release()
         return None
             
     def get(self) -> Any:
