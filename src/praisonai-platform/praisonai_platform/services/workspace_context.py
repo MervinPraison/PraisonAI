@@ -8,6 +8,7 @@ implementing the WorkspaceContextProtocol from praisonaiagents.auth.protocols.
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from typing import Any, Dict, Optional
 
 from sqlalchemy import select
@@ -55,7 +56,7 @@ class PlatformWorkspaceContext(WorkspaceContextProtocol):
             "name": workspace.name,
             "slug": workspace.slug,
             "description": workspace.description,
-            "settings": workspace.settings or {},
+            "settings": deepcopy(workspace.settings or {}),
         }
         return json.dumps(payload, ensure_ascii=False, default=str)
 
@@ -68,11 +69,13 @@ class PlatformWorkspaceContext(WorkspaceContextProtocol):
         Get agent configuration from the platform.
         
         Args:
+            workspace_id: The workspace identifier
             agent_id: The agent identifier
             
         Returns:
             Agent configuration dict if found, None otherwise.
-            Keys: id, name, runtime_mode, instructions, config, max_concurrent_tasks
+            Protocol keys: system_prompt, model, tools, max_concurrent_tasks
+            Plus platform-specific keys for backward compatibility.
         """
         if workspace_id != self.workspace_id:
             return None
@@ -89,11 +92,16 @@ class PlatformWorkspaceContext(WorkspaceContextProtocol):
         if agent is None:
             return None
 
+        # Map platform agent fields to protocol-expected keys
         return {
+            "system_prompt": agent.instructions or "",
+            "model": getattr(agent, "model_name", None),  # Platform may have model field
+            "tools": [],  # Platform may store tools separately - return empty for now
+            "max_concurrent_tasks": agent.max_concurrent_tasks,
+            # Include platform-specific fields as well for backward compatibility
             "id": agent.id,
             "name": agent.name,
             "runtime_mode": agent.runtime_mode,
             "instructions": agent.instructions,
-            "config": agent.runtime_config or {},
-            "max_concurrent_tasks": agent.max_concurrent_tasks,
+            "config": deepcopy(agent.runtime_config or {}),
         }
