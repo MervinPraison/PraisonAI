@@ -206,6 +206,7 @@ Methods:
 * <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">execute_callback_sync</a>(task_output: TaskOutput) -> None</code>
 * <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">get_next_task</a>(context: Dict[str, Any]) -> Optional[str]</code>
 * <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">initialize_memory</a>()</code>
+* <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">set_status</a>(new_status: str) -> None</code>
 * <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">store_in_memory</a>(content: str, agent_name: str = None, task_id: str = None)</code>
 * <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">to_dict</a>() -> Dict[str, Any]</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">loop</a>(step: Any = None, steps: Optional[List[Any]] = None, over: Optional[str] = None, from_csv: Optional[str] = None, from_file: Optional[str] = None, var_name: str = 'item', parallel: bool = False, max_workers: Optional[int] = None, output_variable: Optional[str] = None) -> Loop</code>
