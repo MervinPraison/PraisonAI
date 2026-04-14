@@ -487,15 +487,15 @@ class CheckpointService:
         
         # Calculate how many to remove
         num_to_remove = len(self._checkpoints) - self.config.max_checkpoints
-        checkpoints_to_remove = self._checkpoints[-num_to_remove:]  # Remove oldest ones
         
-        # Keep only the most recent checkpoints in memory
-        self._checkpoints = self._checkpoints[:self.config.max_checkpoints]
+        # Keep only the most recent checkpoints in memory (newest-last semantics)
+        # Since save() appends (newest last), keep the last N entries
+        self._checkpoints = self._checkpoints[-self.config.max_checkpoints:]
         
         logger.info(f"Pruned {num_to_remove} old checkpoints to stay under limit of {self.config.max_checkpoints}")
         
         # Emit pruning event for any cleanup hooks
-        self._emit(CheckpointEvent.ERROR, {"action": "pruned", "removed_count": num_to_remove})
+        self._emit(CheckpointEvent.CHECKPOINTS_PRUNED, {"action": "pruned", "removed_count": num_to_remove})
     
     async def get_checkpoint(self, checkpoint_id: str) -> Optional[Checkpoint]:
         """Get a specific checkpoint by ID."""

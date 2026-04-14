@@ -12,6 +12,7 @@ import json
 import logging
 import asyncio
 import inspect
+import contextvars
 import concurrent.futures
 from typing import List, Optional, Any, Dict, Union, TYPE_CHECKING
 
@@ -194,20 +195,31 @@ class ToolExecutionMixin:
             tool_timeout = getattr(self, '_tool_timeout', None)
             if tool_timeout and tool_timeout > 0:
                 # Use copy_context to preserve injection context in executor thread
-                import contextvars
                 ctx = contextvars.copy_context()
                 
                 def execute_with_context():
                     with with_injection_context(state):
                         return self._execute_tool_impl(function_name, arguments)
                 
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                # Use explicit executor lifecycle to actually bound execution time
+                executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                try:
                     future = executor.submit(ctx.run, execute_with_context)
                     try:
                         result = future.result(timeout=tool_timeout)
                     except concurrent.futures.TimeoutError:
+                        # Cancel and shutdown immediately to avoid blocking
+                        future.cancel()
+                        executor.shutdown(wait=False, cancel_futures=True)
                         logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
                         result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True}
+                    else:
+                        # Normal completion - shutdown gracefully
+                        executor.shutdown(wait=False)
+                finally:
+                    # Ensure executor is always cleaned up
+                    if not executor._shutdown:
+                        executor.shutdown(wait=False)
             else:
                 with with_injection_context(state):
                     result = self._execute_tool_impl(function_name, arguments)
