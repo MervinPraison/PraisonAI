@@ -113,6 +113,16 @@ class TokenCollector:
         self._session_metrics = SessionTokenMetrics()
         self._recent_interactions: List[Dict] = []
         self._max_recent = 100
+        self._sink = None  # Optional TokenUsageSinkProtocol
+
+    def set_sink(self, sink) -> None:
+        """Set a token usage sink for persistence.
+        
+        Args:
+            sink: Any object implementing TokenUsageSinkProtocol
+                  (must have a persist() method)
+        """
+        self._sink = sink
     
     def track_tokens(
         self, 
@@ -140,6 +150,20 @@ class TokenCollector:
             # Limit recent interactions
             if len(self._recent_interactions) > self._max_recent:
                 self._recent_interactions.pop(0)
+        
+        # Call sink outside the lock to avoid holding it during I/O
+        if self._sink is not None:
+            try:
+                task_id = (metadata or {}).get("task_id", "")
+                self._sink.persist(
+                    task_id=task_id,
+                    agent_name=agent or "",
+                    model=model,
+                    metrics=metrics,
+                    metadata=metadata,
+                )
+            except Exception:
+                pass  # Sink errors must not break token tracking
     
     def get_session_summary(self) -> Dict:
         """Get summary of token usage for the session."""

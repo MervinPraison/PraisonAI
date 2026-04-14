@@ -10,8 +10,13 @@ import uuid
 import os
 import time
 
+from .protocols import TaskStatus, TaskLifecycleManager
+
 # Set up logger
 logger = get_logger(__name__)
+
+# Shared lifecycle manager (stateless, thread-safe)
+_lifecycle_manager = TaskLifecycleManager()
 
 class Task:
     """
@@ -185,7 +190,7 @@ class Task:
         else:
             # on_task_complete takes precedence (or both are None)
             self.callback = on_task_complete
-        self.status = status
+        self.status = TaskStatus(status) if status in TaskStatus._value2member_map_ else status
         self.result = result
         self.create_directory = create_directory
         self.images = images if images else []
@@ -462,6 +467,29 @@ class Task:
             self._guardrail_fn = LLMGuardrail(description=self.guardrail, llm=llm)
         else:
             raise ValueError("Guardrail must be either a callable or a string description")
+
+    def set_status(self, new_status: str) -> None:
+        """Set task status with transition validation.
+        
+        Validates the transition is legal. If not, logs a warning but
+        still applies the change for backward compatibility.
+        
+        Args:
+            new_status: Target status (string or TaskStatus enum)
+        """
+        # Normalize to string for comparison
+        new_str = str(new_status)
+        old_str = str(self.status)
+        if not _lifecycle_manager.can_transition(old_str, new_str):
+            logger.warning(
+                f"Task {self.id}: Invalid status transition '{old_str}' -> '{new_str}'. "
+                f"Allowing for backward compatibility."
+            )
+        # Always set for backward compat
+        if new_str in TaskStatus._value2member_map_:
+            self.status = TaskStatus(new_str)
+        else:
+            self.status = new_str
 
     def __str__(self):
         return f"Task(name='{self.name if self.name else 'None'}', description='{self.description}', agent='{self.agent.name if self.agent else 'None'}', status='{self.status}')"
