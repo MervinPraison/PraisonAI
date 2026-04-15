@@ -10,7 +10,7 @@ from pathlib import Path
 
 class TestExampleMetadata:
     """Tests for ExampleMetadata parsing from comment directives."""
-    
+
     def test_parse_skip_directive(self, tmp_path):
         """Test parsing # praisonai: skip=true directive."""
         from praisonai.cli.features.examples import ExampleMetadata
@@ -466,6 +466,7 @@ class TestCLIIntegration:
 
     def test_examples_find_command_invalid_limit(self, tmp_path):
         """Test 'praisonai examples find' validates --limit is >= 1."""
+        import re
         from typer.testing import CliRunner
 
         (tmp_path / "demo.py").write_text("print('hello')")
@@ -476,7 +477,8 @@ class TestCLIIntegration:
         result = runner.invoke(app, ["find", "demo", "--path", str(tmp_path), "--limit", "0"])
 
         assert result.exit_code == 2
-        assert "range x>=1" in (result.stderr or "")
+        clean_stderr = re.sub(r"\x1b\[[0-9;]*m", "", result.stderr or "")
+        assert "Invalid value for '--limit'" in clean_stderr
     
     def test_examples_list_command(self, tmp_path):
         """Test 'praisonai examples list' command."""
