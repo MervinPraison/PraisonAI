@@ -463,6 +463,20 @@ class TestCLIIntegration:
 
         assert result.exit_code == 0
         assert "No examples found" in result.stdout
+
+    def test_examples_find_command_invalid_limit(self, tmp_path):
+        """Test 'praisonai examples find' validates --limit is >= 1."""
+        from typer.testing import CliRunner
+
+        (tmp_path / "demo.py").write_text("print('hello')")
+
+        from praisonai.cli.commands.examples import app
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["find", "demo", "--path", str(tmp_path), "--limit", "0"])
+
+        assert result.exit_code == 2
+        assert "range x>=1" in (result.stderr or "")
     
     def test_examples_list_command(self, tmp_path):
         """Test 'praisonai examples list' command."""

@@ -371,6 +371,7 @@ def find_examples(
         10,
         "--limit", "-n",
         help="Maximum number of matches to show",
+        min=1,
     ),
 ):
     """
