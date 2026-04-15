@@ -22,6 +22,8 @@ Storage Structure:
 import os
 import re
 import json
+import copy
+import time
 import logging
 from praisonaiagents._logging import get_logger
 from pathlib import Path
@@ -959,6 +961,9 @@ class AgentFlow:
         Returns:
             Dict with 'output' (final result) and 'steps' (all step results)
         """
+        # Gap 3c: Clear handoff chain at start of new workflow run  
+        self._handoff_chain.clear()
+        
         # Use default LLM if not specified
         model = llm or self.llm or "gpt-4o-mini"
         logger.debug(f"Workflow using model: {model} (llm={llm}, default_llm={self.llm})")
@@ -1314,7 +1319,6 @@ class AgentFlow:
                     retry_count += 1
                     if retry_count <= max_retries:
                         # Exponential backoff: wait 2^(retry_count-1) seconds
-                        import time
                         backoff_seconds = 2 ** (retry_count - 1)
                         if verbose:
                             print(f"🔄 {step.name} failed (attempt {retry_count}/{max_retries}), retrying in {backoff_seconds}s: {e}")
@@ -1874,7 +1878,6 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                     # Only retry on transient errors (network, timeout, fetch failures)
                     if any(x in error_str for x in ['fetch', 'timeout', 'connection', 'network']):
                         if attempt < max_retries:
-                            import time
                             time.sleep(1 * (attempt + 1))  # Exponential backoff
                             continue
                     # Non-retryable error, raise immediately
@@ -4338,7 +4341,6 @@ class WorkflowManager:
             Path to checkpoint file
         """
         import json
-        import time
         from datetime import datetime
         
         checkpoint_file = self._get_checkpoints_dir() / f"{name}.json"

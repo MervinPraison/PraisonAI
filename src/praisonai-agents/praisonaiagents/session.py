@@ -192,8 +192,8 @@ class Session:
 
         agent = Agent(**agent_kwargs)
         
-        # Create a unique key for this agent (Gap 2a fix: include session_id for proper isolation)
-        agent_key = f"{self.session_id}:{name}:{role}"
+        # Create a unique key for this agent (Gap 2a fix: session-scoped but stable agent key)
+        agent_key = f"{name}:{role}"
         
         # Restore chat history if it exists from previous sessions
         if agent_key in self._agents:
@@ -627,12 +627,6 @@ class Session:
         
         # Clear agents
         self._agents.clear()
-        
-        # Clean up session directory (optional - commented out for safety)
-        # import shutil
-        # session_dir = self._get_session_dir()
-        # if session_dir.exists():
-        #     shutil.rmtree(session_dir)
 
     def time_to_expiry(self) -> Optional[float]:
         """Get seconds until session expires, or None if no TTL set (Gap 2b)."""

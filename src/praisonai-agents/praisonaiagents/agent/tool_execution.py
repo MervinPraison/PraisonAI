@@ -14,6 +14,7 @@ import asyncio
 import inspect
 import concurrent.futures
 from typing import List, Optional, Any, Dict, Union, TYPE_CHECKING
+from ..errors import ToolExecutionError
 
 if TYPE_CHECKING:
     pass
@@ -291,7 +292,6 @@ class ToolExecutionMixin:
             _trace_emitter.tool_call_end(self.name, function_name, None, _duration_ms, str(e))
             
             # Gap 3a fix: Wrap exceptions in ToolExecutionError for better observability
-            from ..errors import ToolExecutionError
             is_retryable = not isinstance(e, (ValueError, TypeError, AttributeError))
             raise ToolExecutionError(
                 f"Tool '{function_name}' failed: {e}",
