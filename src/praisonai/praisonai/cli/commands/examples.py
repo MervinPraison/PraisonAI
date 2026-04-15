@@ -12,6 +12,7 @@ Usage:
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
+import re
 
 import typer
 
@@ -346,6 +347,125 @@ def list_examples(
             typer.echo(f"  {idx:3}. [{item.group}] {rel_path}{flag_str}")
         else:
             typer.echo(f"  {idx:3}. [{item.group}] {rel_path}")
+
+
+def _tokenize_query(query: str) -> List[str]:
+    """Tokenize query into lowercase search terms."""
+    return [t for t in re.split(r"[^a-zA-Z0-9_\-]+", query.lower()) if t]
+
+
+@app.command("find")
+def find_examples(
+    query: str = typer.Argument(..., help="Search query (e.g. rag, mcp, gemini)"),
+    path: Optional[Path] = typer.Option(
+        None,
+        "--path", "-p",
+        help="Path to examples directory",
+    ),
+    group: Optional[List[str]] = typer.Option(
+        None,
+        "--group", "-g",
+        help="Filter by group (top-level dir), can be repeated",
+    ),
+    limit: int = typer.Option(
+        10,
+        "--limit", "-n",
+        help="Maximum number of matches to show",
+    ),
+):
+    """
+    Find examples by keyword with lightweight relevance scoring.
+
+    Examples:
+        praisonai examples find rag
+        praisonai examples find mcp --group python
+        praisonai examples find gemini --limit 20
+    """
+    from praisonai.suite_runner import ExamplesSource
+
+    examples_path = path or _get_default_examples_path()
+
+    if not examples_path.exists():
+        typer.echo(f"❌ Examples path not found: {examples_path}")
+        raise typer.Exit(2)
+
+    terms = _tokenize_query(query)
+    if not terms:
+        typer.echo("❌ Please provide a non-empty search query")
+        raise typer.Exit(2)
+
+    source = ExamplesSource(
+        root=examples_path,
+        groups=list(group) if group else None,
+    )
+    items = source.discover()
+
+    matches = []
+    for item in items:
+        rel_path = item.source_path.relative_to(examples_path).as_posix()
+        rel_lower = rel_path.lower()
+        filename_lower = item.source_path.name.lower()
+        group_lower = item.group.lower()
+
+        # Build searchable text with metadata signals
+        searchable = [
+            rel_lower,
+            filename_lower,
+            group_lower,
+            (item.runnable_decision or "").lower(),
+            " ".join((item.require_env or [])).lower(),
+        ]
+        if item.uses_agent:
+            searchable.append("agent")
+        if item.uses_agents:
+            searchable.append("agents")
+        if item.uses_workflow:
+            searchable.append("workflow")
+        haystack = " ".join(searchable)
+
+        score = 0
+        matched_terms = 0
+        for term in terms:
+            term_score = 0
+            if term in filename_lower:
+                term_score = max(term_score, 8)
+            if f"/{term}" in rel_lower or rel_lower.startswith(term):
+                term_score = max(term_score, 6)
+            if term in group_lower:
+                term_score = max(term_score, 5)
+            if term in haystack:
+                term_score = max(term_score, 3)
+
+            if term_score > 0:
+                matched_terms += 1
+                score += term_score
+
+        # Prefer results matching all terms; allow partial for flexibility
+        if score > 0:
+            if matched_terms == len(terms):
+                score += 2
+            matches.append((score, rel_path, item))
+
+    matches.sort(key=lambda x: (-x[0], x[1]))
+
+    if not matches:
+        typer.echo(f"No examples found for query: {query}")
+        raise typer.Exit(0)
+
+    typer.echo(f"Found {len(matches)} matches for '{query}' in {examples_path}\n")
+
+    for idx, (score, rel_path, item) in enumerate(matches[: max(1, limit)], 1):
+        tags = []
+        if item.uses_agent:
+            tags.append("agent")
+        if item.uses_agents:
+            tags.append("agents")
+        if item.uses_workflow:
+            tags.append("workflow")
+        if item.require_env:
+            tags.append("env")
+        tag_str = f" [{' '.join(tags)}]" if tags else ""
+        typer.echo(f"  {idx:2}. [{item.group}] {rel_path} (score={score}){tag_str}")
 
 
 @app.command()
