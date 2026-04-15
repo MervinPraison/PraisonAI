@@ -192,8 +192,8 @@ class Session:
 
         agent = Agent(**agent_kwargs)
         
-        # Create a unique key for this agent (Gap 2a fix: session-scoped but stable agent key)
-        agent_key = f"{name}:{role}"
+        # Create a unique key for this agent (Gap 2a fix: include session_id for proper isolation)
+        agent_key = f"{self.session_id}:{name}:{role}"
         
         # Restore chat history if it exists from previous sessions
         if agent_key in self._agents:
@@ -291,8 +291,10 @@ class Session:
         try:
             from .session.store import get_default_session_store
             session_store = get_default_session_store()
-            session_id = f"{self.session_id}_{agent_key}"
-            chat_history = session_store.get_chat_history(session_id)
+            chat_history = session_store.get_chat_history(agent_key)
+            if not chat_history:
+                # Backward compatibility for older keying format
+                chat_history = session_store.get_chat_history(f"{self.session_id}_{agent_key}")
             if chat_history:
                 return chat_history
         except ImportError:
@@ -377,11 +379,10 @@ class Session:
                 
                 if session_store is not None:
                     # Use SessionStore for conversation history
-                    session_id = f"{self.session_id}_{agent_key}"
                     for msg in chat_history:
                         if isinstance(msg, dict):
                             session_store.add_message(
-                                session_id,
+                                agent_key,
                                 role=msg.get("role", "user"),
                                 content=msg.get("content", ""),
                             )

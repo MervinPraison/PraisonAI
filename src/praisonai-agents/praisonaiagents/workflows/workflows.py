@@ -980,8 +980,6 @@ class AgentFlow:
         
         results = []
         previous_output = None
-        # Reset per-run chain state to avoid false positives across repeated run() calls
-        self._handoff_chain.clear()
         
         # Update workflow status
         self.status = "running"
