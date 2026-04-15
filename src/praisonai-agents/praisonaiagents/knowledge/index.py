@@ -101,13 +101,18 @@ class IndexProtocol(Protocol):
 class IndexRegistry:
     """Registry for index types."""
     
-    _instance: Optional["IndexRegistry"] = None
+    def __init__(self):
+        """Initialize a new registry instance."""
+        self._indices: Dict[str, Callable[..., IndexProtocol]] = {}
     
-    def __new__(cls) -> "IndexRegistry":
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._indices: Dict[str, Callable[..., IndexProtocol]] = {}
-        return cls._instance
+    @classmethod
+    def default(cls) -> "IndexRegistry":
+        """Get a default global registry instance for convenience."""
+        if not hasattr(cls, '_default_instance'):
+            with cls._init_lock:
+                if not hasattr(cls, '_default_instance'):
+                    cls._default_instance = cls()
+        return cls._default_instance
     
     def register(self, name: str, factory: Callable[..., IndexProtocol]) -> None:
         """Register an index factory."""
@@ -133,7 +138,7 @@ class IndexRegistry:
 
 def get_index_registry() -> IndexRegistry:
     """Get the global index registry instance."""
-    return IndexRegistry()
+    return IndexRegistry.default()
 
 class KeywordIndex:
     """
@@ -315,6 +320,10 @@ class KeywordIndex:
             score += idf * tf_norm
         
         return score
+
+# Initialize IndexRegistry class lock for thread safety
+import threading
+IndexRegistry._init_lock = threading.Lock()
 
 # Register the keyword index by default
 def _register_default_indices():

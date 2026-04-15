@@ -536,9 +536,9 @@ Your Goal: {self.goal}"""
         formatted_tools = self._format_tools_for_completion(tools)
 
         try:
-            # NEW: Unified protocol dispatch path (Issue #1304)
-            # Check if unified dispatch is enabled (opt-in for backward compatibility)
-            if getattr(self, '_use_unified_llm_dispatch', False):
+            # NEW: Unified protocol dispatch path (Issue #1304, #1362)
+            # Enable unified dispatch by default for DRY and feature parity
+            if getattr(self, '_use_unified_llm_dispatch', True):
                 # Use composition instead of runtime class mutation for safety
                 final_response = self._execute_unified_chat_completion(
                     messages=messages,
@@ -560,9 +560,10 @@ Your Goal: {self.goal}"""
                         logging.debug(f"Passing {len(formatted_tools)} formatted tools to LLM instance: {formatted_tools}")
                     
                     # Use the LLM instance for streaming responses
+                    has_system = bool(messages and messages[0].get('role') == 'system')
                     final_response = self.llm_instance.get_response(
-                        prompt=messages[1:],  # Skip system message as LLM handles it separately  
-                        system_prompt=messages[0]['content'] if messages and messages[0]['role'] == 'system' else None,
+                        prompt=messages[1:] if has_system else messages,
+                        system_prompt=messages[0]['content'] if has_system else None,
                         temperature=temperature,
                         tools=formatted_tools if formatted_tools else None,
                         verbose=self.verbose,
@@ -579,50 +580,25 @@ Your Goal: {self.goal}"""
                         reasoning_steps=reasoning_steps
                     )
                 else:
-                    # Non-streaming with custom LLM - don't show streaming-like behavior
-                    if False:  # Don't use display_generating when stream=False to avoid streaming-like behavior
-                        # This block is disabled to maintain consistency with the OpenAI path fix
-                        with _get_live()(
-                            _get_display_functions()['display_generating']("", start_time),
-                            console=self.console,
-                            refresh_per_second=4,
-                        ) as live:
-                            final_response = self.llm_instance.get_response(
-                                prompt=messages[1:],
-                                system_prompt=messages[0]['content'] if messages and messages[0]['role'] == 'system' else None,
-                                temperature=temperature,
-                                tools=formatted_tools if formatted_tools else None,
-                                verbose=self.verbose,
-                                markdown=self.markdown,
-                                stream=stream,
-                                console=self.console,
-                                execute_tool_fn=self.execute_tool,
-                                agent_name=self.name,
-                                agent_role=self.role,
-                                agent_tools=[getattr(t, '__name__', str(t)) for t in self.tools] if self.tools else None,
-                                task_name=task_name,
-                                task_description=task_description,
-                                task_id=task_id,
-                                reasoning_steps=reasoning_steps
-                            )
-                    else:
-                        final_response = self.llm_instance.get_response(
-                            prompt=messages[1:],
-                            system_prompt=messages[0]['content'] if messages and messages[0]['role'] == 'system' else None,
-                            temperature=temperature,
-                            tools=formatted_tools if formatted_tools else None,
-                            verbose=self.verbose,
-                            markdown=self.markdown,
-                            stream=stream,
-                            console=self.console,
-                            execute_tool_fn=self.execute_tool,
-                            agent_name=self.name,
-                            agent_role=self.role,
-                            agent_tools=[getattr(t, '__name__', str(t)) for t in self.tools] if self.tools else None,
-                            task_name=task_name,
-                            task_description=task_description,
-                            task_id=task_id,
-                            reasoning_steps=reasoning_steps
+                    # Non-streaming with custom LLM - direct execution
+                    has_system = bool(messages and messages[0].get('role') == 'system')
+                    final_response = self.llm_instance.get_response(
+                        prompt=messages[1:] if has_system else messages,
+                        system_prompt=messages[0]['content'] if has_system else None,
+                        temperature=temperature,
+                        tools=formatted_tools if formatted_tools else None,
+                        verbose=self.verbose,
+                        markdown=self.markdown,
+                        stream=stream,
+                        console=self.console,
+                        execute_tool_fn=self.execute_tool,
+                        agent_name=self.name,
+                        agent_role=self.role,
+                        agent_tools=[getattr(t, '__name__', str(t)) for t in self.tools] if self.tools else None,
+                        task_name=task_name,
+                        task_description=task_description,
+                        task_id=task_id,
+                        reasoning_steps=reasoning_steps
                         )
             else:
                 # Use the standard OpenAI client approach with tool support
@@ -1860,8 +1836,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     formatted_tools = self._format_tools_for_completion(tools)
                     
                     # NEW: Unified protocol dispatch path (Issue #1304) - Async version
-                    # Check if unified dispatch is enabled (opt-in for backward compatibility)
-                    if getattr(self, '_use_unified_llm_dispatch', False):
+                    # Enable unified dispatch by default for DRY and feature parity (sync/async consistent)
+                    if getattr(self, '_use_unified_llm_dispatch', True):
+                        # Build response_format for native structured output (parity with sync path)
+                        schema_model = output_pydantic or output_json
+                        response_format = None
+                        if schema_model and self._supports_native_structured_output():
+                            response_format = self._build_response_format(schema_model)
+                        
                         # Use composition instead of runtime class mutation for safety
                         response = await self._execute_unified_achat_completion(
                             messages=messages,

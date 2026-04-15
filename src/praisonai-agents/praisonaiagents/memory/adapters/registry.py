@@ -6,6 +6,7 @@ in memory/memory.py. This enables protocol-driven memory backends without
 core modifications.
 """
 
+from functools import lru_cache
 from typing import Callable, List, Optional, Tuple, Type
 from ...utils.adapter_registry import AdapterRegistry
 from ..protocols import MemoryProtocol
@@ -33,28 +34,31 @@ class MemoryAdapterRegistry(AdapterRegistry[MemoryProtocol]):
         super().__init__(adapter_type_name="Memory")
 
 
-# Global registry instance
-_memory_registry = MemoryAdapterRegistry()
+# Default registry instance for backward compatibility
+@lru_cache(maxsize=1)
+def get_default_memory_registry() -> MemoryAdapterRegistry:
+    """Get the default global registry instance for convenience."""
+    return MemoryAdapterRegistry()
 
 
 def register_memory_adapter(name: str, adapter_class: Type[MemoryProtocol]) -> None:
     """Register a memory adapter class."""
-    _memory_registry.register_adapter(name, adapter_class)
+    get_default_memory_registry().register_adapter(name, adapter_class)
 
 
 def register_memory_factory(name: str, factory_func: Callable[..., MemoryProtocol]) -> None:
     """Register a memory adapter factory function."""
-    _memory_registry.register_factory(name, factory_func)
+    get_default_memory_registry().register_factory(name, factory_func)
 
 
 def get_memory_adapter(name: str, **kwargs) -> Optional[MemoryProtocol]:
     """Get memory adapter instance by name."""
-    return _memory_registry.get_adapter(name, **kwargs)
+    return get_default_memory_registry().get_adapter(name, **kwargs)
 
 
 def list_memory_adapters() -> List[str]:
     """List all registered memory adapter names."""
-    return _memory_registry.list_adapters()
+    return get_default_memory_registry().list_adapters()
 
 
 # Canonical aliases per AGENTS.md naming conventions
@@ -70,7 +74,7 @@ def add_memory_factory(name: str, factory_func: Callable[..., MemoryProtocol]) -
 
 def has_memory_adapter(name: str) -> bool:
     """Canonical alias for is_available (preferred naming per AGENTS.md)."""
-    return _memory_registry.is_available(name)
+    return get_default_memory_registry().is_available(name)
 
 
 def get_first_available_memory_adapter(
@@ -89,7 +93,7 @@ def get_first_available_memory_adapter(
     if preferences is None:
         preferences = ["sqlite", "in_memory"]
 
-    return _memory_registry.get_first_available(preferences, **kwargs)
+    return get_default_memory_registry().get_first_available(preferences, **kwargs)
 
 
 __all__ = [

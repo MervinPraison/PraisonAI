@@ -326,6 +326,26 @@ class LLMProviderAdapterProtocol(Protocol):
     def get_default_settings(self) -> Dict[str, Any]:
         """Get provider-specific default settings."""
         ...
+    
+    def parse_tool_calls(self, raw_response: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+        """Parse tool calls from provider-specific response format."""
+        ...
+    
+    def should_skip_streaming_with_tools(self) -> bool:
+        """Check if provider should skip streaming when tools are present."""
+        ...
+    
+    def recover_tool_calls_from_text(self, response_text: str, tools: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+        """Attempt to recover tool calls from response text for providers that don't format them properly."""
+        ...
+    
+    def inject_cache_control(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Inject provider-specific cache control headers."""
+        ...
+    
+    def extract_reasoning_tokens(self, response: Dict[str, Any]) -> int:
+        """Extract reasoning token count from provider-specific response."""
+        ...
 
 
 @runtime_checkable  
