@@ -237,7 +237,14 @@ class OpenAIAdapter:
             reasoning_steps=kwargs.get('reasoning_steps', False),
             verbose=kwargs.get('verbose', True),
             max_iterations=kwargs.get('max_iterations', 10),
-            **{k: v for k, v in kwargs.items() if k not in ['max_tokens', 'execute_tool_fn', 'console', 'display_fn', 'reasoning_steps', 'verbose', 'max_iterations']}
+            **{k: v for k, v in kwargs.items() if k not in {
+                'max_tokens', 'execute_tool_fn', 'console', 'display_fn',
+                'reasoning_steps', 'verbose', 'max_iterations',
+                # Application metadata that must never reach OpenAI API
+                'markdown', 'agent_name', 'agent_role', 'agent_tools',
+                'task_name', 'task_description', 'task_id',
+                'stream_callback', 'emit_events'
+            }}
         )
     
     def chat_completion(

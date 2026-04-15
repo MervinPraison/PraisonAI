@@ -716,6 +716,7 @@ Your Goal: {self.goal}"""
             final_response = self._unified_dispatcher.chat_completion(
                 messages=messages,
                 tools=tools,
+                tool_choice=getattr(self, 'tool_choice', None),
                 temperature=temperature,
                 max_tokens=getattr(self, 'max_tokens', None),
                 stream=stream,
@@ -735,7 +736,17 @@ Your Goal: {self.goal}"""
                 markdown=self.markdown,
                 agent_name=self.name,
                 agent_role=self.role,
-                agent_tools=[getattr(t, '__name__', str(t)) for t in self.tools] if self.tools else None,
+                agent_tools=(
+                    [
+                        t["function"]["name"]
+                        if isinstance(t, dict)
+                        and isinstance(t.get("function"), dict)
+                        and "name" in t["function"]
+                        else getattr(t, "__name__", str(t))
+                        for t in (tools if tools is not None else self.tools or [])
+                    ]
+                    or None
+                ),
             )
             return final_response
             
@@ -788,6 +799,7 @@ Your Goal: {self.goal}"""
             final_response = await self._unified_dispatcher.achat_completion(
                 messages=messages,
                 tools=tools,
+                tool_choice=getattr(self, 'tool_choice', None),
                 temperature=temperature,
                 max_tokens=getattr(self, 'max_tokens', None),
                 stream=stream,
@@ -807,7 +819,17 @@ Your Goal: {self.goal}"""
                 markdown=self.markdown,
                 agent_name=self.name,
                 agent_role=self.role,
-                agent_tools=[getattr(t, '__name__', str(t)) for t in self.tools] if self.tools else None,
+                agent_tools=(
+                    [
+                        t["function"]["name"]
+                        if isinstance(t, dict)
+                        and isinstance(t.get("function"), dict)
+                        and "name" in t["function"]
+                        else getattr(t, "__name__", str(t))
+                        for t in (tools if tools is not None else self.tools or [])
+                    ]
+                    or None
+                ),
             )
             return final_response
             
@@ -841,7 +863,17 @@ Your Goal: {self.goal}"""
                               generation_time=generation_time, console=self.console,
                               agent_name=self.name,
                               agent_role=self.role,
-                              agent_tools=[getattr(t, '__name__', str(t)) for t in self.tools] if self.tools else None,
+                              agent_tools=(
+                    [
+                        t["function"]["name"]
+                        if isinstance(t, dict)
+                        and isinstance(t.get("function"), dict)
+                        and "name" in t["function"]
+                        else getattr(t, "__name__", str(t))
+                        for t in (tools if tools is not None else self.tools or [])
+                    ]
+                    or None
+                ),
                               task_name=None,  # Not available in this context
                               task_description=None,  # Not available in this context
                               task_id=None)  # Not available in this context
