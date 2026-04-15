@@ -1622,6 +1622,8 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
         # Token budget guard (zero overhead when _max_budget is None)
         self._max_budget = _max_budget
         self._on_budget_exceeded = _on_budget_exceeded
+        # Thread-safe cost/token tracking (Gap 1a fix)
+        self._cost_lock = threading.Lock()
         self._total_cost = 0.0
         self._total_tokens_in = 0
         self._total_tokens_out = 0
@@ -1965,7 +1967,9 @@ Your Goal: {self.goal}
     @property
     def total_cost(self) -> float:
         """Cumulative USD cost of all LLM calls in this agent run."""
-        return self._total_cost
+        # Thread-safe cost reading (Gap 1a fix)
+        with self._cost_lock:
+            return self._total_cost
 
     @property
     def cost_summary(self) -> dict:
@@ -1974,12 +1978,14 @@ Your Goal: {self.goal}
         Returns:
             dict with keys: tokens_in, tokens_out, cost, llm_calls
         """
-        return {
-            "tokens_in": self._total_tokens_in,
-            "tokens_out": self._total_tokens_out,
-            "cost": self._total_cost,
-            "llm_calls": self._llm_call_count,
-        }
+        # Thread-safe cost reading (Gap 1a fix)
+        with self._cost_lock:
+            return {
+                "tokens_in": self._total_tokens_in,
+                "tokens_out": self._total_tokens_out,
+                "cost": self._total_cost,
+                "llm_calls": self._llm_call_count,
+            }
 
     @property
     def context_manager(self) -> Optional[Any]:

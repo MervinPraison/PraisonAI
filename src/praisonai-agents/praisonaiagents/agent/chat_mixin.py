@@ -653,26 +653,31 @@ Your Goal: {self.goal}"""
             )
 
             # Budget tracking & enforcement (zero overhead when _max_budget is None)
-            self._total_cost += _cost_usd
-            self._total_tokens_in += _prompt_tokens
-            self._total_tokens_out += _completion_tokens
-            self._llm_call_count += 1
-            if self._max_budget and self._total_cost >= self._max_budget:
+            # Thread-safe cost tracking (Gap 1a fix)
+            with self._cost_lock:
+                self._total_cost += _cost_usd
+                self._total_tokens_in += _prompt_tokens
+                self._total_tokens_out += _completion_tokens
+                self._llm_call_count += 1
+                budget_exceeded = self._max_budget and self._total_cost >= self._max_budget
+                current_cost = self._total_cost
+            
+            if budget_exceeded:
                 if self._on_budget_exceeded == "stop":
                     raise BudgetExceededError(
-                        f"Agent '{self.name}' exceeded budget: ${self._total_cost:.4f} >= ${self._max_budget:.4f}",
+                        f"Agent '{self.name}' exceeded budget: ${current_cost:.4f} >= ${self._max_budget:.4f}",
                         budget_type="cost",
                         limit=self._max_budget,
-                        used=self._total_cost,
+                        used=current_cost,
                         agent_id=self.name
                     )
                 elif self._on_budget_exceeded == "warn":
                     logging.warning(
-                        f"[budget] {self.name}: ${self._total_cost:.4f} exceeded "
+                        f"[budget] {self.name}: ${current_cost:.4f} exceeded "
                         f"${self._max_budget:.4f} budget"
                     )
                 elif callable(self._on_budget_exceeded):
-                    self._on_budget_exceeded(self._total_cost, self._max_budget)
+                    self._on_budget_exceeded(current_cost, self._max_budget)
             
             # Trigger AFTER_LLM hook
             from ..hooks import HookEvent, AfterLLMInput

@@ -22,6 +22,8 @@ Storage Structure:
 import os
 import re
 import json
+import copy
+import time
 import logging
 from praisonaiagents._logging import get_logger
 from pathlib import Path
@@ -585,6 +587,8 @@ class AgentFlow:
     _reflection_config: Optional[Any] = field(default=None, repr=False)
     # Execution history for debugging (only populated when history=True)
     _execution_history: List[Dict[str, Any]] = field(default_factory=list, repr=False)
+    # Gap 3c: Cross-step handoff cycle detection
+    _handoff_chain: List[str] = field(default_factory=list, repr=False)
     
     def __post_init__(self):
         """Resolve consolidated params to internal values."""
@@ -899,6 +903,30 @@ class AgentFlow:
                 "Install with: pip install praisonai"
             )
     
+    def _check_handoff_cycle(self, step: Any) -> None:
+        """Check for cross-step handoff cycles (Gap 3c fix)."""
+        step_id = getattr(step, 'name', str(step))
+        
+        # If step involves handoff (basic check for agent steps)
+        if hasattr(step, 'agent') and step.agent:
+            # Track this step in handoff chain
+            if step_id in self._handoff_chain:
+                # Cycle detected!
+                cycle_path = self._handoff_chain[self._handoff_chain.index(step_id):] + [step_id]
+                from ..errors import HandoffCycleError
+                raise HandoffCycleError(
+                    f"Cross-step handoff cycle detected: {' -> '.join(cycle_path)}",
+                    cycle_path=cycle_path
+                )
+            
+            # Add to chain (limit chain length to prevent memory issues)
+            self._handoff_chain.append(step_id)
+            if len(self._handoff_chain) > 100:  # Reasonable limit
+                self._handoff_chain = self._handoff_chain[-50:]  # Keep last 50
+        else:
+            # Non-agent step, reset chain 
+            self._handoff_chain.clear()
+    
     def run(
         self,
         input: str = "",
@@ -933,6 +961,9 @@ class AgentFlow:
         Returns:
             Dict with 'output' (final result) and 'steps' (all step results)
         """
+        # Gap 3c: Clear handoff chain at start of new workflow run  
+        self._handoff_chain.clear()
+        
         # Use default LLM if not specified
         model = llm or self.llm or "gpt-4o-mini"
         logger.debug(f"Workflow using model: {model} (llm={llm}, default_llm={self.llm})")
@@ -1095,6 +1126,9 @@ class AgentFlow:
                         continue
                 except Exception as e:
                     logger.error(f"should_run failed for {step.name}: {e}")
+            
+            # Gap 3c: Check for cross-step handoff cycles
+            self._check_handoff_cycle(step)
             
             # Execute step with retry and guardrail support
             output = None
@@ -1273,6 +1307,24 @@ class AgentFlow:
                 except Exception as e:
                     step_error = e
                     output = f"Error: {e}"
+                    
+                    # Gap 3b fix: Check if error is retryable and implement exponential backoff
+                    is_retryable = getattr(e, 'is_retryable', True)  # Default to retryable
+                    if not is_retryable:
+                        # Non-retryable error - break out of retry loop immediately
+                        if verbose:
+                            print(f"❌ {step.name} failed with non-retryable error: {e}")
+                        break
+                    
+                    retry_count += 1
+                    if retry_count <= max_retries:
+                        # Exponential backoff: wait 2^(retry_count-1) seconds
+                        backoff_seconds = 2 ** (retry_count - 1)
+                        if verbose:
+                            print(f"🔄 {step.name} failed (attempt {retry_count}/{max_retries}), retrying in {backoff_seconds}s: {e}")
+                        time.sleep(backoff_seconds)
+                        continue  # Retry
+                    
                     if self.on_step_error:
                         try:
                             self.on_step_error(step.name, e)
@@ -1826,7 +1878,6 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                     # Only retry on transient errors (network, timeout, fetch failures)
                     if any(x in error_str for x in ['fetch', 'timeout', 'connection', 'network']):
                         if attempt < max_retries:
-                            import time
                             time.sleep(1 * (attempt + 1))  # Exponential backoff
                             continue
                     # Non-retryable error, raise immediately
@@ -2306,7 +2357,7 @@ CONCISE SUMMARY:"""
                     emitter.set_branch(f"parallel_{idx}")
                     try:
                         return self._execute_single_step_internal(
-                            step, opt_prev, input, all_variables.copy(), model, False, idx, stream, depth=depth+1
+                            step, opt_prev, input, copy.deepcopy(all_variables), model, False, idx, stream, depth=depth+1
                         )
                     finally:
                         emitter.clear_branch()
@@ -4290,7 +4341,6 @@ class WorkflowManager:
             Path to checkpoint file
         """
         import json
-        import time
         from datetime import datetime
         
         checkpoint_file = self._get_checkpoints_dir() / f"{name}.json"
