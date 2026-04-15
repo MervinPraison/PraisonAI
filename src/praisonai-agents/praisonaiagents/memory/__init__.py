@@ -34,10 +34,8 @@ Memory Providers:
 - MCPConfigManager: MCP server configuration management
 """
 
-from .file_memory import FileMemory, create_memory
-from .rules_manager import RulesManager, Rule, create_rules_manager
-from .docs_manager import DocsManager, Doc
-from .mcp_config import MCPConfigManager, MCPConfig
+# Import only essential protocols to avoid loading heavy implementations at import time
+# Following AGENTS.md principle: "No module-level imports of optional dependencies"
 from .protocols import (
     MemoryProtocol, 
     AsyncMemoryProtocol, 
@@ -51,6 +49,36 @@ from .protocols import (
 
 # Lazy imports for optional modules to avoid dependency issues and improve startup time
 def __getattr__(name):
+    # Core memory implementations - lazy loaded to avoid startup overhead
+    if name == "FileMemory":
+        from .file_memory import FileMemory
+        return FileMemory
+    if name == "create_memory":
+        from .file_memory import create_memory
+        return create_memory
+    if name == "RulesManager":
+        from .rules_manager import RulesManager
+        return RulesManager
+    if name == "Rule":
+        from .rules_manager import Rule
+        return Rule
+    if name == "create_rules_manager":
+        from .rules_manager import create_rules_manager
+        return create_rules_manager
+    if name == "DocsManager":
+        from .docs_manager import DocsManager
+        return DocsManager
+    if name == "Doc":
+        from .docs_manager import Doc
+        return Doc
+    if name == "MCPConfigManager":
+        from .mcp_config import MCPConfigManager
+        return MCPConfigManager
+    if name == "MCPConfig":
+        from .mcp_config import MCPConfig
+        return MCPConfig
+    
+    # Optional heavy memory implementations
     if name == "Memory":
         from .memory import Memory
         return Memory
@@ -160,7 +188,6 @@ def __getattr__(name):
     if name == "ImprovementStore":
         from .learn import ImprovementStore
         return ImprovementStore
-    # DocsManager and MCPConfigManager are already imported at module level
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
