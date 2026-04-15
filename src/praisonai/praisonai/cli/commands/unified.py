@@ -13,24 +13,12 @@ import signal
 from pathlib import Path
 from types import FrameType
 from typing import Set, TextIO
+import socket
+import time
 
 import typer
 
-# Lazy imports for optional dependencies
-_FASTAPI_IMPORT_ERROR = None
-
-try:
-    from fastapi import FastAPI, HTTPException
-    from fastapi.responses import HTMLResponse
-    import uvicorn
-except ImportError as exc:
-    _FASTAPI_IMPORT_ERROR = exc
-    FastAPI = None
-    HTTPException = None
-    HTMLResponse = None
-    uvicorn = None
-
-app = typer.Typer(help="🌟 Unified PraisonAI Interface (Flow + Claw + UI)")
+app = typer.Typer(help="🌟 Unified Dashboard (Flow + Claw + UI)")
 
 # Port mappings - centralized configuration
 SERVICE_PORTS = {
@@ -42,7 +30,6 @@ SERVICE_PORTS = {
 # Global process tracking for cleanup
 _ACTIVE_PROCESSES: Set[subprocess.Popen] = set()
 _PROCESS_LOG_HANDLES: dict[subprocess.Popen, TextIO] = {}
-_CLEANUP_HANDLERS_REGISTERED = False
 
 def _cleanup_processes():
     """Cleanup all spawned processes on exit."""
@@ -74,13 +61,19 @@ def _handle_shutdown_signal(signum: int, frame: FrameType | None):
 
 
 def _register_cleanup_handlers():
-    global _CLEANUP_HANDLERS_REGISTERED
-    if _CLEANUP_HANDLERS_REGISTERED:
-        return
+    """Register cleanup handlers for current process only."""
+    # Save original handlers to restore later
+    original_sigint = signal.signal(signal.SIGINT, _handle_shutdown_signal)
+    original_sigterm = signal.signal(signal.SIGTERM, _handle_shutdown_signal)
     atexit.register(_cleanup_processes)
-    signal.signal(signal.SIGTERM, _handle_shutdown_signal)
-    signal.signal(signal.SIGINT, _handle_shutdown_signal)
-    _CLEANUP_HANDLERS_REGISTERED = True
+    return original_sigint, original_sigterm
+
+def _unregister_cleanup_handlers(original_sigint, original_sigterm):
+    """Restore original signal handlers."""
+    signal.signal(signal.SIGINT, original_sigint)
+    signal.signal(signal.SIGTERM, original_sigterm)
+    # Note: atexit handlers cannot be easily unregistered in Python < 3.9
+    # so we keep the atexit handler but check if process list is empty
 
 
 def _generate_dashboard_html(host: str = "localhost") -> str:
@@ -299,7 +292,8 @@ def _generate_dashboard_html(host: str = "localhost") -> str:
         
         async function checkServiceStatus(service, port) {
             try {
-                const response = await fetch(`http://${window.location.hostname}:${port}`, {
+                const serviceHost = window.location.hostname || '127.0.0.1';
+                const response = await fetch(`http://${serviceHost}:${port}`, {
                     method: 'GET',
                     mode: 'no-cors'
                 });
@@ -338,7 +332,8 @@ def _generate_dashboard_html(host: str = "localhost") -> str:
                     // Open in iframe using dynamic hostname
                     document.getElementById('dashboard-view').style.display = 'none';
                     document.getElementById('iframe-view').style.display = 'block';
-                    document.getElementById('service-iframe').src = `http://${window.location.hostname}:${port}`;
+                    const serviceHost = window.location.hostname || '127.0.0.1';
+                    document.getElementById('service-iframe').src = `http://${serviceHost}:${port}`;
                     
                     statusEl.textContent = 'Running';
                     statusEl.className = 'status running';
@@ -397,7 +392,7 @@ def _generate_dashboard_html(host: str = "localhost") -> str:
 def unified(
     ctx: typer.Context,
     port: int = typer.Option(3000, "--port", "-p", help="Port to run unified dashboard on"),
-    host: str = typer.Option("0.0.0.0", "--host", help="Host to bind to"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to (use 0.0.0.0 to expose remotely)"),
 ):
     """
     Launch the PraisonAI Unified Dashboard.
@@ -414,8 +409,8 @@ def unified(
     4. Connect external services like Telegram
     
     Examples:
-        praisonai unified
-        praisonai unified --port 9000
+        praisonai dashboard
+        praisonai dashboard --port 9000 --host 0.0.0.0
     """
     if ctx.invoked_subcommand is not None:
         return
@@ -423,16 +418,22 @@ def unified(
     from rich.console import Console
     console = Console()
     
-    # Check optional dependencies
-    if _FASTAPI_IMPORT_ERROR:
+    # Import optional dependencies inside function to avoid startup overhead
+    try:
+        from fastapi import FastAPI, HTTPException
+        from fastapi.responses import HTMLResponse
+        import uvicorn
+    except ImportError as exc:
         console.print(f"[red]Error: Missing optional dependencies for unified dashboard.[/red]")
         console.print(f"[yellow]Install with: pip install 'praisonai[api]'[/yellow]")
-        console.print(f"[dim]Error details: {_FASTAPI_IMPORT_ERROR}[/dim]")
+        console.print(f"[dim]Error details: {exc}[/dim]")
         raise typer.Abort()
+    
+    # Register cleanup handlers and save originals for restoration
+    original_handlers = _register_cleanup_handlers()
     
     # Create FastAPI app
     fastapi_app = FastAPI(title="PraisonAI Unified Dashboard")
-    _register_cleanup_handlers()
     
     @fastapi_app.get("/", response_class=HTMLResponse)
     async def dashboard():
@@ -440,16 +441,15 @@ def unified(
     
     @fastapi_app.post("/start/{service}")
     async def start_service(service: str):
-        """Start a PraisonAI service."""
+        """Start a PraisonAI service with proper startup verification."""
         if service not in SERVICE_PORTS:
             raise HTTPException(status_code=400, detail=f"Unknown service: {service}")
         
         service_port = SERVICE_PORTS[service]
+        check_host = _resolve_check_host(host)
         
         # Check if service is already running
-        import socket
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        check_host = _resolve_check_host(host)
         try:
             connection_result = sock.connect_ex((check_host, service_port))
             if connection_result == 0:
@@ -460,6 +460,7 @@ def unified(
             sock.close()
         
         log_handle = None
+        proc = None
         try:
             # Create log directory for troubleshooting
             log_dir = Path.home() / ".praisonai" / "unified" / "logs"
@@ -471,26 +472,77 @@ def unified(
                 # Use praisonai module entrypoint so command resolution matches CLI behavior.
                 proc = subprocess.Popen([
                     sys.executable, "-m", "praisonai", "flow", 
-                    "--port", str(service_port), "--no-open"
+                    "--port", str(service_port), "--host", host, "--no-open"
                 ], stdout=log_handle, stderr=subprocess.STDOUT)
             elif service == "claw":
                 proc = subprocess.Popen([
                     sys.executable, "-m", "praisonai", "claw",
-                    "--port", str(service_port)
+                    "--port", str(service_port), "--host", host
                 ], stdout=log_handle, stderr=subprocess.STDOUT)
             elif service == "ui":
                 proc = subprocess.Popen([
                     sys.executable, "-m", "praisonai", "ui",
-                    "--port", str(service_port)
+                    "--port", str(service_port), "--host", host
                 ], stdout=log_handle, stderr=subprocess.STDOUT)
             
-            # Track process for cleanup
+            # Wait for service to start with timeout
+            deadline = time.time() + 15
+            service_ready = False
+            
+            while time.time() < deadline:
+                if proc.poll() is not None:
+                    # Process exited early, service failed to start
+                    if log_handle and not log_handle.closed:
+                        log_handle.close()
+                    _ACTIVE_PROCESSES.discard(proc)
+                    _PROCESS_LOG_HANDLES.pop(proc, None)
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"{service} exited during startup (exit code: {proc.returncode}). Check {log_file}"
+                    )
+                
+                # Check if port is accepting connections
+                test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                try:
+                    if test_sock.connect_ex((check_host, service_port)) == 0:
+                        service_ready = True
+                        break
+                except OSError:
+                    pass
+                finally:
+                    test_sock.close()
+                
+                time.sleep(0.5)
+            
+            if not service_ready:
+                # Service didn't become ready in time
+                proc.terminate()
+                proc.wait(timeout=5)
+                if log_handle and not log_handle.closed:
+                    log_handle.close()
+                _ACTIVE_PROCESSES.discard(proc)
+                _PROCESS_LOG_HANDLES.pop(proc, None)
+                raise HTTPException(
+                    status_code=504,
+                    detail=f"{service} did not become ready within 15 seconds. Check {log_file}"
+                )
+            
+            # Track process for cleanup only after successful startup
             _ACTIVE_PROCESSES.add(proc)
             _PROCESS_LOG_HANDLES[proc] = log_handle
             
             return {"success": True, "message": f"Started {service} on port {service_port}"}
             
+        except HTTPException:
+            raise
         except Exception as e:
+            if proc:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+                _ACTIVE_PROCESSES.discard(proc)
+                _PROCESS_LOG_HANDLES.pop(proc, None)
             if log_handle and not log_handle.closed:
                 log_handle.close()
             raise HTTPException(status_code=500, detail=f"Failed to start {service}: {str(e)}")
@@ -510,10 +562,14 @@ def unified(
             fastapi_app,
             host=host,
             port=port,
-            log_level="error"
+            log_level="info"
         )
     except KeyboardInterrupt:
         console.print("\n[yellow]🌟 Unified Dashboard stopped.[/yellow]")
     except Exception as e:
         console.print(f"[red]Error starting unified dashboard: {e}[/red]")
         raise typer.Abort()
+    finally:
+        # Restore original signal handlers
+        _unregister_cleanup_handlers(*original_handlers)
+        _cleanup_processes()

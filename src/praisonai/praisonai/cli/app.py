@@ -423,7 +423,7 @@ def register_commands():
     app.add_typer(sandbox_app, name="sandbox", help="Sandbox container management")
     app.add_typer(claw_app, name="claw", help="🦞 PraisonAI Dashboard (full UI)")
     app.add_typer(flow_app, name="flow", help="Visual workflow builder (Langflow)")
-    app.add_typer(unified_app, name="unified", help="🌟 Unified Interface (Flow + Claw + UI)")
+    app.add_typer(unified_app, name="dashboard", help="🌟 Unified Dashboard (Flow + Claw + UI)")
     app.add_typer(langfuse_app, name="langfuse", help="🔍 Langfuse observability platform")
     app.add_typer(port_app, name="port", help="🔌 Manage port usage and resolve conflicts")
     
