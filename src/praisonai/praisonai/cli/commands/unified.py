@@ -11,7 +11,8 @@ import sys
 import atexit
 import signal
 from pathlib import Path
-from typing import Set
+from types import FrameType
+from typing import Set, TextIO
 
 import typer
 
@@ -40,6 +41,8 @@ SERVICE_PORTS = {
 
 # Global process tracking for cleanup
 _ACTIVE_PROCESSES: Set[subprocess.Popen] = set()
+_PROCESS_LOG_HANDLES: dict[subprocess.Popen, TextIO] = {}
+_CLEANUP_HANDLERS_REGISTERED = False
 
 def _cleanup_processes():
     """Cleanup all spawned processes on exit."""
@@ -48,17 +51,36 @@ def _cleanup_processes():
             if proc.poll() is None:  # Process still running
                 proc.terminate()
                 proc.wait(timeout=5)
-        except:
+        except Exception:
             try:
                 proc.kill()
-            except:
+            except Exception:
+                pass
+        log_handle = _PROCESS_LOG_HANDLES.pop(proc, None)
+        if log_handle:
+            try:
+                log_handle.close()
+            except Exception:
                 pass
         _ACTIVE_PROCESSES.discard(proc)
 
-# Register cleanup handlers
-atexit.register(_cleanup_processes)
-signal.signal(signal.SIGTERM, lambda s, f: _cleanup_processes())
-signal.signal(signal.SIGINT, lambda s, f: _cleanup_processes())
+def _resolve_check_host(host: str) -> str:
+    return "127.0.0.1" if host == "0.0.0.0" else host
+
+
+def _handle_shutdown_signal(signum: int, frame: FrameType | None):
+    _cleanup_processes()
+    sys.exit(0)
+
+
+def _register_cleanup_handlers():
+    global _CLEANUP_HANDLERS_REGISTERED
+    if _CLEANUP_HANDLERS_REGISTERED:
+        return
+    atexit.register(_cleanup_processes)
+    signal.signal(signal.SIGTERM, _handle_shutdown_signal)
+    signal.signal(signal.SIGINT, _handle_shutdown_signal)
+    _CLEANUP_HANDLERS_REGISTERED = True
 
 
 def _generate_dashboard_html(host: str = "localhost") -> str:
@@ -410,6 +432,7 @@ def unified(
     
     # Create FastAPI app
     fastapi_app = FastAPI(title="PraisonAI Unified Dashboard")
+    _register_cleanup_handlers()
     
     @fastapi_app.get("/", response_class=HTMLResponse)
     async def dashboard():
@@ -426,45 +449,50 @@ def unified(
         # Check if service is already running
         import socket
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        check_host = _resolve_check_host(host)
         try:
-            result = sock.connect_ex(("127.0.0.1", service_port))
-            if result == 0:
-                sock.close()
+            connection_result = sock.connect_ex((check_host, service_port))
+            if connection_result == 0:
                 return {"success": True, "message": f"Service {service} already running on port {service_port}"}
-        except:
+        except OSError:
             pass
         finally:
             sock.close()
         
+        log_handle = None
         try:
             # Create log directory for troubleshooting
             log_dir = Path.home() / ".praisonai" / "unified" / "logs"
             log_dir.mkdir(parents=True, exist_ok=True)
             log_file = log_dir / f"{service}.log"
+            log_handle = open(log_file, "a", encoding="utf-8")
             
             if service == "flow":
-                # Use proper Typer entry point for flow
+                # Use praisonai module entrypoint so command resolution matches CLI behavior.
                 proc = subprocess.Popen([
                     sys.executable, "-m", "praisonai", "flow", 
                     "--port", str(service_port), "--no-open"
-                ], stdout=open(log_file, "w"), stderr=subprocess.STDOUT)
+                ], stdout=log_handle, stderr=subprocess.STDOUT)
             elif service == "claw":
                 proc = subprocess.Popen([
                     sys.executable, "-m", "praisonai", "claw",
                     "--port", str(service_port)
-                ], stdout=open(log_file, "w"), stderr=subprocess.STDOUT)
+                ], stdout=log_handle, stderr=subprocess.STDOUT)
             elif service == "ui":
                 proc = subprocess.Popen([
                     sys.executable, "-m", "praisonai", "ui",
                     "--port", str(service_port)
-                ], stdout=open(log_file, "w"), stderr=subprocess.STDOUT)
+                ], stdout=log_handle, stderr=subprocess.STDOUT)
             
             # Track process for cleanup
             _ACTIVE_PROCESSES.add(proc)
+            _PROCESS_LOG_HANDLES[proc] = log_handle
             
             return {"success": True, "message": f"Started {service} on port {service_port}"}
             
         except Exception as e:
+            if log_handle and not log_handle.closed:
+                log_handle.close()
             raise HTTPException(status_code=500, detail=f"Failed to start {service}: {str(e)}")
     
     @fastapi_app.get("/health")
@@ -482,7 +510,7 @@ def unified(
             fastapi_app,
             host=host,
             port=port,
-            log_level="info"  # Show startup logs for debugging
+            log_level="error"
         )
     except KeyboardInterrupt:
         console.print("\n[yellow]🌟 Unified Dashboard stopped.[/yellow]")
