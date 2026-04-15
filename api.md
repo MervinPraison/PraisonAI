@@ -1057,6 +1057,7 @@ Methods:
 * <code title="cli">praisonai train show <a href="./src/praisonai/praisonai/cli/commands/train.py">--help</a></code>
 * <code title="cli">praisonai train train-callback <a href="./src/praisonai/praisonai/cli/commands/train.py">--help</a></code>
 * <code title="cli">praisonai ui ui <a href="./src/praisonai/praisonai/cli/commands/ui.py">--help</a></code>
+* <code title="cli">praisonai unified unified <a href="./src/praisonai/praisonai/cli/commands/unified.py">--help</a></code>
 * <code title="cli">praisonai version check <a href="./src/praisonai/praisonai/cli/commands/version.py">--help</a></code>
 * <code title="cli">praisonai version show <a href="./src/praisonai/praisonai/cli/commands/version.py">--help</a></code>
 * <code title="cli">praisonai version version-callback <a href="./src/praisonai/praisonai/cli/commands/version.py">--help</a></code>
