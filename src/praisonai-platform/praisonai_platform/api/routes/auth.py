@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from praisonaiagents.auth import AuthIdentity
 
 from ..deps import get_current_user, get_db
 from ..schemas import LoginRequest, RegisterRequest, TokenResponse, UserResponse
+from ...db.models import User
 from ...services.auth_service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -44,10 +46,13 @@ async def login(body: LoginRequest, session: AsyncSession = Depends(get_db)):
 
 
 @router.get("/me", response_model=UserResponse)
-async def me(current_user: AuthIdentity = Depends(get_current_user)):
-    return UserResponse(
-        id=current_user.id,
-        name=current_user.name or "",
-        email=current_user.email or "",
-        created_at=None,  # type: ignore[arg-type]
-    )
+async def me(
+    current_user: AuthIdentity = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    stmt = select(User).where(User.id == current_user.id)
+    result = await session.execute(stmt)
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return UserResponse.model_validate(user)

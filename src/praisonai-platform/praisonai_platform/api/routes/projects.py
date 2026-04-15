@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from praisonaiagents.auth import AuthIdentity
 
-from ..deps import get_current_user, get_db
+from ..deps import get_db, require_workspace_member
 from ..schemas import ProjectCreate, ProjectResponse, ProjectUpdate
 from ...services.project_service import ProjectService
 
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/workspaces/{workspace_id}/projects", tags=["projects
 async def create_project(
     workspace_id: str,
     body: ProjectCreate,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = ProjectService(session)
@@ -40,7 +40,7 @@ async def list_projects(
     workspace_id: str,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = ProjectService(session)
@@ -52,7 +52,7 @@ async def list_projects(
 async def get_project(
     workspace_id: str,
     project_id: str,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = ProjectService(session)
@@ -67,7 +67,7 @@ async def update_project(
     workspace_id: str,
     project_id: str,
     body: ProjectUpdate,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = ProjectService(session)
@@ -88,7 +88,7 @@ async def update_project(
 async def delete_project(
     workspace_id: str,
     project_id: str,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = ProjectService(session)
@@ -101,7 +101,7 @@ async def delete_project(
 async def project_stats(
     workspace_id: str,
     project_id: str,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = ProjectService(session)

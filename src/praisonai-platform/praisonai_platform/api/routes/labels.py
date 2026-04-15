@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from praisonaiagents.auth import AuthIdentity
 
-from ..deps import get_current_user, get_db
+from ..deps import get_db, require_workspace_member
 from ..schemas import LabelCreate, LabelResponse, LabelUpdate
 from ...services.label_service import LabelService
 
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["labels"])
 async def create_label(
     workspace_id: str,
     body: LabelCreate,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = LabelService(session)
@@ -31,7 +31,7 @@ async def create_label(
 @router.get("/labels", response_model=List[LabelResponse])
 async def list_labels(
     workspace_id: str,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = LabelService(session)
@@ -44,7 +44,7 @@ async def update_label(
     workspace_id: str,
     label_id: str,
     body: LabelUpdate,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = LabelService(session)
@@ -58,7 +58,7 @@ async def update_label(
 async def delete_label(
     workspace_id: str,
     label_id: str,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = LabelService(session)
@@ -75,7 +75,7 @@ async def add_label_to_issue(
     workspace_id: str,
     issue_id: str,
     label_id: str,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = LabelService(session)
@@ -87,7 +87,7 @@ async def remove_label_from_issue(
     workspace_id: str,
     issue_id: str,
     label_id: str,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = LabelService(session)
@@ -98,7 +98,7 @@ async def remove_label_from_issue(
 async def list_issue_labels(
     workspace_id: str,
     issue_id: str,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = LabelService(session)

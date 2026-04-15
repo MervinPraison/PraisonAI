@@ -149,6 +149,97 @@ class Task(BaseModel):
 
 
 # =============================================================================
+# Security Scheme Types
+# =============================================================================
+
+class APIKeySecurityScheme(BaseModel):
+    """
+    API key-based authentication scheme.
+    
+    Based on A2A Protocol Specification SecurityScheme.
+    """
+    model_config = ConfigDict(populate_by_name=True)
+    
+    description: Optional[str] = None
+    location: str = Field(alias="in")
+    name: str
+
+
+class HTTPAuthSecurityScheme(BaseModel):
+    """
+    HTTP authentication scheme (Basic, Bearer, etc.).
+    
+    Based on A2A Protocol Specification SecurityScheme.
+    """
+    model_config = ConfigDict(populate_by_name=True)
+    
+    description: Optional[str] = None
+    scheme: str
+    bearer_format: Optional[str] = Field(default=None, alias="bearerFormat")
+
+
+class OAuthFlows(BaseModel):
+    """
+    OAuth 2.0 flow configuration.
+    
+    Based on A2A Protocol Specification OAuthFlows.
+    """
+    model_config = ConfigDict(populate_by_name=True)
+    
+    authorization_code: Optional[Dict[str, Any]] = Field(default=None, alias="authorizationCode")
+    client_credentials: Optional[Dict[str, Any]] = Field(default=None, alias="clientCredentials")
+    device_code: Optional[Dict[str, Any]] = Field(default=None, alias="deviceCode")
+
+
+class OAuth2SecurityScheme(BaseModel):
+    """
+    OAuth 2.0 authentication scheme.
+    
+    Based on A2A Protocol Specification SecurityScheme.
+    """
+    model_config = ConfigDict(populate_by_name=True)
+    
+    description: Optional[str] = None
+    flows: OAuthFlows
+
+
+class OpenIdConnectSecurityScheme(BaseModel):
+    """
+    OpenID Connect authentication scheme.
+    
+    Based on A2A Protocol Specification SecurityScheme.
+    """
+    model_config = ConfigDict(populate_by_name=True)
+    
+    description: Optional[str] = None
+    open_id_connect_url: str = Field(alias="openIdConnectUrl")
+
+
+class MutualTLSSecurityScheme(BaseModel):
+    """
+    Mutual TLS authentication scheme.
+    
+    Based on A2A Protocol Specification SecurityScheme.
+    """
+    description: Optional[str] = None
+
+
+class SecurityScheme(BaseModel):
+    """
+    Discriminated union for security schemes.
+    
+    Based on A2A Protocol Specification SecurityScheme oneof.
+    """
+    model_config = ConfigDict(populate_by_name=True)
+    
+    api_key: Optional[APIKeySecurityScheme] = Field(default=None, alias="apiKey")
+    http: Optional[HTTPAuthSecurityScheme] = None
+    oauth2: Optional[OAuth2SecurityScheme] = None
+    open_id_connect: Optional[OpenIdConnectSecurityScheme] = Field(default=None, alias="openIdConnect")
+    mutual_tls: Optional[MutualTLSSecurityScheme] = Field(default=None, alias="mutualTls")
+
+
+# =============================================================================
 # Agent Card Types
 # =============================================================================
 
@@ -180,6 +271,7 @@ class AgentCapabilities(BaseModel):
     streaming: bool = False
     push_notifications: bool = Field(default=False, alias="pushNotifications")
     state_transition_history: bool = Field(default=False, alias="stateTransitionHistory")
+    extended_agent_card: bool = Field(default=False, alias="extendedAgentCard")
 
 
 class AgentCard(BaseModel):
@@ -201,6 +293,37 @@ class AgentCard(BaseModel):
     default_output_modes: Optional[List[str]] = Field(default=None, alias="defaultOutputModes")
     provider: Optional[Dict[str, str]] = None
     documentation_url: Optional[str] = Field(default=None, alias="documentationUrl")
+    security_schemes: Optional[Dict[str, SecurityScheme]] = Field(default=None, alias="securitySchemes")
+    security: Optional[List[Dict[str, List[str]]]] = None
+
+
+# =============================================================================
+# Push Notification Types
+# =============================================================================
+
+class AuthenticationInfo(BaseModel):
+    """
+    Authentication details for push notifications.
+    
+    Based on A2A Protocol Specification AuthenticationInfo.
+    """
+    scheme: str
+    credentials: Optional[str] = None
+
+
+class TaskPushNotificationConfig(BaseModel):
+    """
+    Push notification configuration for a task.
+    
+    Based on A2A Protocol Specification TaskPushNotificationConfig.
+    """
+    model_config = ConfigDict(populate_by_name=True)
+    
+    id: Optional[str] = None
+    task_id: Optional[str] = Field(default=None, alias="taskId")
+    url: str
+    token: Optional[str] = None
+    authentication: Optional[AuthenticationInfo] = None
 
 
 # =============================================================================

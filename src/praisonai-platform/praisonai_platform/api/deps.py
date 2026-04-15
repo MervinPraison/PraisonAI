@@ -11,6 +11,7 @@ from praisonaiagents.auth import AuthIdentity
 
 from ..db.base import get_session
 from ..services.auth_service import AuthService
+from ..services.member_service import MemberService
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -49,3 +50,25 @@ async def get_current_user(
             detail="Invalid or expired token",
         )
     return identity
+
+
+async def require_workspace_member(
+    workspace_id: str,
+    user: AuthIdentity = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+    min_role: str = "member",
+) -> AuthIdentity:
+    """Verify the current user is a member of the workspace.
+
+    Returns the AuthIdentity with workspace_id set.
+    Raises 403 if the user is not a member or lacks the required role.
+    """
+    member_svc = MemberService(session)
+    has = await member_svc.has_role(workspace_id, user.id, min_role)
+    if not has:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not a member of this workspace or insufficient role",
+        )
+    user.workspace_id = workspace_id
+    return user

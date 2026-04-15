@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from praisonaiagents.auth import AuthIdentity
 
-from ..deps import get_current_user, get_db
+from ..deps import get_db, require_workspace_member
 from ..schemas import DependencyCreate, DependencyResponse
 from ...services.dependency_service import DependencyService
 
@@ -24,7 +24,7 @@ async def create_dependency(
     workspace_id: str,
     issue_id: str,
     body: DependencyCreate,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = DependencyService(session)
@@ -36,7 +36,7 @@ async def create_dependency(
 async def list_dependencies(
     workspace_id: str,
     issue_id: str,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = DependencyService(session)
@@ -49,7 +49,7 @@ async def delete_dependency(
     workspace_id: str,
     issue_id: str,
     dep_id: str,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = DependencyService(session)

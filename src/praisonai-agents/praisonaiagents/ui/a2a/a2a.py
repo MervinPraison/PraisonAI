@@ -65,6 +65,7 @@ class A2A:
         prefix: str = "",
         tags: Optional[List[str]] = None,
         auth_token: Optional[str] = None,
+        extended_agent_card_callback: Optional[callable] = None,
     ):
         if agent is None and agents is None:
             raise ValueError("A2A requires an agent or agents instance")
@@ -76,6 +77,7 @@ class A2A:
         self.prefix = prefix
         self.tags = tags or ["A2A"]
         self.auth_token = auth_token
+        self.extended_agent_card_callback = extended_agent_card_callback
         
         # Set name from agent if not provided
         if name:
@@ -101,6 +103,7 @@ class A2A:
         # Router cache
         self._router: Optional["APIRouter"] = None
         self._agent_card: Optional[AgentCard] = None
+        self._extended_agent_card: Optional[AgentCard] = None
     
     def get_agent_card(self) -> AgentCard:
         """
@@ -115,6 +118,7 @@ class A2A:
                 url=self.url,
                 version=self.version,
                 streaming=True,
+                auth_token=self.auth_token,
             )
         return self._agent_card
     
@@ -222,6 +226,17 @@ class A2A:
                 return self._handle_tasks_get(request_id, params)
             elif method == "tasks/cancel":
                 return self._handle_tasks_cancel(request_id, params)
+            elif method == "tasks/list":
+                return self._handle_tasks_list(request_id, params)
+            elif method == "agent/getExtendedCard":
+                return self._handle_get_extended_card(request_id, params)
+            elif method in (
+                "tasks/pushNotificationConfig/set",
+                "tasks/pushNotificationConfig/get",
+                "tasks/pushNotificationConfig/list",
+                "tasks/pushNotificationConfig/delete",
+            ):
+                return self._handle_push_notification(request_id, method, params)
             else:
                 return _jsonrpc_error(
                     request_id, -32601, f"Method not found: {method}"
@@ -254,6 +269,39 @@ class A2A:
         
         # Create task in store
         task = self.task_store.create_task(message)
+        
+        # Check for return_immediately configuration
+        config = params.get("configuration") or {}
+        return_immediately = config.get("return_immediately", config.get("returnImmediately", False))
+        
+        if return_immediately:
+            # Return task immediately in SUBMITTED state and process in background
+            async def _background_process(task_id, user_input_text):
+                try:
+                    self.task_store.update_status(task_id, TaskState.WORKING)
+                    if self.agent:
+                        response = await asyncio.to_thread(self.agent.chat, user_input_text)
+                    elif self.agents:
+                        response = await asyncio.to_thread(self.agents.start, user_input_text)
+                    else:
+                        raise RuntimeError("No agent or agents configured")
+                    response_msg = praisonai_to_a2a_message(str(response), task_id=task_id)
+                    artifact = create_artifact(str(response))
+                    self.task_store.add_to_history(task_id, response_msg)
+                    self.task_store.add_artifact(task_id, artifact)
+                    self.task_store.update_status(task_id, TaskState.COMPLETED)
+                except Exception as e:
+                    logger.error(f"Background agent error: {e}")
+                    self.task_store.update_status(task_id, TaskState.FAILED)
+            
+            user_input = extract_user_input([message])
+            asyncio.create_task(_background_process(task.id, user_input))
+            
+            return JSONResponse(content={
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": task.model_dump(by_alias=True, exclude_none=True),
+            })
         
         # Update to working
         self.task_store.update_status(task.id, TaskState.WORKING)
@@ -370,6 +418,56 @@ class A2A:
             "id": request_id,
             "result": task.model_dump(by_alias=True, exclude_none=True),
         })
+    
+    def _handle_tasks_list(self, request_id, params: dict):
+        """Handle tasks/list — list tasks, optionally filtered by context_id."""
+        from fastapi.responses import JSONResponse
+        
+        context_id = params.get("contextId") or params.get("context_id")
+        tasks = self.task_store.list_tasks(context_id=context_id)
+        
+        return JSONResponse(content={
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": [t.model_dump(by_alias=True, exclude_none=True) for t in tasks],
+        })
+    
+    def _handle_get_extended_card(self, request_id, params: dict):
+        """Handle agent/getExtendedCard — return extended agent card (requires auth)."""
+        from fastapi.responses import JSONResponse
+        
+        if self._extended_agent_card is None:
+            base_card = self.get_agent_card()
+            if self.extended_agent_card_callback:
+                self._extended_agent_card = self.extended_agent_card_callback(base_card)
+            else:
+                self._extended_agent_card = base_card
+        
+        return JSONResponse(content={
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": self._extended_agent_card.model_dump(by_alias=True, exclude_none=True),
+        })
+    
+    def _handle_push_notification(self, request_id, method: str, params: dict):
+        """Handle push notification config methods — extensible hook.
+        
+        Returns -32601 (method not found) unless push_notifications capability
+        is advertised. External providers can subclass A2A and override this
+        to implement full push notification support.
+        """
+        card = self.get_agent_card()
+        if not card.capabilities.push_notifications:
+            return _jsonrpc_error(
+                request_id, -32601,
+                f"Push notifications not supported: {method}"
+            )
+        
+        return _jsonrpc_error(
+            request_id, -32601,
+            f"Push notification method not implemented: {method}. "
+            "Subclass A2A and override _handle_push_notification to provide support."
+        )
 
 # =============================================================================
 # Helpers (module-level, no class dependency)

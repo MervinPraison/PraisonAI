@@ -145,14 +145,14 @@ class TestA2AWithTools:
 # NEW: JSON-RPC Endpoint Tests
 # ============================================================================
 
-def _make_app():
+def _make_app(**kwargs):
     """Create a test FastAPI app with mocked agent."""
     from fastapi import FastAPI
     from praisonaiagents import Agent
     from praisonaiagents.ui.a2a import A2A
     
     agent = Agent(name="JSON-RPC Test", role="Tester", goal="Test")
-    a2a = A2A(agent=agent, url="http://localhost:8000/a2a")
+    a2a = A2A(agent=agent, url="http://localhost:8000/a2a", **kwargs)
     
     app = FastAPI()
     app.include_router(a2a.get_router())
@@ -819,3 +819,553 @@ class TestA2APartConversion:
         
         result = extract_user_input([msg])
         assert "analyze" in result
+
+
+# ============================================================================
+# GAP 1: tasks/list Tests
+# ============================================================================
+
+class TestA2ATasksList:
+    """GAP 1: Tests for tasks/list JSON-RPC method."""
+    
+    def test_tasks_list_empty(self):
+        """tasks/list with no tasks → empty list."""
+        from fastapi.testclient import TestClient
+        
+        app, _ = _make_app()
+        client = TestClient(app)
+        
+        response = client.post("/a2a", json={
+            "jsonrpc": "2.0",
+            "method": "tasks/list",
+            "id": "list-1",
+            "params": {}
+        })
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["jsonrpc"] == "2.0"
+        assert data["id"] == "list-1"
+        assert data["result"] == []
+    
+    def test_tasks_list_returns_tasks(self):
+        """tasks/list after creating tasks → returns all tasks."""
+        from fastapi.testclient import TestClient
+        
+        app, a2a = _make_app()
+        a2a.agent.chat = MagicMock(return_value="OK")
+        client = TestClient(app)
+        
+        # Create two tasks
+        for i in range(2):
+            client.post("/a2a", json={
+                "jsonrpc": "2.0",
+                "method": "message/send",
+                "id": f"send-{i}",
+                "params": {
+                    "message": {
+                        "messageId": f"m{i}",
+                        "role": "user",
+                        "parts": [{"text": f"Task {i}"}]
+                    }
+                }
+            })
+        
+        # List all tasks
+        response = client.post("/a2a", json={
+            "jsonrpc": "2.0",
+            "method": "tasks/list",
+            "id": "list-2",
+            "params": {}
+        })
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["result"]) == 2
+    
+    def test_tasks_list_filter_by_context_id(self):
+        """tasks/list with contextId filter → returns only matching tasks."""
+        from fastapi.testclient import TestClient
+        
+        app, a2a = _make_app()
+        a2a.agent.chat = MagicMock(return_value="OK")
+        client = TestClient(app)
+        
+        # Create task with contextId
+        client.post("/a2a", json={
+            "jsonrpc": "2.0",
+            "method": "message/send",
+            "id": "send-ctx",
+            "params": {
+                "message": {
+                    "messageId": "m-ctx",
+                    "role": "user",
+                    "parts": [{"text": "With context"}],
+                    "contextId": "ctx-123"
+                }
+            }
+        })
+        
+        # Create task without contextId
+        client.post("/a2a", json={
+            "jsonrpc": "2.0",
+            "method": "message/send",
+            "id": "send-no-ctx",
+            "params": {
+                "message": {
+                    "messageId": "m-no-ctx",
+                    "role": "user",
+                    "parts": [{"text": "No context"}]
+                }
+            }
+        })
+        
+        # List with context filter
+        response = client.post("/a2a", json={
+            "jsonrpc": "2.0",
+            "method": "tasks/list",
+            "id": "list-ctx",
+            "params": {"contextId": "ctx-123"}
+        })
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["result"]) == 1
+        assert data["result"][0]["contextId"] == "ctx-123"
+
+
+# ============================================================================
+# GAP 2: SecurityScheme Tests
+# ============================================================================
+
+class TestA2ASecurityScheme:
+    """GAP 2: Tests for SecurityScheme types on AgentCard."""
+    
+    def test_security_scheme_types_exist(self):
+        """SecurityScheme Pydantic models can be imported and instantiated."""
+        from praisonaiagents.ui.a2a.types import (
+            SecurityScheme, APIKeySecurityScheme, HTTPAuthSecurityScheme,
+            OAuth2SecurityScheme, OpenIdConnectSecurityScheme,
+            MutualTLSSecurityScheme, OAuthFlows,
+        )
+        
+        # API Key
+        api_key = APIKeySecurityScheme(name="X-API-Key", location="header")
+        assert api_key.name == "X-API-Key"
+        assert api_key.location == "header"
+        
+        # HTTP Bearer
+        http = HTTPAuthSecurityScheme(scheme="bearer", bearer_format="JWT")
+        assert http.scheme == "bearer"
+        assert http.bearer_format == "JWT"
+        
+        # OAuth2
+        flows = OAuthFlows(authorization_code={"authorizationUrl": "https://example.com/auth", "tokenUrl": "https://example.com/token", "scopes": {}})
+        oauth2 = OAuth2SecurityScheme(flows=flows)
+        assert oauth2.flows.authorization_code is not None
+        
+        # OpenID Connect
+        oidc = OpenIdConnectSecurityScheme(open_id_connect_url="https://example.com/.well-known/openid-configuration")
+        assert oidc.open_id_connect_url == "https://example.com/.well-known/openid-configuration"
+        
+        # Mutual TLS
+        mtls = MutualTLSSecurityScheme(description="mTLS auth")
+        assert mtls.description == "mTLS auth"
+        
+        # Wrap in SecurityScheme
+        scheme = SecurityScheme(http=http)
+        assert scheme.http is not None
+        assert scheme.api_key is None
+    
+    def test_agent_card_with_security_schemes(self):
+        """AgentCard can include securitySchemes and security fields."""
+        from praisonaiagents.ui.a2a.types import (
+            AgentCard, AgentCapabilities, SecurityScheme, HTTPAuthSecurityScheme,
+        )
+        
+        card = AgentCard(
+            name="Test",
+            url="http://localhost:8000",
+            version="1.0.0",
+            capabilities=AgentCapabilities(streaming=True),
+            security_schemes={
+                "bearer": SecurityScheme(
+                    http=HTTPAuthSecurityScheme(scheme="bearer")
+                )
+            },
+            security=[{"bearer": []}],
+        )
+        
+        dumped = card.model_dump(by_alias=True, exclude_none=True)
+        assert "securitySchemes" in dumped
+        assert "bearer" in dumped["securitySchemes"]
+        assert dumped["security"] == [{"bearer": []}]
+    
+    def test_auth_token_auto_populates_security(self):
+        """A2A with auth_token → agent card advertises Bearer security."""
+        from fastapi.testclient import TestClient
+        
+        app, a2a = _make_app(auth_token="secret-token")
+        client = TestClient(app)
+        
+        response = client.get("/.well-known/agent.json")
+        assert response.status_code == 200
+        data = response.json()
+        
+        assert "securitySchemes" in data
+        assert "bearer" in data["securitySchemes"]
+        assert data["securitySchemes"]["bearer"]["http"]["scheme"] == "bearer"
+        assert data["security"] == [{"bearer": []}]
+    
+    def test_no_auth_no_security_schemes(self):
+        """A2A without auth_token → no securitySchemes in agent card."""
+        from fastapi.testclient import TestClient
+        
+        app, _ = _make_app()
+        client = TestClient(app)
+        
+        response = client.get("/.well-known/agent.json")
+        data = response.json()
+        
+        assert "securitySchemes" not in data
+
+
+# ============================================================================
+# GAP 3: GetExtendedAgentCard Tests
+# ============================================================================
+
+class TestA2AExtendedCard:
+    """GAP 3: Tests for agent/getExtendedCard JSON-RPC method."""
+    
+    def test_get_extended_card_default(self):
+        """agent/getExtendedCard without callback returns base card."""
+        from fastapi.testclient import TestClient
+        
+        app, a2a = _make_app(auth_token="secret")
+        client = TestClient(app)
+        
+        response = client.post("/a2a", json={
+            "jsonrpc": "2.0",
+            "method": "agent/getExtendedCard",
+            "id": "ext-1",
+            "params": {}
+        }, headers={"Authorization": "Bearer secret"})
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["jsonrpc"] == "2.0"
+        assert data["result"]["name"] == "JSON-RPC Test"
+        assert data["result"]["capabilities"]["extendedAgentCard"] is True
+    
+    def test_get_extended_card_with_callback(self):
+        """agent/getExtendedCard with callback returns customized card."""
+        from fastapi.testclient import TestClient
+        from praisonaiagents.ui.a2a.types import AgentCard, AgentSkill
+        
+        def extend_card(base_card):
+            return base_card.model_copy(update={
+                "skills": [AgentSkill(id="secret-skill", name="Secret", description="Hidden skill", tags=["hidden"])]
+            })
+        
+        app, a2a = _make_app(auth_token="secret", extended_agent_card_callback=extend_card)
+        client = TestClient(app)
+        
+        response = client.post("/a2a", json={
+            "jsonrpc": "2.0",
+            "method": "agent/getExtendedCard",
+            "id": "ext-2",
+            "params": {}
+        }, headers={"Authorization": "Bearer secret"})
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["result"]["skills"]) == 1
+        assert data["result"]["skills"][0]["id"] == "secret-skill"
+    
+    def test_extended_card_requires_auth(self):
+        """agent/getExtendedCard without auth → 401."""
+        from fastapi.testclient import TestClient
+        
+        app, _ = _make_app(auth_token="secret")
+        client = TestClient(app)
+        
+        response = client.post("/a2a", json={
+            "jsonrpc": "2.0",
+            "method": "agent/getExtendedCard",
+            "id": "ext-3",
+            "params": {}
+        })
+        
+        assert response.status_code == 401
+    
+    def test_capabilities_advertises_extended_card(self):
+        """AgentCard capabilities.extendedAgentCard=True when auth configured."""
+        from fastapi.testclient import TestClient
+        
+        app, _ = _make_app(auth_token="secret")
+        client = TestClient(app)
+        
+        response = client.get("/.well-known/agent.json")
+        data = response.json()
+        assert data["capabilities"]["extendedAgentCard"] is True
+
+
+# ============================================================================
+# GAP 4: A2AClient Tests
+# ============================================================================
+
+class TestA2AClient:
+    """GAP 4: Tests for A2AClient."""
+    
+    def test_client_import(self):
+        """A2AClient can be imported."""
+        from praisonaiagents.ui.a2a.client import A2AClient
+        client = A2AClient("http://localhost:9999")
+        assert client.base_url == "http://localhost:9999"
+        assert client.auth_token is None
+    
+    def test_client_with_auth(self):
+        """A2AClient stores auth_token."""
+        from praisonaiagents.ui.a2a.client import A2AClient
+        client = A2AClient("http://localhost:9999", auth_token="tok")
+        assert client.auth_token == "tok"
+    
+    def test_client_get_agent_card(self):
+        """A2AClient.get_agent_card() fetches and parses card."""
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock
+        from praisonaiagents.ui.a2a.client import A2AClient
+        
+        card_data = {
+            "name": "Test Agent",
+            "url": "http://localhost:8000/a2a",
+            "version": "1.0.0",
+            "capabilities": {"streaming": False, "pushNotifications": False, "stateTransitionHistory": False},
+        }
+        
+        mock_resp = AsyncMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json = AsyncMock(return_value=card_data)
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=False)
+        
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=mock_resp)
+        mock_session.closed = False
+        
+        client = A2AClient("http://localhost:8000")
+        client._session = mock_session
+        
+        async def run():
+            card = await client.get_agent_card()
+            assert card.name == "Test Agent"
+            assert card.version == "1.0.0"
+        
+        asyncio.get_event_loop().run_until_complete(run())
+    
+    def test_client_send_message(self):
+        """A2AClient.send_message() sends JSON-RPC request."""
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock
+        from praisonaiagents.ui.a2a.client import A2AClient
+        
+        result_data = {
+            "jsonrpc": "2.0",
+            "id": "123",
+            "result": {"id": "task-1", "status": {"state": "completed"}},
+        }
+        
+        mock_resp = AsyncMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json = AsyncMock(return_value=result_data)
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=False)
+        
+        mock_session = AsyncMock()
+        mock_session.post = MagicMock(return_value=mock_resp)
+        mock_session.closed = False
+        
+        client = A2AClient("http://localhost:8000")
+        client._session = mock_session
+        
+        async def run():
+            result = await client.send_message("Hello!")
+            assert result["result"]["id"] == "task-1"
+            # Verify post was called with correct method
+            call_kwargs = mock_session.post.call_args
+            payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
+            assert payload["method"] == "message/send"
+        
+        asyncio.get_event_loop().run_until_complete(run())
+    
+    def test_client_list_tasks(self):
+        """A2AClient.list_tasks() sends correct JSON-RPC."""
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock
+        from praisonaiagents.ui.a2a.client import A2AClient
+        
+        result_data = {"jsonrpc": "2.0", "id": "x", "result": []}
+        
+        mock_resp = AsyncMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json = AsyncMock(return_value=result_data)
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=False)
+        
+        mock_session = AsyncMock()
+        mock_session.post = MagicMock(return_value=mock_resp)
+        mock_session.closed = False
+        
+        client = A2AClient("http://localhost:8000")
+        client._session = mock_session
+        
+        async def run():
+            result = await client.list_tasks(context_id="ctx-1")
+            assert result["result"] == []
+            call_kwargs = mock_session.post.call_args
+            payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
+            assert payload["method"] == "tasks/list"
+            assert payload["params"]["contextId"] == "ctx-1"
+        
+        asyncio.get_event_loop().run_until_complete(run())
+
+
+# ============================================================================
+# GAP 5: return_immediately Tests
+# ============================================================================
+
+class TestA2AReturnImmediately:
+    """GAP 5: Tests for return_immediately on message/send."""
+    
+    def test_return_immediately_returns_submitted(self):
+        """message/send with return_immediately=true returns task in submitted state."""
+        from fastapi.testclient import TestClient
+        from unittest.mock import patch
+        
+        app, a2a = _make_app()
+        client = TestClient(app)
+        
+        with patch.object(a2a.agent, 'chat', return_value="Done"):
+            response = client.post("/a2a", json={
+                "jsonrpc": "2.0",
+                "method": "message/send",
+                "id": "ri-1",
+                "params": {
+                    "message": {
+                        "messageId": "m1",
+                        "role": "user",
+                        "parts": [{"text": "Hello"}]
+                    },
+                    "configuration": {
+                        "returnImmediately": True
+                    }
+                }
+            })
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["result"]["status"]["state"] == "submitted"
+    
+    def test_return_immediately_false_waits(self):
+        """message/send with return_immediately=false (default) returns completed task."""
+        from fastapi.testclient import TestClient
+        from unittest.mock import patch
+        
+        app, a2a = _make_app()
+        client = TestClient(app)
+        
+        with patch.object(a2a.agent, 'chat', return_value="Hello back"):
+            response = client.post("/a2a", json={
+                "jsonrpc": "2.0",
+                "method": "message/send",
+                "id": "ri-2",
+                "params": {
+                    "message": {
+                        "messageId": "m2",
+                        "role": "user",
+                        "parts": [{"text": "Hello"}]
+                    }
+                }
+            })
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["result"]["status"]["state"] == "completed"
+
+
+# ============================================================================
+# GAP 6: Push Notification Hooks Tests
+# ============================================================================
+
+class TestA2APushNotificationHooks:
+    """GAP 6: Tests for push notification protocol hooks."""
+    
+    def test_push_notification_types_exist(self):
+        """TaskPushNotificationConfig and AuthenticationInfo can be imported."""
+        from praisonaiagents.ui.a2a.types import (
+            TaskPushNotificationConfig, AuthenticationInfo,
+        )
+        
+        auth = AuthenticationInfo(scheme="Bearer", credentials="tok123")
+        assert auth.scheme == "Bearer"
+        
+        config = TaskPushNotificationConfig(
+            url="https://example.com/notify",
+            token="abc",
+            authentication=auth,
+        )
+        assert config.url == "https://example.com/notify"
+        dumped = config.model_dump(by_alias=True, exclude_none=True)
+        assert "url" in dumped
+    
+    def test_push_notification_not_supported(self):
+        """Push notification methods return error when not supported."""
+        from fastapi.testclient import TestClient
+        
+        app, _ = _make_app()
+        client = TestClient(app)
+        
+        response = client.post("/a2a", json={
+            "jsonrpc": "2.0",
+            "method": "tasks/pushNotificationConfig/set",
+            "id": "pn-1",
+            "params": {"taskId": "t1", "url": "https://example.com/hook"}
+        })
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "error" in data
+        assert "not supported" in data["error"]["message"].lower()
+    
+    def test_push_notification_extensible(self):
+        """A2A subclass can override _handle_push_notification."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from fastapi.responses import JSONResponse
+        from praisonaiagents import Agent
+        from praisonaiagents.ui.a2a import A2A
+        
+        class CustomA2A(A2A):
+            def _handle_push_notification(self, request_id, method, params):
+                return JSONResponse(content={
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {"registered": True},
+                })
+        
+        agent = Agent(name="PNTest", role="Tester", goal="Test")
+        a2a = CustomA2A(agent=agent, url="http://localhost:8000/a2a")
+        app = FastAPI()
+        app.include_router(a2a.get_router())
+        client = TestClient(app)
+        
+        response = client.post("/a2a", json={
+            "jsonrpc": "2.0",
+            "method": "tasks/pushNotificationConfig/set",
+            "id": "pn-2",
+            "params": {"taskId": "t1", "url": "https://example.com/hook"}
+        })
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["result"]["registered"] is True

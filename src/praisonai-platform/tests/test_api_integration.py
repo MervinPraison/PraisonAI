@@ -223,4 +223,5 @@ class TestNotFound:
         headers = {"Authorization": f"Bearer {token}"}
 
         resp = await client.get("/api/v1/workspaces/nonexistent", headers=headers)
-        assert resp.status_code == 404
+        # With RBAC enforcement, non-members get 403 (no info leakage about existence)
+        assert resp.status_code == 403

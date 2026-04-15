@@ -11,6 +11,8 @@ from praisonaiagents.ui.a2a.types import (
     AgentCard,
     AgentCapabilities,
     AgentSkill,
+    SecurityScheme,
+    HTTPAuthSecurityScheme,
 )
 
 if TYPE_CHECKING:
@@ -64,6 +66,7 @@ def generate_agent_card(
     version: str = "1.0.0",
     streaming: bool = False,
     push_notifications: bool = False,
+    auth_token: Optional[str] = None,
 ) -> AgentCard:
     """
     Generate an A2A Agent Card from a PraisonAI Agent.
@@ -74,6 +77,7 @@ def generate_agent_card(
         version: Version string for the agent
         streaming: Whether streaming is supported
         push_notifications: Whether push notifications are supported
+        auth_token: If set, advertise Bearer auth in securitySchemes
         
     Returns:
         AgentCard object for A2A discovery
@@ -107,7 +111,22 @@ def generate_agent_card(
     capabilities = AgentCapabilities(
         streaming=streaming,
         push_notifications=push_notifications,
+        extended_agent_card=bool(auth_token),
     )
+    
+    # Build security schemes if auth is configured
+    security_schemes = None
+    security = None
+    if auth_token:
+        security_schemes = {
+            "bearer": SecurityScheme(
+                http=HTTPAuthSecurityScheme(
+                    scheme="bearer",
+                    bearer_format="token",
+                )
+            )
+        }
+        security = [{"bearer": []}]
     
     # Create Agent Card
     card = AgentCard(
@@ -118,6 +137,8 @@ def generate_agent_card(
         capabilities=capabilities,
         skills=skills if skills else None,
         provider={"name": "PraisonAI"},
+        security_schemes=security_schemes,
+        security=security,
     )
     
     return card

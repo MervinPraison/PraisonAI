@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from praisonaiagents.auth import AuthIdentity
 
-from ..deps import get_current_user, get_db
+from ..deps import get_current_user, get_db, require_workspace_member
 from ..schemas import (
     MemberAdd,
     MemberResponse,
@@ -50,7 +50,7 @@ async def list_workspaces(
 @router.get("/{workspace_id}", response_model=WorkspaceResponse)
 async def get_workspace(
     workspace_id: str,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     ws_svc = WorkspaceService(session)
@@ -64,7 +64,7 @@ async def get_workspace(
 async def update_workspace(
     workspace_id: str,
     body: WorkspaceUpdate,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     ws_svc = WorkspaceService(session)
@@ -77,7 +77,7 @@ async def update_workspace(
 @router.delete("/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_workspace(
     workspace_id: str,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     ws_svc = WorkspaceService(session)
@@ -93,7 +93,7 @@ async def delete_workspace(
 async def add_member(
     workspace_id: str,
     body: MemberAdd,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     member_svc = MemberService(session)
@@ -104,7 +104,7 @@ async def add_member(
 @router.get("/{workspace_id}/members", response_model=List[MemberResponse])
 async def list_members(
     workspace_id: str,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     member_svc = MemberService(session)
@@ -117,7 +117,7 @@ async def update_member_role(
     workspace_id: str,
     user_id: str,
     body: MemberUpdate,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     member_svc = MemberService(session)
@@ -131,7 +131,7 @@ async def update_member_role(
 async def remove_member(
     workspace_id: str,
     user_id: str,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     member_svc = MemberService(session)

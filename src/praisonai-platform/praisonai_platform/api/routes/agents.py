@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from praisonaiagents.auth import AuthIdentity
 
-from ..deps import get_current_user, get_db
+from ..deps import get_db, require_workspace_member
 from ..schemas import AgentCreate, AgentResponse, AgentUpdate
 from ...services.agent_service import AgentService
 
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/workspaces/{workspace_id}/agents", tags=["agents"])
 async def create_agent(
     workspace_id: str,
     body: AgentCreate,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = AgentService(session)
@@ -42,7 +42,7 @@ async def list_agents(
     status_filter: Optional[str] = Query(None, alias="status"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = AgentService(session)
@@ -54,7 +54,7 @@ async def list_agents(
 async def get_agent(
     workspace_id: str,
     agent_id: str,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = AgentService(session)
@@ -69,7 +69,7 @@ async def update_agent(
     workspace_id: str,
     agent_id: str,
     body: AgentUpdate,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = AgentService(session)
@@ -91,7 +91,7 @@ async def update_agent(
 async def delete_agent(
     workspace_id: str,
     agent_id: str,
-    user: AuthIdentity = Depends(get_current_user),
+    user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
     svc = AgentService(session)

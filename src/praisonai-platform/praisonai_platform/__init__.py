@@ -3,6 +3,27 @@ PraisonAI Platform — workspace, auth, issues, projects.
 
 A separate package providing multi-tenancy, authentication, issue tracking,
 and project management on top of the praisonaiagents core SDK.
+
+Quick start::
+
+    from praisonai_platform import PlatformClient, create_app
+
+    # Client SDK
+    async with PlatformClient("http://localhost:8000") as client:
+        await client.register("agent@example.com", "password")
+        workspaces = await client.list_workspaces()
+
+    # Run server
+    app = create_app()
 """
 
 __version__ = "0.1.0"
+
+from .api.app import create_app
+from .client.platform_client import PlatformClient
+
+__all__ = [
+    "__version__",
+    "create_app",
+    "PlatformClient",
+]

@@ -21,6 +21,7 @@ Usage:
 """
 
 from praisonaiagents.ui.a2a.a2a import A2A
+from praisonaiagents.ui.a2a.client import A2AClient
 from praisonaiagents.ui.a2a.types import (
     # Enums
     TaskState,
@@ -38,6 +39,16 @@ from praisonaiagents.ui.a2a.types import (
     AgentSkill,
     AgentCapabilities,
     AgentCard,
+    # Security Scheme types
+    SecurityScheme,
+    APIKeySecurityScheme,
+    HTTPAuthSecurityScheme,
+    OAuth2SecurityScheme,
+    OpenIdConnectSecurityScheme,
+    MutualTLSSecurityScheme,
+    # Push notification types
+    AuthenticationInfo,
+    TaskPushNotificationConfig,
     # Request/Response types
     MessageConfig,
     SendMessageRequest,
@@ -49,6 +60,7 @@ from praisonaiagents.ui.a2a.types import (
 __all__ = [
     # Main class
     "A2A",
+    "A2AClient",
     # Enums
     "TaskState",
     "Role",
@@ -65,6 +77,16 @@ __all__ = [
     "AgentSkill",
     "AgentCapabilities",
     "AgentCard",
+    # Security Scheme types
+    "SecurityScheme",
+    "APIKeySecurityScheme",
+    "HTTPAuthSecurityScheme",
+    "OAuth2SecurityScheme",
+    "OpenIdConnectSecurityScheme",
+    "MutualTLSSecurityScheme",
+    # Push notification types
+    "AuthenticationInfo",
+    "TaskPushNotificationConfig",
     # Request/Response types
     "MessageConfig",
     "SendMessageRequest",
