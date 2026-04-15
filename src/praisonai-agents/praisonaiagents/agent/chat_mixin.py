@@ -537,96 +537,19 @@ Your Goal: {self.goal}"""
 
         try:
             # NEW: Unified protocol dispatch path (Issue #1304, #1362)
-            # Enable unified dispatch by default for DRY and feature parity
-            if getattr(self, '_use_unified_llm_dispatch', True):
-                # Use composition instead of runtime class mutation for safety
-                final_response = self._execute_unified_chat_completion(
-                    messages=messages,
-                    temperature=temperature,
-                    tools=formatted_tools,
-                    stream=stream,
-                    reasoning_steps=reasoning_steps,
-                    task_name=task_name,
-                    task_description=task_description,
-                    task_id=task_id,
-                    response_format=response_format
-                )
-            
-            # LEGACY: Maintain existing dual execution paths for backward compatibility
-            elif self._using_custom_llm and hasattr(self, 'llm_instance'):
-                if stream:
-                    # Debug logs for tool info
-                    if formatted_tools:
-                        logging.debug(f"Passing {len(formatted_tools)} formatted tools to LLM instance: {formatted_tools}")
-                    
-                    # Use the LLM instance for streaming responses
-                    has_system = bool(messages and messages[0].get('role') == 'system')
-                    final_response = self.llm_instance.get_response(
-                        prompt=messages[1:] if has_system else messages,
-                        system_prompt=messages[0]['content'] if has_system else None,
-                        temperature=temperature,
-                        tools=formatted_tools if formatted_tools else None,
-                        verbose=self.verbose,
-                        markdown=self.markdown,
-                        stream=stream,
-                        console=self.console,
-                        execute_tool_fn=self.execute_tool,
-                        agent_name=self.name,
-                        agent_role=self.role,
-                        agent_tools=[getattr(t, '__name__', str(t)) for t in self.tools] if self.tools else None,
-                        task_name=task_name,
-                        task_description=task_description,
-                        task_id=task_id,
-                        reasoning_steps=reasoning_steps
-                    )
-                else:
-                    # Non-streaming with custom LLM - direct execution
-                    has_system = bool(messages and messages[0].get('role') == 'system')
-                    final_response = self.llm_instance.get_response(
-                        prompt=messages[1:] if has_system else messages,
-                        system_prompt=messages[0]['content'] if has_system else None,
-                        temperature=temperature,
-                        tools=formatted_tools if formatted_tools else None,
-                        verbose=self.verbose,
-                        markdown=self.markdown,
-                        stream=stream,
-                        console=self.console,
-                        execute_tool_fn=self.execute_tool,
-                        agent_name=self.name,
-                        agent_role=self.role,
-                        agent_tools=[getattr(t, '__name__', str(t)) for t in self.tools] if self.tools else None,
-                        task_name=task_name,
-                        task_description=task_description,
-                        task_id=task_id,
-                        reasoning_steps=reasoning_steps
-                        )
-            else:
-                # Use the standard OpenAI client approach with tool support
-                # Note: openai_client expects tools in various formats and will format them internally
-                # But since we already have formatted_tools, we can pass them directly
-                if self._openai_client is None:
-                    raise ValueError("OpenAI client is not initialized. Please provide OPENAI_API_KEY or use a custom LLM provider.")
-                
-                # Build kwargs including response_format if provided
-                chat_kwargs = {
-                    "messages": messages,
-                    "model": self.llm,
-                    "temperature": temperature,
-                    "tools": formatted_tools,  # Already formatted for OpenAI
-                    "execute_tool_fn": self.execute_tool,
-                    "stream": stream,
-                    "console": self.console if (self.verbose or stream) else None,
-                    "display_fn": self._display_generating if self.verbose else None,
-                    "reasoning_steps": reasoning_steps,
-                    "verbose": self.verbose,
-                    "max_iterations": 10,
-                    "stream_callback": self.stream_emitter.emit,
-                    "emit_events": True,
-                }
-                if response_format:
-                    chat_kwargs["response_format"] = response_format
-                
-                final_response = self._openai_client.chat_completion_with_tools(**chat_kwargs)
+            # UNIFIED: Single protocol-driven dispatch path (fixes DRY violation)
+            # All LLM providers now go through unified dispatcher for consistency and maintainability
+            final_response = self._execute_unified_chat_completion(
+                messages=messages,
+                temperature=temperature,
+                tools=formatted_tools,
+                stream=stream,
+                reasoning_steps=reasoning_steps,
+                task_name=task_name,
+                task_description=task_description,
+                task_id=task_id,
+                response_format=response_format
+            )
 
             # Emit LLM response trace event with token usage
             _duration_ms = (time.time() - start_time) * 1000
@@ -781,6 +704,7 @@ Your Goal: {self.goal}"""
             self._unified_dispatcher = dispatcher
         
         # Execute unified dispatch with all necessary parameters
+        # Includes all parameters from both legacy paths to ensure full compatibility
         try:
             final_response = self._unified_dispatcher.chat_completion(
                 messages=messages,
@@ -799,7 +723,12 @@ Your Goal: {self.goal}"""
                 reasoning_steps=reasoning_steps,
                 task_name=task_name,
                 task_description=task_description,
-                task_id=task_id
+                task_id=task_id,
+                # Additional parameters from legacy custom LLM path
+                markdown=self.markdown,
+                agent_name=self.name,
+                agent_role=self.role,
+                agent_tools=[getattr(t, '__name__', str(t)) for t in self.tools] if self.tools else None,
             )
             return final_response
             
@@ -843,6 +772,7 @@ Your Goal: {self.goal}"""
             self._unified_dispatcher = dispatcher
         
         # Execute unified async dispatch with all necessary parameters
+        # Includes all parameters from both legacy paths to ensure full compatibility
         try:
             final_response = await self._unified_dispatcher.achat_completion(
                 messages=messages,
@@ -861,7 +791,12 @@ Your Goal: {self.goal}"""
                 reasoning_steps=reasoning_steps,
                 task_name=task_name,
                 task_description=task_description,
-                task_id=task_id
+                task_id=task_id,
+                # Additional parameters from legacy custom LLM path
+                markdown=self.markdown,
+                agent_name=self.name,
+                agent_role=self.role,
+                agent_tools=[getattr(t, '__name__', str(t)) for t in self.tools] if self.tools else None,
             )
             return final_response
             
