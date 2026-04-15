@@ -11,7 +11,7 @@ import sys
 import atexit
 import signal
 from pathlib import Path
-from typing import Dict, Set
+from typing import Set
 
 import typer
 
