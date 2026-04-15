@@ -8,28 +8,61 @@ Usage:
 
 import subprocess
 import sys
-import time
+import atexit
+import signal
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Set
 
 import typer
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
-import uvicorn
+
+# Lazy imports for optional dependencies
+_FASTAPI_IMPORT_ERROR = None
+
+try:
+    from fastapi import FastAPI, HTTPException
+    from fastapi.responses import HTMLResponse
+    import uvicorn
+except ImportError as exc:
+    _FASTAPI_IMPORT_ERROR = exc
+    FastAPI = None
+    HTTPException = None
+    HTMLResponse = None
+    uvicorn = None
 
 app = typer.Typer(help="🌟 Unified PraisonAI Interface (Flow + Claw + UI)")
 
-UNIFIED_DIR = Path.home() / ".praisonai" / "unified"
-STATIC_DIR = UNIFIED_DIR / "static"
+# Port mappings - centralized configuration
+SERVICE_PORTS = {
+    "flow": 7860,
+    "claw": 8082, 
+    "ui": 8081
+}
+
+# Global process tracking for cleanup
+_ACTIVE_PROCESSES: Set[subprocess.Popen] = set()
+
+def _cleanup_processes():
+    """Cleanup all spawned processes on exit."""
+    for proc in _ACTIVE_PROCESSES.copy():
+        try:
+            if proc.poll() is None:  # Process still running
+                proc.terminate()
+                proc.wait(timeout=5)
+        except:
+            try:
+                proc.kill()
+            except:
+                pass
+        _ACTIVE_PROCESSES.discard(proc)
+
+# Register cleanup handlers
+atexit.register(_cleanup_processes)
+signal.signal(signal.SIGTERM, lambda s, f: _cleanup_processes())
+signal.signal(signal.SIGINT, lambda s, f: _cleanup_processes())
 
 
-def _ensure_static_files():
-    """Create static files directory and dashboard HTML."""
-    UNIFIED_DIR.mkdir(parents=True, exist_ok=True)
-    STATIC_DIR.mkdir(parents=True, exist_ok=True)
-    
-    # Create the unified dashboard HTML
+def _generate_dashboard_html(host: str = "localhost") -> str:
+    """Generate dashboard HTML with dynamic host configuration."""
     dashboard_html = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -244,7 +277,7 @@ def _ensure_static_files():
         
         async function checkServiceStatus(service, port) {
             try {
-                const response = await fetch(`http://localhost:${port}`, {
+                const response = await fetch(`http://${window.location.hostname}:${port}`, {
                     method: 'GET',
                     mode: 'no-cors'
                 });
@@ -258,7 +291,13 @@ def _ensure_static_files():
             const response = await fetch(`/start/${service}`, {
                 method: 'POST'
             });
-            return response.ok;
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || 'Failed to start service');
+            }
+            
+            return await response.json();
         }
         
         async function openService(service, port) {
@@ -266,25 +305,31 @@ def _ensure_static_files():
             statusEl.textContent = 'Starting...';
             statusEl.className = 'status';
             
-            // Try to start the service
-            const started = await startService(service);
-            
-            if (started) {
-                // Wait a moment for the service to fully start
-                await new Promise(resolve => setTimeout(resolve, 3000));
+            try {
+                // Try to start the service
+                const result = await startService(service);
                 
-                // Open in iframe
-                document.getElementById('dashboard-view').style.display = 'none';
-                document.getElementById('iframe-view').style.display = 'block';
-                document.getElementById('service-iframe').src = `http://localhost:${port}`;
-                
-                statusEl.textContent = 'Running';
-                statusEl.className = 'status running';
-                activeServices[service] = port;
-            } else {
+                if (result.success) {
+                    // Wait a moment for the service to fully start
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    
+                    // Open in iframe using dynamic hostname
+                    document.getElementById('dashboard-view').style.display = 'none';
+                    document.getElementById('iframe-view').style.display = 'block';
+                    document.getElementById('service-iframe').src = `http://${window.location.hostname}:${port}`;
+                    
+                    statusEl.textContent = 'Running';
+                    statusEl.className = 'status running';
+                    activeServices[service] = port;
+                } else {
+                    statusEl.textContent = 'Failed to Start';
+                    statusEl.className = 'status stopped';
+                    alert(`Failed to start ${service}: ${result.error || 'Unknown error'}`);
+                }
+            } catch (error) {
                 statusEl.textContent = 'Failed to Start';
                 statusEl.className = 'status stopped';
-                alert(`Failed to start ${service}. Check console for details.`);
+                alert(`Failed to start ${service}: ${error.message}`);
             }
         }
         
@@ -323,10 +368,7 @@ def _ensure_static_files():
     </script>
 </body>
 </html>"""
-    
-    index_file = STATIC_DIR / "index.html"
-    index_file.write_text(dashboard_html)
-    return index_file
+    return dashboard_html
 
 
 @app.callback(invoke_without_command=True)
@@ -359,51 +401,71 @@ def unified(
     from rich.console import Console
     console = Console()
     
-    # Ensure static files exist
-    try:
-        _ensure_static_files()
-    except Exception as e:
-        console.print(f"[red]Error creating static files: {e}[/red]")
+    # Check optional dependencies
+    if _FASTAPI_IMPORT_ERROR:
+        console.print(f"[red]Error: Missing optional dependencies for unified dashboard.[/red]")
+        console.print(f"[yellow]Install with: pip install 'praisonai[api]'[/yellow]")
+        console.print(f"[dim]Error details: {_FASTAPI_IMPORT_ERROR}[/dim]")
         raise typer.Abort()
     
     # Create FastAPI app
     fastapi_app = FastAPI(title="PraisonAI Unified Dashboard")
     
-    # Mount static files
-    fastapi_app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-    
     @fastapi_app.get("/", response_class=HTMLResponse)
     async def dashboard():
-        return (STATIC_DIR / "index.html").read_text()
+        return _generate_dashboard_html(host)
     
     @fastapi_app.post("/start/{service}")
     async def start_service(service: str):
         """Start a PraisonAI service."""
+        if service not in SERVICE_PORTS:
+            raise HTTPException(status_code=400, detail=f"Unknown service: {service}")
+        
+        service_port = SERVICE_PORTS[service]
+        
+        # Check if service is already running
+        import socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
+            result = sock.connect_ex(("127.0.0.1", service_port))
+            if result == 0:
+                sock.close()
+                return {"success": True, "message": f"Service {service} already running on port {service_port}"}
+        except:
+            pass
+        finally:
+            sock.close()
+        
+        try:
+            # Create log directory for troubleshooting
+            log_dir = Path.home() / ".praisonai" / "unified" / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_file = log_dir / f"{service}.log"
+            
             if service == "flow":
-                # Start flow in background
-                subprocess.Popen([
-                    sys.executable, "-m", "praisonai.cli.main", "flow", 
-                    "--port", "7860", "--no-open"
-                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                # Use proper Typer entry point for flow
+                proc = subprocess.Popen([
+                    sys.executable, "-m", "praisonai", "flow", 
+                    "--port", str(service_port), "--no-open"
+                ], stdout=open(log_file, "w"), stderr=subprocess.STDOUT)
             elif service == "claw":
-                # Start claw in background
-                subprocess.Popen([
-                    sys.executable, "-m", "praisonai.cli.main", "claw",
-                    "--port", "8082"
-                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                proc = subprocess.Popen([
+                    sys.executable, "-m", "praisonai", "claw",
+                    "--port", str(service_port)
+                ], stdout=open(log_file, "w"), stderr=subprocess.STDOUT)
             elif service == "ui":
-                # Start ui in background
-                subprocess.Popen([
-                    sys.executable, "-m", "praisonai.cli.main", "ui",
-                    "--port", "8081"
-                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            else:
-                return {"success": False, "error": "Unknown service"}
-                
-            return {"success": True}
+                proc = subprocess.Popen([
+                    sys.executable, "-m", "praisonai", "ui",
+                    "--port", str(service_port)
+                ], stdout=open(log_file, "w"), stderr=subprocess.STDOUT)
+            
+            # Track process for cleanup
+            _ACTIVE_PROCESSES.add(proc)
+            
+            return {"success": True, "message": f"Started {service} on port {service_port}"}
+            
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            raise HTTPException(status_code=500, detail=f"Failed to start {service}: {str(e)}")
     
     @fastapi_app.get("/health")
     async def health():
@@ -420,7 +482,7 @@ def unified(
             fastapi_app,
             host=host,
             port=port,
-            log_level="error"  # Reduce log noise
+            log_level="info"  # Show startup logs for debugging
         )
     except KeyboardInterrupt:
         console.print("\n[yellow]🌟 Unified Dashboard stopped.[/yellow]")
