@@ -7,6 +7,7 @@ model selection based on task characteristics.
 
 import os
 import logging
+from dataclasses import dataclass, asdict
 from praisonaiagents._logging import get_logger
 from typing import Dict, List, Optional, Any, Union
 from .agent import Agent
@@ -15,6 +16,18 @@ from ..llm import LLM, TokenUsage
 from ..trace.protocol import get_default_emitter
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class CapabilityDecision:
+    """Decision payload emitted when capability preflight adjusts model selection."""
+    requested_model: str
+    selected_model: str
+    fallback_applied: bool
+    reason: str
+    required_capabilities: List[str]
+    context_size: Optional[int] = None
+
 
 class RouterAgent(Agent):
     """
@@ -120,11 +133,58 @@ class RouterAgent(Agent):
             except Exception as e:
                 logger.warning(f"Failed to initialize LLM for model {model_name}: {e}")
     
+    def _derive_required_capabilities(
+        self,
+        tools: Optional[List[Any]] = None,
+        stream: Optional[bool] = None,
+        task_description: Optional[str] = None,
+    ) -> List[str]:
+        """Infer requested capabilities for preflight compatibility checks."""
+        capabilities: List[str] = ["text"]
+
+        if tools:
+            capabilities.append("function-calling")
+
+        effective_stream = self.stream if stream is None else stream
+        if effective_stream:
+            capabilities.append("streaming")
+
+        task_text = (task_description or "").lower()
+        vision_hints = ["image", "vision", "screenshot", "ocr", "photo"]
+        if any(h in task_text for h in vision_hints):
+            capabilities.append("vision")
+
+        # Preserve order while deduplicating
+        return list(dict.fromkeys(capabilities))
+
+    def _build_capability_decision(
+        self,
+        requested_model: str,
+        selected_model: str,
+        required_capabilities: List[str],
+        context_size: Optional[int],
+    ) -> CapabilityDecision:
+        """Build decision object for traceability and logs."""
+        fallback_applied = requested_model != selected_model
+        reason = "compatible"
+        if fallback_applied:
+            reason = "capability-mismatch-or-unavailable"
+
+        return CapabilityDecision(
+            requested_model=requested_model,
+            selected_model=selected_model,
+            fallback_applied=fallback_applied,
+            reason=reason,
+            required_capabilities=required_capabilities,
+            context_size=context_size,
+        )
+
     def _select_model_for_task(
         self,
         task_description: str,
         tools: Optional[List[Any]] = None,
-        context_size: Optional[int] = None
+        context_size: Optional[int] = None,
+        stream: Optional[bool] = None,
     ) -> str:
         """
         Select the most appropriate model for a given task.
@@ -149,11 +209,12 @@ class RouterAgent(Agent):
             # Fallback if no model is configured
             return self.fallback_model
         
-        # Determine required capabilities
-        required_capabilities = []
-        if tools:
-            required_capabilities.append("function-calling")
-        
+        required_capabilities = self._derive_required_capabilities(
+            tools=tools,
+            stream=stream,
+            task_description=task_description,
+        )
+
         # Determine budget consciousness based on strategy
         budget_conscious = self.routing_strategy in ["auto", "cost-optimized"]
         
@@ -171,12 +232,47 @@ class RouterAgent(Agent):
             budget_conscious=budget_conscious
         )
         
-        # Ensure selected model is available
+        # Ensure selected model is available before compatibility checks
         if selected_model not in self._llm_instances:
             logger.warning(f"Selected model {selected_model} not available, using fallback")
-            return self.fallback_model
-        
-        return selected_model
+            selected_model = self.fallback_model
+
+        # Capability preflight + compatibility fallback
+        compatible_model = self.model_router.select_compatible_fallback(
+            preferred_model=selected_model,
+            required_capabilities=required_capabilities,
+            context_size=context_size,
+            budget_conscious=budget_conscious,
+        )
+
+        # Ensure the compatible model is initialized in this runtime
+        if compatible_model not in self._llm_instances:
+            logger.warning(
+                "Compatible model %s not initialized. Falling back to %s",
+                compatible_model,
+                self.fallback_model,
+            )
+            compatible_model = self.fallback_model
+
+        decision = self._build_capability_decision(
+            requested_model=selected_model,
+            selected_model=compatible_model,
+            required_capabilities=required_capabilities,
+            context_size=context_size,
+        )
+
+        if decision.fallback_applied:
+            logger.info(
+                "Capability preflight switched model %s -> %s (%s)",
+                decision.requested_model,
+                decision.selected_model,
+                decision.reason,
+            )
+
+        # Store latest decision for reporting/tracing
+        self._latest_capability_decision = decision
+
+        return compatible_model
     
     def _execute_with_model(
         self,
@@ -251,16 +347,20 @@ class RouterAgent(Agent):
             # Emit token usage via trace system for observability
             try:
                 trace_emitter = get_default_emitter()
+                capability_decision = getattr(self, '_latest_capability_decision', None)
+                trace_metadata = {
+                    'selected_model': model_name,
+                    'routing_strategy': self.routing_strategy,
+                    'token_usage': token_usage.to_dict(),
+                    'estimated_cost': self.model_usage_stats[model_name]['cost'],
+                    'total_calls': self.model_usage_stats[model_name]['calls'],
+                }
+                if capability_decision is not None:
+                    trace_metadata['capability_decision'] = asdict(capability_decision)
                 trace_emitter.output(
                     content=f"RouterAgent routing decision completed",
                     agent_name=self.name,
-                    metadata={
-                        'selected_model': model_name,
-                        'routing_strategy': self.routing_strategy,
-                        'token_usage': token_usage.to_dict(),
-                        'estimated_cost': self.model_usage_stats[model_name]['cost'],
-                        'total_calls': self.model_usage_stats[model_name]['calls'],
-                    }
+                    metadata=trace_metadata
                 )
             except Exception as trace_error:
                 # Don't fail the request if tracing fails
@@ -311,7 +411,8 @@ class RouterAgent(Agent):
         selected_model = self._select_model_for_task(
             task_description=task_description,
             tools=tools,
-            context_size=context_size
+            context_size=context_size,
+            stream=kwargs.get('stream', self.stream),
         )
         
         logger.info(f"RouterAgent '{self.name}' selected model: {selected_model} for task")
@@ -338,6 +439,10 @@ class RouterAgent(Agent):
             'routing_strategy': self.routing_strategy,
             'model_usage': {}
         }
+
+        latest_decision = getattr(self, '_latest_capability_decision', None)
+        if latest_decision is not None:
+            report['latest_capability_decision'] = asdict(latest_decision)
         
         for model, stats in self.model_usage_stats.items():
             model_info = self.model_router.get_model_info(model)

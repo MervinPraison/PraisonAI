@@ -293,6 +293,98 @@ class ModelRouter:
         selected = candidates[0]
         logger.info(f"Selected model: {selected.name} (complexity: {complexity}, cost: ${selected.cost_per_1k_tokens}/1k tokens)")
         return selected.name
+
+    def _model_supports_requirements(
+        self,
+        model: ModelProfile,
+        required_capabilities: Optional[List[str]] = None,
+        context_size: Optional[int] = None,
+    ) -> bool:
+        """Check whether a model satisfies requested capabilities and context size."""
+        required_capabilities = required_capabilities or []
+
+        if context_size and model.context_window < context_size:
+            return False
+
+        for capability in required_capabilities:
+            normalized = capability.lower().strip()
+            if normalized in ("tools", "tool-calling", "function-calling"):
+                if not model.supports_tools and "function-calling" not in model.capabilities:
+                    return False
+            elif normalized in ("stream", "streaming"):
+                if not model.supports_streaming:
+                    return False
+            else:
+                if normalized not in model.capabilities:
+                    return False
+
+        return True
+
+    def select_compatible_fallback(
+        self,
+        preferred_model: str,
+        required_capabilities: Optional[List[str]] = None,
+        context_size: Optional[int] = None,
+        budget_conscious: bool = True,
+    ) -> str:
+        """Return a compatible fallback model when preferred model misses requirements.
+
+        Strategy:
+        1) Keep preferred model when compatible
+        2) Prefer compatible models from the same provider
+        3) Otherwise choose best compatible model globally
+        """
+        preferred_profile = self.get_model_info(preferred_model)
+        if preferred_profile and self._model_supports_requirements(
+            preferred_profile,
+            required_capabilities=required_capabilities,
+            context_size=context_size,
+        ):
+            return preferred_model
+
+        compatible_models = [
+            m for m in self.models
+            if self._model_supports_requirements(
+                m,
+                required_capabilities=required_capabilities,
+                context_size=context_size,
+            )
+        ]
+
+        if not compatible_models:
+            logger.warning(
+                "No compatible fallback model found for %s (capabilities=%s, context_size=%s)",
+                preferred_model,
+                required_capabilities,
+                context_size,
+            )
+            return preferred_model
+
+        def _sort_key(model: ModelProfile):
+            if budget_conscious:
+                return (model.cost_per_1k_tokens, -model.complexity_range[1].value)
+            return (-model.complexity_range[1].value, model.cost_per_1k_tokens)
+
+        compatible_models.sort(key=_sort_key)
+
+        if preferred_profile:
+            same_provider = [m for m in compatible_models if m.provider == preferred_profile.provider]
+            if same_provider:
+                chosen = same_provider[0]
+                logger.info(
+                    "Capability fallback selected same-provider model %s (from %s)",
+                    chosen.name,
+                    preferred_model,
+                )
+                return chosen.name
+
+        chosen = compatible_models[0]
+        logger.info(
+            "Capability fallback selected model %s (from %s)",
+            chosen.name,
+            preferred_model,
+        )
+        return chosen.name
     
     def get_model_info(self, model_name: str) -> Optional[ModelProfile]:
         """Get profile information for a specific model"""
