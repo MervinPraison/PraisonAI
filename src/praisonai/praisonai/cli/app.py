@@ -238,6 +238,7 @@ def register_commands():
     from .commands.sandbox import app as sandbox_app
     from .commands.claw import app as claw_app
     from .commands.flow import app as flow_app
+    from .commands.unified import app as unified_app
     from .commands.langfuse import app as langfuse_app
     from .commands.port import app as port_app
     from .commands.managed import app as managed_app
@@ -422,6 +423,7 @@ def register_commands():
     app.add_typer(sandbox_app, name="sandbox", help="Sandbox container management")
     app.add_typer(claw_app, name="claw", help="🦞 PraisonAI Dashboard (full UI)")
     app.add_typer(flow_app, name="flow", help="Visual workflow builder (Langflow)")
+    app.add_typer(unified_app, name="dashboard", help="🌟 Unified Dashboard (Flow + Claw + UI)")
     app.add_typer(langfuse_app, name="langfuse", help="🔍 Langfuse observability platform")
     app.add_typer(port_app, name="port", help="🔌 Manage port usage and resolve conflicts")
     
