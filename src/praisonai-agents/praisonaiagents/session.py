@@ -293,7 +293,8 @@ class Session:
             session_store = get_default_session_store()
             chat_history = session_store.get_chat_history(agent_key)
             if not chat_history:
-                # Backward compatibility for older keying format
+                # Backward compatibility: fall back to legacy
+                # "{session_id}_{agent_key}" format for existing stored conversations.
                 chat_history = session_store.get_chat_history(f"{self.session_id}_{agent_key}")
             if chat_history:
                 return chat_history
