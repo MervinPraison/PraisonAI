@@ -188,7 +188,6 @@ def __getattr__(name):
     if name == "ImprovementStore":
         from .learn import ImprovementStore
         return ImprovementStore
-    # DocsManager and MCPConfigManager are already imported at module level
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [

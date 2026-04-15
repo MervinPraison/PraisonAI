@@ -539,6 +539,7 @@ Your Goal: {self.goal}"""
             # NEW: Unified protocol dispatch path (Issue #1304, #1362)
             # UNIFIED: Single protocol-driven dispatch path (fixes DRY violation)
             # All LLM providers now go through unified dispatcher for consistency and maintainability
+            stream_callback = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
             final_response = self._execute_unified_chat_completion(
                 messages=messages,
                 temperature=temperature,
@@ -548,7 +549,9 @@ Your Goal: {self.goal}"""
                 task_name=task_name,
                 task_description=task_description,
                 task_id=task_id,
-                response_format=response_format
+                response_format=response_format,
+                stream_callback=stream_callback,
+                emit_events=True,
             )
 
             # Emit LLM response trace event with token usage
@@ -678,7 +681,9 @@ Your Goal: {self.goal}"""
         task_name=None,
         task_description=None,
         task_id=None,
-        response_format=None
+        response_format=None,
+        stream_callback=None,
+        emit_events=True,
     ):
         """
         Execute unified chat completion using composition instead of runtime class mutation.
@@ -706,6 +711,8 @@ Your Goal: {self.goal}"""
         # Execute unified dispatch with all necessary parameters
         # Includes all parameters from both legacy paths to ensure full compatibility
         try:
+            if stream_callback is None and hasattr(self, 'stream_emitter'):
+                stream_callback = getattr(self.stream_emitter, 'emit', None)
             final_response = self._unified_dispatcher.chat_completion(
                 messages=messages,
                 tools=tools,
@@ -716,8 +723,8 @@ Your Goal: {self.goal}"""
                 execute_tool_fn=getattr(self, 'execute_tool', None),
                 console=self.console if (self.verbose or stream) else None,
                 display_fn=self._display_generating if self.verbose else None,
-                stream_callback=getattr(self.stream_emitter, 'emit', None) if hasattr(self, 'stream_emitter') else None,
-                emit_events=True,
+                stream_callback=stream_callback,
+                emit_events=emit_events,
                 verbose=self.verbose,
                 max_iterations=10,
                 reasoning_steps=reasoning_steps,
@@ -746,7 +753,9 @@ Your Goal: {self.goal}"""
         task_name=None,
         task_description=None,
         task_id=None,
-        response_format=None
+        response_format=None,
+        stream_callback=None,
+        emit_events=True,
     ):
         """
         Execute unified async chat completion using composition instead of runtime class mutation.
@@ -774,6 +783,8 @@ Your Goal: {self.goal}"""
         # Execute unified async dispatch with all necessary parameters
         # Includes all parameters from both legacy paths to ensure full compatibility
         try:
+            if stream_callback is None and hasattr(self, 'stream_emitter'):
+                stream_callback = getattr(self.stream_emitter, 'emit', None)
             final_response = await self._unified_dispatcher.achat_completion(
                 messages=messages,
                 tools=tools,
@@ -784,8 +795,8 @@ Your Goal: {self.goal}"""
                 execute_tool_fn=getattr(self, 'execute_tool', None),
                 console=self.console if (self.verbose or stream) else None,
                 display_fn=self._display_generating if self.verbose else None,
-                stream_callback=getattr(self.stream_emitter, 'emit', None) if hasattr(self, 'stream_emitter') else None,
-                emit_events=True,
+                stream_callback=stream_callback,
+                emit_events=emit_events,
                 verbose=self.verbose,
                 max_iterations=10,
                 reasoning_steps=reasoning_steps,
@@ -2430,4 +2441,3 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             response = self.chat(prompt, **kwargs)
             if response:
                 yield response
-
