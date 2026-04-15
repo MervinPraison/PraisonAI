@@ -388,11 +388,17 @@ def find_examples(
     if not examples_path.exists():
         typer.echo(f"❌ Examples path not found: {examples_path}")
         raise typer.Exit(2)
+    if not examples_path.is_dir():
+        typer.echo(f"❌ Examples path is not a directory: {examples_path}")
+        raise typer.Exit(2)
 
     terms = _tokenize_query(query)
     if not terms:
         typer.echo("❌ Please provide a non-empty search query")
         raise typer.Exit(2)
+
+    # Resolve path to ensure it's absolute for relative_to operations
+    examples_path = examples_path.resolve()
 
     source = ExamplesSource(
         root=examples_path,
@@ -454,7 +460,7 @@ def find_examples(
 
     typer.echo(f"Found {len(matches)} matches for '{query}' in {examples_path}\n")
 
-    for idx, (score, rel_path, item) in enumerate(matches[: max(1, limit)], 1):
+    for idx, (score, rel_path, item) in enumerate(matches[:limit], 1):
         tags = []
         if item.uses_agent:
             tags.append("agent")
