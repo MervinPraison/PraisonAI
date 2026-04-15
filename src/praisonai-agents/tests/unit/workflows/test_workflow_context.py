@@ -310,5 +310,31 @@ class TestZeroOverhead:
             "Context manager should be initialized after first access"
 
 
+class TestWorkflowHandoffCycleState:
+    """Test handoff cycle state handling in workflows."""
+
+    def test_handoff_chain_resets_between_runs(self):
+        """Repeated run() calls should not trigger false handoff cycles."""
+        from praisonaiagents.workflows.workflows import Workflow, Task
+        from types import SimpleNamespace
+
+        workflow = Workflow(
+            name="handoff_chain_reset",
+            steps=[
+                Task(
+                    name="agent_step",
+                    handler=lambda _: "ok",
+                    agent=SimpleNamespace(name="agent_stub"),
+                )
+            ],
+        )
+
+        first = workflow.run("")
+        second = workflow.run("")
+
+        assert first["output"] == "ok"
+        assert second["output"] == "ok"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
