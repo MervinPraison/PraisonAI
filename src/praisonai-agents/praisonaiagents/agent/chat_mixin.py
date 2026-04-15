@@ -560,9 +560,10 @@ Your Goal: {self.goal}"""
                         logging.debug(f"Passing {len(formatted_tools)} formatted tools to LLM instance: {formatted_tools}")
                     
                     # Use the LLM instance for streaming responses
+                    has_system = bool(messages and messages[0].get('role') == 'system')
                     final_response = self.llm_instance.get_response(
-                        prompt=messages[1:],  # Skip system message as LLM handles it separately  
-                        system_prompt=messages[0]['content'] if messages and messages[0]['role'] == 'system' else None,
+                        prompt=messages[1:] if has_system else messages,
+                        system_prompt=messages[0]['content'] if has_system else None,
                         temperature=temperature,
                         tools=formatted_tools if formatted_tools else None,
                         verbose=self.verbose,
@@ -1837,6 +1838,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # NEW: Unified protocol dispatch path (Issue #1304) - Async version
                     # Enable unified dispatch by default for DRY and feature parity (sync/async consistent)
                     if getattr(self, '_use_unified_llm_dispatch', True):
+                        # Build response_format for native structured output (parity with sync path)
+                        schema_model = output_pydantic or output_json
+                        response_format = None
+                        if schema_model and self._supports_native_structured_output():
+                            response_format = self._build_response_format(schema_model)
+                        
                         # Use composition instead of runtime class mutation for safety
                         response = await self._execute_unified_achat_completion(
                             messages=messages,

@@ -6,6 +6,7 @@ in memory/memory.py. This enables protocol-driven memory backends without
 core modifications.
 """
 
+from functools import lru_cache
 from typing import Callable, List, Optional, Tuple, Type
 from ...utils.adapter_registry import AdapterRegistry
 from ..protocols import MemoryProtocol
@@ -34,17 +35,10 @@ class MemoryAdapterRegistry(AdapterRegistry[MemoryProtocol]):
 
 
 # Default registry instance for backward compatibility
+@lru_cache(maxsize=1)
 def get_default_memory_registry() -> MemoryAdapterRegistry:
     """Get the default global registry instance for convenience."""
-    if not hasattr(get_default_memory_registry, '_default_instance'):
-        import threading
-        # Use lock for thread safety
-        if not hasattr(get_default_memory_registry, '_init_lock'):
-            get_default_memory_registry._init_lock = threading.Lock()
-        with get_default_memory_registry._init_lock:
-            if not hasattr(get_default_memory_registry, '_default_instance'):
-                get_default_memory_registry._default_instance = MemoryAdapterRegistry()
-    return get_default_memory_registry._default_instance
+    return MemoryAdapterRegistry()
 
 
 def register_memory_adapter(name: str, adapter_class: Type[MemoryProtocol]) -> None:

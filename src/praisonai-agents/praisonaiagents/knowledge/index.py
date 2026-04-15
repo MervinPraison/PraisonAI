@@ -109,10 +109,6 @@ class IndexRegistry:
     def default(cls) -> "IndexRegistry":
         """Get a default global registry instance for convenience."""
         if not hasattr(cls, '_default_instance'):
-            import threading
-            # Use lock for thread safety 
-            if not hasattr(cls, '_init_lock'):
-                cls._init_lock = threading.Lock()
             with cls._init_lock:
                 if not hasattr(cls, '_default_instance'):
                     cls._default_instance = cls()
@@ -324,6 +320,10 @@ class KeywordIndex:
             score += idf * tf_norm
         
         return score
+
+# Initialize IndexRegistry class lock for thread safety
+import threading
+IndexRegistry._init_lock = threading.Lock()
 
 # Register the keyword index by default
 def _register_default_indices():
