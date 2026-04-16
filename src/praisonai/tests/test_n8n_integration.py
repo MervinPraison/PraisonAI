@@ -184,7 +184,7 @@ class TestN8nConverter:
         assert tool_agent is not None
         assert tool_agent["type"] == "n8n-nodes-base.httpRequest"
         assert tool_agent["parameters"]["method"] == "POST"
-        assert "/agents/tool_agent" in tool_agent["parameters"]["url"]
+        assert "/api/v1/agents/tool_agent/invoke" in tool_agent["parameters"]["url"]
         
         # Check simple agent is also converted to HTTP request node
         simple_agent = next((n for n in agent_nodes if "Simple Agent" in n["name"]), None)
@@ -226,7 +226,7 @@ class TestN8nConverter:
         converter = YAMLToN8nConverter()
         result = converter.convert(yaml_workflow)
         agent_node = next(n for n in result["nodes"] if n["type"] == "n8n-nodes-base.httpRequest")
-        assert agent_node["parameters"]["url"].endswith("/agents/agent_one")
+        assert agent_node["parameters"]["url"].endswith("/api/v1/agents/Agent/One?/invoke")
 
     def test_node_positions_are_sequential(self, sample_agents_yaml_dict):
         """Test that node positions are laid out sequentially."""
@@ -278,14 +278,14 @@ class TestN8nReverseConverter:
                 },
                 {
                     "name": "Content Writer",
-                    "type": "@n8n/n8n-nodes-langchain.chainLlm",
+                    "type": "n8n-nodes-base.httpRequest",
                     "position": [650, 300],
                     "parameters": {
-                        "options": {
-                            "systemMessage": "Write engaging content based on research",
-                            "role": "Writer",
-                            "model": "gpt-4o-mini"
-                        }
+                        "method": "POST",
+                        "url": "http://localhost:8000/api/v1/agents/writer/invoke",
+                        "sendBody": True,
+                        "specifyBody": "json",
+                        "jsonBody": "={{ JSON.stringify({ message: $json.result || 'Continue workflow' }) }}"
                     }
                 }
             ],

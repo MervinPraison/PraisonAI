@@ -57,12 +57,19 @@ class N8nToYAMLConverter:
     def _is_agent_node(self, node: Dict[str, Any]) -> bool:
         """Check if node represents an AI agent."""
         node_type = node.get("type", "")
-        return (
-            "langchain.agent" in node_type or
+        
+        # Check for LangChain nodes
+        if ("langchain.agent" in node_type or
             "langchain.chainLlm" in node_type or
-            node_type.startswith("@n8n/n8n-nodes-langchain") or
-            node_type == "n8n-nodes-base.httpRequest"
-        )
+            node_type.startswith("@n8n/n8n-nodes-langchain")):
+            return True
+            
+        # Check for httpRequest nodes that point to PraisonAI API
+        if node_type == "n8n-nodes-base.httpRequest":
+            url = str(node.get("parameters", {}).get("url", ""))
+            return "/api/v1/agents/" in url and url.endswith("/invoke")
+            
+        return False
 
     def _node_to_agent_id(self, node: Dict[str, Any]) -> str:
         """Derive a stable agent id from node URL/name."""
@@ -70,7 +77,8 @@ class N8nToYAMLConverter:
         node_type = node.get("type", "")
         if node_type == "n8n-nodes-base.httpRequest":
             url = str(node.get("parameters", {}).get("url", ""))
-            match = re.search(r"/agents/([a-z0-9_]+)$", url)
+            # Match new API pattern: /api/v1/agents/{agent_id}/invoke
+            match = re.search(r"/api/v1/agents/([a-z0-9_]+)/invoke$", url)
             if match:
                 return match.group(1).lower()
         return node_name.lower().replace(" ", "_").replace("-", "_")

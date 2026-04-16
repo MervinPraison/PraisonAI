@@ -68,9 +68,9 @@ class YAMLToN8nConverter:
         steps = yaml_workflow.get("steps", [])
         connections = self._steps_to_connections(steps, agent_nodes, nodes)
         
-        # If no steps defined, create sequential chain connecting all agents
-        if not steps and agent_nodes:
-            connections = self._build_sequential_connections(agent_nodes, trigger_node.name)
+        
+        # Define fields allowed by n8n Public API
+        ALLOWED_FIELDS = ["name", "nodes", "connections", "settings"]
         
         workflow_data = {
             "name": yaml_workflow.get("name", "PraisonAI Workflow"),
@@ -81,7 +81,11 @@ class YAMLToN8nConverter:
             }
         }
         
-        return workflow_data
+        # Filter to only allowed fields for n8n Public API
+        return {
+            key: value for key, value in workflow_data.items()
+            if key in ALLOWED_FIELDS
+        }
     
     def _create_trigger_node(self) -> N8nNode:
         """Create manual trigger node."""
@@ -105,17 +109,17 @@ class YAMLToN8nConverter:
         if not agent_url_id:
             agent_url_id = f"agent_{self.node_counter}"
         
-        # Use query from webhook for first agent, previous response for others
-        query_expr = "$json.body?.query || $json.query || 'Execute task'"
+        # Use message from webhook for first agent, result from previous for others
+        query_expr = "$json.body?.message || $json.message || 'Execute task'"
         if self.node_counter > 1:
-            query_expr = "$json.response || 'Continue workflow'"
+            query_expr = "$json.result || 'Continue workflow'"
         
         parameters = {
             "method": "POST",
-            "url": f"http://localhost:8000/agents/{agent_url_id}",
+            "url": f"http://localhost:8000/api/v1/agents/{agent_id}/invoke",
             "sendBody": True,
             "specifyBody": "json",
-            "jsonBody": f"={{{{ JSON.stringify({{ query: {query_expr} }}) }}}}",
+            "jsonBody": f"={{{{ JSON.stringify({{ message: {query_expr} }}) }}}}",
             "options": {
                 "timeout": 300000  # 5 minute timeout
             }
