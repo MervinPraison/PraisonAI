@@ -53,7 +53,7 @@ app = FastAPI()
 # Set up logging
 logger = logging.getLogger(__name__)
 log_level = os.getenv("LOGLEVEL", "INFO").upper()
-logger.handlers = []
+logger.handlers.clear()
 
 # Include agent invoke router for n8n integration
 try:

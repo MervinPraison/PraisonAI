@@ -96,9 +96,15 @@ def list_registered_agents() -> list:
 
 
 def _supports_async_start(agent: Any) -> bool:
-    """Return True when agent exposes a real async astart method."""
+    """Return True if agent.astart is a coroutine function."""
     astart = getattr(agent, "astart", None)
-    return callable(astart) and inspect.iscoroutinefunction(astart)
+    return inspect.iscoroutinefunction(astart)
+
+
+def _supports_sync_start(agent: Any) -> bool:
+    """Return True when agent exposes a callable sync start method."""
+    start = getattr(agent, "start", None)
+    return callable(start)
 
 
 # FastAPI Router (if FastAPI is available)
@@ -161,11 +167,11 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
             if _supports_async_start(agent):
                 # Async agent
                 result = await agent.astart(request.message)
-            elif hasattr(agent, "start") and callable(agent.start):
+            elif _supports_sync_start(agent):
                 # Sync agent (use start method)
                 result = agent.start(request.message)
             else:
-                raise AttributeError("Agent must provide start() or async astart()")
+                raise AttributeError(f"Agent {agent_id} must provide start() or async astart()")
             
             logger.info(f"Agent {agent_id} invoked successfully")
             
@@ -298,10 +304,10 @@ async def invoke_agent_standalone(
         
         if _supports_async_start(agent):
             result = await agent.astart(message)
-        elif hasattr(agent, "start") and callable(agent.start):
+        elif _supports_sync_start(agent):
             result = agent.start(message)
         else:
-            raise AttributeError("Agent must provide start() or async astart()")
+            raise AttributeError(f"Agent {agent_id} must provide start() or async astart()")
         
         return {
             "result": str(result),
