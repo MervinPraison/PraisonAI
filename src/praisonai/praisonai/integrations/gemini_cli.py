@@ -33,6 +33,10 @@ from typing import AsyncIterator, Dict, Any, Optional, List, Tuple
 from .base import BaseCLIIntegration
 
 
+# Default model configuration
+DEFAULT_GEMINI_MODEL = os.getenv("PRAISONAI_GEMINI_MODEL", "gemini-2.5-flash-lite")
+
+
 class GeminiCLIIntegration(BaseCLIIntegration):
     """
     Integration with Google's Gemini CLI.
@@ -49,7 +53,7 @@ class GeminiCLIIntegration(BaseCLIIntegration):
         workspace: str = ".",
         timeout: int = 300,
         output_format: str = "json",
-        model: str = "gemini-2.5-pro",
+        model: Optional[str] = None,
         include_directories: Optional[List[str]] = None,
         sandbox: bool = False,
     ):
@@ -67,7 +71,7 @@ class GeminiCLIIntegration(BaseCLIIntegration):
         super().__init__(workspace=workspace, timeout=timeout)
         
         self.output_format = output_format
-        self.model = model
+        self.model = model or DEFAULT_GEMINI_MODEL
         self.include_directories = include_directories
         self.sandbox = sandbox
         

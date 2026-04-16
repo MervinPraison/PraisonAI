@@ -18,6 +18,17 @@ import shutil
 import os
 
 
+class CLIExecutionError(RuntimeError):
+    """Raised when a CLI command fails with non-zero exit code."""
+    
+    def __init__(self, cmd: List[str], returncode: int, stderr: str):
+        stderr_excerpt = stderr.strip()[:500] if stderr.strip() else "(no error message)"
+        super().__init__(f"{cmd[0]} exited {returncode}: {stderr_excerpt}")
+        self.cmd = cmd
+        self.returncode = returncode
+        self.stderr = stderr
+
+
 class BaseCLIIntegration(ABC):
     """
     Abstract base class for external CLI tool integrations.
@@ -128,6 +139,7 @@ class BaseCLIIntegration(ABC):
             
         Raises:
             TimeoutError: If the command times out
+            CLIExecutionError: If the command fails with non-zero exit code
         """
         timeout = timeout or self.timeout
         
@@ -144,6 +156,11 @@ class BaseCLIIntegration(ABC):
                 proc.communicate(),
                 timeout=timeout
             )
+            
+            # Check exit code and raise error if non-zero
+            if proc.returncode != 0:
+                raise CLIExecutionError(cmd, proc.returncode, stderr.decode(errors="replace"))
+            
             return stdout.decode()
         except asyncio.TimeoutError:
             proc.kill()

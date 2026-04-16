@@ -111,7 +111,7 @@ class CodexCLIIntegration(BaseCLIIntegration):
         Returns:
             List of command arguments
         """
-        cmd = ["codex", "exec"]
+        cmd = ["codex", "exec", "--skip-git-repo-check"]
         
         # Add working directory
         cmd.extend(["-C", self.workspace])
