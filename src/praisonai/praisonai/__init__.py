@@ -34,7 +34,6 @@ __all__ = [
     'AnthropicManagedAgent',
     'LocalManagedAgent',
     'LocalManagedConfig',
-    'n8n',  # n8n workflow integration
 ]
 
 
