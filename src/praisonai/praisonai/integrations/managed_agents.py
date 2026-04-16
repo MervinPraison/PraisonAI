@@ -639,21 +639,12 @@ class AnthropicManagedAgent:
 # ---------------------------------------------------------------------------
 # Tool mapping helpers
 # ---------------------------------------------------------------------------
-TOOL_MAPPING = {
-    "bash": "execute_command",
-    "read": "read_file",
-    "write": "write_file",
-    "edit": "apply_diff",
-    "glob": "list_files",
-    "grep": "search_file",
-    "web_fetch": "web_fetch",
-    "search": "search_web",
-}
+from ._tool_aliases import TOOL_ALIAS_MAP
 
 
 def map_managed_tools(managed_tools: List[str]) -> List[str]:
     """Map managed agent tool names to PraisonAI tool names."""
-    return [TOOL_MAPPING.get(tool, tool) for tool in managed_tools]
+    return [TOOL_ALIAS_MAP.get(tool, tool) for tool in managed_tools]
 
 
 # ---------------------------------------------------------------------------
