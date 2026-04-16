@@ -11,37 +11,58 @@ import logging
 try:
     from fastapi import APIRouter, HTTPException, Depends
     from pydantic import BaseModel, Field
+    FASTAPI_AVAILABLE = True
 except ImportError:
     # Fallback for environments without FastAPI
     APIRouter = None
     HTTPException = None
     BaseModel = object
-    Field = None
+    Field = lambda *args, **kwargs: None
+    FASTAPI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
 
 # Request/Response Models
-class AgentInvokeRequest(BaseModel):
-    """Request model for agent invocation."""
-    message: str = Field(..., description="Message to send to the agent")
-    session_id: Optional[str] = Field(None, description="Optional session ID for conversation continuity")
-    agent_config: Optional[Dict[str, Any]] = Field(None, description="Optional agent configuration overrides")
+if FASTAPI_AVAILABLE:
+    class AgentInvokeRequest(BaseModel):
+        """Request model for agent invocation."""
+        message: str = Field(..., description="Message to send to the agent")
+        session_id: Optional[str] = Field(None, description="Optional session ID for conversation continuity")
+        agent_config: Optional[Dict[str, Any]] = Field(None, description="Optional agent configuration overrides")
 
+    class AgentInvokeResponse(BaseModel):
+        """Response model for agent invocation."""
+        result: str = Field(..., description="Agent response")
+        session_id: str = Field(..., description="Session ID used for this conversation")
+        status: str = Field(default="success", description="Response status")
+        metadata: Optional[Dict[str, Any]] = Field(None, description="Optional response metadata")
 
-class AgentInvokeResponse(BaseModel):
-    """Response model for agent invocation."""
-    result: str = Field(..., description="Agent response")
-    session_id: str = Field(..., description="Session ID used for this conversation")
-    status: str = Field(default="success", description="Response status")
-    metadata: Optional[Dict[str, Any]] = Field(None, description="Optional response metadata")
-
-
-class ErrorResponse(BaseModel):
-    """Error response model."""
-    error: str = Field(..., description="Error message")
-    status: str = Field(default="error", description="Error status")
-    code: Optional[str] = Field(None, description="Error code")
+    class ErrorResponse(BaseModel):
+        """Error response model."""
+        error: str = Field(..., description="Error message")
+        status: str = Field(default="error", description="Error status")
+        code: Optional[str] = Field(None, description="Error code")
+else:
+    # Simple dict-based fallbacks
+    class AgentInvokeRequest:
+        def __init__(self, message: str, session_id: Optional[str] = None, agent_config: Optional[Dict[str, Any]] = None):
+            self.message = message
+            self.session_id = session_id
+            self.agent_config = agent_config
+    
+    class AgentInvokeResponse:
+        def __init__(self, result: str, session_id: str, status: str = "success", metadata: Optional[Dict[str, Any]] = None):
+            self.result = result
+            self.session_id = session_id
+            self.status = status
+            self.metadata = metadata
+            
+    class ErrorResponse:
+        def __init__(self, error: str, status: str = "error", code: Optional[str] = None):
+            self.error = error
+            self.status = status
+            self.code = code
 
 
 # Agent Registry
@@ -74,7 +95,7 @@ def list_registered_agents() -> list:
 
 
 # FastAPI Router (if FastAPI is available)
-if APIRouter is not None:
+if FASTAPI_AVAILABLE and APIRouter is not None:
     router = APIRouter(prefix="/api/v1", tags=["agents"])
 
     @router.post("/agents/{agent_id}/invoke")
