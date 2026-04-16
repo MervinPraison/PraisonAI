@@ -632,7 +632,17 @@ class TestN8nRoundTrip:
         n8n_json = forward_converter.convert(original_yaml)
         result_yaml = reverse_converter.convert(n8n_json)
 
-        assert any(isinstance(step, dict) and "route" in step for step in result_yaml.get("steps", []))
+        route_steps = [
+            step["route"]
+            for step in result_yaml.get("steps", [])
+            if isinstance(step, dict) and "route" in step
+        ]
+
+        assert route_steps, "Route step missing after round-trip conversion"
+        assert any(
+            route.get("type_a") == ["handler_a"] and route.get("type_b") == ["handler_b"]
+            for route in route_steps
+        ), "Route mappings were not preserved"
 
 
 if __name__ == "__main__":

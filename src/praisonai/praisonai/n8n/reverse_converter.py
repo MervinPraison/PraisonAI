@@ -233,7 +233,7 @@ class N8nToYAMLConverter:
             # Preserve control flow steps (route/if) discovered during traversal
             elif self._is_control_flow_node(current_node, nodes):
                 control_step = self._convert_control_flow(current_node, nodes, connections)
-                if control_step and control_step not in steps:
+                if control_step and not self._has_step(steps, control_step):
                     steps.append(control_step)
             
             # Add all connected nodes to queue for processing
@@ -248,6 +248,10 @@ class N8nToYAMLConverter:
                             queue.append(target_node)
         
         return steps
+
+    def _has_step(self, steps: List[Any], candidate: Dict[str, Any]) -> bool:
+        """Return True when an equivalent step already exists."""
+        return any(isinstance(step, dict) and step == candidate for step in steps)
     
     def _is_control_flow_node(self, node_name: str, nodes: List[Dict[str, Any]]) -> bool:
         """Check if node represents control flow (routing, parallel, etc.)."""

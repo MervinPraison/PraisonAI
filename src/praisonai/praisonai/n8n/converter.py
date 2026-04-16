@@ -235,7 +235,7 @@ class YAMLToN8nConverter:
                     }
                     
                     # Connect switch to target agents
-                    switch_connections = []
+                    switch_outputs = []
                     for route_key, target_agents in step["route"].items():
                         if route_key != "default" and target_agents:
                             if isinstance(target_agents, list):
@@ -244,13 +244,13 @@ class YAMLToN8nConverter:
                                 target_agent = target_agents
                                 
                             if target_agent in agent_nodes:
-                                switch_connections.append({
-                                    "node": agent_nodes[target_agent], 
-                                    "type": "main", 
-                                    "index": len(switch_connections)
-                                })
+                                switch_outputs.append([{
+                                    "node": agent_nodes[target_agent],
+                                    "type": "main",
+                                    "index": 0
+                                }])
                     
-                    connections[switch_node.name] = {"main": [switch_connections]}
+                    connections[switch_node.name] = {"main": switch_outputs}
                     previous_node = switch_node.name
                     
                 elif "parallel" in step:
