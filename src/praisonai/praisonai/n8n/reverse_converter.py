@@ -46,6 +46,11 @@ class N8nToYAMLConverter:
             "name": n8n_workflow.get("name", "Converted Workflow")
         }
         
+        # Restore workflow description from staticData if present
+        static_data = n8n_workflow.get("staticData", {})
+        if static_data.get("praisonai_description"):
+            yaml_workflow["description"] = static_data["praisonai_description"]
+        
         if agents:
             yaml_workflow["agents"] = agents
             
@@ -110,6 +115,13 @@ class N8nToYAMLConverter:
         # Extract model/LLM configuration
         if options.get("model"):
             agent_config["llm"] = options["model"]
+            
+        # Extract additional agent fields for round-trip preservation
+        if options.get("goal"):
+            agent_config["goal"] = options["goal"]
+            
+        if options.get("backstory"):
+            agent_config["backstory"] = options["backstory"]
             
         # Extract tools
         tools = self._extract_tools(parameters)
@@ -182,18 +194,44 @@ class N8nToYAMLConverter:
                         steps.append({"agent": agent_id})
             return steps
         
-        # Trace execution from trigger
+        # Trace execution from trigger using BFS to get complete step order
         trigger_name = trigger_nodes[0].get("name")
-        visited = set()
+        steps = self._trace_execution_complete(trigger_name, connections, node_to_agent, nodes)
         
-        def trace_execution(current_node: str) -> List[Any]:
-            """Recursively trace execution path."""
+        # If no steps found through connections, create sequential steps from all agents
+        if not steps:
+            for node in nodes:
+                if self._is_agent_node(node):
+                    agent_id = node_to_agent.get(node.get("name"))
+                    if agent_id:
+                        steps.append({"agent": agent_id})
+        
+        return steps
+    
+    def _trace_execution_complete(self, start_node: str, connections: Dict[str, Any], node_to_agent: Dict[str, str], nodes: List[Dict[str, Any]]) -> List[Any]:
+        """Complete BFS traversal of execution graph to capture all agent steps."""
+        from collections import deque
+        
+        steps = []
+        visited = set()
+        queue = deque([start_node])
+        
+        while queue:
+            current_node = queue.popleft()
+            
             if current_node in visited:
-                return []
+                continue
                 
             visited.add(current_node)
-            current_steps = []
             
+            # If this is an agent node, add it as a step
+            if current_node in node_to_agent:
+                agent_id = node_to_agent[current_node]
+                # Avoid duplicate agent steps
+                if not any(step.get("agent") == agent_id for step in steps if isinstance(step, dict)):
+                    steps.append({"agent": agent_id})
+            
+            # Add all connected nodes to queue for processing
             if current_node in connections:
                 connection = connections[current_node]
                 main_connections = connection.get("main", [[]])
@@ -201,27 +239,9 @@ class N8nToYAMLConverter:
                 for output_connections in main_connections:
                     for conn in output_connections:
                         target_node = conn.get("node")
-                        
-                        if not target_node:
-                            continue
-                            
-                        # Check if target is an agent
-                        if target_node in node_to_agent:
-                            agent_id = node_to_agent[target_node]
-                            current_steps.append({"agent": agent_id})
-                            
-                        # Check if target is a control flow node
-                        elif self._is_control_flow_node(target_node, nodes):
-                            control_step = self._convert_control_flow(target_node, nodes, connections)
-                            if control_step:
-                                current_steps.append(control_step)
-                        
-                        # Continue tracing
-                        current_steps.extend(trace_execution(target_node))
-            
-            return current_steps
+                        if target_node and target_node not in visited:
+                            queue.append(target_node)
         
-        steps = trace_execution(trigger_name)
         return steps
     
     def _is_control_flow_node(self, node_name: str, nodes: List[Dict[str, Any]]) -> bool:

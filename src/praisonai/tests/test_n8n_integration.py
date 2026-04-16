@@ -462,6 +462,75 @@ class TestN8nWorkflowPatterns:
 
 class TestN8nRoundTrip:
     """Tests for round-trip conversion."""
+    
+    def test_converter_roundtrip_preserves_all_fields(self):
+        """Test complete round-trip preservation of all required fields."""
+        try:
+            from praisonai.n8n import YAMLToN8nConverter, N8nToYAMLConverter
+        except ImportError:
+            pytest.skip("n8n dependencies not available")
+        
+        # Input YAML with all fields that should be preserved
+        input_yaml = {
+            "name": "Test Workflow",
+            "description": "Simple test workflow",
+            "agents": {
+                "researcher": {
+                    "name": "Researcher",
+                    "role": "Research Specialist",
+                    "goal": "Research topics",
+                    "backstory": "Expert researcher",
+                    "llm": "gpt-4o-mini"
+                },
+                "writer": {
+                    "name": "Writer", 
+                    "role": "Writer",
+                    "goal": "Write content",
+                    "backstory": "Pro writer", 
+                    "llm": "gpt-4o-mini"
+                }
+            },
+            "steps": [
+                {"agent": "researcher"},
+                {"agent": "writer"}
+            ]
+        }
+        
+        # Round-trip conversion
+        forward_converter = YAMLToN8nConverter()
+        reverse_converter = N8nToYAMLConverter()
+        
+        n8n_json = forward_converter.convert(input_yaml)
+        output_yaml = reverse_converter.convert(n8n_json)
+        
+        # Assertions per acceptance criteria
+        
+        # Round-trip preserves description
+        assert output_yaml.get("description") == input_yaml["description"], "Workflow description not preserved"
+        
+        # Round-trip preserves goal and backstory for every agent
+        for agent_id, input_agent in input_yaml["agents"].items():
+            # Find corresponding agent in output (ID may be different)
+            output_agent = None
+            for aid, agent in output_yaml["agents"].items():
+                if agent["name"] == input_agent["name"]:
+                    output_agent = agent
+                    break
+            
+            assert output_agent is not None, f"Agent {input_agent['name']} not found in output"
+            assert output_agent.get("goal") == input_agent["goal"], f"Goal not preserved for {input_agent['name']}"
+            assert output_agent.get("backstory") == input_agent["backstory"], f"Backstory not preserved for {input_agent['name']}"
+        
+        # Round-trip preserves all steps
+        assert len(output_yaml["steps"]) == len(input_yaml["steps"]), "Not all steps preserved"
+        
+        # All agent steps should be present
+        input_agents = set(step["agent"] for step in input_yaml["steps"] if "agent" in step)
+        output_agent_names = {agent["name"] for agent in output_yaml["agents"].values()}
+        
+        for agent_id in input_agents:
+            input_agent_name = input_yaml["agents"][agent_id]["name"]
+            assert input_agent_name in output_agent_names, f"Agent step for {input_agent_name} missing"
 
     def test_round_trip_conversion(self):
         """Test YAML -> n8n -> YAML round trip maintains core structure."""
@@ -472,15 +541,24 @@ class TestN8nRoundTrip:
         
         original_yaml = {
             "name": "Round Trip Test",
+            "description": "Test workflow for round-trip conversion",
             "agents": {
                 "researcher": {
                     "name": "Research Agent",
-                    "instructions": "Research topics",
+                    "role": "Research Specialist", 
+                    "goal": "Research topics thoroughly",
+                    "backstory": "Expert researcher with years of experience",
+                    "instructions": "Research topics using available tools",
+                    "llm": "gpt-4o-mini",
                     "tools": ["web_search"]
                 },
                 "writer": {
                     "name": "Content Writer",
-                    "instructions": "Write content"
+                    "role": "Writer",
+                    "goal": "Write engaging content", 
+                    "backstory": "Professional content writer",
+                    "instructions": "Write content based on research",
+                    "llm": "gpt-4o-mini"
                 }
             },
             "steps": [
@@ -499,13 +577,34 @@ class TestN8nRoundTrip:
         
         # Check that core structure is preserved
         assert result_yaml["name"] == original_yaml["name"]
+        assert result_yaml.get("description") == original_yaml["description"] 
         assert "agents" in result_yaml
         assert "steps" in result_yaml
         
-        # Should have same number of agents (within reason - conversion may change names)
+        # Should have same number of agents
         original_agent_count = len(original_yaml["agents"])
         result_agent_count = len(result_yaml["agents"])
         assert result_agent_count == original_agent_count
+        
+        # Check that all steps are preserved
+        assert len(result_yaml["steps"]) == len(original_yaml["steps"])
+        
+        # Verify agent fields are preserved
+        result_agents = result_yaml["agents"]
+        for agent_id, original_agent in original_yaml["agents"].items():
+            # Agent ID might be transformed, so find by name
+            result_agent = None
+            for aid, agent in result_agents.items():
+                if agent.get("name") == original_agent["name"]:
+                    result_agent = agent
+                    break
+            
+            assert result_agent is not None, f"Agent {original_agent['name']} not found in result"
+            
+            # Check all fields are preserved
+            for field in ["role", "goal", "backstory", "llm"]:
+                if field in original_agent:
+                    assert result_agent.get(field) == original_agent[field], f"Field {field} not preserved for agent {original_agent['name']}"
 
 
 if __name__ == "__main__":
