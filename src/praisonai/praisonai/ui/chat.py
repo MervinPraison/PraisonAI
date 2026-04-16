@@ -422,7 +422,7 @@ def _get_or_create_agent(model_name: str, tools_enabled: bool = True, external_a
     _profile_start("create_agent")
     tools = []
     if tools_enabled:
-        tools = _get_interactive_tools()
+        tools = list(_get_interactive_tools())  # Copy to avoid mutating cache
         # Add Tavily if available
         if os.getenv("TAVILY_API_KEY"):
             tools.append(tavily_web_search)
@@ -826,6 +826,11 @@ async def on_chat_resume(thread: ThreadDict):
     tools_enabled = (load_setting("tools_enabled") or "true").lower() == "true"
     
     logger.debug(f"Model name: {model_name}")
+    
+    # Load external agent settings for resume
+    from praisonai.ui._external_agents import load_external_agent_settings_from_chainlit, chainlit_switches
+    external_settings = load_external_agent_settings_from_chainlit()
+    
     settings = cl.ChatSettings(
         [
             TextInput(
@@ -838,7 +843,8 @@ async def on_chat_resume(thread: ThreadDict):
                 id="tools_enabled",
                 label="Enable Tools (ACP, LSP, Web Search)",
                 initial=tools_enabled
-            )
+            ),
+            *chainlit_switches(external_settings),
         ]
     )
     await settings.send()

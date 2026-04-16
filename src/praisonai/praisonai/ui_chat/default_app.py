@@ -49,16 +49,22 @@ async def on_welcome():
     await aiui.say("👋 Hi! I'm your PraisonAI assistant. Ask me anything!")
 
 
-_agent = None
+# Session-scoped agent cache to avoid cross-user state leaks
+_agents_cache = {}
 
 @aiui.settings
 async def on_settings(new_settings):
-    global _agent
-    _agent = None  # invalidate cache on change
+    # Clear cache for current session when settings change
+    session_id = getattr(aiui.current_session, 'id', 'default')
+    if session_id in _agents_cache:
+        del _agents_cache[session_id]
 
-def _get_agent(settings):
-    global _agent
-    if _agent is None:
+def _get_agent(settings: dict | None = None):
+    session_id = getattr(aiui.current_session, 'id', 'default')
+    settings_key = str(sorted((settings or {}).items()))
+    cache_key = f"{session_id}:{settings_key}"
+    
+    if cache_key not in _agents_cache:
         try:
             from praisonaiagents import Agent
             from praisonai.ui._external_agents import external_agent_tools
@@ -66,19 +72,20 @@ def _get_agent(settings):
             # Get external agent tools based on settings
             tools = external_agent_tools(settings or {}, workspace=os.environ.get("PRAISONAI_WORKSPACE", "."))
             
-            _agent = Agent(
+            agent = Agent(
                 name="PraisonAI",
                 instructions="You are a helpful assistant. Delegate coding/analysis tasks to external subagents when available.",
                 llm=os.getenv("MODEL_NAME", "gpt-4o-mini"),
                 tools=tools if tools else None,
             )
+            _agents_cache[cache_key] = agent
         except ImportError:
             # Fallback to OpenAI if PraisonAI agents not available
-            _agent = None
-    return _agent
+            _agents_cache[cache_key] = None
+    return _agents_cache[cache_key]
 
 @aiui.reply
-async def on_message(message: str, settings: dict = None):
+async def on_message(message: str, settings: dict | None = None):
     """Stream a response using PraisonAI Agent or fallback to OpenAI."""
     await aiui.think("Thinking...")
     
@@ -86,13 +93,16 @@ async def on_message(message: str, settings: dict = None):
     agent = _get_agent(settings)
     if agent is not None:
         try:
-            # Use agent.start() for synchronous call - agent handles async internally
-            result = agent.start(str(message))
-            # Stream the response token by token
-            for chunk in str(result).split(" "):
-                await aiui.stream_token(chunk + " ")
+            # Use async call to avoid blocking the event loop
+            result = await agent.achat(str(message))
+            response_text = str(result) if result else ""
+            words = response_text.split(" ")
+            for i, word in enumerate(words):
+                await aiui.stream_token(word + (" " if i < len(words) - 1 else ""))
             return
         except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception("Agent execution failed")
             await aiui.say(f"⚠️ Agent error: {e}. Falling back to OpenAI...")
     
     # Fallback to direct OpenAI

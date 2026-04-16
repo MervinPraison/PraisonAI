@@ -506,8 +506,10 @@ async def ui_run_praisonai(config, topic, tools_dict):
                         logger.warning(f"Tool '{tool_name}' not found. Skipping.")
             
             # Set the agent's tools after collecting all tools
-            if role_tools:
-                agent.tools = role_tools
+            # Merge resolved YAML tools with external agent tools so both survive
+            merged_tools = role_tools + external_tools
+            if merged_tools:
+                agent.tools = merged_tools
 
             for tname, tdetails in details.get('tasks', {}).items():
                 description_filled = tdetails['description'].format(topic=topic)
@@ -696,11 +698,15 @@ async def start_chat():
                 f.write("# Add your custom agents here\n")
         
         # Load external agent settings
-        from praisonai.ui._external_agents import chainlit_switches
         try:
-            from praisonai.ui._external_agents import load_external_agent_settings_from_chainlit
+            from praisonai.ui._external_agents import (
+                chainlit_switches,
+                load_external_agent_settings_from_chainlit,
+            )
             external_settings = load_external_agent_settings_from_chainlit(load_setting)
         except ImportError:
+            def chainlit_switches(_settings):  # no-op fallback
+                return []
             external_settings = {}
         
         settings = await cl.ChatSettings(

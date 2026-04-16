@@ -44,7 +44,12 @@ def external_agent_tools(settings: Dict[str, Any], workspace: str = ".") -> list
             if integration.is_available:
                 tools.append(integration.as_tool())
         except (ImportError, AttributeError):
-            # Integration module not available, skip
+            continue  # Integration module/class not available
+        except Exception as e:  # noqa: BLE001 — isolate faulty integrations
+            import logging
+            logging.getLogger(__name__).warning(
+                "Skipping external agent %s due to error: %s", toggle_id, e
+            )
             continue
     return tools
 
@@ -98,9 +103,10 @@ def load_external_agent_settings_from_chainlit(
     if loader is None:
         try:
             # Backward-compatible fallback for callers that don't pass a loader
-            from praisonai.ui.chat import load_setting as loader
+            from praisonai.ui.chat import load_setting as loader  # type: ignore
         except ImportError:
             loader = None
+    
     if loader is not None:
         # Check for legacy key first
         if _parse_setting_bool(loader("claude_code_enabled")):
@@ -109,8 +115,11 @@ def load_external_agent_settings_from_chainlit(
         # Load all current toggles from persistent storage
         for toggle_id in EXTERNAL_AGENTS:
             persistent_value = loader(toggle_id)
-            if persistent_value is not None:
-                settings[toggle_id] = _parse_setting_bool(persistent_value)
+            if persistent_value:  # non-empty string
+                value = _parse_setting_bool(persistent_value)
+                # Don't let a False persistent value override a legacy True
+                if not (toggle_id == "claude_enabled" and settings.get(toggle_id) and not value):
+                    settings[toggle_id] = value
     
     # Load from session (may override persistent settings)
     # Check for legacy key in session
