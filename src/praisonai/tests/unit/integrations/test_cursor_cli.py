@@ -69,6 +69,7 @@ class TestCursorCLIIntegration:
         assert "Fix the bug" in cmd
         assert "--output-format" in cmd
         assert "json" in cmd
+        assert "--workspace" not in cmd
     
     def test_build_command_with_force(self):
         """Test building command with force flag."""

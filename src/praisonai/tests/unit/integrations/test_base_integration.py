@@ -258,6 +258,29 @@ class TestBaseCLIIntegrationAsync:
         result = await integration.execute("test")
         assert "error" in result
 
+    @pytest.mark.asyncio
+    async def test_execute_async_raises_cli_execution_error(self):
+        """Test that execute_async raises CLIExecutionError on non-zero exit."""
+        from praisonai.integrations.base import BaseCLIIntegration, CLIExecutionError
+
+        class TestIntegration(BaseCLIIntegration):
+            @property
+            def cli_command(self) -> str:
+                return "bash"
+
+            async def execute(self, prompt: str, **options) -> str:
+                return await self.execute_async(["bash", "-c", "echo failure >&2; exit 7"])
+
+            async def stream(self, prompt: str, **options):
+                yield {}
+
+        integration = TestIntegration()
+        with pytest.raises(CLIExecutionError) as exc:
+            await integration.execute("test")
+
+        assert exc.value.returncode == 7
+        assert "failure" in exc.value.stderr
+
 
 class TestAvailabilityCache:
     """Tests for the availability caching mechanism."""

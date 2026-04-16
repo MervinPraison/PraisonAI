@@ -34,7 +34,7 @@ from .base import BaseCLIIntegration
 
 
 # Default model configuration
-DEFAULT_GEMINI_MODEL = os.getenv("PRAISONAI_GEMINI_MODEL", "gemini-2.5-flash-lite")
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 
 class GeminiCLIIntegration(BaseCLIIntegration):
@@ -71,7 +71,7 @@ class GeminiCLIIntegration(BaseCLIIntegration):
         super().__init__(workspace=workspace, timeout=timeout)
         
         self.output_format = output_format
-        self.model = model or DEFAULT_GEMINI_MODEL
+        self.model = model or os.getenv("PRAISONAI_GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
         self.include_directories = include_directories
         self.sandbox = sandbox
         

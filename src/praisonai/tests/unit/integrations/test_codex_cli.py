@@ -83,6 +83,7 @@ class TestCodexCLIIntegration:
         
         assert cmd[0] == "codex"
         assert "exec" in cmd
+        assert "--skip-git-repo-check" in cmd
         assert "Fix the bug" in cmd
     
     def test_build_command_with_full_auto(self):
