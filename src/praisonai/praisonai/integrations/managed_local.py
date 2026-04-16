@@ -468,7 +468,10 @@ class LocalManagedAgent:
         # If compute provider is attached, install in sandbox
         if self._compute and self._compute_instance_id:
             logger.info("[local_managed] installing pip packages in sandbox: %s", pip_pkgs)
-            cmd = f"{sys.executable} -m pip install -q " + " ".join(pip_pkgs)
+            import shlex
+            cmd = f"{shlex.quote(sys.executable)} -m pip install -q " + " ".join(
+                shlex.quote(pkg) for pkg in pip_pkgs
+            )
             try:
                 await self._compute.execute(self._compute_instance_id, cmd, timeout=120)
             except Exception as e:
@@ -593,6 +596,7 @@ class LocalManagedAgent:
             }
         )
 
+        end_metadata = {"status": "completed"}
         try:
             agent = await self._ensure_agent()
             self._ensure_session()
@@ -608,10 +612,10 @@ class LocalManagedAgent:
             return result
             
         except Exception as e:
-            emitter.agent_end(agent_name=agent_name, metadata={"error": str(e)})
+            end_metadata = {"status": "error", "error": str(e)}
             raise
         finally:
-            emitter.agent_end(agent_name=agent_name, metadata={"status": "completed"})
+            emitter.agent_end(agent_name=agent_name, metadata=end_metadata)
 
     def _sync_usage(self) -> None:
         """Sync token usage from inner agent to managed backend counters."""

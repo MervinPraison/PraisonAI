@@ -440,6 +440,7 @@ class AnthropicManagedAgent:
             }
         )
 
+        end_metadata = {"status": "completed"}
         try:
             client = self._get_client()
             session_id = self._ensure_session()
@@ -470,10 +471,10 @@ class AnthropicManagedAgent:
             return result
             
         except Exception as e:
-            emitter.agent_end(agent_name=agent_name, metadata={"error": str(e)})
+            end_metadata = {"status": "error", "error": str(e)}
             raise
         finally:
-            emitter.agent_end(agent_name=agent_name, metadata={"status": "completed"})
+            emitter.agent_end(agent_name=agent_name, metadata=end_metadata)
 
     # ------------------------------------------------------------------
     # stream() — ManagedBackendProtocol
