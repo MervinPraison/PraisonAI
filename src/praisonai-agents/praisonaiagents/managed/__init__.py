@@ -25,6 +25,7 @@ from .protocols import (
     ComputeConfig,
     InstanceInfo,
     InstanceStatus,
+    ManagedBackendProtocol,
 )
 
 __all__ = [
@@ -41,4 +42,5 @@ __all__ = [
     "ComputeConfig",
     "InstanceInfo",
     "InstanceStatus",
+    "ManagedBackendProtocol",
 ]

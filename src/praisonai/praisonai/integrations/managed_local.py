@@ -54,10 +54,10 @@ TOOL_ALIAS_MAP = {
     "bash": "execute_command",
     "read": "read_file",
     "write": "write_file",
-    "edit": "write_file",
+    "edit": "apply_diff",  # Consistent with managed_agents.py
     "glob": "list_files",
-    "grep": "execute_command",
-    "web_fetch": "web_crawl",
+    "grep": "search_file",  # Fixed: should search files, not execute commands
+    "web_fetch": "web_fetch",  # Fixed: consistent with managed_agents.py 
     "search": "search_web",
     "web_search": "search_web",
 }
@@ -278,6 +278,9 @@ class LocalManagedAgent:
         # Compute provider (optional — for remote tool execution)
         self._compute = self._resolve_compute(compute)
         self._compute_instance_id: Optional[str] = None
+        
+        # Tracing support
+        self._trace_emitter = None
 
     # ------------------------------------------------------------------
     # Model resolution
@@ -468,14 +471,32 @@ class LocalManagedAgent:
 
         pip_pkgs = packages.get("pip", []) if isinstance(packages, dict) else []
         if pip_pkgs:
-            cmd = [sys.executable, "-m", "pip", "install", "-q"] + pip_pkgs
             logger.info("[local_managed] installing pip packages: %s", pip_pkgs)
-            try:
-                subprocess.run(cmd, check=True, capture_output=True, timeout=120)
-            except subprocess.CalledProcessError as e:
-                logger.warning("[local_managed] pip install failed: %s", e.stderr)
-            except subprocess.TimeoutExpired:
-                logger.warning("[local_managed] pip install timed out")
+            
+            # Use compute provider if available, otherwise fall back to host
+            if self._compute:
+                try:
+                    # Route package installation through compute provider
+                    cmd_str = f"{sys.executable} -m pip install -q " + " ".join(pip_pkgs)
+                    result = self._compute.execute(cmd_str)
+                    logger.info("[local_managed] packages installed via compute provider")
+                except Exception as e:
+                    logger.warning("[local_managed] compute provider pip install failed: %s", e)
+                    # Fall back to host installation
+                    self._install_packages_host(pip_pkgs)
+            else:
+                self._install_packages_host(pip_pkgs)
+    
+    def _install_packages_host(self, pip_pkgs: List[str]) -> None:
+        """Install packages on host interpreter (fallback)."""
+        cmd = [sys.executable, "-m", "pip", "install", "-q"] + pip_pkgs
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, timeout=120)
+            logger.info("[local_managed] packages installed on host")
+        except subprocess.CalledProcessError as e:
+            logger.warning("[local_managed] host pip install failed: %s", e.stderr)
+        except subprocess.TimeoutExpired:
+            logger.warning("[local_managed] host pip install timed out")
 
     def _ensure_agent(self) -> Any:
         """Create or return the inner PraisonAI Agent."""
@@ -491,12 +512,25 @@ class LocalManagedAgent:
         system = self._cfg.get("system", self.instructions)
         name = self._cfg.get("name", "Agent")
 
+        # Configure execution environment if compute provider is available
+        execution_config = None
+        if self._compute:
+            from praisonaiagents import ExecutionConfig
+            execution_config = ExecutionConfig(
+                code_execution=True,
+                code_mode=self._cfg.get("sandbox_type", "subprocess"),
+                compute_provider=self._compute
+            )
+
         agent_kwargs: Dict[str, Any] = {
             "name": name,
             "instructions": system,
             "llm": model,
             "tools": tools,
         }
+        
+        if execution_config:
+            agent_kwargs["execution"] = execution_config
 
         # Pass API key and base if provided
         if self.api_key:
@@ -523,6 +557,10 @@ class LocalManagedAgent:
         })
         self._persist_state()
         logger.info("[local_managed] session created: %s", self._session_id)
+        
+        # Emit trace event for session creation
+        self._emit_trace_event("managed.session.created", {"session_id": self._session_id})
+        
         return self._session_id
 
     # ------------------------------------------------------------------
@@ -547,34 +585,49 @@ class LocalManagedAgent:
 
     def _execute_sync(self, prompt: str, stream_live: bool = False) -> str:
         """Synchronous execution using PraisonAI Agent.chat()."""
+        # Emit trace event for managed execution start
+        self._emit_trace_event("managed.execution.start", {"prompt": prompt, "stream_live": stream_live})
+        
         agent = self._ensure_agent()
         self._ensure_session()
         self._persist_message("user", prompt)
 
-        if stream_live:
-            result_parts = []
-            gen = agent.chat(prompt, stream=True)
-            if hasattr(gen, '__iter__'):
-                for chunk in gen:
-                    if chunk:
-                        sys.stdout.write(str(chunk))
-                        sys.stdout.flush()
-                        result_parts.append(str(chunk))
-                sys.stdout.write("\n")
-                sys.stdout.flush()
-                full = "".join(result_parts)
+        try:
+            if stream_live:
+                result_parts = []
+                gen = agent.chat(prompt, stream=True)
+                if hasattr(gen, '__iter__'):
+                    for chunk in gen:
+                        if chunk:
+                            sys.stdout.write(str(chunk))
+                            sys.stdout.flush()
+                            result_parts.append(str(chunk))
+                    sys.stdout.write("\n")
+                    sys.stdout.flush()
+                    full = "".join(result_parts)
+                else:
+                    full = str(gen) if gen else ""
+                    sys.stdout.write(full + "\n")
+                    sys.stdout.flush()
             else:
-                full = str(gen) if gen else ""
-                sys.stdout.write(full + "\n")
-                sys.stdout.flush()
-        else:
-            result = agent.chat(prompt)
-            full = str(result) if result else ""
+                result = agent.chat(prompt)
+                full = str(result) if result else ""
 
-        self._persist_message("assistant", full)
-        self._sync_usage()
-        self._persist_state()
-        return full
+            self._persist_message("assistant", full)
+            self._sync_usage()
+            self._persist_state()
+            
+            # Emit trace event for successful completion
+            self._emit_trace_event("managed.execution.complete", {
+                "response_length": len(full),
+                "session_id": self._session_id
+            })
+            
+            return full
+        except Exception as e:
+            # Emit trace event for execution error
+            self._emit_trace_event("managed.execution.error", {"error": str(e)})
+            raise
 
     # ------------------------------------------------------------------
     # stream() — ManagedBackendProtocol
@@ -618,12 +671,17 @@ class LocalManagedAgent:
     # ------------------------------------------------------------------
     def reset_session(self) -> None:
         """Discard cached session; next execute() creates a fresh one."""
+        old_session_id = self._session_id
         self._session_id = None
         if self._inner_agent and hasattr(self._inner_agent, 'chat_history'):
             self._inner_agent.chat_history = []
+        
+        # Emit trace event for session reset
+        self._emit_trace_event("managed.session.reset", {"old_session_id": old_session_id})
 
     def reset_all(self) -> None:
         """Discard all cached state."""
+        old_agent_id = self.agent_id
         self.agent_id = None
         self.agent_version = 1
         self.environment_id = None
@@ -632,6 +690,9 @@ class LocalManagedAgent:
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self._session_history = []
+        
+        # Emit trace event for full reset
+        self._emit_trace_event("managed.reset_all", {"old_agent_id": old_agent_id})
 
     # ------------------------------------------------------------------
     # update_agent — ManagedBackendProtocol
@@ -671,24 +732,60 @@ class LocalManagedAgent:
     # retrieve_session / list_sessions — ManagedBackendProtocol
     # ------------------------------------------------------------------
     def retrieve_session(self) -> Dict[str, Any]:
-        """Retrieve current session metadata."""
+        """Retrieve current session metadata with standardized schema."""
         self._sync_usage()
+        
+        # Find session metadata from history
+        session_meta = None
+        if self._session_id:
+            for session in self._session_history:
+                if session.get("id") == self._session_id:
+                    session_meta = session
+                    break
+        
+        current_time = time.time()
         return {
-            "id": self._session_id,
+            "session_id": self._session_id or "",
+            "agent_id": self.agent_id or "",
+            "environment_id": self.environment_id or "",
             "status": "idle" if self._session_id else "none",
+            "created_at": session_meta.get("created_at", current_time) if session_meta else current_time,
+            "last_activity_at": current_time,
             "usage": {
                 "input_tokens": self.total_input_tokens,
                 "output_tokens": self.total_output_tokens,
+                "cache_creation_input_tokens": 0,  # Not tracked in local implementation
+                "cache_read_input_tokens": 0,      # Not tracked in local implementation
             },
+            "metadata": session_meta.get("metadata", {}) if session_meta else {},
         }
 
     def list_sessions(self, **kwargs) -> List[Dict[str, Any]]:
         """List all sessions created in this backend instance."""
         limit = kwargs.get("limit")
-        result = list(self._session_history)
+        
+        # Convert to standardized schema
+        standardized_sessions = []
+        for session in self._session_history:
+            standardized_sessions.append({
+                "session_id": session.get("id", ""),
+                "agent_id": self.agent_id or "",
+                "environment_id": self.environment_id or "",
+                "status": session.get("status", "idle"),
+                "created_at": session.get("created_at", 0.0),
+                "last_activity_at": session.get("created_at", 0.0),  # Approximation
+                "usage": {
+                    "input_tokens": 0,   # Per-session usage not tracked
+                    "output_tokens": 0,
+                    "cache_creation_input_tokens": 0,
+                    "cache_read_input_tokens": 0,
+                },
+                "metadata": session.get("metadata", {}),
+            })
+        
         if limit:
-            result = result[:limit]
-        return result
+            standardized_sessions = standardized_sessions[:limit]
+        return standardized_sessions
 
     # ------------------------------------------------------------------
     # Session resume / ID persistence
@@ -791,6 +888,24 @@ class LocalManagedAgent:
     def compute_provider(self) -> Optional[Any]:
         """The attached compute provider (if any)."""
         return self._compute
+
+    def _emit_trace_event(self, event_type: str, data: Dict[str, Any]) -> None:
+        """Emit a trace event for observability integration."""
+        try:
+            from praisonaiagents.trace import get_context_emitter
+            emitter = get_context_emitter()
+            if emitter and hasattr(emitter, 'emit_action'):
+                emitter.emit_action(
+                    action_type=event_type,
+                    data={
+                        **data,
+                        "agent_id": self.agent_id,
+                        "provider": self.provider,
+                        "timestamp": time.time()
+                    }
+                )
+        except Exception as e:
+            logger.debug("[local_managed] trace emit failed: %s", e)
 
     async def provision_compute(self, **kwargs) -> Any:
         """Provision compute infrastructure for remote tool execution.

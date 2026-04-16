@@ -533,6 +533,97 @@ def ids_restore(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Delete commands for missing CLI operations (Fix A7)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@sessions_app.command("delete")
+def sessions_delete(
+    session_id: str = typer.Argument(..., help="Session ID to delete"),
+    force: bool = typer.Option(False, "--force", help="Force delete without confirmation"),
+):
+    """Delete a managed session."""
+    if not force:
+        confirm = typer.confirm(f"Delete session {session_id}?")
+        if not confirm:
+            typer.echo("Cancelled.")
+            return
+
+    client = _get_client()
+    try:
+        # For Anthropic managed agents, delete via API
+        response = client.delete(f"/v1/agent_sessions/{session_id}")
+        typer.secho(f"Session {session_id} deleted", fg="green")
+    except Exception as e:
+        typer.secho(f"Failed to delete session: {e}", fg="red")
+
+
+@agents_app.command("delete")
+def agents_delete(
+    agent_id: str = typer.Argument(..., help="Agent ID to delete"),
+    force: bool = typer.Option(False, "--force", help="Force delete without confirmation"),
+):
+    """Delete a managed agent."""
+    if not force:
+        confirm = typer.confirm(f"Delete agent {agent_id}? This will also delete all its sessions.")
+        if not confirm:
+            typer.echo("Cancelled.")
+            return
+
+    client = _get_client()
+    try:
+        response = client.delete(f"/v1/agents/{agent_id}")
+        typer.secho(f"Agent {agent_id} deleted", fg="green")
+    except Exception as e:
+        typer.secho(f"Failed to delete agent: {e}", fg="red")
+
+
+@envs_app.command("update")
+def envs_update(
+    env_id: str = typer.Argument(..., help="Environment ID to update"),
+    name: Optional[str] = typer.Option(None, "--name", help="New environment name"),
+    description: Optional[str] = typer.Option(None, "--description", help="New environment description"),
+):
+    """Update a managed environment."""
+    if not name and not description:
+        typer.echo("Must specify at least --name or --description")
+        return
+
+    client = _get_client()
+    try:
+        data = {}
+        if name:
+            data["name"] = name
+        if description:
+            data["description"] = description
+
+        response = client.patch(f"/v1/environments/{env_id}", json=data)
+        typer.secho(f"Environment {env_id} updated", fg="green")
+        typer.echo(json.dumps(response.json(), indent=2))
+    except Exception as e:
+        typer.secho(f"Failed to update environment: {e}", fg="red")
+
+
+@envs_app.command("delete")
+def envs_delete(
+    env_id: str = typer.Argument(..., help="Environment ID to delete"),
+    force: bool = typer.Option(False, "--force", help="Force delete without confirmation"),
+):
+    """Delete a managed environment."""
+    if not force:
+        confirm = typer.confirm(f"Delete environment {env_id}? This may affect running agents.")
+        if not confirm:
+            typer.echo("Cancelled.")
+            return
+
+    client = _get_client()
+    try:
+        response = client.delete(f"/v1/environments/{env_id}")
+        typer.secho(f"Environment {env_id} deleted", fg="green")
+    except Exception as e:
+        typer.secho(f"Failed to delete environment: {e}", fg="red")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Register sub-apps onto main app
 # ─────────────────────────────────────────────────────────────────────────────
 app.add_typer(sessions_app, name="sessions")

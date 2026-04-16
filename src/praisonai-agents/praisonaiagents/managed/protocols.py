@@ -216,3 +216,131 @@ class ComputeProviderProtocol(Protocol):
             List of InstanceInfo for running instances.
         """
         ...
+
+
+@runtime_checkable
+class ManagedBackendProtocol(Protocol):
+    """Protocol for external managed agent backends.
+    
+    Defines the contract between PraisonAI Agent's delegation layer
+    and any managed agent infrastructure provider (Anthropic Managed Agents, etc.).
+    
+    The Core SDK defines *what* — this protocol.
+    The Wrapper implements *how* — the provider-specific adapter.
+    
+    Lifecycle::
+    
+        backend = SomeManagedBackend(config={...})
+        agent = Agent(name="coder", backend=backend)
+        result = agent.start("Write a script")  # delegates to backend.execute()
+    
+    Implementations must handle:
+    - Agent/environment/session creation and caching
+    - Event streaming (agent.message, agent.tool_use, session.status_idle)
+    - Custom tool calls (agent.custom_tool_use → user.custom_tool_result)
+    - Tool confirmation (always_ask policy → user.tool_confirmation)
+    - Usage tracking (input_tokens, output_tokens)
+    - Session reset for multi-turn isolation
+    """
+    
+    async def execute(self, prompt: str, **kwargs) -> str:
+        """Execute a prompt on managed infrastructure and return the full response.
+        
+        This is the primary entry point called by Agent._delegate_to_backend().
+        
+        Args:
+            prompt: The user message to send to the managed agent.
+            **kwargs: Provider-specific options (e.g., timeout, metadata).
+            
+        Returns:
+            The agent's complete text response.
+        """
+        ...
+    
+    async def stream(self, prompt: str, **kwargs):
+        """Stream a prompt response as text chunks.
+        
+        Yields text fragments as the managed agent produces them.
+        Used when Agent is invoked with stream=True.
+        
+        Args:
+            prompt: The user message.
+            **kwargs: Provider-specific options.
+            
+        Yields:
+            Text chunks from the agent's response.
+        """
+        ...
+        yield ""  # type: ignore[misc]
+    
+    def reset_session(self) -> None:
+        """Discard the cached session so the next execute() creates a fresh one.
+        
+        The agent and environment remain cached for reuse.
+        """
+        ...
+    
+    def reset_all(self) -> None:
+        """Discard all cached state (agent, environment, session, client).
+        
+        Next execute() call will re-create everything from scratch.
+        """
+        ...
+
+    # ── Optional methods (default no-ops for backward compat) ──
+
+    def update_agent(self, **kwargs) -> None:
+        """Update an existing managed agent's configuration.
+        
+        Allows changing system prompt, tools, model, etc. on a previously
+        created agent without recreating it.
+        
+        Args:
+            **kwargs: Fields to update (system, tools, model, name, etc.).
+        """
+        ...
+
+    def interrupt(self) -> None:
+        """Send a user interrupt to the active session.
+        
+        Signals the managed agent to stop its current work (equivalent to
+        ``user.interrupt`` event in the Anthropic API).
+        """
+        ...
+
+    def retrieve_session(self) -> Dict[str, Any]:
+        """Retrieve the current managed session's metadata and usage.
+        
+        Standardized return schema::
+        
+            {
+                "session_id": "sesn_01234",
+                "agent_id": "agent_01234", 
+                "environment_id": "env_01234",
+                "status": "idle" | "running" | "error",
+                "created_at": 1234567890.0,
+                "last_activity_at": 1234567890.0,
+                "usage": {
+                    "input_tokens": 150,
+                    "output_tokens": 75,
+                    "cache_creation_input_tokens": 0,
+                    "cache_read_input_tokens": 0
+                },
+                "metadata": {}
+            }
+        
+        Returns:
+            Dict with standardized session info.
+        """
+        ...
+
+    def list_sessions(self, **kwargs) -> List[Dict[str, Any]]:
+        """List sessions for the current agent.
+        
+        Args:
+            **kwargs: Provider-specific filters (limit, status, etc.).
+            
+        Returns:
+            List of session summary dicts with same schema as retrieve_session().
+        """
+        ...
