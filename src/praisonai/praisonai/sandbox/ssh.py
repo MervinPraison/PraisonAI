@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import shlex
 import time
 import uuid
@@ -115,10 +116,7 @@ class SSHSandbox:
                 connect_kwargs["password"] = self.password
             else:
                 # Try default key files
-                connect_kwargs["client_keys"] = [
-                    os.path.expanduser("~/.ssh/id_rsa"),
-                    os.path.expanduser("~/.ssh/id_ed25519"),
-                ]
+                connect_kwargs["client_keys"] = ["~/.ssh/id_rsa", "~/.ssh/id_ed25519"]
             
             self._connection = await asyncssh.connect(**connect_kwargs)
             
@@ -192,13 +190,7 @@ class SSHSandbox:
             
             return SandboxResult(
                 execution_id=execution_id,
-                status=(
-                    SandboxStatus.COMPLETED
-                    if result.exit_status == 0
-                    else SandboxStatus.TIMEOUT
-                    if result.exit_status == 124  # timeout command exit code
-                    else SandboxStatus.FAILED
-                ),
+                status=SandboxStatus.COMPLETED if result.exit_status == 0 else SandboxStatus.FAILED,
                 exit_code=result.exit_status,
                 stdout=result.stdout,
                 stderr=result.stderr,
@@ -244,7 +236,7 @@ class SSHSandbox:
         started_at = time.time()
         
         try:
-            # Build command with proper shell escaping
+            # Build command
             command_parts = [shlex.quote(file_path)]
             if args:
                 command_parts.extend(shlex.quote(arg) for arg in args)
@@ -258,13 +250,7 @@ class SSHSandbox:
             
             return SandboxResult(
                 execution_id=execution_id,
-                status=(
-                    SandboxStatus.COMPLETED
-                    if result.exit_status == 0
-                    else SandboxStatus.TIMEOUT
-                    if result.exit_status == 124  # timeout command exit code
-                    else SandboxStatus.FAILED
-                ),
+                status=SandboxStatus.COMPLETED if result.exit_status == 0 else SandboxStatus.FAILED,
                 exit_code=result.exit_status,
                 stdout=result.stdout,
                 stderr=result.stderr,
@@ -302,7 +288,7 @@ class SSHSandbox:
         try:
             # Convert command to string if needed
             if isinstance(command, list):
-                command = " ".join(command)
+                command = shlex.join(command)
             
             # Execute command
             result = await self._run_command_with_limits(
@@ -316,13 +302,7 @@ class SSHSandbox:
             
             return SandboxResult(
                 execution_id=execution_id,
-                status=(
-                    SandboxStatus.COMPLETED
-                    if result.exit_status == 0
-                    else SandboxStatus.TIMEOUT
-                    if result.exit_status == 124  # timeout command exit code
-                    else SandboxStatus.FAILED
-                ),
+                status=SandboxStatus.COMPLETED if result.exit_status == 0 else SandboxStatus.FAILED,
                 exit_code=result.exit_status,
                 stdout=result.stdout,
                 stderr=result.stderr,
@@ -468,19 +448,22 @@ class SSHSandbox:
     ) -> str:
         """Build execution command for language."""
         interpreters = {
-            "python": f"python3 {file_path}",
-            "bash": f"bash {file_path}",
-            "shell": f"bash {file_path}",
-            "javascript": f"node {file_path}",
-            "typescript": f"npx ts-node {file_path}",
-            "java": f"javac {file_path} && java {os.path.splitext(os.path.basename(file_path))[0]}",
+            "python": f"python3 {shlex.quote(file_path)}",
+            "bash": f"bash {shlex.quote(file_path)}",
+            "shell": f"bash {shlex.quote(file_path)}",
+            "javascript": f"node {shlex.quote(file_path)}",
+            "typescript": f"npx ts-node {shlex.quote(file_path)}",
+            "java": f"javac {shlex.quote(file_path)} && java {shlex.quote(os.path.splitext(os.path.basename(file_path))[0])}",
         }
         
-        base_command = interpreters.get(language.lower(), f"cat {file_path}")
+        base_command = interpreters.get(language.lower(), f"cat {shlex.quote(file_path)}")
         
         # Add environment variables
         if env:
-            env_vars = " ".join(f"{shlex.quote(k)}={shlex.quote(v)}" for k, v in env.items())
+            for key in env:
+                if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", key):
+                    raise ValueError(f"Invalid environment variable name: {key}")
+            env_vars = " ".join(f"{k}={shlex.quote(v)}" for k, v in env.items())
             base_command = f"env {env_vars} {base_command}"
         
         # Add resource limits using timeout and ulimit

@@ -3,6 +3,7 @@ Unit tests for SSH Sandbox implementation.
 """
 
 import pytest
+import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 from praisonai.sandbox.ssh import SSHSandbox
 from praisonaiagents.sandbox import SandboxStatus, ResourceLimits
@@ -27,17 +28,14 @@ class TestSSHSandbox:
     
     def test_is_available_without_asyncssh(self):
         """Test availability check when asyncssh is not available."""
-        with patch('praisonai.sandbox.ssh.SSHSandbox.is_available', False):
-            sandbox = SSHSandbox(host="test.example.com")
-            assert not sandbox.is_available
-    
-    @patch('importlib.import_module')
-    def test_is_available_with_asyncssh(self, mock_import):
-        """Test availability check when asyncssh is available."""
-        mock_import.return_value = MagicMock()
         sandbox = SSHSandbox(host="test.example.com")
-        # This would be True in real scenario, but we're testing the pattern
-        assert sandbox.sandbox_type == "ssh"
+        assert not sandbox.is_available
+    
+    def test_is_available_with_asyncssh(self):
+        """Test availability check when asyncssh is available."""
+        with patch.dict(sys.modules, {"asyncssh": MagicMock()}):
+            sandbox = SSHSandbox(host="test.example.com")
+            assert sandbox.is_available
     
     @pytest.mark.asyncio
     async def test_start_without_asyncssh(self):
@@ -52,10 +50,10 @@ class TestSSHSandbox:
     async def test_start_with_mocked_connection(self):
         """Test successful start with mocked asyncssh."""
         mock_connection = AsyncMock()
+        mock_asyncssh = MagicMock()
+        mock_asyncssh.connect = AsyncMock(return_value=mock_connection)
         
-        with patch.object(SSHSandbox, 'is_available', True), \
-             patch.dict('sys.modules', {'asyncssh': MagicMock()}), \
-             patch('asyncssh.connect', return_value=mock_connection) as mock_connect:
+        with patch.dict(sys.modules, {"asyncssh": mock_asyncssh}):
             
             sandbox = SSHSandbox(
                 host="test.example.com",
@@ -67,13 +65,14 @@ class TestSSHSandbox:
             
             assert sandbox._is_running
             assert sandbox._connection == mock_connection
-            mock_connect.assert_called_once()
+            mock_asyncssh.connect.assert_called_once()
             mock_connection.run.assert_called_once_with("mkdir -p /tmp/praisonai")
     
     @pytest.mark.asyncio
     async def test_stop(self):
         """Test stopping SSH connection."""
-        mock_connection = AsyncMock()
+        mock_connection = MagicMock()
+        mock_connection.wait_closed = AsyncMock()
         
         sandbox = SSHSandbox(host="test.example.com")
         sandbox._connection = mock_connection
@@ -157,11 +156,16 @@ class TestSSHSandbox:
     @pytest.mark.asyncio
     async def test_write_file(self):
         """Test writing file to remote server."""
-        mock_connection = AsyncMock()
-        mock_sftp = AsyncMock()
+        mock_connection = MagicMock()
+        mock_connection.run = AsyncMock()
+        mock_sftp = MagicMock()
         mock_file = AsyncMock()
-        mock_sftp.open.return_value.__aenter__.return_value = mock_file
-        mock_connection.start_sftp_client.return_value.__aenter__.return_value = mock_sftp
+        file_ctx = AsyncMock()
+        file_ctx.__aenter__.return_value = mock_file
+        mock_sftp.open.return_value = file_ctx
+        sftp_ctx = AsyncMock()
+        sftp_ctx.__aenter__.return_value = mock_sftp
+        mock_connection.start_sftp_client.return_value = sftp_ctx
         
         sandbox = SSHSandbox(host="test.example.com")
         sandbox._connection = mock_connection
@@ -176,12 +180,16 @@ class TestSSHSandbox:
     @pytest.mark.asyncio
     async def test_read_file(self):
         """Test reading file from remote server."""
-        mock_connection = AsyncMock()
-        mock_sftp = AsyncMock()
+        mock_connection = MagicMock()
+        mock_sftp = MagicMock()
         mock_file = AsyncMock()
         mock_file.read.return_value = b"print('Hello')"
-        mock_sftp.open.return_value.__aenter__.return_value = mock_file
-        mock_connection.start_sftp_client.return_value.__aenter__.return_value = mock_sftp
+        file_ctx = AsyncMock()
+        file_ctx.__aenter__.return_value = mock_file
+        mock_sftp.open.return_value = file_ctx
+        sftp_ctx = AsyncMock()
+        sftp_ctx.__aenter__.return_value = mock_sftp
+        mock_connection.start_sftp_client.return_value = sftp_ctx
         
         sandbox = SSHSandbox(host="test.example.com")
         sandbox._connection = mock_connection

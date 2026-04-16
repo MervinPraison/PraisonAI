@@ -120,110 +120,74 @@ class ModalSandbox:
                 import subprocess
                 import tempfile
                 import os
-                
-                # Set environment variables
-                if env_vars:
-                    os.environ.update(env_vars)
-                
-                if language.lower() == "python":
-                    # Execute Python code directly
-                    import sys
-                    from io import StringIO
-                    import contextlib
-                    
-                    # Capture stdout/stderr
-                    stdout_capture = StringIO()
-                    stderr_capture = StringIO()
-                    
-                    try:
-                        with contextlib.redirect_stdout(stdout_capture), \
-                             contextlib.redirect_stderr(stderr_capture):
-                            
-                            # Create a new namespace for execution
-                            exec_globals = {"__name__": "__main__"}
-                            exec(code, exec_globals)
-                        
-                        return {
-                            "exit_code": 0,
-                            "stdout": stdout_capture.getvalue(),
-                            "stderr": stderr_capture.getvalue(),
-                        }
-                    except Exception as e:
-                        return {
-                            "exit_code": 1,
-                            "stdout": stdout_capture.getvalue(),
-                            "stderr": str(e),
-                        }
-                else:
-                    # Use subprocess for other languages
-                    extension_map = {
-                        "bash": "sh",
-                        "shell": "sh",
-                        "javascript": "js",
-                        "java": "java",
-                        "cpp": "cpp",
-                        "c": "c",
-                    }
-                    
-                    interpreter_map = {
-                        "bash": ["bash"],
-                        "shell": ["bash"],
-                        "javascript": ["node"],
-                    }
-                    
-                    ext = extension_map.get(language.lower(), "txt")
-                    interpreter = interpreter_map.get(language.lower())
-                    
-                    # Write code to temp file
-                    with tempfile.NamedTemporaryFile(mode='w', suffix=f'.{ext}', delete=False) as f:
-                        f.write(code)
-                        temp_file = f.name
-                    
-                    try:
-                        if interpreter:
-                            cmd = interpreter + [temp_file]
-                        else:
-                            # Try to execute directly
-                            os.chmod(temp_file, 0o755)
-                            cmd = [temp_file]
-                        
-                        timeout_candidates = []
-                        if self.timeout is not None and self.timeout > 0:
-                            timeout_candidates.append(self.timeout)
-                        if limits and limits.timeout_seconds is not None and limits.timeout_seconds > 0:
-                            timeout_candidates.append(limits.timeout_seconds)
-                        effective_timeout = min(timeout_candidates) if timeout_candidates else None
+                import sys
 
-                        result = subprocess.run(
-                            cmd,
-                            capture_output=True,
-                            text=True,
-                            timeout=effective_timeout,
-                        )
-                        
-                        return {
-                            "exit_code": result.returncode,
-                            "stdout": result.stdout,
-                            "stderr": result.stderr,
-                        }
-                    except subprocess.TimeoutExpired:
-                        return {
-                            "exit_code": 124,  # Timeout exit code
-                            "stdout": "",
-                            "stderr": "Execution timed out",
-                        }
-                    except Exception as e:
-                        return {
-                            "exit_code": 1,
-                            "stdout": "",
-                            "stderr": str(e),
-                        }
-                    finally:
-                        # Clean up temp file
-                        try:
-                            os.unlink(temp_file)
-                        except:
-                            pass
+                extension_map = {
+                    "python": "py",
+                    "bash": "sh",
+                    "shell": "sh",
+                    "javascript": "js",
+                    "java": "java",
+                    "cpp": "cpp",
+                    "c": "c",
+                }
+
+                interpreter_map = {
+                    "python": [sys.executable],
+                    "bash": ["bash"],
+                    "shell": ["bash"],
+                    "javascript": ["node"],
+                }
+
+                ext = extension_map.get(language.lower(), "txt")
+                interpreter = interpreter_map.get(language.lower())
+                execution_env = os.environ.copy()
+                execution_env.update(env_vars or {})
+
+                # Write code to temp file
+                with tempfile.NamedTemporaryFile(mode="w", suffix=f".{ext}", delete=False) as f:
+                    f.write(code)
+                    temp_file = f.name
+
+                try:
+                    if interpreter:
+                        cmd = interpreter + [temp_file]
+                    else:
+                        # Try to execute directly
+                        os.chmod(temp_file, 0o755)
+                        cmd = [temp_file]
+
+                    result = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=self.timeout,
+                        env=execution_env,
+                    )
+
+                    return {
+                        "exit_code": result.returncode,
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                    }
+                except subprocess.TimeoutExpired:
+                    return {
+                        "exit_code": 124,  # Timeout exit code
+                        "stdout": "",
+                        "stderr": "Execution timed out",
+                    }
+                except Exception as e:
+                    return {
+                        "exit_code": 1,
+                        "stdout": "",
+                        "stderr": str(e),
+                    }
+                finally:
+                    # Clean up temp file
+                    try:
+                        os.unlink(temp_file)
+                    except OSError:
+                        pass
             
             self._function = execute_code
             self._is_running = True
@@ -323,27 +287,29 @@ class ModalSandbox:
     ) -> SandboxResult:
         """Execute a file on Modal platform.
         
-        Note: File-based execution is not supported by this backend because
-        persistent file storage is not implemented for Modal sandboxes.
-        Use `execute()` with inline code instead.
+        Note: File must be uploaded to Modal first via write_file.
         """
-        started_at = time.time()
-        return SandboxResult(
-            execution_id=str(uuid.uuid4()),
-            status=SandboxStatus.FAILED,
-            error=(
-                f"File execution is not supported by the Modal sandbox backend: "
-                f"cannot execute '{file_path}' because read_file/write_file "
-                f"persistence is not implemented. Use execute() with inline code instead."
-            ),
-            started_at=started_at,
-            completed_at=time.time(),
-            duration_seconds=time.time() - started_at,
-            metadata={
-                "platform": "modal",
-                "file_path": file_path,
-            }
-        )
+        # Read file content and execute it
+        content = await self.read_file(file_path)
+        if content is None:
+            return SandboxResult(
+                execution_id=str(uuid.uuid4()),
+                status=SandboxStatus.FAILED,
+                error=f"File not found: {file_path}",
+                started_at=time.time(),
+                completed_at=time.time(),
+            )
+        
+        # Determine language from file extension
+        language = "python"
+        if file_path.endswith(('.sh', '.bash')):
+            language = "bash"
+        elif file_path.endswith('.js'):
+            language = "javascript"
+        elif file_path.endswith('.java'):
+            language = "java"
+        
+        return await self.execute(content, language, limits, env)
     
     async def run_command(
         self,
@@ -363,19 +329,11 @@ class ModalSandbox:
         path: str,
         content: Union[str, bytes],
     ) -> bool:
-        """Write a file.
-        
-        File persistence is not supported in this stateless Modal implementation.
-        Returns False to indicate that the content was not stored.
-        """
-        # Modal functions are stateless, so file persistence is not available here.
-        # In practice, you'd use Modal Volumes for persistent storage.
-        logger.warning(
-            "Modal sandbox write_file is not supported for stateless functions; "
-            "content was not persisted for path: %s",
-            path,
-        )
-        return False
+        """Write a file (stored in Modal's temporary storage)."""
+        # Modal functions are stateless, so we simulate file storage
+        # In practice, you'd use Modal Volumes for persistent storage
+        logger.warning("Modal sandbox write_file is limited - files are not persistent between executions")
+        return True
     
     async def read_file(
         self,

@@ -3,6 +3,7 @@ Unit tests for Daytona Sandbox implementation.
 """
 
 import pytest
+import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 from praisonai.sandbox.daytona import DaytonaSandbox
 from praisonaiagents.sandbox import SandboxStatus, ResourceLimits
@@ -26,18 +27,15 @@ class TestDaytonaSandbox:
         assert not sandbox._is_running
     
     def test_is_available_without_requests(self):
-        """Test availability check when requests is not available."""
-        with patch('praisonai.sandbox.daytona.DaytonaSandbox.is_available', False):
-            sandbox = DaytonaSandbox()
-            assert not sandbox.is_available
-    
-    @patch('importlib.import_module')
-    def test_is_available_with_requests(self, mock_import):
-        """Test availability check when requests is available."""
-        mock_import.return_value = MagicMock()
+        """Test availability check when daytona is not available."""
         sandbox = DaytonaSandbox()
-        # This would be True in real scenario, but we're testing the pattern
-        assert sandbox.sandbox_type == "daytona"
+        assert not sandbox.is_available
+    
+    def test_is_available_with_requests(self):
+        """Test availability check when daytona is available."""
+        with patch.dict(sys.modules, {"daytona": MagicMock()}):
+            sandbox = DaytonaSandbox()
+            assert sandbox.is_available
     
     @pytest.mark.asyncio
     async def test_start_without_daytona(self):
@@ -168,7 +166,7 @@ class TestDaytonaSandbox:
             assert result.status == SandboxStatus.COMPLETED
             assert result.exit_code == 0
             assert result.stdout == "File executed successfully"
-            mock_execute.assert_called_once_with("/workspace/script.py --verbose", None, None, None)
+            mock_execute.assert_called_once_with("/workspace/script.py --verbose", None, None)
     
     @pytest.mark.asyncio
     async def test_run_command(self):

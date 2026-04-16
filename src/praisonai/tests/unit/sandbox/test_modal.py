@@ -3,6 +3,7 @@ Unit tests for Modal Sandbox implementation.
 """
 
 import pytest
+import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 from praisonai.sandbox.modal import ModalSandbox
 from praisonaiagents.sandbox import SandboxStatus, ResourceLimits
@@ -27,17 +28,14 @@ class TestModalSandbox:
     
     def test_is_available_without_modal(self):
         """Test availability check when modal is not available."""
-        with patch('praisonai.sandbox.modal.ModalSandbox.is_available', False):
-            sandbox = ModalSandbox()
-            assert not sandbox.is_available
-    
-    @patch('importlib.import_module')
-    def test_is_available_with_modal(self, mock_import):
-        """Test availability check when modal is available."""
-        mock_import.return_value = MagicMock()
         sandbox = ModalSandbox()
-        # This would be True in real scenario, but we're testing the pattern
-        assert sandbox.sandbox_type == "modal"
+        assert not sandbox.is_available
+    
+    def test_is_available_with_modal(self):
+        """Test availability check when modal is available."""
+        with patch.dict(sys.modules, {"modal": MagicMock()}):
+            sandbox = ModalSandbox()
+            assert sandbox.is_available
     
     @pytest.mark.asyncio
     async def test_start_without_modal(self):
@@ -54,11 +52,11 @@ class TestModalSandbox:
         mock_modal = MagicMock()
         mock_app = MagicMock()
         mock_modal.App.return_value = mock_app
+        mock_app.function.return_value = lambda *args, **kwargs: (lambda fn: fn)
         mock_modal.Image.from_registry.return_value.pip_install.return_value = MagicMock()
         mock_modal.gpu.A100.return_value = MagicMock()
         
-        with patch.object(ModalSandbox, 'is_available', True), \
-             patch.dict('sys.modules', {'modal': mock_modal}):
+        with patch.dict(sys.modules, {"modal": mock_modal}):
             
             sandbox = ModalSandbox(gpu="A100")
             
@@ -140,7 +138,7 @@ class TestModalSandbox:
             
             result = await sandbox.execute("import time; time.sleep(1000)", "python")
             
-            assert result.status == SandboxStatus.FAILED
+            assert result.status == SandboxStatus.TIMEOUT
             assert result.error == "Timeout error"
     
     @pytest.mark.asyncio
