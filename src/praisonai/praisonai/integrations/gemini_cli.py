@@ -33,8 +33,11 @@ from typing import AsyncIterator, Dict, Any, Optional, List, Tuple
 from .base import BaseCLIIntegration
 
 
-# Default model configuration
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
+# Default model configuration (resolved per-instance so env overrides are honored)
+DEFAULT_GEMINI_MODEL_FALLBACK = "gemini-2.5-flash-lite"
+
+# For backward compatibility, export the default for tests that import it
+DEFAULT_GEMINI_MODEL = DEFAULT_GEMINI_MODEL_FALLBACK
 
 
 class GeminiCLIIntegration(BaseCLIIntegration):
@@ -71,7 +74,7 @@ class GeminiCLIIntegration(BaseCLIIntegration):
         super().__init__(workspace=workspace, timeout=timeout)
         
         self.output_format = output_format
-        self.model = model or os.getenv("PRAISONAI_GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
+        self.model = model or os.getenv("PRAISONAI_GEMINI_MODEL", DEFAULT_GEMINI_MODEL_FALLBACK)
         self.include_directories = include_directories
         self.sandbox = sandbox
         
