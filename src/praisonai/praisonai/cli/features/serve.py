@@ -310,7 +310,7 @@ Launch PraisonAI servers with unified discovery support.
                             else:
                                 raise AttributeError(f"Agent {agent_name} has no start/astart method")
                             return {"response": str(result)}
-                    except Exception as e:
+                    except Exception:
                         # Fall back to crew-based approach if individual agent fails
                         pass
                 
@@ -365,6 +365,8 @@ Launch PraisonAI servers with unified discovery support.
                             raise HTTPException(status_code=404, detail=f"Agent '{agent_name}' not found")
                     else:
                         raise HTTPException(status_code=404, detail=f"Agent registry not available")
+                except HTTPException:
+                    raise
                 except Exception as e:
                     raise HTTPException(status_code=500, detail=f"Agent execution failed: {str(e)}")
                     
