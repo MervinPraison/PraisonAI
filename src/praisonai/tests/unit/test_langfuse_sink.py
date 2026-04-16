@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from praisonaiagents.trace.context_events import ContextEvent, ContextEventType
 from praisonaiagents.trace.protocol import ActionEvent, ActionEventType, TraceSinkProtocol
 from praisonai.observability.langfuse import LangfuseSink, LangfuseSinkConfig
 
@@ -306,3 +307,47 @@ class TestLangfuseSinkProtocol:
         """LangfuseSink satisfies TraceSinkProtocol at runtime."""
         sink = LangfuseSink(LangfuseSinkConfig(enabled=False))
         assert isinstance(sink, TraceSinkProtocol)
+
+
+class TestLangfuseContextBridge:
+    def test_context_tool_end_maps_result_and_status(self):
+        sink = _make_sink_with_mock_client()
+        bridge = sink.context_sink()
+
+        event = ContextEvent(
+            event_type=ContextEventType.TOOL_CALL_END,
+            timestamp=time.time(),
+            session_id="session-1",
+            agent_name="agent1",
+            data={
+                "tool_name": "search_tool",
+                "result": "ok",
+                "duration_ms": 12.0,
+            },
+        )
+
+        action_event = bridge._convert_context_to_action(event)
+        assert action_event is not None
+        assert action_event.tool_result_summary == "ok"
+        assert action_event.status == "completed"
+        assert action_event.error_message is None
+
+    def test_context_tool_end_maps_error(self):
+        sink = _make_sink_with_mock_client()
+        bridge = sink.context_sink()
+
+        event = ContextEvent(
+            event_type=ContextEventType.TOOL_CALL_END,
+            timestamp=time.time(),
+            session_id="session-1",
+            agent_name="agent1",
+            data={
+                "tool_name": "search_tool",
+                "error": "failed",
+            },
+        )
+
+        action_event = bridge._convert_context_to_action(event)
+        assert action_event is not None
+        assert action_event.status == "error"
+        assert action_event.error_message == "failed"

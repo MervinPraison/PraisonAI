@@ -66,6 +66,21 @@ class _ContextToActionBridge:
         action_type = event_type_mapping.get(ctx_event.event_type)
         if not action_type:
             return None
+
+        tool_result_summary = (
+            ctx_event.data.get("tool_result_summary")
+            if isinstance(ctx_event.data, dict)
+            else None
+        )
+        if tool_result_summary is None and isinstance(ctx_event.data, dict):
+            tool_result_summary = ctx_event.data.get("result")
+
+        status = ctx_event.data.get("status") if isinstance(ctx_event.data, dict) else None
+        error_message = ctx_event.data.get("error_message") if isinstance(ctx_event.data, dict) else None
+        if error_message is None and isinstance(ctx_event.data, dict):
+            error_message = ctx_event.data.get("error")
+        if status is None and action_type == ActionEventType.TOOL_END:
+            status = "error" if error_message else "completed"
         
         # Convert to ActionEvent format
         return ActionEvent(
@@ -75,10 +90,10 @@ class _ContextToActionBridge:
             agent_name=ctx_event.agent_name or "unknown",
             tool_name=ctx_event.data.get("tool_name"),
             tool_args=ctx_event.data.get("tool_args"),
-            tool_result_summary=ctx_event.data.get("tool_result_summary"),
+            tool_result_summary=tool_result_summary,
             duration_ms=ctx_event.data.get("duration_ms", 0.0),
-            status=ctx_event.data.get("status"),
-            error_message=ctx_event.data.get("error_message"),
+            status=status,
+            error_message=error_message,
             metadata=ctx_event.data,
         )
 
