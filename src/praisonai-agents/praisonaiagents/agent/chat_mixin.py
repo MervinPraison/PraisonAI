@@ -1250,6 +1250,7 @@ Your Goal: {self.goal}"""
                         task_description=task_description,
                         task_id=task_id,
                         execute_tool_fn=self.execute_tool,
+                        parallel_tool_calls=self.parallel_tool_calls,
                         reasoning_steps=reasoning_steps,
                         stream=stream
                     )
@@ -2248,7 +2249,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         task_name=kwargs.get('task_name'),
                         task_description=kwargs.get('task_description'),
                         task_id=kwargs.get('task_id'),
-                        execute_tool_fn=self.execute_tool
+                        execute_tool_fn=self.execute_tool,
+                        parallel_tool_calls=self.parallel_tool_calls
                     ):
                         response_content += chunk
                         yield chunk

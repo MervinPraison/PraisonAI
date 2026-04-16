@@ -545,6 +545,7 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
         skills: Optional[Union[List[str], str, Dict[str, Any], 'SkillsConfig']] = None,
         approval: Optional[Union[bool, str, Dict[str, Any], 'ApprovalConfig', 'ApprovalProtocol']] = None,
         tool_timeout: Optional[int] = None,  # P8/G11: Timeout in seconds for each tool call
+        parallel_tool_calls: bool = False,  # Gap 2: Enable parallel execution of batched LLM tool calls
         learn: Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
         backend: Optional[Any] = None,  # External managed agent backend (e.g., ManagedAgentIntegration)
     ):
@@ -634,6 +635,10 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
                 - LearnConfig: Custom configuration
                 Learning is a first-class citizen, peer to memory. It captures patterns,
                 preferences, and insights from interactions to improve future responses.
+            parallel_tool_calls: Enable parallel execution of batched LLM tool calls.
+                - False: Sequential execution (current behavior, default for compatibility)
+                - True: Parallel execution with bounded workers for improved latency
+                When LLM returns multiple tool calls, executes them concurrently instead of sequentially.
             backend: External managed agent backend for hybrid execution. Accepts:
                 - ManagedAgentIntegration: External managed agent service
                 - None: Use local execution (default)
@@ -1440,6 +1445,8 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
             self.self_reflect = True if self_reflect is None else self_reflect
         
         self.instructions = instructions
+        # Gap 2: Store parallel tool calls setting for ToolCallExecutor selection
+        self.parallel_tool_calls = parallel_tool_calls
         # Check for model name in environment variable if not provided
         self._using_custom_llm = False
         # Flag to track if final result has been displayed to prevent duplicates

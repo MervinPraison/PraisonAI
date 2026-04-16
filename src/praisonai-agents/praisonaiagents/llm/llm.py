@@ -15,6 +15,8 @@ from pydantic import BaseModel
 import time
 import json
 import xml.etree.ElementTree as ET
+# Gap 2: Tool call execution imports
+from ..tools.call_executor import ToolCall, ToolResult, create_tool_call_executor
 # Display functions - lazy loaded to avoid importing rich at startup
 # These are only needed when output=verbose
 _display_module = None
@@ -1649,6 +1651,7 @@ Now provide your final answer using this result. Summarize the information natur
         task_description: Optional[str] = None,
         task_id: Optional[str] = None,
         execute_tool_fn: Optional[Callable] = None,
+        parallel_tool_calls: bool = False,  # Gap 2: Enable parallel tool execution
         stream: bool = True,
         stream_callback: Optional[Callable] = None,
         emit_events: bool = False,
@@ -1893,26 +1896,45 @@ Now provide your final answer using this result. Summarize the information natur
                                 "tool_calls": serializable_tool_calls,
                             })
 
-                            tool_results = []
+                            # Execute tool calls using ToolCallExecutor (Gap 2: parallel or sequential)
+                            is_ollama = self._is_ollama_provider()
+                            tool_calls_batch = []
+                            
+                            # Prepare batch of ToolCall objects
                             for tool_call in tool_calls:
                                 function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call)
-
-                                logging.debug(f"[RESPONSES_API] Executing tool {function_name} with args: {arguments}")
-                                tool_result = execute_tool_fn(function_name, arguments, tool_call_id=tool_call_id)
+                                tool_calls_batch.append(ToolCall(
+                                    function_name=function_name,
+                                    arguments=arguments,
+                                    tool_call_id=tool_call_id,
+                                    is_ollama=is_ollama
+                                ))
+                            
+                            # Create appropriate executor based on parallel_tool_calls setting
+                            executor = create_tool_call_executor(parallel=parallel_tool_calls)
+                            
+                            # Execute batch
+                            tool_results_batch = executor.execute_batch(tool_calls_batch, execute_tool_fn)
+                            
+                            tool_results = []
+                            for tool_result_obj in tool_results_batch:
+                                tool_result = tool_result_obj.result
                                 tool_results.append(tool_result)
                                 accumulated_tool_results.append(tool_result)
 
+                                logging.debug(f"[RESPONSES_API] Executed tool {tool_result_obj.function_name} with result: {tool_result}")
+
                                 if verbose:
-                                    display_message = f"Agent {agent_name} called function '{function_name}' with arguments: {arguments}\n"
+                                    display_message = f"Agent {agent_name} called function '{tool_result_obj.function_name}' with arguments: {tool_result_obj.arguments if hasattr(tool_result_obj, 'arguments') else 'N/A'}\n"
                                     display_message += f"Function returned: {tool_result}" if tool_result else "Function returned no output"
                                     _get_display_functions()['display_tool_call'](display_message, console=self.console)
 
                                 result_str = json.dumps(tool_result) if tool_result else "empty"
                                 _get_display_functions()['execute_sync_callback'](
                                     'tool_call',
-                                    message=f"Calling function: {function_name}",
-                                    tool_name=function_name,
-                                    tool_input=arguments,
+                                    message=f"Calling function: {tool_result_obj.function_name}",
+                                    tool_name=tool_result_obj.function_name,
+                                    tool_input=tool_result_obj.arguments if hasattr(tool_result_obj, 'arguments') else {},
                                     tool_output=result_str[:200] if result_str else None,
                                 )
 
@@ -3142,6 +3164,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         task_description: Optional[str] = None,
         task_id: Optional[str] = None,
         execute_tool_fn: Optional[Callable] = None,
+        parallel_tool_calls: bool = False,  # Gap 2: Enable parallel tool execution
         **kwargs
     ):
         """Generator that yields real-time response chunks from the LLM.
@@ -3167,6 +3190,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             task_description: Optional task description for logging
             task_id: Optional task ID for logging
             execute_tool_fn: Optional function for executing tools
+            parallel_tool_calls: If True, execute batched LLM tool calls in parallel (default False)
             **kwargs: Additional parameters
             
         Yields:
@@ -3301,26 +3325,44 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 "tool_calls": serializable_tool_calls
                             })
                         
-                        # Execute tool calls and add results to conversation
+                        # Execute tool calls using ToolCallExecutor (Gap 2: parallel or sequential)
+                        is_ollama = self._is_ollama_provider()
+                        tool_calls_batch = []
+                        
+                        # Prepare batch of ToolCall objects
                         for tool_call in tool_calls:
-                            is_ollama = self._is_ollama_provider()
                             function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
-                            
-                            try:
-                                # Execute the tool (pass tool_call_id for event correlation)
-                                tool_result = execute_tool_fn(function_name, arguments, tool_call_id=tool_call_id)
-                                
-                                # Add tool result to messages
-                                tool_message = self._create_tool_message(function_name, tool_result, tool_call_id, is_ollama)
-                                messages.append(tool_message)
-                                
-                            except Exception as e:
-                                logging.error(f"Tool execution error for {function_name}: {e}")
-                                # Add error message to conversation
-                                error_message = self._create_tool_message(
-                                    function_name, f"Error executing tool: {e}", tool_call_id, is_ollama
+                            tool_calls_batch.append(ToolCall(
+                                function_name=function_name,
+                                arguments=arguments, 
+                                tool_call_id=tool_call_id,
+                                is_ollama=is_ollama
+                            ))
+                        
+                        # Create appropriate executor based on parallel_tool_calls setting
+                        executor = create_tool_call_executor(parallel=parallel_tool_calls)
+                        
+                        # Execute batch and add results to conversation
+                        tool_results = executor.execute_batch(tool_calls_batch, execute_tool_fn)
+                        
+                        for tool_result in tool_results:
+                            if tool_result.error is None:
+                                # Successful execution
+                                tool_message = self._create_tool_message(
+                                    tool_result.function_name, 
+                                    tool_result.result, 
+                                    tool_result.tool_call_id, 
+                                    tool_result.is_ollama
                                 )
-                                messages.append(error_message)
+                            else:
+                                # Error during execution (already logged by executor)
+                                tool_message = self._create_tool_message(
+                                    tool_result.function_name,
+                                    tool_result.result,  # Contains error message
+                                    tool_result.tool_call_id,
+                                    tool_result.is_ollama
+                                )
+                            messages.append(tool_message)
                         
                         # Continue conversation after tool execution - get follow-up response
                         try:
