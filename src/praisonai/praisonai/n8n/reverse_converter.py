@@ -70,7 +70,7 @@ class N8nToYAMLConverter:
         node_type = node.get("type", "")
         if node_type == "n8n-nodes-base.httpRequest":
             url = str(node.get("parameters", {}).get("url", ""))
-            match = re.search(r"/agents/([a-zA-Z0-9_-]+)$", url)
+            match = re.search(r"/agents/([a-z0-9_]+)$", url)
             if match:
                 return match.group(1).lower()
         return node_name.lower().replace(" ", "_").replace("-", "_")

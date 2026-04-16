@@ -100,7 +100,8 @@ class YAMLToN8nConverter:
         node_type = "n8n-nodes-base.httpRequest"
         
         # Build HTTP request parameters for PraisonAI API
-        agent_url_id = re.sub(r"[^a-z0-9_-]", "_", agent_id.lower().replace(" ", "_")).strip("_")
+        agent_url_id = re.sub(r"[^a-z0-9_]", "_", agent_id.lower().replace(" ", "_"))
+        agent_url_id = re.sub(r"_+", "_", agent_url_id).strip("_")
         if not agent_url_id:
             agent_url_id = f"agent_{self.node_counter}"
         
