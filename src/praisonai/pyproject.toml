@@ -133,6 +133,8 @@ all = [
     "pymongo>=4.6.0", 
     "psycopg2-binary>=2.9.0",
     "boto3>=1.35.0",
+    # n8n integration
+    "httpx>=0.27.0",
 ]
 bot = [
     # Dependencies for Telegram, Discord, Slack, and WhatsApp bots
@@ -213,6 +215,8 @@ claw = [
     "pymongo>=4.6.0", 
     "psycopg2-binary>=2.9.0",
     "boto3>=1.35.0",
+    # n8n integration
+    "httpx>=0.27.0",
 ]
 n8n = [
     "httpx>=0.27.0",

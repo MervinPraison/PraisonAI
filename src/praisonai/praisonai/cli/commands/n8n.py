@@ -247,9 +247,9 @@ def test_connection(
         praisonai n8n test
         praisonai n8n test --n8n-url http://n8n.example.com
     """
+    client = None
     try:
         from praisonai.n8n import N8nClient
-        
         client = N8nClient(base_url=n8n_url, api_key=api_key)
         
         if client.test_connection():
@@ -267,14 +267,17 @@ def test_connection(
             typer.echo("💡 Make sure n8n is running. Start with: npx n8n start")
             raise typer.Exit(1)
             
-        client.close()
-        
+    except typer.Exit:
+        raise
     except ImportError:
         typer.echo("Error: n8n dependencies not installed. Run: pip install 'praisonai[n8n]'", err=True)
         raise typer.Exit(1)
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
+    finally:
+        if client is not None:
+            client.close()
 
 @app.command(name="list")
 def list_workflows(
@@ -286,6 +289,7 @@ def list_workflows(
     Example:
         praisonai n8n list
     """
+    client = None
     try:
         from praisonai.n8n import N8nClient
         
@@ -307,8 +311,6 @@ def list_workflows(
                 
                 typer.echo(f"  {workflow_id}: {name} ({status})")
         
-        client.close()
-        
     except ImportError:
         typer.echo("Error: n8n dependencies not installed. Run: pip install 'praisonai[n8n]'", err=True)
         raise typer.Exit(1)
@@ -319,3 +321,6 @@ def list_workflows(
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
+    finally:
+        if client is not None:
+            client.close()

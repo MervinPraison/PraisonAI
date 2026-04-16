@@ -48,6 +48,8 @@ def preview_workflow(
         import yaml as yaml_lib
         with open(yaml_file, 'r') as f:
             yaml_content = yaml_lib.safe_load(f)
+        if not isinstance(yaml_content, dict):
+            raise ValueError("Workflow YAML must deserialize to a mapping")
     except Exception as e:
         raise ValueError(f"Failed to parse YAML workflow: {e}")
     
@@ -175,6 +177,8 @@ def sync_workflow(
         import yaml as yaml_lib
         with open(yaml_file, 'r') as f:
             yaml_content = yaml_lib.safe_load(f)
+        if not isinstance(yaml_content, dict):
+            raise ValueError("Workflow YAML must deserialize to a mapping")
     except Exception as e:
         raise ValueError(f"Failed to parse YAML workflow: {e}")
     

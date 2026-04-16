@@ -210,6 +210,8 @@ class N8nClient:
                 timeout=5.0
             )
             return response.status_code == 200
+        except ImportError:
+            raise
         except Exception as e:
             logger.warning(f"Connection test failed: {e}")
             return False

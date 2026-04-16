@@ -6,6 +6,7 @@ Converts PraisonAI YAML workflows to n8n JSON format for visual editing.
 
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import logging
 
 logger = logging.getLogger(__name__)
@@ -84,7 +85,7 @@ class YAMLToN8nConverter:
             "staticData": {},
             "tags": ["praisonai", "agents"],
             "triggerCount": 1,
-            "updatedAt": "2026-04-16T12:00:00.000Z",
+            "updatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
             "versionId": "1.0.0"
         }
     
@@ -261,7 +262,7 @@ class YAMLToN8nConverter:
                 })
         
         return N8nNode(
-            name="Router",
+            name=f"Router {self.node_counter}",
             type="n8n-nodes-base.switch",
             position=[
                 self.position_x_start + (self.node_counter * self.position_x_increment),
