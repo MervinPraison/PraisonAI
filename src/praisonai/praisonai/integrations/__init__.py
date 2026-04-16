@@ -81,7 +81,7 @@ def __getattr__(name):
         from .managed_agents import ManagedConfig
         return ManagedConfig
     elif name == 'get_available_integrations':
-        from .registry import get_available_integrations
+        from .base import get_available_integrations
         return get_available_integrations
     elif name == 'ExternalAgentRegistry':
         from .registry import ExternalAgentRegistry

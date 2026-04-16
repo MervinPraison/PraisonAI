@@ -45,6 +45,8 @@ class CodexCLIIntegration(BaseCLIIntegration):
         output_schema: Path to JSON schema for structured output
     """
     
+    VALID_APPROVAL_MODES = {"suggest", "auto-edit", "full-auto"}
+
     def __init__(
         self,
         workspace: str = ".",
@@ -76,6 +78,12 @@ class CodexCLIIntegration(BaseCLIIntegration):
         # Handle backward compatibility
         if full_auto is not None:
             approval_mode = "full-auto" if full_auto else "suggest"
+
+        if approval_mode not in self.VALID_APPROVAL_MODES:
+            raise ValueError(
+                f"Invalid approval_mode: {approval_mode}. "
+                f"Must be one of: {sorted(self.VALID_APPROVAL_MODES)}"
+            )
         
         self.approval_mode = approval_mode
         self.sandbox = sandbox
