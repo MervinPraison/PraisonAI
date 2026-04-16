@@ -1902,7 +1902,7 @@ Now provide your final answer using this result. Summarize the information natur
                             
                             # Prepare batch of ToolCall objects
                             for tool_call in tool_calls:
-                                function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call)
+                                function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama=is_ollama)
                                 tool_calls_batch.append(ToolCall(
                                     function_name=function_name,
                                     arguments=arguments,
@@ -1917,7 +1917,7 @@ Now provide your final answer using this result. Summarize the information natur
                             tool_results_batch = executor.execute_batch(tool_calls_batch, execute_tool_fn)
                             
                             tool_results = []
-                            for tool_result_obj in tool_results_batch:
+                            for tool_call_obj, tool_result_obj in zip(tool_calls_batch, tool_results_batch):
                                 if tool_result_obj.error is not None:
                                     raise tool_result_obj.error
                                 tool_result = tool_result_obj.result
@@ -1927,16 +1927,16 @@ Now provide your final answer using this result. Summarize the information natur
                                 logging.debug(f"[RESPONSES_API] Executed tool {tool_result_obj.function_name} with result: {tool_result}")
 
                                 if verbose:
-                                    display_message = f"Agent {agent_name} called function '{tool_result_obj.function_name}' with arguments: {tool_result_obj.arguments}\n"
+                                    display_message = f"Agent {agent_name} called function '{tool_call_obj.function_name}' with arguments: {tool_call_obj.arguments}\n"
                                     display_message += f"Function returned: {tool_result}" if tool_result else "Function returned no output"
                                     _get_display_functions()['display_tool_call'](display_message, console=self.console)
 
                                 result_str = json.dumps(tool_result) if tool_result else "empty"
                                 _get_display_functions()['execute_sync_callback'](
                                     'tool_call',
-                                    message=f"Calling function: {tool_result_obj.function_name}",
-                                    tool_name=tool_result_obj.function_name,
-                                    tool_input=tool_result_obj.arguments,
+                                    message=f"Calling function: {tool_call_obj.function_name}",
+                                    tool_name=tool_call_obj.function_name,
+                                    tool_input=tool_call_obj.arguments,
                                     tool_output=result_str[:200] if result_str else None,
                                 )
 

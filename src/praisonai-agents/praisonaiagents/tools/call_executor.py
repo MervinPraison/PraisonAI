@@ -12,6 +12,7 @@ Design principles:
 """
 
 import concurrent.futures
+import contextvars
 import logging
 from typing import Any, Callable, Dict, List, Optional, Protocol
 from dataclasses import dataclass
@@ -142,7 +143,7 @@ class ParallelToolCallExecutor:
             try:
                 result = execute_tool_fn(
                     tool_call.function_name,
-                    tool_call.arguments,
+                    tool_call.arguments, 
                     tool_call.tool_call_id
                 )
                 return ToolResult(
@@ -165,7 +166,7 @@ class ParallelToolCallExecutor:
         
         # Use ThreadPoolExecutor for sync tools
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # Submit all tool calls
+            # Submit all tool calls with context propagation
             future_to_index = {
                 executor.submit(copy_context_to_callable(_execute_single_tool), tool_call): i
                 for i, tool_call in enumerate(tool_calls)

@@ -10,8 +10,8 @@ and call the LLM end-to-end, not just object construction.
 """
 
 import time
-import asyncio
 import logging
+import pytest
 from typing import List
 from praisonaiagents import Agent, tool
 from praisonaiagents.tools.call_executor import create_tool_call_executor, ToolCall
@@ -88,11 +88,11 @@ def test_executor_protocols():
     print(f"Results: {len(par_results)} tools executed")
     
     # Verify results are identical and in correct order
-    assert len(seq_results) == len(par_results)
+    assert len(seq_results) == len(par_results), "Result counts should match"
     for i, (seq_result, par_result) in enumerate(zip(seq_results, par_results)):
-        assert seq_result.function_name == par_result.function_name
-        assert seq_result.arguments == par_result.arguments
-        assert seq_result.tool_call_id == par_result.tool_call_id
+        assert seq_result.function_name == par_result.function_name, f"Function names should match at index {i}"
+        assert seq_result.arguments == par_result.arguments, f"Arguments should match at index {i}"
+        assert seq_result.tool_call_id == par_result.tool_call_id, f"Tool call IDs should match at index {i}"
         print(f"  Result {i+1}: {seq_result.function_name} -> {seq_result.result}")
     
     # Verify latency improvement
@@ -104,9 +104,15 @@ def test_executor_protocols():
     assert speedup >= 1.5, f"Expected speedup >= 1.5x, got {speedup:.2f}x"
     print("✅ ToolCallExecutor protocol test passed!\n")
 
+@pytest.mark.live
 def test_agent_parallel_tools():
     """Real agentic test with LLM end-to-end."""
     print("=== Real Agentic Test: Parallel Tool Execution ===")
+    
+    # Skip if no OpenAI API key
+    import os
+    if not os.getenv('OPENAI_API_KEY') and not os.getenv('PRAISONAI_LIVE_TESTS'):
+        pytest.skip("OpenAI API key not available for live test")
     
     # Create agents with different settings
     sequential_agent = Agent(
@@ -138,61 +144,59 @@ Return a summary of all the fetched data."""
     # Test sequential agent (baseline)
     print("\n--- Sequential Agent ---")
     sequential_start = time.time()
-    try:
-        sequential_result = sequential_agent.start(prompt)
-        sequential_time = time.time() - sequential_start
-        print(f"Sequential agent completed in: {sequential_time:.2f}s")
-        print(f"Result length: {len(sequential_result)} chars")
-        print(f"Result preview: {sequential_result[:200]}...")
-    except Exception as e:
-        print(f"Sequential agent error: {e}")
-        sequential_time = float('inf')
-        sequential_result = None
+    sequential_result = sequential_agent.start(prompt)
+    sequential_time = time.time() - sequential_start
+    print(f"Sequential agent completed in: {sequential_time:.2f}s")
+    print(f"Result length: {len(sequential_result)} chars")
+    print(f"Result preview: {sequential_result[:200]}...")
     
     # Test parallel agent
     print("\n--- Parallel Agent ---")
     parallel_start = time.time()
-    try:
-        parallel_result = parallel_agent.start(prompt)
-        parallel_time = time.time() - parallel_start
-        print(f"Parallel agent completed in: {parallel_time:.2f}s")
-        print(f"Result length: {len(parallel_result)} chars")
-        print(f"Result preview: {parallel_result[:200]}...")
-    except Exception as e:
-        print(f"Parallel agent error: {e}")
-        parallel_time = float('inf')
-        parallel_result = None
+    parallel_result = parallel_agent.start(prompt)
+    parallel_time = time.time() - parallel_start
+    print(f"Parallel agent completed in: {parallel_time:.2f}s")
+    print(f"Result length: {len(parallel_result)} chars")
+    print(f"Result preview: {parallel_result[:200]}...")
     
-    # Compare performance
-    if sequential_time < float('inf') and parallel_time < float('inf'):
-        speedup = sequential_time / parallel_time if parallel_time > 0 else 1
-        print(f"\n=== Performance Comparison ===")
-        print(f"Sequential time: {sequential_time:.2f}s")
-        print(f"Parallel time: {parallel_time:.2f}s") 
-        print(f"Speedup: {speedup:.2f}x")
-        
-        # Both agents should produce similar results
-        if sequential_result and parallel_result:
-            print(f"Both agents completed successfully")
-            print(f"Sequential result contains tools: {'fetch_user_data' in sequential_result}")
-            print(f"Parallel result contains tools: {'fetch_user_data' in parallel_result}")
+    speedup = sequential_time / parallel_time if parallel_time > 0 else float("inf")
+    print(f"\n=== Performance Comparison ===")
+    print(f"Sequential time: {sequential_time:.2f}s")
+    print(f"Parallel time: {parallel_time:.2f}s")
+    print(f"Speedup: {speedup:.2f}x")
+    
+    # Assertions for test validation
+    assert isinstance(sequential_result, str) and sequential_result.strip(), (
+        "Sequential agent should return a non-empty string result."
+    )
+    assert isinstance(parallel_result, str) and parallel_result.strip(), (
+        "Parallel agent should return a non-empty string result."
+    )
+    
+    # Both results should contain evidence of tool execution
+    assert 'user123' in sequential_result.lower() or 'john doe' in sequential_result.lower(), (
+        "Sequential result should contain user data"
+    )
+    assert 'user123' in parallel_result.lower() or 'john doe' in parallel_result.lower(), (
+        "Parallel result should contain user data"  
+    )
     
     print("✅ Real agentic test completed!\n")
 
-def main():
-    """Run all tests."""
+if __name__ == "__main__":
+    """Run tests directly."""
     print("Testing Gap 2: Parallel Tool Execution")
     print("=====================================")
     
     # Test 1: Direct executor protocol testing
     test_executor_protocols()
     
-    # Test 2: Real agentic test (per AGENTS.md requirement)
-    test_agent_parallel_tools()
+    # Test 2: Real agentic test (per AGENTS.md requirement) 
+    try:
+        test_agent_parallel_tools()
+    except Exception as e:
+        print(f"Live test skipped or failed: {e}")
     
-    print("All tests completed successfully! 🎉")
+    print("Tests completed! 🎉")
     print("\nGap 2 implementation allows agents to execute batched LLM tool calls in parallel,")
     print("reducing latency for I/O-bound workflows while maintaining backward compatibility.")
-
-if __name__ == "__main__":
-    main()
