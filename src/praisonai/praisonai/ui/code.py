@@ -49,6 +49,38 @@ def _profile_end(name: str):
 
 # Lazy import cache
 _cached_modules = {}
+_EXTERNAL_AGENT_DESCRIPTIONS = {
+    "claude": "Claude Code (coding, refactoring)",
+    "gemini": "Gemini CLI (analysis, search)",
+    "codex": "Codex CLI (code generation)",
+    "cursor": "Cursor CLI (IDE tasks)",
+}
+
+def _parse_external_agents_setting(raw_value: str):
+    """Parse comma-separated external agent setting into a normalized list."""
+    if not raw_value:
+        return []
+    return [agent.strip() for agent in raw_value.split(",") if agent and agent.strip()]
+
+def _normalize_selected_external_agents(value):
+    """Normalize UI settings value to list[str]."""
+    if not value:
+        return []
+    if isinstance(value, str):
+        return _parse_external_agents_setting(value)
+    if isinstance(value, (list, tuple)):
+        normalized = []
+        for item in value:
+            if isinstance(item, str):
+                cleaned = item.strip()
+                if cleaned:
+                    normalized.append(cleaned)
+            elif isinstance(item, dict):
+                item_value = item.get("value")
+                if isinstance(item_value, str) and item_value.strip():
+                    normalized.append(item_value.strip())
+        return normalized
+    return []
 
 def _get_json():
     if 'json' not in _cached_modules:
@@ -516,7 +548,7 @@ async def start():
         claude_code_enabled = (load_setting("claude_code_enabled") or "false").lower() == "true"
     tools_enabled = (load_setting("tools_enabled") or "true").lower() == "true"
     external_agents_setting = load_setting("external_agents") or ""
-    selected_external_agents = [agent.strip() for agent in external_agents_setting.split(",") if agent.strip()]
+    selected_external_agents = _parse_external_agents_setting(external_agents_setting)
     
     cl.user_session.set("model_name", model_name)
     cl.user_session.set("claude_code_enabled", claude_code_enabled)
@@ -530,16 +562,9 @@ async def start():
     # Get available external agents for settings
     available_external_agents = _check_available_external_agents()
     external_agent_options = []
-    agent_descriptions = {
-        "claude": "Claude Code (coding, refactoring)",
-        "gemini": "Gemini CLI (analysis, search)",
-        "codex": "Codex CLI (code generation)",
-        "cursor": "Cursor CLI (IDE tasks)"
-    }
-    
     for agent_name, is_available in available_external_agents.items():
         if is_available:
-            description = agent_descriptions.get(agent_name, agent_name)
+            description = _EXTERNAL_AGENT_DESCRIPTIONS.get(agent_name, agent_name)
             external_agent_options.append(cl.SelectOption(label=description, value=agent_name))
     
     settings_widgets = [
@@ -607,7 +632,7 @@ async def setup_agent(settings):
     model_name = settings["model_name"]
     claude_code_enabled = settings.get("claude_code_enabled", False)
     tools_enabled = settings.get("tools_enabled", True)
-    selected_external_agents = settings.get("external_agents", [])
+    selected_external_agents = _normalize_selected_external_agents(settings.get("external_agents", []))
     
     cl.user_session.set("model_name", model_name)
     cl.user_session.set("claude_code_enabled", claude_code_enabled)
@@ -826,22 +851,15 @@ async def on_chat_resume(thread: ThreadDict):
         claude_code_enabled = (load_setting("claude_code_enabled") or "false").lower() == "true"
     tools_enabled = (load_setting("tools_enabled") or "true").lower() == "true"
     external_agents_setting = load_setting("external_agents") or ""
-    selected_external_agents = [agent.strip() for agent in external_agents_setting.split(",") if agent.strip()]
+    selected_external_agents = _parse_external_agents_setting(external_agents_setting)
     
     logger.debug(f"Model name: {model_name}")
     # Get available external agents for settings
     available_external_agents = _check_available_external_agents()
     external_agent_options = []
-    agent_descriptions = {
-        "claude": "Claude Code (coding, refactoring)",
-        "gemini": "Gemini CLI (analysis, search)",
-        "codex": "Codex CLI (code generation)",
-        "cursor": "Cursor CLI (IDE tasks)"
-    }
-    
     for agent_name, is_available in available_external_agents.items():
         if is_available:
-            description = agent_descriptions.get(agent_name, agent_name)
+            description = _EXTERNAL_AGENT_DESCRIPTIONS.get(agent_name, agent_name)
             external_agent_options.append(cl.SelectOption(label=description, value=agent_name))
     
     settings_widgets = [
