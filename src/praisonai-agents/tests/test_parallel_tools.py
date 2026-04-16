@@ -14,6 +14,7 @@ import logging
 import pytest
 from typing import List
 from praisonaiagents import Agent, tool
+from praisonaiagents.config.feature_configs import ExecutionConfig
 from praisonaiagents.tools.call_executor import create_tool_call_executor, ToolCall
 
 # Set up logging to see execution details
@@ -119,7 +120,7 @@ def test_agent_parallel_tools():
         name="sequential_agent",
         instructions="You are a data fetcher. Use the provided tools to fetch user, analytics, and config data.",
         tools=[fetch_user_data, fetch_analytics_data, fetch_config_data],
-        parallel_tool_calls=False,  # Sequential (current behavior)
+        execution=ExecutionConfig(parallel_tool_calls=False),  # Sequential (current behavior)
         llm="gpt-4o-mini"
     )
     
@@ -127,7 +128,7 @@ def test_agent_parallel_tools():
         name="parallel_agent", 
         instructions="You are a data fetcher. Use the provided tools to fetch user, analytics, and config data.",
         tools=[fetch_user_data, fetch_analytics_data, fetch_config_data],
-        parallel_tool_calls=True,   # Parallel (new feature)
+        execution=ExecutionConfig(parallel_tool_calls=True),   # Parallel (new feature)
         llm="gpt-4o-mini"
     )
     
