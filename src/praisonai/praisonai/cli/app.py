@@ -13,7 +13,7 @@ from .output.console import OutputController, OutputMode, set_output_controller
 from .state.identifiers import create_context
 
 
-def _setup_langfuse_observability() -> None:
+def _setup_langfuse_observability(*, verbose: bool = False) -> None:
     """Set up Langfuse observability by wiring TraceSink to both action and context emitters."""
     try:
         from praisonai.observability.langfuse import LangfuseSink
@@ -34,9 +34,10 @@ def _setup_langfuse_observability() -> None:
     except ImportError:
         # Gracefully degrade if Langfuse not installed
         pass
-    except Exception:
-        # Silently fail to avoid breaking CLI if observability setup fails
-        pass
+    except Exception as e:
+        # Avoid breaking CLI if observability setup fails
+        if verbose:
+            typer.echo(f"Warning: failed to initialize Langfuse observability: {e}", err=True)
 
 
 class OutputFormat(str, Enum):
@@ -152,7 +153,7 @@ def main_callback(
     
     # Set up observability if requested
     if observe == "langfuse":
-        _setup_langfuse_observability()
+        _setup_langfuse_observability(verbose=verbose)
     
     # Determine output mode
     if state.quiet:

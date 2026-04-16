@@ -6,10 +6,14 @@ between Langflow and PraisonAI formats.
 
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+_LANGFUSE_CONTEXT_EMITTER: Any | None = None
+_LANGFUSE_OBS_LOCK = threading.Lock()
 
 
 def convert_tools(tools: list | None) -> list[Callable] | None:
@@ -128,3 +132,26 @@ def build_memory_config(
     return {
         "provider": memory_provider,
     }
+
+
+def setup_langfuse_context_observability() -> None:
+    """Set up Langfuse context observability once per process."""
+    import os
+
+    if os.environ.get("PRAISONAI_OBSERVE", "") != "langfuse":
+        return
+
+    try:
+        from praisonai.observability.langfuse import LangfuseSink
+        from praisonaiagents.trace.context_events import ContextTraceEmitter, set_context_emitter
+    except ImportError:
+        return
+
+    global _LANGFUSE_CONTEXT_EMITTER
+
+    with _LANGFUSE_OBS_LOCK:
+        if _LANGFUSE_CONTEXT_EMITTER is None:
+            sink = LangfuseSink()
+            _LANGFUSE_CONTEXT_EMITTER = ContextTraceEmitter(sink=sink, enabled=True)
+
+        set_context_emitter(_LANGFUSE_CONTEXT_EMITTER)

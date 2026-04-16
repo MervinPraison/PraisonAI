@@ -440,16 +440,6 @@ class PraisonAIAgentComponent(Component):
     
     def _setup_observability(self) -> None:
         """Auto-configure observability from environment variables."""
-        import os
-        observe = os.environ.get("PRAISONAI_OBSERVE", "")
-        if observe == "langfuse":
-            try:
-                from praisonai.observability.langfuse import LangfuseSink
-                from praisonaiagents.trace.context_events import (
-                    ContextTraceEmitter, set_context_emitter
-                )
-                sink = LangfuseSink()
-                emitter = ContextTraceEmitter(sink=sink, enabled=True)
-                set_context_emitter(emitter)
-            except ImportError:
-                pass  # Langfuse not installed, gracefully degrade
+        from praisonai.flow.helpers import setup_langfuse_context_observability
+
+        setup_langfuse_context_observability()
