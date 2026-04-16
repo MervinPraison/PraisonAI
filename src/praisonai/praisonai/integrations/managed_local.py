@@ -488,7 +488,9 @@ class LocalManagedAgent:
                     result = self._run_async(
                         self.execute_in_compute(cmd_str, timeout=_COMPUTE_INSTALL_TIMEOUT_SECONDS)
                     )
-                    if result.get("exit_code", 1) != 0:
+                    if "exit_code" not in result:
+                        raise RuntimeError(f"compute install result missing exit_code: {result}")
+                    if result["exit_code"] != 0:
                         raise RuntimeError(
                             f"compute package install failed for {pip_pkgs}: "
                             f"{result.get('stderr', 'unknown error')}"
@@ -509,7 +511,10 @@ class LocalManagedAgent:
         except RuntimeError:
             return asyncio.run(coro)
 
-        raise RuntimeError("Cannot run async compute operations from an active event loop")
+        raise RuntimeError(
+            "Cannot run async compute operations from an active event loop. "
+            "Use await or schedule the operation in async code."
+        )
     
     def _install_packages_host(self, pip_pkgs: List[str]) -> None:
         """Install packages on host interpreter (fallback)."""
