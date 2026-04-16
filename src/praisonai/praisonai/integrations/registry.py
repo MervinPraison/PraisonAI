@@ -27,7 +27,6 @@ Usage:
 """
 
 from typing import Dict, Type, Optional, Any, List
-from abc import ABC
 
 from .base import BaseCLIIntegration
 
@@ -154,15 +153,27 @@ class ExternalAgentRegistry:
         Returns:
             Dict[str, bool]: Mapping of integration name to availability status
         """
+        import inspect
         availability = {}
         
         for name, integration_class in self._integrations.items():
             try:
+                # Check if constructor requires parameters beyond self
+                sig = inspect.signature(integration_class.__init__)
+                params = [p for p_name, p in sig.parameters.items() if p_name != 'self' and p.default is inspect.Parameter.empty]
+                
+                if params:
+                    # Constructor requires arguments, can't instantiate for availability check
+                    # Skip this integration rather than marking it unavailable
+                    continue
+                
                 # Create a temporary instance to check availability
                 instance = integration_class()
                 availability[name] = instance.is_available
-            except Exception:
-                # If instantiation fails, mark as unavailable
+            except Exception as e:
+                # Log real exceptions rather than hiding them
+                import logging
+                logging.warning(f"Failed to check availability for {name}: {e}")
                 availability[name] = False
         
         return availability
@@ -216,14 +227,30 @@ def create_integration(name: str, **kwargs: Any) -> Optional[BaseCLIIntegration]
     return registry.create(name, **kwargs)
 
 
-async def get_available_integrations() -> Dict[str, bool]:
+def get_available_integrations() -> Dict[str, bool]:
     """
     Get availability status of all registered integrations.
     
-    Backward compatibility wrapper for the original function.
+    Backward compatibility wrapper for the original synchronous function.
     
     Returns:
         Dict[str, bool]: Mapping of integration name to availability status
     """
+    import asyncio
     registry = get_registry()
-    return await registry.get_available()
+    
+    try:
+        # Try to get existing event loop
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # We're in an async context, use create_task via thread pool
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, registry.get_available())
+                return future.result()
+        else:
+            # No running loop, safe to use asyncio.run
+            return asyncio.run(registry.get_available())
+    except RuntimeError:
+        # No event loop, safe to use asyncio.run
+        return asyncio.run(registry.get_available())

@@ -19,11 +19,10 @@ export interface ExternalAgentResult {
   duration: number;
 }
 
-export interface StreamEvent {
-  type: string;
-  content?: string;
-  data?: any;
-}
+export type StreamEvent =
+  | { type: 'text'; content: string }
+  | { type: 'json'; data: unknown }
+  | { type: 'error'; error: string };
 
 /**
  * Base class for external agent integrations
@@ -117,12 +116,23 @@ export abstract class BaseExternalAgent {
     const proc = spawn(this.config.command, args, {
       cwd: this.config.cwd || process.cwd(),
       env: { ...process.env, ...this.config.env },
+      timeout: this.config.timeout,
       stdio: ['pipe', 'pipe', 'pipe']
     });
 
     if (!proc.stdout) {
       throw new Error('Failed to create stdout stream');
     }
+
+    let stderr = '';
+    proc.stderr?.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    const exit = new Promise<number | null>((resolve, reject) => {
+      proc.once('error', reject);
+      proc.once('close', resolve);
+    });
 
     const readline = await import('readline');
     const rl = readline.createInterface({
@@ -143,9 +153,16 @@ export abstract class BaseExternalAgent {
           }
         }
       }
+
+      const exitCode = await exit;
+      if (exitCode !== 0) {
+        throw new Error(stderr || `${this.config.command} exited with code ${exitCode}`);
+      }
     } finally {
       rl.close();
-      proc.kill();
+      if (!proc.killed) {
+        proc.kill();
+      }
     }
   }
 
@@ -273,6 +290,9 @@ export class AiderAgent extends BaseExternalAgent {
   async *stream(prompt: string): AsyncGenerator<StreamEvent, void, unknown> {
     // Aider doesn't support JSON streaming, so just yield text events
     const result = await this.execute(prompt);
+    if (!result.success) {
+      throw new Error(result.error || 'Aider execution failed');
+    }
     for (const line of result.output.split('\n')) {
       if (line.trim()) {
         yield { type: 'text', content: line };
