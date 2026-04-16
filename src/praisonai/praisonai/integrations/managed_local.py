@@ -24,6 +24,7 @@ Usage::
 import asyncio
 import logging
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -278,9 +279,6 @@ class LocalManagedAgent:
         # Compute provider (optional — for remote tool execution)
         self._compute = self._resolve_compute(compute)
         self._compute_instance_id: Optional[str] = None
-        
-        # Tracing support
-        self._trace_emitter = None
 
     # ------------------------------------------------------------------
     # Model resolution
@@ -472,13 +470,18 @@ class LocalManagedAgent:
         pip_pkgs = packages.get("pip", []) if isinstance(packages, dict) else []
         if pip_pkgs:
             logger.info("[local_managed] installing pip packages: %s", pip_pkgs)
-            
+
             # Use compute provider if available, otherwise fall back to host
             if self._compute:
                 try:
+                    if not self._compute_instance_id:
+                        self._run_async(self.provision_compute())
+
                     # Route package installation through compute provider
-                    cmd_str = f"{sys.executable} -m pip install -q " + " ".join(pip_pkgs)
-                    result = self._compute.execute(cmd_str)
+                    cmd_str = f"{sys.executable} -m pip install -q " + " ".join(shlex.quote(pkg) for pkg in pip_pkgs)
+                    result = self._run_async(self.execute_in_compute(cmd_str, timeout=120))
+                    if result.get("exit_code", 1) != 0:
+                        raise RuntimeError(result.get("stderr", "unknown compute install failure"))
                     logger.info("[local_managed] packages installed via compute provider")
                 except Exception as e:
                     logger.warning("[local_managed] compute provider pip install failed: %s", e)
@@ -486,6 +489,11 @@ class LocalManagedAgent:
                     self._install_packages_host(pip_pkgs)
             else:
                 self._install_packages_host(pip_pkgs)
+
+    @staticmethod
+    def _run_async(coro: Any) -> Any:
+        """Run an async coroutine from sync code."""
+        return asyncio.run(coro)
     
     def _install_packages_host(self, pip_pkgs: List[str]) -> None:
         """Install packages on host interpreter (fallback)."""

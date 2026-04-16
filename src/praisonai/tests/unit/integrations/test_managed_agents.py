@@ -5,8 +5,10 @@ Tests the basic functionality of the managed agent backend integration
 without making actual API calls.
 """
 
-import pytest
+import os
 from unittest.mock import Mock, patch
+
+import pytest
 
 
 def test_anthropic_managed_agent_import():
@@ -170,8 +172,7 @@ def test_compute_provider_integration():
 def test_managed_agent_protocol_compliance():
     """Test that managed agents implement the protocol correctly."""
     from praisonai.integrations.managed_local import LocalManagedAgent
-    from praisonaiagents.agent.protocols import ManagedBackendProtocol
-    from typing import get_type_hints
+    from praisonaiagents.managed import ManagedBackendProtocol
     
     # Check that LocalManagedAgent implements required protocol methods
     local_agent = LocalManagedAgent()
@@ -192,13 +193,17 @@ async def test_local_managed_agent_real_execution():
     """Real agentic test - LocalManagedAgent must call LLM and produce response."""
     from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
     from praisonaiagents import Agent
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        pytest.skip("OPENAI_API_KEY not set; skipping real managed execution test")
     
     # Create local managed backend
     config = LocalManagedConfig(
         model="gpt-4o-mini",  # Use smaller model for testing
         system="You are a helpful assistant. Respond in exactly one sentence."
     )
-    managed = LocalManagedAgent(config=config, api_key="test-key")
+    managed = LocalManagedAgent(config=config, api_key=api_key)
     
     # Create agent with managed backend
     agent = Agent(
@@ -207,19 +212,11 @@ async def test_local_managed_agent_real_execution():
         backend=managed
     )
     
-    try:
-        # This must actually call the LLM and produce a real response
-        result = agent.start("Say hello in one sentence")
-        print(f"Agent response: {result}")
-        
-        # Verify we got a meaningful response
-        assert isinstance(result, str)
-        assert len(result.strip()) > 0
-        assert "hello" in result.lower() or "hi" in result.lower()
-        
-    except Exception as e:
-        # If we can't connect to LLM (no API key, network issue), that's expected in tests
-        print(f"Expected test limitation: {e}")
-        # Still verify the code structure is correct
-        assert hasattr(agent, 'backend')
-        assert agent.backend == managed
+    # This must actually call the LLM and produce a real response
+    result = agent.start("Say hello in one sentence")
+    print(f"Agent response: {result}")
+
+    # Verify we got a meaningful response
+    assert isinstance(result, str)
+    assert len(result.strip()) > 0
+    assert "hello" in result.lower() or "hi" in result.lower()
