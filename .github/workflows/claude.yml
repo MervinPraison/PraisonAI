@@ -201,7 +201,7 @@ jobs:
           label_trigger: "claude"
 
           direct_prompt: |
-            ${{ steps.check_fork.outputs.is_fork == 'true' && 'CRITICAL: THIS IS A PULL REQUEST FROM A FORK. YOU DO NOT HAVE PUSH PERMISSIONS TO THIS REPOSITORY. ONLY READ FILES, VALIDATE CODE, AND PROVIDE YOUR COMMENTS/FEEDBACK DIRECTLY IN THIS PR VIA COMMENTS. DO NOT ATTEMPT TO PUSH OR CREATE PULL REQUESTS.\n\n' || '' }}
+            ${{ steps.check_fork.outputs.is_fork == 'true' && 'CRITICAL: THIS IS A PULL REQUEST FROM A FORK. YOU DO NOT HAVE PUSH PERMISSIONS TO THIS REPOSITORY. ONLY READ FILES, VALIDATE CODE, AND PROVIDE YOUR COMMENTS/FEEDBACK DIRECTLY IN THIS PR VIA COMMENTS. DO NOT ATTEMPT TO PUSH OR CREATE PULL REQUESTS.\n\n' || 'NOTE: The branch is under MervinPraison/PraisonAI (not a fork). You are able to make modifications and push directly to this branch.\n\n' }}
             You are working on the PraisonAI SDK. Follow AGENTS.md strictly.
 
             STEP 0 — SETUP GIT IDENTITY & AUTH (GLOBAL — required for all repos):
