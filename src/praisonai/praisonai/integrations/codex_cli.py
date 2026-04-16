@@ -81,7 +81,7 @@ class CodexCLIIntegration(BaseCLIIntegration):
 
         if approval_mode not in self.VALID_APPROVAL_MODES:
             raise ValueError(
-                f"Invalid approval_mode: {approval_mode}. "
+                f"Invalid approval_mode: '{approval_mode}'. "
                 f"Must be one of: {', '.join(sorted(self.VALID_APPROVAL_MODES))}"
             )
         
