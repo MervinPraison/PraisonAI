@@ -768,6 +768,14 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
                 alternative="use 'execution=ExecutionConfig(rate_limiter=obj)' instead",
                 stacklevel=3
             )
+        if parallel_tool_calls is not None:
+            warn_deprecated_param(
+                "parallel_tool_calls",
+                since="1.0.0",
+                removal="2.0.0",
+                alternative="use 'execution=ExecutionConfig(parallel_tool_calls=True)' instead",
+                stacklevel=3
+            )
         if verification_hooks is not None:
             warn_deprecated_param(
                 "verification_hooks",
@@ -943,6 +951,8 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
                 allow_code_execution = True
             if _exec_config.code_mode != "safe":
                 code_execution_mode = _exec_config.code_mode
+            # Get parallel_tool_calls from ExecutionConfig
+            parallel_tool_calls = _exec_config.parallel_tool_calls
             # Budget guard extraction
             _max_budget = getattr(_exec_config, 'max_budget', None)
             _on_budget_exceeded = getattr(_exec_config, 'on_budget_exceeded', 'stop') or 'stop'
@@ -950,6 +960,8 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
             max_iter, max_rpm, max_execution_time, max_retry_limit = 20, None, None, 2
             _max_budget = None
             _on_budget_exceeded = 'stop'
+            # Default parallel_tool_calls when no ExecutionConfig provided
+            parallel_tool_calls = False
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve TEMPLATES param - FAST PATH
@@ -1440,6 +1452,8 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
             self.self_reflect = True if self_reflect is None else self_reflect
         
         self.instructions = instructions
+        # Gap 2: Store parallel tool calls setting for ToolCallExecutor selection
+        self.parallel_tool_calls = parallel_tool_calls
         # Check for model name in environment variable if not provided
         self._using_custom_llm = False
         # Flag to track if final result has been displayed to prevent duplicates

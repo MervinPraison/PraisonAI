@@ -735,6 +735,11 @@ class ExecutionConfig:
     # Action when budget exceeded: "stop" (default) raises BudgetExceededError,
     # "warn" logs warning but continues, or callable(total_cost, max_budget).
     on_budget_exceeded: Any = "stop"
+    
+    # Parallel tool execution (Gap 2): Enable parallel execution of batched LLM tool calls
+    # When True, multiple tool calls from LLM are executed concurrently instead of sequentially
+    # Default False preserves existing behavior for backward compatibility
+    parallel_tool_calls: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -749,6 +754,7 @@ class ExecutionConfig:
             "context_compaction": self.context_compaction,
             "max_context_tokens": self.max_context_tokens,
             "max_budget": self.max_budget,
+            "parallel_tool_calls": self.parallel_tool_calls,
         }
 
 
