@@ -18,14 +18,14 @@ from unittest.mock import Mock, patch
 from praisonaiagents.trace.protocol import ActionEvent, ActionEventType
 
 
+_REAL_IMPORT = builtins.__import__
+
+
 def _import_with_langextract_failure(name, globals=None, locals=None, fromlist=(), level=0):
     """Import hook that fails only for langextract."""
     if name == "langextract":
         raise ImportError("No module named 'langextract'")
     return _REAL_IMPORT(name, globals, locals, fromlist, level)
-
-
-_REAL_IMPORT = builtins.__import__
 
 
 @pytest.fixture
