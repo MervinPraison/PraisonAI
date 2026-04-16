@@ -365,3 +365,9 @@ class PraisonAIAgentsComponent(Component):
     async def build_response_async(self) -> Message:
         """Execute the multi-agent workflow asynchronously."""
         return await asyncio.to_thread(self.build_response)
+    
+    def _setup_observability(self) -> None:
+        """Auto-configure observability from environment variables."""
+        from praisonai.flow.helpers import setup_langfuse_context_observability
+
+        setup_langfuse_context_observability()

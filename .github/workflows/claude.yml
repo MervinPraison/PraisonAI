@@ -201,7 +201,7 @@ jobs:
           label_trigger: "claude"
 
           direct_prompt: |
-            ${{ steps.check_fork.outputs.is_fork == 'true' && 'CRITICAL: THIS IS A PULL REQUEST FROM A FORK. YOU DO NOT HAVE PUSH PERMISSIONS TO THIS REPOSITORY. ONLY READ FILES, VALIDATE CODE, AND PROVIDE YOUR COMMENTS/FEEDBACK DIRECTLY IN THIS PR VIA COMMENTS. DO NOT ATTEMPT TO PUSH OR CREATE PULL REQUESTS.\n\n' || '' }}
+            ${{ steps.check_fork.outputs.is_fork == 'true' && 'CRITICAL: THIS IS A PULL REQUEST FROM A FORK. YOU DO NOT HAVE PUSH PERMISSIONS TO THIS REPOSITORY. ONLY READ FILES, VALIDATE CODE, AND PROVIDE YOUR COMMENTS/FEEDBACK DIRECTLY IN THIS PR VIA COMMENTS. DO NOT ATTEMPT TO PUSH OR CREATE PULL REQUESTS.\n\n' || 'NOTE: The branch is under MervinPraison/PraisonAI (not a fork). You are able to make modifications and push directly to this branch.\n\n' }}
             You are working on the PraisonAI SDK. Follow AGENTS.md strictly.
 
             STEP 0 — SETUP GIT IDENTITY & AUTH (GLOBAL — required for all repos):
@@ -212,6 +212,7 @@ jobs:
 
             STEP 1 — READ GUIDELINES:
             Read AGENTS.md to understand the architecture rules.
+            SCOPE: Focus ONLY on Python packages (praisonaiagents, praisonai). Do NOT modify or touch praisonai-rust or praisonai-ts packages.
 
             STEP 2 — ARCHITECTURE VALIDATION & ROUTING (MANDATORY before writing code):
             Before implementing anything, answer these questions:
@@ -230,9 +231,14 @@ jobs:
             If ANY of these conceptual checks fail (excluding routing), add a comment to the issue explaining why and close it. Do NOT create a PR.
 
             STEP 3 — IMPLEMENT (for changes in THIS repo — PraisonAI):
-            - Create a fix branch and implement a minimal, focused fix
+            - Create a fix branch: git checkout -b claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)
+            - Implement a minimal, focused fix
             - Follow protocol-driven design: protocols in core SDK, heavy implementations in wrapper
             - Keep changes small and backward-compatible
+            - Commit: git add -A && git commit -m "fix: <description> (fixes #$ISSUE_NUMBER)"
+            - Push: git push origin claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)
+            CRITICAL: After pushing, you MUST immediately run: gh pr create --title "fix: <title>" --body "Fixes #$ISSUE_NUMBER" --head claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)
+            Do NOT stop after pushing. Do NOT say "manually create a PR". Always create the PR automatically.
 
             STEP 3-ALT — IMPLEMENT IN EXTERNAL REPO (for PraisonAI-Tools, PraisonAIDocs, PraisonAI-Plugins):
             When work must happen in a different repository, follow these steps EXACTLY. Do NOT attempt to use `cd`, as directory state is not preserved. Use `git -C` for all commands.

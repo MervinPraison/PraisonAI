@@ -472,3 +472,9 @@ class PraisonAIAgentComponent(Component):
             if converted:
                 return converted
         return self.llm
+    
+    def _setup_observability(self) -> None:
+        """Auto-configure observability from environment variables."""
+        from praisonai.flow.helpers import setup_langfuse_context_observability
+
+        setup_langfuse_context_observability()
