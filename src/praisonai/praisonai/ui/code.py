@@ -246,101 +246,7 @@ def _get_cached_context(repo_path: str, force_refresh: bool = False):
     
     return context, token_count, context_tree
 
-# Claude Code Tool Function (lazy subprocess)
-async def claude_code_tool(query: str) -> str:
-    """Execute Claude Code CLI commands for file modifications and coding tasks."""
-    subprocess = _get_subprocess()
-    datetime = _get_datetime()
-    
-    try:
-        repo_path = os.environ.get("PRAISONAI_CODE_REPO_PATH", ".")
-        
-        git_available = False
-        try:
-            subprocess.run(["git", "status"], cwd=repo_path, capture_output=True, check=True)
-            git_available = True
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            git_available = False
-        
-        claude_cmd = ["claude", "--dangerously-skip-permissions", "-p", query]
-        
-        user_session_context = cl.user_session.get("claude_code_context", False)
-        if user_session_context:
-            claude_cmd.insert(1, "--continue")
-        
-        result = subprocess.run(
-            claude_cmd,
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            timeout=300
-        )
-        
-        cl.user_session.set("claude_code_context", True)
-        
-        output = result.stdout
-        if result.stderr:
-            output += f"\n\nErrors:\n{result.stderr}"
-        
-        if git_available and result.returncode == 0:
-            try:
-                git_status = subprocess.run(
-                    ["git", "status", "--porcelain"],
-                    cwd=repo_path,
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
-                
-                if git_status.stdout.strip():
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    branch_name = f"claude-code-{timestamp}"
-                    
-                    subprocess.run(["git", "checkout", "-b", branch_name], cwd=repo_path, check=True)
-                    subprocess.run(["git", "add", "."], cwd=repo_path, check=True)
-                    commit_message = f"Claude Code changes: {query[:50]}..."
-                    subprocess.run(
-                        ["git", "commit", "-m", commit_message],
-                        cwd=repo_path,
-                        check=True
-                    )
-                    
-                    try:
-                        subprocess.run(
-                            ["git", "push", "-u", "origin", branch_name],
-                            cwd=repo_path,
-                            check=True
-                        )
-                        
-                        remote_url = subprocess.run(
-                            ["git", "config", "--get", "remote.origin.url"],
-                            cwd=repo_path,
-                            capture_output=True,
-                            text=True
-                        )
-                        
-                        if remote_url.returncode == 0:
-                            repo_url = remote_url.stdout.strip()
-                            if repo_url.endswith(".git"):
-                                repo_url = repo_url[:-4]
-                            if "github.com" in repo_url:
-                                pr_url = f"{repo_url}/compare/main...{branch_name}?quick_pull=1"
-                                output += f"\n\n📋 **Pull Request Created:**\n{pr_url}"
-                                
-                    except subprocess.CalledProcessError:
-                        output += f"\n\n🌲 **Branch created:** {branch_name} (push manually if needed)"
-                        
-            except subprocess.CalledProcessError as e:
-                output += f"\n\nGit operations failed: {e}"
-        
-        return output
-        
-    except subprocess.TimeoutExpired:
-        return "Claude Code execution timed out after 5 minutes."
-    except subprocess.CalledProcessError as e:
-        return f"Claude Code execution failed: {e}\nStdout: {e.stdout}\nStderr: {e.stderr}"
-    except Exception as e:
-        return f"Error executing Claude Code: {str(e)}"
+# External agents now handled via shared helper
 
 # Deferred tool loading
 _tavily_client = None
@@ -414,19 +320,24 @@ def auth_callback(input_username: str, input_password: str):
     else:
         return None
 
-def _get_or_create_agent(model_name: str, tools_enabled: bool = True, claude_code_enabled: bool = False):
+def _get_or_create_agent(model_name: str, tools_enabled: bool = True, external_agents_settings: dict = None):
     """Get or create a reusable agent for the session."""
     Agent = _get_praisonai_agent()
     if Agent is None:
         return None
     
+    # Default external agents settings
+    if external_agents_settings is None:
+        external_agents_settings = {}
+    
     # Get cached agent from session
     cached_agent = cl.user_session.get("_cached_agent")
     cached_model = cl.user_session.get("_cached_agent_model")
-    cached_claude = cl.user_session.get("_cached_agent_claude")
+    cached_external = cl.user_session.get("_cached_agent_external", {})
     
-    # Reuse if model and claude setting match
-    if cached_agent is not None and cached_model == model_name and cached_claude == claude_code_enabled:
+    # Reuse if model and external agents settings match
+    if (cached_agent is not None and cached_model == model_name and 
+        cached_external == external_agents_settings):
         return cached_agent
     
     # Create new agent with interactive tools
@@ -437,26 +348,40 @@ def _get_or_create_agent(model_name: str, tools_enabled: bool = True, claude_cod
         # Add Tavily if available
         if os.getenv("TAVILY_API_KEY"):
             tools.append(tavily_web_search)
-        # Add Claude Code if enabled
-        if claude_code_enabled:
-            tools.append(claude_code_tool)
+        # Add external agent tools
+        from praisonai.ui._external_agents import external_agent_tools
+        workspace = os.environ.get("PRAISONAI_CODE_REPO_PATH", ".")
+        tools.extend(external_agent_tools(external_agents_settings, workspace=workspace))
+    
+    # Build dynamic instructions based on available external agents
+    available_agents = []
+    if external_agents_settings.get("claude_enabled"):
+        available_agents.append("**Claude Code**: Execute complex coding tasks with Claude Code CLI")
+    if external_agents_settings.get("gemini_enabled"):
+        available_agents.append("**Gemini CLI**: Analysis and search capabilities")  
+    if external_agents_settings.get("codex_enabled"):
+        available_agents.append("**Codex CLI**: Advanced code refactoring")
+    if external_agents_settings.get("cursor_enabled"):
+        available_agents.append("**Cursor CLI**: IDE-style development tasks")
+    
+    external_capabilities = "\n- ".join([""] + available_agents) if available_agents else ""
     
     agent = Agent(
         name="PraisonAI Code Assistant",
-        instructions="""You are a powerful AI code assistant with access to comprehensive development tools.
+        instructions=f"""You are a powerful AI code assistant with access to comprehensive development tools.
 
 Available capabilities:
 - **File Operations**: Read, write, create, edit, delete files using ACP tools
 - **Code Intelligence**: Find symbols, definitions, references using LSP tools
 - **Command Execution**: Run shell commands safely
-- **Web Search**: Search the web for documentation and solutions (if Tavily API key is set)
-- **Claude Code**: Execute complex coding tasks with Claude Code CLI (if enabled)
+- **Web Search**: Search the web for documentation and solutions (if Tavily API key is set){external_capabilities}
 
 When helping with code:
 1. Use ACP tools for safe, reviewable file modifications
 2. Use LSP tools to understand code structure before making changes
-3. Always explain what you're doing and why
-4. Test changes when possible
+3. Delegate complex tasks to specialized external agents when available
+4. Always explain what you're doing and why
+5. Test changes when possible
 
 Trust mode is enabled - tool executions are auto-approved for efficiency.""",
         llm=model_name,
@@ -467,7 +392,7 @@ Trust mode is enabled - tool executions are auto-approved for efficiency.""",
     # Cache the agent
     cl.user_session.set("_cached_agent", agent)
     cl.user_session.set("_cached_agent_model", model_name)
-    cl.user_session.set("_cached_agent_claude", claude_code_enabled)
+    cl.user_session.set("_cached_agent_external", external_agents_settings)
     _profile_end("create_agent")
     
     return agent
@@ -478,18 +403,35 @@ async def start():
     _ensure_env_loaded()
     
     model_name = load_setting("model_name") or os.getenv("MODEL_NAME", "gpt-4o-mini")
-    claude_code_enabled = os.getenv("PRAISONAI_CLAUDECODE_ENABLED", "false").lower() == "true"
-    if not claude_code_enabled:
-        claude_code_enabled = (load_setting("claude_code_enabled") or "false").lower() == "true"
     tools_enabled = (load_setting("tools_enabled") or "true").lower() == "true"
     
+    # Load external agent settings with backward compatibility
+    from praisonai.ui._external_agents import chainlit_switches, EXTERNAL_AGENTS
+    external_settings = {}
+    
+    # Check for legacy claude_code_enabled setting
+    legacy_claude = os.getenv("PRAISONAI_CLAUDECODE_ENABLED", "false").lower() == "true"
+    if not legacy_claude:
+        legacy_claude = (load_setting("claude_code_enabled") or "false").lower() == "true"
+    if legacy_claude:
+        external_settings["claude_enabled"] = True
+    
+    # Load all external agent settings
+    for toggle_id in EXTERNAL_AGENTS:
+        if toggle_id not in external_settings:  # Don't override claude if set via legacy
+            setting_value = load_setting(toggle_id)
+            external_settings[toggle_id] = setting_value and setting_value.lower() == "true"
+    
     cl.user_session.set("model_name", model_name)
-    cl.user_session.set("claude_code_enabled", claude_code_enabled)
     cl.user_session.set("tools_enabled", tools_enabled)
-    logger.debug(f"Model name: {model_name}, Claude Code: {claude_code_enabled}, Tools: {tools_enabled}")
+    # Save external settings to session
+    for toggle_id, value in external_settings.items():
+        cl.user_session.set(toggle_id, value)
+    
+    logger.debug(f"Model: {model_name}, Tools: {tools_enabled}, External agents: {external_settings}")
     
     # Pre-create agent for faster first response
-    _get_or_create_agent(model_name, tools_enabled, claude_code_enabled)
+    _get_or_create_agent(model_name, tools_enabled, external_settings)
     
     settings = cl.ChatSettings(
         [
@@ -504,11 +446,7 @@ async def start():
                 label="Enable Tools (ACP, LSP, Web Search)",
                 initial=tools_enabled
             ),
-            Switch(
-                id="claude_code_enabled",
-                label="Enable Claude Code (file modifications & coding)",
-                initial=claude_code_enabled
-            )
+            *chainlit_switches(external_settings)
         ]
     )
     cl.user_session.set("settings", settings)
@@ -524,11 +462,15 @@ async def start():
     if len(tools) > 5:
         tool_names.append(f"... and {len(tools) - 5} more")
     
+    # Build external agents status
+    enabled_agents = [agent for agent, enabled in external_settings.items() if enabled]
+    agents_status = ", ".join(enabled_agents) if enabled_agents else "None"
+    
     await cl.Message(
         content=f"🚀 **PraisonAI Code Assistant Ready**\n\n"
                 f"**Model:** {model_name}\n"
                 f"**Tools:** {len(tools)} loaded ({', '.join(tool_names)})\n"
-                f"**Claude Code:** {'Enabled' if claude_code_enabled else 'Disabled'}\n"
+                f"**External Agents:** {agents_status}\n"
                 f"**Trust Mode:** Enabled (auto-approve tool executions)\n"
                 f"**Context:** {token_count} tokens from workspace\n\n"
                 f"**Files in workspace:**\n```\n{context_tree[:500]}{'...' if len(context_tree) > 500 else ''}\n```"
@@ -543,24 +485,35 @@ async def setup_agent(settings):
     cl.user_session.set("settings", settings)
     
     model_name = settings["model_name"]
-    claude_code_enabled = settings.get("claude_code_enabled", False)
     tools_enabled = settings.get("tools_enabled", True)
     
+    # Extract external agent settings
+    from praisonai.ui._external_agents import EXTERNAL_AGENTS
+    external_settings = {toggle_id: settings.get(toggle_id, False) for toggle_id in EXTERNAL_AGENTS}
+    
     cl.user_session.set("model_name", model_name)
-    cl.user_session.set("claude_code_enabled", claude_code_enabled)
     cl.user_session.set("tools_enabled", tools_enabled)
+    # Save external settings to session
+    for toggle_id, value in external_settings.items():
+        cl.user_session.set(toggle_id, value)
     
     # Invalidate cached agent if settings changed
     cached_model = cl.user_session.get("_cached_agent_model")
-    cached_claude = cl.user_session.get("_cached_agent_claude")
-    if cached_model != model_name or cached_claude != claude_code_enabled:
+    cached_external = cl.user_session.get("_cached_agent_external", {})
+    if cached_model != model_name or cached_external != external_settings:
         cl.user_session.set("_cached_agent", None)
         cl.user_session.set("_cached_agent_model", None)
-        cl.user_session.set("_cached_agent_claude", None)
+        cl.user_session.set("_cached_agent_external", None)
 
     save_setting("model_name", model_name)
-    save_setting("claude_code_enabled", str(claude_code_enabled).lower())
     save_setting("tools_enabled", str(tools_enabled).lower())
+    # Save external agent settings
+    for toggle_id, enabled in external_settings.items():
+        save_setting(toggle_id, str(enabled).lower())
+    
+    # Backward compatibility - save claude_enabled as claude_code_enabled too
+    if "claude_enabled" in external_settings:
+        save_setting("claude_code_enabled", str(external_settings["claude_enabled"]).lower())
 
     thread_id = cl.user_session.get("thread_id")
     if thread_id:
@@ -573,8 +526,10 @@ async def setup_agent(settings):
                 except json.JSONDecodeError:
                     metadata = {}
             metadata["model_name"] = model_name
-            metadata["claude_code_enabled"] = claude_code_enabled
             metadata["tools_enabled"] = tools_enabled
+            # Save external agent settings to metadata
+            for toggle_id, enabled in external_settings.items():
+                metadata[toggle_id] = enabled
             await cl_data.update_thread(thread_id, metadata=metadata)
             cl.user_session.set("metadata", metadata)
 
@@ -585,8 +540,11 @@ async def main(message: cl.Message):
     datetime = _get_datetime()
     
     model_name = cl.user_session.get("model_name") or load_setting("model_name") or os.getenv("MODEL_NAME", "gpt-4o-mini")
-    claude_code_enabled = cl.user_session.get("claude_code_enabled", False)
     tools_enabled = cl.user_session.get("tools_enabled", True)
+    
+    # Get external agent settings from session
+    from praisonai.ui._external_agents import EXTERNAL_AGENTS
+    external_settings = {toggle_id: cl.user_session.get(toggle_id, False) for toggle_id in EXTERNAL_AGENTS}
     message_history = cl.user_session.get("message_history", [])
     
     repo_path = os.environ.get("PRAISONAI_CODE_REPO_PATH", ".")
@@ -624,7 +582,7 @@ Context:
     msg = cl.Message(content="")
 
     # Try PraisonAI Agent first (faster, with tool reuse)
-    agent = _get_or_create_agent(model_name, tools_enabled, claude_code_enabled) if tools_enabled else None
+    agent = _get_or_create_agent(model_name, tools_enabled, external_settings) if tools_enabled else None
     
     if agent is not None:
         _profile_start("agent_response")
@@ -751,10 +709,24 @@ async def on_chat_resume(thread: ThreadDict):
     
     logger.info(f"Resuming chat: {thread['id']}")
     model_name = load_setting("model_name") or os.getenv("MODEL_NAME", "gpt-4o-mini")
-    claude_code_enabled = os.getenv("PRAISONAI_CLAUDECODE_ENABLED", "false").lower() == "true"
-    if not claude_code_enabled:
-        claude_code_enabled = (load_setting("claude_code_enabled") or "false").lower() == "true"
     tools_enabled = (load_setting("tools_enabled") or "true").lower() == "true"
+    
+    # Load external agent settings with backward compatibility
+    from praisonai.ui._external_agents import chainlit_switches, EXTERNAL_AGENTS
+    external_settings = {}
+    
+    # Check for legacy claude_code_enabled setting
+    legacy_claude = os.getenv("PRAISONAI_CLAUDECODE_ENABLED", "false").lower() == "true"
+    if not legacy_claude:
+        legacy_claude = (load_setting("claude_code_enabled") or "false").lower() == "true"
+    if legacy_claude:
+        external_settings["claude_enabled"] = True
+    
+    # Load all external agent settings
+    for toggle_id in EXTERNAL_AGENTS:
+        if toggle_id not in external_settings:  # Don't override claude if set via legacy
+            setting_value = load_setting(toggle_id)
+            external_settings[toggle_id] = setting_value and setting_value.lower() == "true"
     
     logger.debug(f"Model name: {model_name}")
     settings = cl.ChatSettings(
@@ -770,19 +742,17 @@ async def on_chat_resume(thread: ThreadDict):
                 label="Enable Tools (ACP, LSP, Web Search)",
                 initial=tools_enabled
             ),
-            Switch(
-                id="claude_code_enabled",
-                label="Enable Claude Code (file modifications & coding)",
-                initial=claude_code_enabled
-            )
+            *chainlit_switches(external_settings)
         ]
     )
     await settings.send()
     
     cl.user_session.set("thread_id", thread["id"])
     cl.user_session.set("model_name", model_name)
-    cl.user_session.set("claude_code_enabled", claude_code_enabled)
     cl.user_session.set("tools_enabled", tools_enabled)
+    # Save external settings to session
+    for toggle_id, value in external_settings.items():
+        cl.user_session.set(toggle_id, value)
 
     metadata = thread.get("metadata", {})
     if isinstance(metadata, str):
@@ -810,7 +780,7 @@ async def on_chat_resume(thread: ThreadDict):
     cl.user_session.set("message_history", message_history)
     
     # Pre-create agent for faster first response
-    _get_or_create_agent(model_name, tools_enabled, claude_code_enabled)
+    _get_or_create_agent(model_name, tools_enabled, external_settings)
 
     image_data = metadata.get("image")
     if image_data:

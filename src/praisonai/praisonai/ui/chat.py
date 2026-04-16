@@ -422,6 +422,10 @@ def _get_or_create_agent(model_name: str, tools_enabled: bool = True):
         # Add Tavily if available
         if os.getenv("TAVILY_API_KEY"):
             tools.append(tavily_web_search)
+        # Add external agent tools
+        from praisonai.ui._external_agents import external_agent_tools, load_external_agent_settings_from_chainlit
+        external_settings = load_external_agent_settings_from_chainlit()
+        tools.extend(external_agent_tools(external_settings, workspace=os.environ.get("PRAISONAI_WORKSPACE", ".")))
     
     agent = Agent(
         name="PraisonAI Assistant",
@@ -459,6 +463,10 @@ async def start():
     cl.user_session.set("tools_enabled", tools_enabled)
     logger.debug(f"Model name: {model_name}, Tools enabled: {tools_enabled}")
     
+    # Load external agent settings
+    from praisonai.ui._external_agents import load_external_agent_settings_from_chainlit, chainlit_switches
+    external_settings = load_external_agent_settings_from_chainlit()
+    
     # Pre-create agent for faster first response
     _get_or_create_agent(model_name, tools_enabled)
     
@@ -474,7 +482,8 @@ async def start():
                 id="tools_enabled",
                 label="Enable Tools (ACP, LSP, Web Search)",
                 initial=tools_enabled
-            )
+            ),
+            *chainlit_switches(external_settings)
         ]
     )
     cl.user_session.set("settings", settings)
@@ -508,7 +517,12 @@ async def setup_agent(settings):
     cl.user_session.set("model_name", model_name)
     cl.user_session.set("tools_enabled", tools_enabled)
     
-    # Invalidate cached agent if model changed
+    # Save external agent settings
+    from praisonai.ui._external_agents import save_external_agent_settings_to_chainlit, EXTERNAL_AGENTS
+    external_settings = {k: settings.get(k, False) for k in EXTERNAL_AGENTS}
+    save_external_agent_settings_to_chainlit(external_settings)
+    
+    # Invalidate cached agent if model changed or external agents changed
     cached_model = cl.user_session.get("_cached_agent_model")
     if cached_model != model_name:
         cl.user_session.set("_cached_agent", None)
@@ -516,6 +530,9 @@ async def setup_agent(settings):
 
     save_setting("model_name", model_name)
     save_setting("tools_enabled", str(tools_enabled).lower())
+    # Save external agent settings to persistent storage
+    for toggle_id, enabled in external_settings.items():
+        save_setting(toggle_id, str(enabled).lower())
 
     thread_id = cl.user_session.get("thread_id")
     if thread_id:
