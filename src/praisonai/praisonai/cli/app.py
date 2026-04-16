@@ -35,6 +35,48 @@ def _setup_langfuse_observability(*, verbose: bool = False) -> None:
             typer.echo(f"Warning: failed to initialize Langfuse observability: {e}", err=True)
 
 
+def _setup_langextract_observability(*, verbose: bool = False) -> None:
+    """Set up Langextract observability by wiring TraceSink to action emitter."""
+    try:
+        import importlib.util
+        
+        # Explicitly check if langextract is available before attempting to use it
+        if importlib.util.find_spec('langextract') is None:
+            if verbose:
+                typer.echo("Warning: langextract is not installed. Install with: pip install 'praisonai[langextract]'", err=True)
+            return
+        
+        from praisonai.observability.langextract import LangextractSink, LangextractSinkConfig
+        from praisonaiagents.trace.protocol import TraceEmitter, set_default_emitter
+        import os
+        import atexit
+        
+        # Build LangextractSinkConfig from env vars
+        config = LangextractSinkConfig(
+            output_path=os.getenv("PRAISONAI_LANGEXTRACT_OUTPUT", "praisonai-trace.html"),
+            auto_open=os.getenv("PRAISONAI_LANGEXTRACT_AUTO_OPEN", "false").lower() == "true",
+        )
+        
+        # Create LangextractSink
+        sink = LangextractSink(config=config)
+        
+        # Ensure sink is closed on exit to write the trace file
+        atexit.register(sink.close)
+        
+        # Set up action-level trace emitter
+        emitter = TraceEmitter(sink=sink, enabled=True)
+        set_default_emitter(emitter)
+        
+    except ImportError:
+        # Gracefully degrade if langextract not installed
+        if verbose:
+            typer.echo("Warning: langextract is not installed. Install with: pip install 'praisonai[langextract]'", err=True)
+    except Exception as e:
+        # Avoid breaking CLI if observability setup fails
+        if verbose:
+            typer.echo(f"Warning: failed to initialize langextract observability: {e}", err=True)
+
+
 class OutputFormat(str, Enum):
     """Output format options."""
     text = "text"
@@ -125,7 +167,7 @@ def main_callback(
         None,
         "--observe",
         "-O",
-        help="Enable observability (langfuse, langsmith, etc.)",
+        help="Enable observability (langfuse, langextract)",
         envvar="PRAISONAI_OBSERVE",
     ),
 ):
@@ -148,9 +190,15 @@ def main_callback(
     
     # Validate and set up observability if requested
     if observe:
-        if observe != "langfuse":
-            raise typer.BadParameter(f"Unsupported observe provider: {observe}")
-        _setup_langfuse_observability(verbose=verbose)
+        if observe == "langfuse":
+            _setup_langfuse_observability(verbose=verbose)
+        elif observe == "langextract":
+            _setup_langextract_observability(verbose=verbose)
+        else:
+            raise typer.BadParameter(
+                f"Unsupported observe provider: {observe}. "
+                "Choose one of: langfuse, langextract."
+            )
     
     # Determine output mode
     if state.quiet:
@@ -278,6 +326,7 @@ def register_commands():
     from .commands.flow import app as flow_app
     from .commands.unified import app as unified_app
     from .commands.langfuse import app as langfuse_app
+    from .commands.langextract import app as langextract_app
     from .commands.port import app as port_app
     from .commands.managed import app as managed_app
     from .commands.up import app as up_app
@@ -465,6 +514,7 @@ def register_commands():
     app.add_typer(flow_app, name="flow", help="Visual workflow builder (Langflow)")
     app.add_typer(unified_app, name="dashboard", help="🌟 Unified Dashboard (Flow + Claw + UI)")
     app.add_typer(langfuse_app, name="langfuse", help="🔍 Langfuse observability platform")
+    app.add_typer(langextract_app, name="langextract", help="🧠 Langextract visual trace layer")
     app.add_typer(port_app, name="port", help="🔌 Manage port usage and resolve conflicts")
     app.add_typer(up_app, name="up", help="🚀 Start unified PraisonAI stack (Langfuse + Langflow)")
     

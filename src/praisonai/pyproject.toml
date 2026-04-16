@@ -45,6 +45,7 @@ os = [
 ]
 agentops = ["agentops>=0.3.12"]
 langfuse = ["langfuse>=3.0.0"]
+langextract = ["langextract>=1.0.0"]
 chat = [
     "chainlit>=2.8.5,<=2.9.4",
     "aiosqlite>=0.20.0",

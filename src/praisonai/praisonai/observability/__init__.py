@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .langfuse import LangfuseSink, LangfuseSinkConfig
+    from .langextract import LangextractSink, LangextractSinkConfig
 
 __all__ = []
 
@@ -20,5 +21,11 @@ def __getattr__(name: str):
     elif name == "LangfuseSinkConfig":
         from .langfuse import LangfuseSinkConfig
         return LangfuseSinkConfig
+    elif name == "LangextractSink":
+        from .langextract import LangextractSink
+        return LangextractSink
+    elif name == "LangextractSinkConfig":
+        from .langextract import LangextractSinkConfig
+        return LangextractSinkConfig
     else:
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
