@@ -4,10 +4,10 @@ YAML to n8n JSON Converter
 Converts PraisonAI YAML workflows to n8n JSON format for visual editing.
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from dataclasses import dataclass
-from datetime import datetime, timezone
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +72,6 @@ class YAMLToN8nConverter:
         if not steps and agent_nodes:
             connections = self._build_sequential_connections(agent_nodes, trigger_node.name)
         
-        # Only include fields allowed by n8n Public API
-        ALLOWED_FIELDS = {"name", "nodes", "connections", "settings"}
         workflow_data = {
             "name": yaml_workflow.get("name", "PraisonAI Workflow"),
             "nodes": [node.to_dict() for node in nodes],
@@ -97,13 +95,14 @@ class YAMLToN8nConverter:
     def _agent_to_node(self, agent_id: str, config: Dict[str, Any]) -> N8nNode:
         """Convert PraisonAI agent to n8n node."""
         self.node_counter += 1
-        has_tools = bool(config.get("tools"))
         
         # Use httpRequest node type that points to PraisonAI API
         node_type = "n8n-nodes-base.httpRequest"
         
         # Build HTTP request parameters for PraisonAI API
-        agent_url_id = agent_id.lower().replace(' ', '_')
+        agent_url_id = re.sub(r"[^a-z0-9_-]", "_", agent_id.lower().replace(" ", "_")).strip("_")
+        if not agent_url_id:
+            agent_url_id = f"agent_{self.node_counter}"
         
         # Use query from webhook for first agent, previous response for others
         query_expr = "$json.body?.query || $json.query || 'Execute task'"

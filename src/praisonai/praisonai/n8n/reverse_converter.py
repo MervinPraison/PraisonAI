@@ -6,6 +6,7 @@ Converts n8n JSON workflows back to PraisonAI YAML format.
 
 from typing import Dict, Any, List, Optional
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +60,20 @@ class N8nToYAMLConverter:
         return (
             "langchain.agent" in node_type or
             "langchain.chainLlm" in node_type or
-            node_type.startswith("@n8n/n8n-nodes-langchain")
+            node_type.startswith("@n8n/n8n-nodes-langchain") or
+            node_type == "n8n-nodes-base.httpRequest"
         )
+
+    def _node_to_agent_id(self, node: Dict[str, Any]) -> str:
+        """Derive a stable agent id from node URL/name."""
+        node_name = node.get("name", f"agent_{self.agent_counter}")
+        node_type = node.get("type", "")
+        if node_type == "n8n-nodes-base.httpRequest":
+            url = str(node.get("parameters", {}).get("url", ""))
+            match = re.search(r"/agents/([a-zA-Z0-9_-]+)$", url)
+            if match:
+                return match.group(1).lower()
+        return node_name.lower().replace(" ", "_").replace("-", "_")
     
     def _node_to_agent(self, node: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
         """Convert n8n node to PraisonAI agent configuration."""
@@ -68,7 +81,7 @@ class N8nToYAMLConverter:
         self.agent_counter += 1
         
         # Create agent ID from node name
-        agent_id = node_name.lower().replace(" ", "_").replace("-", "_")
+        agent_id = self._node_to_agent_id(node)
         
         # Extract agent configuration from node parameters
         parameters = node.get("parameters", {})
@@ -143,7 +156,7 @@ class N8nToYAMLConverter:
         for node in nodes:
             if self._is_agent_node(node):
                 node_name = node.get("name")
-                agent_id = node_name.lower().replace(" ", "_").replace("-", "_")
+                agent_id = self._node_to_agent_id(node)
                 node_to_agent[node_name] = agent_id
         
         # Find trigger node and trace execution path
