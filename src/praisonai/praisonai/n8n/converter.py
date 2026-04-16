@@ -68,22 +68,26 @@ class YAMLToN8nConverter:
         steps = yaml_workflow.get("steps", [])
         connections = self._steps_to_connections(steps, agent_nodes, nodes)
         
-        
         # Define fields allowed by n8n Public API
-        ALLOWED_FIELDS = ["name", "nodes", "connections", "settings"]
+        ALLOWED_FIELDS = ["name", "nodes", "connections", "settings", "staticData"]
         
-        workflow_data = {
+        n8n_workflow = {
             "name": yaml_workflow.get("name", "PraisonAI Workflow"),
             "nodes": [node.to_dict() for node in nodes],
             "connections": connections,
             "settings": {
                 "executionOrder": "v1"
-            }
+            },
+            "staticData": {}
         }
+        
+        # Store workflow description in staticData for round-trip preservation
+        if yaml_workflow.get("description"):
+            n8n_workflow["staticData"]["praisonai_description"] = yaml_workflow["description"]
         
         # Filter to only allowed fields for n8n Public API
         return {
-            key: value for key, value in workflow_data.items()
+            key: value for key, value in n8n_workflow.items()
             if key in ALLOWED_FIELDS
         }
     
@@ -124,6 +128,27 @@ class YAMLToN8nConverter:
                 "timeout": 300000  # 5 minute timeout
             }
         }
+        
+        if config.get("instructions"):
+            parameters["options"]["systemMessage"] = config["instructions"]
+            
+        if config.get("role"):
+            parameters["options"]["role"] = config["role"]
+            
+        if config.get("llm"):
+            parameters["options"]["model"] = config["llm"]
+            
+        # Store additional agent fields for round-trip preservation
+        if config.get("goal"):
+            parameters["options"]["goal"] = config["goal"]
+            
+        if config.get("backstory"):
+            parameters["options"]["backstory"] = config["backstory"]
+            
+        # Add tool configuration if present
+        has_tools = config.get("tools") and len(config.get("tools", [])) > 0
+        if has_tools:
+            parameters["tools"] = self._convert_tools(config.get("tools", []))
             
         return N8nNode(
             name=config.get("name", agent_id.replace("_", " ").title()),
@@ -210,7 +235,7 @@ class YAMLToN8nConverter:
                     }
                     
                     # Connect switch to target agents
-                    switch_connections = []
+                    switch_outputs = []
                     for route_key, target_agents in step["route"].items():
                         if route_key != "default" and target_agents:
                             if isinstance(target_agents, list):
@@ -219,13 +244,13 @@ class YAMLToN8nConverter:
                                 target_agent = target_agents
                                 
                             if target_agent in agent_nodes:
-                                switch_connections.append({
-                                    "node": agent_nodes[target_agent], 
-                                    "type": "main", 
-                                    "index": len(switch_connections)
-                                })
+                                switch_outputs.append([{
+                                    "node": agent_nodes[target_agent],
+                                    "type": "main",
+                                    "index": 0
+                                }])
                     
-                    connections[switch_node.name] = {"main": [switch_connections]}
+                    connections[switch_node.name] = {"main": switch_outputs}
                     previous_node = switch_node.name
                     
                 elif "parallel" in step:
