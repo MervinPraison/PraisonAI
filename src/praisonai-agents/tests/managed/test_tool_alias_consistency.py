@@ -77,10 +77,10 @@ class TestToolAliasConsistency(TestCase):
         from praisonai.praisonai.integrations.managed_agents import map_managed_tools
         
         # Test function signature and behavior is preserved
-        test_tools = ["bash", "grep", "web_fetch", "unknown_tool"]
+        test_tools = ["bash", "grep", "web_fetch", "unknown_tool", "web_search"]
         result = map_managed_tools(test_tools)
         
-        expected = ["execute_command", "search_file", "web_fetch", "unknown_tool"]
+        expected = ["execute_command", "search_file", "web_fetch", "unknown_tool", "search_web"]
         assert result == expected, f"map_managed_tools should map known tools and pass through unknown ones"
     
     def test_no_duplicate_definitions(self):
