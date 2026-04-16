@@ -80,9 +80,10 @@ class LangextractSink:
         pass  # no-op; HTML is built on close()
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
         try:
             self._render()
         except Exception as e:
@@ -101,8 +102,16 @@ class LangextractSink:
                 "langextract is not installed. Install with: pip install 'praisonai[langextract]'"
             )
 
-        source = self._source_text or ""
-        extractions = list(self._events_to_extractions(lx, source))
+        # Capture snapshot of events under lock to ensure thread safety
+        with self._lock:
+            events = self._events[:]
+            source = self._source_text or ""
+        
+        # Skip rendering if no events were recorded
+        if not events:
+            return
+
+        extractions = list(self._events_to_extractions(lx, source, events))
         doc = lx.data.AnnotatedDocument(
             document_id=self._config.document_id,
             text=source,
@@ -115,14 +124,18 @@ class LangextractSink:
 
         html = lx.visualize(jsonl)
         html_text = html.data if hasattr(html, "data") else html
-        Path(self._config.output_path).write_text(html_text, encoding="utf-8")
+        
+        # Create parent directory for output path if it doesn't exist
+        output_path = Path(self._config.output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(html_text, encoding="utf-8")
 
         if self._config.auto_open:
-            webbrowser.open(f"file://{Path(self._config.output_path).resolve()}")
+            webbrowser.open(f"file://{output_path.resolve()}")
 
-    def _events_to_extractions(self, lx, source: str):
+    def _events_to_extractions(self, lx, source: str, events: List[ActionEvent]):
         """Pure mapper: ActionEvent list -> lx.data.Extraction generator."""
-        for ev in self._events:
+        for ev in events:
             et = ev.event_type
             attrs: Dict[str, Any] = {
                 "agent_name": ev.agent_name,
@@ -152,9 +165,15 @@ class LangextractSink:
                     attributes={**attrs, "tool_name": ev.tool_name},
                 )
             elif et == ActionEventType.OUTPUT.value:
+                # Fix: OUTPUT events store text in tool_result_summary, not metadata['content']
+                output_text = (
+                    ev.tool_result_summary
+                    or (ev.metadata or {}).get("output")
+                    or (ev.metadata or {}).get("content", "")
+                )
                 yield lx.data.Extraction(
                     extraction_class="final_output",
-                    extraction_text=(ev.metadata or {}).get("content", "")[:1000],
+                    extraction_text=output_text[:1000],
                     attributes=attrs,
                 )
             elif et == ActionEventType.ERROR.value:

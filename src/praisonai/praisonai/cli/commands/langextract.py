@@ -79,7 +79,7 @@ def render(
         # Run the workflow
         praison = PraisonAI(agent_file=str(yaml_path))
         if api_url:
-            praison.api_url = api_url
+            praison.api_url = api_url.rstrip("/")
         
         result = praison.main()
         typer.echo(result)

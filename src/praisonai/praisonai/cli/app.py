@@ -38,9 +38,18 @@ def _setup_langfuse_observability(*, verbose: bool = False) -> None:
 def _setup_langextract_observability(*, verbose: bool = False) -> None:
     """Set up Langextract observability by wiring TraceSink to action emitter."""
     try:
+        import importlib.util
+        
+        # Explicitly check if langextract is available before attempting to use it
+        if importlib.util.find_spec('langextract') is None:
+            if verbose:
+                typer.echo("Warning: langextract is not installed. Install with: pip install 'praisonai[langextract]'", err=True)
+            return
+        
         from praisonai.observability.langextract import LangextractSink, LangextractSinkConfig
         from praisonaiagents.trace.protocol import TraceEmitter, set_default_emitter
         import os
+        import atexit
         
         # Build LangextractSinkConfig from env vars
         config = LangextractSinkConfig(
@@ -50,6 +59,9 @@ def _setup_langextract_observability(*, verbose: bool = False) -> None:
         
         # Create LangextractSink
         sink = LangextractSink(config=config)
+        
+        # Ensure sink is closed on exit to write the trace file
+        atexit.register(sink.close)
         
         # Set up action-level trace emitter
         emitter = TraceEmitter(sink=sink, enabled=True)

@@ -164,8 +164,10 @@ class TestLangextractSink:
         assert mock_lx.data.Extraction.call_count == 4
 
     @patch('webbrowser.open')
+    @patch('sys.modules', new={})  # Start with empty modules
     def test_render_with_mock_langextract(self, mock_browser, sample_events):
         """Test rendering with mocked langextract."""
+        import sys
         from praisonai.observability import LangextractSink, LangextractSinkConfig
         
         # Mock langextract module
@@ -191,9 +193,10 @@ class TestLangextractSink:
             for event in sample_events:
                 sink.emit(event)
             
-            # Mock import of optional langextract dependency
-            with patch.dict("sys.modules", {"langextract": mock_lx}):
-                sink.close()
+            # Mock the langextract import directly
+            with patch.dict(sys.modules, {"langextract": mock_lx}):
+                with patch("builtins.__import__", side_effect=lambda name, *args, **kwargs: mock_lx if name == "langextract" else _REAL_IMPORT(name, *args, **kwargs)):
+                    sink.close()
             
             # Verify HTML file was written
             assert output_path.exists()
@@ -268,19 +271,31 @@ class TestLangextractCLI:
 
     def test_view_command_missing_file(self):
         """Test view command with missing JSONL file."""
-        from praisonai.cli.commands.langextract import view
-        import typer
-        
-        with pytest.raises(typer.Exit):
-            view(Path("/nonexistent/file.jsonl"))
+        # First mock the imports to avoid ImportError
+        mock_lx = Mock()
+        with patch.dict("sys.modules", {"langextract": mock_lx}):
+            from praisonai.cli.commands.langextract import view
+            import typer
+            
+            with pytest.raises(typer.Exit):
+                view(Path("/nonexistent/file.jsonl"))
 
     def test_render_command_missing_yaml(self):
         """Test render command with missing YAML file."""
-        from praisonai.cli.commands.langextract import render
-        import typer
-        
-        with pytest.raises(typer.Exit):
-            render(Path("/nonexistent/workflow.yaml"))
+        # First mock the imports to avoid ImportError
+        mock_lx = Mock()
+        mock_observability = Mock()
+        mock_praisonai = Mock()
+        with patch.dict("sys.modules", {
+            "langextract": mock_lx,
+            "praisonai.observability": mock_observability,
+            "praisonai": mock_praisonai
+        }):
+            from praisonai.cli.commands.langextract import render
+            import typer
+            
+            with pytest.raises(typer.Exit):
+                render(Path("/nonexistent/workflow.yaml"))
 
 
 class TestLangextractObservabilitySetup:
@@ -292,7 +307,18 @@ class TestLangextractObservabilitySetup:
         mock_ctx = Mock(invoked_subcommand="test")
 
         with patch.object(cli_app, "_setup_langextract_observability") as mock_setup:
-            cli_app.main_callback(ctx=mock_ctx, observe="langextract")
+            # Mock all the required arguments with defaults
+            cli_app.main_callback(
+                ctx=mock_ctx, 
+                observe="langextract",
+                version=False,
+                output_format=cli_app.OutputFormat.text,
+                json_output=False,
+                no_color=False,
+                quiet=False,
+                verbose=False,
+                screen_reader=False
+            )
 
         # Setup should have been called
         mock_setup.assert_called_once()
@@ -305,7 +331,17 @@ class TestLangextractObservabilitySetup:
 
         with patch('sys.argv', ['praisonai', '--observe', 'invalid-provider']):
             with pytest.raises(typer.BadParameter, match="Unsupported observe provider"):
-                cli_app.main_callback(ctx=mock_ctx, observe="invalid-provider")
+                cli_app.main_callback(
+                    ctx=mock_ctx, 
+                    observe="invalid-provider",
+                    version=False,
+                    output_format=cli_app.OutputFormat.text,
+                    json_output=False,
+                    no_color=False,
+                    quiet=False,
+                    verbose=False,
+                    screen_reader=False
+                )
 
 
 if __name__ == "__main__":
