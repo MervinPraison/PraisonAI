@@ -606,6 +606,34 @@ class TestN8nRoundTrip:
                 if field in original_agent:
                     assert result_agent.get(field) == original_agent[field], f"Field {field} not preserved for agent {original_agent['name']}"
 
+    def test_round_trip_preserves_route_steps(self):
+        """Test route control flow survives YAML -> n8n -> YAML conversion."""
+        try:
+            from praisonai.n8n import YAMLToN8nConverter, N8nToYAMLConverter
+        except ImportError:
+            pytest.skip("n8n dependencies not available")
+
+        original_yaml = {
+            "name": "Route Round Trip",
+            "agents": {
+                "classifier": {"name": "Classifier", "instructions": "Classify input"},
+                "handler_a": {"name": "Handler A", "instructions": "Handle A"},
+                "handler_b": {"name": "Handler B", "instructions": "Handle B"},
+            },
+            "steps": [
+                {"agent": "classifier"},
+                {"route": {"type_a": ["handler_a"], "type_b": ["handler_b"]}},
+            ],
+        }
+
+        forward_converter = YAMLToN8nConverter()
+        reverse_converter = N8nToYAMLConverter()
+
+        n8n_json = forward_converter.convert(original_yaml)
+        result_yaml = reverse_converter.convert(n8n_json)
+
+        assert any(isinstance(step, dict) and "route" in step for step in result_yaml.get("steps", []))
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

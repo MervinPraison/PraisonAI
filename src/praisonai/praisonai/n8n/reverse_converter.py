@@ -230,6 +230,11 @@ class N8nToYAMLConverter:
                 # Avoid duplicate agent steps
                 if not any(step.get("agent") == agent_id for step in steps if isinstance(step, dict)):
                     steps.append({"agent": agent_id})
+            # Preserve control flow steps (route/if) discovered during traversal
+            elif self._is_control_flow_node(current_node, nodes):
+                control_step = self._convert_control_flow(current_node, nodes, connections)
+                if control_step and control_step not in steps:
+                    steps.append(control_step)
             
             # Add all connected nodes to queue for processing
             if current_node in connections:
