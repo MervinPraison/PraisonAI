@@ -310,7 +310,11 @@ Launch PraisonAI servers with unified discovery support.
                             else:
                                 raise AttributeError(f"Agent {agent_name} has no start/astart method")
                             return {"response": str(result)}
-                    except Exception:
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).warning(
+                            f"Failed direct agent invoke for '{agent_name}', falling back to crew execution: {e}"
+                        )
                         # Fall back to crew-based approach if individual agent fails
                         pass
                 
