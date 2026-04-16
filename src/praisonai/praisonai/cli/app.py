@@ -14,22 +14,17 @@ from .state.identifiers import create_context
 
 
 def _setup_langfuse_observability(*, verbose: bool = False) -> None:
-    """Set up Langfuse observability by wiring TraceSink to both action and context emitters."""
+    """Set up Langfuse observability by wiring TraceSink to action emitter."""
     try:
         from praisonai.observability.langfuse import LangfuseSink
         from praisonaiagents.trace.protocol import TraceEmitter, set_default_emitter
-        from praisonaiagents.trace.context_events import ContextTraceEmitter, set_context_emitter
         
         # Create LangfuseSink (auto-reads env vars)
         sink = LangfuseSink()
         
-        # Set up action-level trace emitter
+        # Set up action-level trace emitter (sufficient for Phase 1)
         emitter = TraceEmitter(sink=sink, enabled=True)
         set_default_emitter(emitter)
-        
-        # Set up context-level trace emitter
-        ctx_emitter = ContextTraceEmitter(sink=sink, enabled=True)
-        set_context_emitter(ctx_emitter)
         
     except ImportError:
         # Gracefully degrade if Langfuse not installed
@@ -151,8 +146,10 @@ def main_callback(
     if json_output:
         state.output_format = OutputFormat.json
     
-    # Set up observability if requested
-    if observe == "langfuse":
+    # Validate and set up observability if requested
+    if observe:
+        if observe != "langfuse":
+            raise typer.BadParameter(f"Unsupported observe provider: {observe}")
         _setup_langfuse_observability(verbose=verbose)
     
     # Determine output mode
