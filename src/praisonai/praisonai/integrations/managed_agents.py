@@ -37,6 +37,19 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Exceptions
+# ---------------------------------------------------------------------------
+
+class ManagedSandboxRequired(Exception):
+    """Raised when LocalManagedAgent requires sandbox execution but compute provider is missing.
+    
+    This safety exception prevents accidental host-side package installation or 
+    execution when the user expects sandboxed behavior.
+    """
+    pass
+
+
+# ---------------------------------------------------------------------------
 # ManagedConfig — Anthropic-specific configuration dataclass
 # Lives in the Wrapper (not Core SDK) because its fields map directly to
 # the Anthropic Managed Agents API.  The Core SDK only defines the
@@ -259,7 +272,7 @@ class AnthropicManagedAgent:
     # ------------------------------------------------------------------
     # Event processing helpers
     # ------------------------------------------------------------------
-    def _process_events(self, client, session_id, stream, *, collect: bool = True, stream_live: bool = False):
+    def _process_events(self, client, session_id, stream, *, collect: bool = True, stream_live: bool = False, emitter=None, agent_name="Agent"):
         """Walk the SSE stream and return (text_parts, tool_log).
 
         Handles:
@@ -277,6 +290,7 @@ class AnthropicManagedAgent:
 
         text_parts: List[str] = []
         tool_log: List[str] = []
+        last_tool_start = None  # Track last tool start for synthetic end event
 
         for event in stream:
             etype = getattr(event, "type", None)
@@ -292,11 +306,31 @@ class AnthropicManagedAgent:
 
             elif etype == "agent.tool_use":
                 name = getattr(event, "name", "unknown")
+                tool_input = getattr(event, "input", {})
+                tool_use_id = getattr(event, "id", "")
                 tool_log.append(name)
                 logger.debug("[managed] tool_use: %s", name)
                 if stream_live:
                     _sys.stdout.write(f"\n[Using tool: {name}]\n")
                     _sys.stdout.flush()
+
+                # Emit tool_call_start event
+                if emitter:
+                    # Emit synthetic tool_call_end for previous tool if any
+                    if last_tool_start:
+                        emitter.tool_call_end(
+                            agent_name=agent_name,
+                            tool_name=last_tool_start["name"],
+                            metadata={"tool_use_id": last_tool_start["id"], "synthetic": True}
+                        )
+                    
+                    emitter.tool_call_start(
+                        agent_name=agent_name,
+                        tool_name=name,
+                        input_data=tool_input,
+                        metadata={"tool_use_id": tool_use_id}
+                    )
+                    last_tool_start = {"name": name, "id": tool_use_id}
 
                 # Handle tool confirmation (always_ask policy)
                 if getattr(event, "needs_confirmation", False):
@@ -358,6 +392,14 @@ class AnthropicManagedAgent:
                 self.total_input_tokens += getattr(usage, "input_tokens", 0)
                 self.total_output_tokens += getattr(usage, "output_tokens", 0)
 
+        # Emit final tool_call_end if there was a tool in progress
+        if emitter and last_tool_start:
+            emitter.tool_call_end(
+                agent_name=agent_name,
+                tool_name=last_tool_start["name"],
+                metadata={"tool_use_id": last_tool_start["id"], "synthetic": True}
+            )
+
         if tool_log:
             logger.info("[managed] tools used: %s", tool_log)
 
@@ -382,28 +424,56 @@ class AnthropicManagedAgent:
                          (token-by-token streaming). The full text is still returned.
         """
         import sys
+        from praisonaiagents.trace.context_events import get_context_emitter
 
-        client = self._get_client()
-        session_id = self._ensure_session()
+        emitter = get_context_emitter()
+        agent_name = self._cfg.get("name", "Agent")
 
-        with client.beta.sessions.events.stream(session_id) as stream:
-            client.beta.sessions.events.send(
-                session_id,
-                events=[{
-                    "type": "user.message",
-                    "content": [{"type": "text", "text": prompt}],
-                }],
-            )
-            text_parts, _ = self._process_events(
-                client, session_id, stream, collect=True,
-                stream_live=stream_live,
-            )
+        # Emit agent_start event
+        emitter.agent_start(
+            agent_name=agent_name,
+            metadata={
+                "input": prompt,
+                "provider": "anthropic",
+                "model": self._cfg.get("model", "claude-sonnet-4-6"),
+                "session_id": getattr(self, "session_id", "")
+            }
+        )
 
-        if stream_live:
-            sys.stdout.write("\n")
-            sys.stdout.flush()
+        try:
+            client = self._get_client()
+            session_id = self._ensure_session()
 
-        return "".join(text_parts)
+            with client.beta.sessions.events.stream(session_id) as stream:
+                client.beta.sessions.events.send(
+                    session_id,
+                    events=[{
+                        "type": "user.message",
+                        "content": [{"type": "text", "text": prompt}],
+                    }],
+                )
+                text_parts, tool_log = self._process_events(
+                    client, session_id, stream, collect=True,
+                    stream_live=stream_live, emitter=emitter, agent_name=agent_name,
+                )
+
+            if stream_live:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+
+            result = "".join(text_parts)
+            
+            # Emit llm_response event
+            if result:
+                emitter.llm_response(agent_name=agent_name, response_content=result)
+
+            return result
+            
+        except Exception as e:
+            emitter.agent_end(agent_name=agent_name, metadata={"error": str(e)})
+            raise
+        finally:
+            emitter.agent_end(agent_name=agent_name, metadata={"status": "completed"})
 
     # ------------------------------------------------------------------
     # stream() — ManagedBackendProtocol
@@ -509,22 +579,44 @@ class AnthropicManagedAgent:
     # retrieve_session — ManagedBackendProtocol
     # ------------------------------------------------------------------
     def retrieve_session(self) -> Dict[str, Any]:
-        """Retrieve current session metadata and usage from the API."""
+        """Retrieve current session metadata and usage from the API.
+        
+        Returns unified SessionInfo schema with all fields always present.
+        """
+        from ._session_info import SessionInfo, SessionUsage
+        
         if not self._session_id:
-            return {}
-        client = self._get_client()
-        sess = client.beta.sessions.retrieve(self._session_id)
-        result: Dict[str, Any] = {
-            "id": getattr(sess, "id", self._session_id),
-            "status": getattr(sess, "status", None),
-        }
-        usage = getattr(sess, "usage", None)
-        if usage:
-            result["usage"] = {
-                "input_tokens": getattr(usage, "input_tokens", 0),
-                "output_tokens": getattr(usage, "output_tokens", 0),
-            }
-        return result
+            return SessionInfo().to_dict()
+            
+        try:
+            client = self._get_client()
+            sess = client.beta.sessions.retrieve(self._session_id)
+            
+            # Extract usage if available
+            usage = getattr(sess, "usage", None)
+            session_usage = SessionUsage()
+            if usage:
+                session_usage = SessionUsage(
+                    input_tokens=getattr(usage, "input_tokens", 0),
+                    output_tokens=getattr(usage, "output_tokens", 0)
+                )
+            
+            # Create unified session info
+            session_info = SessionInfo(
+                id=getattr(sess, "id", self._session_id),
+                status=getattr(sess, "status", "active"),
+                title=getattr(sess, "title", ""),
+                usage=session_usage
+            )
+            
+            return session_info.to_dict()
+            
+        except Exception:
+            # Fallback on API errors
+            return SessionInfo(
+                id=self._session_id,
+                status="unknown"
+            ).to_dict()
 
     # ------------------------------------------------------------------
     # list_sessions — ManagedBackendProtocol
@@ -639,21 +731,12 @@ class AnthropicManagedAgent:
 # ---------------------------------------------------------------------------
 # Tool mapping helpers
 # ---------------------------------------------------------------------------
-TOOL_MAPPING = {
-    "bash": "execute_command",
-    "read": "read_file",
-    "write": "write_file",
-    "edit": "apply_diff",
-    "glob": "list_files",
-    "grep": "search_file",
-    "web_fetch": "web_fetch",
-    "search": "search_web",
-}
 
+# Import unified mapping to consolidate with managed_local
+from ._tool_mapping import map_managed_tools, UNIFIED_TOOL_MAPPING
 
-def map_managed_tools(managed_tools: List[str]) -> List[str]:
-    """Map managed agent tool names to PraisonAI tool names."""
-    return [TOOL_MAPPING.get(tool, tool) for tool in managed_tools]
+# Backward compatibility alias
+TOOL_MAPPING = UNIFIED_TOOL_MAPPING
 
 
 # ---------------------------------------------------------------------------

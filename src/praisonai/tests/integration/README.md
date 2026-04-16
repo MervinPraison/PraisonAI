@@ -279,4 +279,53 @@ Generate detailed coverage:
 python tests/test_runner.py --pattern frameworks --coverage
 ```
 
-This will show which integration test code paths are covered and highlight areas needing additional testing. 
+This will show which integration test code paths are covered and highlight areas needing additional testing.
+
+## Real Agentic Tests
+
+**Location:** `test_managed_real.py`
+
+These are special tests that make actual LLM API calls to verify end-to-end managed agent functionality. They are gated behind environment variables for safety and cost control.
+
+### Running Real Agentic Tests
+
+**Prerequisites:**
+- Set `RUN_REAL_AGENTIC=1` to enable the tests
+- Set appropriate API keys:
+  - `ANTHROPIC_API_KEY` for Anthropic Managed Agents
+  - `OPENAI_API_KEY` for Local Managed Agents
+
+**Run all real agentic tests:**
+```bash
+RUN_REAL_AGENTIC=1 ANTHROPIC_API_KEY=your_key OPENAI_API_KEY=your_key pytest src/praisonai/tests/integration/test_managed_real.py -v
+```
+
+**Run specific real test:**
+```bash
+RUN_REAL_AGENTIC=1 OPENAI_API_KEY=your_key pytest src/praisonai/tests/integration/test_managed_real.py::test_local_managed_real_openai -v
+```
+
+### Real Agentic Test Coverage
+
+- ✅ **Anthropic Managed Agents:** End-to-end execution with Claude models
+- ✅ **Local Managed Agents:** End-to-end execution with OpenAI models  
+- ✅ **Multi-turn sessions:** Context preservation across conversation turns
+- ✅ **Trace event emission:** Integration with observability system
+- ✅ **Package safety:** Safety checks for package installation
+
+### Important Notes
+
+**Cost Awareness:**
+- These tests make real API calls and incur costs
+- Use fast/cheap models (claude-haiku-4-5, gpt-4o-mini)
+- Keep prompts brief and specific
+
+**Reliability:**
+- Tests print actual LLM outputs for human verification
+- May occasionally fail due to LLM variability
+- Should pass consistently with the given prompts
+
+**Safety:**
+- Tests are skipped by default (`RUN_REAL_AGENTIC=1` required)
+- No package installation tests run on CI (gated by API keys)
+- Safety checks are tested without actual installation

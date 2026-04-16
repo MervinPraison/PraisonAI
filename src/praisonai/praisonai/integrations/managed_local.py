@@ -50,17 +50,11 @@ _DEFAULT_TOOLS = [
     "search_web",
 ]
 
-TOOL_ALIAS_MAP = {
-    "bash": "execute_command",
-    "read": "read_file",
-    "write": "write_file",
-    "edit": "write_file",
-    "glob": "list_files",
-    "grep": "execute_command",
-    "web_fetch": "web_crawl",
-    "search": "search_web",
-    "web_search": "search_web",
-}
+# Import unified mapping to consolidate with managed_agents
+from ._tool_mapping import get_tool_alias, UNIFIED_TOOL_MAPPING
+
+# Backward compatibility alias
+TOOL_ALIAS_MAP = UNIFIED_TOOL_MAPPING
 
 
 @dataclass
@@ -88,11 +82,12 @@ class LocalManagedConfig:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     # ── Environment fields ──
-    sandbox_type: str = "subprocess"
+    sandbox_type: str = "subprocess"  # DEPRECATED: Use compute= parameter instead
     working_dir: str = ""
     env: Dict[str, str] = field(default_factory=dict)
     packages: Optional[Dict[str, List[str]]] = None
     networking: Dict[str, Any] = field(default_factory=lambda: {"type": "unrestricted"})
+    host_packages_ok: bool = False  # Allow pip install on host Python (unsafe)
 
     # ── Session fields ──
     session_title: str = "PraisonAI local session"
@@ -132,7 +127,7 @@ def _translate_anthropic_tools(tools_config: List) -> List[str]:
             default_enabled = entry.get("default_config", {}).get("enabled", True)
             for cfg in entry.get("configs", []):
                 name = cfg.get("name", "")
-                alias = TOOL_ALIAS_MAP.get(name, name)
+                alias = get_tool_alias(name)
                 if cfg.get("enabled", default_enabled):
                     enabled.add(alias)
                 else:
@@ -305,7 +300,7 @@ class LocalManagedAgent:
         # Normalize aliases
         resolved_names = []
         for name in tool_names:
-            resolved_names.append(TOOL_ALIAS_MAP.get(name, name))
+            resolved_names.append(get_tool_alias(name))
 
         # Import tools lazily
         tools = []
@@ -460,29 +455,80 @@ class LocalManagedAgent:
             if saved_cfg.get("provider"):
                 self.provider = saved_cfg["provider"]
 
-    def _install_packages(self) -> None:
+    async def _install_packages(self) -> None:
         """Install packages specified in config before agent starts."""
         packages = self._cfg.get("packages")
         if not packages:
             return
 
         pip_pkgs = packages.get("pip", []) if isinstance(packages, dict) else []
-        if pip_pkgs:
-            cmd = [sys.executable, "-m", "pip", "install", "-q"] + pip_pkgs
-            logger.info("[local_managed] installing pip packages: %s", pip_pkgs)
-            try:
-                subprocess.run(cmd, check=True, capture_output=True, timeout=120)
-            except subprocess.CalledProcessError as e:
-                logger.warning("[local_managed] pip install failed: %s", e.stderr)
-            except subprocess.TimeoutExpired:
-                logger.warning("[local_managed] pip install timed out")
+        if not pip_pkgs:
+            return
 
-    def _ensure_agent(self) -> Any:
+        # If compute provider is attached, install in sandbox
+        if self._compute and self._compute_instance_id:
+            logger.info("[local_managed] installing pip packages in sandbox: %s", pip_pkgs)
+            cmd = f"{sys.executable} -m pip install -q " + " ".join(pip_pkgs)
+            try:
+                await self._compute.execute(self._compute_instance_id, cmd, timeout=120)
+            except Exception as e:
+                logger.warning("[local_managed] sandbox pip install failed: %s", e)
+            return
+
+        # No compute provider - check if host installation is allowed
+        if not self._cfg.get("host_packages_ok", False):
+            from praisonai.integrations.managed_agents import ManagedSandboxRequired
+            raise ManagedSandboxRequired(
+                "LocalManagedAgent: packages= requires compute= for safety. "
+                "Either:\n"
+                "1. Add compute='docker' (recommended), or\n" 
+                "2. Set LocalManagedConfig(host_packages_ok=True) to allow host pip install (unsafe)"
+            )
+
+        # Host installation (unsafe but explicitly allowed)
+        cmd = [sys.executable, "-m", "pip", "install", "-q"] + pip_pkgs
+        logger.warning("[local_managed] installing pip packages on HOST (unsafe): %s", pip_pkgs)
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, timeout=120)
+        except subprocess.CalledProcessError as e:
+            logger.warning("[local_managed] pip install failed: %s", e.stderr)
+        except subprocess.TimeoutExpired:
+            logger.warning("[local_managed] pip install timed out")
+
+    async def _ensure_compute(self) -> None:
+        """Provision compute instance if compute provider is attached."""
+        if not self._compute or self._compute_instance_id:
+            return
+
+        logger.info("[local_managed] provisioning compute instance")
+        try:
+            from praisonaiagents.managed.protocols import ComputeConfig
+            
+            # Create compute config with our environment settings
+            config = ComputeConfig(
+                packages=self._cfg.get("packages", {}),
+                env=self._cfg.get("env", {}),
+                working_dir=self._cfg.get("working_dir", "/workspace"),
+            )
+            
+            instance_info = await self._compute.provision(config)
+            self._compute_instance_id = instance_info.instance_id
+            logger.info("[local_managed] compute instance provisioned: %s", self._compute_instance_id)
+            
+        except Exception as e:
+            logger.error("[local_managed] failed to provision compute: %s", e)
+            raise
+
+    async def _ensure_agent(self) -> Any:
         """Create or return the inner PraisonAI Agent."""
         if self._inner_agent is not None:
             return self._inner_agent
 
-        self._install_packages()
+        # Provision compute instance if needed
+        await self._ensure_compute()
+
+        # Install packages (in sandbox or host as configured)
+        await self._install_packages()
 
         from praisonaiagents import Agent
 
@@ -530,8 +576,42 @@ class LocalManagedAgent:
     # ------------------------------------------------------------------
     async def execute(self, prompt: str, **kwargs) -> str:
         """Execute prompt locally and return full response."""
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._execute_sync, prompt)
+        from praisonaiagents.trace.context_events import get_context_emitter
+
+        emitter = get_context_emitter()
+        agent_name = self._cfg.get("name", "Agent")
+
+        # Emit agent_start event for managed level
+        emitter.agent_start(
+            agent_name=agent_name,
+            metadata={
+                "input": prompt,
+                "provider": "local",
+                "model": self._cfg.get("model", self._resolve_model()),
+                "compute": "sandbox" if self._compute else "host",
+                "session_id": getattr(self, "_session_id", "")
+            }
+        )
+
+        try:
+            agent = await self._ensure_agent()
+            self._ensure_session()
+            self._persist_message("user", prompt)
+
+            # Execute via inner agent (which will emit its own context events)
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(None, agent.chat, prompt)
+            
+            self._persist_message("assistant", result)
+            self._sync_usage()
+            
+            return result
+            
+        except Exception as e:
+            emitter.agent_end(agent_name=agent_name, metadata={"error": str(e)})
+            raise
+        finally:
+            emitter.agent_end(agent_name=agent_name, metadata={"status": "completed"})
 
     def _sync_usage(self) -> None:
         """Sync token usage from inner agent to managed backend counters."""
@@ -547,7 +627,21 @@ class LocalManagedAgent:
 
     def _execute_sync(self, prompt: str, stream_live: bool = False) -> str:
         """Synchronous execution using PraisonAI Agent.chat()."""
-        agent = self._ensure_agent()
+        # Note: This method is kept for backwards compatibility but 
+        # cannot provision compute instances. Use execute() instead.
+        if self._inner_agent is None:
+            # Try sync fallback for packages without compute
+            try:
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                agent = loop.run_until_complete(self._ensure_agent())
+                loop.close()
+            except Exception as e:
+                raise RuntimeError(f"Cannot initialize agent synchronously: {e}. Use async execute() instead.")
+        else:
+            agent = self._inner_agent
+        
         self._ensure_session()
         self._persist_message("user", prompt)
 
@@ -671,16 +765,25 @@ class LocalManagedAgent:
     # retrieve_session / list_sessions — ManagedBackendProtocol
     # ------------------------------------------------------------------
     def retrieve_session(self) -> Dict[str, Any]:
-        """Retrieve current session metadata."""
+        """Retrieve current session metadata.
+        
+        Returns unified SessionInfo schema with all fields always present.
+        """
+        from ._session_info import SessionInfo, SessionUsage
+        
         self._sync_usage()
-        return {
-            "id": self._session_id,
-            "status": "idle" if self._session_id else "none",
-            "usage": {
-                "input_tokens": self.total_input_tokens,
-                "output_tokens": self.total_output_tokens,
-            },
-        }
+        
+        session_info = SessionInfo(
+            id=self._session_id or "",
+            status="idle" if self._session_id else "none", 
+            title=self._cfg.get("session_title", ""),
+            usage=SessionUsage(
+                input_tokens=self.total_input_tokens,
+                output_tokens=self.total_output_tokens
+            )
+        )
+        
+        return session_info.to_dict()
 
     def list_sessions(self, **kwargs) -> List[Dict[str, Any]]:
         """List all sessions created in this backend instance."""

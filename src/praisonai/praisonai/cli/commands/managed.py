@@ -316,6 +316,31 @@ def sessions_resume(
         print(result)
 
 
+@sessions_app.command("delete")  
+def sessions_delete(
+    session_id: str = typer.Argument(..., help="Session ID to delete (sesn_01...)"),
+    confirm: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+):
+    """Delete a managed session permanently.
+    
+    Example:
+        praisonai managed sessions delete sesn_01AbCdEf
+        praisonai managed sessions delete sesn_01AbCdEf --yes
+    """
+    if not confirm:
+        typer.confirm(f"Delete session {session_id}? This cannot be undone.", abort=True)
+    
+    try:
+        client = _get_client()
+        # Note: Anthropic API may not have delete endpoint yet
+        # This is a placeholder for when it becomes available
+        typer.echo(f"Session deletion not yet supported by Anthropic API")
+        typer.echo(f"Sessions will eventually expire automatically")
+    except Exception as e:
+        typer.echo(f"Error deleting session: {e}", err=True)
+        raise typer.Exit(1)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # agents sub-commands
 # ─────────────────────────────────────────────────────────────────────────────
@@ -397,6 +422,29 @@ def agents_update(
     typer.echo(f"Updated agent: {updated.id} (v{getattr(updated,'version','')})")
 
 
+@agents_app.command("delete")
+def agents_delete(
+    agent_id: str = typer.Argument(..., help="Agent ID to delete (agent_01...)"),
+    confirm: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+):
+    """Delete a managed agent permanently.
+    
+    Example:
+        praisonai managed agents delete agent_01AbCdEf
+        praisonai managed agents delete agent_01AbCdEf --yes
+    """
+    if not confirm:
+        typer.confirm(f"Delete agent {agent_id}? This cannot be undone.", abort=True)
+    
+    try:
+        client = _get_client()
+        client.beta.agents.delete(agent_id)
+        typer.echo(f"Agent {agent_id} deleted successfully")
+    except Exception as e:
+        typer.echo(f"Error deleting agent: {e}", err=True)
+        raise typer.Exit(1)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # envs sub-commands
 # ─────────────────────────────────────────────────────────────────────────────
@@ -439,6 +487,54 @@ def envs_get(
     cfg = getattr(e, "config", None)
     if cfg:
         typer.echo(f"Config: {cfg}")
+
+
+@envs_app.command("update")
+def envs_update(
+    env_id: str = typer.Argument(..., help="Environment ID to update (env_01...)"),
+    name: Optional[str] = typer.Option(None, "--name", help="Update environment name"),
+):
+    """Update an existing environment's configuration.
+    
+    Example:
+        praisonai managed envs update env_01AbCdEf --name "New Environment Name"
+    """
+    client = _get_client()
+    kwargs = {}
+    if name:
+        kwargs["name"] = name
+    if not kwargs:
+        typer.echo("Nothing to update. Pass --name.")
+        raise typer.Exit(0)
+    try:
+        updated = client.beta.environments.update(env_id, **kwargs)
+        typer.echo(f"Updated environment: {updated.id}")
+    except Exception as e:
+        typer.echo(f"Error updating environment: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@envs_app.command("delete")
+def envs_delete(
+    env_id: str = typer.Argument(..., help="Environment ID to delete (env_01...)"),
+    confirm: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+):
+    """Delete an environment permanently.
+    
+    Example:
+        praisonai managed envs delete env_01AbCdEf
+        praisonai managed envs delete env_01AbCdEf --yes
+    """
+    if not confirm:
+        typer.confirm(f"Delete environment {env_id}? This cannot be undone.", abort=True)
+    
+    try:
+        client = _get_client()
+        client.beta.environments.delete(env_id)
+        typer.echo(f"Environment {env_id} deleted successfully")
+    except Exception as e:
+        typer.echo(f"Error deleting environment: {e}", err=True)
+        raise typer.Exit(1)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
