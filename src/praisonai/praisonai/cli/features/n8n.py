@@ -14,6 +14,8 @@ import yaml
 import webbrowser
 import hashlib
 import os
+import platform
+import re
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
@@ -26,6 +28,15 @@ except ImportError:
 from .base import FlagHandler
 
 
+def _default_api_url(n8n_url: str, port: int = 8005) -> str:
+    """Return a host-reachable URL for PraisonAI API based on where n8n runs."""
+    # If n8n is local Docker and explicit Docker env flag is set, use host.docker.internal on mac/windows
+    if ("localhost" in n8n_url or "127.0.0.1" in n8n_url) and os.environ.get("N8N_DOCKER", "").lower() in ("1", "true"):
+        if platform.system() in ("Darwin", "Windows"):
+            return f"http://host.docker.internal:{port}"
+    return f"http://127.0.0.1:{port}"
+
+
 class N8nHandler(FlagHandler):
     """
     Handler for n8n workflow export and visualization.
@@ -35,7 +46,7 @@ class N8nHandler(FlagHandler):
     """
     
     def __init__(self, verbose: bool = False, n8n_url: str = "http://localhost:5678",
-                 use_execute_command: bool = False, api_url: str = "http://127.0.0.1:8005"):
+                 use_execute_command: bool = False, api_url: Optional[str] = None, port: int = 8005):
         """
         Initialize the n8n handler.
         
@@ -45,11 +56,23 @@ class N8nHandler(FlagHandler):
             use_execute_command: Use Execute Command nodes (runs praisonai directly)
                                  instead of HTTP Request nodes
             api_url: PraisonAI API URL that n8n will call (for tunnel/cloud deployments)
+                    If None, uses Docker-aware default based on n8n_url
+            port: PraisonAI API port (used when api_url is None)
         """
         super().__init__(verbose=verbose)
         self.n8n_url = n8n_url
-        self.praisonai_api_url = api_url
+        self._api_url_explicit = api_url is not None
+        self._port = port
+        self.praisonai_api_url = api_url if api_url is not None else _default_api_url(n8n_url, port)
         self.use_execute_command = use_execute_command
+        
+        # Print Docker networking hint if using default with Docker n8n
+        if not self._api_url_explicit and ("localhost" in n8n_url or "127.0.0.1" in n8n_url):
+            docker_env = os.environ.get("N8N_DOCKER", "").lower() in ("1", "true")
+            if docker_env and platform.system() in ("Darwin", "Windows"):
+                self.print_status("💡 Tip: Using host.docker.internal for Docker n8n compatibility", "info")
+            else:
+                self.print_status(f"💡 Tip: For Docker n8n, set N8N_DOCKER=1 and use --api-url http://host.docker.internal:{port} if needed", "info")
     
     @property
     def feature_name(self) -> str:
@@ -78,6 +101,9 @@ class N8nHandler(FlagHandler):
         """
         if n8n_url:
             self.n8n_url = n8n_url
+            # Recompute API URL if it wasn't explicitly set
+            if not self._api_url_explicit:
+                self.praisonai_api_url = _default_api_url(self.n8n_url, self._port)
         
         # Convert YAML to n8n workflow JSON
         workflow_json = self.convert_yaml_to_n8n(yaml_path)
@@ -409,18 +435,19 @@ class N8nHandler(FlagHandler):
             n8n HTTP Request node configuration
         """
         agent_name = agent_config.get('name', agent_id.title())
-        # Convert agent_id to URL-safe format (lowercase, underscores)
-        agent_url_id = agent_id.lower().replace(' ', '_')
+        # Convert agent_id to a safe identifier (lowercase, underscores)
+        agent_url_id = re.sub(r"[^a-z0-9_]", "_", agent_id.lower())
+        agent_url_id = re.sub(r"_+", "_", agent_url_id).strip("_") or "agent"
         
         # Build the query - first agent uses webhook input, others use previous response
-        # Escape single quotes and double braces (n8n expression syntax)
-        escaped_action = action.replace("'", "\\'").replace("{{", "").replace("}}", "")
+        # Use JSON.dumps to properly escape action for JavaScript
+        escaped_action_json = json.dumps(action)
         if is_first:
             # First agent: use query from webhook body
-            query_expr = "$json.body?.query || $json.query || '" + escaped_action + "'"
+            query_expr = f"$json.body?.query || $json.query || {escaped_action_json}"
         else:
             # Subsequent agents: use previous agent's response + original action context
-            query_expr = "$json.response || '" + escaped_action + "'"
+            query_expr = f"$json.response || {escaped_action_json}"
         
         return {
             "id": f"agent_{index}",
@@ -430,7 +457,7 @@ class N8nHandler(FlagHandler):
             "position": position,
             "parameters": {
                 "method": "POST",
-                "url": f"{self.praisonai_api_url}/agents/{agent_url_id}",
+                "url": f"{self.praisonai_api_url}/agents/{agent_url_id}/invoke",
                 "sendBody": True,
                 "specifyBody": "json",
                 "jsonBody": f"={{{{ JSON.stringify({{ query: {query_expr} }}) }}}}",
@@ -467,7 +494,7 @@ class N8nHandler(FlagHandler):
             "position": position,
             "parameters": {
                 "method": "POST",
-                "url": f"{self.praisonai_api_url}/agents",
+                "url": f"{self.praisonai_api_url.rstrip('/')}/workflow/execute",
                 "sendBody": True,
                 "specifyBody": "json",
                 # Pass the query from webhook body, or use a default
@@ -529,6 +556,9 @@ class N8nHandler(FlagHandler):
             "agent": agent_id
         }
         
+        # Convert agent_id to a safe identifier for URL path
+        agent_url_id = re.sub(r"[^a-z0-9_]", "_", agent_id.lower().replace(" ", "_"))
+        
         return {
             "id": f"agent_{index}",
             "name": agent_name,
@@ -537,10 +567,10 @@ class N8nHandler(FlagHandler):
             "position": position,
             "parameters": {
                 "method": "POST",
-                "url": f"{self.praisonai_api_url}/agents",
+                "url": f"{self.praisonai_api_url.rstrip('/')}/agents/{agent_url_id}/invoke",
                 "sendBody": True,
                 "specifyBody": "json",
-                "jsonBody": json.dumps(request_body),
+                "jsonBody": json.dumps({"query": action}),
                 "options": {
                     "timeout": 300000  # 5 minute timeout for LLM calls
                 }
