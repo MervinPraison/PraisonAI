@@ -50,6 +50,14 @@ client_ips = defaultdict(list)
 
 app = FastAPI()
 
+# Include agent invoke router for n8n integration
+try:
+    from .agent_invoke import router as agent_invoke_router
+    app.include_router(agent_invoke_router)
+    logger.debug("Agent invoke router added for n8n integration")
+except ImportError as e:
+    logger.warning(f"Could not load agent invoke router: {e}")
+
 # Set up logging
 logger = logging.getLogger(__name__)
 log_level = os.getenv("LOGLEVEL", "INFO").upper()
