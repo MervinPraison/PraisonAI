@@ -241,6 +241,7 @@ def register_commands():
     from .commands.memory import app as memory_app
     from .commands.workflow import app as workflow_app
     from .commands.tools import app as tools_app
+    from .commands.n8n import app as n8n_app
     from .commands.knowledge import app as knowledge_app
     from .commands.rag import app as rag_app
     from .commands import retrieval as retrieval_module
@@ -318,6 +319,7 @@ def register_commands():
     app.add_typer(memory_app, name="memory", help="Memory management")
     app.add_typer(workflow_app, name="workflow", help="Workflow management")
     app.add_typer(tools_app, name="tools", help="Tool management")
+    app.add_typer(n8n_app, name="n8n", help="n8n visual workflow editor integration")
     app.add_typer(knowledge_app, name="knowledge", help="Knowledge base management (legacy)")
     app.add_typer(rag_app, name="rag", help="RAG commands (legacy - use index/query instead)")
     
