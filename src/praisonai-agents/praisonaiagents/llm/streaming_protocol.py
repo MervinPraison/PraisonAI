@@ -149,14 +149,16 @@ class DefaultStreamingAdapter:
         
         # Emit request start event
         start_time = time.perf_counter()
+        request_start_event = StreamEvent(
+            type=StreamEventType.REQUEST_START,
+            timestamp=start_time,
+            metadata={"model": model, "provider": "default"}
+        )
+        
+        # Yield the event to consumers and emit to optional stream_emitter
+        yield request_start_event
         if stream_emitter:
-            await stream_emitter.emit_async(
-                StreamEvent(
-                    type=StreamEventType.REQUEST_START,
-                    timestamp=start_time,
-                    metadata={"model": model, "provider": "default"}
-                )
-            )
+            await stream_emitter.emit_async(request_start_event)
         
         try:
             # Build completion parameters
@@ -244,8 +246,7 @@ class DefaultStreamingAdapter:
             "json",
             "parsing",
             "timeout",
-            "connection",
-            "rate limit"
+            "connection"
         ]
         return any(pattern in error_str for pattern in recoverable_patterns)
     
@@ -307,12 +308,12 @@ class AnthropicStreamingAdapter(DefaultStreamingAdapter):
         """
         return False  # Disable until litellm bug is fixed
     
-    def create_stream_unavailable_event(self, reason: str = None, **metadata) -> StreamEvent:
+    def create_stream_unavailable_event(self, reason: Optional[str] = None, **metadata) -> StreamEvent:
         """Create Anthropic-specific unavailable event with bug details."""
         return super().create_stream_unavailable_event(
             reason or "litellm async generator bug",
             provider="anthropic",
-            bug_reference="https://github.com/BerriAI/litellm/issues/...",
+            # TODO: Add actual bug reference when litellm issue is filed
             **metadata
         )
 
@@ -330,7 +331,7 @@ class GeminiStreamingAdapter(DefaultStreamingAdapter):
             return False  # Disable streaming when tools are present due to JSON parsing issues
         return True
     
-    def create_stream_unavailable_event(self, reason: str = None, **metadata) -> StreamEvent:
+    def create_stream_unavailable_event(self, reason: Optional[str] = None, **metadata) -> StreamEvent:
         """Create Gemini-specific unavailable event."""
         return super().create_stream_unavailable_event(
             reason or "JSON parsing issues with tools",

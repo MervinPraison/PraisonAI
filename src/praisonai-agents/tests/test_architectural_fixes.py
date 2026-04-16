@@ -16,7 +16,7 @@ Tests follow AGENTS.md requirements:
 import pytest
 import asyncio
 import time
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch, MagicMock, AsyncMock
 from praisonaiagents import Agent, tool
 from praisonaiagents.agent.unified_execution_mixin import UnifiedExecutionMixin
 from praisonaiagents.llm.streaming_protocol import (
@@ -49,7 +49,7 @@ class TestGap1UnifiedExecution:
                 self.tools = []
                 self.chat_history = []
                 self._hook_runner = Mock()
-                self._hook_runner.execute = Mock(return_value=asyncio.coroutine(lambda *args: [])())
+                self._hook_runner.execute = AsyncMock(return_value=[])
                 self._hook_runner.is_blocked = Mock(return_value=False)
                 
             def _build_system_prompt(self, tools=None):
@@ -82,9 +82,9 @@ class TestGap1UnifiedExecution:
                 self.tools = []
                 self.chat_history = []
                 self.llm_instance = Mock()
-                self.llm_instance.get_response_async = Mock(return_value="Test response")
+                self.llm_instance.get_response_async = AsyncMock(return_value="Test response")
                 self._hook_runner = Mock()
-                self._hook_runner.execute = Mock(return_value=asyncio.coroutine(lambda *args: [])())
+                self._hook_runner.execute = AsyncMock(return_value=[])
                 self._hook_runner.is_blocked = Mock(return_value=False)
                 self._using_custom_llm = False
                 

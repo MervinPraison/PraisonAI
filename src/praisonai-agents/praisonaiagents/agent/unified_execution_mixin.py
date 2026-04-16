@@ -183,10 +183,15 @@ class UnifiedExecutionMixin:
             if tools is None:
                 tools = getattr(self, 'tools', [])
 
+            # Ensure LLM client is available (fallback from llm_instance to llm)
+            llm_client = getattr(self, 'llm_instance', None) or getattr(self, 'llm', None)
+            if llm_client is None:
+                raise RuntimeError("No LLM client available. Agent must have either llm_instance or llm attribute.")
+
             # Call the LLM using async method (supports both custom and standard LLMs)
             if getattr(self, '_using_custom_llm', False):
                 # Async custom LLM path
-                response_text = await self.llm_instance.get_response_async(
+                response_text = await llm_client.get_response_async(
                     prompt=llm_prompt,
                     system_prompt=self._build_system_prompt(tools),
                     chat_history=getattr(self, 'chat_history', []),
@@ -205,7 +210,7 @@ class UnifiedExecutionMixin:
                 )
             else:
                 # Standard LiteLLM path - delegate to existing LLM class
-                response_text = await self.llm_instance.get_response_async(
+                response_text = await llm_client.get_response_async(
                     prompt=llm_prompt,
                     system_prompt=self._build_system_prompt(tools),
                     chat_history=getattr(self, 'chat_history', []),
@@ -276,8 +281,8 @@ class UnifiedExecutionMixin:
         
         Handles the common cases:
         1. No event loop exists - use asyncio.run()
-        2. Event loop exists but we're in main thread - use run_coroutine_threadsafe()
-        3. Event loop exists and we're in async context - should not happen for sync entry points
+        2. Event loop exists on main thread - use dedicated thread with new loop
+        3. Event loop exists on worker thread - create new event loop
         """
         try:
             # Try to get the current event loop
@@ -286,15 +291,21 @@ class UnifiedExecutionMixin:
             # No event loop - safe to use asyncio.run()
             return asyncio.run(coro)
         
-        # Event loop exists - use thread pool to avoid blocking it
-        if threading.current_thread() is threading.main_thread():
-            # We're in the main thread with an event loop
-            # Use run_coroutine_threadsafe with a timeout
-            future = asyncio.run_coroutine_threadsafe(coro, loop)
+        # Event loop exists - avoid deadlock by running in dedicated thread
+        import concurrent.futures
+        
+        def run_in_thread():
+            # Create new event loop in dedicated thread
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                return new_loop.run_until_complete(coro)
+            finally:
+                new_loop.close()
+        
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(run_in_thread)
             return future.result(timeout=300)  # 5 minute timeout
-        else:
-            # We're in a worker thread - create new event loop
-            return asyncio.run(coro)
 
     def unified_chat(self, *args, **kwargs) -> Optional[str]:
         """
@@ -328,12 +339,9 @@ class UnifiedExecutionMixin:
         Contains all business logic that was previously duplicated between 
         execute_tool and execute_tool_async. Both sync and async entry points delegate here.
         """
-        from ..tools.tool_execution import execute_tool_async
-        
-        # This would contain the unified tool execution logic
-        # For now, delegate to the existing async tool execution
-        return await execute_tool_async(
-            agent=self,
+        # Delegate to the existing async tool execution method on self
+        # This would contain the unified tool execution logic in a full implementation
+        return await self.execute_tool_async(
             function_name=function_name,
             arguments=arguments,
             tool_call_id=tool_call_id
