@@ -49,11 +49,14 @@ class CodexCLIIntegration(BaseCLIIntegration):
         self,
         workspace: str = ".",
         timeout: int = 300,
-        full_auto: bool = False,
+        approval_mode: str = "suggest",  # suggest, auto-edit, full-auto
         sandbox: str = "default",
         json_output: bool = False,
         output_schema: Optional[str] = None,
         output_file: Optional[str] = None,
+        provider: Optional[str] = None,  # OpenAI, OpenRouter, Azure, Gemini, etc.
+        # Backward compatibility
+        full_auto: Optional[bool] = None,
     ):
         """
         Initialize Codex CLI integration.
@@ -61,19 +64,28 @@ class CodexCLIIntegration(BaseCLIIntegration):
         Args:
             workspace: Working directory for CLI execution
             timeout: Timeout in seconds for CLI execution
-            full_auto: Whether to allow file modifications (--full-auto)
+            approval_mode: Approval mode ("suggest", "auto-edit", "full-auto")
             sandbox: Sandbox mode ("default", "danger-full-access")
             json_output: Whether to use JSON streaming output (--json)
             output_schema: Path to JSON schema for structured output
             output_file: Path to save the final output (-o)
+            provider: Model provider ("openai", "openrouter", "azure", "gemini", "ollama", etc.)
         """
         super().__init__(workspace=workspace, timeout=timeout)
         
-        self.full_auto = full_auto
+        # Handle backward compatibility
+        if full_auto is not None:
+            approval_mode = "full-auto" if full_auto else "suggest"
+        
+        self.approval_mode = approval_mode
         self.sandbox = sandbox
         self.json_output = json_output
         self.output_schema = output_schema
         self.output_file = output_file
+        self.provider = provider
+        
+        # Backward compatibility
+        self.full_auto = approval_mode == "full-auto"
     
     @property
     def cli_command(self) -> str:
@@ -99,9 +111,12 @@ class CodexCLIIntegration(BaseCLIIntegration):
         # Add task
         cmd.append(task)
         
-        # Add full auto flag if enabled
-        if self.full_auto:
+        # Add approval mode
+        if self.approval_mode == "full-auto":
             cmd.append("--full-auto")
+        elif self.approval_mode == "auto-edit":
+            cmd.append("--auto-edit")
+        # suggest is the default, no flag needed
         
         # Add sandbox mode if not default
         if self.sandbox and self.sandbox != "default":
@@ -118,6 +133,10 @@ class CodexCLIIntegration(BaseCLIIntegration):
         # Add output file if specified
         if self.output_file:
             cmd.extend(["-o", self.output_file])
+        
+        # Add provider if specified
+        if self.provider:
+            cmd.extend(["--provider", self.provider])
         
         return cmd
     
