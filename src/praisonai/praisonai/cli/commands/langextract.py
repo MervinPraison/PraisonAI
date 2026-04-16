@@ -53,12 +53,17 @@ def render(
 ):
     """Run a workflow end-to-end with LangextractSink attached, then open the HTML."""
     try:
+        import langextract  # noqa: F401 — probe optional dep early for clear error
         from praisonai.observability import LangextractSink, LangextractSinkConfig
         from praisonaiagents.trace.protocol import TraceEmitter, set_default_emitter
         from praisonai import PraisonAI
     except ImportError as e:
-        typer.echo(f"Error: Missing dependencies: {e}", err=True)
-        raise typer.Exit(1)
+        typer.echo(
+            f"Error: Missing dependencies: {e}. "
+            "Install langextract with: pip install 'praisonai[langextract]'",
+            err=True,
+        )
+        raise typer.Exit(1) from e
 
     if not yaml_path.exists():
         typer.echo(f"Error: YAML file not found: {yaml_path}", err=True)
@@ -90,5 +95,12 @@ def render(
     finally:
         # Ensure sink is closed even if workflow fails
         sink.close()
-    
-    typer.echo(f"✅ Trace rendered: {output_html}")
+
+    if output_html.exists():
+        typer.echo(f"✅ Trace rendered: {output_html}")
+    else:
+        typer.echo(
+            f"Error: Trace was not rendered to {output_html} (see logs for details)",
+            err=True,
+        )
+        raise typer.Exit(1)

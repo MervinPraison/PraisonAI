@@ -155,7 +155,7 @@ class TestLangextractSink:
             sink.emit(event)
         
         # Test the mapping function
-        extractions = list(sink._events_to_extractions(mock_lx, "Test input text"))
+        extractions = list(sink._events_to_extractions(mock_lx, "Test input text", sink._events))
         
         # AGENT_END is intentionally skipped in current implementation
         assert len(extractions) == 4
@@ -163,8 +163,7 @@ class TestLangextractSink:
         # Check that each event type creates an extraction
         assert mock_lx.data.Extraction.call_count == 4
 
-    @patch('webbrowser.open')
-    @patch('sys.modules', new={})  # Start with empty modules
+    @patch('praisonai.observability.langextract.webbrowser.open')
     def test_render_with_mock_langextract(self, mock_browser, sample_events):
         """Test rendering with mocked langextract."""
         import sys
@@ -195,8 +194,7 @@ class TestLangextractSink:
             
             # Mock the langextract import directly
             with patch.dict(sys.modules, {"langextract": mock_lx}):
-                with patch("builtins.__import__", side_effect=lambda name, *args, **kwargs: mock_lx if name == "langextract" else _REAL_IMPORT(name, *args, **kwargs)):
-                    sink.close()
+                sink.close()
             
             # Verify HTML file was written
             assert output_path.exists()

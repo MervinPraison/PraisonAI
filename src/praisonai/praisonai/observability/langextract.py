@@ -86,10 +86,10 @@ class LangextractSink:
             self._closed = True
         try:
             self._render()
-        except Exception as e:
+        except Exception:
             # Observability must never break the agent
             import logging
-            logging.getLogger(__name__).warning("LangextractSink render failed: %s", e)
+            logging.getLogger(__name__).exception("LangextractSink render failed")
 
     # ---- Rendering ---------------------------------------------------------
 
@@ -97,10 +97,10 @@ class LangextractSink:
         # Lazy import — langextract is optional
         try:
             import langextract as lx  # type: ignore
-        except ImportError:
+        except ImportError as err:
             raise ImportError(
                 "langextract is not installed. Install with: pip install 'praisonai[langextract]'"
-            )
+            ) from err
 
         # Capture snapshot of events under lock to ensure thread safety
         with self._lock:
@@ -169,7 +169,8 @@ class LangextractSink:
                 output_text = (
                     ev.tool_result_summary
                     or (ev.metadata or {}).get("output")
-                    or (ev.metadata or {}).get("content", "")
+                    or (ev.metadata or {}).get("content")
+                    or ""
                 )
                 yield lx.data.Extraction(
                     extraction_class="final_output",
