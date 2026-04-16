@@ -429,7 +429,8 @@ class N8nHandler(FlagHandler):
         """
         agent_name = agent_config.get('name', agent_id.title())
         # Convert agent_id to a safe identifier (lowercase, underscores)
-        agent_url_id = re.sub(r"[^a-z0-9_]", "_", agent_id.lower().replace(" ", "_"))
+        agent_url_id = re.sub(r"[^a-z0-9_]", "_", agent_id.lower())
+        agent_url_id = re.sub(r"_+", "_", agent_url_id).strip("_") or "agent"
         
         # Build the query - first agent uses webhook input, others use previous response
         # Escape single quotes and double braces (n8n expression syntax)

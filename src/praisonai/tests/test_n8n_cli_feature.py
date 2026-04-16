@@ -16,7 +16,7 @@ def test_default_api_url_keeps_loopback_on_linux_localhost():
 def test_per_agent_node_uses_agents_endpoint_and_sanitized_agent_field():
     handler = N8nHandler(api_url="http://127.0.0.1:8005")
     node = handler._create_per_agent_node(
-        agent_id="Sales' Agent",
+        agent_id="Sales-Agent (2023)'",
         agent_config={},
         action="Do work",
         position=[100, 200],
@@ -25,4 +25,7 @@ def test_per_agent_node_uses_agents_endpoint_and_sanitized_agent_field():
     )
 
     assert node["parameters"]["url"] == "http://127.0.0.1:8005/agents"
-    assert "agent: 'sales__agent'" in node["parameters"]["jsonBody"]
+    assert node["parameters"]["jsonBody"] == (
+        "={{ JSON.stringify({ query: $json.body?.query || $json.query || 'Do work', "
+        "agent: 'sales_agent_2023' }) }}"
+    )
