@@ -285,7 +285,7 @@ Launch PraisonAI servers with unified discovery support.
             if query_data is None:
                 try:
                     body = await request.json()
-                    query = body.get("query", "")
+                    query = body.get("query", "") or body.get("message", "")
                     agent_name = body.get("agent")
                 except Exception:
                     raise HTTPException(status_code=400, detail="Invalid request")
