@@ -1067,6 +1067,8 @@ class PraisonAI:
         # External Agent - use external AI CLI tools
         parser.add_argument("--external-agent", type=str, choices=["claude", "gemini", "codex", "cursor"],
                           help="Use external AI CLI tool (claude, gemini, codex, cursor)")
+        parser.add_argument("--external-agent-direct", action="store_true",
+                          help="Use external agent as direct proxy (skip manager Agent delegation)")
         
         # Compare - compare different CLI modes
         parser.add_argument("--compare", type=str, help="Compare CLI modes (comma-separated: basic,tools,research,planning)")
@@ -4365,11 +4367,13 @@ Do NOT add any explanations or formatting."""
                             existing_tools = list(mcp_tools)
                         agent_config['tools'] = existing_tools
                 
-                # External Agent - Use external AI CLI tools directly
+                # External Agent - Use external AI CLI tools with manager delegation
                 if getattr(self.args, 'external_agent', None):
                     from rich.console import Console
                     ext_console = Console()
                     external_agent_name = self.args.external_agent
+                    direct = getattr(self.args, 'external_agent_direct', False)
+                    
                     try:
                         from .features.external_agents import ExternalAgentsHandler
                         handler = ExternalAgentsHandler(verbose=getattr(self.args, 'verbose', False))
@@ -4379,23 +4383,43 @@ Do NOT add any explanations or formatting."""
                         
                         integration = handler.get_integration(external_agent_name, workspace=workspace)
                         
-                        if integration.is_available:
-                            ext_console.print(f"[bold cyan]🔌 Using external agent: {external_agent_name}[/bold cyan]")
-                            
-                            # Run the external agent directly instead of PraisonAI agent
+                        if not integration.is_available:
+                            ext_console.print(f"[yellow]⚠️ External agent '{external_agent_name}' is not installed[/yellow]")
+                            ext_console.print(f"[dim]Install with: {handler._get_install_instructions(external_agent_name)}[/dim]")
+                            return None
+                        
+                        if direct:
+                            # Pass-through proxy (original behavior, preserved as escape hatch)
+                            ext_console.print(f"[bold cyan]🔌 Using external agent (direct): {external_agent_name}[/bold cyan]")
                             import asyncio
                             try:
                                 result = asyncio.run(integration.execute(prompt))
                                 ext_console.print(f"\n[bold green]Result from {external_agent_name}:[/bold green]")
                                 ext_console.print(result)
-                                # Return empty string to avoid duplicate printing by caller
                                 return ""
                             except Exception as e:
                                 ext_console.print(f"[red]Error executing {external_agent_name}: {e}[/red]")
                                 return None
-                        else:
-                            ext_console.print(f"[yellow]⚠️ External agent '{external_agent_name}' is not installed[/yellow]")
-                            ext_console.print(f"[dim]Install with: {handler._get_install_instructions(external_agent_name)}[/dim]")
+                        
+                        # NEW default: manager Agent uses external CLI as subagent tool
+                        ext_console.print(f"[bold cyan]🔌 Using external agent via manager delegation: {external_agent_name}[/bold cyan]")
+                        try:
+                            from praisonaiagents import Agent
+                            manager = Agent(
+                                name="Manager",
+                                instructions=(
+                                    f"You are a manager that delegates tasks to the {external_agent_name} subagent "
+                                    f"via the {integration.cli_command}_tool. Call the tool for coding/analysis tasks."
+                                ),
+                                tools=[integration.as_tool()],
+                                llm=os.environ.get("MODEL_NAME", "gpt-4o-mini"),
+                            )
+                            result = manager.start(prompt)
+                            ext_console.print(f"\n[bold green]Manager delegation result:[/bold green]")
+                            ext_console.print(result)
+                            return ""
+                        except Exception as e:
+                            ext_console.print(f"[red]Error with manager delegation: {e}[/red]")
                             return None
                     except Exception as e:
                         ext_console.print(f"[red]Error setting up external agent: {e}[/red]")
