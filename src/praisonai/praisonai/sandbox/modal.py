@@ -18,6 +18,7 @@ from praisonaiagents.sandbox import (
 )
 
 logger = logging.getLogger(__name__)
+TIMEOUT_EXIT_CODE = 124
 
 
 class ModalSandbox:
@@ -85,6 +86,7 @@ class ModalSandbox:
         
         try:
             import modal
+            execution_timeout = self.timeout
             
             # Create Modal app
             self._app = modal.App(self.app_name)
@@ -117,10 +119,12 @@ class ModalSandbox:
             )
             def execute_code(code: str, language: str = "python", env_vars: Dict[str, str] = None):
                 """Execute code in Modal environment."""
+                import logging
                 import subprocess
                 import tempfile
                 import os
                 import sys
+                execute_logger = logging.getLogger(__name__)
 
                 extension_map = {
                     "python": "py",
@@ -161,7 +165,7 @@ class ModalSandbox:
                         cmd,
                         capture_output=True,
                         text=True,
-                        timeout=self.timeout,
+                        timeout=execution_timeout,
                         env=execution_env,
                     )
 
@@ -172,7 +176,7 @@ class ModalSandbox:
                     }
                 except subprocess.TimeoutExpired:
                     return {
-                        "exit_code": 124,  # Timeout exit code
+                        "exit_code": TIMEOUT_EXIT_CODE,
                         "stdout": "",
                         "stderr": "Execution timed out",
                     }
@@ -186,8 +190,10 @@ class ModalSandbox:
                     # Clean up temp file
                     try:
                         os.unlink(temp_file)
-                    except OSError:
-                        pass
+                    except OSError as e:
+                        execute_logger.debug(
+                            f"Failed to remove temporary file {temp_file}: {e}"
+                        )
             
             self._function = execute_code
             self._is_running = True

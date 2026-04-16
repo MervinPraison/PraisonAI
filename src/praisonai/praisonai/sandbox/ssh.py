@@ -447,14 +447,23 @@ class SSHSandbox:
         env: Optional[Dict[str, str]]
     ) -> str:
         """Build execution command for language."""
+        java_command = None
+        if language.lower() == "java":
+            java_class_name = os.path.splitext(os.path.basename(file_path))[0]
+            if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", java_class_name):
+                raise ValueError(f"Invalid Java class name derived from file path: {java_class_name}")
+            java_command = f"javac {shlex.quote(file_path)} && java {shlex.quote(java_class_name)}"
+
         interpreters = {
             "python": f"python3 {shlex.quote(file_path)}",
             "bash": f"bash {shlex.quote(file_path)}",
             "shell": f"bash {shlex.quote(file_path)}",
             "javascript": f"node {shlex.quote(file_path)}",
             "typescript": f"npx ts-node {shlex.quote(file_path)}",
-            "java": f"javac {shlex.quote(file_path)} && java {shlex.quote(os.path.splitext(os.path.basename(file_path))[0])}",
         }
+
+        if java_command:
+            interpreters["java"] = java_command
         
         base_command = interpreters.get(language.lower(), f"cat {shlex.quote(file_path)}")
         
