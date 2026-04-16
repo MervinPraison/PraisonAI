@@ -206,7 +206,7 @@ def pytest_collection_modifyitems(config, items):
         
         # 2. Auto-detect and assign provider markers from file content
         # Skip auto-detection entirely for excluded paths (plugin tests, etc.)
-        if item.fspath:
+        if item.fspath and test_type != 'unit':
             filepath = Path(item.fspath)
             filepath_str = str(filepath)
             
