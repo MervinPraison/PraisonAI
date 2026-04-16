@@ -13,6 +13,28 @@ from .output.console import OutputController, OutputMode, set_output_controller
 from .state.identifiers import create_context
 
 
+def _setup_langfuse_observability(*, verbose: bool = False) -> None:
+    """Set up Langfuse observability by wiring TraceSink to action emitter."""
+    try:
+        from praisonai.observability.langfuse import LangfuseSink
+        from praisonaiagents.trace.protocol import TraceEmitter, set_default_emitter
+        
+        # Create LangfuseSink (auto-reads env vars)
+        sink = LangfuseSink()
+        
+        # Set up action-level trace emitter (sufficient for Phase 1)
+        emitter = TraceEmitter(sink=sink, enabled=True)
+        set_default_emitter(emitter)
+        
+    except ImportError:
+        # Gracefully degrade if Langfuse not installed
+        pass
+    except Exception as e:
+        # Avoid breaking CLI if observability setup fails
+        if verbose:
+            typer.echo(f"Warning: failed to initialize Langfuse observability: {e}", err=True)
+
+
 class OutputFormat(str, Enum):
     """Output format options."""
     text = "text"
@@ -38,6 +60,7 @@ class GlobalState:
     quiet: bool = False
     verbose: bool = False
     screen_reader: bool = False
+    observe: Optional[str] = None
     output_controller: Optional[OutputController] = None
 
 
@@ -98,6 +121,13 @@ def main_callback(
         "--screen-reader",
         help="Screen reader friendly output (no spinners/panels)",
     ),
+    observe: Optional[str] = typer.Option(
+        None,
+        "--observe",
+        "-O",
+        help="Enable observability (langfuse, langsmith, etc.)",
+        envvar="PRAISONAI_OBSERVE",
+    ),
 ):
     """
     PraisonAI - AI Agents Framework CLI.
@@ -110,10 +140,17 @@ def main_callback(
     state.quiet = quiet
     state.verbose = verbose
     state.screen_reader = screen_reader
+    state.observe = observe
     
     # Handle --json alias
     if json_output:
         state.output_format = OutputFormat.json
+    
+    # Validate and set up observability if requested
+    if observe:
+        if observe != "langfuse":
+            raise typer.BadParameter(f"Unsupported observe provider: {observe}")
+        _setup_langfuse_observability(verbose=verbose)
     
     # Determine output mode
     if state.quiet:

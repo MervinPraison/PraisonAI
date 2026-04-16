@@ -1,48 +1,40 @@
 """
-Langfuse Integration Example
+Langfuse Integration Example (Updated for TraceSinkProtocol)
 
-This example shows how to use Langfuse for LLM observability.
+This example shows how to use Langfuse for LLM observability with PraisonAI's native trace infrastructure.
 
 Setup:
-    1. Sign up at https://langfuse.com/
-    2. Get your API keys from the project settings
-    3. Set environment variables:
-       export LANGFUSE_PUBLIC_KEY=pk-lf-xxx
-       export LANGFUSE_SECRET_KEY=sk-lf-xxx
-    4. Install dependencies:
-       pip install opentelemetry-sdk opentelemetry-exporter-otlp
+    pip install "praisonai[langfuse]"
+    export LANGFUSE_PUBLIC_KEY=pk-lf-xxx
+    export LANGFUSE_SECRET_KEY=sk-lf-xxx
 
 Usage:
     python langfuse_example.py
 """
-
-import os
-from praisonai_tools.observability import obs
 from praisonaiagents import Agent
-
-# Initialize Langfuse
-success = obs.init(
-    provider="langfuse",
-    project_name="praisonai-demo",
+from praisonai.observability import LangfuseSink
+from praisonaiagents.trace.protocol import (
+    TraceEmitter, set_default_emitter
 )
 
-if not success:
-    print("Failed to initialize Langfuse. Check your API keys.")
-    print("Required: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY")
-    exit(1)
+# Initialize Langfuse observability
+sink = LangfuseSink()
+emitter = TraceEmitter(sink=sink, enabled=True)
+set_default_emitter(emitter)
 
-print("Langfuse initialized successfully!")
-print(f"View traces at: https://cloud.langfuse.com/")
-
-# Create agent
+# Create and run agent — all traces automatically captured
 agent = Agent(
+    name="Coder",
     instructions="You are a helpful coding assistant.",
-    model="gpt-4o-mini",
+    llm="openai/gpt-4o-mini",
 )
 
-# Run with tracing
-with obs.trace("coding-session", user_id="developer-1"):
-    response = agent.chat("Write a Python function to calculate fibonacci numbers")
-    print(response)
+try:
+    result = agent.start("Write a Python function to calculate fibonacci numbers")
+    print(result)
+finally:
+    # Ensure traces are flushed and resources cleaned up
+    sink.flush()
+    sink.close()
 
 print("\nCheck Langfuse dashboard for traces!")
