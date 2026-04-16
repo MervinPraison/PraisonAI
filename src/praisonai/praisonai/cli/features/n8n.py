@@ -14,6 +14,7 @@ import yaml
 import webbrowser
 import hashlib
 import os
+import platform
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
@@ -26,6 +27,15 @@ except ImportError:
 from .base import FlagHandler
 
 
+def _default_api_url(n8n_url: str) -> str:
+    """Return a host-reachable URL for PraisonAI API based on where n8n runs."""
+    # If n8n is local Docker (default 5678), use host.docker.internal on mac/windows
+    if "localhost" in n8n_url or "127.0.0.1" in n8n_url:
+        if platform.system() in ("Darwin", "Windows"):
+            return "http://host.docker.internal:8005"
+    return "http://127.0.0.1:8005"
+
+
 class N8nHandler(FlagHandler):
     """
     Handler for n8n workflow export and visualization.
@@ -35,7 +45,7 @@ class N8nHandler(FlagHandler):
     """
     
     def __init__(self, verbose: bool = False, n8n_url: str = "http://localhost:5678",
-                 use_execute_command: bool = False, api_url: str = "http://127.0.0.1:8005"):
+                 use_execute_command: bool = False, api_url: Optional[str] = None):
         """
         Initialize the n8n handler.
         
@@ -45,11 +55,19 @@ class N8nHandler(FlagHandler):
             use_execute_command: Use Execute Command nodes (runs praisonai directly)
                                  instead of HTTP Request nodes
             api_url: PraisonAI API URL that n8n will call (for tunnel/cloud deployments)
+                    If None, uses Docker-aware default based on n8n_url
         """
         super().__init__(verbose=verbose)
         self.n8n_url = n8n_url
-        self.praisonai_api_url = api_url
+        self.praisonai_api_url = api_url if api_url is not None else _default_api_url(n8n_url)
         self.use_execute_command = use_execute_command
+        
+        # Print Docker networking hint if using default with Docker n8n
+        if api_url is None and ("localhost" in n8n_url or "127.0.0.1" in n8n_url):
+            if platform.system() in ("Darwin", "Windows"):
+                self.log("💡 Tip: Using host.docker.internal for Docker n8n compatibility", "info")
+            else:
+                self.log("💡 Tip: n8n in Docker can't reach 127.0.0.1 — use --api-url http://host.docker.internal:8005 if needed", "info")
     
     @property
     def feature_name(self) -> str:
@@ -430,10 +448,10 @@ class N8nHandler(FlagHandler):
             "position": position,
             "parameters": {
                 "method": "POST",
-                "url": f"{self.praisonai_api_url}/agents/{agent_url_id}",
+                "url": f"{self.praisonai_api_url}/agents",
                 "sendBody": True,
                 "specifyBody": "json",
-                "jsonBody": f"={{{{ JSON.stringify({{ query: {query_expr} }}) }}}}",
+                "jsonBody": f"={{{{ JSON.stringify({{ query: {query_expr}, agent: '{agent_url_id}' }}) }}}}",
                 "options": {
                     "timeout": 300000  # 5 minute timeout per agent
                 }
