@@ -187,11 +187,18 @@ class ModalSandbox:
                             os.chmod(temp_file, 0o755)
                             cmd = [temp_file]
                         
+                        timeout_candidates = []
+                        if self.timeout is not None and self.timeout > 0:
+                            timeout_candidates.append(self.timeout)
+                        if limits and limits.timeout_seconds is not None and limits.timeout_seconds > 0:
+                            timeout_candidates.append(limits.timeout_seconds)
+                        effective_timeout = min(timeout_candidates) if timeout_candidates else None
+
                         result = subprocess.run(
                             cmd,
                             capture_output=True,
                             text=True,
-                            timeout=300,  # 5 minute timeout
+                            timeout=effective_timeout,
                         )
                         
                         return {
@@ -316,29 +323,27 @@ class ModalSandbox:
     ) -> SandboxResult:
         """Execute a file on Modal platform.
         
-        Note: File must be uploaded to Modal first via write_file.
+        Note: File-based execution is not supported by this backend because
+        persistent file storage is not implemented for Modal sandboxes.
+        Use `execute()` with inline code instead.
         """
-        # Read file content and execute it
-        content = await self.read_file(file_path)
-        if content is None:
-            return SandboxResult(
-                execution_id=str(uuid.uuid4()),
-                status=SandboxStatus.FAILED,
-                error=f"File not found: {file_path}",
-                started_at=time.time(),
-                completed_at=time.time(),
-            )
-        
-        # Determine language from file extension
-        language = "python"
-        if file_path.endswith(('.sh', '.bash')):
-            language = "bash"
-        elif file_path.endswith('.js'):
-            language = "javascript"
-        elif file_path.endswith('.java'):
-            language = "java"
-        
-        return await self.execute(content, language, limits, env)
+        started_at = time.time()
+        return SandboxResult(
+            execution_id=str(uuid.uuid4()),
+            status=SandboxStatus.FAILED,
+            error=(
+                f"File execution is not supported by the Modal sandbox backend: "
+                f"cannot execute '{file_path}' because read_file/write_file "
+                f"persistence is not implemented. Use execute() with inline code instead."
+            ),
+            started_at=started_at,
+            completed_at=time.time(),
+            duration_seconds=time.time() - started_at,
+            metadata={
+                "platform": "modal",
+                "file_path": file_path,
+            }
+        )
     
     async def run_command(
         self,
@@ -358,11 +363,19 @@ class ModalSandbox:
         path: str,
         content: Union[str, bytes],
     ) -> bool:
-        """Write a file (stored in Modal's temporary storage)."""
-        # Modal functions are stateless, so we simulate file storage
-        # In practice, you'd use Modal Volumes for persistent storage
-        logger.warning("Modal sandbox write_file is limited - files are not persistent between executions")
-        return True
+        """Write a file.
+        
+        File persistence is not supported in this stateless Modal implementation.
+        Returns False to indicate that the content was not stored.
+        """
+        # Modal functions are stateless, so file persistence is not available here.
+        # In practice, you'd use Modal Volumes for persistent storage.
+        logger.warning(
+            "Modal sandbox write_file is not supported for stateless functions; "
+            "content was not persisted for path: %s",
+            path,
+        )
+        return False
     
     async def read_file(
         self,

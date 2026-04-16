@@ -9,10 +9,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import tempfile
+import shlex
 import time
 import uuid
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from praisonaiagents.sandbox import (
@@ -116,12 +115,15 @@ class SSHSandbox:
                 connect_kwargs["password"] = self.password
             else:
                 # Try default key files
-                connect_kwargs["client_keys"] = ["~/.ssh/id_rsa", "~/.ssh/id_ed25519"]
+                connect_kwargs["client_keys"] = [
+                    os.path.expanduser("~/.ssh/id_rsa"),
+                    os.path.expanduser("~/.ssh/id_ed25519"),
+                ]
             
             self._connection = await asyncssh.connect(**connect_kwargs)
             
             # Create working directory
-            await self._connection.run(f"mkdir -p {self.working_dir}")
+            await self._connection.run(f"mkdir -p {shlex.quote(self.working_dir)}")
             
             self._is_running = True
             logger.info(f"SSH sandbox connected to {self.user}@{self.host}:{self.port}")
@@ -183,14 +185,20 @@ class SSHSandbox:
             )
             
             # Cleanup temp file
-            await self._connection.run(f"rm -f {remote_file}")
+            await self._connection.run(f"rm -f {shlex.quote(remote_file)}")
             
             completed_at = time.time()
             duration = completed_at - started_at
             
             return SandboxResult(
                 execution_id=execution_id,
-                status=SandboxStatus.COMPLETED if result.exit_status == 0 else SandboxStatus.FAILED,
+                status=(
+                    SandboxStatus.COMPLETED
+                    if result.exit_status == 0
+                    else SandboxStatus.TIMEOUT
+                    if result.exit_status == 124  # timeout command exit code
+                    else SandboxStatus.FAILED
+                ),
                 exit_code=result.exit_status,
                 stdout=result.stdout,
                 stderr=result.stderr,
@@ -236,10 +244,10 @@ class SSHSandbox:
         started_at = time.time()
         
         try:
-            # Build command
-            command_parts = [file_path]
+            # Build command with proper shell escaping
+            command_parts = [shlex.quote(file_path)]
             if args:
-                command_parts.extend(args)
+                command_parts.extend(shlex.quote(arg) for arg in args)
             command = " ".join(command_parts)
             
             # Execute command
@@ -250,7 +258,13 @@ class SSHSandbox:
             
             return SandboxResult(
                 execution_id=execution_id,
-                status=SandboxStatus.COMPLETED if result.exit_status == 0 else SandboxStatus.FAILED,
+                status=(
+                    SandboxStatus.COMPLETED
+                    if result.exit_status == 0
+                    else SandboxStatus.TIMEOUT
+                    if result.exit_status == 124  # timeout command exit code
+                    else SandboxStatus.FAILED
+                ),
                 exit_code=result.exit_status,
                 stdout=result.stdout,
                 stderr=result.stderr,
@@ -302,7 +316,13 @@ class SSHSandbox:
             
             return SandboxResult(
                 execution_id=execution_id,
-                status=SandboxStatus.COMPLETED if result.exit_status == 0 else SandboxStatus.FAILED,
+                status=(
+                    SandboxStatus.COMPLETED
+                    if result.exit_status == 0
+                    else SandboxStatus.TIMEOUT
+                    if result.exit_status == 124  # timeout command exit code
+                    else SandboxStatus.FAILED
+                ),
                 exit_code=result.exit_status,
                 stdout=result.stdout,
                 stderr=result.stderr,
@@ -336,7 +356,7 @@ class SSHSandbox:
             # Create directory if needed
             directory = os.path.dirname(path)
             if directory:
-                await self._connection.run(f"mkdir -p {directory}")
+                await self._connection.run(f"mkdir -p {shlex.quote(directory)}")
             
             # Write content
             async with self._connection.start_sftp_client() as sftp:
@@ -384,7 +404,7 @@ class SSHSandbox:
             await self.start()
         
         try:
-            result = await self._connection.run(f"find {path} -type f")
+            result = await self._connection.run(f"find {shlex.quote(path)} -type f")
             if result.exit_status == 0:
                 return result.stdout.strip().split('\n') if result.stdout.strip() else []
             return []
@@ -412,7 +432,7 @@ class SSHSandbox:
         
         try:
             # Clean working directory
-            await self._connection.run(f"rm -rf {self.working_dir}/*")
+            await self._connection.run(f"rm -rf {shlex.quote(self.working_dir)}/*")
         except Exception as e:
             logger.warning(f"Failed to cleanup working directory: {e}")
     
@@ -421,7 +441,7 @@ class SSHSandbox:
         await self.cleanup()
         if self._is_running:
             # Recreate working directory
-            await self._connection.run(f"mkdir -p {self.working_dir}")
+            await self._connection.run(f"mkdir -p {shlex.quote(self.working_dir)}")
     
     def _get_file_extension(self, language: str) -> str:
         """Get file extension for language."""
@@ -460,7 +480,7 @@ class SSHSandbox:
         
         # Add environment variables
         if env:
-            env_vars = " ".join(f"{k}={v}" for k, v in env.items())
+            env_vars = " ".join(f"{shlex.quote(k)}={shlex.quote(v)}" for k, v in env.items())
             base_command = f"env {env_vars} {base_command}"
         
         # Add resource limits using timeout and ulimit
@@ -483,7 +503,7 @@ class SSHSandbox:
     ):
         """Run command with resource limits."""
         # Change to working directory
-        full_command = f"cd {working_dir} && {command}"
+        full_command = f"cd {shlex.quote(working_dir)} && {command}"
         
         # Set timeout
         timeout = None

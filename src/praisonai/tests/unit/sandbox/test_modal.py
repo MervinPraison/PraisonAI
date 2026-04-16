@@ -58,7 +58,7 @@ class TestModalSandbox:
         mock_modal.gpu.A100.return_value = MagicMock()
         
         with patch.object(ModalSandbox, 'is_available', True), \
-             patch('modal', mock_modal):
+             patch.dict('sys.modules', {'modal': mock_modal}):
             
             sandbox = ModalSandbox(gpu="A100")
             

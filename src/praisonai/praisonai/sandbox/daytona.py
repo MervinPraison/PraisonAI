@@ -73,10 +73,16 @@ class DaytonaSandbox:
     def is_available(self) -> bool:
         """Check if Daytona backend is available."""
         try:
-            import requests
-            # In a real implementation, this would check Daytona CLI/API availability
-            return True
-        except ImportError:
+            # Try to check for Daytona CLI or API availability
+            import subprocess
+            import shlex
+            # Check if daytona command exists
+            result = subprocess.run(["which", "daytona"], capture_output=True, text=True)
+            if result.returncode == 0:
+                return True
+            # Fallback: check if this is a simulation mode
+            return True  # For now, always available as simulation
+        except Exception:
             return False
     
     @property

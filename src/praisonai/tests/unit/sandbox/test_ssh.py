@@ -54,6 +54,7 @@ class TestSSHSandbox:
         mock_connection = AsyncMock()
         
         with patch.object(SSHSandbox, 'is_available', True), \
+             patch.dict('sys.modules', {'asyncssh': MagicMock()}), \
              patch('asyncssh.connect', return_value=mock_connection) as mock_connect:
             
             sandbox = SSHSandbox(
