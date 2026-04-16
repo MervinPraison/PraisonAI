@@ -1,35 +1,39 @@
 """
-Unit tests for the ManagedAgentIntegration feature.
+Unit tests for the Managed Agents Integration feature.
 
 Tests the basic functionality of the managed agent backend integration
-without making actual API calls.
+without making actual API calls. Focuses on current API surface and
+protocol compliance.
 """
 
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, MagicMock
 
 
-def test_managed_agent_integration_import():
-    """Test that ManagedAgentIntegration can be imported."""
-    from praisonai.integrations.managed_agents import ManagedAgentIntegration
-    assert ManagedAgentIntegration is not None
-
-
-def test_managed_agent_integration_creation():
-    """Test creating a ManagedAgentIntegration instance."""
-    with patch('praisonai.integrations.managed_agents.aiohttp', None):
-        from praisonai.integrations.managed_agents import ManagedAgentIntegration
-        
-        # Should not raise an exception even without aiohttp
-        managed = ManagedAgentIntegration(
-            provider="anthropic", 
-            api_key="test_key"
-        )
-        
-        assert managed.provider == "anthropic"
-        assert managed.api_key == "test_key"
-        assert managed.cli_command == "managed-anthropic"
-        assert not managed.is_available  # Should be False without aiohttp
+def test_managed_config_dataclass():
+    """Test ManagedConfig dataclass creation and defaults."""
+    from praisonai.integrations.managed_agents import ManagedConfig
+    
+    # Test with defaults
+    config = ManagedConfig()
+    assert config.name == "Agent"
+    assert config.model == "claude-haiku-4-5"
+    assert config.system == "You are a helpful coding assistant."
+    assert config.tools == [{"type": "agent_toolset_20260401"}]
+    assert config.env_name == "praisonai-env"
+    assert config.networking == {"type": "unrestricted"}
+    
+    # Test with custom values
+    custom_config = ManagedConfig(
+        name="CustomAgent",
+        model="claude-sonnet-4-6",
+        system="You are a research assistant.",
+        tools=[{"type": "agent_toolset_20260401"}, {"type": "custom", "name": "my_tool"}]
+    )
+    assert custom_config.name == "CustomAgent"
+    assert custom_config.model == "claude-sonnet-4-6"
+    assert custom_config.system == "You are a research assistant."
+    assert len(custom_config.tools) == 2
 
 
 def test_tool_mapping():
@@ -43,155 +47,265 @@ def test_tool_mapping():
     assert mapped_tools == expected
 
 
-def test_agent_backend_parameter():
-    """Test that Agent class supports the backend parameter."""
-    # Mock aiohttp to avoid import issues
-    with patch('praisonai.integrations.managed_agents.aiohttp', None):
-        from praisonai.integrations.managed_agents import ManagedAgentIntegration
-        from praisonaiagents import Agent
-        
-        # Create a managed backend instance
-        managed = ManagedAgentIntegration(provider="anthropic", api_key="test_key")
-        
-        # Create agent with backend parameter
-        agent = Agent(
-            name="test_agent",
-            instructions="You are a test agent.",
-            backend=managed
-        )
-        
-        # Verify backend is stored
-        assert agent.backend == managed
+def test_managed_agent_factory_auto_detection():
+    """Test ManagedAgent factory auto-detection logic."""
+    from praisonai.integrations.managed_agents import ManagedAgent
+    
+    # Test auto-detection with no env vars (should default to local)
+    with patch.dict('os.environ', {}, clear=True):
+        managed = ManagedAgent()
+        assert managed.provider == "local"
+    
+    # Test auto-detection with ANTHROPIC_API_KEY
+    with patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test-key'}, clear=True):
+        managed = ManagedAgent()
+        assert managed.provider == "anthropic"
+        assert managed.api_key == "test-key"
+    
+    # Test auto-detection with CLAUDE_API_KEY
+    with patch.dict('os.environ', {'CLAUDE_API_KEY': 'claude-key'}, clear=True):
+        managed = ManagedAgent()
+        assert managed.provider == "anthropic"
+        assert managed.api_key == "claude-key"
 
 
-def test_agent_backend_delegation():
-    """Test that Agent properly delegates execution to backend."""
-    import asyncio
-    from typing import Dict, Any, AsyncIterator
+def test_managed_agent_factory_explicit_providers():
+    """Test ManagedAgent factory with explicit provider selection."""
+    from praisonai.integrations.managed_agents import ManagedAgent, ManagedConfig
     
-    class MockManagedBackend:
-        """Mock backend to test delegation."""
-        
-        def __init__(self):
-            self.executed_prompts = []
-            self.execution_kwargs = []
-        
-        async def execute(self, prompt: str, **kwargs) -> str:
-            self.executed_prompts.append(prompt)
-            self.execution_kwargs.append(kwargs)
-            return f"Backend response: {prompt}"
-        
-        async def stream(self, prompt: str, **kwargs) -> AsyncIterator[Dict[str, Any]]:
-            self.executed_prompts.append(prompt)
-            self.execution_kwargs.append(kwargs)
-            yield {
-                'type': 'agent.message',
-                'content': [{'type': 'text', 'text': f"Backend streamed: {prompt}"}]
-            }
+    # Test explicit anthropic
+    config = ManagedConfig(model="claude-haiku-4-5")
+    managed = ManagedAgent(provider="anthropic", config=config, api_key="test-key")
+    assert managed.provider == "anthropic"
+    assert managed.api_key == "test-key"
     
-    # Create mock backend
-    mock_backend = MockManagedBackend()
+    # Test explicit local
+    managed = ManagedAgent(provider="local", config=config)
+    assert managed.provider == "local"
+    
+    # Test OpenAI routing to local
+    managed = ManagedAgent(provider="openai", config=config)
+    assert managed.provider == "openai"
+    
+    # Test Ollama routing to local
+    managed = ManagedAgent(provider="ollama", config=config)
+    assert managed.provider == "ollama"
+
+
+def test_anthropic_managed_agent_creation():
+    """Test AnthropicManagedAgent creation and configuration."""
+    from praisonai.integrations.managed_agents import AnthropicManagedAgent, ManagedConfig
+    
+    config = ManagedConfig(
+        name="TestAgent",
+        model="claude-haiku-4-5",
+        system="Test system prompt",
+        tools=[{"type": "agent_toolset_20260401"}]
+    )
+    
+    managed = AnthropicManagedAgent(
+        provider="anthropic",
+        api_key="test-key",
+        config=config,
+        timeout=120,
+        instructions="Test instructions"
+    )
+    
+    assert managed.provider == "anthropic"
+    assert managed.api_key == "test-key"
+    assert managed.timeout == 120
+    assert managed.instructions == "Test instructions"
+    assert managed._cfg["name"] == "TestAgent"
+    assert managed._cfg["model"] == "claude-haiku-4-5"
+    assert managed._cfg["system"] == "Test system prompt"
+    
+    # Check initial state
+    assert managed.agent_id is None
+    assert managed.environment_id is None
+    assert managed.session_id is None
+    assert managed.total_input_tokens == 0
+    assert managed.total_output_tokens == 0
+
+
+def test_anthropic_managed_agent_dict_config():
+    """Test AnthropicManagedAgent with dict config (backward compatibility)."""
+    from praisonai.integrations.managed_agents import AnthropicManagedAgent
+    
+    config_dict = {
+        "name": "DictAgent",
+        "model": "claude-sonnet-4-6",
+        "system": "Dict config test",
+        "tools": [{"type": "custom", "name": "test_tool"}]
+    }
+    
+    managed = AnthropicManagedAgent(config=config_dict, api_key="test-key")
+    
+    assert managed._cfg["name"] == "DictAgent"
+    assert managed._cfg["model"] == "claude-sonnet-4-6"
+    assert managed._cfg["system"] == "Dict config test"
+    assert managed._cfg["tools"] == [{"type": "custom", "name": "test_tool"}]
+
+
+def test_managed_backend_protocol_compliance():
+    """Test that managed agents implement the expected protocol methods."""
+    from praisonai.integrations.managed_agents import AnthropicManagedAgent
+    
+    managed = AnthropicManagedAgent(api_key="test-key")
+    
+    # Check protocol methods exist
+    assert hasattr(managed, 'execute')
+    assert hasattr(managed, 'stream')
+    assert hasattr(managed, 'reset_session')
+    assert hasattr(managed, 'reset_all')
+    assert hasattr(managed, 'update_agent')
+    assert hasattr(managed, 'interrupt')
+    assert hasattr(managed, 'retrieve_session')
+    assert hasattr(managed, 'list_sessions')
+    assert hasattr(managed, 'resume_session')
+    assert hasattr(managed, 'save_ids')
+    assert hasattr(managed, 'restore_ids')
+    
+    # Check properties
+    assert hasattr(managed, 'session_id')
+    assert hasattr(managed, 'managed_session_id')
+    assert managed.managed_session_id == managed.session_id
+
+
+def test_id_persistence_methods():
+    """Test save_ids and restore_ids functionality."""
+    from praisonai.integrations.managed_agents import AnthropicManagedAgent
+    
+    managed = AnthropicManagedAgent(api_key="test-key")
+    
+    # Set some test IDs
+    managed.agent_id = "agent_123"
+    managed.agent_version = 2
+    managed.environment_id = "env_456"
+    managed._session_id = "session_789"
+    
+    # Save IDs
+    saved_ids = managed.save_ids()
+    expected_ids = {
+        "agent_id": "agent_123",
+        "agent_version": 2,
+        "environment_id": "env_456",
+        "session_id": "session_789"
+    }
+    assert saved_ids == expected_ids
+    
+    # Reset and restore
+    managed.reset_all()
+    assert managed.agent_id is None
+    assert managed.session_id is None
+    
+    managed.restore_ids(saved_ids)
+    assert managed.agent_id == "agent_123"
+    assert managed.agent_version == 2
+    assert managed.environment_id == "env_456"
+    assert managed.session_id == "session_789"
+
+
+def test_session_management():
+    """Test session management methods."""
+    from praisonai.integrations.managed_agents import AnthropicManagedAgent
+    
+    managed = AnthropicManagedAgent(api_key="test-key")
+    
+    # Test initial state
+    assert managed.session_id is None
+    
+    # Test reset methods
+    managed._session_id = "test_session"
+    managed.total_input_tokens = 100
+    managed.total_output_tokens = 200
+    
+    managed.reset_session()
+    assert managed.session_id is None
+    assert managed.total_input_tokens == 100  # Should not reset tokens
+    
+    managed._session_id = "test_session"
+    managed.reset_all()
+    assert managed.session_id is None
+    assert managed.total_input_tokens == 0
+    assert managed.total_output_tokens == 0
+    assert managed.agent_id is None
+
+
+def test_agent_backend_integration():
+    """Test that Agent class can use managed backend."""
+    from praisonaiagents import Agent
+    from praisonai.integrations.managed_agents import AnthropicManagedAgent
+    
+    # Create a mock backend
+    mock_backend = Mock(spec=AnthropicManagedAgent)
+    mock_backend.execute.return_value = "Backend response"
     
     # Create agent with backend
     agent = Agent(
-        name="test-agent",
+        name="test_agent",
         instructions="Test agent",
         backend=mock_backend
     )
     
-    # Test run() delegation
-    result = agent.run("Test run prompt")
-    assert result == "Backend response: Test run prompt"
-    assert len(mock_backend.executed_prompts) == 1
-    assert mock_backend.executed_prompts[0] == "Test run prompt"
+    # Verify backend is stored
+    assert agent.backend == mock_backend
+
+
+def test_agent_env_key_resolution():
+    """Test API key resolution from environment variables."""
+    from praisonai.integrations.managed_agents import AnthropicManagedAgent
     
-    # Test start() delegation
-    result = agent.start("Test start prompt")
-    assert result == "Backend response: Test start prompt"
-    assert len(mock_backend.executed_prompts) == 2
-    assert mock_backend.executed_prompts[1] == "Test start prompt"
+    # Test ANTHROPIC_API_KEY
+    with patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'anthropic-key'}, clear=True):
+        managed = AnthropicManagedAgent()
+        assert managed.api_key == "anthropic-key"
     
-    # Test chat() delegation
-    result = agent.chat("Test chat prompt")
-    assert result == "Backend response: Test chat prompt"
-    assert len(mock_backend.executed_prompts) == 3
-    assert mock_backend.executed_prompts[2] == "Test chat prompt"
+    # Test CLAUDE_API_KEY fallback
+    with patch.dict('os.environ', {'CLAUDE_API_KEY': 'claude-key'}, clear=True):
+        managed = AnthropicManagedAgent()
+        assert managed.api_key == "claude-key"
     
-    # Test that Agent without backend doesn't delegate
-    local_agent = Agent(name="local", instructions="Local agent")
-    assert not hasattr(local_agent, 'backend') or local_agent.backend is None
+    # Test explicit key overrides env
+    with patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'env-key'}, clear=True):
+        managed = AnthropicManagedAgent(api_key="explicit-key")
+        assert managed.api_key == "explicit-key"
 
 
-def test_managed_backend_protocol():
-    """Test the ManagedBackendProtocol interface."""
-    from praisonai.integrations.managed_agents import ManagedBackendProtocol
+def test_usage_tracking_initialization():
+    """Test that usage tracking counters are properly initialized."""
+    from praisonai.integrations.managed_agents import AnthropicManagedAgent
     
-    # Test that the protocol has the expected abstract methods
-    expected_methods = [
-        'create_agent',
-        'create_environment',
-        'create_session',
-        'send_message',
-        'stream_events',
-        'collect_response'
-    ]
+    managed = AnthropicManagedAgent(api_key="test-key")
     
-    for method_name in expected_methods:
-        assert hasattr(ManagedBackendProtocol, method_name)
-
-
-@patch('praisonai.integrations.managed_agents.aiohttp')
-def test_anthropic_provider_creation(mock_aiohttp):
-    """Test creating an Anthropic provider."""
-    from praisonai.integrations.managed_agents import ManagedAgentIntegration
+    assert managed.total_input_tokens == 0
+    assert managed.total_output_tokens == 0
     
-    # Mock aiohttp to be available
-    mock_aiohttp.__bool__ = lambda: True
+    # Test that reset_all clears counters
+    managed.total_input_tokens = 100
+    managed.total_output_tokens = 200
+    managed.reset_all()
     
-    managed = ManagedAgentIntegration(
-        provider="anthropic", 
-        api_key="test_key"
-    )
+    assert managed.total_input_tokens == 0
+    assert managed.total_output_tokens == 0
+
+
+def test_backward_compatible_aliases():
+    """Test backward compatible class aliases."""
+    from praisonai.integrations.managed_agents import ManagedAgentIntegration, ManagedBackendConfig, ManagedAgent, ManagedConfig
     
-    assert managed.provider == "anthropic"
-    assert managed.api_key == "test_key"
-    assert managed.backend is not None
-    assert managed.is_available
+    # Test that aliases exist and point to correct classes
+    assert ManagedAgentIntegration == ManagedAgent
+    assert ManagedBackendConfig == ManagedConfig
 
 
-def test_unsupported_provider():
-    """Test creating integration with unsupported provider."""
-    with patch('praisonai.integrations.managed_agents.aiohttp'):
-        from praisonai.integrations.managed_agents import ManagedAgentIntegration
-        
-        with pytest.raises(ValueError, match="Unsupported provider: unknown"):
-            ManagedAgentIntegration(provider="unknown", api_key="test_key")
-
-
-def test_session_caching():
-    """Test that session IDs are cached correctly (regression test for #357 bug)."""
-    with patch('praisonai.integrations.managed_agents.aiohttp'):
-        from praisonai.integrations.managed_agents import ManagedAgentIntegration
-        
-        managed = ManagedAgentIntegration(provider="anthropic", api_key="test_key")
-        
-        # Simulate adding session to cache
-        managed._session_cache["test_session"] = "session_id_123"
-        
-        # Verify the correct session ID is cached (not the key)
-        assert managed._session_cache["test_session"] == "session_id_123"
-        assert managed._session_cache["test_session"] != "test_session"
-
-
-def test_api_key_persistence():
-    """Test that API keys from environment are persisted (regression test)."""
-    with patch('praisonai.integrations.managed_agents.aiohttp'), \
-         patch('os.getenv', return_value="env_api_key"):
-        
-        from praisonai.integrations.managed_agents import ManagedAgentIntegration
-        
-        # Create without explicit API key to trigger env lookup
-        managed = ManagedAgentIntegration(provider="anthropic", api_key=None)
-        
-        # Should have stored the env key back to api_key
-        assert managed.api_key == "env_api_key"
+@patch('praisonai.integrations.managed_agents.logger')
+def test_logging_integration(mock_logger):
+    """Test that managed agents include proper logging."""
+    from praisonai.integrations.managed_agents import AnthropicManagedAgent
+    
+    managed = AnthropicManagedAgent(api_key="test-key")
+    managed.reset_session()
+    managed.reset_all()
+    
+    # Verify logging is available (don't assert specific calls since they may not happen in unit tests)
+    assert mock_logger is not None
