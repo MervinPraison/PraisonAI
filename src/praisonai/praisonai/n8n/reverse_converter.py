@@ -5,6 +5,7 @@ Converts n8n JSON workflows back to PraisonAI YAML format.
 """
 
 from typing import Dict, Any, List, Optional
+from collections import deque
 import logging
 import re
 
@@ -196,7 +197,7 @@ class N8nToYAMLConverter:
         
         # Trace execution from trigger using BFS to get complete step order
         trigger_name = trigger_nodes[0].get("name")
-        steps = self._trace_execution_complete(trigger_name, connections, node_to_agent, nodes)
+        steps = self._trace_execution_complete(trigger_name, connections, node_to_agent)
         
         # If no steps found through connections, create sequential steps from all agents
         if not steps:
@@ -208,13 +209,28 @@ class N8nToYAMLConverter:
         
         return steps
     
-    def _trace_execution_complete(self, start_node: str, connections: Dict[str, Any], node_to_agent: Dict[str, str], nodes: List[Dict[str, Any]]) -> List[Any]:
-        """Complete BFS traversal of execution graph to capture all agent steps."""
-        from collections import deque
-        
+    def _trace_execution_complete(self, start_node: str, connections: Dict[str, Any], node_to_agent: Dict[str, str]) -> List[Any]:
+        """Complete BFS traversal of execution graph to capture all agent steps and control flow."""
         steps = []
         visited = set()
         queue = deque([start_node])
+        
+        # Get nodes for control flow checking by extracting all node names from connections
+        nodes = []
+        all_node_names = set()
+        all_node_names.add(start_node)
+        
+        for node_name in connections.keys():
+            all_node_names.add(node_name)
+        for target_connections in connections.values():
+            for main_conns in target_connections.get("main", []):
+                for conn in main_conns:
+                    if conn.get("node"):
+                        all_node_names.add(conn["node"])
+        
+        # Create minimal node objects for control flow checking
+        for node_name in all_node_names:
+            nodes.append({"name": node_name})
         
         while queue:
             current_node = queue.popleft()
@@ -224,11 +240,17 @@ class N8nToYAMLConverter:
                 
             visited.add(current_node)
             
+            # Check if this is a control flow node and convert it
+            if self._is_control_flow_node(current_node, nodes):
+                control_flow_step = self._convert_control_flow(current_node, nodes, connections)
+                if control_flow_step:
+                    steps.append(control_flow_step)
             # If this is an agent node, add it as a step
-            if current_node in node_to_agent:
+            elif current_node in node_to_agent:
                 agent_id = node_to_agent[current_node]
-                # Avoid duplicate agent steps
-                if not any(step.get("agent") == agent_id for step in steps if isinstance(step, dict)):
+                # Check if agent already exists in steps to avoid duplicates
+                existing_agent_ids = {step.get("agent") for step in steps if isinstance(step, dict) and "agent" in step}
+                if agent_id not in existing_agent_ids:
                     steps.append({"agent": agent_id})
             # Preserve control flow steps (route/if) discovered during traversal
             elif self._is_control_flow_node(current_node, nodes):

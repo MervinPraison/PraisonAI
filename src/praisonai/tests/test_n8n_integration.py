@@ -509,10 +509,10 @@ class TestN8nRoundTrip:
         assert output_yaml.get("description") == input_yaml["description"], "Workflow description not preserved"
         
         # Round-trip preserves goal and backstory for every agent
-        for agent_id, input_agent in input_yaml["agents"].items():
+        for _agent_id, input_agent in input_yaml["agents"].items():
             # Find corresponding agent in output (ID may be different)
             output_agent = None
-            for aid, agent in output_yaml["agents"].items():
+            for _aid, agent in output_yaml["agents"].items():
                 if agent["name"] == input_agent["name"]:
                     output_agent = agent
                     break
@@ -524,13 +524,24 @@ class TestN8nRoundTrip:
         # Round-trip preserves all steps
         assert len(output_yaml["steps"]) == len(input_yaml["steps"]), "Not all steps preserved"
         
-        # All agent steps should be present
-        input_agents = set(step["agent"] for step in input_yaml["steps"] if "agent" in step)
-        output_agent_names = {agent["name"] for agent in output_yaml["agents"].values()}
+        # Agent references in steps should be preserved, including order and duplicates
+        input_step_agent_names = [
+            input_yaml["agents"][step["agent"]]["name"]
+            for step in input_yaml["steps"]
+            if "agent" in step
+        ]
+        output_step_agent_names = []
+        for step in output_yaml["steps"]:
+            if "agent" in step:
+                output_agent_id = step["agent"]
+                assert output_agent_id in output_yaml["agents"], (
+                    f"Output step references unknown agent ID: {output_agent_id}"
+                )
+                output_step_agent_names.append(output_yaml["agents"][output_agent_id]["name"])
         
-        for agent_id in input_agents:
-            input_agent_name = input_yaml["agents"][agent_id]["name"]
-            assert input_agent_name in output_agent_names, f"Agent step for {input_agent_name} missing"
+        assert output_step_agent_names == input_step_agent_names, (
+            "Agent step references were not preserved"
+        )
 
     def test_round_trip_conversion(self):
         """Test YAML -> n8n -> YAML round trip maintains core structure."""
