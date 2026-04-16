@@ -479,7 +479,9 @@ class LocalManagedAgent:
                         try:
                             self._run_async(self.provision_compute())
                         except Exception as provision_error:
-                            raise RuntimeError("compute provisioning failed before package install") from provision_error
+                            raise RuntimeError(
+                                f"compute provisioning failed before package install: {provision_error}"
+                            ) from provision_error
 
                     # Route package installation through compute provider
                     cmd_str = f"{sys.executable} -m pip install -q " + " ".join(shlex.quote(pkg) for pkg in pip_pkgs)
