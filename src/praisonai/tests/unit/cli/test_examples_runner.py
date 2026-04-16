@@ -10,7 +10,7 @@ from pathlib import Path
 
 class TestExampleMetadata:
     """Tests for ExampleMetadata parsing from comment directives."""
-    
+
     def test_parse_skip_directive(self, tmp_path):
         """Test parsing # praisonai: skip=true directive."""
         from praisonai.cli.features.examples import ExampleMetadata
@@ -430,6 +430,55 @@ class TestReportGenerator:
 
 class TestCLIIntegration:
     """Tests for CLI command integration."""
+
+    def test_examples_find_command(self, tmp_path):
+        """Test 'praisonai examples find' command returns relevant matches."""
+        from typer.testing import CliRunner
+
+        # Create test examples
+        (tmp_path / "rag").mkdir()
+        (tmp_path / "rag" / "basic_rag.py").write_text("print('rag')")
+        (tmp_path / "mcp").mkdir()
+        (tmp_path / "mcp" / "tool_demo.py").write_text("print('mcp')")
+
+        from praisonai.cli.commands.examples import app
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["find", "rag", "--path", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "basic_rag.py" in result.stdout
+        assert "tool_demo.py" not in result.stdout
+
+    def test_examples_find_command_no_matches(self, tmp_path):
+        """Test 'praisonai examples find' with no matches exits cleanly."""
+        from typer.testing import CliRunner
+
+        (tmp_path / "demo.py").write_text("print('hello')")
+
+        from praisonai.cli.commands.examples import app
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["find", "nonexistent-keyword", "--path", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "No examples found" in result.stdout
+
+    def test_examples_find_command_invalid_limit(self, tmp_path):
+        """Test 'praisonai examples find' validates --limit is >= 1."""
+        import re
+        from typer.testing import CliRunner
+
+        (tmp_path / "demo.py").write_text("print('hello')")
+
+        from praisonai.cli.commands.examples import app
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["find", "demo", "--path", str(tmp_path), "--limit", "0"])
+
+        assert result.exit_code == 2
+        clean_stderr = re.sub(r"\x1b\[[0-9;]*m", "", result.stderr or "")
+        assert "Invalid value for '--limit'" in clean_stderr
     
     def test_examples_list_command(self, tmp_path):
         """Test 'praisonai examples list' command."""
