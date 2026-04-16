@@ -876,6 +876,8 @@ Methods:
 * <code title="cli">praisonai knowledge index <a href="./src/praisonai/praisonai/cli/commands/knowledge.py">--help</a></code>
 * <code title="cli">praisonai knowledge list <a href="./src/praisonai/praisonai/cli/commands/knowledge.py">--help</a></code>
 * <code title="cli">praisonai knowledge search <a href="./src/praisonai/praisonai/cli/commands/knowledge.py">--help</a></code>
+* <code title="cli">praisonai langextract render <a href="./src/praisonai/praisonai/cli/commands/langextract.py">--help</a></code>
+* <code title="cli">praisonai langextract view <a href="./src/praisonai/praisonai/cli/commands/langextract.py">--help</a></code>
 * <code title="cli">praisonai langfuse config <a href="./src/praisonai/praisonai/cli/commands/langfuse.py">--help</a></code>
 * <code title="cli">praisonai langfuse connect <a href="./src/praisonai/praisonai/cli/commands/langfuse.py">--help</a></code>
 * <code title="cli">praisonai langfuse init <a href="./src/praisonai/praisonai/cli/commands/langfuse.py">--help</a></code>
