@@ -60,7 +60,7 @@ def _parse_external_agents_setting(raw_value: str):
     """Parse comma-separated external agent setting into a normalized list."""
     if not raw_value:
         return []
-    return [agent.strip() for agent in raw_value.split(",") if agent and agent.strip()]
+    return [agent.strip() for agent in raw_value.split(",") if agent.strip()]
 
 def _normalize_selected_external_agents(value):
     """Normalize UI settings value to list[str]."""
