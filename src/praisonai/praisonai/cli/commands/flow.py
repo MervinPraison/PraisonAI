@@ -126,6 +126,292 @@ def flow_start(
         raise typer.Abort()
 
 
+@app.command("import")
+def flow_import(
+    yaml_path: str = typer.Argument(..., help="Path to YAML workflow file"),
+    langflow_url: str = typer.Option(
+        "http://localhost:7860", 
+        "--url", 
+        help="Langflow server URL"
+    ),
+    dry_run: bool = typer.Option(
+        False, 
+        "--dry-run", 
+        help="Preview JSON without uploading"
+    ),
+    open_browser: bool = typer.Option(
+        False, 
+        "--open", 
+        help="Open imported flow in browser"
+    ),
+    output: str = typer.Option(
+        None, 
+        "--output", 
+        "-o", 
+        help="Save JSON to file instead of uploading"
+    ),
+):
+    """Import YAML workflow into Langflow.
+    
+    Converts PraisonAI YAML workflow to Langflow JSON format and uploads
+    to a running Langflow instance for visual editing.
+    
+    Examples:
+        praisonai flow import workflow.yaml
+        praisonai flow import workflow.yaml --dry-run
+        praisonai flow import workflow.yaml --output flow.json
+        praisonai flow import workflow.yaml --url http://localhost:8080
+    """
+    from pathlib import Path
+    from rich.console import Console
+    from rich.json import JSON
+    
+    console = Console()
+    
+    # Validate input file
+    yaml_file = Path(yaml_path)
+    if not yaml_file.exists():
+        console.print(f"[red]Error: File not found: {yaml_path}[/red]")
+        raise typer.Abort()
+    
+    try:
+        from praisonai.flow.converter import yaml_to_langflow_json
+        
+        console.print(f"[cyan]Converting {yaml_path} to Langflow format...[/cyan]")
+        
+        # Convert YAML to Langflow JSON
+        langflow_json = yaml_to_langflow_json(str(yaml_file))
+        
+        # Dry run: just show the JSON
+        if dry_run:
+            console.print("\n[bold green]✅ Conversion Preview[/bold green]")
+            console.print(JSON.from_data(langflow_json, indent=2))
+            return
+        
+        # Save to file mode
+        if output:
+            output_path = Path(output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            import json
+            with open(output_path, 'w') as f:
+                json.dump(langflow_json, f, indent=2)
+            
+            console.print(f"[green]✅ Flow saved to {output_path}[/green]")
+            return
+        
+        # Upload to Langflow
+        from praisonai.flow.client import create_client
+        
+        console.print(f"[cyan]Connecting to Langflow at {langflow_url}...[/cyan]")
+        client = create_client(langflow_url)
+        
+        # Check server health
+        health = client.health_check()
+        if health["status"] != "healthy":
+            console.print(f"[red]Error: Langflow server not accessible at {langflow_url}[/red]")
+            console.print("[yellow]Make sure Langflow is running: praisonai flow[/yellow]")
+            raise typer.Abort()
+        
+        # Upload flow
+        console.print("[cyan]Uploading flow to Langflow...[/cyan]")
+        response = client.upload_flow(langflow_json)
+        
+        flow_id = response.get("id", response.get("flow_id", ""))
+        flow_name = langflow_json.get("name", "Imported Flow")
+        
+        console.print(f"[green]✅ Flow '{flow_name}' imported successfully![/green]")
+        console.print(f"[dim]Flow ID: {flow_id}[/dim]")
+        
+        # Generate flow URL
+        if flow_id:
+            flow_url = f"{langflow_url}/flow/{flow_id}"
+            console.print(f"[blue]View: {flow_url}[/blue]")
+            
+            # Open browser if requested
+            if open_browser:
+                import webbrowser
+                webbrowser.open(flow_url)
+                console.print("[dim]Opening in browser...[/dim]")
+        
+    except ImportError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        console.print("[yellow]Install with: pip install 'praisonai[flow]'[/yellow]")
+        raise typer.Abort()
+    except Exception as e:
+        console.print(f"[red]Error importing flow: {e}[/red]")
+        raise typer.Abort()
+
+
+@app.command("export")
+def flow_export(
+    flow_id: str = typer.Argument(..., help="Flow ID to export"),
+    output: str = typer.Option(
+        None, 
+        "--output", 
+        "-o", 
+        help="Output YAML file path (default: flow_id.yaml)"
+    ),
+    langflow_url: str = typer.Option(
+        "http://localhost:7860", 
+        "--url", 
+        help="Langflow server URL"
+    ),
+    format: str = typer.Option(
+        "yaml",
+        "--format",
+        help="Output format (yaml, json)",
+        type=typer.Choice(["yaml", "json"])
+    ),
+):
+    """Export Langflow flow to YAML format.
+    
+    Downloads a flow from Langflow and converts it back to PraisonAI 
+    YAML format for use with the CLI.
+    
+    Examples:
+        praisonai flow export abc-123-def
+        praisonai flow export abc-123-def --output my_workflow.yaml
+        praisonai flow export abc-123-def --format json
+    """
+    from pathlib import Path
+    from rich.console import Console
+    
+    console = Console()
+    
+    try:
+        from praisonai.flow.client import create_client
+        
+        console.print(f"[cyan]Connecting to Langflow at {langflow_url}...[/cyan]")
+        client = create_client(langflow_url)
+        
+        # Check server health
+        health = client.health_check()
+        if health["status"] != "healthy":
+            console.print(f"[red]Error: Langflow server not accessible at {langflow_url}[/red]")
+            raise typer.Abort()
+        
+        # Download flow
+        console.print(f"[cyan]Downloading flow {flow_id}...[/cyan]")
+        flow_data = client.get_flow(flow_id)
+        
+        # Determine output file
+        if not output:
+            flow_name = flow_data.get("name", flow_id)
+            safe_name = "".join(c for c in flow_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+            output = f"{safe_name}.{format}"
+        
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        if format == "json":
+            # Save as JSON
+            import json
+            with open(output_path, 'w') as f:
+                json.dump(flow_data, f, indent=2)
+        else:
+            # Convert to YAML
+            from praisonai.flow.converter import langflow_json_to_yaml
+            
+            console.print("[cyan]Converting to YAML format...[/cyan]")
+            yaml_content = langflow_json_to_yaml(flow_data)
+            
+            with open(output_path, 'w') as f:
+                f.write(yaml_content)
+        
+        console.print(f"[green]✅ Flow exported to {output_path}[/green]")
+        
+    except ImportError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        console.print("[yellow]Install with: pip install 'praisonai[flow]'[/yellow]")
+        raise typer.Abort()
+    except Exception as e:
+        console.print(f"[red]Error exporting flow: {e}[/red]")
+        raise typer.Abort()
+
+
+@app.command("list")
+def flow_list(
+    langflow_url: str = typer.Option(
+        "http://localhost:7860", 
+        "--url", 
+        help="Langflow server URL"
+    ),
+    search: str = typer.Option(
+        None,
+        "--search",
+        "-s", 
+        help="Search flows by name or description"
+    ),
+):
+    """List flows in Langflow server.
+    
+    Shows all flows with their IDs, names, and descriptions for
+    easy identification and export.
+    
+    Examples:
+        praisonai flow list
+        praisonai flow list --search research
+        praisonai flow list --url http://localhost:8080
+    """
+    from rich.console import Console
+    from rich.table import Table
+    
+    console = Console()
+    
+    try:
+        from praisonai.flow.client import create_client
+        
+        console.print(f"[cyan]Connecting to Langflow at {langflow_url}...[/cyan]")
+        client = create_client(langflow_url)
+        
+        # Check server health
+        health = client.health_check()
+        if health["status"] != "healthy":
+            console.print(f"[red]Error: Langflow server not accessible at {langflow_url}[/red]")
+            raise typer.Abort()
+        
+        # Get flows
+        if search:
+            console.print(f"[cyan]Searching for flows matching '{search}'...[/cyan]")
+            flows = client.search_flows(search)
+        else:
+            console.print("[cyan]Loading flows...[/cyan]")
+            flows = client.list_flows()
+        
+        if not flows:
+            if search:
+                console.print(f"[yellow]No flows found matching '{search}'[/yellow]")
+            else:
+                console.print("[yellow]No flows found[/yellow]")
+            return
+        
+        # Create table
+        table = Table(title=f"Langflow Flows ({len(flows)} found)")
+        table.add_column("ID", style="cyan", min_width=20)
+        table.add_column("Name", style="green")
+        table.add_column("Description", style="dim")
+        table.add_column("Created", style="blue")
+        
+        for flow in flows:
+            flow_id = flow.get("id", "")[:20] + "..." if len(flow.get("id", "")) > 20 else flow.get("id", "")
+            name = flow.get("name", "Unnamed")
+            description = flow.get("description", "")[:50] + "..." if len(flow.get("description", "")) > 50 else flow.get("description", "")
+            created = flow.get("created_at", "")[:10] if flow.get("created_at") else ""
+            
+            table.add_row(flow_id, name, description, created)
+        
+        console.print(table)
+        
+    except ImportError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        console.print("[yellow]Install with: pip install 'praisonai[flow]'[/yellow]")
+        raise typer.Abort()
+    except Exception as e:
+        console.print(f"[red]Error listing flows: {e}[/red]")
+        raise typer.Abort()
+
+
 @app.command("version")
 def flow_version():
     """Show Langflow version information."""

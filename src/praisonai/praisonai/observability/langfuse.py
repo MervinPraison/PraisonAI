@@ -65,12 +65,13 @@ class LangfuseSink:
     Thread-safe: langfuse.Langfuse handles its own batching and thread safety.
     """
     
-    __slots__ = ("_config", "_client", "_traces", "_spans", "_lock", "_closed")
+    __slots__ = ("_config", "_client", "_traces", "_spans", "_lock", "_closed", "_metadata")
     
-    def __init__(self, config: Optional[LangfuseSinkConfig] = None):
+    def __init__(self, config: Optional[LangfuseSinkConfig] = None, metadata: Optional[Dict[str, Any]] = None):
         self._config = config or LangfuseSinkConfig()
         self._client: Optional[Any] = None  # Lazy-loaded langfuse.Langfuse
         self._traces: Dict[str, Any] = {}  # agent_name -> trace observation
+        self._metadata = metadata or {}  # Additional metadata for traces
         self._spans: Dict[str, Any] = {}   # span_key -> span observation
         self._lock = threading.Lock()
         self._closed = False
@@ -142,16 +143,20 @@ class LangfuseSink:
         # Use unique agent key combining agent_id and name for collision safety
         agent_key = f"{event.agent_id or agent_name}-{agent_name}"
         
+        # Merge flow correlation metadata with agent metadata
+        agent_metadata = {
+            "agent_id": event.agent_id,
+            "agent_name": agent_name,
+            "schema_version": event.schema_version,
+            **(event.metadata if event.metadata else {}),
+            **self._metadata  # Include flow correlation metadata
+        }
+        
         span = self._client.start_observation(
             name=trace_name,
             as_type="span",
             input=trace_input,
-            metadata={
-                "agent_id": event.agent_id,
-                "agent_name": agent_name,
-                "schema_version": event.schema_version,
-                **(event.metadata if event.metadata else {}),
-            }
+            metadata=agent_metadata,
         )
         # Store both trace and span reference with unique key
         self._traces[agent_key] = span  # Root span serves as trace reference
@@ -186,16 +191,20 @@ class LangfuseSink:
         tool_invocation_id = str(uuid.uuid4())[:8]  # Short UUID
         tool_key = f"{agent_key}:{tool_name}:{tool_invocation_id}"
         
+        # Merge flow correlation metadata with tool metadata
+        tool_metadata = {
+            "tool_name": tool_name,
+            "agent_name": agent_name,
+            "tool_invocation_id": tool_invocation_id,
+            **(event.metadata if event.metadata else {}),
+            **self._metadata  # Include flow correlation metadata
+        }
+        
         tool_span = self._client.start_observation(
             name=tool_name,
             as_type="span",
             input=event.tool_args,
-            metadata={
-                "tool_name": tool_name,
-                "parent_agent": agent_name,
-                "invocation_id": tool_invocation_id,
-                **(event.metadata if event.metadata else {}),
-            }
+            metadata=tool_metadata,
         )
         
         # Store with unique tool key
@@ -232,30 +241,39 @@ class LangfuseSink:
         """Handle ERROR -> create error event observation."""
         agent_key = f"{event.agent_id or agent_name}-{agent_name}"
         
+        # Include flow correlation metadata in error events
+        error_metadata = {
+            "agent_name": agent_name,
+            "error_type": type(event.error_message).__name__ if hasattr(event.error_message, '__class__') else "str",
+            **(event.metadata if event.metadata else {}),
+            **self._metadata  # Include flow correlation metadata
+        }
+        
         error_event = self._client.start_observation(
             name="error",
             as_type="event",
             level="ERROR",
             status_message=event.error_message,
             input=event.tool_args,
-            metadata={
-                "tool_name": event.tool_name,
-                "agent_name": agent_name,
-                **(event.metadata if event.metadata else {}),
-            }
+            metadata=error_metadata,
         )
         error_event.end()
     
     def _handle_output(self, event: ActionEvent, agent_name: str) -> None:
         """Handle OUTPUT -> create output event observation."""
+        # Include flow correlation metadata in output events
+        output_metadata = {
+            "agent_name": agent_name,
+            "output_type": "agent_output",
+            **(event.metadata if event.metadata else {}),
+            **self._metadata  # Include flow correlation metadata
+        }
+        
         output_event = self._client.start_observation(
             name="output",
             as_type="event",
             output=event.tool_result_summary,
-            metadata={
-                "agent_name": agent_name,
-                **(event.metadata or {}),
-            }
+            metadata=output_metadata,
         )
         output_event.end()
     
