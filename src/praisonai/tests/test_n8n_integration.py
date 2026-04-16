@@ -83,6 +83,22 @@ class TestN8nConverter:
         except ImportError:
             pytest.skip("n8n dependencies not available")
 
+    def test_export_from_n8n_import(self):
+        """Test that export_from_n8n can be imported."""
+        try:
+            from praisonai.n8n import export_from_n8n
+            assert export_from_n8n is not None
+        except ImportError:
+            pytest.skip("n8n dependencies not available")
+
+    def test_sync_workflow_import(self):
+        """Test that sync_workflow can be imported."""
+        try:
+            from praisonai.n8n import sync_workflow
+            assert sync_workflow is not None
+        except ImportError:
+            pytest.skip("n8n dependencies not available")
+
     def test_yaml_to_n8n_conversion(self, sample_agents_yaml_dict):
         """Test basic YAML to n8n conversion."""
         try:

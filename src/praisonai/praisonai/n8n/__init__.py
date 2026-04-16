@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .converter import YAMLToN8nConverter
     from .reverse_converter import N8nToYAMLConverter
-    from .preview import preview_workflow
+    from .preview import preview_workflow, export_from_n8n, sync_workflow
     from .client import N8nClient
 
 # Lazy imports for optional dependencies
@@ -39,6 +39,12 @@ def __getattr__(name: str):
     elif name == "preview_workflow":
         from .preview import preview_workflow
         return preview_workflow
+    elif name == "export_from_n8n":
+        from .preview import export_from_n8n
+        return export_from_n8n
+    elif name == "sync_workflow":
+        from .preview import sync_workflow
+        return sync_workflow
     elif name == "N8nClient":
         from .client import N8nClient
         return N8nClient
@@ -49,5 +55,7 @@ __all__ = [
     "YAMLToN8nConverter",
     "N8nToYAMLConverter", 
     "preview_workflow",
+    "export_from_n8n",
+    "sync_workflow",
     "N8nClient",
 ]

@@ -101,7 +101,7 @@ def import_workflow(
             yaml_lib.dump(yaml_workflow, f, default_flow_style=False, sort_keys=False)
         
         typer.echo(f"✅ Imported workflow to: {output}")
-        typer.echo(f"💡 Run 'praisonai workflow run {output}' to execute the workflow")
+        typer.echo(f"💡 Run 'praisonai run {output}' to execute the workflow")
         
     except ImportError:
         typer.echo("Error: n8n dependencies not installed. Run: pip install 'praisonai[n8n]'", err=True)
@@ -183,7 +183,7 @@ def pull(
         )
         
         typer.echo(f"✅ Pulled workflow {workflow_id} to: {output_path}")
-        typer.echo(f"💡 Run 'praisonai workflow run {output_path}' to execute the workflow")
+        typer.echo(f"💡 Run 'praisonai run {output_path}' to execute the workflow")
         
     except ImportError:
         typer.echo("Error: n8n dependencies not installed. Run: pip install 'praisonai[n8n]'", err=True)
