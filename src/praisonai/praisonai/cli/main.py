@@ -750,7 +750,8 @@ class PraisonAI:
                 n8n_handler = N8nHandler(
                     verbose=getattr(args, 'verbose', False),
                     n8n_url=getattr(args, 'n8n_url', 'http://localhost:5678'),
-                    api_url=getattr(args, 'api_url', None)
+                    api_url=getattr(args, 'api_url', None),
+                    port=getattr(args, 'port', 8005)
                 )
                 result = n8n_handler.execute(self.agent_file)
                 return result
@@ -1022,7 +1023,7 @@ class PraisonAI:
         # n8n Integration - export workflow to n8n
         parser.add_argument("--n8n", action="store_true", help="Export workflow to n8n and open in browser")
         parser.add_argument("--n8n-url", type=str, default="http://localhost:5678", help="n8n instance URL (default: http://localhost:5678)")
-        parser.add_argument("--api-url", type=str, help="PraisonAI API URL for n8n to call (default: auto-detected, use http://host.docker.internal:8005 for Docker n8n)")
+        parser.add_argument("--api-url", type=str, help="PraisonAI API URL for n8n to call (default: auto-detected; for Docker Desktop on macOS/Windows with N8N_DOCKER=1 use http://host.docker.internal:8005)")
         
         # Serve - start API server for agents
         parser.add_argument("--serve", action="store_true", help="Start API server for agents (use with agents.yaml)")
