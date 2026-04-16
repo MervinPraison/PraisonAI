@@ -42,6 +42,7 @@ from typing import (
 logger = logging.getLogger(__name__)
 
 _DEFAULT_SYSTEM = "You are a helpful coding assistant."
+_COMPUTE_INSTALL_TIMEOUT_SECONDS = 120
 
 _DEFAULT_TOOLS = [
     "execute_command",
@@ -482,7 +483,9 @@ class LocalManagedAgent:
 
                     # Route package installation through compute provider
                     cmd_str = f"{sys.executable} -m pip install -q " + " ".join(shlex.quote(pkg) for pkg in pip_pkgs)
-                    result = self._run_async(self.execute_in_compute(cmd_str, timeout=120))
+                    result = self._run_async(
+                        self.execute_in_compute(cmd_str, timeout=_COMPUTE_INSTALL_TIMEOUT_SECONDS)
+                    )
                     if result.get("exit_code", 1) != 0:
                         raise RuntimeError(
                             f"compute package install failed for {pip_pkgs}: "
@@ -510,7 +513,7 @@ class LocalManagedAgent:
         """Install packages on host interpreter (fallback)."""
         cmd = [sys.executable, "-m", "pip", "install", "-q"] + pip_pkgs
         try:
-            subprocess.run(cmd, check=True, capture_output=True, timeout=120)
+            subprocess.run(cmd, check=True, capture_output=True, timeout=_COMPUTE_INSTALL_TIMEOUT_SECONDS)
             logger.info("[local_managed] packages installed on host")
         except subprocess.CalledProcessError as e:
             logger.warning("[local_managed] host pip install failed: %s", e.stderr)
