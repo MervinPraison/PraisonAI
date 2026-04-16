@@ -29,6 +29,7 @@ Usage:
 # Lazy imports to avoid performance impact
 __all__ = [
     'BaseCLIIntegration',
+    'CLIExecutionError',
     'ClaudeCodeIntegration',
     'GeminiCLIIntegration',
     'CodexCLIIntegration',
@@ -53,6 +54,9 @@ def __getattr__(name):
     if name == 'BaseCLIIntegration':
         from .base import BaseCLIIntegration
         return BaseCLIIntegration
+    elif name == 'CLIExecutionError':
+        from .base import CLIExecutionError
+        return CLIExecutionError
     elif name == 'ClaudeCodeIntegration':
         from .claude_code import ClaudeCodeIntegration
         return ClaudeCodeIntegration

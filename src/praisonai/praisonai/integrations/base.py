@@ -18,6 +18,19 @@ import shutil
 import os
 
 
+class CLIExecutionError(RuntimeError):
+    """Raised when a CLI command fails with non-zero exit code."""
+    
+    def __init__(self, cmd: List[str], returncode: int, stderr: str):
+        stderr_excerpt = stderr.strip()[:500] if stderr.strip() else "(no error message)"
+        cmd_str = ' '.join(cmd) if cmd else "unknown command"
+        hint = f"Hint: ensure the CLI is installed and authenticated; try '{cmd_str} --help' or rerun the command manually."
+        super().__init__(f"{cmd[0]} exited {returncode}: {stderr_excerpt}. {hint}")
+        self.cmd = cmd
+        self.returncode = returncode
+        self.stderr = stderr
+
+
 class BaseCLIIntegration(ABC):
     """
     Abstract base class for external CLI tool integrations.
@@ -128,6 +141,7 @@ class BaseCLIIntegration(ABC):
             
         Raises:
             TimeoutError: If the command times out
+            CLIExecutionError: If the command fails with non-zero exit code
         """
         timeout = timeout or self.timeout
         
@@ -144,7 +158,12 @@ class BaseCLIIntegration(ABC):
                 proc.communicate(),
                 timeout=timeout
             )
-            return stdout.decode()
+            
+            # Check exit code and raise error if non-zero
+            if proc.returncode != 0:
+                raise CLIExecutionError(cmd, proc.returncode, stderr.decode(errors="replace"))
+            
+            return stdout.decode(errors="replace")
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
@@ -183,7 +202,12 @@ class BaseCLIIntegration(ABC):
                 proc.communicate(),
                 timeout=timeout
             )
-            return stdout.decode(), stderr.decode()
+            
+            # Check exit code and raise error if non-zero
+            if proc.returncode != 0:
+                raise CLIExecutionError(cmd, proc.returncode, stderr.decode(errors="replace"))
+            
+            return stdout.decode(errors="replace"), stderr.decode(errors="replace")
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
@@ -203,8 +227,12 @@ class BaseCLIIntegration(ABC):
             
         Yields:
             str: Each line of output
+            
+        Raises:
+            CLIExecutionError: If the command fails with non-zero exit code
         """
         timeout = timeout or self.timeout
+        stderr_buffer = []
         
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -215,15 +243,35 @@ class BaseCLIIntegration(ABC):
         )
         
         try:
+            async def read_stderr():
+                """Read stderr into buffer for error reporting"""
+                while True:
+                    line = await proc.stderr.readline()
+                    if not line:
+                        break
+                    stderr_buffer.append(line.decode(errors="replace").rstrip('\n'))
+            
+            # Start reading stderr in background
+            stderr_task = asyncio.create_task(read_stderr())
+            
             async def read_lines():
                 while True:
                     line = await proc.stdout.readline()
                     if not line:
                         break
-                    yield line.decode().rstrip('\n')
+                    yield line.decode(errors="replace").rstrip('\n')
             
             async for line in read_lines():
                 yield line
+            
+            # Wait for stderr reading to complete and process to finish
+            await stderr_task
+            await proc.wait()
+            
+            # Check exit code and raise error if non-zero
+            if proc.returncode != 0:
+                stderr_text = '\n'.join(stderr_buffer)
+                raise CLIExecutionError(cmd, proc.returncode, stderr_text)
                 
         except asyncio.TimeoutError:
             proc.kill()

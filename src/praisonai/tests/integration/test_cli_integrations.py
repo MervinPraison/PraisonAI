@@ -38,6 +38,7 @@ class TestIntegrationAvailability:
         """Test importing all integrations."""
         from praisonai.integrations import (
             BaseCLIIntegration,
+            CLIExecutionError,
             ClaudeCodeIntegration,
             GeminiCLIIntegration,
             CodexCLIIntegration,
@@ -45,6 +46,7 @@ class TestIntegrationAvailability:
         )
         
         assert BaseCLIIntegration is not None
+        assert CLIExecutionError is not None
         assert ClaudeCodeIntegration is not None
         assert GeminiCLIIntegration is not None
         assert CodexCLIIntegration is not None
@@ -124,6 +126,12 @@ class TestGeminiCLIIntegrationReal:
         assert integration.cli_command == "gemini"
         assert integration.model == "gemini-2.5-pro"
         print(f"\n🔧 Gemini CLI available: {integration.is_available}")
+        
+        # Test default model configuration
+        default_integration = GeminiCLIIntegration()
+        expected_default = os.environ.get("PRAISONAI_GEMINI_MODEL", "gemini-2.5-flash-lite")
+        assert default_integration.model == expected_default
+        print(f"🔧 Gemini default model: {default_integration.model}")
     
     @pytest.mark.skipif(
         not os.environ.get("GEMINI_API_KEY") and not os.environ.get("GOOGLE_API_KEY"),

@@ -41,7 +41,15 @@ class TestGeminiCLIIntegration:
         
         integration = GeminiCLIIntegration()
         assert integration.output_format == "json"
-        assert integration.model == "gemini-2.5-pro"
+        assert integration.model == "gemini-2.5-flash-lite"
+
+    def test_default_model_reads_environment(self):
+        """Test default model is read from environment when not explicitly set."""
+        from praisonai.integrations.gemini_cli import GeminiCLIIntegration
+
+        with patch.dict(os.environ, {"PRAISONAI_GEMINI_MODEL": "gemini-2.5-pro"}, clear=False):
+            integration = GeminiCLIIntegration()
+            assert integration.model == "gemini-2.5-pro"
     
     def test_custom_model(self):
         """Test custom model can be set."""
