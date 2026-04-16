@@ -31,7 +31,7 @@ logger.setLevel(log_level)
 
 # Chainlit must be imported early (required by decorators)
 import chainlit as cl
-from chainlit.input_widget import TextInput, Switch
+from chainlit.input_widget import TextInput, Switch, Select
 from chainlit.types import ThreadDict
 import chainlit.data as cl_data
 
@@ -97,6 +97,21 @@ def _get_inspect():
         import inspect
         _cached_modules['inspect'] = inspect
     return _cached_modules['inspect']
+
+def _get_external_agents_handler():
+    """Lazy load external agents handler."""
+    try:
+        from praisonai.cli.features.external_agents import ExternalAgentsHandler
+        return ExternalAgentsHandler()
+    except ImportError:
+        return None
+
+def _check_available_external_agents():
+    """Check which external agents are available."""
+    handler = _get_external_agents_handler()
+    if handler:
+        return handler.check_availability()
+    return {}
 
 def _get_pil_image():
     if 'PIL.Image' not in _cached_modules:
@@ -400,7 +415,7 @@ def auth_callback(username: str, password: str):
         logger.warning(f"Login failed for user: {username}")
         return None
 
-def _get_or_create_agent(model_name: str, tools_enabled: bool = True):
+def _get_or_create_agent(model_name: str, tools_enabled: bool = True, selected_external_agents: list = None):
     """Get or create a reusable agent for the session."""
     Agent = _get_praisonai_agent()
     if Agent is None:
@@ -423,18 +438,37 @@ def _get_or_create_agent(model_name: str, tools_enabled: bool = True):
         if os.getenv("TAVILY_API_KEY"):
             tools.append(tavily_web_search)
     
-    agent = Agent(
-        name="PraisonAI Assistant",
-        instructions="""You are a helpful AI assistant with access to powerful tools.
+    # Add external agent tools
+    if selected_external_agents:
+        handler = _get_external_agents_handler()
+        if handler:
+            for agent_name in selected_external_agents:
+                try:
+                    integration = handler.get_integration(agent_name)
+                    if integration and integration.is_available:
+                        tools.append(integration.as_tool())
+                        logger.info(f"Added external agent tool: {agent_name}")
+                except Exception as e:
+                    logger.warning(f"Could not load external agent {agent_name}: {e}")
+    
+    # Build instructions based on available tools
+    instructions = """You are a helpful AI assistant with access to powerful tools.
 
 Available capabilities:
 - File operations (read, write, create, edit, delete files)
 - Code intelligence (find symbols, definitions, references)
 - Command execution (run shell commands)
-- Web search (if Tavily API key is set)
-
-Use tools when needed to help the user. For file modifications, use the ACP tools which provide safe, reviewable changes.
-Always be helpful, accurate, and concise.""",
+- Web search (if Tavily API key is set)"""
+    
+    if selected_external_agents:
+        instructions += "\n- External AI agents: " + ", ".join(selected_external_agents)
+        instructions += "\n\nYou can delegate tasks to external agents by using their tools. When users mention @claude, @gemini, @codex, or @cursor, use the corresponding external agent tool."
+    
+    instructions += "\n\nUse tools when needed to help the user. For file modifications, use the ACP tools which provide safe, reviewable changes.\nAlways be helpful, accurate, and concise."
+    
+    agent = Agent(
+        name="PraisonAI Assistant",
+        instructions=instructions,
         llm=model_name,
         tools=tools if tools else None,
         output="minimal",
@@ -443,6 +477,7 @@ Always be helpful, accurate, and concise.""",
     # Cache the agent
     cl.user_session.set("_cached_agent", agent)
     cl.user_session.set("_cached_agent_model", model_name)
+    cl.user_session.set("_cached_external_agents", selected_external_agents or [])
     _profile_end("create_agent")
     
     return agent
@@ -454,29 +489,59 @@ async def start():
     
     model_name = load_setting("model_name") or os.getenv("MODEL_NAME", "gpt-4o-mini")
     tools_enabled = (load_setting("tools_enabled") or "true").lower() == "true"
+    external_agents_setting = load_setting("external_agents") or ""
+    selected_external_agents = [agent.strip() for agent in external_agents_setting.split(",") if agent.strip()]
     
     cl.user_session.set("model_name", model_name)
     cl.user_session.set("tools_enabled", tools_enabled)
-    logger.debug(f"Model name: {model_name}, Tools enabled: {tools_enabled}")
+    cl.user_session.set("selected_external_agents", selected_external_agents)
+    logger.debug(f"Model name: {model_name}, Tools enabled: {tools_enabled}, External agents: {selected_external_agents}")
     
     # Pre-create agent for faster first response
-    _get_or_create_agent(model_name, tools_enabled)
+    _get_or_create_agent(model_name, tools_enabled, selected_external_agents)
     
-    settings = cl.ChatSettings(
-        [
-            TextInput(
-                id="model_name",
-                label="Enter the Model Name",
-                placeholder="e.g., gpt-4o-mini",
-                initial=model_name
-            ),
-            Switch(
-                id="tools_enabled",
-                label="Enable Tools (ACP, LSP, Web Search)",
-                initial=tools_enabled
+    # Get available external agents for settings
+    available_external_agents = _check_available_external_agents()
+    external_agent_options = []
+    agent_descriptions = {
+        "claude": "Claude Code (coding, refactoring)",
+        "gemini": "Gemini CLI (analysis, search)",
+        "codex": "Codex CLI (code generation)", 
+        "cursor": "Cursor CLI (IDE tasks)"
+    }
+    
+    for agent_name, is_available in available_external_agents.items():
+        if is_available:
+            description = agent_descriptions.get(agent_name, agent_name)
+            external_agent_options.append(cl.SelectOption(label=description, value=agent_name))
+    
+    settings_widgets = [
+        TextInput(
+            id="model_name",
+            label="Enter the Model Name",
+            placeholder="e.g., gpt-4o-mini",
+            initial=model_name
+        ),
+        Switch(
+            id="tools_enabled",
+            label="Enable Tools (ACP, LSP, Web Search)",
+            initial=tools_enabled
+        )
+    ]
+    
+    # Add external agents selector if any are available
+    if external_agent_options:
+        settings_widgets.append(
+            Select(
+                id="external_agents",
+                label="External AI Agents (Select multiple)",
+                options=external_agent_options,
+                initial=selected_external_agents,
+                multiple=True
             )
-        ]
-    )
+        )
+    
+    settings = cl.ChatSettings(settings_widgets)
     cl.user_session.set("settings", settings)
     await settings.send()
     
@@ -504,18 +569,24 @@ async def setup_agent(settings):
     
     model_name = settings["model_name"]
     tools_enabled = settings.get("tools_enabled", True)
+    selected_external_agents = settings.get("external_agents", [])
     
     cl.user_session.set("model_name", model_name)
     cl.user_session.set("tools_enabled", tools_enabled)
+    cl.user_session.set("selected_external_agents", selected_external_agents)
     
-    # Invalidate cached agent if model changed
+    # Invalidate cached agent if settings changed
     cached_model = cl.user_session.get("_cached_agent_model")
-    if cached_model != model_name:
+    cached_external_agents = cl.user_session.get("_cached_external_agents", [])
+    if (cached_model != model_name or 
+        cached_external_agents != selected_external_agents):
         cl.user_session.set("_cached_agent", None)
         cl.user_session.set("_cached_agent_model", None)
+        cl.user_session.set("_cached_external_agents", [])
 
     save_setting("model_name", model_name)
     save_setting("tools_enabled", str(tools_enabled).lower())
+    save_setting("external_agents", ",".join(selected_external_agents))
 
     thread_id = cl.user_session.get("thread_id")
     if thread_id:
@@ -541,6 +612,7 @@ async def main(message: cl.Message):
     
     model_name = cl.user_session.get("model_name") or load_setting("model_name") or os.getenv("MODEL_NAME", "gpt-4o-mini")
     tools_enabled = cl.user_session.get("tools_enabled", True)
+    selected_external_agents = cl.user_session.get("selected_external_agents", [])
     message_history = cl.user_session.get("message_history", [])
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -572,7 +644,7 @@ User Question: {message.content}
     msg = cl.Message(content="")
 
     # Try PraisonAI Agent first (faster, with tool reuse)
-    agent = _get_or_create_agent(model_name, tools_enabled) if tools_enabled else None
+    agent = _get_or_create_agent(model_name, tools_enabled, selected_external_agents) if tools_enabled else None
     
     if agent is not None:
         _profile_start("agent_response")
@@ -828,7 +900,7 @@ async def on_chat_resume(thread: ThreadDict):
     cl.user_session.set("message_history", message_history)
     
     # Pre-create agent for faster first response
-    _get_or_create_agent(model_name, tools_enabled)
+    _get_or_create_agent(model_name, tools_enabled, selected_external_agents)
 
     image_data = metadata.get("image")
     if image_data:

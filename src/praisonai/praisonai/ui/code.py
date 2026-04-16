@@ -25,7 +25,7 @@ logger.setLevel(log_level)
 
 # Chainlit must be imported early (required by decorators)
 import chainlit as cl
-from chainlit.input_widget import TextInput, Switch
+from chainlit.input_widget import TextInput, Switch, Select
 from chainlit.types import ThreadDict
 import chainlit.data as cl_data
 
@@ -414,7 +414,22 @@ def auth_callback(input_username: str, input_password: str):
     else:
         return None
 
-def _get_or_create_agent(model_name: str, tools_enabled: bool = True, claude_code_enabled: bool = False):
+def _get_external_agents_handler():
+    """Lazy load external agents handler."""
+    try:
+        from praisonai.cli.features.external_agents import ExternalAgentsHandler
+        return ExternalAgentsHandler()
+    except ImportError:
+        return None
+
+def _check_available_external_agents():
+    """Check which external agents are available."""
+    handler = _get_external_agents_handler()
+    if handler:
+        return handler.check_availability()
+    return {}
+
+def _get_or_create_agent(model_name: str, tools_enabled: bool = True, claude_code_enabled: bool = False, selected_external_agents: list = None):
     """Get or create a reusable agent for the session."""
     Agent = _get_praisonai_agent()
     if Agent is None:
@@ -440,6 +455,19 @@ def _get_or_create_agent(model_name: str, tools_enabled: bool = True, claude_cod
         # Add Claude Code if enabled
         if claude_code_enabled:
             tools.append(claude_code_tool)
+            
+        # Add external agent tools
+        if selected_external_agents:
+            handler = _get_external_agents_handler()
+            if handler:
+                for agent_name in selected_external_agents:
+                    try:
+                        integration = handler.get_integration(agent_name)
+                        if integration and integration.is_available:
+                            tools.append(integration.as_tool())
+                            logger.info(f"Added external agent tool: {agent_name}")
+                    except Exception as e:
+                        logger.warning(f"Could not load external agent {agent_name}: {e}")
     
     agent = Agent(
         name="PraisonAI Code Assistant",
