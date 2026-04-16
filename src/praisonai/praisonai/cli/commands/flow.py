@@ -210,7 +210,7 @@ def flow_import(
         health = client.health_check()
         if health["status"] != "healthy":
             console.print(f"[red]Error: Langflow server not accessible at {langflow_url}[/red]")
-            console.print(f"[yellow]Make sure Langflow is running: praisonai flow[/yellow]")
+            console.print("[yellow]Make sure Langflow is running: praisonai flow[/yellow]")
             raise typer.Abort()
         
         # Upload flow

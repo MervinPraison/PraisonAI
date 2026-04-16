@@ -424,14 +424,25 @@ class PraisonAIAgentComponent(Component):
     
     def _setup_observability(self) -> None:
         """Auto-configure observability from environment variables."""
+        # Skip if already set up
+        if getattr(self, "_observability_setup_done", False):
+            return
+            
         import os
         observe = os.environ.get("PRAISONAI_OBSERVE", "")
         if observe == "langfuse":
             try:
                 from praisonai.observability import LangfuseSink
                 from praisonaiagents.trace.context_events import (
-                    ContextTraceEmitter, set_context_emitter
+                    ContextTraceEmitter, set_context_emitter, get_context_emitter
                 )
+                
+                # Reuse existing emitter if already configured
+                existing = get_context_emitter()
+                if existing and existing.enabled:
+                    self._observability_setup_done = True
+                    return
+                
                 # Add flow metadata for trace correlation
                 metadata = {
                     "praisonai_source": "langflow",
@@ -442,6 +453,7 @@ class PraisonAIAgentComponent(Component):
                 sink = LangfuseSink(metadata=metadata)
                 emitter = ContextTraceEmitter(sink=sink, enabled=True)
                 set_context_emitter(emitter)
+                self._observability_setup_done = True
             except ImportError:
                 pass  # Langfuse not installed, gracefully degrade
 

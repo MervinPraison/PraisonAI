@@ -50,8 +50,8 @@ class YAMLToLangflowConverter:
         workflow = parser.parse_file(yaml_path)
         
         # Extract metadata from parsed YAML for direct access
-        yaml_path = Path(yaml_path)
-        with open(yaml_path, 'r') as f:
+        yaml_file = Path(yaml_path)
+        with open(yaml_file, 'r') as f:
             import yaml
             raw_yaml = yaml.safe_load(f)
         
@@ -59,8 +59,8 @@ class YAMLToLangflowConverter:
         nodes, edges = self._convert_workflow_to_nodes(workflow, raw_yaml)
         
         # Generate flow metadata
-        flow_name = workflow.name or yaml_path.stem
-        flow_description = getattr(workflow, 'description', f'Converted from {yaml_path.name}')
+        flow_name = workflow.name or yaml_file.stem
+        flow_description = getattr(workflow, 'description', f'Converted from {yaml_file.name}')
         
         # Build Langflow JSON structure
         langflow_json = {
@@ -95,6 +95,14 @@ class YAMLToLangflowConverter:
         if not agents_data and 'roles' in raw_yaml:
             # Convert roles to agents format
             agents_data = self._convert_roles_to_agents(raw_yaml['roles'])
+        
+        # Convert agents_data to dict format if it's a list (common PraisonAI format)
+        if isinstance(agents_data, list):
+            agents_dict = {}
+            for i, agent in enumerate(agents_data):
+                agent_name = agent.get('name', f'agent_{i}')
+                agents_dict[agent_name] = agent
+            agents_data = agents_dict
         
         # Create agent nodes
         agent_nodes = []
@@ -469,85 +477,6 @@ class LangflowToYAMLConverter:
         return bool(value)  # Include non-empty values for other fields
 
 
-class LangflowAPIClient:
-    """Client for Langflow REST API operations."""
-    
-    def __init__(self, base_url: str = "http://localhost:7860"):
-        """Initialize client with Langflow server URL."""
-        self.base_url = base_url.rstrip("/")
-        
-        if not requests:
-            raise ImportError("requests is required for Langflow API operations. Install with: pip install requests")
-    
-    def upload_flow(self, flow_json: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Upload a flow to Langflow.
-        
-        Args:
-            flow_json: Langflow JSON flow definition
-            
-        Returns:
-            API response with flow ID
-        """
-        url = f"{self.base_url}/api/v1/flows/upload/"
-        
-        try:
-            response = requests.post(url, json=flow_json, timeout=30)
-            response.raise_for_status()
-            return response.json()
-        except requests.RequestException as e:
-            raise ConnectionError(f"Failed to upload flow to Langflow: {e}")
-    
-    def download_flow(self, flow_id: str) -> Dict[str, Any]:
-        """
-        Download a flow from Langflow.
-        
-        Args:
-            flow_id: UUID of the flow to download
-            
-        Returns:
-            Langflow JSON flow definition
-        """
-        url = f"{self.base_url}/api/v1/flows/{flow_id}"
-        
-        try:
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()
-            return response.json()
-        except requests.RequestException as e:
-            raise ConnectionError(f"Failed to download flow from Langflow: {e}")
-    
-    def list_flows(self) -> List[Dict[str, Any]]:
-        """
-        List all flows in Langflow.
-        
-        Returns:
-            List of flow metadata
-        """
-        url = f"{self.base_url}/api/v1/flows/"
-        
-        try:
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()
-            return response.json().get("flows", [])
-        except requests.RequestException as e:
-            raise ConnectionError(f"Failed to list flows from Langflow: {e}")
-    
-    def health_check(self) -> bool:
-        """
-        Check if Langflow server is running.
-        
-        Returns:
-            True if server is healthy
-        """
-        url = f"{self.base_url}/api/v1/health"
-        
-        try:
-            response = requests.get(url, timeout=10)
-            return response.status_code == 200
-        except requests.RequestException:
-            return False
-
 
 def yaml_to_langflow_json(yaml_path: str) -> Dict[str, Any]:
     """
@@ -588,11 +517,13 @@ def export_yaml_to_langflow(yaml_path: str, langflow_url: str = "http://localhos
     Returns:
         Flow ID of uploaded flow
     """
+    from praisonai.flow.client import LangflowClient
+    
     # Convert YAML to Langflow JSON
     flow_json = yaml_to_langflow_json(yaml_path)
     
     # Upload to Langflow
-    client = LangflowAPIClient(langflow_url)
+    client = LangflowClient(langflow_url)
     response = client.upload_flow(flow_json)
     
     return response.get("id", response.get("flow_id", ""))
@@ -611,9 +542,11 @@ def import_langflow_to_yaml(flow_id: str, output_path: Optional[str] = None,
     Returns:
         YAML string (or path if saved to file)
     """
+    from praisonai.flow.client import LangflowClient
+    
     # Download from Langflow
-    client = LangflowAPIClient(langflow_url)
-    flow_json = client.download_flow(flow_id)
+    client = LangflowClient(langflow_url)
+    flow_json = client.get_flow(flow_id)
     
     # Convert to YAML
     yaml_content = langflow_json_to_yaml(flow_json)

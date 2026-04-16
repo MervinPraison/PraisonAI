@@ -33,8 +33,8 @@ class ServiceManager:
             proc = subprocess.Popen(
                 cmd,
                 env=env or os.environ.copy(),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
             self.services.append(proc)
             self.console.print(f"[green]✅ {name} started (PID: {proc.pid})[/green]")
@@ -57,7 +57,7 @@ class ServiceManager:
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
-                response = requests.get(f"{url}/health", timeout=5)
+                response = requests.get(f"{url}/api/v1/health", timeout=5)
                 if response.status_code == 200:
                     self.console.print(f"[green]✅ {service_name} is ready![/green]")
                     return True
@@ -263,8 +263,7 @@ def up_start(
         
         # Setup signal handler for graceful shutdown
         def signal_handler(signum, frame):
-            manager.shutdown_all()
-            raise typer.Abort()
+            raise KeyboardInterrupt()  # Let the try/except/finally handle cleanup
         
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
