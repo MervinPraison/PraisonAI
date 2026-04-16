@@ -26,6 +26,88 @@ from praisonaiagents.trace.protocol import (
 )
 
 
+class _ContextToActionBridge:
+    """
+    Adapter that implements ``ContextTraceSinkProtocol`` and forwards
+    ``ContextEvent``s to a ``LangextractSink`` as equivalent ``ActionEvent``s.
+
+    The base agent runtime (``chat_mixin``, ``tool_execution``,
+    ``unified_execution_mixin``) emits lifecycle events via
+    ``ContextTraceEmitter`` only.  This bridge lets the langextract sink
+    observe those events without touching the core SDK.
+    """
+
+    __slots__ = ("_sink",)
+
+    # Subset of ContextEventType values we care about (strings to avoid
+    # importing ContextEventType at module load time).
+    _CTX_AGENT_START = "agent_start"
+    _CTX_AGENT_END = "agent_end"
+    _CTX_TOOL_START = "tool_call_start"
+    _CTX_TOOL_END = "tool_call_end"
+    _CTX_LLM_RESPONSE = "llm_response"
+
+    def __init__(self, sink: "LangextractSink") -> None:
+        self._sink = sink
+
+    def emit(self, event: Any) -> None:  # ContextEvent duck-typed
+        et = getattr(event, "event_type", None)
+        et_value = et.value if hasattr(et, "value") else et
+        data = getattr(event, "data", {}) or {}
+        ts = getattr(event, "timestamp", 0.0)
+        agent = getattr(event, "agent_name", None)
+
+        if et_value == self._CTX_AGENT_START:
+            self._sink.emit(ActionEvent(
+                event_type=ActionEventType.AGENT_START.value,
+                timestamp=ts,
+                agent_name=agent,
+                metadata={"input": data.get("input") or data.get("goal") or ""},
+            ))
+        elif et_value == self._CTX_AGENT_END:
+            self._sink.emit(ActionEvent(
+                event_type=ActionEventType.AGENT_END.value,
+                timestamp=ts,
+                agent_name=agent,
+                status="ok",
+            ))
+        elif et_value == self._CTX_TOOL_START:
+            self._sink.emit(ActionEvent(
+                event_type=ActionEventType.TOOL_START.value,
+                timestamp=ts,
+                agent_name=agent,
+                tool_name=data.get("tool_name"),
+                tool_args=data.get("arguments"),
+            ))
+        elif et_value == self._CTX_TOOL_END:
+            self._sink.emit(ActionEvent(
+                event_type=ActionEventType.TOOL_END.value,
+                timestamp=ts,
+                agent_name=agent,
+                tool_name=data.get("tool_name"),
+                duration_ms=(data.get("duration_ms") or 0.0),
+                status=data.get("status") or "ok",
+                tool_result_summary=str(data.get("result"))[:500] if data.get("result") is not None else None,
+            ))
+        elif et_value == self._CTX_LLM_RESPONSE:
+            # Treat LLM response as an OUTPUT event so the final text shows
+            # up in the rendered HTML.
+            content = data.get("response_content") or data.get("content") or ""
+            self._sink.emit(ActionEvent(
+                event_type=ActionEventType.OUTPUT.value,
+                timestamp=ts,
+                agent_name=agent,
+                tool_result_summary=content,
+            ))
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        # The owning sink handles render/close — nothing to do here.
+        pass
+
+
 @dataclass
 class LangextractSinkConfig:
     """Configuration for the langextract trace sink."""
@@ -60,6 +142,17 @@ class LangextractSink:
         self._events: List[ActionEvent] = []
         self._source_text: Optional[str] = None
         self._closed = False
+
+    # ---- Context-emitter bridge -------------------------------------------
+
+    def context_sink(self) -> "_ContextToActionBridge":
+        """
+        Return a ``ContextTraceSinkProtocol`` adapter that forwards core
+        ``ContextEvent``s into this sink as ``ActionEvent``s.  Use with
+        ``praisonaiagents.trace.context_events.set_context_emitter`` (or
+        ``trace_context``) to capture real agent runtime events.
+        """
+        return _ContextToActionBridge(self)
 
     # ---- TraceSinkProtocol -------------------------------------------------
 

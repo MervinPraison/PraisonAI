@@ -79,6 +79,22 @@ def render(
     # Set up trace emitter for the duration of the run
     emitter = TraceEmitter(sink=sink, enabled=True)
     set_default_emitter(emitter)
+
+    # Also bridge the context emitter so real agent runtime events
+    # (agent_start/end, tool_call_*, llm_response) are captured.
+    try:
+        from praisonaiagents.trace.context_events import (
+            ContextTraceEmitter,
+            set_context_emitter,
+        )
+        context_emitter = ContextTraceEmitter(
+            sink=sink.context_sink(),
+            session_id="praisonai-langextract-render",
+            enabled=True,
+        )
+        set_context_emitter(context_emitter)
+    except Exception:
+        pass
     
     try:
         # Run the workflow
