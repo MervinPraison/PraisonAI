@@ -333,10 +333,22 @@ class TestN8nCLIIntegration:
             pytest.skip("CLI commands not available")
         
         # Check that the main app is a typer app
-        assert hasattr(app, 'commands')
+        assert hasattr(app, 'registered_commands') or hasattr(app, 'commands')
         
         # Check that expected commands exist
-        command_names = [cmd.name for cmd in app.commands.values()]
+        if hasattr(app, 'registered_commands'):
+            # Modern Typer uses a list of CommandInfo objects
+            if isinstance(app.registered_commands, list):
+                command_names = []
+                for cmd in app.registered_commands:
+                    # Use name if available, otherwise fallback to callback name
+                    name = cmd.name if cmd.name else (cmd.callback.__name__ if cmd.callback else 'unknown')
+                    command_names.append(name)
+            else:
+                command_names = [name for name in app.registered_commands.keys()]
+        else:
+            command_names = [cmd.name for cmd in app.commands.values()]
+        # Some commands use explicit names, others use function names
         expected_commands = ['export', 'import', 'preview', 'push', 'pull', 'test', 'list']
         
         for cmd in expected_commands:
