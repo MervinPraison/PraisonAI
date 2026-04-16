@@ -15,6 +15,7 @@ All servers include the unified discovery endpoint at /__praisonai__/discovery.
 
 import os
 import sys
+import logging
 from typing import Any, Dict, List, Optional
 
 
@@ -265,11 +266,9 @@ Launch PraisonAI servers with unified discovery support.
                 # Register agents from YAML
                 self._register_agents_from_yaml(agents_config, agent_invoke.register_agent)
             else:
-                import logging
                 logging.getLogger(__name__).warning("FastAPI not available, agent_invoke router not mounted")
             
         except ImportError as e:
-            import logging
             logging.getLogger(__name__).warning(f"Could not load agent invoke router: {e}")
         
         # Request model
@@ -311,7 +310,6 @@ Launch PraisonAI servers with unified discovery support.
                                 raise AttributeError(f"Agent {agent_name} has no start/astart method")
                             return {"response": str(result)}
                     except Exception as e:
-                        import logging
                         logging.getLogger(__name__).warning(
                             f"Failed direct agent invoke for '{agent_name}', falling back to crew execution: {e}"
                         )
@@ -429,14 +427,11 @@ Launch PraisonAI servers with unified discovery support.
                     register_agent_func(agent_name, agent)
                     
                 except Exception as e:
-                    import logging
                     logging.getLogger(__name__).warning(f"Failed to create agent {agent_name}: {e}")
                     
         except ImportError:
-            import logging
             logging.getLogger(__name__).warning("praisonaiagents not available, skipping agent registration")
         except Exception as e:
-            import logging
             logging.getLogger(__name__).warning(f"Failed to register agents from YAML: {e}")
     
     def cmd_recipe(self, args: List[str]) -> int:
