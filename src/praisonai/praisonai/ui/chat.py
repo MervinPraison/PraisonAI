@@ -851,28 +851,57 @@ async def on_chat_resume(thread: ThreadDict):
     logger.info(f"Resuming chat: {thread['id']}")
     model_name = load_setting("model_name") or os.getenv("MODEL_NAME", "gpt-4o-mini")
     tools_enabled = (load_setting("tools_enabled") or "true").lower() == "true"
+    external_agents_setting = load_setting("external_agents") or ""
+    selected_external_agents = [agent.strip() for agent in external_agents_setting.split(",") if agent.strip()]
     
     logger.debug(f"Model name: {model_name}")
-    settings = cl.ChatSettings(
-        [
-            TextInput(
-                id="model_name",
-                label="Enter the Model Name",
-                placeholder="e.g., gpt-4o-mini",
-                initial=model_name
-            ),
-            Switch(
-                id="tools_enabled",
-                label="Enable Tools (ACP, LSP, Web Search)",
-                initial=tools_enabled
+    # Get available external agents for settings
+    available_external_agents = _check_available_external_agents()
+    external_agent_options = []
+    agent_descriptions = {
+        "claude": "Claude Code (coding, refactoring)",
+        "gemini": "Gemini CLI (analysis, search)",
+        "codex": "Codex CLI (code generation)", 
+        "cursor": "Cursor CLI (IDE tasks)"
+    }
+    
+    for agent_name, is_available in available_external_agents.items():
+        if is_available:
+            description = agent_descriptions.get(agent_name, agent_name)
+            external_agent_options.append(cl.SelectOption(label=description, value=agent_name))
+    
+    settings_widgets = [
+        TextInput(
+            id="model_name",
+            label="Enter the Model Name",
+            placeholder="e.g., gpt-4o-mini",
+            initial=model_name
+        ),
+        Switch(
+            id="tools_enabled",
+            label="Enable Tools (ACP, LSP, Web Search)",
+            initial=tools_enabled
+        )
+    ]
+    
+    if external_agent_options:
+        settings_widgets.append(
+            Select(
+                id="external_agents",
+                label="External AI Agents (Select multiple)",
+                options=external_agent_options,
+                initial=selected_external_agents,
+                multiple=True
             )
-        ]
-    )
+        )
+    
+    settings = cl.ChatSettings(settings_widgets)
     await settings.send()
     
     cl.user_session.set("thread_id", thread["id"])
     cl.user_session.set("model_name", model_name)
     cl.user_session.set("tools_enabled", tools_enabled)
+    cl.user_session.set("selected_external_agents", selected_external_agents)
 
     metadata = thread.get("metadata", {})
     if isinstance(metadata, str):

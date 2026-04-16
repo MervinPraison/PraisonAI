@@ -439,9 +439,13 @@ def _get_or_create_agent(model_name: str, tools_enabled: bool = True, claude_cod
     cached_agent = cl.user_session.get("_cached_agent")
     cached_model = cl.user_session.get("_cached_agent_model")
     cached_claude = cl.user_session.get("_cached_agent_claude")
+    cached_external_agents = cl.user_session.get("_cached_external_agents", [])
     
-    # Reuse if model and claude setting match
-    if cached_agent is not None and cached_model == model_name and cached_claude == claude_code_enabled:
+    # Reuse if settings match
+    if (cached_agent is not None and
+        cached_model == model_name and
+        cached_claude == claude_code_enabled and
+        cached_external_agents == (selected_external_agents or [])):
         return cached_agent
     
     # Create new agent with interactive tools
@@ -496,6 +500,7 @@ Trust mode is enabled - tool executions are auto-approved for efficiency.""",
     cl.user_session.set("_cached_agent", agent)
     cl.user_session.set("_cached_agent_model", model_name)
     cl.user_session.set("_cached_agent_claude", claude_code_enabled)
+    cl.user_session.set("_cached_external_agents", selected_external_agents or [])
     _profile_end("create_agent")
     
     return agent
@@ -510,35 +515,64 @@ async def start():
     if not claude_code_enabled:
         claude_code_enabled = (load_setting("claude_code_enabled") or "false").lower() == "true"
     tools_enabled = (load_setting("tools_enabled") or "true").lower() == "true"
+    external_agents_setting = load_setting("external_agents") or ""
+    selected_external_agents = [agent.strip() for agent in external_agents_setting.split(",") if agent.strip()]
     
     cl.user_session.set("model_name", model_name)
     cl.user_session.set("claude_code_enabled", claude_code_enabled)
     cl.user_session.set("tools_enabled", tools_enabled)
-    logger.debug(f"Model name: {model_name}, Claude Code: {claude_code_enabled}, Tools: {tools_enabled}")
+    cl.user_session.set("selected_external_agents", selected_external_agents)
+    logger.debug(f"Model name: {model_name}, Claude Code: {claude_code_enabled}, Tools: {tools_enabled}, External agents: {selected_external_agents}")
     
     # Pre-create agent for faster first response
-    _get_or_create_agent(model_name, tools_enabled, claude_code_enabled)
+    _get_or_create_agent(model_name, tools_enabled, claude_code_enabled, selected_external_agents)
     
-    settings = cl.ChatSettings(
-        [
-            TextInput(
-                id="model_name",
-                label="Enter the Model Name",
-                placeholder="e.g., gpt-4o-mini",
-                initial=model_name
-            ),
-            Switch(
-                id="tools_enabled",
-                label="Enable Tools (ACP, LSP, Web Search)",
-                initial=tools_enabled
-            ),
-            Switch(
-                id="claude_code_enabled",
-                label="Enable Claude Code (file modifications & coding)",
-                initial=claude_code_enabled
+    # Get available external agents for settings
+    available_external_agents = _check_available_external_agents()
+    external_agent_options = []
+    agent_descriptions = {
+        "claude": "Claude Code (coding, refactoring)",
+        "gemini": "Gemini CLI (analysis, search)",
+        "codex": "Codex CLI (code generation)",
+        "cursor": "Cursor CLI (IDE tasks)"
+    }
+    
+    for agent_name, is_available in available_external_agents.items():
+        if is_available:
+            description = agent_descriptions.get(agent_name, agent_name)
+            external_agent_options.append(cl.SelectOption(label=description, value=agent_name))
+    
+    settings_widgets = [
+        TextInput(
+            id="model_name",
+            label="Enter the Model Name",
+            placeholder="e.g., gpt-4o-mini",
+            initial=model_name
+        ),
+        Switch(
+            id="tools_enabled",
+            label="Enable Tools (ACP, LSP, Web Search)",
+            initial=tools_enabled
+        ),
+        Switch(
+            id="claude_code_enabled",
+            label="Enable Claude Code (file modifications & coding)",
+            initial=claude_code_enabled
+        )
+    ]
+    
+    if external_agent_options:
+        settings_widgets.append(
+            Select(
+                id="external_agents",
+                label="External AI Agents (Select multiple)",
+                options=external_agent_options,
+                initial=selected_external_agents,
+                multiple=True
             )
-        ]
-    )
+        )
+    
+    settings = cl.ChatSettings(settings_widgets)
     cl.user_session.set("settings", settings)
     await settings.send()
     
@@ -573,22 +607,29 @@ async def setup_agent(settings):
     model_name = settings["model_name"]
     claude_code_enabled = settings.get("claude_code_enabled", False)
     tools_enabled = settings.get("tools_enabled", True)
+    selected_external_agents = settings.get("external_agents", [])
     
     cl.user_session.set("model_name", model_name)
     cl.user_session.set("claude_code_enabled", claude_code_enabled)
     cl.user_session.set("tools_enabled", tools_enabled)
+    cl.user_session.set("selected_external_agents", selected_external_agents)
     
     # Invalidate cached agent if settings changed
     cached_model = cl.user_session.get("_cached_agent_model")
     cached_claude = cl.user_session.get("_cached_agent_claude")
-    if cached_model != model_name or cached_claude != claude_code_enabled:
+    cached_external_agents = cl.user_session.get("_cached_external_agents", [])
+    if (cached_model != model_name or
+        cached_claude != claude_code_enabled or
+        cached_external_agents != selected_external_agents):
         cl.user_session.set("_cached_agent", None)
         cl.user_session.set("_cached_agent_model", None)
         cl.user_session.set("_cached_agent_claude", None)
+        cl.user_session.set("_cached_external_agents", [])
 
     save_setting("model_name", model_name)
     save_setting("claude_code_enabled", str(claude_code_enabled).lower())
     save_setting("tools_enabled", str(tools_enabled).lower())
+    save_setting("external_agents", ",".join(selected_external_agents))
 
     thread_id = cl.user_session.get("thread_id")
     if thread_id:
@@ -615,6 +656,7 @@ async def main(message: cl.Message):
     model_name = cl.user_session.get("model_name") or load_setting("model_name") or os.getenv("MODEL_NAME", "gpt-4o-mini")
     claude_code_enabled = cl.user_session.get("claude_code_enabled", False)
     tools_enabled = cl.user_session.get("tools_enabled", True)
+    selected_external_agents = cl.user_session.get("selected_external_agents", [])
     message_history = cl.user_session.get("message_history", [])
     
     repo_path = os.environ.get("PRAISONAI_CODE_REPO_PATH", ".")
@@ -652,7 +694,7 @@ Context:
     msg = cl.Message(content="")
 
     # Try PraisonAI Agent first (faster, with tool reuse)
-    agent = _get_or_create_agent(model_name, tools_enabled, claude_code_enabled) if tools_enabled else None
+    agent = _get_or_create_agent(model_name, tools_enabled, claude_code_enabled, selected_external_agents) if tools_enabled else None
     
     if agent is not None:
         _profile_start("agent_response")
@@ -783,34 +825,63 @@ async def on_chat_resume(thread: ThreadDict):
     if not claude_code_enabled:
         claude_code_enabled = (load_setting("claude_code_enabled") or "false").lower() == "true"
     tools_enabled = (load_setting("tools_enabled") or "true").lower() == "true"
+    external_agents_setting = load_setting("external_agents") or ""
+    selected_external_agents = [agent.strip() for agent in external_agents_setting.split(",") if agent.strip()]
     
     logger.debug(f"Model name: {model_name}")
-    settings = cl.ChatSettings(
-        [
-            TextInput(
-                id="model_name",
-                label="Enter the Model Name",
-                placeholder="e.g., gpt-4o-mini",
-                initial=model_name
-            ),
-            Switch(
-                id="tools_enabled",
-                label="Enable Tools (ACP, LSP, Web Search)",
-                initial=tools_enabled
-            ),
-            Switch(
-                id="claude_code_enabled",
-                label="Enable Claude Code (file modifications & coding)",
-                initial=claude_code_enabled
+    # Get available external agents for settings
+    available_external_agents = _check_available_external_agents()
+    external_agent_options = []
+    agent_descriptions = {
+        "claude": "Claude Code (coding, refactoring)",
+        "gemini": "Gemini CLI (analysis, search)",
+        "codex": "Codex CLI (code generation)",
+        "cursor": "Cursor CLI (IDE tasks)"
+    }
+    
+    for agent_name, is_available in available_external_agents.items():
+        if is_available:
+            description = agent_descriptions.get(agent_name, agent_name)
+            external_agent_options.append(cl.SelectOption(label=description, value=agent_name))
+    
+    settings_widgets = [
+        TextInput(
+            id="model_name",
+            label="Enter the Model Name",
+            placeholder="e.g., gpt-4o-mini",
+            initial=model_name
+        ),
+        Switch(
+            id="tools_enabled",
+            label="Enable Tools (ACP, LSP, Web Search)",
+            initial=tools_enabled
+        ),
+        Switch(
+            id="claude_code_enabled",
+            label="Enable Claude Code (file modifications & coding)",
+            initial=claude_code_enabled
+        )
+    ]
+    
+    if external_agent_options:
+        settings_widgets.append(
+            Select(
+                id="external_agents",
+                label="External AI Agents (Select multiple)",
+                options=external_agent_options,
+                initial=selected_external_agents,
+                multiple=True
             )
-        ]
-    )
+        )
+    
+    settings = cl.ChatSettings(settings_widgets)
     await settings.send()
     
     cl.user_session.set("thread_id", thread["id"])
     cl.user_session.set("model_name", model_name)
     cl.user_session.set("claude_code_enabled", claude_code_enabled)
     cl.user_session.set("tools_enabled", tools_enabled)
+    cl.user_session.set("selected_external_agents", selected_external_agents)
 
     metadata = thread.get("metadata", {})
     if isinstance(metadata, str):
@@ -838,7 +909,7 @@ async def on_chat_resume(thread: ThreadDict):
     cl.user_session.set("message_history", message_history)
     
     # Pre-create agent for faster first response
-    _get_or_create_agent(model_name, tools_enabled, claude_code_enabled)
+    _get_or_create_agent(model_name, tools_enabled, claude_code_enabled, selected_external_agents)
 
     image_data = metadata.get("image")
     if image_data:
