@@ -410,11 +410,17 @@ class TestLangextractContextBridge:
     def test_setup_observability_registers_context_emitter(self):
         """`--observe langextract` must install the bridge on the context emitter."""
         import praisonai.cli.app as cli_app
-        from praisonaiagents.trace.context_events import get_context_emitter
+        from praisonaiagents.trace.context_events import get_context_emitter, set_context_emitter
 
-        cli_app._setup_langextract_observability(verbose=False)
-        emitter = get_context_emitter()
-        assert emitter.enabled, "context emitter should be enabled after setup"
+        previous_emitter = get_context_emitter()
+        try:
+            # Make test deterministic even when optional dependency is not installed.
+            with patch("importlib.util.find_spec", return_value=object()):
+                cli_app._setup_langextract_observability(verbose=False)
+            emitter = get_context_emitter()
+            assert emitter.enabled, "context emitter should be enabled after setup"
+        finally:
+            set_context_emitter(previous_emitter)
 
 
 if __name__ == "__main__":
