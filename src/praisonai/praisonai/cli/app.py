@@ -242,6 +242,7 @@ def register_commands():
     from .commands.langfuse import app as langfuse_app
     from .commands.port import app as port_app
     from .commands.managed import app as managed_app
+    from .commands.up import app as up_app
     
     # Import TUI and queue commands
     from .features.tui.debug import create_debug_app as create_tui_debug_app
@@ -426,6 +427,7 @@ def register_commands():
     app.add_typer(unified_app, name="dashboard", help="🌟 Unified Dashboard (Flow + Claw + UI)")
     app.add_typer(langfuse_app, name="langfuse", help="🔍 Langfuse observability platform")
     app.add_typer(port_app, name="port", help="🔌 Manage port usage and resolve conflicts")
+    app.add_typer(up_app, name="up", help="🚀 Start unified PraisonAI stack (Langfuse + Langflow)")
     
     # Register standardise command
     try:
