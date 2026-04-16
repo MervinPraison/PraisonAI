@@ -37,6 +37,24 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Shared exceptions
+# ---------------------------------------------------------------------------
+
+class ManagedSandboxRequired(RuntimeError):
+    """Raised when package installation is attempted without proper sandboxing.
+    
+    This exception is raised when `LocalManagedAgent` is configured with packages
+    but no compute provider is specified, creating a security risk where packages
+    would be installed on the host system.
+    
+    To fix this error, either:
+    1. Specify a compute provider: `LocalManagedAgent(compute="docker", ...)`
+    2. Explicitly allow host packages: `LocalManagedConfig(host_packages_ok=True)`
+    """
+    pass
+
+
+# ---------------------------------------------------------------------------
 # ManagedConfig — Anthropic-specific configuration dataclass
 # Lives in the Wrapper (not Core SDK) because its fields map directly to
 # the Anthropic Managed Agents API.  The Core SDK only defines the
