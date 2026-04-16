@@ -2,7 +2,7 @@
 """
 Real agentic test for parallel tool execution (Gap 2).
 
-This test verifies that Agent(parallel_tool_calls=True) executes
+This test verifies that Agent(execution=ExecutionConfig(parallel_tool_calls=True)) executes
 batched LLM tool calls concurrently with improved latency.
 
 Per AGENTS.md requirements: Agent MUST call agent.start() with a real prompt

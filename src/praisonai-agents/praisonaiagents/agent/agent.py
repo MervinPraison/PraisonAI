@@ -545,7 +545,6 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
         skills: Optional[Union[List[str], str, Dict[str, Any], 'SkillsConfig']] = None,
         approval: Optional[Union[bool, str, Dict[str, Any], 'ApprovalConfig', 'ApprovalProtocol']] = None,
         tool_timeout: Optional[int] = None,  # P8/G11: Timeout in seconds for each tool call
-        parallel_tool_calls: Optional[bool] = None,  # **Deprecated** — use ``execution=ExecutionConfig(parallel_tool_calls=True)``
         learn: Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
         backend: Optional[Any] = None,  # External managed agent backend (e.g., ManagedAgentIntegration)
     ):
@@ -635,10 +634,6 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
                 - LearnConfig: Custom configuration
                 Learning is a first-class citizen, peer to memory. It captures patterns,
                 preferences, and insights from interactions to improve future responses.
-            parallel_tool_calls: Enable parallel execution of batched LLM tool calls.
-                - False: Sequential execution (current behavior, default for compatibility)
-                - True: Parallel execution with bounded workers for improved latency
-                When LLM returns multiple tool calls, executes them concurrently instead of sequentially.
             backend: External managed agent backend for hybrid execution. Accepts:
                 - ManagedAgentIntegration: External managed agent service
                 - None: Use local execution (default)
@@ -956,11 +951,8 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
                 allow_code_execution = True
             if _exec_config.code_mode != "safe":
                 code_execution_mode = _exec_config.code_mode
-            # Consolidate parallel_tool_calls (config takes precedence over deprecated standalone param)
-            if _exec_config.parallel_tool_calls:
-                parallel_tool_calls = True
-            elif parallel_tool_calls is None:
-                parallel_tool_calls = False
+            # Get parallel_tool_calls from ExecutionConfig
+            parallel_tool_calls = _exec_config.parallel_tool_calls
             # Budget guard extraction
             _max_budget = getattr(_exec_config, 'max_budget', None)
             _on_budget_exceeded = getattr(_exec_config, 'on_budget_exceeded', 'stop') or 'stop'
@@ -968,9 +960,8 @@ class Agent(ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin
             max_iter, max_rpm, max_execution_time, max_retry_limit = 20, None, None, 2
             _max_budget = None
             _on_budget_exceeded = 'stop'
-            # Handle standalone deprecated params when no ExecutionConfig provided
-            if parallel_tool_calls is None:
-                parallel_tool_calls = False
+            # Default parallel_tool_calls when no ExecutionConfig provided
+            parallel_tool_calls = False
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve TEMPLATES param - FAST PATH
