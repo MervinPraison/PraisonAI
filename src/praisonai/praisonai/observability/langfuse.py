@@ -67,18 +67,15 @@ class _ContextToActionBridge:
         if not action_type:
             return None
 
-        tool_result_summary = (
-            ctx_event.data.get("tool_result_summary")
-            if isinstance(ctx_event.data, dict)
-            else None
-        )
-        if tool_result_summary is None and isinstance(ctx_event.data, dict):
-            tool_result_summary = ctx_event.data.get("result")
+        event_data = ctx_event.data if isinstance(ctx_event.data, dict) else {}
+        tool_result_summary = event_data.get("tool_result_summary")
+        if tool_result_summary is None:
+            tool_result_summary = event_data.get("result")
 
-        status = ctx_event.data.get("status") if isinstance(ctx_event.data, dict) else None
-        error_message = ctx_event.data.get("error_message") if isinstance(ctx_event.data, dict) else None
-        if error_message is None and isinstance(ctx_event.data, dict):
-            error_message = ctx_event.data.get("error")
+        status = event_data.get("status")
+        error_message = event_data.get("error_message")
+        if error_message is None:
+            error_message = event_data.get("error")
         if status is None and action_type == ActionEventType.TOOL_END:
             status = "error" if error_message else "completed"
         
@@ -88,13 +85,13 @@ class _ContextToActionBridge:
             timestamp=ctx_event.timestamp,
             agent_id=ctx_event.session_id,
             agent_name=ctx_event.agent_name or "unknown",
-            tool_name=ctx_event.data.get("tool_name"),
-            tool_args=ctx_event.data.get("tool_args"),
+            tool_name=event_data.get("tool_name"),
+            tool_args=event_data.get("tool_args"),
             tool_result_summary=tool_result_summary,
-            duration_ms=ctx_event.data.get("duration_ms", 0.0),
+            duration_ms=event_data.get("duration_ms", 0.0),
             status=status,
             error_message=error_message,
-            metadata=ctx_event.data,
+            metadata=event_data,
         )
 
 
