@@ -545,11 +545,15 @@ class LocalManagedAgent:
         execution_config = None
         if self._compute:
             from praisonaiagents import ExecutionConfig
+            # Map sandbox_type to proper code_sandbox_mode
+            sandbox_type = self._cfg.get("sandbox_type", "subprocess")
+            code_sandbox_mode = "sandbox" if sandbox_type == "subprocess" else "direct"
             execution_config = ExecutionConfig(
                 code_execution=True,
-                code_mode=self._cfg.get("sandbox_type", "subprocess"),
-                compute_provider=self._compute
+                code_mode=self._cfg.get("code_mode", "safe"),
+                code_sandbox_mode=code_sandbox_mode
             )
+            # Compute provider is managed directly by this backend
 
         agent_kwargs: Dict[str, Any] = {
             "name": name,
@@ -923,16 +927,27 @@ class LocalManagedAgent:
         try:
             from praisonaiagents.trace import get_context_emitter
             emitter = get_context_emitter()
-            if emitter and hasattr(emitter, 'emit_action'):
-                emitter.emit_action(
-                    action_type=event_type,
-                    data={
-                        **data,
-                        "agent_id": self.agent_id,
-                        "provider": self.provider,
-                        "timestamp": time.time()
-                    }
-                )
+            if emitter:
+                # Map managed event types to ContextTraceEmitter methods
+                enhanced_data = {
+                    **data,
+                    "agent_id": self.agent_id,
+                    "provider": self.provider,
+                    "timestamp": time.time()
+                }
+                
+                if event_type.startswith("managed.session"):
+                    if "created" in event_type or "start" in event_type:
+                        emitter.session_start(enhanced_data)
+                    elif "reset" in event_type:
+                        emitter.session_end(enhanced_data)
+                elif event_type.startswith("managed.execution"):
+                    if "start" in event_type:
+                        emitter.agent_start(enhanced_data)
+                    elif "complete" in event_type or "error" in event_type:
+                        emitter.agent_end(enhanced_data)
+                # For other events, we could add a generic emit if available
+                # or just log them for now
         except Exception as e:
             logger.debug("[local_managed] trace emit failed: %s", e)
 

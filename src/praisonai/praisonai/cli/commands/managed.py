@@ -550,11 +550,12 @@ def sessions_delete(
 
     client = _get_client()
     try:
-        # For Anthropic managed agents, delete via API
-        response = client.delete(f"/v1/agent_sessions/{session_id}")
+        # Use SDK resource method
+        client.beta.sessions.delete(session_id)
         typer.secho(f"Session {session_id} deleted", fg="green")
     except Exception as e:
         typer.secho(f"Failed to delete session: {e}", fg="red")
+        raise typer.Exit(1)
 
 
 @agents_app.command("delete")
@@ -571,10 +572,12 @@ def agents_delete(
 
     client = _get_client()
     try:
-        response = client.delete(f"/v1/agents/{agent_id}")
-        typer.secho(f"Agent {agent_id} deleted", fg="green")
+        # Agents use archive, not delete
+        client.beta.agents.archive(agent_id)
+        typer.secho(f"Agent {agent_id} archived", fg="green")
     except Exception as e:
-        typer.secho(f"Failed to delete agent: {e}", fg="red")
+        typer.secho(f"Failed to archive agent: {e}", fg="red")
+        raise typer.Exit(1)
 
 
 @envs_app.command("update")
@@ -586,21 +589,23 @@ def envs_update(
     """Update a managed environment."""
     if not name and not description:
         typer.echo("Must specify at least --name or --description")
-        return
+        raise typer.Exit(0)
 
     client = _get_client()
     try:
-        data = {}
+        # Use SDK resource method
+        kwargs = {}
         if name:
-            data["name"] = name
+            kwargs["name"] = name
         if description:
-            data["description"] = description
+            kwargs["description"] = description
 
-        response = client.patch(f"/v1/environments/{env_id}", json=data)
+        response = client.beta.environments.update(env_id, **kwargs)
         typer.secho(f"Environment {env_id} updated", fg="green")
-        typer.echo(json.dumps(response.json(), indent=2))
+        typer.echo(str(response))
     except Exception as e:
         typer.secho(f"Failed to update environment: {e}", fg="red")
+        raise typer.Exit(1)
 
 
 @envs_app.command("delete")
@@ -617,10 +622,12 @@ def envs_delete(
 
     client = _get_client()
     try:
-        response = client.delete(f"/v1/environments/{env_id}")
+        # Use SDK resource method
+        client.beta.environments.delete(env_id)
         typer.secho(f"Environment {env_id} deleted", fg="green")
     except Exception as e:
         typer.secho(f"Failed to delete environment: {e}", fg="red")
+        raise typer.Exit(1)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

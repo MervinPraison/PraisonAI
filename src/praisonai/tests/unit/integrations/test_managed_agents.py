@@ -184,8 +184,8 @@ def test_managed_agent_protocol_compliance():
     assert hasattr(local_agent, 'reset_all')
     
     # Test method signatures exist and are callable
-    assert callable(getattr(local_agent, 'execute'))
-    assert callable(getattr(local_agent, 'stream'))
+    assert callable(local_agent.execute)
+    assert callable(local_agent.stream)
 
 
 @pytest.mark.asyncio
