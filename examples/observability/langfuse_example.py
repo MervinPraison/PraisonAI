@@ -13,14 +13,14 @@ Usage:
 """
 from praisonaiagents import Agent
 from praisonai.observability import LangfuseSink
-from praisonaiagents.trace.context_events import (
-    ContextTraceEmitter, set_context_emitter
+from praisonaiagents.trace.protocol import (
+    TraceEmitter, set_default_emitter
 )
 
 # Initialize Langfuse observability
 sink = LangfuseSink()
-emitter = ContextTraceEmitter(sink=sink, enabled=True)
-set_context_emitter(emitter)
+emitter = TraceEmitter(sink=sink, enabled=True)
+set_default_emitter(emitter)
 
 # Create and run agent — all traces automatically captured
 agent = Agent(
@@ -29,11 +29,12 @@ agent = Agent(
     llm="openai/gpt-4o-mini",
 )
 
-result = agent.start("Write a Python function to calculate fibonacci numbers")
-print(result)
-
-# Flush traces
-sink.flush()
-sink.close()
+try:
+    result = agent.start("Write a Python function to calculate fibonacci numbers")
+    print(result)
+finally:
+    # Ensure traces are flushed and resources cleaned up
+    sink.flush()
+    sink.close()
 
 print("\nCheck Langfuse dashboard for traces!")
