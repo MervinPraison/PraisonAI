@@ -205,27 +205,29 @@ class TestLangextractSink:
 
     def test_close_idempotent(self, sample_events):
         """Test that close() can be called multiple times safely."""
-        from praisonai.observability import LangextractSink
-        
-        sink = LangextractSink()
-        for event in sample_events:
-            sink.emit(event)
-        
-        # Mock langextract to avoid import error
-        mock_lx = Mock()
-        with patch.dict("sys.modules", {"langextract": mock_lx}):
-            mock_lx.data.AnnotatedDocument = Mock()
-            mock_lx.data.Extraction = Mock()
-            mock_lx.io.save_annotated_documents = Mock()
-            mock_lx.visualize = Mock(return_value=Mock(data="<html></html>"))
-            
-            # First close should work
-            sink.close()
-            assert sink._closed is True
-            
-            # Second close should be no-op
-            sink.close()
-            assert sink._closed is True
+        from praisonai.observability import LangextractSink, LangextractSinkConfig
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "trace.html"
+            sink = LangextractSink(config=LangextractSinkConfig(output_path=str(output_path)))
+            for event in sample_events:
+                sink.emit(event)
+
+            # Mock langextract to avoid import error
+            mock_lx = Mock()
+            with patch.dict("sys.modules", {"langextract": mock_lx}):
+                mock_lx.data.AnnotatedDocument = Mock()
+                mock_lx.data.Extraction = Mock()
+                mock_lx.io.save_annotated_documents = Mock()
+                mock_lx.visualize = Mock(return_value=Mock(data="<html></html>"))
+
+                # First close should work
+                sink.close()
+                assert sink._closed is True
+
+                # Second close should be no-op
+                sink.close()
+                assert sink._closed is True
 
     def test_flush_no_op(self):
         """Test that flush() is a no-op."""
