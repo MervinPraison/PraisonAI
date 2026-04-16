@@ -699,7 +699,7 @@ async def start_chat():
         from praisonai.ui._external_agents import chainlit_switches
         try:
             from praisonai.ui._external_agents import load_external_agent_settings_from_chainlit
-            external_settings = load_external_agent_settings_from_chainlit()
+            external_settings = load_external_agent_settings_from_chainlit(load_setting)
         except ImportError:
             external_settings = {}
         

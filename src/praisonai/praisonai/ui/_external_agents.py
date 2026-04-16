@@ -7,7 +7,7 @@ Single source of truth for:
 """
 
 from functools import lru_cache
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 # Map of UI toggle id → (integration class path, pretty label)
 EXTERNAL_AGENTS: Dict[str, Dict[str, str]] = {
@@ -72,43 +72,56 @@ def aiui_settings_entries() -> Dict[str, Any]:
     return settings
 
 
-def load_external_agent_settings_from_chainlit() -> Dict[str, bool]:
-    """Load external agent settings from Chainlit session and persistent storage."""
+def _parse_setting_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"true", "1", "yes", "on"}
+
+
+def load_external_agent_settings_from_chainlit(
+    load_setting_fn: Optional[Callable[[str], Any]] = None,
+) -> Dict[str, bool]:
+    """Load external agent settings from Chainlit session and persistent storage.
+
+    Args:
+        load_setting_fn: Optional callback used to load persisted settings by key.
+            If omitted, falls back to importing ``praisonai.ui.chat.load_setting``
+            for backward compatibility.
+    """
     import chainlit as cl
-    settings = {}
+    settings = {toggle_id: False for toggle_id in EXTERNAL_AGENTS}
+    loader = load_setting_fn
     
     # Try to load from persistent storage (if load_setting is available)
-    try:
-        # Import load_setting from the UI module where it's defined
-        from praisonai.ui.chat import load_setting
-        
+    if loader is None:
+        try:
+            # Backward-compatible fallback for callers that don't pass a loader
+            from praisonai.ui.chat import load_setting as loader
+        except ImportError:
+            loader = None
+    if loader is not None:
         # Check for legacy key first
-        legacy_claude = load_setting("claude_code_enabled")
-        if legacy_claude and legacy_claude.lower() == "true":
+        if _parse_setting_bool(loader("claude_code_enabled")):
             settings["claude_enabled"] = True
         
         # Load all current toggles from persistent storage
         for toggle_id in EXTERNAL_AGENTS:
-            persistent_value = load_setting(toggle_id)
+            persistent_value = loader(toggle_id)
             if persistent_value is not None:
-                settings[toggle_id] = persistent_value.lower() == "true"
-            else:
-                settings[toggle_id] = settings.get(toggle_id, False)
-    except ImportError:
-        # Fallback to session-only storage
-        pass
+                settings[toggle_id] = _parse_setting_bool(persistent_value)
     
     # Load from session (may override persistent settings)
     # Check for legacy key in session
-    legacy_claude_session = cl.user_session.get("claude_code_enabled", False)
-    if legacy_claude_session:
+    if _parse_setting_bool(cl.user_session.get("claude_code_enabled", False)):
         settings["claude_enabled"] = True
     
     # Load all current toggles from session
     for toggle_id in EXTERNAL_AGENTS:
         session_value = cl.user_session.get(toggle_id)
         if session_value is not None:
-            settings[toggle_id] = session_value
+            settings[toggle_id] = _parse_setting_bool(session_value)
     
     return settings
 
