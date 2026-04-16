@@ -67,6 +67,16 @@ code = [
 sandbox = [
     "sandlock>=0.1.0",
 ]
+ssh = [
+    "asyncssh>=2.14.0",
+]
+modal = [
+    "modal>=0.64.0",
+]
+daytona = [
+    # Note: daytona package not yet available on PyPI
+    # Install via: pip install git+https://github.com/daytonaio/daytona-python
+]
 realtime = [
     "chainlit>=2.8.5,<=2.9.4",
     "aiosqlite>=0.20.0",
