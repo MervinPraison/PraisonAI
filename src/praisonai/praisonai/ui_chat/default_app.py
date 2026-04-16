@@ -22,10 +22,8 @@ aiui.set_branding(title="PraisonAI Chat", logo="🤖")
 aiui.set_theme(preset="blue", dark_mode=True, radius="lg")
 aiui.set_pages(["chat"])
 
-# Global state for external agents
-_available_agents = {}
-_selected_agents = []
-_agent_instance = None
+# Module-level cache for available agents (read-only)
+_available_agents_cache = {}
 
 
 def _get_external_agents_handler():
@@ -47,12 +45,17 @@ def _check_available_agents() -> Dict[str, bool]:
 
 def _get_agent_with_tools(model: str, selected_agents: List[str]):
     """Create or get cached PraisonAI agent with external agent tools."""
-    global _agent_instance
+    # Get session-scoped state
+    if not hasattr(aiui, 'session_state'):
+        session_state = {}
+    else:
+        session_state = aiui.session_state
     
     # Simple caching based on model and selected agents
     cache_key = f"{model}:{','.join(sorted(selected_agents))}"
-    if _agent_instance and getattr(_agent_instance, '_cache_key', '') == cache_key:
-        return _agent_instance
+    cached_agent = session_state.get('agent_instance')
+    if cached_agent and getattr(cached_agent, '_cache_key', '') == cache_key:
+        return cached_agent
     
     try:
         from praisonaiagents import Agent
@@ -78,7 +81,7 @@ def _get_agent_with_tools(model: str, selected_agents: List[str]):
             tools=tools if tools else None
         )
         agent._cache_key = cache_key
-        _agent_instance = agent
+        session_state['agent_instance'] = agent
         return agent
         
     except ImportError:
@@ -89,13 +92,18 @@ def _get_agent_with_tools(model: str, selected_agents: List[str]):
 @aiui.sidebar
 async def external_agents_settings():
     """Render external agents selection in sidebar."""
-    global _available_agents, _selected_agents
+    # Get session-scoped state
+    if not hasattr(aiui, 'session_state'):
+        # Fallback if session_state not available
+        session_state = {}
+    else:
+        session_state = aiui.session_state
     
-    # Check available agents (cached)
-    if not _available_agents:
-        _available_agents = _check_available_agents()
+    # Check available agents (cached at module level for performance)
+    if not _available_agents_cache:
+        _available_agents_cache.update(_check_available_agents())
     
-    if not _available_agents:
+    if not any(_available_agents_cache.values()):
         aiui.markdown("**No External Agents**")
         aiui.markdown("No external AI agents are installed. Install them to enable delegation:")
         aiui.markdown("- `curl -fsSL https://claude.ai/install.sh | sh` (Claude Code)")
@@ -113,11 +121,14 @@ async def external_agents_settings():
         "cursor": "Cursor CLI (IDE tasks)"
     }
     
+    # Get current selection from session state
+    current_selection = session_state.get('selected_agents', [])
     updated_selection = []
-    for agent_name, is_available in _available_agents.items():
+    
+    for agent_name, is_available in _available_agents_cache.items():
         if is_available:
             description = agent_descriptions.get(agent_name, agent_name)
-            is_selected = agent_name in _selected_agents
+            is_selected = agent_name in current_selection
             
             # Create toggle button as checkbox alternative
             if is_selected:
@@ -134,12 +145,11 @@ async def external_agents_settings():
                     # Button clicked - add to selection (toggle on)
                     updated_selection.append(agent_name)
     
-    # Update global selection if changed
-    if updated_selection != _selected_agents:
-        _selected_agents = updated_selection
+    # Update session-scoped selection if changed
+    if updated_selection != current_selection:
+        session_state['selected_agents'] = updated_selection
         # Clear agent cache to recreate with new tools
-        global _agent_instance
-        _agent_instance = None
+        session_state['agent_instance'] = None
         
         if updated_selection:
             aiui.success(f"External agents enabled: {', '.join(updated_selection)}")
@@ -172,8 +182,15 @@ async def on_message(message: str):
     
     model = os.getenv("PRAISONAI_MODEL", "gpt-4o-mini")
     
+    # Get session-scoped state
+    if not hasattr(aiui, 'session_state'):
+        session_state = {}
+    else:
+        session_state = aiui.session_state
+    
     # Try to use PraisonAI agent with external agents
-    agent = _get_agent_with_tools(model, _selected_agents)
+    selected_agents = session_state.get('selected_agents', [])
+    agent = _get_agent_with_tools(model, selected_agents)
     if agent:
         try:
             # Check for @mentions for direct delegation
@@ -185,18 +202,20 @@ async def on_message(message: str):
             }
             
             mentioned_agent = None
+            import re
             for mention, agent_name in agent_mentions.items():
-                if mention in message.lower() and agent_name in _selected_agents:
-                    mentioned_agent = agent_name
-                    # Remove mention from message
-                    message = message.replace(mention, "").replace(mention.title(), "").strip()
-                    break
+                if agent_name in selected_agents:
+                    pattern = re.compile(rf'(?<!\w){re.escape(mention)}\b', re.IGNORECASE)
+                    if pattern.search(message):
+                        mentioned_agent = agent_name
+                        message = pattern.sub("", message).strip()
+                        break
             
             if mentioned_agent:
                 await aiui.say(f"🤖 Delegating to {mentioned_agent}...")
             
             # Use PraisonAI agent (supports async)
-            response = await agent.start_async(message)
+            response = await agent.achat(message)
             if hasattr(response, 'content'):
                 content = response.content
             elif hasattr(response, 'result'):

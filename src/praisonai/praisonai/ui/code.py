@@ -11,6 +11,7 @@ This is the optimized code assistant application with:
 # Standard library imports (minimal at top level)
 import os
 import logging
+from typing import Optional
 
 # Set up minimal logging first
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ logger.setLevel(log_level)
 
 # Chainlit must be imported early (required by decorators)
 import chainlit as cl
-from chainlit.input_widget import TextInput, Switch, Select
+from chainlit.input_widget import TextInput, Switch, Select, MultiSelect
 from chainlit.types import ThreadDict
 import chainlit.data as cl_data
 
@@ -461,7 +462,7 @@ def _check_available_external_agents():
         return handler.check_availability()
     return {}
 
-def _get_or_create_agent(model_name: str, tools_enabled: bool = True, claude_code_enabled: bool = False, selected_external_agents: list = None):
+def _get_or_create_agent(model_name: str, tools_enabled: bool = True, claude_code_enabled: bool = False, selected_external_agents: Optional[list[str]] = None):
     """Get or create a reusable agent for the session."""
     Agent = _get_praisonai_agent()
     if Agent is None:
@@ -561,11 +562,12 @@ async def start():
     
     # Get available external agents for settings
     available_external_agents = _check_available_external_agents()
-    external_agent_options = []
+    # Build agent options dict for MultiSelect
+    external_agent_options = {}
     for agent_name, is_available in available_external_agents.items():
         if is_available:
             description = _EXTERNAL_AGENT_DESCRIPTIONS.get(agent_name, agent_name)
-            external_agent_options.append(cl.SelectOption(label=description, value=agent_name))
+            external_agent_options[description] = agent_name
     
     settings_widgets = [
         TextInput(
@@ -588,12 +590,11 @@ async def start():
     
     if external_agent_options:
         settings_widgets.append(
-            Select(
+            MultiSelect(
                 id="external_agents",
                 label="External AI Agents (Select multiple)",
-                options=external_agent_options,
-                initial=selected_external_agents,
-                multiple=True
+                items=external_agent_options,
+                initial=selected_external_agents
             )
         )
     
@@ -856,11 +857,12 @@ async def on_chat_resume(thread: ThreadDict):
     logger.debug(f"Model name: {model_name}")
     # Get available external agents for settings
     available_external_agents = _check_available_external_agents()
-    external_agent_options = []
+    # Build agent options dict for MultiSelect
+    external_agent_options = {}
     for agent_name, is_available in available_external_agents.items():
         if is_available:
             description = _EXTERNAL_AGENT_DESCRIPTIONS.get(agent_name, agent_name)
-            external_agent_options.append(cl.SelectOption(label=description, value=agent_name))
+            external_agent_options[description] = agent_name
     
     settings_widgets = [
         TextInput(
@@ -883,12 +885,11 @@ async def on_chat_resume(thread: ThreadDict):
     
     if external_agent_options:
         settings_widgets.append(
-            Select(
+            MultiSelect(
                 id="external_agents",
                 label="External AI Agents (Select multiple)",
-                options=external_agent_options,
-                initial=selected_external_agents,
-                multiple=True
+                items=external_agent_options,
+                initial=selected_external_agents
             )
         )
     

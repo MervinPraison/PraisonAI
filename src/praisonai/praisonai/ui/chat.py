@@ -17,6 +17,7 @@ Performance improvements over original chat.py:
 # Standard library imports (minimal at top level)
 import os
 import logging
+from typing import Optional
 
 # Set up minimal logging first
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ logger.setLevel(log_level)
 
 # Chainlit must be imported early (required by decorators)
 import chainlit as cl
-from chainlit.input_widget import TextInput, Switch, Select
+from chainlit.input_widget import TextInput, Switch, Select, MultiSelect
 from chainlit.types import ThreadDict
 import chainlit.data as cl_data
 
@@ -447,7 +448,7 @@ def auth_callback(username: str, password: str):
         logger.warning(f"Login failed for user: {username}")
         return None
 
-def _get_or_create_agent(model_name: str, tools_enabled: bool = True, selected_external_agents: list = None):
+def _get_or_create_agent(model_name: str, tools_enabled: bool = True, selected_external_agents: Optional[list[str]] = None):
     """Get or create a reusable agent for the session."""
     Agent = _get_praisonai_agent()
     if Agent is None:
@@ -456,32 +457,35 @@ def _get_or_create_agent(model_name: str, tools_enabled: bool = True, selected_e
     # Get cached agent from session
     cached_agent = cl.user_session.get("_cached_agent")
     cached_model = cl.user_session.get("_cached_agent_model")
+    cached_external_agents = cl.user_session.get("_cached_external_agents", [])
     
-    # Reuse if model matches
-    if cached_agent is not None and cached_model == model_name:
+    # Reuse if model and external agents match
+    if (cached_agent is not None and 
+        cached_model == model_name and
+        cached_external_agents == (selected_external_agents or [])):
         return cached_agent
     
     # Create new agent with interactive tools
     _profile_start("create_agent")
     tools = []
     if tools_enabled:
-        tools = _get_interactive_tools()
+        tools = list(_get_interactive_tools())  # Copy to avoid mutation
         # Add Tavily if available
         if os.getenv("TAVILY_API_KEY"):
             tools.append(tavily_web_search)
-    
-    # Add external agent tools
-    if selected_external_agents:
-        handler = _get_external_agents_handler()
-        if handler:
-            for agent_name in selected_external_agents:
-                try:
-                    integration = handler.get_integration(agent_name)
-                    if integration and integration.is_available:
-                        tools.append(integration.as_tool())
-                        logger.info(f"Added external agent tool: {agent_name}")
-                except Exception as e:
-                    logger.warning(f"Could not load external agent {agent_name}: {e}")
+        
+        # Add external agent tools (only when tools are enabled)
+        if selected_external_agents:
+            handler = _get_external_agents_handler()
+            if handler:
+                for agent_name in selected_external_agents:
+                    try:
+                        integration = handler.get_integration(agent_name)
+                        if integration and integration.is_available:
+                            tools.append(integration.as_tool())
+                            logger.info(f"Added external agent tool: {agent_name}")
+                    except Exception as e:
+                        logger.warning(f"Could not load external agent {agent_name}: {e}")
     
     # Build instructions based on available tools
     instructions = """You are a helpful AI assistant with access to powerful tools.
@@ -534,11 +538,12 @@ async def start():
     
     # Get available external agents for settings
     available_external_agents = _check_available_external_agents()
-    external_agent_options = []
+    # Build agent options dict for MultiSelect
+    external_agent_options = {}
     for agent_name, is_available in available_external_agents.items():
         if is_available:
             description = _EXTERNAL_AGENT_DESCRIPTIONS.get(agent_name, agent_name)
-            external_agent_options.append(cl.SelectOption(label=description, value=agent_name))
+            external_agent_options[description] = agent_name
     
     settings_widgets = [
         TextInput(
@@ -557,12 +562,11 @@ async def start():
     # Add external agents selector if any are available
     if external_agent_options:
         settings_widgets.append(
-            Select(
+            MultiSelect(
                 id="external_agents",
                 label="External AI Agents (Select multiple)",
-                options=external_agent_options,
-                initial=selected_external_agents,
-                multiple=True
+                items=external_agent_options,
+                initial=selected_external_agents
             )
         )
     
@@ -882,11 +886,12 @@ async def on_chat_resume(thread: ThreadDict):
     logger.debug(f"Model name: {model_name}")
     # Get available external agents for settings
     available_external_agents = _check_available_external_agents()
-    external_agent_options = []
+    # Build agent options dict for MultiSelect
+    external_agent_options = {}
     for agent_name, is_available in available_external_agents.items():
         if is_available:
             description = _EXTERNAL_AGENT_DESCRIPTIONS.get(agent_name, agent_name)
-            external_agent_options.append(cl.SelectOption(label=description, value=agent_name))
+            external_agent_options[description] = agent_name
     
     settings_widgets = [
         TextInput(
@@ -904,12 +909,11 @@ async def on_chat_resume(thread: ThreadDict):
     
     if external_agent_options:
         settings_widgets.append(
-            Select(
+            MultiSelect(
                 id="external_agents",
                 label="External AI Agents (Select multiple)",
-                options=external_agent_options,
-                initial=selected_external_agents,
-                multiple=True
+                items=external_agent_options,
+                initial=selected_external_agents
             )
         )
     
