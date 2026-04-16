@@ -4412,7 +4412,7 @@ Do NOT add any explanations or formatting."""
                                     f"via the {integration.cli_command}_tool. Call the tool for coding/analysis tasks."
                                 ),
                                 tools=[integration.as_tool()],
-                                llm=os.environ.get("MODEL_NAME", "gpt-4o-mini"),
+                                llm=agent_config.get('llm') or os.environ.get("MODEL_NAME", "gpt-4o-mini"),
                             )
                             result = manager.start(prompt)
                             ext_console.print(f"\n[bold green]Manager delegation result:[/bold green]")
