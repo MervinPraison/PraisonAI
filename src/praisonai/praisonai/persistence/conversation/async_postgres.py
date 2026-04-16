@@ -12,7 +12,7 @@ import threading
 import time
 from typing import List, Optional
 
-from .base import ConversationStore, ConversationSession, ConversationMessage
+from .base import ConversationStore, ConversationSession, ConversationMessage, validate_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,7 @@ class AsyncPostgresConversationStore(ConversationStore):
         self.database = database
         self.user = user
         self.password = password
+        validate_identifier(table_prefix, "table_prefix")
         self.table_prefix = table_prefix
         self.pool_size = pool_size
         self._pool = None

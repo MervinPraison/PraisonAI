@@ -10,7 +10,7 @@ import logging
 import os
 from typing import List, Optional
 
-from .base import ConversationStore, ConversationSession, ConversationMessage
+from .base import ConversationStore, ConversationSession, ConversationMessage, validate_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +63,7 @@ class TursoConversationStore(ConversationStore):
         
         self._url = url or os.getenv("TURSO_DATABASE_URL")
         self._auth_token = auth_token or os.getenv("TURSO_AUTH_TOKEN")
+        validate_identifier(table_prefix, "table_prefix")
         self.table_prefix = table_prefix
         self.sessions_table = f"{table_prefix}sessions"
         self.messages_table = f"{table_prefix}messages"

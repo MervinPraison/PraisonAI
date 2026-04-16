@@ -7,8 +7,25 @@ ConversationStore handles session and message persistence for conversation histo
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+import re
 import time
 import uuid
+
+
+_IDENTIFIER_RE = re.compile(r'^[a-zA-Z0-9_]*$')
+
+
+def validate_identifier(value: str, name: str = "identifier") -> str:
+    """Validate that a string is safe for use as a SQL identifier.
+
+    Only allows alphanumeric characters and underscores to prevent SQL
+    injection in table/schema names that are interpolated into DDL/DML.
+    """
+    if not isinstance(value, str) or not _IDENTIFIER_RE.match(value):
+        raise ValueError(
+            f"{name} must contain only alphanumeric characters and underscores"
+        )
+    return value
 
 
 @dataclass

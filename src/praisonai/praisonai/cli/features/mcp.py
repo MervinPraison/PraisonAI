@@ -24,6 +24,16 @@ ALLOWED_MCP_COMMANDS = {
     "pipx",
 }
 
+# Per-executable argument flags that enable arbitrary inline code execution
+# and must be rejected to prevent command-injection via MCP command strings.
+_INLINE_EXEC_ARGS = {
+    "python":  {"-c", "--command"},
+    "python3": {"-c", "--command"},
+    "node":    {"-e", "--eval", "-p", "--print"},
+    "deno":    {"-e", "--eval", "eval"},
+    "bun":     {"-e", "--eval", "eval"},
+}
+
 
 class MCPHandler(FlagHandler):
     """
@@ -90,6 +100,21 @@ class MCPHandler(FlagHandler):
                 f"Command '{cmd}' is not in the allowed MCP executables list. "
                 f"Allowed: {', '.join(sorted(ALLOWED_MCP_COMMANDS - {c for c in ALLOWED_MCP_COMMANDS if '.' in c}))}"
             )
+
+        # Reject inline-eval flags that allow arbitrary code execution for
+        # interpreters (python -c, node -e, deno eval, bun -e, ...).
+        base_key = basename.lower()
+        for suffix in (".exe", ".cmd"):
+            if base_key.endswith(suffix):
+                base_key = base_key[: -len(suffix)]
+        forbidden = _INLINE_EXEC_ARGS.get(base_key)
+        if forbidden:
+            for arg in args:
+                if arg in forbidden:
+                    raise ValueError(
+                        f"Argument '{arg}' is not allowed for '{basename}' "
+                        "(inline code execution is blocked in MCP commands)."
+                    )
         
         # Parse environment variables
         env = {}

@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Any, List, Optional
 
-from .base import ConversationStore, ConversationSession, ConversationMessage
+from .base import ConversationStore, ConversationSession, ConversationMessage, validate_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,7 @@ class MySQLConversationStore(ConversationStore):
             )
         
         self._mysql = mysql.connector
+        validate_identifier(table_prefix, "table_prefix")
         self.table_prefix = table_prefix
         self.sessions_table = f"{table_prefix}sessions"
         self.messages_table = f"{table_prefix}messages"

@@ -9,7 +9,7 @@ import logging
 import time
 from typing import List, Optional
 
-from .base import ConversationStore, ConversationSession, ConversationMessage
+from .base import ConversationStore, ConversationSession, ConversationMessage, validate_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,7 @@ class SupabaseConversationStore(ConversationStore):
             max_retries: Max retries for paused project wake-up
             retry_delay: Base delay between retries in seconds
         """
+        validate_identifier(table_prefix, "table_prefix")
         try:
             from supabase import create_client, Client
         except ImportError:

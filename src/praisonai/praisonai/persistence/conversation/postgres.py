@@ -11,7 +11,7 @@ import time as _time
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
-from .base import ConversationStore, ConversationSession, ConversationMessage
+from .base import ConversationStore, ConversationSession, ConversationMessage, validate_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +85,8 @@ class PostgresConversationStore(ConversationStore):
         self._psycopg2 = psycopg2
         self._RealDictCursor = RealDictCursor
         
+        validate_identifier(schema, "schema")
+        validate_identifier(table_prefix, "table_prefix")
         self.schema = schema
         self.table_prefix = table_prefix
         self.sessions_table = f"{schema}.{table_prefix}sessions"
