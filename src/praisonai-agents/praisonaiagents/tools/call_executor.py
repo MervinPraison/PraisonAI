@@ -168,6 +168,7 @@ class ParallelToolCallExecutor:
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             # Submit all tool calls with context propagation
             future_to_index = {
+                # Preserve contextvars (tracing/session context) across worker threads.
                 executor.submit(copy_context_to_callable(_execute_single_tool), tool_call): i
                 for i, tool_call in enumerate(tool_calls)
             }
