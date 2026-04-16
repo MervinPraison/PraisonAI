@@ -68,26 +68,22 @@ class YAMLToN8nConverter:
         steps = yaml_workflow.get("steps", [])
         connections = self._steps_to_connections(steps, agent_nodes, nodes)
         
-        # If no steps defined, create simple chain from trigger to first agent
+        # If no steps defined, create sequential chain connecting all agents
         if not steps and agent_nodes:
-            first_agent = list(agent_nodes.values())[0]
-            connections[trigger_node.name] = {
-                "main": [[{"node": first_agent, "type": "main", "index": 0}]]
-            }
+            connections = self._build_sequential_connections(agent_nodes, trigger_node.name)
         
-        return {
+        # Only include fields allowed by n8n Public API
+        ALLOWED_FIELDS = {"name", "nodes", "connections", "settings"}
+        workflow_data = {
             "name": yaml_workflow.get("name", "PraisonAI Workflow"),
             "nodes": [node.to_dict() for node in nodes],
             "connections": connections,
             "settings": {
                 "executionOrder": "v1"
-            },
-            "staticData": {},
-            "tags": ["praisonai", "agents"],
-            "triggerCount": 1,
-            "updatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
-            "versionId": "1.0.0"
+            }
         }
+        
+        return workflow_data
     
     def _create_trigger_node(self) -> N8nNode:
         """Create manual trigger node."""
@@ -103,29 +99,27 @@ class YAMLToN8nConverter:
         self.node_counter += 1
         has_tools = bool(config.get("tools"))
         
-        # Determine node type based on agent capabilities
-        if has_tools:
-            node_type = "@n8n/n8n-nodes-langchain.agent"
-        else:
-            node_type = "@n8n/n8n-nodes-langchain.chainLlm"
+        # Use httpRequest node type that points to PraisonAI API
+        node_type = "n8n-nodes-base.httpRequest"
         
-        # Prepare parameters
+        # Build HTTP request parameters for PraisonAI API
+        agent_url_id = agent_id.lower().replace(' ', '_')
+        
+        # Use query from webhook for first agent, previous response for others
+        query_expr = "$json.body?.query || $json.query || 'Execute task'"
+        if self.node_counter > 1:
+            query_expr = "$json.response || 'Continue workflow'"
+        
         parameters = {
-            "options": {}
+            "method": "POST",
+            "url": f"http://localhost:8000/agents/{agent_url_id}",
+            "sendBody": True,
+            "specifyBody": "json",
+            "jsonBody": f"={{{{ JSON.stringify({{ query: {query_expr} }}) }}}}",
+            "options": {
+                "timeout": 300000  # 5 minute timeout
+            }
         }
-        
-        if config.get("instructions"):
-            parameters["options"]["systemMessage"] = config["instructions"]
-            
-        if config.get("role"):
-            parameters["options"]["role"] = config["role"]
-            
-        if config.get("llm"):
-            parameters["options"]["model"] = config["llm"]
-            
-        # Add tool configuration if present
-        if has_tools:
-            parameters["tools"] = self._convert_tools(config.get("tools", []))
             
         return N8nNode(
             name=config.get("name", agent_id.replace("_", " ").title()),
@@ -172,6 +166,9 @@ class YAMLToN8nConverter:
         connections = {}
         
         if not steps:
+            # If no steps defined but we have agents, create sequential chain
+            if agent_nodes:
+                return self._build_sequential_connections(agent_nodes, "Manual Trigger")
             return connections
             
         # Start with trigger node
@@ -246,6 +243,37 @@ class YAMLToN8nConverter:
                         if parallel_targets:
                             previous_node = parallel_targets[-1]["node"]
         
+        return connections
+    
+    def _build_sequential_connections(self, agent_nodes: Dict[str, str], trigger_name: str) -> Dict[str, Any]:
+        """Build sequential connections between agents.
+        
+        Creates agent[i] -> agent[i+1] connections for all adjacent pairs.
+        
+        Args:
+            agent_nodes: Dictionary mapping agent IDs to node names
+            trigger_name: Name of the trigger node
+            
+        Returns:
+            Dictionary of n8n connections
+        """
+        connections = {}
+        agent_names = list(agent_nodes.values())
+        
+        if not agent_names:
+            return connections
+            
+        # Connect trigger to first agent
+        connections[trigger_name] = {
+            "main": [[{"node": agent_names[0], "type": "main", "index": 0}]]
+        }
+        
+        # Connect each agent to the next one (sequential chain)
+        for i in range(len(agent_names) - 1):
+            connections[agent_names[i]] = {
+                "main": [[{"node": agent_names[i + 1], "type": "main", "index": 0}]]
+            }
+            
         return connections
     
     def _create_switch_node(self, route_config: Dict[str, Any]) -> N8nNode:
