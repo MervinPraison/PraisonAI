@@ -126,7 +126,7 @@ class TestN8nConverter:
         assert len(trigger_nodes) == 1
         
         # Check agent nodes
-        agent_nodes = [n for n in result["nodes"] if "langchain" in n["type"]]
+        agent_nodes = [n for n in result["nodes"] if n["type"] == "n8n-nodes-base.httpRequest"]
         assert len(agent_nodes) == 2
 
     def test_n8n_workflow_has_required_keys(self, sample_agents_yaml_dict):
@@ -143,8 +143,10 @@ class TestN8nConverter:
         assert "nodes" in result
         assert "connections" in result
         assert "settings" in result
-        assert "staticData" in result
-        assert "tags" in result
+        assert "staticData" not in result
+        assert "tags" not in result
+        assert "updatedAt" not in result
+        assert "versionId" not in result
 
     def test_agent_node_mapping(self):
         """Test that agents are correctly mapped to n8n nodes."""
@@ -174,18 +176,20 @@ class TestN8nConverter:
         nodes = result["nodes"]
         
         # Find agent nodes (exclude trigger)
-        agent_nodes = [n for n in nodes if "langchain" in n["type"]]
+        agent_nodes = [n for n in nodes if n["type"] == "n8n-nodes-base.httpRequest"]
         assert len(agent_nodes) == 2
         
-        # Check tool agent uses agent type
+        # Check tool agent is converted to HTTP request node
         tool_agent = next((n for n in agent_nodes if "Tool Agent" in n["name"]), None)
         assert tool_agent is not None
-        assert tool_agent["type"] == "@n8n/n8n-nodes-langchain.agent"
+        assert tool_agent["type"] == "n8n-nodes-base.httpRequest"
+        assert tool_agent["parameters"]["method"] == "POST"
+        assert "/api/v1/agents/tool_agent/invoke" in tool_agent["parameters"]["url"]
         
-        # Check simple agent uses chain LLM type
+        # Check simple agent is also converted to HTTP request node
         simple_agent = next((n for n in agent_nodes if "Simple Agent" in n["name"]), None)
         assert simple_agent is not None
-        assert simple_agent["type"] == "@n8n/n8n-nodes-langchain.chainLlm"
+        assert simple_agent["type"] == "n8n-nodes-base.httpRequest"
 
     def test_tool_conversion(self):
         """Test that tools are correctly converted."""
@@ -204,6 +208,25 @@ class TestN8nConverter:
         assert any(t["type"] == "web_search" for t in converted)
         assert any(t["type"] == "code_execution" for t in converted)
         assert any(t["type"] == "file_operations" for t in converted)
+
+    def test_http_request_agent_url_is_sanitized(self):
+        """Test that agent IDs are sanitized for URL usage."""
+        try:
+            from praisonai.n8n import YAMLToN8nConverter
+        except ImportError:
+            pytest.skip("n8n dependencies not available")
+
+        yaml_workflow = {
+            "name": "Sanitize URL",
+            "agents": {
+                "Agent/One?": {"name": "Agent One", "instructions": "Do task"}
+            }
+        }
+
+        converter = YAMLToN8nConverter()
+        result = converter.convert(yaml_workflow)
+        agent_node = next(n for n in result["nodes"] if n["type"] == "n8n-nodes-base.httpRequest")
+        assert agent_node["parameters"]["url"].endswith("/api/v1/agents/Agent/One?/invoke")
 
     def test_node_positions_are_sequential(self, sample_agents_yaml_dict):
         """Test that node positions are laid out sequentially."""
@@ -255,14 +278,14 @@ class TestN8nReverseConverter:
                 },
                 {
                     "name": "Content Writer",
-                    "type": "@n8n/n8n-nodes-langchain.chainLlm",
+                    "type": "n8n-nodes-base.httpRequest",
                     "position": [650, 300],
                     "parameters": {
-                        "options": {
-                            "systemMessage": "Write engaging content based on research",
-                            "role": "Writer",
-                            "model": "gpt-4o-mini"
-                        }
+                        "method": "POST",
+                        "url": "http://localhost:8000/api/v1/agents/writer/invoke",
+                        "sendBody": True,
+                        "specifyBody": "json",
+                        "jsonBody": "={{ JSON.stringify({ message: $json.result || 'Continue workflow' }) }}"
                     }
                 }
             ],
