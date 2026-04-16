@@ -851,6 +851,7 @@ Methods:
 * <code title="cli">praisonai eval judge <a href="./src/praisonai/praisonai/cli/commands/eval.py">--help</a></code>
 * <code title="cli">praisonai eval list-judges <a href="./src/praisonai/praisonai/cli/commands/eval.py">--help</a></code>
 * <code title="cli">praisonai eval performance <a href="./src/praisonai/praisonai/cli/commands/eval.py">--help</a></code>
+* <code title="cli">praisonai examples find <a href="./src/praisonai/praisonai/cli/commands/examples.py">--help</a></code>
 * <code title="cli">praisonai examples info <a href="./src/praisonai/praisonai/cli/commands/examples.py">--help</a></code>
 * <code title="cli">praisonai examples list <a href="./src/praisonai/praisonai/cli/commands/examples.py">--help</a></code>
 * <code title="cli">praisonai examples report <a href="./src/praisonai/praisonai/cli/commands/examples.py">--help</a></code>
