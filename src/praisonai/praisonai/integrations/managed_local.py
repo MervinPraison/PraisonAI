@@ -547,34 +547,64 @@ class LocalManagedAgent:
 
     def _execute_sync(self, prompt: str, stream_live: bool = False) -> str:
         """Synchronous execution using PraisonAI Agent.chat()."""
+        # Get context emitter (zero-overhead when no emitter is installed)
+        try:
+            from praisonaiagents.trace.context_events import get_context_emitter
+            emitter = get_context_emitter()
+        except ImportError:
+            emitter = None
+
         agent = self._ensure_agent()
         self._ensure_session()
         self._persist_message("user", prompt)
+        agent_name = self._cfg.get("name", "Agent")
 
-        if stream_live:
-            result_parts = []
-            gen = agent.chat(prompt, stream=True)
-            if hasattr(gen, '__iter__'):
-                for chunk in gen:
-                    if chunk:
-                        sys.stdout.write(str(chunk))
-                        sys.stdout.flush()
-                        result_parts.append(str(chunk))
-                sys.stdout.write("\n")
-                sys.stdout.flush()
-                full = "".join(result_parts)
+        # Emit agent_start event
+        if emitter:
+            emitter.agent_start(agent_name, {
+                "input": prompt,
+                "goal": self._cfg.get("system", self.instructions)
+            })
+
+        try:
+            if stream_live:
+                result_parts = []
+                gen = agent.chat(prompt, stream=True)
+                if hasattr(gen, '__iter__'):
+                    for chunk in gen:
+                        if chunk:
+                            sys.stdout.write(str(chunk))
+                            sys.stdout.flush()
+                            result_parts.append(str(chunk))
+                    sys.stdout.write("\n")
+                    sys.stdout.flush()
+                    full = "".join(result_parts)
+                else:
+                    full = str(gen) if gen else ""
+                    sys.stdout.write(full + "\n")
+                    sys.stdout.flush()
             else:
-                full = str(gen) if gen else ""
-                sys.stdout.write(full + "\n")
-                sys.stdout.flush()
-        else:
-            result = agent.chat(prompt)
-            full = str(result) if result else ""
+                result = agent.chat(prompt)
+                full = str(result) if result else ""
 
-        self._persist_message("assistant", full)
-        self._sync_usage()
-        self._persist_state()
-        return full
+            # Emit llm_response event for the response
+            if emitter and full:
+                emitter.llm_response(
+                    agent_name,
+                    response_content=full,
+                    prompt_tokens=self.total_input_tokens,
+                    completion_tokens=self.total_output_tokens
+                )
+
+            self._persist_message("assistant", full)
+            self._sync_usage()
+            self._persist_state()
+            return full
+
+        finally:
+            # Emit agent_end event
+            if emitter:
+                emitter.agent_end(agent_name)
 
     # ------------------------------------------------------------------
     # stream() — ManagedBackendProtocol
