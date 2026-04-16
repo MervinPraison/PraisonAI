@@ -189,7 +189,7 @@ class TestAgentInvokeFastAPI:
             app = FastAPI()
             app.include_router(router)
             return TestClient(app)
-        except ImportError:
+        except (ImportError, RuntimeError):
             pytest.skip("FastAPI test dependencies not available")
     
     def test_list_agents_endpoint(self, client):

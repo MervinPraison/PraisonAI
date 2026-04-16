@@ -6,6 +6,7 @@ enabling bidirectional n8n ↔ PraisonAI integration.
 """
 
 from typing import Any, Dict, Optional, Union
+import inspect
 import logging
 
 try:
@@ -94,6 +95,12 @@ def list_registered_agents() -> list:
     return list(_agent_registry.keys())
 
 
+def _supports_async_start(agent: Any) -> bool:
+    """Return True when agent exposes a real async astart method."""
+    astart = getattr(agent, "astart", None)
+    return callable(astart) and inspect.iscoroutinefunction(astart)
+
+
 # FastAPI Router (if FastAPI is available)
 if FASTAPI_AVAILABLE and APIRouter is not None:
     router = APIRouter(prefix="/api/v1", tags=["agents"])
@@ -151,12 +158,14 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
                 logger.debug(f"Agent config overrides provided: {request.agent_config}")
             
             # Invoke agent (handle both sync and async agents)
-            if hasattr(agent, 'astart'):
+            if _supports_async_start(agent):
                 # Async agent
                 result = await agent.astart(request.message)
-            else:
+            elif hasattr(agent, "start") and callable(agent.start):
                 # Sync agent (use start method)
                 result = agent.start(request.message)
+            else:
+                raise AttributeError("Agent must provide start() or async astart()")
             
             logger.info(f"Agent {agent_id} invoked successfully")
             
@@ -287,10 +296,12 @@ async def invoke_agent_standalone(
         # Invoke agent
         session_id = session_id or "default"
         
-        if hasattr(agent, 'astart'):
+        if _supports_async_start(agent):
             result = await agent.astart(message)
-        else:
+        elif hasattr(agent, "start") and callable(agent.start):
             result = agent.start(message)
+        else:
+            raise AttributeError("Agent must provide start() or async astart()")
         
         return {
             "result": str(result),
