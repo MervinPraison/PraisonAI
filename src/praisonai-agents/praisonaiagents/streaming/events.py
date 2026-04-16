@@ -31,6 +31,7 @@ class StreamEventType(Enum):
     LAST_TOKEN = "last_token"            # Final content delta
     STREAM_END = "stream_end"            # Stream completed successfully
     ERROR = "error"                      # Error during streaming
+    STREAM_UNAVAILABLE = "stream_unavailable"  # Streaming not available in current configuration
 
 
 @dataclass
