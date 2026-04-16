@@ -11,12 +11,11 @@ Design principles:
 - Thread-safe with bounded workers
 """
 
-import asyncio
 import concurrent.futures
 import logging
-from typing import Any, Callable, Dict, List, Optional, Protocol, Union
+from typing import Any, Callable, Dict, List, Optional, Protocol
 from dataclasses import dataclass
-from threading import BoundedSemaphore
+from ..trace.context_events import copy_context_to_callable
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +33,7 @@ class ToolCall:
 class ToolResult:
     """Result of executing a single tool call."""
     function_name: str
+    arguments: Dict[str, Any]
     result: Any
     tool_call_id: str
     is_ollama: bool
@@ -85,6 +85,7 @@ class SequentialToolCallExecutor:
                 )
                 results.append(ToolResult(
                     function_name=tool_call.function_name,
+                    arguments=tool_call.arguments,
                     result=result,
                     tool_call_id=tool_call.tool_call_id,
                     is_ollama=tool_call.is_ollama
@@ -93,6 +94,7 @@ class SequentialToolCallExecutor:
                 logger.error(f"Tool execution error for {tool_call.function_name}: {e}")
                 results.append(ToolResult(
                     function_name=tool_call.function_name,
+                    arguments=tool_call.arguments,
                     result=f"Error executing tool: {e}",
                     tool_call_id=tool_call.tool_call_id,
                     is_ollama=tool_call.is_ollama,
@@ -120,7 +122,6 @@ class ParallelToolCallExecutor:
             max_workers: Maximum concurrent tool executions (default 5)
         """
         self.max_workers = max_workers
-        self._semaphore = BoundedSemaphore(max_workers)
     
     def execute_batch(
         self,
@@ -138,34 +139,35 @@ class ParallelToolCallExecutor:
         
         def _execute_single_tool(tool_call: ToolCall) -> ToolResult:
             """Execute a single tool call with error handling."""
-            with self._semaphore:  # Respect max_workers bound
-                try:
-                    result = execute_tool_fn(
-                        tool_call.function_name,
-                        tool_call.arguments, 
-                        tool_call.tool_call_id
-                    )
-                    return ToolResult(
-                        function_name=tool_call.function_name,
-                        result=result,
-                        tool_call_id=tool_call.tool_call_id,
-                        is_ollama=tool_call.is_ollama
-                    )
-                except Exception as e:
-                    logger.error(f"Tool execution error for {tool_call.function_name}: {e}")
-                    return ToolResult(
-                        function_name=tool_call.function_name,
-                        result=f"Error executing tool: {e}",
-                        tool_call_id=tool_call.tool_call_id,
-                        is_ollama=tool_call.is_ollama,
-                        error=e
-                    )
+            try:
+                result = execute_tool_fn(
+                    tool_call.function_name,
+                    tool_call.arguments,
+                    tool_call.tool_call_id
+                )
+                return ToolResult(
+                    function_name=tool_call.function_name,
+                    arguments=tool_call.arguments,
+                    result=result,
+                    tool_call_id=tool_call.tool_call_id,
+                    is_ollama=tool_call.is_ollama
+                )
+            except Exception as e:
+                logger.error(f"Tool execution error for {tool_call.function_name}: {e}")
+                return ToolResult(
+                    function_name=tool_call.function_name,
+                    arguments=tool_call.arguments,
+                    result=f"Error executing tool: {e}",
+                    tool_call_id=tool_call.tool_call_id,
+                    is_ollama=tool_call.is_ollama,
+                    error=e
+                )
         
         # Use ThreadPoolExecutor for sync tools
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             # Submit all tool calls
             future_to_index = {
-                executor.submit(_execute_single_tool, tool_call): i 
+                executor.submit(copy_context_to_callable(_execute_single_tool), tool_call): i
                 for i, tool_call in enumerate(tool_calls)
             }
             

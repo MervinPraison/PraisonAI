@@ -16,7 +16,7 @@ import time
 import json
 import xml.etree.ElementTree as ET
 # Gap 2: Tool call execution imports
-from ..tools.call_executor import ToolCall, ToolResult, create_tool_call_executor
+from ..tools.call_executor import ToolCall, create_tool_call_executor
 # Display functions - lazy loaded to avoid importing rich at startup
 # These are only needed when output=verbose
 _display_module = None
@@ -1918,6 +1918,8 @@ Now provide your final answer using this result. Summarize the information natur
                             
                             tool_results = []
                             for tool_result_obj in tool_results_batch:
+                                if tool_result_obj.error is not None:
+                                    raise tool_result_obj.error
                                 tool_result = tool_result_obj.result
                                 tool_results.append(tool_result)
                                 accumulated_tool_results.append(tool_result)
@@ -1925,7 +1927,7 @@ Now provide your final answer using this result. Summarize the information natur
                                 logging.debug(f"[RESPONSES_API] Executed tool {tool_result_obj.function_name} with result: {tool_result}")
 
                                 if verbose:
-                                    display_message = f"Agent {agent_name} called function '{tool_result_obj.function_name}' with arguments: {tool_result_obj.arguments if hasattr(tool_result_obj, 'arguments') else 'N/A'}\n"
+                                    display_message = f"Agent {agent_name} called function '{tool_result_obj.function_name}' with arguments: {tool_result_obj.arguments}\n"
                                     display_message += f"Function returned: {tool_result}" if tool_result else "Function returned no output"
                                     _get_display_functions()['display_tool_call'](display_message, console=self.console)
 
@@ -1934,7 +1936,7 @@ Now provide your final answer using this result. Summarize the information natur
                                     'tool_call',
                                     message=f"Calling function: {tool_result_obj.function_name}",
                                     tool_name=tool_result_obj.function_name,
-                                    tool_input=tool_result_obj.arguments if hasattr(tool_result_obj, 'arguments') else {},
+                                    tool_input=tool_result_obj.arguments,
                                     tool_output=result_str[:200] if result_str else None,
                                 )
 
@@ -1949,7 +1951,7 @@ Now provide your final answer using this result. Summarize the information natur
                                     content = json.dumps(tool_result)
                                 messages.append({
                                     "role": "tool",
-                                    "tool_call_id": tool_call_id,
+                                    "tool_call_id": tool_result_obj.tool_call_id,
                                     "content": content,
                                 })
 

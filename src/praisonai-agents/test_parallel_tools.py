@@ -91,6 +91,7 @@ def test_executor_protocols():
     assert len(seq_results) == len(par_results)
     for i, (seq_result, par_result) in enumerate(zip(seq_results, par_results)):
         assert seq_result.function_name == par_result.function_name
+        assert seq_result.arguments == par_result.arguments
         assert seq_result.tool_call_id == par_result.tool_call_id
         print(f"  Result {i+1}: {seq_result.function_name} -> {seq_result.result}")
     
