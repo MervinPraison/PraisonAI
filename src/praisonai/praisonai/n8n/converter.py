@@ -316,9 +316,15 @@ class YAMLToN8nConverter:
         """Convert loop configuration to n8n SplitInBatches node."""
         self.node_counter += 1
         
-        # Extract loop configuration
-        batch_size = loop_config.get("batch_size", 1)
-        input_field = loop_config.get("items", "items")
+        # Extract loop configuration with defensive validation
+        if not isinstance(loop_config, dict):
+            loop_config = {}
+        try:
+            batch_size = int(loop_config.get("batch_size", 1))
+        except (TypeError, ValueError):
+            batch_size = 1
+        if batch_size < 1:
+            batch_size = 1
         
         return N8nNode(
             name=f"Loop {self.node_counter}",

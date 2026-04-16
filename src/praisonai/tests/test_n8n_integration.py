@@ -448,6 +448,70 @@ class TestN8nWorkflowPatterns:
         switch_nodes = [n for n in result["nodes"] if "switch" in n["type"]]
         assert len(switch_nodes) >= 1
 
+    def test_loop_workflow_conversion(self):
+        """Test that loop steps are handled with splitInBatches node."""
+        try:
+            from praisonai.n8n import YAMLToN8nConverter
+        except ImportError:
+            pytest.skip("n8n dependencies not available")
+
+        loop_workflow = {
+            "name": "Loop Workflow",
+            "agents": {
+                "worker": {
+                    "name": "Worker",
+                    "instructions": "Process an item"
+                }
+            },
+            "steps": [
+                {
+                    "loop": {
+                        "batch_size": 2,
+                        "steps": [{"agent": "worker"}]
+                    }
+                }
+            ]
+        }
+
+        converter = YAMLToN8nConverter()
+        result = converter.convert(loop_workflow)
+
+        split_nodes = [n for n in result["nodes"] if "splitInBatches" in n["type"]]
+        assert len(split_nodes) == 1
+        assert split_nodes[0]["parameters"]["batchSize"] == 2
+
+    def test_loop_workflow_invalid_batch_size_defaults_to_one(self):
+        """Test that invalid loop batch_size is safely normalized."""
+        try:
+            from praisonai.n8n import YAMLToN8nConverter
+        except ImportError:
+            pytest.skip("n8n dependencies not available")
+
+        loop_workflow = {
+            "name": "Loop Workflow Invalid Batch",
+            "agents": {
+                "worker": {
+                    "name": "Worker",
+                    "instructions": "Process an item"
+                }
+            },
+            "steps": [
+                {
+                    "loop": {
+                        "batch_size": 0,
+                        "steps": [{"agent": "worker"}]
+                    }
+                }
+            ]
+        }
+
+        converter = YAMLToN8nConverter()
+        result = converter.convert(loop_workflow)
+
+        split_nodes = [n for n in result["nodes"] if "splitInBatches" in n["type"]]
+        assert len(split_nodes) == 1
+        assert split_nodes[0]["parameters"]["batchSize"] == 1
+
 
 class TestN8nRoundTrip:
     """Tests for round-trip conversion."""
