@@ -10,7 +10,7 @@ import inspect
 import logging
 
 try:
-    from fastapi import APIRouter, HTTPException, Depends
+    from fastapi import APIRouter, HTTPException, Depends, Header, Request
     from pydantic import BaseModel, Field
     FASTAPI_AVAILABLE = True
 except ImportError:
@@ -19,10 +19,48 @@ except ImportError:
     HTTPException = None
     BaseModel = object
     Field = lambda *args, **kwargs: None
+    Depends = lambda x: x
+    Header = lambda *args, **kwargs: None
+    Request = object
     FASTAPI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
+# Authentication
+import os
+CALL_SERVER_TOKEN = os.getenv('CALL_SERVER_TOKEN')
+
+async def verify_token(
+    request: Request, 
+    authorization: Optional[str] = Header(None)
+) -> None:
+    """Verify API token for authentication."""
+    if not FASTAPI_AVAILABLE or not CALL_SERVER_TOKEN:
+        return  # No authentication if FastAPI unavailable or no token set
+        
+    token = None
+    
+    # Check Authorization header first (Bearer or Basic)
+    if authorization:
+        if authorization.startswith("Bearer "):
+            token = authorization.split(" ")[1]
+        elif authorization.startswith("Basic "):
+            try:
+                import base64
+                decoded = base64.b64decode(authorization[6:]).decode("utf-8")
+                if ":" in decoded:
+                    token = decoded.split(":", 1)[1]  # Use password as token
+                else:
+                    token = decoded
+            except Exception:
+                pass
+    
+    # Check query param as fallback
+    if not token:
+        token = request.query_params.get("token")
+    
+    if token != CALL_SERVER_TOKEN:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 # Request/Response Models
 if FASTAPI_AVAILABLE:
@@ -114,7 +152,8 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
     @router.post("/agents/{agent_id}/invoke")
     async def invoke_agent(
         agent_id: str,
-        request: AgentInvokeRequest
+        request: AgentInvokeRequest,
+        _: None = Depends(verify_token)
     ) -> Union[AgentInvokeResponse, ErrorResponse]:
         """
         Invoke a PraisonAI agent with a message.
@@ -150,7 +189,7 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
             logger.error(f"Agent not found: {agent_id}")
             raise HTTPException(
                 status_code=404,
-                detail=f"Agent '{agent_id}' not found. Available agents: {list_registered_agents()}"
+                detail=f"Agent '{agent_id}' not found"
             )
         
         try:
@@ -168,8 +207,10 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
                 # Async agent
                 result = await agent.astart(request.message)
             elif _supports_sync_start(agent):
-                # Sync agent (use start method)
-                result = agent.start(request.message)
+                # Sync agent - run in thread pool to avoid blocking the event loop
+                import asyncio
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(None, agent.start, request.message)
             else:
                 raise AttributeError(f"Agent {agent_id} must provide start() or async astart()")
             
@@ -194,7 +235,7 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
             )
 
     @router.get("/agents")
-    async def list_agents() -> Dict[str, Any]:
+    async def list_agents(_: None = Depends(verify_token)) -> Dict[str, Any]:
         """
         List all registered agents.
         
@@ -209,7 +250,7 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
         }
 
     @router.post("/agents/{agent_id}/register")
-    async def register_agent_endpoint(agent_id: str) -> Dict[str, Any]:
+    async def register_agent_endpoint(agent_id: str, _: None = Depends(verify_token)) -> Dict[str, Any]:
         """
         Register an agent for API access.
         
@@ -225,7 +266,7 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
         }
 
     @router.delete("/agents/{agent_id}")
-    async def unregister_agent_endpoint(agent_id: str) -> Dict[str, Any]:
+    async def unregister_agent_endpoint(agent_id: str, _: None = Depends(verify_token)) -> Dict[str, Any]:
         """
         Unregister an agent from API access.
         """
@@ -242,7 +283,7 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
             )
 
     @router.get("/agents/{agent_id}")
-    async def get_agent_info(agent_id: str) -> Dict[str, Any]:
+    async def get_agent_info(agent_id: str, _: None = Depends(verify_token)) -> Dict[str, Any]:
         """
         Get information about a registered agent.
         """
@@ -305,7 +346,10 @@ async def invoke_agent_standalone(
         if _supports_async_start(agent):
             result = await agent.astart(message)
         elif _supports_sync_start(agent):
-            result = agent.start(message)
+            # Sync agent - run in thread pool to avoid blocking the event loop
+            import asyncio
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, agent.start, message)
         else:
             raise AttributeError(f"Agent {agent_id} must provide start() or async astart()")
         
