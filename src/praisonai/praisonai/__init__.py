@@ -100,6 +100,8 @@ def __getattr__(name):
     elif name in ('DB', 'PraisonAIDB', 'PraisonDB'):
         from .db.adapter import DB
         return DB
+    # Note: n8n is available via direct import: from praisonai.n8n import YAMLToN8nConverter
+    # Lazy loading from main package causes recursion, so use direct import for now
     
     # Try praisonaiagents exports
     try:

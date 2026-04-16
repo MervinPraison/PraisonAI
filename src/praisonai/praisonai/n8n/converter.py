@@ -271,6 +271,43 @@ class YAMLToN8nConverter:
                         # For simplicity, use last parallel agent as previous
                         if parallel_targets:
                             previous_node = parallel_targets[-1]["node"]
+                            
+                elif "loop" in step:
+                    # Loop step - create splitInBatches node for loop iteration
+                    loop_node = self._create_split_in_batches_node(step["loop"])
+                    all_nodes.append(loop_node)
+                    
+                    # Connect previous to split node
+                    connections[previous_node] = {
+                        "main": [[{"node": loop_node.name, "type": "main", "index": 0}]]
+                    }
+                    
+                    # Connect split node to loop body agents
+                    loop_targets = []
+                    loop_config = step["loop"]
+                    if "steps" in loop_config:
+                        for loop_step in loop_config["steps"]:
+                            if isinstance(loop_step, str) and loop_step in agent_nodes:
+                                loop_targets.append({
+                                    "node": agent_nodes[loop_step],
+                                    "type": "main",
+                                    "index": 0
+                                })
+                            elif isinstance(loop_step, dict) and "agent" in loop_step:
+                                agent_id = loop_step["agent"]
+                                if agent_id in agent_nodes:
+                                    loop_targets.append({
+                                        "node": agent_nodes[agent_id],
+                                        "type": "main", 
+                                        "index": 0
+                                    })
+                    
+                    if loop_targets:
+                        connections[loop_node.name] = {"main": [loop_targets]}
+                        # Use the last loop target as previous node
+                        previous_node = loop_targets[-1]["node"]
+                    else:
+                        previous_node = loop_node.name
         
         return connections
     
@@ -329,6 +366,33 @@ class YAMLToN8nConverter:
                 "rules": {
                     "rules": rules
                 }
+            }
+        )
+    
+    def _create_split_in_batches_node(self, loop_config: Dict[str, Any]) -> N8nNode:
+        """Convert loop configuration to n8n SplitInBatches node."""
+        self.node_counter += 1
+        
+        # Extract loop configuration with defensive validation
+        if not isinstance(loop_config, dict):
+            loop_config = {}
+        try:
+            batch_size = int(loop_config.get("batch_size", 1))
+        except (TypeError, ValueError):
+            batch_size = 1
+        if batch_size < 1:
+            batch_size = 1
+        
+        return N8nNode(
+            name=f"Loop {self.node_counter}",
+            type="n8n-nodes-base.splitInBatches",
+            position=[
+                self.position_x_start + (self.node_counter * self.position_x_increment),
+                self.position_y
+            ],
+            parameters={
+                "batchSize": batch_size,
+                "options": {}
             }
         )
     

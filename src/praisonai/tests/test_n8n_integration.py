@@ -356,10 +356,22 @@ class TestN8nCLIIntegration:
             pytest.skip("CLI commands not available")
         
         # Check that the main app is a typer app
-        assert hasattr(app, 'commands')
+        assert hasattr(app, 'registered_commands') or hasattr(app, 'commands')
         
         # Check that expected commands exist
-        command_names = [cmd.name for cmd in app.commands.values()]
+        if hasattr(app, 'registered_commands'):
+            # Modern Typer uses a list of CommandInfo objects
+            if isinstance(app.registered_commands, list):
+                command_names = []
+                for cmd in app.registered_commands:
+                    # Use name if available, otherwise fallback to callback name
+                    name = cmd.name if cmd.name else (cmd.callback.__name__ if cmd.callback else 'unknown')
+                    command_names.append(name)
+            else:
+                command_names = [name for name in app.registered_commands.keys()]
+        else:
+            command_names = [cmd.name for cmd in app.commands.values()]
+        # Some commands use explicit names, others use function names
         expected_commands = ['export', 'import', 'preview', 'push', 'pull', 'test', 'list']
         
         for cmd in expected_commands:
@@ -458,6 +470,70 @@ class TestN8nWorkflowPatterns:
         # Should have switch node for routing
         switch_nodes = [n for n in result["nodes"] if "switch" in n["type"]]
         assert len(switch_nodes) >= 1
+
+    def test_loop_workflow_conversion(self):
+        """Test that loop steps are handled with splitInBatches node."""
+        try:
+            from praisonai.n8n import YAMLToN8nConverter
+        except ImportError:
+            pytest.skip("n8n dependencies not available")
+
+        loop_workflow = {
+            "name": "Loop Workflow",
+            "agents": {
+                "worker": {
+                    "name": "Worker",
+                    "instructions": "Process an item"
+                }
+            },
+            "steps": [
+                {
+                    "loop": {
+                        "batch_size": 2,
+                        "steps": [{"agent": "worker"}]
+                    }
+                }
+            ]
+        }
+
+        converter = YAMLToN8nConverter()
+        result = converter.convert(loop_workflow)
+
+        split_nodes = [n for n in result["nodes"] if "splitInBatches" in n["type"]]
+        assert len(split_nodes) == 1
+        assert split_nodes[0]["parameters"]["batchSize"] == 2
+
+    def test_loop_workflow_invalid_batch_size_defaults_to_one(self):
+        """Test that invalid loop batch_size is safely normalized."""
+        try:
+            from praisonai.n8n import YAMLToN8nConverter
+        except ImportError:
+            pytest.skip("n8n dependencies not available")
+
+        loop_workflow = {
+            "name": "Loop Workflow Invalid Batch",
+            "agents": {
+                "worker": {
+                    "name": "Worker",
+                    "instructions": "Process an item"
+                }
+            },
+            "steps": [
+                {
+                    "loop": {
+                        "batch_size": 0,
+                        "steps": [{"agent": "worker"}]
+                    }
+                }
+            ]
+        }
+
+        converter = YAMLToN8nConverter()
+        result = converter.convert(loop_workflow)
+
+        split_nodes = [n for n in result["nodes"] if "splitInBatches" in n["type"]]
+        assert len(split_nodes) == 1
+        assert split_nodes[0]["parameters"]["batchSize"] == 1
 
 
 class TestN8nRoundTrip:
