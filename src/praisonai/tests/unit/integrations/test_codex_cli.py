@@ -9,6 +9,7 @@ import json
 from unittest.mock import patch, AsyncMock
 import sys
 import os
+import inspect
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
@@ -49,6 +50,22 @@ class TestCodexCLIIntegration:
         
         integration = CodexCLIIntegration(full_auto=True)
         assert integration.full_auto is True
+        assert integration.approval_mode == "full-auto"
+
+    def test_approval_mode_option(self):
+        """Test approval_mode can be set explicitly."""
+        from praisonai.integrations.codex_cli import CodexCLIIntegration
+
+        integration = CodexCLIIntegration(approval_mode="auto-edit")
+        assert integration.approval_mode == "auto-edit"
+        assert integration.full_auto is False
+
+    def test_invalid_approval_mode_raises(self):
+        """Test invalid approval_mode raises ValueError."""
+        from praisonai.integrations.codex_cli import CodexCLIIntegration
+
+        with pytest.raises(ValueError, match="Invalid approval_mode"):
+            CodexCLIIntegration(approval_mode="invalid")
     
     def test_sandbox_option(self):
         """Test sandbox option can be set."""
@@ -85,6 +102,26 @@ class TestCodexCLIIntegration:
         cmd = integration._build_command("Fix the bug")
         
         assert "--json" in cmd
+
+    def test_build_command_with_auto_edit(self):
+        """Test building command with auto-edit approval mode."""
+        from praisonai.integrations.codex_cli import CodexCLIIntegration
+
+        integration = CodexCLIIntegration(approval_mode="auto-edit")
+        cmd = integration._build_command("Fix the bug")
+
+        assert "--auto-edit" in cmd
+        assert "--full-auto" not in cmd
+
+    def test_build_command_with_provider(self):
+        """Test building command with provider option."""
+        from praisonai.integrations.codex_cli import CodexCLIIntegration
+
+        integration = CodexCLIIntegration(provider="openrouter")
+        cmd = integration._build_command("Fix the bug")
+
+        assert "--provider" in cmd
+        assert "openrouter" in cmd
     
     def test_build_command_with_sandbox(self):
         """Test building command with sandbox."""
@@ -152,3 +189,15 @@ class TestCodexCLIStructuredOutput:
         
         assert "--output-schema" in cmd
         assert "/path/to/schema.json" in cmd
+
+
+class TestIntegrationExports:
+    """Tests for integration module exports."""
+
+    def test_get_available_integrations_export_is_sync(self):
+        """Test exported get_available_integrations remains synchronous."""
+        from praisonai.integrations import get_available_integrations
+
+        result = get_available_integrations()
+        assert inspect.iscoroutine(result) is False
+        assert isinstance(result, dict)

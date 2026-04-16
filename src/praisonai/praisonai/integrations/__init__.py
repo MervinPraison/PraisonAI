@@ -41,6 +41,10 @@ __all__ = [
     'ManagedAgentIntegration',  # backward compat alias
     'ManagedBackendConfig',     # backward compat alias
     'get_available_integrations',
+    'ExternalAgentRegistry',
+    'get_registry',
+    'register_integration',
+    'create_integration',
 ]
 
 
@@ -79,4 +83,16 @@ def __getattr__(name):
     elif name == 'get_available_integrations':
         from .base import get_available_integrations
         return get_available_integrations
+    elif name == 'ExternalAgentRegistry':
+        from .registry import ExternalAgentRegistry
+        return ExternalAgentRegistry
+    elif name == 'get_registry':
+        from .registry import get_registry
+        return get_registry
+    elif name == 'register_integration':
+        from .registry import register_integration
+        return register_integration
+    elif name == 'create_integration':
+        from .registry import create_integration
+        return create_integration
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

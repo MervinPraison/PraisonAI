@@ -19,6 +19,11 @@ export interface ExternalAgentResult {
   duration: number;
 }
 
+export type StreamEvent =
+  | { type: 'text'; content: string }
+  | { type: 'json'; data: unknown }
+  | { type: 'error'; error: string };
+
 /**
  * Base class for external agent integrations
  */
@@ -41,6 +46,11 @@ export abstract class BaseExternalAgent {
    * Execute a prompt with the external agent
    */
   abstract execute(prompt: string): Promise<ExternalAgentResult>;
+
+  /**
+   * Stream output from the external agent
+   */
+  abstract stream(prompt: string): AsyncGenerator<StreamEvent, void, unknown>;
 
   /**
    * Get the agent name
@@ -98,6 +108,65 @@ export abstract class BaseExternalAgent {
   }
 
   /**
+   * Stream command output line by line
+   */
+  protected async *streamCommand(args: string[]): AsyncGenerator<StreamEvent, void, unknown> {
+    const { spawn } = await import('child_process');
+    
+    const proc = spawn(this.config.command, args, {
+      cwd: this.config.cwd || process.cwd(),
+      env: { ...process.env, ...this.config.env },
+      timeout: this.config.timeout,
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+
+    if (!proc.stdout) {
+      throw new Error('Failed to create stdout stream');
+    }
+
+    let stderr = '';
+    proc.stderr?.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    const exit = new Promise<number | null>((resolve, reject) => {
+      proc.once('error', reject);
+      proc.once('close', resolve);
+    });
+
+    const readline = await import('readline');
+    const rl = readline.createInterface({
+      input: proc.stdout,
+      crlfDelay: Infinity
+    });
+
+    try {
+      for await (const line of rl) {
+        if (line.trim()) {
+          // Try to parse as JSON first
+          try {
+            const event = JSON.parse(line);
+            yield { type: 'json', data: event };
+          } catch {
+            // If not JSON, treat as text
+            yield { type: 'text', content: line };
+          }
+        }
+      }
+
+      const exitCode = await exit;
+      if (exitCode !== 0) {
+        throw new Error(stderr || `${this.config.command} exited with code ${exitCode}`);
+      }
+    } finally {
+      rl.close();
+      if (!proc.killed) {
+        proc.kill();
+      }
+    }
+  }
+
+  /**
    * Check if a command exists
    */
   protected async commandExists(command: string): Promise<boolean> {
@@ -129,6 +198,10 @@ export class ClaudeCodeAgent extends BaseExternalAgent {
 
   async execute(prompt: string): Promise<ExternalAgentResult> {
     return this.runCommand(['--print', prompt]);
+  }
+
+  async *stream(prompt: string): AsyncGenerator<StreamEvent, void, unknown> {
+    yield* this.streamCommand(['--print', '--output-format', 'stream-json', prompt]);
   }
 
   async executeWithSession(prompt: string, sessionId?: string): Promise<ExternalAgentResult> {
@@ -163,6 +236,10 @@ export class GeminiCliAgent extends BaseExternalAgent {
   async execute(prompt: string): Promise<ExternalAgentResult> {
     return this.runCommand(['-m', this.model, prompt]);
   }
+
+  async *stream(prompt: string): AsyncGenerator<StreamEvent, void, unknown> {
+    yield* this.streamCommand(['-m', this.model, '--json', prompt]);
+  }
 }
 
 /**
@@ -184,6 +261,10 @@ export class CodexCliAgent extends BaseExternalAgent {
   async execute(prompt: string): Promise<ExternalAgentResult> {
     return this.runCommand(['exec', '--full-auto', prompt]);
   }
+
+  async *stream(prompt: string): AsyncGenerator<StreamEvent, void, unknown> {
+    yield* this.streamCommand(['exec', '--full-auto', '--json', prompt]);
+  }
 }
 
 /**
@@ -204,6 +285,19 @@ export class AiderAgent extends BaseExternalAgent {
 
   async execute(prompt: string): Promise<ExternalAgentResult> {
     return this.runCommand(['--message', prompt, '--yes']);
+  }
+
+  async *stream(prompt: string): AsyncGenerator<StreamEvent, void, unknown> {
+    // Aider doesn't support JSON streaming, so just yield text events
+    const result = await this.execute(prompt);
+    if (!result.success) {
+      throw new Error(result.error || 'Aider execution failed');
+    }
+    for (const line of result.output.split('\n')) {
+      if (line.trim()) {
+        yield { type: 'text', content: line };
+      }
+    }
   }
 }
 
@@ -230,6 +324,16 @@ export class GenericExternalAgent extends BaseExternalAgent {
       args.push(prompt);
     }
     return this.runCommand(args);
+  }
+
+  async *stream(prompt: string): AsyncGenerator<StreamEvent, void, unknown> {
+    const args = [...(this.config.args || [])];
+    if (this.promptArg) {
+      args.push(this.promptArg, prompt);
+    } else {
+      args.push(prompt);
+    }
+    yield* this.streamCommand(args);
   }
 }
 
