@@ -212,6 +212,7 @@ jobs:
 
             STEP 1 — READ GUIDELINES:
             Read AGENTS.md to understand the architecture rules.
+            SCOPE: Focus ONLY on Python packages (praisonaiagents, praisonai). Do NOT modify or touch praisonai-rust or praisonai-ts packages.
 
             STEP 2 — ARCHITECTURE VALIDATION & ROUTING (MANDATORY before writing code):
             Before implementing anything, answer these questions:
