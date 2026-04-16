@@ -20,7 +20,7 @@ class TestAnthropicManagedAgentTraceEvents:
 
     def test_execute_sync_emits_trace_events(self):
         """Test that _execute_sync emits agent_start, llm_response, and agent_end events."""
-        from praisonai.praisonai.integrations.managed_agents import AnthropicManagedAgent, ManagedConfig
+        from praisonai.integrations.managed_agents import AnthropicManagedAgent, ManagedConfig
         
         # Create a mock client and session
         mock_client = Mock()
@@ -68,7 +68,7 @@ class TestAnthropicManagedAgentTraceEvents:
 
     def test_process_events_emits_tool_events(self):
         """Test that _process_events emits tool_call_start and tool_call_end for tool_use events."""
-        from praisonai.praisonai.integrations.managed_agents import AnthropicManagedAgent, ManagedConfig
+        from praisonai.integrations.managed_agents import AnthropicManagedAgent, ManagedConfig
         
         # Create agent
         config = ManagedConfig(name="TestAgent")
@@ -81,10 +81,14 @@ class TestAnthropicManagedAgentTraceEvents:
         mock_event.id = "tool_123"
         mock_event.input = {"query": "test"}
         mock_event.needs_confirmation = False
+        mock_event.usage = None
+        mock_event.model_usage = None
         
         # Mock session idle event
         mock_idle = Mock()
         mock_idle.type = "session.status_idle"
+        mock_idle.usage = None
+        mock_idle.model_usage = None
         
         # Set up trace sink
         sink = ContextListSink()
@@ -120,7 +124,7 @@ class TestLocalManagedAgentTraceEvents:
 
     def test_execute_sync_emits_trace_events(self):
         """Test that _execute_sync emits agent_start, llm_response, and agent_end events."""
-        from praisonai.praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
+        from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
         
         # Create agent with minimal config
         config = LocalManagedConfig(name="TestAgent", system="Test system", tools=[])
@@ -172,7 +176,7 @@ class TestLocalManagedAgentTraceEvents:
 
     def test_zero_overhead_when_no_emitter(self):
         """Test that trace events have zero overhead when no emitter is installed."""
-        from praisonai.praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
+        from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
         
         # Create agent
         config = LocalManagedConfig(name="TestAgent", tools=[])
@@ -201,7 +205,7 @@ class TestRealAgenticTest:
     @pytest.mark.skipif(True, reason="Gated real agentic test - requires API keys")
     def test_agent_with_managed_backend_shows_events(self):
         """Real agentic test: Agent(backend=ManagedAgent()).start() with ContextListSink shows ≥ 2 events."""
-        from praisonai.praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
+        from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
         from praisonaiagents import Agent
         
         # Create local managed backend
