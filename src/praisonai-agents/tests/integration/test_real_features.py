@@ -17,6 +17,7 @@ from unittest.mock import patch, MagicMock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 from praisonaiagents import Agent, tool
+from praisonaiagents.gateway.protocols import EventType as GatewayEventType
 from praisonaiagents import (
     # Gateway
     GatewayConfig, SessionConfig, GatewayEvent, GatewayMessage, EventType,
@@ -85,13 +86,13 @@ class TestGatewayReal:
     def test_gateway_event_creation_and_roundtrip(self):
         """Test 3: Gateway events can be created and serialized."""
         event = GatewayEvent(
-            type=EventType.MESSAGE,
+            type=GatewayEventType.MESSAGE,
             data={"content": "Hello, World!"},
             source="agent-1",
             target="client-1",
         )
         
-        assert event.type == EventType.MESSAGE
+        assert event.type == GatewayEventType.MESSAGE
         assert event.data["content"] == "Hello, World!"
         assert event.source == "agent-1"
         assert event.target == "client-1"
@@ -101,7 +102,7 @@ class TestGatewayReal:
         # Test serialization roundtrip
         event_dict = event.to_dict()
         restored = GatewayEvent.from_dict(event_dict)
-        assert restored.type == EventType.MESSAGE
+        assert restored.type == GatewayEventType.MESSAGE
         assert restored.data["content"] == "Hello, World!"
     
     def test_gateway_message_creation(self):
