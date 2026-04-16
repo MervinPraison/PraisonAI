@@ -15,6 +15,7 @@ import webbrowser
 import hashlib
 import os
 import platform
+import re
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
@@ -427,8 +428,8 @@ class N8nHandler(FlagHandler):
             n8n HTTP Request node configuration
         """
         agent_name = agent_config.get('name', agent_id.title())
-        # Convert agent_id to URL-safe format (lowercase, underscores)
-        agent_url_id = agent_id.lower().replace(' ', '_')
+        # Convert agent_id to a safe identifier (lowercase, underscores)
+        agent_url_id = re.sub(r"[^a-z0-9_]", "_", agent_id.lower().replace(" ", "_"))
         
         # Build the query - first agent uses webhook input, others use previous response
         # Escape single quotes and double braces (n8n expression syntax)
