@@ -15,7 +15,8 @@ All servers include the unified discovery endpoint at /__praisonai__/discovery.
 
 import os
 import sys
-from typing import Any, Dict, List
+import logging
+from typing import Any, Dict, List, Optional
 
 
 class ServeHandler:
@@ -235,7 +236,7 @@ Launch PraisonAI servers with unified discovery support.
         # Load agents from YAML
         import yaml
         with open(config["file"]) as f:
-            _ = yaml.safe_load(f)  # Validate YAML
+            agents_config = yaml.safe_load(f)
         
         # Create discovery document
         discovery = create_discovery_document(server_name="praisonai-agents")
@@ -255,9 +256,25 @@ Launch PraisonAI servers with unified discovery support.
         # Add discovery routes
         add_discovery_routes(app, discovery)
         
+        # Mount agent_invoke router for n8n integration
+        try:
+            from praisonai.api import agent_invoke
+            # Only mount router if FastAPI is available and router exists
+            if getattr(agent_invoke, 'FASTAPI_AVAILABLE', False) and hasattr(agent_invoke, 'router'):
+                app.include_router(agent_invoke.router)
+                
+                # Register agents from YAML
+                self._register_agents_from_yaml(agents_config, agent_invoke.register_agent)
+            else:
+                logging.getLogger(__name__).warning("FastAPI not available, agent_invoke router not mounted")
+            
+        except ImportError as e:
+            logging.getLogger(__name__).warning(f"Could not load agent invoke router: {e}")
+        
         # Request model
         class AgentQuery(BaseModel):
             query: str
+            agent: Optional[str] = None  # For specifying which agent to use
         
         # Create endpoint for agents
         path = config["path"]
@@ -268,17 +285,48 @@ Launch PraisonAI servers with unified discovery support.
             if query_data is None:
                 try:
                     body = await request.json()
-                    _ = body.get("query", "")  # Extract query
+                    query = body.get("query", "") or body.get("message", "")
+                    agent_name = body.get("agent")
                 except Exception:
                     raise HTTPException(status_code=400, detail="Invalid request")
+            else:
+                query = query_data.query
+                agent_name = query_data.agent
             
             try:
-                # Lazy load and run agents
+                # If specific agent requested, try to use the registered agent
+                if agent_name:
+                    try:
+                        from praisonai.api.agent_invoke import get_agent
+                        agent = get_agent(agent_name)
+                        if agent:
+                            if hasattr(agent, 'astart'):
+                                result = await agent.astart(query)
+                            elif hasattr(agent, 'start'):
+                                import asyncio
+                                loop = asyncio.get_event_loop()
+                                result = await loop.run_in_executor(None, agent.start, query)
+                            else:
+                                raise AttributeError(f"Agent {agent_name} has no start/astart method")
+                            return {"response": str(result)}
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(
+                            f"Failed direct agent invoke for '{agent_name}', falling back to crew execution: {e}"
+                        )
+                        # Fall back to crew-based approach if individual agent fails
+                        pass
+                
+                # Fall back to crew-based approach for compatibility
                 from praisonai.agents_generator import AgentsGenerator
+                from praisonai.inc import LLMConfig
+                
+                # Create a minimal config_list for AgentsGenerator
+                config_list = [LLMConfig().to_dict()]
                 
                 generator = AgentsGenerator(
                     agent_file=config["file"],
                     framework="praisonai",
+                    config_list=config_list
                 )
                 result = generator.generate_crew_and_kickoff()
                 
@@ -289,10 +337,58 @@ Launch PraisonAI servers with unified discovery support.
                     status_code=500,
                 )
         
+        # Add simple /agents/{agent_name} endpoint for n8n compatibility
+        @app.post("/agents/{agent_name}")
+        async def invoke_single_agent(agent_name: str, request: Request):
+            """Invoke a specific agent by name (n8n compatibility endpoint)."""
+            try:
+                body = await request.json()
+                query = body.get("query", "") or body.get("message", "")
+                
+                if not query:
+                    raise HTTPException(status_code=400, detail="No query or message provided")
+                
+                # Use the registered agent if available
+                try:
+                    from praisonai.api import agent_invoke
+                    if hasattr(agent_invoke, 'get_agent'):
+                        agent = agent_invoke.get_agent(agent_name)
+                        if agent:
+                            if hasattr(agent, 'astart'):
+                                result = await agent.astart(query)
+                            elif hasattr(agent, 'start'):
+                                import asyncio
+                                loop = asyncio.get_event_loop()
+                                result = await loop.run_in_executor(None, agent.start, query)
+                            else:
+                                raise AttributeError(f"Agent {agent_name} has no start/astart method")
+                            return {"response": str(result)}
+                        else:
+                            raise HTTPException(status_code=404, detail=f"Agent '{agent_name}' not found")
+                    else:
+                        raise HTTPException(status_code=404, detail=f"Agent registry not available")
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    raise HTTPException(status_code=500, detail=f"Agent execution failed: {str(e)}")
+                    
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Invalid request: {str(e)}")
+        
         # Add endpoint to discovery
         discovery.add_endpoint(EndpointInfo(
             name=path.lstrip("/"),
             description="Invoke agents workflow",
+            provider_type="agents-api",
+            input_schema={"type": "object", "properties": {"query": {"type": "string"}, "agent": {"type": "string", "description": "Optional agent name"}}},
+            streaming=["none"],
+        ))
+        
+        discovery.add_endpoint(EndpointInfo(
+            name="agents/{agent_name}",
+            description="Invoke specific agent by name",
             provider_type="agents-api",
             input_schema={"type": "object", "properties": {"query": {"type": "string"}}},
             streaming=["none"],
@@ -303,11 +399,40 @@ Launch PraisonAI servers with unified discovery support.
         async def root():
             return {
                 "message": "PraisonAI Agents API",
-                "endpoints": [path],
+                "endpoints": [path, "/agents/{agent_name}", "/api/v1/agents/{agent_id}/invoke"],
                 "discovery": "/__praisonai__/discovery",
             }
         
         return app
+    
+    def _register_agents_from_yaml(self, agents_config: Dict[str, Any], register_agent_func) -> None:
+        """Register agents from YAML configuration."""
+        try:
+            # Try to import praisonaiagents to create Agent instances
+            from praisonaiagents import Agent as PraisonAgent
+            
+            roles = agents_config.get('roles', {})
+            
+            for agent_name, agent_data in roles.items():
+                try:
+                    # Create a simple PraisonAgent instance
+                    agent = PraisonAgent(
+                        name=agent_data.get('role', agent_name),
+                        instructions=f"{agent_data.get('goal', '')}. {agent_data.get('backstory', '')}".strip(),
+                        # Add tools if they exist in the YAML
+                        tools=agent_data.get('tools', [])
+                    )
+                    
+                    # Register the agent
+                    register_agent_func(agent_name, agent)
+                    
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"Failed to create agent {agent_name}: {e}")
+                    
+        except ImportError:
+            logging.getLogger(__name__).warning("praisonaiagents not available, skipping agent registration")
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Failed to register agents from YAML: {e}")
     
     def cmd_recipe(self, args: List[str]) -> int:
         """Launch recipe runner server via WebSocketGateway."""
