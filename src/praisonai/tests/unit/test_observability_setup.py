@@ -7,7 +7,7 @@ from praisonai.flow import helpers as flow_helpers
 
 def test_flow_langfuse_context_observability_reuses_single_emitter(monkeypatch):
     monkeypatch.setenv("PRAISONAI_OBSERVE", "langfuse")
-    flow_helpers._LANGFUSE_CONTEXT_EMITTER = None
+    flow_helpers.reset_langfuse_context_observability_for_tests()
 
     sink_instances = []
     set_calls = []
@@ -37,6 +37,7 @@ def test_flow_langfuse_context_observability_reuses_single_emitter(monkeypatch):
     assert len(sink_instances) == 1
     assert len(set_calls) == 2
     assert set_calls[0] is set_calls[1]
+    assert set_calls[0] is flow_helpers.get_langfuse_context_emitter()
 
 
 def test_setup_langfuse_observability_verbose_logs_warning(monkeypatch, capsys):
