@@ -14,17 +14,26 @@ from .state.identifiers import create_context
 
 
 def _setup_langfuse_observability(*, verbose: bool = False) -> None:
-    """Set up Langfuse observability by wiring TraceSink to action emitter."""
+    """Set up Langfuse observability by wiring both Action and Context emitters."""
     try:
         from praisonai.observability.langfuse import LangfuseSink
         from praisonaiagents.trace.protocol import TraceEmitter, set_default_emitter
+        from praisonaiagents.trace.context_events import ContextTraceEmitter, set_context_emitter
+        import atexit
         
         # Create LangfuseSink (auto-reads env vars)
         sink = LangfuseSink()
         
-        # Set up action-level trace emitter (sufficient for Phase 1)
-        emitter = TraceEmitter(sink=sink, enabled=True)
-        set_default_emitter(emitter)
+        # Set up action-level trace emitter (for backward compatibility)
+        action_emitter = TraceEmitter(sink=sink, enabled=True)
+        set_default_emitter(action_emitter)
+        
+        # Set up context-level trace emitter (captures rich agent lifecycle events)
+        context_emitter = ContextTraceEmitter(sink=sink.context_sink(), enabled=True)
+        set_context_emitter(context_emitter)
+        
+        # Clean up on exit
+        atexit.register(sink.close)
         
     except ImportError:
         # Gracefully degrade if Langfuse not installed

@@ -17,6 +17,70 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
 from praisonaiagents.trace.protocol import ActionEvent, ActionEventType, TraceSinkProtocol
+from praisonaiagents.trace.context_events import ContextEvent, ContextEventType, ContextTraceSinkProtocol
+
+
+class _ContextToActionBridge:
+    """
+    Bridge adapter that implements ContextTraceSinkProtocol and forwards
+    ContextEvents to ActionEvents for LangfuseSink.
+    
+    This enables LangfuseSink to receive events from ContextTraceEmitter,
+    which captures the rich lifecycle events that actual agents emit.
+    """
+    
+    __slots__ = ("_action_sink",)
+    
+    def __init__(self, action_sink: "LangfuseSink") -> None:
+        self._action_sink = action_sink
+    
+    def emit(self, event: ContextEvent) -> None:
+        """Convert ContextEvent to ActionEvent and forward to action sink."""
+        action_event = self._convert_context_to_action(event)
+        if action_event:
+            self._action_sink.emit(action_event)
+    
+    def flush(self) -> None:
+        """Forward flush to action sink."""
+        self._action_sink.flush()
+    
+    def close(self) -> None:
+        """Forward close to action sink."""
+        self._action_sink.close()
+    
+    def _convert_context_to_action(self, ctx_event: ContextEvent) -> Optional[ActionEvent]:
+        """Convert ContextEvent to ActionEvent format."""
+        # Map ContextEventType to ActionEventType
+        event_type_mapping = {
+            ContextEventType.AGENT_START: ActionEventType.AGENT_START,
+            ContextEventType.AGENT_END: ActionEventType.AGENT_END,
+            ContextEventType.TOOL_CALL_START: ActionEventType.TOOL_START,
+            ContextEventType.TOOL_CALL_END: ActionEventType.TOOL_END,
+            ContextEventType.LLM_REQUEST: None,  # No direct ActionEvent equivalent
+            ContextEventType.LLM_RESPONSE: None,  # No direct ActionEvent equivalent
+            ContextEventType.MESSAGE_ADDED: None,  # No direct ActionEvent equivalent
+            ContextEventType.SESSION_START: None,  # No direct ActionEvent equivalent
+            ContextEventType.SESSION_END: None,  # No direct ActionEvent equivalent
+        }
+        
+        action_type = event_type_mapping.get(ctx_event.event_type)
+        if not action_type:
+            return None
+        
+        # Convert to ActionEvent format
+        return ActionEvent(
+            event_type=action_type.value,
+            timestamp=ctx_event.timestamp,
+            agent_id=ctx_event.session_id,
+            agent_name=ctx_event.agent_name or "unknown",
+            tool_name=ctx_event.data.get("tool_name"),
+            tool_args=ctx_event.data.get("tool_args"),
+            tool_result_summary=ctx_event.data.get("tool_result_summary"),
+            duration_ms=ctx_event.data.get("duration_ms", 0.0),
+            status=ctx_event.data.get("status"),
+            error_message=ctx_event.data.get("error_message"),
+            metadata=ctx_event.data,
+        )
 
 
 @dataclass
@@ -304,3 +368,16 @@ class LangfuseSink:
                         self._traces.clear()
                 except Exception:
                     pass
+    
+    def context_sink(self) -> ContextTraceSinkProtocol:
+        """
+        Get a ContextTraceSinkProtocol bridge that forwards ContextEvents to this sink.
+        
+        This enables LangfuseSink to receive events from ContextTraceEmitter,
+        which captures the rich lifecycle events that actual agents emit
+        (agent_start, agent_end, tool_call_start, tool_call_end, llm_request, llm_response).
+        
+        Returns:
+            ContextTraceSinkProtocol: Bridge that converts and forwards events
+        """
+        return _ContextToActionBridge(self)

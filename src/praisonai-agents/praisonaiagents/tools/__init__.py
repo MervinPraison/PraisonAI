@@ -147,6 +147,10 @@ TOOL_MAPPINGS = {
     'Crawl4AITools': ('.crawl4ai_tools', 'Crawl4AITools'),
     'crawl4ai_tools': ('.crawl4ai_tools', None),
     
+    # Langextract Tools (interactive text analysis)
+    'langextract_extract': ('.langextract_tools', None),
+    'langextract_render_file': ('.langextract_tools', None),
+    
     # Unified Web Search (auto-fallback across providers)
     'search_web': ('.web_search', None),
     'web_search': ('.web_search', None),  # Alias

@@ -56,6 +56,33 @@ if TYPE_CHECKING:
 class ChatMixin:
     """Mixin providing chat methods for the Agent class."""
 
+    def _extract_llm_response_content(self, response) -> Optional[str]:
+        """Extract actual message content from LLM response for better observability.
+        
+        Instead of str(response) which shows the entire ChatCompletion object,
+        this extracts the actual message text that agents produce.
+        
+        Args:
+            response: OpenAI ChatCompletion response object
+            
+        Returns:
+            str: The actual message content, or fallback representation
+        """
+        if not response:
+            return None
+        
+        try:
+            # Try to extract the actual message content first
+            if hasattr(response, 'choices') and response.choices:
+                choice = response.choices[0]
+                if hasattr(choice, 'message') and hasattr(choice.message, 'content'):
+                    return choice.message.content
+        except (AttributeError, IndexError, TypeError):
+            pass
+        
+        # Fallback to string representation if extraction fails
+        return str(response)
+
     def _build_system_prompt(self, tools=None):
         """Build the system prompt with tool information.
         
@@ -572,7 +599,7 @@ Your Goal: {self.goal}"""
             _trace_emitter.llm_response(
                 self.name,
                 duration_ms=_duration_ms,
-                response_content=str(final_response) if final_response else None,
+                response_content=self._extract_llm_response_content(final_response),
                 prompt_tokens=_prompt_tokens,
                 completion_tokens=_completion_tokens,
                 cost_usd=_cost_usd,
