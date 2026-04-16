@@ -21,11 +21,11 @@ from praisonaiagents.trace.protocol import ActionEvent, ActionEventType
 _REAL_IMPORT = builtins.__import__
 
 
-def _import_with_langextract_failure(name, globals=None, locals=None, fromlist=(), level=0):
+def _import_with_langextract_failure(name, global_vars=None, local_vars=None, fromlist=(), level=0):
     """Import hook that fails only for langextract."""
     if name == "langextract":
         raise ImportError("No module named 'langextract'")
-    return _REAL_IMPORT(name, globals, locals, fromlist, level)
+    return _REAL_IMPORT(name, global_vars, local_vars, fromlist, level)
 
 
 @pytest.fixture
@@ -261,7 +261,9 @@ class TestLangextractCLI:
         from praisonai.cli.commands.langextract import app
         
         # Check that the command exists
-        commands = {cmd.name for cmd in app.registered_commands}
+        registered = app.registered_commands
+        command_objects = registered.values() if hasattr(registered, "values") else registered
+        commands = {cmd.name for cmd in command_objects}
         assert command in commands
 
     def test_view_command_missing_file(self):
