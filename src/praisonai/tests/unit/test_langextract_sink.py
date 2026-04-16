@@ -407,6 +407,7 @@ class TestLangextractContextBridge:
         assert "agent_end" in types
         assert sink._source_text == "Write a haiku"
 
+    @pytest.mark.skipif(not _langextract_available(), reason="langextract not installed")
     def test_setup_observability_registers_context_emitter(self):
         """`--observe langextract` must install the bridge on the context emitter."""
         import praisonai.cli.app as cli_app

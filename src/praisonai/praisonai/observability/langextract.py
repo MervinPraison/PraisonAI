@@ -154,6 +154,35 @@ class LangextractSink:
         """
         return _ContextToActionBridge(self)
 
+    @staticmethod
+    def bridge_context_events(sink: "LangextractSink", session_id: str, warn_callback=None) -> None:
+        """
+        Helper method to set up context event bridging for the given sink.
+        
+        Args:
+            sink: LangextractSink instance to bridge
+            session_id: Session ID for the context emitter
+            warn_callback: Optional callback function for warnings, called with message string
+        """
+        try:
+            from praisonaiagents.trace.context_events import (
+                ContextTraceEmitter,
+                set_context_emitter,
+            )
+            context_emitter = ContextTraceEmitter(
+                sink=sink.context_sink(),
+                session_id=session_id,
+                enabled=True,
+            )
+            set_context_emitter(context_emitter)
+        except ImportError:
+            # Context emitter bridging is optional if not available
+            if warn_callback:
+                warn_callback("ContextTraceEmitter not available")
+        except Exception as e:
+            if warn_callback:
+                warn_callback(f"could not bridge context emitter: {e}")
+
     # ---- TraceSinkProtocol -------------------------------------------------
 
     def emit(self, event: ActionEvent) -> None:

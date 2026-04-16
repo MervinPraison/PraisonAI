@@ -70,20 +70,15 @@ def _setup_langextract_observability(*, verbose: bool = False) -> None:
         # Bridge the context emitter so regular Agent.start / tool calls / LLM
         # responses are captured as well.  Without this, typical single-agent
         # flows produce an empty trace (no agent_start/end, no tool events).
-        try:
-            from praisonaiagents.trace.context_events import (
-                ContextTraceEmitter,
-                set_context_emitter,
-            )
-            context_emitter = ContextTraceEmitter(
-                sink=sink.context_sink(),
-                session_id="praisonai-cli",
-                enabled=True,
-            )
-            set_context_emitter(context_emitter)
-        except Exception as e:  # pragma: no cover - defensive
+        def warn_handler(msg: str):
             if verbose:
-                typer.echo(f"Warning: could not bridge context emitter: {e}", err=True)
+                typer.echo(f"Warning: {msg}", err=True)
+                
+        LangextractSink.bridge_context_events(
+            sink=sink,
+            session_id="praisonai-cli",
+            warn_callback=warn_handler
+        )
 
     except ImportError:
         # Gracefully degrade if langextract not installed
