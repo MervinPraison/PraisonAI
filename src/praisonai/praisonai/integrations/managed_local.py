@@ -475,13 +475,19 @@ class LocalManagedAgent:
             if self._compute:
                 try:
                     if not self._compute_instance_id:
-                        self._run_async(self.provision_compute())
+                        try:
+                            self._run_async(self.provision_compute())
+                        except Exception as provision_error:
+                            raise RuntimeError("compute provisioning failed before package install") from provision_error
 
                     # Route package installation through compute provider
                     cmd_str = f"{sys.executable} -m pip install -q " + " ".join(shlex.quote(pkg) for pkg in pip_pkgs)
                     result = self._run_async(self.execute_in_compute(cmd_str, timeout=120))
                     if result.get("exit_code", 1) != 0:
-                        raise RuntimeError(result.get("stderr", "unknown compute install failure"))
+                        raise RuntimeError(
+                            f"compute package install failed for {pip_pkgs}: "
+                            f"{result.get('stderr', 'unknown error')}"
+                        )
                     logger.info("[local_managed] packages installed via compute provider")
                 except Exception as e:
                     logger.warning("[local_managed] compute provider pip install failed: %s", e)
@@ -493,7 +499,12 @@ class LocalManagedAgent:
     @staticmethod
     def _run_async(coro: Any) -> Any:
         """Run an async coroutine from sync code."""
-        return asyncio.run(coro)
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coro)
+
+        raise RuntimeError("Cannot run async compute operations from an active event loop")
     
     def _install_packages_host(self, pip_pkgs: List[str]) -> None:
         """Install packages on host interpreter (fallback)."""
