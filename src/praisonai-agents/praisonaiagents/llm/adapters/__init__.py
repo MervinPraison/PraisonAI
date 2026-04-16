@@ -4,11 +4,13 @@ LLM Provider Adapters
 Concrete implementations of LLMProviderAdapter protocol that replace
 scattered provider dispatch logic throughout the core.
 
-This demonstrates the protocol-driven approach for Gap 2.
+This demonstrates the protocol-driven approach for Gap 3 (streaming)
+and integrates with Gap 2 (parallel tool execution).
 """
 
 from ..protocols import LLMProviderAdapterProtocol
 from ..model_capabilities import GEMINI_INTERNAL_TOOLS
+from ..streaming_protocol import StreamingCapableAdapter, get_streaming_adapter
 from typing import Dict, Any, List, Optional
 
 
@@ -35,6 +37,11 @@ class DefaultAdapter:
     
     def supports_streaming_with_tools(self) -> bool:
         return True  # Most providers support streaming with tools
+    
+    def get_streaming_adapter(self) -> StreamingCapableAdapter:
+        """Get the streaming adapter for this provider."""
+        # Default providers use the default streaming adapter
+        return get_streaming_adapter("default")
     
     def get_max_iteration_threshold(self) -> int:
         return 10  # Conservative default
@@ -97,6 +104,10 @@ class OllamaAdapter(DefaultAdapter):
     def supports_streaming_with_tools(self) -> bool:
         # Ollama doesn't reliably support streaming with tools
         return False
+    
+    def get_streaming_adapter(self) -> StreamingCapableAdapter:
+        """Get Ollama-specific streaming adapter."""
+        return get_streaming_adapter("ollama")
     
     def get_max_iteration_threshold(self) -> int:
         return 1  # Ollama-specific threshold
@@ -180,6 +191,10 @@ class AnthropicAdapter(DefaultAdapter):
 
     def supports_streaming_with_tools(self) -> bool:
         return False
+    
+    def get_streaming_adapter(self) -> StreamingCapableAdapter:
+        """Get Anthropic-specific streaming adapter."""
+        return get_streaming_adapter("anthropic")
 
 
 class GeminiAdapter(DefaultAdapter):
@@ -217,6 +232,10 @@ class GeminiAdapter(DefaultAdapter):
     def supports_streaming_with_tools(self) -> bool:
         # Gemini has issues with streaming + tools
         return False
+    
+    def get_streaming_adapter(self) -> StreamingCapableAdapter:
+        """Get Gemini-specific streaming adapter."""
+        return get_streaming_adapter("gemini")
 
 
 # Provider adapter registry - public for extension
