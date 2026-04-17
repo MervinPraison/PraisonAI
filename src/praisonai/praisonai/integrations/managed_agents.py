@@ -36,6 +36,22 @@ from typing import AsyncIterator, Callable, Dict, Any, Optional, List
 logger = logging.getLogger(__name__)
 
 
+class ManagedSandboxRequired(Exception):
+    """Raised when package installation or tool execution requires a compute provider for security.
+    
+    This exception is raised when:
+    - Packages are specified without a compute provider attached
+    - host_packages_ok=False (the default for security)
+    
+    To resolve:
+    1. Attach a compute provider: LocalManagedAgent(compute="docker")
+    2. Or explicitly opt-out: LocalManagedConfig(host_packages_ok=True)
+    """
+    
+    def __init__(self, message: str = "Package installation requires compute provider for security"):
+        super().__init__(message)
+
+
 # ---------------------------------------------------------------------------
 # ManagedConfig — Anthropic-specific configuration dataclass
 # Lives in the Wrapper (not Core SDK) because its fields map directly to

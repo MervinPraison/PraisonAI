@@ -53,7 +53,7 @@ class TestLocalManagedConfig:
         cfg = LocalManagedConfig()
         assert cfg.name == "Agent"
         assert cfg.model == "gpt-4o"
-        assert cfg.sandbox_type == "subprocess"
+        assert cfg.host_packages_ok is False
         assert cfg.max_turns == 25
         assert "execute_command" in cfg.tools
 
@@ -471,3 +471,293 @@ class TestComputeProviderWiring:
 
         asyncio.run(agent.shutdown_compute())
         assert agent._compute_instance_id is None
+
+
+# ====================================================================== #
+#  Security tests - package installation and sandbox behavior
+# ====================================================================== #
+
+class TestManagedSandboxSafety:
+    def test_install_packages_without_compute_raises(self):
+        """Test that package installation without compute provider raises ManagedSandboxRequired."""
+        import pytest
+        from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
+        from praisonai.integrations.managed_agents import ManagedSandboxRequired
+        
+        cfg = LocalManagedConfig(packages={"pip": ["requests"]})
+        agent = LocalManagedAgent(config=cfg)
+        
+        with pytest.raises(ManagedSandboxRequired, match="Package installation requires compute provider"):
+            agent._install_packages()
+
+    def test_install_packages_with_host_packages_ok_works(self):
+        """Test that package installation with explicit opt-out works."""
+        from unittest.mock import patch, MagicMock
+        from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
+        
+        cfg = LocalManagedConfig(packages={"pip": ["requests"]}, host_packages_ok=True)
+        agent = LocalManagedAgent(config=cfg)
+        
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock()
+            agent._install_packages()
+            mock_run.assert_called_once()
+            args = mock_run.call_args[0][0]
+            assert "pip" in args
+            assert "install" in args
+            assert "requests" in args
+
+    def test_install_packages_with_compute_runs_in_sandbox(self):
+        """Test that packages install in compute sandbox when compute provider attached."""
+        import asyncio
+        from unittest.mock import patch, MagicMock, AsyncMock
+        from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
+        
+        mock_compute = MagicMock()
+        mock_compute.execute = AsyncMock(return_value={"exit_code": 0, "stdout": "success", "stderr": ""})
+        
+        cfg = LocalManagedConfig(packages={"pip": ["requests"]})
+        agent = LocalManagedAgent(config=cfg, compute=mock_compute)
+        agent._compute_instance_id = "test_instance"
+        
+        with patch('subprocess.run') as mock_subprocess:
+            agent._install_packages()
+            # subprocess.run should NOT be called when compute is attached
+            mock_subprocess.assert_not_called()
+            # compute.execute should be called instead
+            mock_compute.execute.assert_called_once()
+
+    def test_no_packages_skips_installation(self):
+        """Test that no packages specified skips installation entirely."""
+        from unittest.mock import patch
+        from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
+        
+        cfg = LocalManagedConfig()
+        agent = LocalManagedAgent(config=cfg)
+        
+        with patch('subprocess.run') as mock_run:
+            agent._install_packages()
+            mock_run.assert_not_called()
+
+    def test_empty_pip_packages_skips_installation(self):
+        """Test that empty pip packages list skips installation."""
+        from unittest.mock import patch
+        from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
+        
+        cfg = LocalManagedConfig(packages={"pip": []})
+        agent = LocalManagedAgent(config=cfg)
+        
+        with patch('subprocess.run') as mock_run:
+            agent._install_packages()
+            mock_run.assert_not_called()
+
+    def test_exception_message_includes_remediation(self):
+        """Test that ManagedSandboxRequired exception includes actionable remediation."""
+        import pytest
+        from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
+        from praisonai.integrations.managed_agents import ManagedSandboxRequired
+        
+        cfg = LocalManagedConfig(packages={"pip": ["dangerous-package"]})
+        agent = LocalManagedAgent(config=cfg)
+        
+        with pytest.raises(ManagedSandboxRequired) as exc_info:
+            agent._install_packages()
+        
+        error_msg = str(exc_info.value)
+        assert "dangerous-package" in error_msg
+        assert "compute='docker'" in error_msg
+        assert "host_packages_ok=True" in error_msg
+
+    def test_managed_sandbox_required_exception_creation(self):
+        """Test ManagedSandboxRequired exception can be created and has correct default message."""
+        from praisonai.integrations.managed_agents import ManagedSandboxRequired
+        
+        exc = ManagedSandboxRequired()
+        assert "Package installation requires compute provider for security" in str(exc)
+        
+        custom_exc = ManagedSandboxRequired("Custom message")
+        assert str(custom_exc) == "Custom message"
+
+
+class TestComputeToolBridge:
+    """Test compute-bridged tool execution routing."""
+    
+    def test_tools_use_compute_bridge_when_compute_attached(self):
+        """Test that shell tools use compute bridge when compute provider attached."""
+        from unittest.mock import MagicMock
+        from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
+        
+        mock_compute = MagicMock()
+        cfg = LocalManagedConfig(tools=["execute_command", "read_file", "write_file", "list_files"])
+        agent = LocalManagedAgent(config=cfg, compute=mock_compute)
+        
+        tools = agent._resolve_tools()
+        
+        # Should have 4 compute-bridged tools
+        shell_tools = [t for t in tools if hasattr(t, '__name__') and 
+                      t.__name__ in {"execute_command", "read_file", "write_file", "list_files"}]
+        assert len(shell_tools) == 4
+
+    def test_tools_use_host_when_no_compute(self):
+        """Test that tools use host versions when no compute provider."""
+        from unittest.mock import patch, MagicMock
+        from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
+        
+        cfg = LocalManagedConfig(tools=["execute_command"])
+        agent = LocalManagedAgent(config=cfg)
+        
+        with patch('praisonaiagents.tools.execute_command') as mock_tool:
+            mock_tool.__name__ = "execute_command"
+            tools = agent._resolve_tools()
+            # Should use host tool, not compute bridge
+            assert mock_tool in tools
+
+    def test_compute_execute_command_bridge(self):
+        """Test compute-bridged execute_command works correctly."""
+        import asyncio
+        from unittest.mock import MagicMock, AsyncMock
+        from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
+        
+        mock_compute = MagicMock()
+        mock_compute.execute = AsyncMock(return_value={
+            "stdout": "hello world", 
+            "stderr": "", 
+            "exit_code": 0
+        })
+        
+        agent = LocalManagedAgent(compute=mock_compute)
+        agent._compute_instance_id = "test_instance"
+        
+        execute_command = agent._create_compute_execute_command()
+        result = execute_command("echo hello world")
+        
+        assert result == "hello world"
+        mock_compute.execute.assert_called_once_with("test_instance", "echo hello world", timeout=300)
+
+    def test_compute_execute_command_with_stderr(self):
+        """Test compute-bridged execute_command handles stderr correctly."""
+        import asyncio
+        from unittest.mock import MagicMock, AsyncMock
+        from praisonai.integrations.managed_local import LocalManagedAgent
+        
+        mock_compute = MagicMock()
+        mock_compute.execute = AsyncMock(return_value={
+            "stdout": "output", 
+            "stderr": "warning", 
+            "exit_code": 1
+        })
+        
+        agent = LocalManagedAgent(compute=mock_compute)
+        agent._compute_instance_id = "test_instance"
+        
+        execute_command = agent._create_compute_execute_command()
+        result = execute_command("failing_command")
+        
+        assert "output" in result
+        assert "STDERR: warning" in result
+        assert "Exit code: 1" in result
+
+    def test_compute_read_file_bridge(self):
+        """Test compute-bridged read_file works correctly."""
+        from unittest.mock import MagicMock, AsyncMock
+        from praisonai.integrations.managed_local import LocalManagedAgent
+        
+        mock_compute = MagicMock()
+        mock_compute.execute = AsyncMock(return_value={
+            "stdout": "file contents", 
+            "stderr": "", 
+            "exit_code": 0
+        })
+        
+        agent = LocalManagedAgent(compute=mock_compute)
+        agent._compute_instance_id = "test_instance"
+        
+        read_file = agent._create_compute_read_file()
+        result = read_file("/path/to/file.txt")
+        
+        assert result == "file contents"
+        mock_compute.execute.assert_called_once_with("test_instance", "cat /path/to/file.txt", timeout=60)
+
+    def test_compute_write_file_bridge(self):
+        """Test compute-bridged write_file works correctly."""
+        from unittest.mock import MagicMock, AsyncMock
+        from praisonai.integrations.managed_local import LocalManagedAgent
+        
+        mock_compute = MagicMock()
+        mock_compute.execute = AsyncMock(return_value={
+            "stdout": "", 
+            "stderr": "", 
+            "exit_code": 0
+        })
+        
+        agent = LocalManagedAgent(compute=mock_compute)
+        agent._compute_instance_id = "test_instance"
+        
+        write_file = agent._create_compute_write_file()
+        result = write_file("/path/to/file.txt", "file content")
+        
+        assert "File written successfully" in result
+        # Check that the command was properly escaped
+        mock_compute.execute.assert_called_once()
+        call_args = mock_compute.execute.call_args
+        assert "echo" in call_args[0][1]
+        assert "/path/to/file.txt" in call_args[0][1]
+
+    def test_compute_list_files_bridge(self):
+        """Test compute-bridged list_files works correctly."""
+        from unittest.mock import MagicMock, AsyncMock
+        from praisonai.integrations.managed_local import LocalManagedAgent
+        
+        mock_compute = MagicMock()
+        mock_compute.execute = AsyncMock(return_value={
+            "stdout": "file1.txt\nfile2.txt\n", 
+            "stderr": "", 
+            "exit_code": 0
+        })
+        
+        agent = LocalManagedAgent(compute=mock_compute)
+        agent._compute_instance_id = "test_instance"
+        
+        list_files = agent._create_compute_list_files()
+        result = list_files("/some/dir")
+        
+        assert "file1.txt" in result
+        assert "file2.txt" in result
+        mock_compute.execute.assert_called_once_with("test_instance", "ls -la /some/dir", timeout=60)
+
+    def test_compute_tools_require_provisioned_instance(self):
+        """Test that compute tools raise error when no instance is provisioned."""
+        import pytest
+        from praisonai.integrations.managed_local import LocalManagedAgent
+        
+        mock_compute = MagicMock()
+        agent = LocalManagedAgent(compute=mock_compute)
+        # Don't set _compute_instance_id
+        
+        execute_command = agent._create_compute_execute_command()
+        with pytest.raises(RuntimeError, match="No compute provider provisioned"):
+            execute_command("echo test")
+
+    def test_auto_provision_compute_in_ensure_agent(self):
+        """Test that _ensure_agent auto-provisions compute when needed."""
+        import asyncio
+        from unittest.mock import patch, MagicMock, AsyncMock
+        from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
+        
+        mock_compute = MagicMock()
+        mock_info = MagicMock()
+        mock_info.instance_id = "auto_provisioned_instance"
+        
+        cfg = LocalManagedConfig()
+        agent = LocalManagedAgent(config=cfg, compute=mock_compute)
+        
+        with patch.object(agent, 'provision_compute', new_callable=AsyncMock) as mock_provision:
+            mock_provision.return_value = mock_info
+            with patch('praisonaiagents.Agent') as mock_agent_class:
+                mock_agent_class.return_value = MagicMock()
+                
+                inner_agent = agent._ensure_agent()
+                
+                # Should have auto-provisioned compute
+                mock_provision.assert_called_once()
+                assert agent._compute_instance_id == "auto_provisioned_instance"

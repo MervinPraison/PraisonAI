@@ -78,11 +78,13 @@ class LocalManagedConfig:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     # ── Environment fields ──
-    sandbox_type: str = "subprocess"
     working_dir: str = ""
     env: Dict[str, str] = field(default_factory=dict)
     packages: Optional[Dict[str, List[str]]] = None
     networking: Dict[str, Any] = field(default_factory=lambda: {"type": "unrestricted"})
+    
+    # ── Security fields ──
+    host_packages_ok: bool = False  # Safety: require explicit opt-out for host pip installs
 
     # ── Session fields ──
     session_title: str = "PraisonAI local session"
@@ -285,6 +287,125 @@ class LocalManagedAgent:
         return model
 
     # ------------------------------------------------------------------
+    # Compute-based tool execution bridge
+    # ------------------------------------------------------------------
+    def _create_compute_execute_command(self) -> Callable:
+        """Create a compute-bridged execute_command tool."""
+        def execute_command(command: str, timeout: int = 300) -> str:
+            """Execute a shell command in the compute sandbox."""
+            if self._compute is None or self._compute_instance_id is None:
+                raise RuntimeError("No compute provider provisioned for command execution")
+            
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(self._compute.execute(
+                    self._compute_instance_id, command, timeout=timeout
+                ))
+                stdout = result.get("stdout", "")
+                stderr = result.get("stderr", "")
+                exit_code = result.get("exit_code", 0)
+                
+                output = ""
+                if stdout:
+                    output += stdout
+                if stderr:
+                    if output:
+                        output += "\n"
+                    output += f"STDERR: {stderr}"
+                if exit_code != 0:
+                    output += f"\nExit code: {exit_code}"
+                
+                return output or "Command completed successfully"
+            finally:
+                loop.close()
+        
+        execute_command.__name__ = "execute_command"
+        execute_command.__doc__ = "Execute a shell command in the compute sandbox."
+        return execute_command
+
+    def _create_compute_read_file(self) -> Callable:
+        """Create a compute-bridged read_file tool."""
+        def read_file(file_path: str) -> str:
+            """Read a file from the compute sandbox."""
+            if self._compute is None or self._compute_instance_id is None:
+                raise RuntimeError("No compute provider provisioned for file operations")
+            
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                # Use cat command to read file content
+                result = loop.run_until_complete(self._compute.execute(
+                    self._compute_instance_id, f"cat {file_path}", timeout=60
+                ))
+                if result.get("exit_code", 0) != 0:
+                    stderr = result.get("stderr", "")
+                    return f"Error reading file: {stderr}"
+                return result.get("stdout", "")
+            finally:
+                loop.close()
+        
+        read_file.__name__ = "read_file"
+        read_file.__doc__ = "Read a file from the compute sandbox."
+        return read_file
+
+    def _create_compute_write_file(self) -> Callable:
+        """Create a compute-bridged write_file tool."""
+        def write_file(file_path: str, content: str) -> str:
+            """Write content to a file in the compute sandbox."""
+            if self._compute is None or self._compute_instance_id is None:
+                raise RuntimeError("No compute provider provisioned for file operations")
+            
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                # Use tee command to write file content safely
+                import shlex
+                escaped_content = shlex.quote(content)
+                result = loop.run_until_complete(self._compute.execute(
+                    self._compute_instance_id, f"echo {escaped_content} > {file_path}", timeout=60
+                ))
+                if result.get("exit_code", 0) != 0:
+                    stderr = result.get("stderr", "")
+                    return f"Error writing file: {stderr}"
+                return f"File written successfully to {file_path}"
+            finally:
+                loop.close()
+        
+        write_file.__name__ = "write_file"
+        write_file.__doc__ = "Write content to a file in the compute sandbox."
+        return write_file
+
+    def _create_compute_list_files(self) -> Callable:
+        """Create a compute-bridged list_files tool."""
+        def list_files(directory: str = ".") -> str:
+            """List files in a directory within the compute sandbox."""
+            if self._compute is None or self._compute_instance_id is None:
+                raise RuntimeError("No compute provider provisioned for file operations")
+            
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                # Use ls -la command to list files
+                result = loop.run_until_complete(self._compute.execute(
+                    self._compute_instance_id, f"ls -la {directory}", timeout=60
+                ))
+                if result.get("exit_code", 0) != 0:
+                    stderr = result.get("stderr", "")
+                    return f"Error listing directory: {stderr}"
+                return result.get("stdout", "")
+            finally:
+                loop.close()
+        
+        list_files.__name__ = "list_files"
+        list_files.__doc__ = "List files in a directory within the compute sandbox."
+        return list_files
+
+    # ------------------------------------------------------------------
     # Tool resolution
     # ------------------------------------------------------------------
     def _resolve_tools(self) -> List:
@@ -297,9 +418,25 @@ class LocalManagedAgent:
         for name in tool_names:
             resolved_names.append(TOOL_ALIAS_MAP.get(name, name))
 
-        # Import tools lazily
+        # Import tools lazily, using compute-bridged versions when available
         tools = []
+        compute_tools = {"execute_command", "read_file", "write_file", "list_files"}
+        
         for name in resolved_names:
+            # Use compute-bridged versions for shell/file tools when compute attached
+            if self._compute is not None and name in compute_tools:
+                if name == "execute_command":
+                    tools.append(self._create_compute_execute_command())
+                elif name == "read_file":
+                    tools.append(self._create_compute_read_file())
+                elif name == "write_file":
+                    tools.append(self._create_compute_write_file())
+                elif name == "list_files":
+                    tools.append(self._create_compute_list_files())
+                logger.debug("[local_managed] using compute-bridged tool: %s", name)
+                continue
+            
+            # Use host tools for non-shell operations or when no compute attached
             try:
                 from praisonaiagents import tools as tool_module
                 func = getattr(tool_module, name, None)
@@ -451,26 +588,93 @@ class LocalManagedAgent:
                 self.provider = saved_cfg["provider"]
 
     def _install_packages(self) -> None:
-        """Install packages specified in config before agent starts."""
+        """Install packages specified in config before agent starts.
+        
+        Security: When compute provider is attached, packages install in sandbox.
+        When no compute provider, requires explicit host_packages_ok=True.
+        """
         packages = self._cfg.get("packages")
         if not packages:
             return
 
         pip_pkgs = packages.get("pip", []) if isinstance(packages, dict) else []
-        if pip_pkgs:
-            cmd = [sys.executable, "-m", "pip", "install", "-q"] + pip_pkgs
-            logger.info("[local_managed] installing pip packages: %s", pip_pkgs)
+        if not pip_pkgs:
+            return
+            
+        # If compute provider attached, install in sandbox
+        if self._compute is not None:
+            logger.info("[local_managed] installing pip packages in sandbox: %s", pip_pkgs)
+            # Auto-provision compute if needed
+            if self._compute_instance_id is None:
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    self._compute_instance_id = loop.run_until_complete(self._provision_compute_if_needed())
+                finally:
+                    loop.close()
+            
+            # Install packages in compute sandbox
+            cmd = f"pip install -q {' '.join(pip_pkgs)}"
             try:
-                subprocess.run(cmd, check=True, capture_output=True, timeout=120)
-            except subprocess.CalledProcessError as e:
-                logger.warning("[local_managed] pip install failed: %s", e.stderr)
-            except subprocess.TimeoutExpired:
-                logger.warning("[local_managed] pip install timed out")
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    result = loop.run_until_complete(self._compute.execute(
+                        self._compute_instance_id, cmd, timeout=120
+                    ))
+                    if result.get("exit_code", 0) != 0:
+                        logger.warning("[local_managed] pip install in sandbox failed: %s", result.get("stderr"))
+                finally:
+                    loop.close()
+            except Exception as e:
+                logger.warning("[local_managed] pip install in sandbox failed: %s", e)
+            return
+        
+        # No compute provider - check if host install is explicitly allowed
+        host_packages_ok = self._cfg.get("host_packages_ok", False)
+        if not host_packages_ok:
+            from .managed_agents import ManagedSandboxRequired
+            raise ManagedSandboxRequired(
+                f"Package installation requires compute provider for security. "
+                f"Packages requested: {pip_pkgs}. "
+                f"To fix: 1) Add compute='docker' (recommended) or 2) Set host_packages_ok=True (unsafe)."
+            )
+        
+        # Host install with explicit opt-out
+        logger.warning("[local_managed] installing pip packages on HOST (unsafe): %s", pip_pkgs)
+        cmd = [sys.executable, "-m", "pip", "install", "-q"] + pip_pkgs
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, timeout=120)
+        except subprocess.CalledProcessError as e:
+            logger.warning("[local_managed] pip install failed: %s", e.stderr)
+        except subprocess.TimeoutExpired:
+            logger.warning("[local_managed] pip install timed out")
+
+    async def _provision_compute_if_needed(self) -> str:
+        """Auto-provision compute if needed and return instance ID."""
+        if self._compute is None:
+            raise RuntimeError("No compute provider attached")
+        if self._compute_instance_id is not None:
+            return self._compute_instance_id
+        info = await self.provision_compute()
+        return info.instance_id
 
     def _ensure_agent(self) -> Any:
         """Create or return the inner PraisonAI Agent."""
         if self._inner_agent is not None:
             return self._inner_agent
+
+        # Auto-provision compute if needed for tool execution
+        if self._compute is not None and self._compute_instance_id is None:
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                self._compute_instance_id = loop.run_until_complete(self._provision_compute_if_needed())
+            finally:
+                loop.close()
 
         self._install_packages()
 
