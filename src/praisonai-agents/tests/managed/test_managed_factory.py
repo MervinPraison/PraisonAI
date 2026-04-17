@@ -472,7 +472,8 @@ class TestComputeToolBridge:
         original_func = lambda command: "original result"
         bridge_tool = agent._create_compute_bridge_tool("execute_command", original_func)
         
-        with patch.object(agent._compute, 'execute') as mock_execute, \
+        with patch.object(agent._compute, 'execute'), \
+             patch('asyncio.get_event_loop', side_effect=RuntimeError('no loop')), \
              patch('asyncio.run') as mock_asyncio_run:
             
             mock_asyncio_run.return_value = {"exit_code": 0, "stdout": "compute result"}
@@ -527,7 +528,8 @@ class TestComputeToolBridge:
         agent = LocalManagedAgent(compute="local")
         agent._compute_instance_id = "test_instance"
         
-        with patch('asyncio.run') as mock_asyncio_run:
+        with patch('asyncio.get_event_loop', side_effect=RuntimeError('no loop')), \
+             patch('asyncio.run') as mock_asyncio_run:
             mock_asyncio_run.return_value = {"exit_code": 0, "stdout": "file contents"}
             
             result = agent._bridge_file_tool("read_file", "/test/file")
@@ -541,7 +543,8 @@ class TestComputeToolBridge:
         agent = LocalManagedAgent(compute="local")
         agent._compute_instance_id = "test_instance"
         
-        with patch('asyncio.run') as mock_asyncio_run:
+        with patch('asyncio.get_event_loop', side_effect=RuntimeError('no loop')), \
+             patch('asyncio.run') as mock_asyncio_run:
             mock_asyncio_run.return_value = {"exit_code": 0, "stdout": ""}
             
             result = agent._bridge_file_tool("write_file", "/test/file", "content")
@@ -555,7 +558,8 @@ class TestComputeToolBridge:
         agent = LocalManagedAgent(compute="local")
         agent._compute_instance_id = "test_instance"
         
-        with patch('asyncio.run') as mock_asyncio_run:
+        with patch('asyncio.get_event_loop', side_effect=RuntimeError('no loop')), \
+             patch('asyncio.run') as mock_asyncio_run:
             mock_asyncio_run.return_value = {"exit_code": 0, "stdout": "file1\nfile2\n"}
             
             result = agent._bridge_file_tool("list_files", "/test/dir")
