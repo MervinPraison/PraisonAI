@@ -2,8 +2,9 @@ import os
 import time
 import json
 import logging
+import threading
 from praisonaiagents._logging import get_logger
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional, List, Tuple
 from ..main import display_error, TaskOutput
 from ..agent.agent import Agent
 from ..task.task import Task
@@ -18,6 +19,12 @@ try:
 except ImportError:
     _token_collector = None
 
+# Import async utility for hot-path usage
+try:
+    from ..approval.utils import run_coroutine_safely
+except ImportError:
+    run_coroutine_safely = None
+
 # Task status constants
 class TaskStatus(Enum):
     """Enumeration for task status values to ensure consistency"""
@@ -31,7 +38,6 @@ class TaskStatus(Enum):
 logger = get_logger(__name__)
 
 # Agent server registry for thread-safe server management
-import threading
 
 
 class _AgentServerRegistry:
@@ -44,7 +50,7 @@ class _AgentServerRegistry:
         self._apps: Dict[int, Any] = {}  # FastAPI apps
         self._ready_events: Dict[int, threading.Event] = {}
     
-    def get_or_create_app(self, port: int, title: str = "AgentTeam API") -> Any:
+    def get_or_create_app(self, port: int, title: str = "AgentTeam API") -> Tuple[Any, bool]:
         """Thread-safe app creation. Returns (app, is_new)."""
         with self._lock:
             if port not in self._apps:
@@ -87,12 +93,17 @@ class _AgentServerRegistry:
         with self._lock:
             return list(self._endpoints.get(port, {}).keys())
     
+    def has_route(self, port: int, path: str) -> bool:
+        """Thread-safe check whether a path is registered on a port."""
+        with self._lock:
+            return path in self._endpoints.get(port, {})
+    
     def is_server_started(self, port: int) -> bool:
         """Check if server is started for this port."""
         with self._lock:
             return self._started.get(port, False)
     
-    def start_server_if_needed(self, port: int, host: str = "0.0.0.0", **kwargs) -> bool:
+    def start_server_if_needed(self, port: int, host: str = "0.0.0.0", **kwargs) -> bool:  # noqa: S104
         """Start server with proper readiness signaling. Returns True if server was started."""
         with self._lock:
             if self._started.get(port, False):
@@ -107,7 +118,8 @@ class _AgentServerRegistry:
         
         def run_server():
             import uvicorn
-            config = uvicorn.Config(app, host=host, port=port, log_level="error", **kwargs)
+            # Remove hardcoded log_level to avoid conflict with kwargs
+            config = uvicorn.Config(app, host=host, port=port, **kwargs)
             server = uvicorn.Server(config)
             ready_event.set()  # Signal readiness
             server.run()
@@ -1017,8 +1029,10 @@ class AgentTeam:
                     if task.callback:
                         try:
                             if asyncio.iscoroutinefunction(task.callback):
-                                from ..approval.utils import run_coroutine_safely
-                                run_coroutine_safely(task.callback(task_output))
+                                if run_coroutine_safely:
+                                    run_coroutine_safely(task.callback(task_output))
+                                else:
+                                    logger.warning("run_coroutine_safely not available, skipping async callback")
                             else:
                                 task.callback(task_output)
                         except Exception as e:
@@ -1244,8 +1258,10 @@ class AgentTeam:
                     if task.callback:
                         try:
                             if asyncio.iscoroutinefunction(task.callback):
-                                from ..approval.utils import run_coroutine_safely
-                                run_coroutine_safely(task.callback(task_output))
+                                if run_coroutine_safely:
+                                    run_coroutine_safely(task.callback(task_output))
+                                else:
+                                    logger.warning("run_coroutine_safely not available, skipping async callback")
                             else:
                                 task.callback(task_output)
                         except Exception as e:
