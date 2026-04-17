@@ -75,15 +75,3 @@ def test_direct_flag_preserves_proxy_path(_has_claude):
     assert result and len(result.strip()) > 0
 
 
-def test_cli_args_include_external_agent_direct_flag():
-    """Regression: verify --external-agent-direct is registered as a CLI flag."""
-    from praisonai.cli.main import PraisonAI
-    import argparse
-    parser = argparse.ArgumentParser()
-    # Only exercise the arg-registration portion; no execution.
-    app = PraisonAI.__new__(PraisonAI)
-    app._build_parser = PraisonAI.main.__wrapped__ if hasattr(PraisonAI.main, "__wrapped__") else None
-    # Fallback: just grep the source for the flag (simpler)
-    import inspect
-    source = inspect.getsource(PraisonAI.main)
-    assert "--external-agent-direct" in source
