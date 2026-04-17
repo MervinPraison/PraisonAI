@@ -505,22 +505,28 @@ def envs_update(
         praisonai managed envs update env_01AbCdEf --packages "numpy,pandas"
         praisonai managed envs update env_01AbCdEf --networking limited
     """
-    client = _get_client()
     kwargs = {}
     
     if packages:
-        pkg_list = [p.strip() for p in packages.split(",")]
+        pkg_list = [p.strip() for p in packages.split(",") if p.strip()]
+        if not pkg_list:
+            typer.echo("Error: --packages must include at least one non-empty package name")
+            raise typer.Exit(1)
         kwargs["packages"] = {"pip": pkg_list}
     
     if networking:
-        if networking not in ["full", "limited"]:
+        networking_lower = networking.lower()
+        if networking_lower not in ["full", "limited"]:
             typer.echo("Error: --networking must be 'full' or 'limited'")
             raise typer.Exit(1)
-        kwargs["networking"] = {"type": networking}
+        kwargs["networking"] = {"type": networking_lower}
     
     if not kwargs:
         typer.echo("Nothing to update. Pass --packages or --networking.")
         raise typer.Exit(0)
+    
+    # Get client only after validation and early-exit checks
+    client = _get_client()
     
     try:
         updated = client.beta.environments.update(env_id, **kwargs)
