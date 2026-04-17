@@ -485,6 +485,7 @@ class LocalManagedAgent:
             logger.info("[local_managed] installing packages via compute provider (%s): %s", sandbox_type, pip_pkgs)
             try:
                 try:
+                    # Raises RuntimeError when no event loop is currently running.
                     asyncio.get_running_loop()
                     # We're in async context, run in a separate thread loop.
                     import threading

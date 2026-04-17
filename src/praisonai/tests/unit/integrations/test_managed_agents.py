@@ -324,6 +324,24 @@ def test_local_install_packages_prefers_compute_and_skips_host(mock_subprocess_r
 
 
 @pytest.mark.asyncio
+@patch("praisonai.integrations.managed_local.subprocess.run")
+async def test_local_install_packages_prefers_compute_inside_running_loop(mock_subprocess_run):
+    """Compute install should also work when called inside an active event loop."""
+    from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
+
+    managed = LocalManagedAgent(
+        config=LocalManagedConfig(packages={"pip": ["requests"]})
+    )
+    managed._compute = object()
+    managed._install_via_compute = AsyncMock(return_value=None)
+
+    managed._install_packages()
+
+    managed._install_via_compute.assert_awaited_once_with(["requests"])
+    mock_subprocess_run.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_local_install_via_compute_quotes_package_names():
     """Package names passed through shell command should be shell-escaped."""
     from praisonai.integrations.managed_local import LocalManagedAgent
