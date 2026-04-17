@@ -6,7 +6,6 @@ import yaml, os
 from rich import print
 from dotenv import load_dotenv
 from .auto import AutoGenerator
-from .inbuilt_tools import *
 from .inc import PraisonAIModel
 import inspect
 from pathlib import Path
@@ -17,79 +16,23 @@ import logging
 import re
 import keyword
 
-# Framework-specific imports with availability checks
-CREWAI_AVAILABLE = False
-AUTOGEN_AVAILABLE = False
-AUTOGEN_V4_AVAILABLE = False
-PRAISONAI_TOOLS_AVAILABLE = False
-AGENTOPS_AVAILABLE = False
-PRAISONAI_AVAILABLE = False
+# Import new architecture components
+from .framework_adapters import (
+    FrameworkAdapter, CrewAIAdapter, AutoGenAdapter, 
+    AutoGenV4Adapter, AG2Adapter, PraisonAIAdapter
+)
+from .tool_registry import ToolRegistry
 
-try:
-    from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, AgentTeam
-    PRAISONAI_AVAILABLE = True
-except ImportError:
-    pass
+# Registry of available adapters (lazy-loaded)
+FRAMEWORK_ADAPTERS = {
+    "crewai": CrewAIAdapter,
+    "autogen": AutoGenAdapter, 
+    "autogen_v4": AutoGenV4Adapter,
+    "ag2": AG2Adapter,
+    "praisonai": PraisonAIAdapter
+}
 
-try:
-    from crewai import Agent, Task, Crew
-    from crewai.telemetry import Telemetry
-    CREWAI_AVAILABLE = True
-except ImportError:
-    pass
-
-try:
-    import autogen
-    AUTOGEN_AVAILABLE = True
-except ImportError:
-    pass
-
-try:
-    from autogen_agentchat.agents import AssistantAgent as AutoGenV4AssistantAgent
-    from autogen_ext.models.openai import OpenAIChatCompletionClient
-    from autogen_agentchat.teams import RoundRobinGroupChat
-    from autogen_agentchat.conditions import TextMentionTermination, MaxMessageTermination
-    from autogen_agentchat.messages import TextMessage
-    from autogen_core import CancellationToken
-    AUTOGEN_V4_AVAILABLE = True
-except ImportError:
-    pass
-
-AG2_AVAILABLE = False
-try:
-    import importlib.metadata as _importlib_metadata
-    _importlib_metadata.distribution('ag2')
-    from autogen import LLMConfig as _AG2LLMConfig  # noqa: F401 — AG2-exclusive class
-    AG2_AVAILABLE = True
-    del _AG2LLMConfig, _importlib_metadata
-except Exception:
-    pass
-
-try:
-    import agentops
-    AGENTOPS_AVAILABLE = True
-    AGENTOPS_API_KEY = os.getenv("AGENTOPS_API_KEY")
-    if not AGENTOPS_API_KEY:
-        AGENTOPS_AVAILABLE = False
-except ImportError:
-    pass
-
-# Only try to import praisonai_tools if either CrewAI or AutoGen is available
-if CREWAI_AVAILABLE or AUTOGEN_AVAILABLE or PRAISONAI_AVAILABLE or AG2_AVAILABLE:
-    try:
-        from praisonai_tools import (
-            CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool, DirectoryReadTool,
-            FileReadTool, TXTSearchTool, JSONSearchTool, MDXSearchTool, PDFSearchTool, RagTool,
-            ScrapeElementFromWebsiteTool, ScrapeWebsiteTool, WebsiteSearchTool, XMLSearchTool, 
-            YoutubeChannelSearchTool, YoutubeVideoSearchTool, BaseTool
-        )
-        PRAISONAI_TOOLS_AVAILABLE = True
-    except ImportError:
-        # If import fails, define BaseTool as a simple base class
-        class BaseTool:
-            pass
-
-os.environ["OTEL_SDK_DISABLED"] = "true"
+# Note: OTEL_SDK_DISABLED moved to CLI entry point per issue requirements
 
 
 def safe_format(template: str, **kwargs) -> str:
@@ -169,16 +112,6 @@ def sanitize_agent_name_for_autogen_v4(name):
     
     return sanitized
 
-def disable_crewai_telemetry():
-    if CREWAI_AVAILABLE:
-        for attr in dir(Telemetry):
-            if callable(getattr(Telemetry, attr)) and not attr.startswith("__"):
-                setattr(Telemetry, attr, noop)
-
-# Only disable telemetry if CrewAI is available
-if CREWAI_AVAILABLE:
-    disable_crewai_telemetry()
-
 class AgentsGenerator:
     def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None, tools=None, cli_config=None):
         """
@@ -221,15 +154,34 @@ class AgentsGenerator:
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(self.log_level)
         
-        # Validate framework availability
-        if framework == "crewai" and not CREWAI_AVAILABLE:
-            raise ImportError("CrewAI is not installed. Please install it with 'pip install praisonai[crewai]'")
-        elif framework == "autogen" and not (AUTOGEN_AVAILABLE or AUTOGEN_V4_AVAILABLE):
-            raise ImportError("AutoGen is not installed. Please install it with 'pip install praisonai[autogen]' for v0.2 or 'pip install praisonai[autogen-v4]' for v0.4")
-        elif framework == "praisonai" and not PRAISONAI_AVAILABLE:
-            raise ImportError("PraisonAI is not installed. Please install it with 'pip install praisonaiagents'")
-        elif framework == "ag2" and not AG2_AVAILABLE:
-            raise ImportError("AG2 is not installed. Please install it with 'pip install praisonai[ag2]'")
+        # Initialize tool registry (replaces globals() pattern)
+        self.tool_registry = ToolRegistry()
+        self.tool_registry.register_builtin_autogen_adapters()
+        
+        # Get framework adapter and validate availability
+        self.framework_adapter = self._get_framework_adapter(framework)
+        if not self.framework_adapter.is_available():
+            raise ImportError(f"Framework '{framework}' is not available. Please install the required dependencies.")
+
+    def _get_framework_adapter(self, framework: str) -> FrameworkAdapter:
+        """
+        Get the appropriate framework adapter for the given framework.
+        
+        Args:
+            framework: Name of the framework
+            
+        Returns:
+            Framework adapter instance
+            
+        Raises:
+            ValueError: If framework is not supported
+        """
+        if framework not in FRAMEWORK_ADAPTERS:
+            raise ValueError(f"Unsupported framework: {framework}. "
+                           f"Supported frameworks: {list(FRAMEWORK_ADAPTERS.keys())}")
+        
+        adapter_class = FRAMEWORK_ADAPTERS[framework]
+        return adapter_class()
 
     def _merge_cli_config(self, config, cli_config):
         """
@@ -371,7 +323,7 @@ class AgentsGenerator:
     def load_tools_from_tools_py(self):
         """
         Imports and returns all contents from tools.py file.
-        Also adds the tools to the global namespace.
+        Uses the tool registry instead of global namespace pollution.
 
         Returns:
             list: A list of callable functions with proper formatting
@@ -388,19 +340,12 @@ class AgentsGenerator:
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
 
-            # Get all module attributes except private ones and classes
-            for name, obj in inspect.getmembers(module):
-                if (not name.startswith('_') and 
-                    callable(obj) and 
-                    not inspect.isclass(obj)):
-                    # Add the function to global namespace
-                    globals()[name] = obj
-                    # Add to tools list
-                    tools_list.append(obj)
-                    self.logger.debug(f"Loaded and globalized tool function: {name}")
+            # Register functions in the tool registry instead of globals()
+            registered_tools = self.tool_registry.register_from_module(module)
+            tools_list = [self.tool_registry.get_function(name) for name in registered_tools]
 
             self.logger.debug(f"Loaded {len(tools_list)} tool functions from tools.py")
-            self.logger.debug(f"Tools list: {tools_list}")
+            self.logger.debug(f"Registered tools: {registered_tools}")
             
         except FileNotFoundError:
             self.logger.debug("tools.py not found in current directory")
@@ -515,56 +460,42 @@ class AgentsGenerator:
             tools_dict.update(self.load_tools_from_module_class(tools_dir_path))
             self.logger.debug("tools folder exists in the root directory")
 
-        framework = self.framework or config.get('framework')
+        framework = self.framework or config.get('framework', 'crewai')
 
+        # Determine AutoGen version if needed (keeping compatibility logic)
         if framework == "autogen":
-            if not (AUTOGEN_AVAILABLE or AUTOGEN_V4_AVAILABLE):
-                raise ImportError("AutoGen is not installed. Please install it with 'pip install praisonai[autogen]' for v0.2 or 'pip install praisonai[autogen-v4]' for v0.4")
-            
-            # Choose autogen version based on availability and environment preference
-            # AUTOGEN_VERSION can be set to "v0.2" or "v0.4" to force a specific version
             autogen_version = os.environ.get("AUTOGEN_VERSION", "auto").lower()
+            autogen_v4_adapter = self._get_framework_adapter("autogen_v4")
+            autogen_v2_adapter = self._get_framework_adapter("autogen")
             
             use_v4 = False
-            if autogen_version == "v0.4" and AUTOGEN_V4_AVAILABLE:
+            if autogen_version == "v0.4" and autogen_v4_adapter.is_available():
                 use_v4 = True
-            elif autogen_version == "v0.2" and AUTOGEN_AVAILABLE:
+            elif autogen_version == "v0.2" and autogen_v2_adapter.is_available():
                 use_v4 = False
             elif autogen_version == "auto":
-                # Default preference: use v0.4 if available, fallback to v0.2
-                use_v4 = AUTOGEN_V4_AVAILABLE
+                use_v4 = autogen_v4_adapter.is_available()
             else:
-                # Fallback to whatever is available
-                use_v4 = AUTOGEN_V4_AVAILABLE and not AUTOGEN_AVAILABLE
+                use_v4 = autogen_v4_adapter.is_available() and not autogen_v2_adapter.is_available()
             
-            if AGENTOPS_AVAILABLE:
-                version_tag = "autogen-v4" if use_v4 else "autogen-v2"
-                agentops.init(os.environ.get("AGENTOPS_API_KEY"), default_tags=[version_tag])
+            framework = "autogen_v4" if use_v4 else "autogen"
             
-            if use_v4:
-                self.logger.info("Using AutoGen v0.4")
-                return self._run_autogen_v4(config, topic, tools_dict)
-            else:
-                self.logger.info("Using AutoGen v0.2")
-                return self._run_autogen(config, topic, tools_dict)
-        elif framework == "ag2":
-            if not AG2_AVAILABLE:
-                raise ImportError("AG2 is not installed. Please install it with 'pip install praisonai[ag2]'")
-            if AGENTOPS_AVAILABLE:
-                agentops.init(os.environ.get("AGENTOPS_API_KEY"), default_tags=["ag2"])
-            return self._run_ag2(config, topic, tools_dict)
-        elif framework == "praisonai":
-            if not PRAISONAI_AVAILABLE:
-                raise ImportError("PraisonAI is not installed. Please install it with 'pip install praisonaiagents'")
-            if AGENTOPS_AVAILABLE:
-                agentops.init(os.environ.get("AGENTOPS_API_KEY"), default_tags=["praisonai"])
-            return self._run_praisonai(config, topic, tools_dict)
-        else:  # framework=crewai
-            if not CREWAI_AVAILABLE:
-                raise ImportError("CrewAI is not installed. Please install it with 'pip install praisonai[crewai]'")
-            if AGENTOPS_AVAILABLE:
-                agentops.init(os.environ.get("AGENTOPS_API_KEY"), default_tags=["crewai"])
-            return self._run_crewai(config, topic, tools_dict)
+        # Initialize AgentOps if available
+        try:
+            import agentops
+            agentops_api_key = os.getenv("AGENTOPS_API_KEY")
+            if agentops_api_key:
+                agentops.init(agentops_api_key, default_tags=[framework])
+        except ImportError:
+            pass
+            
+        # Use the framework adapter
+        if not self.framework_adapter.is_available():
+            # Re-get the adapter since framework may have changed for AutoGen
+            self.framework_adapter = self._get_framework_adapter(framework)
+            
+        self.logger.info(f"Using framework: {framework}")
+        return self.framework_adapter.run(config, self.config_list, topic)
 
     def _run_yaml_workflow(self, config):
         """
@@ -666,13 +597,16 @@ class AgentsGenerator:
             # Add tools to agent if specified
             for tool in details.get('tools', []):
                 if tool in tools_dict:
-                    try:
-                        tool_class = globals()[f'autogen_{type(tools_dict[tool]).__name__}']
-                        self.logger.debug(f"Found {tool_class.__name__} for {tool}")
-                        tool_class(agents[role], user_proxy)
-                    except KeyError:
-                        self.logger.warning(f"Warning: autogen_{type(tools_dict[tool]).__name__} function not found. Skipping this tool.")
-                        continue
+                    tool_type_name = type(tools_dict[tool]).__name__
+                    adapter = self.tool_registry.get_autogen_adapter(tool_type_name)
+                    if adapter:
+                        try:
+                            self.logger.debug(f"Found AutoGen adapter for {tool_type_name}")
+                            adapter(agents[role], user_proxy)
+                        except Exception as e:
+                            self.logger.warning(f"Error applying AutoGen adapter for {tool}: {e}")
+                    else:
+                        self.logger.warning(f"Warning: No AutoGen adapter found for {tool_type_name}. Skipping this tool.")
 
             # Prepare tasks
             for task_name, task_details in details.get('tasks', {}).items():
@@ -1111,9 +1045,8 @@ class AgentsGenerator:
                 import asyncio
                 from praisonai.cli.features.interactive_runtime import InteractiveRuntime, RuntimeConfig
                 from praisonai.cli.features.agent_tools import create_agent_centric_tools
-                import nest_asyncio
                 
-                nest_asyncio.apply()
+                # Use scoped event loop instead of process-global mutations
                 runtime_config = RuntimeConfig(
                     workspace=os.getcwd(),
                     acp_enabled=acp_enabled,
@@ -1123,17 +1056,22 @@ class AgentsGenerator:
                 interactive_runtime = InteractiveRuntime(runtime_config)
                 self.logger.info(f"Starting InteractiveRuntime (ACP: {acp_enabled}, LSP: {lsp_enabled})")
                 
+                # Create a scoped event loop instead of modifying process globals
+                interactive_loop = asyncio.new_event_loop()
                 try:
-                    interactive_loop = asyncio.get_event_loop()
-                except RuntimeError:
-                    interactive_loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(interactive_loop)
-                
-                interactive_loop.run_until_complete(interactive_runtime.start())
-                
-                centric_tools = create_agent_centric_tools(interactive_runtime)
-                self.logger.info(f"Injected {len(centric_tools)} InteractiveRuntime tools globally")
-                tools_list.extend(centric_tools)
+                    interactive_loop.run_until_complete(interactive_runtime.start())
+                    
+                    centric_tools = create_agent_centric_tools(interactive_runtime)
+                    self.logger.info(f"Loaded {len(centric_tools)} InteractiveRuntime tools")
+                    tools_list.extend(centric_tools)
+                    
+                finally:
+                    try:
+                        interactive_loop.run_until_complete(interactive_runtime.stop())
+                    except Exception as stop_error:
+                        self.logger.warning(f"Error stopping InteractiveRuntime: {stop_error}")
+                    finally:
+                        interactive_loop.close()
                 
             except ImportError as e:
                 self.logger.warning(f"Failed to load InteractiveRuntime components: {e}")
