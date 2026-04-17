@@ -47,10 +47,10 @@ Located in `test_managed_real.py`
 RUN_REAL_AGENTIC=1 pytest src/praisonai/tests/integration/test_managed_real.py -v
 
 # Run only Anthropic tests
-RUN_REAL_AGENTIC=1 PRAISONAI_TEST_PROVIDERS=anthropic pytest src/praisonai/tests/integration/test_managed_real.py::test_anthropic_managed_real -v
+RUN_REAL_AGENTIC=1 pytest src/praisonai/tests/integration/test_managed_real.py::test_anthropic_managed_real -v
 
 # Run only local/OpenAI tests
-RUN_REAL_AGENTIC=1 PRAISONAI_TEST_PROVIDERS=openai pytest src/praisonai/tests/integration/test_managed_real.py::test_local_managed_real_openai -v
+RUN_REAL_AGENTIC=1 pytest src/praisonai/tests/integration/test_managed_real.py::test_local_managed_real_openai -v
 ```
 
 **Expected Output:** Each test prints the full LLM response for human verification, along with usage statistics and session IDs.
