@@ -337,8 +337,9 @@ class LocalManagedAgent:
             asyncio.set_event_loop(loop)
             try:
                 # Use cat command to read file content
+                import shlex
                 result = loop.run_until_complete(self._compute.execute(
-                    self._compute_instance_id, f"cat {file_path}", timeout=60
+                    self._compute_instance_id, f"cat -- {shlex.quote(file_path)}", timeout=60
                 ))
                 if result.get("exit_code", 0) != 0:
                     stderr = result.get("stderr", "")
@@ -362,11 +363,12 @@ class LocalManagedAgent:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
-                # Use tee command to write file content safely
+                # Use printf for safe file writing (preserves newlines)
                 import shlex
                 escaped_content = shlex.quote(content)
+                escaped_path = shlex.quote(file_path)
                 result = loop.run_until_complete(self._compute.execute(
-                    self._compute_instance_id, f"echo {escaped_content} > {file_path}", timeout=60
+                    self._compute_instance_id, f"printf '%s' {escaped_content} > {escaped_path}", timeout=60
                 ))
                 if result.get("exit_code", 0) != 0:
                     stderr = result.get("stderr", "")
@@ -391,8 +393,9 @@ class LocalManagedAgent:
             asyncio.set_event_loop(loop)
             try:
                 # Use ls -la command to list files
+                import shlex
                 result = loop.run_until_complete(self._compute.execute(
-                    self._compute_instance_id, f"ls -la {directory}", timeout=60
+                    self._compute_instance_id, f"ls -la -- {shlex.quote(directory)}", timeout=60
                 ))
                 if result.get("exit_code", 0) != 0:
                     stderr = result.get("stderr", "")
@@ -615,7 +618,8 @@ class LocalManagedAgent:
                     loop.close()
             
             # Install packages in compute sandbox
-            cmd = f"pip install -q {' '.join(pip_pkgs)}"
+            import shlex
+            cmd = "pip install -q " + " ".join(shlex.quote(pkg) for pkg in pip_pkgs)
             try:
                 import asyncio
                 loop = asyncio.new_event_loop()
@@ -625,11 +629,20 @@ class LocalManagedAgent:
                         self._compute_instance_id, cmd, timeout=120
                     ))
                     if result.get("exit_code", 0) != 0:
-                        logger.warning("[local_managed] pip install in sandbox failed: %s", result.get("stderr"))
+                        stderr = result.get("stderr", "")
+                        raise RuntimeError(
+                            f"pip install failed in compute sandbox: {stderr}. "
+                            f"Packages: {pip_pkgs}"
+                        )
                 finally:
                     loop.close()
             except Exception as e:
-                logger.warning("[local_managed] pip install in sandbox failed: %s", e)
+                if "RuntimeError" in str(type(e)):
+                    raise  # Re-raise our structured error
+                raise RuntimeError(
+                    f"pip install failed in compute sandbox: {e}. "
+                    f"Packages: {pip_pkgs}"
+                )
             return
         
         # No compute provider - check if host install is explicitly allowed
