@@ -400,28 +400,40 @@ def auth_callback(username: str, password: str):
         logger.warning(f"Login failed for user: {username}")
         return None
 
-def _get_or_create_agent(model_name: str, tools_enabled: bool = True):
+def _get_or_create_agent(model_name: str, tools_enabled: bool = True, external_agents_settings: dict = None):
     """Get or create a reusable agent for the session."""
     Agent = _get_praisonai_agent()
     if Agent is None:
         return None
+    if external_agents_settings is None:
+        external_agents_settings = {}
     
     # Get cached agent from session
     cached_agent = cl.user_session.get("_cached_agent")
     cached_model = cl.user_session.get("_cached_agent_model")
+    cached_external = cl.user_session.get("_cached_agent_external", {})
     
-    # Reuse if model matches
-    if cached_agent is not None and cached_model == model_name:
+    # Reuse if model and external settings match
+    if (cached_agent is not None and cached_model == model_name
+        and cached_external == external_agents_settings):
         return cached_agent
     
     # Create new agent with interactive tools
     _profile_start("create_agent")
     tools = []
     if tools_enabled:
-        tools = _get_interactive_tools()
+        tools = list(_get_interactive_tools())  # Copy to avoid mutating cache
         # Add Tavily if available
         if os.getenv("TAVILY_API_KEY"):
             tools.append(tavily_web_search)
+        # Add external agent tools
+        from praisonai.ui._external_agents import external_agent_tools
+        tools.extend(
+            external_agent_tools(
+                external_agents_settings,
+                workspace=os.environ.get("PRAISONAI_WORKSPACE", "."),
+            )
+        )
     
     agent = Agent(
         name="PraisonAI Assistant",
@@ -443,9 +455,26 @@ Always be helpful, accurate, and concise.""",
     # Cache the agent
     cl.user_session.set("_cached_agent", agent)
     cl.user_session.set("_cached_agent_model", model_name)
+    cl.user_session.set("_cached_agent_external", external_agents_settings)
     _profile_end("create_agent")
     
     return agent
+
+
+def _parse_setting_bool(value):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"true", "1", "yes", "on"}
+
+
+def _get_external_agent_settings_from_session() -> dict:
+    from praisonai.ui._external_agents import EXTERNAL_AGENTS
+    return {
+        toggle_id: _parse_setting_bool(cl.user_session.get(toggle_id, False))
+        for toggle_id in EXTERNAL_AGENTS
+    }
 
 @cl.on_chat_start
 async def start():
@@ -459,8 +488,12 @@ async def start():
     cl.user_session.set("tools_enabled", tools_enabled)
     logger.debug(f"Model name: {model_name}, Tools enabled: {tools_enabled}")
     
+    # Load external agent settings
+    from praisonai.ui._external_agents import load_external_agent_settings_from_chainlit, chainlit_switches
+    external_settings = load_external_agent_settings_from_chainlit(load_setting)
+    
     # Pre-create agent for faster first response
-    _get_or_create_agent(model_name, tools_enabled)
+    _get_or_create_agent(model_name, tools_enabled, external_settings)
     
     settings = cl.ChatSettings(
         [
@@ -474,7 +507,8 @@ async def start():
                 id="tools_enabled",
                 label="Enable Tools (ACP, LSP, Web Search)",
                 initial=tools_enabled
-            )
+            ),
+            *chainlit_switches(external_settings)
         ]
     )
     cl.user_session.set("settings", settings)
@@ -508,14 +542,24 @@ async def setup_agent(settings):
     cl.user_session.set("model_name", model_name)
     cl.user_session.set("tools_enabled", tools_enabled)
     
-    # Invalidate cached agent if model changed
+    # Save external agent settings
+    from praisonai.ui._external_agents import save_external_agent_settings_to_chainlit, EXTERNAL_AGENTS
+    external_agent_settings = {k: settings.get(k, False) for k in EXTERNAL_AGENTS}
+    save_external_agent_settings_to_chainlit(external_agent_settings)
+    
+    # Invalidate cached agent if model changed or external agents changed
     cached_model = cl.user_session.get("_cached_agent_model")
-    if cached_model != model_name:
+    cached_external = cl.user_session.get("_cached_agent_external", {})
+    if cached_model != model_name or cached_external != external_agent_settings:
         cl.user_session.set("_cached_agent", None)
         cl.user_session.set("_cached_agent_model", None)
+        cl.user_session.set("_cached_agent_external", None)
 
     save_setting("model_name", model_name)
     save_setting("tools_enabled", str(tools_enabled).lower())
+    # Save external agent settings to persistent storage
+    for toggle_id, enabled in external_agent_settings.items():
+        save_setting(toggle_id, str(enabled).lower())
 
     thread_id = cl.user_session.get("thread_id")
     if thread_id:
@@ -572,7 +616,8 @@ User Question: {message.content}
     msg = cl.Message(content="")
 
     # Try PraisonAI Agent first (faster, with tool reuse)
-    agent = _get_or_create_agent(model_name, tools_enabled) if tools_enabled else None
+    external_settings = _get_external_agent_settings_from_session()
+    agent = _get_or_create_agent(model_name, tools_enabled, external_settings) if tools_enabled else None
     
     if agent is not None:
         _profile_start("agent_response")
@@ -781,6 +826,11 @@ async def on_chat_resume(thread: ThreadDict):
     tools_enabled = (load_setting("tools_enabled") or "true").lower() == "true"
     
     logger.debug(f"Model name: {model_name}")
+    
+    # Load external agent settings for resume
+    from praisonai.ui._external_agents import load_external_agent_settings_from_chainlit, chainlit_switches
+    external_settings = load_external_agent_settings_from_chainlit()
+    
     settings = cl.ChatSettings(
         [
             TextInput(
@@ -793,7 +843,8 @@ async def on_chat_resume(thread: ThreadDict):
                 id="tools_enabled",
                 label="Enable Tools (ACP, LSP, Web Search)",
                 initial=tools_enabled
-            )
+            ),
+            *chainlit_switches(external_settings),
         ]
     )
     await settings.send()
@@ -828,7 +879,8 @@ async def on_chat_resume(thread: ThreadDict):
     cl.user_session.set("message_history", message_history)
     
     # Pre-create agent for faster first response
-    _get_or_create_agent(model_name, tools_enabled)
+    external_settings = _get_external_agent_settings_from_session()
+    _get_or_create_agent(model_name, tools_enabled, external_settings)
 
     image_data = metadata.get("image")
     if image_data:

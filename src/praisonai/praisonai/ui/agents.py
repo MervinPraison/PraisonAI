@@ -426,6 +426,26 @@ async def ui_run_praisonai(config, topic, tools_dict):
                 except Exception as e:
                     logger.error(f"Error in step_callback_sync: {e}", exc_info=True)
 
+            # Get external agent tools from current settings
+            external_tools = []
+            try:
+                from praisonai.ui._external_agents import external_agent_tools, EXTERNAL_AGENTS
+                settings = cl.user_session.get("settings", {})
+                external_settings = {k: settings.get(k, False) for k in EXTERNAL_AGENTS}
+                workspace = os.environ.get("PRAISONAI_WORKSPACE", ".")
+                external_tools = external_agent_tools(external_settings, workspace=workspace)
+            except ImportError:
+                pass
+            
+            # Get existing tools from details
+            existing_tools = details.get('tools', [])
+            if isinstance(existing_tools, str):
+                # If tools is a string, it might be a module reference - keep as is
+                all_tools = existing_tools
+            else:
+                # Combine existing and external tools
+                all_tools = (existing_tools or []) + external_tools
+                
             agent = Agent(
                 name=role_name,
                 role=role_filled,
@@ -439,7 +459,8 @@ async def ui_run_praisonai(config, topic, tools_dict):
                 max_execution_time=details.get('max_execution_time'),
                 cache=details.get('cache', True),
                 step_callback=step_callback_sync,
-                reflection=details.get('self_reflect', False)
+                reflection=details.get('self_reflect', False),
+                tools=all_tools if all_tools else None
             )
             agents_map[role] = agent
 
@@ -485,8 +506,10 @@ async def ui_run_praisonai(config, topic, tools_dict):
                         logger.warning(f"Tool '{tool_name}' not found. Skipping.")
             
             # Set the agent's tools after collecting all tools
-            if role_tools:
-                agent.tools = role_tools
+            # Merge resolved YAML tools with external agent tools so both survive
+            merged_tools = role_tools + external_tools
+            if merged_tools:
+                agent.tools = merged_tools
 
             for tname, tdetails in details.get('tasks', {}).items():
                 description_filled = tdetails['description'].format(topic=topic)
@@ -674,6 +697,18 @@ async def start_chat():
             with open("agents.yaml", "w") as f:
                 f.write("# Add your custom agents here\n")
         
+        # Load external agent settings
+        try:
+            from praisonai.ui._external_agents import (
+                chainlit_switches,
+                load_external_agent_settings_from_chainlit,
+            )
+            external_settings = load_external_agent_settings_from_chainlit(load_setting)
+        except ImportError:
+            def chainlit_switches(_settings):  # no-op fallback
+                return []
+            external_settings = {}
+        
         settings = await cl.ChatSettings(
             [
                 TextInput(id="Model", label="OpenAI - Model", initial=model_name),
@@ -685,6 +720,7 @@ async def start_chat():
                     values=["praisonai", "crewai", "autogen"],
                     initial_index=0,
                 ),
+                *chainlit_switches(external_settings)
             ]
         ).send()
         cl.user_session.set("settings", settings)
@@ -719,6 +755,7 @@ async def start_chat():
                     ),
                     TextInput(id="agents", label="agents.yaml", initial=yaml_content, multiline=True),
                     TextInput(id="tools", label="tools.py", initial=tools_content, multiline=True),
+                    *chainlit_switches(external_settings)
                 ]
             ).send()
             cl.user_session.set("settings", settings)
