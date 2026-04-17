@@ -272,51 +272,58 @@ class TestGetClient:
     """Test the _get_client helper function."""
 
     @patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test-key'})
-    @patch('praisonai.cli.commands.managed.anthropic')
-    def test_get_client_with_anthropic_api_key(self, mock_anthropic):
+    def test_get_client_with_anthropic_api_key(self):
         """Test client creation with ANTHROPIC_API_KEY."""
+        import sys
+        mock_anthropic = MagicMock()
         mock_client = Mock()
         mock_anthropic.Anthropic.return_value = mock_client
-        
-        # Reset the patched _get_client to use the real function
-        from praisonai.cli.commands.managed import _get_client
-        
-        client = _get_client()
-        
+        with patch.dict(sys.modules, {'anthropic': mock_anthropic}):
+            from praisonai.cli.commands.managed import _get_client
+            client = _get_client()
         mock_anthropic.Anthropic.assert_called_once_with(api_key='test-key')
         assert client == mock_client
 
-    @patch.dict('os.environ', {'CLAUDE_API_KEY': 'test-key-2'})
-    @patch('praisonai.cli.commands.managed.anthropic')
-    def test_get_client_with_claude_api_key(self, mock_anthropic):
+    @patch.dict('os.environ', {'CLAUDE_API_KEY': 'test-key-2'}, clear=True)
+    def test_get_client_with_claude_api_key(self):
         """Test client creation with CLAUDE_API_KEY."""
+        import sys
+        mock_anthropic = MagicMock()
         mock_client = Mock()
         mock_anthropic.Anthropic.return_value = mock_client
-        
-        from praisonai.cli.commands.managed import _get_client
-        
-        client = _get_client()
-        
+        with patch.dict(sys.modules, {'anthropic': mock_anthropic}):
+            from praisonai.cli.commands.managed import _get_client
+            client = _get_client()
         mock_anthropic.Anthropic.assert_called_once_with(api_key='test-key-2')
         assert client == mock_client
 
     @patch.dict('os.environ', {}, clear=True)
-    @patch('praisonai.cli.commands.managed.anthropic')
-    def test_get_client_no_api_key(self, mock_anthropic):
+    def test_get_client_no_api_key(self):
         """Test client creation with no API key."""
-        from praisonai.cli.commands.managed import _get_client
-        
-        with pytest.raises(typer.Exit) as exc_info:
-            _get_client()
-        
+        import sys
+        mock_anthropic = MagicMock()
+        with patch.dict(sys.modules, {'anthropic': mock_anthropic}):
+            from praisonai.cli.commands.managed import _get_client
+            with pytest.raises(typer.Exit) as exc_info:
+                _get_client()
         assert exc_info.value.exit_code == 1
 
-    @patch('praisonai.cli.commands.managed.anthropic', None)
     def test_get_client_no_anthropic_package(self):
         """Test client creation when anthropic package is not installed."""
-        from praisonai.cli.commands.managed import _get_client
-        
-        with pytest.raises(typer.Exit) as exc_info:
-            _get_client()
-        
-        assert exc_info.value.exit_code == 1
+        import sys
+        import builtins
+        real_import = builtins.__import__
+        def fake_import(name, *args, **kwargs):
+            if name == 'anthropic':
+                raise ImportError("No module named 'anthropic'")
+            return real_import(name, *args, **kwargs)
+        saved = sys.modules.pop('anthropic', None)
+        try:
+            with patch('builtins.__import__', side_effect=fake_import):
+                from praisonai.cli.commands.managed import _get_client
+                with pytest.raises(typer.Exit) as exc_info:
+                    _get_client()
+            assert exc_info.value.exit_code == 1
+        finally:
+            if saved is not None:
+                sys.modules['anthropic'] = saved
