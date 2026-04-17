@@ -41,4 +41,13 @@ __all__ = [
     "ComputeConfig",
     "InstanceInfo",
     "InstanceStatus",
+    "ManagedBackendProtocol",
 ]
+
+
+def __getattr__(name: str):
+    """Lazy import for heavy dependencies."""
+    if name == "ManagedBackendProtocol":
+        from ..agent.protocols import ManagedBackendProtocol
+        return ManagedBackendProtocol
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

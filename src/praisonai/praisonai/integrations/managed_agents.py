@@ -565,22 +565,39 @@ class AnthropicManagedAgent:
     # retrieve_session — ManagedBackendProtocol
     # ------------------------------------------------------------------
     def retrieve_session(self) -> Dict[str, Any]:
-        """Retrieve current session metadata and usage from the API."""
+        """Retrieve current session metadata and usage from the API.
+        
+        Returns:
+            Dict with unified schema: {id, status, title, usage}.
+            All fields are always present with sensible defaults.
+        """
+        from ._session_info import SessionInfo, UsageInfo
+        
         if not self._session_id:
-            return {}
+            # Return empty session info with defaults
+            return SessionInfo().to_dict()
+            
         client = self._get_client()
         sess = client.beta.sessions.retrieve(self._session_id)
-        result: Dict[str, Any] = {
-            "id": getattr(sess, "id", self._session_id),
-            "status": getattr(sess, "status", None),
-        }
+        
+        # Extract usage information
         usage = getattr(sess, "usage", None)
+        usage_info = UsageInfo()
         if usage:
-            result["usage"] = {
-                "input_tokens": getattr(usage, "input_tokens", 0),
-                "output_tokens": getattr(usage, "output_tokens", 0),
-            }
-        return result
+            usage_info = UsageInfo(
+                input_tokens=getattr(usage, "input_tokens", 0),
+                output_tokens=getattr(usage, "output_tokens", 0),
+            )
+        
+        # Create unified session info
+        session_info = SessionInfo(
+            id=getattr(sess, "id", self._session_id),
+            status=getattr(sess, "status", "unknown"),
+            title=getattr(sess, "title", ""),  # Anthropic sessions may have titles
+            usage=usage_info,
+        )
+        
+        return session_info.to_dict()
 
     # ------------------------------------------------------------------
     # list_sessions — ManagedBackendProtocol
