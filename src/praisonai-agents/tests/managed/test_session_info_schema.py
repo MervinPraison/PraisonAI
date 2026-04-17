@@ -218,7 +218,7 @@ def test_empty_session_local_none_id():
     result = agent.retrieve_session()
 
     assert result["id"] == ""
-    assert result["status"] == "none"
+    assert result["status"] == "unknown"
 
 
 if __name__ == "__main__":
