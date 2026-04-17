@@ -30,12 +30,72 @@ class TaskStatus(Enum):
 # Set up logger
 logger = get_logger(__name__)
 
-# Global variables for managing the shared servers with thread-safety
+# Agent server registry for thread-safe server management
 import threading
-_agents_server_lock = threading.Lock()  # Protect all global server state mutations
-_agents_server_started = {}  # Dict of port -> started boolean
-_agents_registered_endpoints = {}  # Dict of port -> Dict of path -> endpoint_id
-_agents_shared_apps = {}  # Dict of port -> FastAPI app
+
+
+class _AgentServerRegistry:
+    """Encapsulates all shared HTTP server state with proper synchronization."""
+    
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._started: Dict[int, bool] = {}
+        self._endpoints: Dict[int, Dict[str, str]] = {}
+        self._apps: Dict[int, Any] = {}  # FastAPI apps
+        self._ready_events: Dict[int, threading.Event] = {}
+    
+    def get_or_create_app(self, port: int, title: str = "AgentTeam API") -> Any:
+        """Thread-safe app creation. Returns (app, is_new)."""
+        with self._lock:
+            if port not in self._apps:
+                # Lazy import to avoid optional dependency at module level
+                from fastapi import FastAPI
+                self._apps[port] = FastAPI(title=title)
+                self._endpoints[port] = {}
+                self._ready_events[port] = threading.Event()
+                return self._apps[port], True
+            return self._apps[port], False
+    
+    def register_route(self, port: int, path: str, endpoint_id: str = "registered") -> None:
+        """Thread-safe route registration tracking."""
+        with self._lock:
+            if port not in self._endpoints:
+                self._endpoints[port] = {}
+            self._endpoints[port][path] = endpoint_id
+    
+    def is_server_started(self, port: int) -> bool:
+        """Check if server is started for this port."""
+        with self._lock:
+            return self._started.get(port, False)
+    
+    def start_server_if_needed(self, port: int, host: str = "0.0.0.0", **kwargs) -> bool:
+        """Start server with proper readiness signaling. Returns True if server was started."""
+        with self._lock:
+            if self._started.get(port, False):
+                return False  # Already started
+            self._started[port] = True
+            app = self._apps.get(port)
+            
+        if not app:
+            raise ValueError(f"No app registered for port {port}")
+        
+        ready_event = self._ready_events[port]
+        
+        def run_server():
+            import uvicorn
+            config = uvicorn.Config(app, host=host, port=port, log_level="error", **kwargs)
+            server = uvicorn.Server(config)
+            ready_event.set()  # Signal readiness
+            server.run()
+        
+        thread = threading.Thread(target=run_server, daemon=True)
+        thread.start()
+        ready_event.wait(timeout=5.0)  # Deterministic wait instead of sleep(0.5)
+        return True
+
+
+# Module level — single registry instance
+_server_registry = _AgentServerRegistry()
 
 def encode_file_to_base64(file_path: str) -> str:
     """Base64-encode a file."""
@@ -933,12 +993,8 @@ class AgentTeam:
                     if task.callback:
                         try:
                             if asyncio.iscoroutinefunction(task.callback):
-                                try:
-                                    loop = asyncio.get_running_loop()
-                                    loop.create_task(task.callback(task_output))
-                                except RuntimeError:
-                                    # No event loop running, create new one
-                                    asyncio.run(task.callback(task_output))
+                                from ..approval.utils import run_coroutine_safely
+                                run_coroutine_safely(task.callback(task_output))
                             else:
                                 task.callback(task_output)
                         except Exception as e:
@@ -1164,12 +1220,8 @@ class AgentTeam:
                     if task.callback:
                         try:
                             if asyncio.iscoroutinefunction(task.callback):
-                                try:
-                                    loop = asyncio.get_running_loop()
-                                    loop.create_task(task.callback(task_output))
-                                except RuntimeError:
-                                    # No event loop running, create new one
-                                    asyncio.run(task.callback(task_output))
+                                from ..approval.utils import run_coroutine_safely
+                                run_coroutine_safely(task.callback(task_output))
                             else:
                                 task.callback(task_output)
                         except Exception as e:
@@ -1643,7 +1695,7 @@ class AgentTeam:
             None
         """
         if protocol == "http":
-            global _agents_server_started, _agents_registered_endpoints, _agents_shared_apps
+            # Use centralized server registry
             
             if not self.agents:
                 logging.warning("No agents to launch for HTTP mode. Add agents to the Agents instance first.")
@@ -1674,58 +1726,49 @@ class AgentTeam:
                 print("pip install 'praisonaiagents[api]'")
                 return None
             
-            # Thread-safe initialization of port-specific collections
-            with _agents_server_lock:
-                # Initialize port-specific collections if needed
-                if port not in _agents_registered_endpoints:
-                    _agents_registered_endpoints[port] = {}
-                    
-                # Initialize shared FastAPI app if not already created for this port
-                if _agents_shared_apps.get(port) is None:
-                    _agents_shared_apps[port] = FastAPI(
-                        title=f"PraisonAI Agents API (Port {port})",
-                        description="API for interacting with multiple PraisonAI Agents"
-                    )
-                
+            # Thread-safe initialization of FastAPI app
+            app, is_new = _server_registry.get_or_create_app(
+                port, f"PraisonAI Agents API (Port {port})"
+            )
+            
+            if is_new:
                 # Add a root endpoint with a welcome message
-                @_agents_shared_apps[port].get("/")
+                @app.get("/")
                 async def root():
                     return {
                         "message": f"Welcome to PraisonAI Agents API on port {port}. See /docs for usage.",
-                        "endpoints": list(_agents_registered_endpoints[port].keys())
+                        "endpoints": list(_server_registry._endpoints.get(port, {}).keys())
                     }
                 
                 # Add healthcheck endpoint
-                @_agents_shared_apps[port].get("/health")
+                @app.get("/health")
                 async def healthcheck():
                     return {
                         "status": "ok", 
-                        "endpoints": list(_agents_registered_endpoints[port].keys())
+                        "endpoints": list(_server_registry._endpoints.get(port, {}).keys())
                     }
             
             # Normalize path to ensure it starts with /
             if not path.startswith('/'):
                 path = f'/{path}'
                 
-            # Thread-safe path registration 
-            with _agents_server_lock:
-                # Check if path is already registered for this port
-                if path in _agents_registered_endpoints[port]:
-                    logging.warning(f"Path '{path}' is already registered on port {port}. Please use a different path.")
-                    print(f"⚠️ Warning: Path '{path}' is already registered on port {port}.")
-                    # Use a modified path to avoid conflicts
-                    original_path = path
-                    instance_id = str(uuid.uuid4())[:6]
-                    path = f"{path}_{instance_id}"
-                    logging.warning(f"Using '{path}' instead of '{original_path}'")
-                    print(f"🔄 Using '{path}' instead")
-                
-                # Generate a unique ID for this agent group's endpoint
-                endpoint_id = str(uuid.uuid4())
-                _agents_registered_endpoints[port][path] = endpoint_id
+            # Check if path is already registered for this port
+            if port in _server_registry._endpoints and path in _server_registry._endpoints[port]:
+                logging.warning(f"Path '{path}' is already registered on port {port}. Please use a different path.")
+                print(f"⚠️ Warning: Path '{path}' is already registered on port {port}.")
+                # Use a modified path to avoid conflicts
+                original_path = path
+                instance_id = str(uuid.uuid4())[:6]
+                path = f"{path}_{instance_id}"
+                logging.warning(f"Using '{path}' instead of '{original_path}'")
+                print(f"🔄 Using '{path}' instead")
+            
+            # Generate a unique ID for this agent group's endpoint and register
+            endpoint_id = str(uuid.uuid4())
+            _server_registry.register_route(port, path, endpoint_id)
             
             # Define the endpoint handler
-            @_agents_shared_apps[port].post(path)
+            @app.post(path)
             async def handle_query(request: Request, query_data: Optional[AgentQuery] = None):
                 # Handle both direct JSON with query field and form data
                 if query_data is None:
@@ -1804,7 +1847,7 @@ class AgentTeam:
             agents_dict = {agent.display_name.lower().replace(' ', '_'): agent for agent in self.agents}
             
             # Add GET endpoint to list available agents
-            @_agents_shared_apps[port].get(f"{path}/list")
+            @app.get(f"{path}/list")
             async def list_agents():
                 return {
                     "agents": [
@@ -1850,45 +1893,19 @@ class AgentTeam:
                             )
                     return handle_single_agent
                 
-                # Register the endpoint with thread safety
-                _agents_shared_apps[port].post(agent_path)(create_agent_handler(agent_instance))
-                with _agents_server_lock:
-                    _agents_registered_endpoints[port][agent_path] = f"{endpoint_id}_{agent_id}"
+                # Register the endpoint
+                app.post(agent_path)(create_agent_handler(agent_instance))
+                _server_registry.register_route(port, agent_path, f"{endpoint_id}_{agent_id}")
             
             print(f"🔗 Per-agent endpoints: {', '.join([f'{path}/{aid}' for aid in agents_dict.keys()])}")
             
             # Start the server if it's not already running for this port
-            with _agents_server_lock:
-                if not _agents_server_started.get(port, False):
-                    # Mark the server as started first to prevent duplicate starts
-                    _agents_server_started[port] = True
-                    should_start_server = True
-                else:
-                    should_start_server = False
-            
-            if should_start_server:
+            if _server_registry.start_server_if_needed(port, host, log_level="debug" if debug else "info"):
+                print(f"✅ FastAPI server started at http://{host}:{port}")
+                print(f"📚 API documentation available at http://{host}:{port}/docs")
                 
-                # Start the server in a separate thread
-                def run_server():
-                    try:
-                        print(f"✅ FastAPI server started at http://{host}:{port}")
-                        print(f"📚 API documentation available at http://{host}:{port}/docs")
-                        print(f"🔌 Registered HTTP endpoints on port {port}: {', '.join(list(_agents_registered_endpoints[port].keys()))}")
-                        uvicorn.run(_agents_shared_apps[port], host=host, port=port, log_level="debug" if debug else "info")
-                    except Exception as e:
-                        logging.error(f"Error starting server: {str(e)}", exc_info=True)
-                        print(f"❌ Error starting server: {str(e)}")
-                
-                # Run server in a background thread
-                server_thread = threading.Thread(target=run_server, daemon=True)
-                server_thread.start()
-                
-                # Wait for a moment to allow the server to start and register endpoints
-                time.sleep(0.5)
-            else:
-                # If server is already running, wait a moment to make sure the endpoint is registered
-                time.sleep(0.1)
-                print(f"🔌 Registered HTTP endpoints on port {port}: {', '.join(list(_agents_registered_endpoints[port].keys()))}")
+            endpoints = list(_server_registry._endpoints.get(port, {}).keys())
+            print(f"🔌 Registered HTTP endpoints on port {port}: {', '.join(endpoints)}")
             
             # Get the stack frame to check if this is the last launch() call in the script
             import inspect
