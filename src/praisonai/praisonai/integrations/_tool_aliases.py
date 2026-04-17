@@ -24,7 +24,7 @@ TOOL_ALIAS_MAP: Dict[str, str] = {
     "edit": "apply_diff",
     "glob": "list_files",
     "grep": "search_file",
-    "web_fetch": "web_fetch",
+    # web_fetch is not aliased — the PraisonAI tool name matches the Anthropic name directly
     "search": "search_web",
     "web_search": "search_web",
 }

@@ -33,6 +33,8 @@ import os
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Callable, Dict, Any, Optional, List
 
+from ._tool_aliases import TOOL_ALIAS_MAP
+
 logger = logging.getLogger(__name__)
 
 
@@ -639,7 +641,6 @@ class AnthropicManagedAgent:
 # ---------------------------------------------------------------------------
 # Tool mapping helpers
 # ---------------------------------------------------------------------------
-from ._tool_aliases import TOOL_ALIAS_MAP
 
 
 def map_managed_tools(managed_tools: List[str]) -> List[str]:

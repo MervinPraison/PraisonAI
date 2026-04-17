@@ -38,6 +38,8 @@ from typing import (
     Optional,
 )
 
+from ._tool_aliases import TOOL_ALIAS_MAP
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_SYSTEM = "You are a helpful coding assistant."
@@ -49,8 +51,6 @@ _DEFAULT_TOOLS = [
     "list_files",
     "search_web",
 ]
-
-from ._tool_aliases import TOOL_ALIAS_MAP
 
 
 @dataclass
