@@ -405,23 +405,21 @@ class TestManagedSandboxSafety:
         cfg = LocalManagedConfig(packages={"pip": ["requests"]})
         agent = LocalManagedAgent(config=cfg, compute="local")
         
-        # Mock the compute execution
-        with patch.object(agent, 'provision_compute') as mock_provision, \
-             patch.object(agent._compute, 'execute') as mock_execute, \
-             patch('asyncio.run') as mock_asyncio_run, \
-             patch('asyncio.get_event_loop') as mock_get_loop:
+        # Mock the compute execution for the full duration
+        with patch.object(agent, '_run_async_safe') as mock_run_async, \
+             patch('praisonai.integrations.managed_local.subprocess.run') as mock_subprocess:
             
-            mock_provision.return_value = None
-            mock_execute.return_value = {"exit_code": 0, "stdout": "installed"}
+            # Mock compute execution response
+            mock_run_async.return_value = {"exit_code": 0, "stdout": "installed"}
             agent._compute_instance_id = "test_instance"
-            mock_asyncio_run.return_value = {"exit_code": 0, "stdout": "installed"}
             
             agent._install_packages()
             
+            # Verify compute.execute was called via _run_async_safe
+            mock_run_async.assert_called()
+            
             # Verify subprocess.run was NOT called (no host installation)
-            with patch('praisonai.integrations.managed_local.subprocess.run') as mock_run:
-                agent._install_packages()
-                mock_run.assert_not_called()
+            mock_subprocess.assert_not_called()
 
     def test_no_packages_no_error(self):
         """Test that agents without packages work normally."""

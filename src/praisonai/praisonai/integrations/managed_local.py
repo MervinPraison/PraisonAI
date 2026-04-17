@@ -22,8 +22,10 @@ Usage::
 """
 
 import asyncio
+import base64
 import logging
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -306,10 +308,14 @@ class LocalManagedAgent:
         tools = []
         compute_bridged_tools = {"execute_command", "read_file", "write_file", "list_files"}
         
+        try:
+            from praisonaiagents import tools as tool_module
+        except ImportError:
+            tool_module = None
+        
         for name in resolved_names:
             try:
-                from praisonaiagents import tools as tool_module
-                func = getattr(tool_module, name, None)
+                func = getattr(tool_module, name, None) if tool_module else None
                 if func is not None:
                     # Bridge shell-based tools to compute when available
                     if self._compute and name in compute_bridged_tools:
@@ -345,17 +351,12 @@ class LocalManagedAgent:
         environment instead of on the host.
         """
         import inspect
-        import asyncio
         
         def compute_bridged_tool(*args, **kwargs):
             """Compute-bridged tool wrapper."""
             # Auto-provision compute if needed
             if self._compute_instance_id is None:
-                try:
-                    loop = asyncio.get_event_loop()
-                    loop.run_until_complete(self.provision_compute())
-                except RuntimeError:
-                    asyncio.run(self.provision_compute())
+                self._run_async_safe(self.provision_compute())
             
             if tool_name == "execute_command":
                 # For execute_command, directly route to compute
@@ -364,15 +365,9 @@ class LocalManagedAgent:
                     return "Error: No command specified"
                 
                 try:
-                    try:
-                        loop = asyncio.get_event_loop()
-                        result = loop.run_until_complete(
-                            self._compute.execute(self._compute_instance_id, command)
-                        )
-                    except RuntimeError:
-                        result = asyncio.run(
-                            self._compute.execute(self._compute_instance_id, command)
-                        )
+                    result = self._run_async_safe(
+                        self._compute.execute(self._compute_instance_id, command)
+                    )
                     
                     # Format result similar to local execute_command
                     if result.get("exit_code", 0) == 0:
@@ -406,14 +401,13 @@ class LocalManagedAgent:
 
     def _bridge_file_tool(self, tool_name: str, *args, **kwargs) -> str:
         """Bridge file operations to compute environment."""
-        import asyncio
         
         if tool_name == "read_file":
             filepath = args[0] if args else kwargs.get("filepath", "")
             if not filepath:
                 return "Error: No filepath specified"
             
-            command = f'cat "{filepath}"'
+            command = f'cat {shlex.quote(filepath)}'
             
         elif tool_name == "write_file":
             filepath = args[0] if args else kwargs.get("filepath", "")
@@ -421,27 +415,21 @@ class LocalManagedAgent:
             if not filepath:
                 return "Error: No filepath specified"
             
-            # Escape content for shell
-            import shlex
-            command = f'cat > "{filepath}" << "EOF"\n{content}\nEOF'
+            # Use printf with base64 encoding to safely handle any content
+            content_b64 = base64.b64encode(content.encode('utf-8')).decode('ascii')
+            command = f'echo {shlex.quote(content_b64)} | base64 -d > {shlex.quote(filepath)}'
             
         elif tool_name == "list_files":
             directory = args[0] if args else kwargs.get("directory", ".")
-            command = f'ls -la "{directory}"'
+            command = f'ls -la {shlex.quote(directory)}'
             
         else:
             return f"Error: Unsupported bridged tool: {tool_name}"
         
         try:
-            try:
-                loop = asyncio.get_event_loop()
-                result = loop.run_until_complete(
-                    self._compute.execute(self._compute_instance_id, command)
-                )
-            except RuntimeError:
-                result = asyncio.run(
-                    self._compute.execute(self._compute_instance_id, command)
-                )
+            result = self._run_async_safe(
+                self._compute.execute(self._compute_instance_id, command)
+            )
             
             if result.get("exit_code", 0) == 0:
                 return result.get("stdout", "")
@@ -513,6 +501,30 @@ class LocalManagedAgent:
                 store._save_session(new_session)
         except Exception as e:
             logger.debug("[local_managed] _persist_state failed: %s", e)
+
+    def _run_async_safe(self, coroutine):
+        """Run a coroutine safely, handling various event loop scenarios.
+        
+        This method handles:
+        - No event loop (creates one with asyncio.run)
+        - Event loop exists but not running (use run_until_complete)
+        - Event loop exists and is running (raises clear error)
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                raise RuntimeError(
+                    "Cannot run async operation from within a running event loop. "
+                    "This operation must be called from a synchronous context."
+                )
+            return loop.run_until_complete(coroutine)
+        except RuntimeError as e:
+            if "no current event loop" in str(e).lower() or "no running event loop" in str(e).lower():
+                # No event loop exists, create one
+                return asyncio.run(coroutine)
+            else:
+                # Re-raise other RuntimeErrors (like "event loop is running")
+                raise
 
     def _restore_state(self) -> None:
         """Restore all mutable state from the session store.
@@ -623,30 +635,16 @@ class LocalManagedAgent:
         
         # Auto-provision compute if not done yet
         if self._compute_instance_id is None:
-            try:
-                import asyncio
-                loop = asyncio.get_event_loop()
-                loop.run_until_complete(self.provision_compute())
-            except RuntimeError:
-                # No event loop, create one
-                asyncio.run(self.provision_compute())
+            self._run_async_safe(self.provision_compute())
         
-        pip_cmd = "python -m pip install -q " + " ".join(f'"{pkg}"' for pkg in pip_pkgs)
+        pip_cmd = "python -m pip install -q " + " ".join(shlex.quote(pkg) for pkg in pip_pkgs)
         logger.info("[local_managed] installing pip packages in compute: %s", pip_pkgs)
         
         try:
             # Run installation synchronously in compute
-            import asyncio
-            try:
-                loop = asyncio.get_event_loop()
-                result = loop.run_until_complete(
-                    self._compute.execute(self._compute_instance_id, pip_cmd, timeout=120)
-                )
-            except RuntimeError:
-                # No event loop, create one
-                result = asyncio.run(
-                    self._compute.execute(self._compute_instance_id, pip_cmd, timeout=120)
-                )
+            result = self._run_async_safe(
+                self._compute.execute(self._compute_instance_id, pip_cmd, timeout=120)
+            )
             
             if result.get("exit_code", 0) == 0:
                 logger.info("[local_managed] compute pip install completed")
