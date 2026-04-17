@@ -316,6 +316,32 @@ def sessions_resume(
         print(result)
 
 
+@sessions_app.command("delete")
+def sessions_delete(
+    session_id: str = typer.Argument(..., help="Session ID to delete (sesn_01...)"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+):
+    """Delete a session.
+
+    Example:
+        praisonai managed sessions delete sesn_01AbCdEf
+        praisonai managed sessions delete sesn_01AbCdEf --yes
+    """
+    if not yes:
+        confirm = typer.confirm(f"Delete session {session_id}?")
+        if not confirm:
+            typer.echo("Cancelled.")
+            raise typer.Exit(0)
+
+    client = _get_client()
+    try:
+        client.beta.sessions.delete(session_id)
+        typer.echo(f"Deleted session: {session_id}")
+    except Exception as e:
+        typer.echo(f"Error deleting session: {e}")
+        raise typer.Exit(1)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # agents sub-commands
 # ─────────────────────────────────────────────────────────────────────────────
@@ -397,6 +423,32 @@ def agents_update(
     typer.echo(f"Updated agent: {updated.id} (v{getattr(updated,'version','')})")
 
 
+@agents_app.command("delete")
+def agents_delete(
+    agent_id: str = typer.Argument(..., help="Agent ID to delete (agent_01...)"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+):
+    """Delete an agent.
+
+    Example:
+        praisonai managed agents delete agent_01AbCdEf
+        praisonai managed agents delete agent_01AbCdEf --yes
+    """
+    if not yes:
+        confirm = typer.confirm(f"Delete agent {agent_id}?")
+        if not confirm:
+            typer.echo("Cancelled.")
+            raise typer.Exit(0)
+
+    client = _get_client()
+    try:
+        client.beta.agents.delete(agent_id)
+        typer.echo(f"Deleted agent: {agent_id}")
+    except Exception as e:
+        typer.echo(f"Error deleting agent: {e}")
+        raise typer.Exit(1)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # envs sub-commands
 # ─────────────────────────────────────────────────────────────────────────────
@@ -439,6 +491,71 @@ def envs_get(
     cfg = getattr(e, "config", None)
     if cfg:
         typer.echo(f"Config: {cfg}")
+
+
+@envs_app.command("update")
+def envs_update(
+    env_id: str = typer.Argument(..., help="Environment ID (env_01...)"),
+    packages: Optional[str] = typer.Option(None, "--packages", "-p", help="Comma-separated pip packages to install"),
+    networking: Optional[str] = typer.Option(None, "--networking", help="Networking configuration (limited/unrestricted)"),
+):
+    """Update an environment's packages or networking configuration.
+
+    Example:
+        praisonai managed envs update env_01AbCdEf --packages "pandas,numpy"
+        praisonai managed envs update env_01AbCdEf --networking limited
+    """
+    client = _get_client()
+    kwargs = {}
+    
+    # Handle packages
+    if packages:
+        package_list = [p.strip() for p in packages.split(",")]
+        kwargs["packages"] = {"pip": package_list}
+    
+    # Handle networking
+    if networking:
+        if networking.lower() not in ["limited", "unrestricted"]:
+            typer.echo("Error: networking must be 'limited' or 'unrestricted'")
+            raise typer.Exit(1)
+        kwargs["networking"] = {"type": networking.lower()}
+    
+    if not kwargs:
+        typer.echo("Nothing to update. Pass --packages or --networking.")
+        raise typer.Exit(0)
+    
+    try:
+        updated = client.beta.environments.update(env_id, **kwargs)
+        typer.echo(f"Updated environment: {updated.id}")
+    except Exception as e:
+        typer.echo(f"Error updating environment: {e}")
+        raise typer.Exit(1)
+
+
+@envs_app.command("delete")
+def envs_delete(
+    env_id: str = typer.Argument(..., help="Environment ID to delete (env_01...)"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+):
+    """Delete an environment.
+
+    Example:
+        praisonai managed envs delete env_01AbCdEf
+        praisonai managed envs delete env_01AbCdEf --yes
+    """
+    if not yes:
+        confirm = typer.confirm(f"Delete environment {env_id}?")
+        if not confirm:
+            typer.echo("Cancelled.")
+            raise typer.Exit(0)
+
+    client = _get_client()
+    try:
+        client.beta.environments.delete(env_id)
+        typer.echo(f"Deleted environment: {env_id}")
+    except Exception as e:
+        typer.echo(f"Error deleting environment: {e}")
+        raise typer.Exit(1)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
