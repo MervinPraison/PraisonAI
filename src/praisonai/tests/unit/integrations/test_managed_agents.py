@@ -7,7 +7,7 @@ protocol compliance.
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
 
 def test_managed_config_dataclass():
@@ -296,6 +296,48 @@ def test_backward_compatible_aliases():
     # Test that aliases exist and point to correct classes
     assert ManagedAgentIntegration == ManagedAgent
     assert ManagedBackendConfig == ManagedConfig
+
+
+def test_local_retrieve_session_no_session_returns_empty_dict():
+    """Local backend should preserve empty-session behavior."""
+    from praisonai.integrations.managed_local import LocalManagedAgent
+
+    managed = LocalManagedAgent()
+    assert managed.retrieve_session() == {}
+
+
+@patch("praisonai.integrations.managed_local.subprocess.run")
+def test_local_install_packages_prefers_compute_and_skips_host(mock_subprocess_run):
+    """Successful compute install must not fall through to host install."""
+    from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
+
+    managed = LocalManagedAgent(
+        config=LocalManagedConfig(packages={"pip": ["requests"]})
+    )
+    managed._compute = object()
+    managed._install_via_compute = AsyncMock(return_value=None)
+
+    managed._install_packages()
+
+    managed._install_via_compute.assert_awaited_once_with(["requests"])
+    mock_subprocess_run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_local_install_via_compute_quotes_package_names():
+    """Package names passed through shell command should be shell-escaped."""
+    from praisonai.integrations.managed_local import LocalManagedAgent
+
+    managed = LocalManagedAgent()
+    managed._compute_instance_id = "inst_123"
+    managed.execute_in_compute = AsyncMock(return_value={"stdout": "", "stderr": "", "exit_code": 0})
+
+    await managed._install_via_compute(["requests", "bad;echo pwned"])
+
+    managed.execute_in_compute.assert_awaited_once()
+    command = managed.execute_in_compute.await_args.args[0]
+    assert "pip install -q " in command
+    assert "'bad;echo pwned'" in command
 
 
 @patch('praisonai.integrations.managed_agents.logger')

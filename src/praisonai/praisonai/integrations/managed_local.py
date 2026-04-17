@@ -476,42 +476,42 @@ class LocalManagedAgent:
         if not pip_pkgs:
             return
             
+        compute_install_succeeded = False
+
         # If compute provider is available, use it
         if self._compute is not None:
             # Use sandbox_type from config
             sandbox_type = self._cfg.get("sandbox_type", "subprocess")
             logger.info("[local_managed] installing packages via compute provider (%s): %s", sandbox_type, pip_pkgs)
             try:
-                import asyncio
-                # Run async operation in sync context
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # We're in async context, need to run in executor
+                try:
+                    asyncio.get_running_loop()
+                    # We're in async context, run in a separate thread loop.
                     import threading
-                    result = [None]
                     exception = [None]
-                    
+
                     def run_install():
                         try:
-                            new_loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(new_loop)
-                            result[0] = new_loop.run_until_complete(self._install_via_compute(pip_pkgs))
+                            asyncio.run(self._install_via_compute(pip_pkgs))
                         except Exception as e:
                             exception[0] = e
-                        finally:
-                            new_loop.close()
-                    
+
                     thread = threading.Thread(target=run_install)
                     thread.start()
                     thread.join()
-                    
+
                     if exception[0]:
                         raise exception[0]
-                else:
-                    loop.run_until_complete(self._install_via_compute(pip_pkgs))
+                except RuntimeError:
+                    # No running loop in this thread.
+                    asyncio.run(self._install_via_compute(pip_pkgs))
+                compute_install_succeeded = True
             except Exception as e:
                 logger.warning("[local_managed] compute package install failed: %s", e)
                 # Fall through to host installation if allowed
+
+        if compute_install_succeeded:
+            return
         
         # Host installation - only if explicitly allowed
         if not self._cfg.get("host_packages_ok", False):
@@ -544,7 +544,8 @@ class LocalManagedAgent:
             await self.provision_compute(config=config)
         else:
             # Install on existing instance
-            cmd = f"pip install -q {' '.join(pip_pkgs)}"
+            import shlex
+            cmd = "pip install -q " + " ".join(shlex.quote(pkg) for pkg in pip_pkgs)
             await self.execute_in_compute(cmd, timeout=120)
 
     def _ensure_agent(self) -> Any:
@@ -773,29 +774,32 @@ class LocalManagedAgent:
     # ------------------------------------------------------------------
     def retrieve_session(self) -> Dict[str, Any]:
         """Retrieve current session metadata using unified SessionInfo schema."""
+        if not self._session_id:
+            return {}
+
         self._sync_usage()
         
         # Use unified SessionInfo schema for consistency with Anthropic backend
         try:
             from praisonaiagents.managed import SessionInfo
             session_info = SessionInfo(
-                id=self._session_id or "",
-                status="idle" if self._session_id else "none",
+                id=self._session_id,
+                status="idle",
                 usage={
                     "input_tokens": self.total_input_tokens,
                     "output_tokens": self.total_output_tokens,
-                } if self._session_id else None
+                }
             )
             return session_info.to_dict()
         except ImportError:
             # Fallback to old format if SessionInfo not available
             return {
-                "id": self._session_id or "",
-                "status": "idle" if self._session_id else "none",
+                "id": self._session_id,
+                "status": "idle",
                 "usage": {
                     "input_tokens": self.total_input_tokens,
                     "output_tokens": self.total_output_tokens,
-                } if self._session_id else None,
+                },
             }
 
     def list_sessions(self, **kwargs) -> List[Dict[str, Any]]:
