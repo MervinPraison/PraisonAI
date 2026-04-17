@@ -375,8 +375,12 @@ class AnthropicManagedAgent:
             # Usage tracking (from event.usage or span.model_usage)
             usage = getattr(event, "usage", None) or getattr(event, "model_usage", None)
             if usage:
-                self.total_input_tokens += getattr(usage, "input_tokens", 0)
-                self.total_output_tokens += getattr(usage, "output_tokens", 0)
+                in_t = getattr(usage, "input_tokens", 0)
+                out_t = getattr(usage, "output_tokens", 0)
+                if isinstance(in_t, int):
+                    self.total_input_tokens += in_t
+                if isinstance(out_t, int):
+                    self.total_output_tokens += out_t
 
         if tool_log:
             logger.info("[managed] tools used: %s", tool_log)
