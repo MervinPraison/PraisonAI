@@ -64,7 +64,13 @@ class _AgentServerRegistry:
             self._endpoints[port][path] = endpoint_id
 
     def reserve_route(self, port: int, path: str, endpoint_id: str) -> tuple[str, Optional[str]]:
-        """Atomically reserve a unique route path for a port and register it."""
+        """Atomically reserve and register a route.
+
+        Returns:
+            tuple[str, Optional[str]]: (final_path, original_path_if_collided).
+            If there is no collision, final_path equals the requested path and
+            original_path_if_collided is None.
+        """
         with self._lock:
             if port not in self._endpoints:
                 self._endpoints[port] = {}
