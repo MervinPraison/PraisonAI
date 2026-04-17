@@ -490,7 +490,7 @@ class DefaultSessionStore:
             pass
         
         # Sort by updated_at descending
-        sessions.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
+        sessions.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
         return sessions[:limit]
     
     # ── Agent-Level Queries (Gap S4) ──────────────────────────────────
