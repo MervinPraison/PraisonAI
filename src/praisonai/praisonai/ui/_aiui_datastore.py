@@ -17,7 +17,7 @@ except ImportError:
 
 try:
     from praisonaiagents.session import SessionStoreProtocol
-    from praisonaiagents.session.stores import get_hierarchical_session_store
+    from praisonaiagents.session import get_hierarchical_session_store
 except ImportError:
     # Fallback when praisonaiagents not available
     SessionStoreProtocol = None
