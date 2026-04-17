@@ -509,7 +509,10 @@ def envs_update(
     kwargs = {}
     
     if packages:
-        pkg_list = [p.strip() for p in packages.split(",")]
+        pkg_list = [p.strip() for p in packages.split(",") if p.strip()]
+        if not pkg_list:
+            typer.echo("Error: --packages must include at least one package name")
+            raise typer.Exit(1)
         kwargs["packages"] = {"pip": pkg_list}
     
     if networking:

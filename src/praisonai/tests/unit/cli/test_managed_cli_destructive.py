@@ -167,6 +167,32 @@ class TestEnvsUpdate:
             networking={"type": "limited"}
         )
 
+    def test_envs_update_packages_filters_empty_values(self, cli_runner, mock_anthropic_client):
+        """Test package parsing removes empty entries."""
+        mock_env = Mock()
+        mock_env.id = "env_01test123"
+        mock_anthropic_client.beta.environments.update.return_value = mock_env
+
+        result = cli_runner.invoke(envs_app, [
+            "update", "env_01test123", "--packages", "numpy, ,pandas,,"
+        ])
+
+        assert result.exit_code == 0
+        mock_anthropic_client.beta.environments.update.assert_called_once_with(
+            "env_01test123",
+            packages={"pip": ["numpy", "pandas"]}
+        )
+
+    def test_envs_update_packages_all_empty_values_error(self, cli_runner, mock_anthropic_client):
+        """Test package parsing rejects all-empty package input."""
+        result = cli_runner.invoke(envs_app, [
+            "update", "env_01test123", "--packages", " , , "
+        ])
+
+        assert result.exit_code == 1
+        assert "--packages must include at least one package name" in result.stdout
+        mock_anthropic_client.beta.environments.update.assert_not_called()
+
     def test_envs_update_both_options(self, cli_runner, mock_anthropic_client):
         """Test environment update with both packages and networking."""
         mock_env = Mock()
