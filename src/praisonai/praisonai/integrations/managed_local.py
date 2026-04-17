@@ -577,6 +577,8 @@ class LocalManagedAgent:
                 result = agent.chat(prompt)
                 full = str(result) if result else ""
 
+            self._sync_usage()
+
             # Emit llm_response event for the response
             if emitter and full:
                 emitter.llm_response(
@@ -587,7 +589,6 @@ class LocalManagedAgent:
                 )
 
             self._persist_message("assistant", full)
-            self._sync_usage()
             self._persist_state()
             return full
 

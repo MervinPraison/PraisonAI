@@ -275,11 +275,9 @@ class AnthropicManagedAgent:
             emitter: ContextTraceEmitter for trace events.
         """
         import sys as _sys
-        import time
 
         text_parts: List[str] = []
         tool_log: List[str] = []
-        tool_start_times = {}  # Track tool start times for duration calculation
 
         for event in stream:
             etype = getattr(event, "type", None)
@@ -308,7 +306,6 @@ class AnthropicManagedAgent:
                 if emitter:
                     agent_name = self._cfg.get("name", "Agent")
                     emitter.tool_call_start(agent_name, name, tool_input)
-                    tool_start_times[tool_id] = time.time()
 
                 # Handle tool confirmation (always_ask policy)
                 if getattr(event, "needs_confirmation", False):
@@ -331,12 +328,10 @@ class AnthropicManagedAgent:
                     )
 
                 # Emit synthetic tool_call_end since Anthropic doesn't provide a direct end event
-                # We emit this immediately after the tool_use event for now
-                if emitter and tool_id in tool_start_times:
-                    duration_ms = (time.time() - tool_start_times[tool_id]) * 1000
+                # Duration is set to 0.0 as we cannot measure actual tool execution time
+                if emitter:
                     agent_name = self._cfg.get("name", "Agent")
-                    emitter.tool_call_end(agent_name, name, duration_ms=duration_ms)
-                    del tool_start_times[tool_id]
+                    emitter.tool_call_end(agent_name, name, duration_ms=0.0)
 
             elif etype == "agent.custom_tool_use":
                 tool_name = getattr(event, "name", "custom_tool")

@@ -5,6 +5,7 @@ Verifies that AnthropicManagedAgent and LocalManagedAgent emit proper
 ContextTraceEmitter events so that langextract/langfuse traces are non-empty.
 """
 
+import os
 import pytest
 from unittest.mock import Mock, patch
 from praisonaiagents.trace.context_events import (
@@ -31,6 +32,8 @@ class TestAnthropicManagedAgentTraceEvents:
         # Mock events for the stream
         mock_event = Mock()
         mock_event.type = "session.status_idle"
+        mock_event.usage = None
+        mock_event.model_usage = None
         mock_stream.__iter__ = Mock(return_value=iter([mock_event]))
         
         mock_client.beta.sessions.events.stream.return_value = mock_stream
@@ -83,10 +86,14 @@ class TestAnthropicManagedAgentTraceEvents:
         mock_event.needs_confirmation = False
         mock_event.usage = None
         mock_event.model_usage = None
+        mock_event.usage = None
+        mock_event.model_usage = None
         
         # Mock session idle event
         mock_idle = Mock()
         mock_idle.type = "session.status_idle"
+        mock_idle.usage = None
+        mock_idle.model_usage = None
         mock_idle.usage = None
         mock_idle.model_usage = None
         
@@ -96,7 +103,7 @@ class TestAnthropicManagedAgentTraceEvents:
         
         # Call _process_events with emitter
         with trace_context(emitter):
-            text_parts, tool_log = agent._process_events(
+            _text_parts, _tool_log = agent._process_events(
                 client=Mock(), 
                 session_id="test_session",
                 stream=[mock_event, mock_idle],
@@ -202,7 +209,7 @@ class TestLocalManagedAgentTraceEvents:
 class TestRealAgenticTest:
     """Real agentic test with actual Agent and managed backend."""
     
-    @pytest.mark.skipif(True, reason="Gated real agentic test - requires API keys")
+    @pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="Requires OPENAI_API_KEY for real agentic test")
     def test_agent_with_managed_backend_shows_events(self):
         """Real agentic test: Agent(backend=ManagedAgent()).start() with ContextListSink shows ≥ 2 events."""
         from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
