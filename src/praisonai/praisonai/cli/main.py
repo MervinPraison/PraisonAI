@@ -4398,7 +4398,7 @@ Do NOT add any explanations or formatting."""
                                 ext_console.print(result)
                                 return ""
                             except Exception as e:
-                                ext_console.print(f"[red]Error executing {external_agent_name}: {e}[/red]")
+                                ext_console.print(f"[red]Error executing {external_agent_name}: {e.__class__.__name__}: {e}[/red]")
                                 return None
                         
                         # NEW default: manager Agent uses external CLI as subagent tool
@@ -4419,7 +4419,7 @@ Do NOT add any explanations or formatting."""
                             ext_console.print(result)
                             return ""
                         except Exception as e:
-                            ext_console.print(f"[red]Error with manager delegation: {e}[/red]")
+                            ext_console.print(f"[red]Error with manager delegation: {e.__class__.__name__}: {e}[/red]")
                             return None
                     except Exception as e:
                         ext_console.print(f"[red]Error setting up external agent: {e}[/red]")
