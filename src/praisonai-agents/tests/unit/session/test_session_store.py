@@ -332,6 +332,42 @@ class TestDefaultSessionStore:
         temp_store.invalidate_cache("session-1")
         history = temp_store.get_chat_history("session-1")
         assert len(history) == 2
+    
+    def test_list_sessions_with_none_updated_at(self, temp_store):
+        """Test list_sessions handles None updated_at values without crashing.
+        
+        Regression test for issue #1445 where sessions with updated_at=None
+        caused TypeError in sorting.
+        """
+        # Create a session with a regular message
+        temp_store.add_user_message("session-1", "Hello")
+        
+        # Create another session and manually set updated_at to None
+        temp_store.add_user_message("session-2", "Hi")
+        filepath = os.path.join(temp_store.session_dir, "session-2.json")
+        
+        # Read the session file and set updated_at to None
+        with open(filepath, "r") as f:
+            data = json.load(f)
+        data["updated_at"] = None  # Explicit None value
+        with open(filepath, "w") as f:
+            json.dump(data, f)
+        
+        # Clear cache to ensure file is re-read
+        temp_store.invalidate_cache("session-2")
+        
+        # This should not crash with TypeError
+        sessions = temp_store.list_sessions(limit=50)
+        
+        # Should return both sessions
+        assert len(sessions) == 2
+        session_ids = [s["session_id"] for s in sessions]
+        assert "session-1" in session_ids
+        assert "session-2" in session_ids
+        
+        # Session with None updated_at should appear last (empty string sorts before timestamps)
+        assert sessions[-1]["session_id"] == "session-2"
+        assert sessions[-1]["updated_at"] is None
 
 
 class TestAgentSessionIntegration:
