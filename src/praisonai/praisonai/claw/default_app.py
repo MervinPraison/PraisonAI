@@ -9,6 +9,10 @@ Custom page: Feature Explorer
 
 import os
 import praisonaiui as aiui
+from praisonai.ui._aiui_datastore import PraisonAISessionDataStore
+
+# ── Set up datastore bridge ─────────────────────────────────
+aiui.set_datastore(PraisonAISessionDataStore())
 
 # ── Dashboard style ─────────────────────────────────────────
 aiui.set_style("dashboard")

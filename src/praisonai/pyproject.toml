@@ -47,22 +47,16 @@ agentops = ["agentops>=0.3.12"]
 langfuse = ["langfuse>=3.0.0"]
 langextract = ["langextract>=1.0.0"]
 chat = [
-    "chainlit>=2.8.5,<=2.9.4",
-    "aiosqlite>=0.20.0",
-    "greenlet>=3.0.3",
+    "aiui>=0.3.100",
     "tavily-python==0.5.0",
     "crawl4ai>=0.7.0",
-    "sqlalchemy>=2.0.36",
     "playwright>=1.47.0",
     "rich"
 ]
 code = [
-    "chainlit>=2.8.5,<=2.9.4",
-    "aiosqlite>=0.20.0",
-    "greenlet>=3.0.3",
+    "aiui>=0.3.100",
     "tavily-python==0.5.0",
     "crawl4ai>=0.7.0",
-    "sqlalchemy>=2.0.36",
     "playwright>=1.47.0"
 ]
 sandbox = [
@@ -79,9 +73,7 @@ daytona = [
     # Install via: pip install git+https://github.com/daytonaio/daytona-python
 ]
 realtime = [
-    "chainlit>=2.8.5,<=2.9.4",
-    "aiosqlite>=0.20.0",
-    "greenlet>=3.0.3",
+    "aiui>=0.3.100",
     "tavily-python==0.5.0",
     "crawl4ai>=0.7.0",
     "playwright>=1.47.0",    # required by crawl4ai — browsers still need: playwright install chromium
@@ -89,7 +81,6 @@ realtime = [
     "plotly>=5.24.0",
     "yfinance>=0.2.44",
     "ddgs>=9.0.0",
-    "sqlalchemy>=2.0.36"
 ]
 call = [
     "twilio>=7.0.0",
@@ -120,10 +111,7 @@ lite = [
 ]
 all = [
     # Full installation with all main features
-    "chainlit>=2.8.5,<=2.9.4",
-    "sqlalchemy>=2.0.36",
-    "aiosqlite>=0.20.0",
-    "greenlet>=3.0.3",
+    "aiui>=0.3.100",
     "gradio>=4.26.0",
     "flask>=3.0.0",
     "fastapi>=0.115.0",
@@ -195,10 +183,6 @@ claw = [
     "aiui[all]>=0.3.100",
     "praisonaiagents[all]>=1.5.40",
     # UI + persistence
-    "chainlit>=2.8.5,<=2.9.4",
-    "sqlalchemy>=2.0.36",
-    "aiosqlite>=0.20.0",
-    "greenlet>=3.0.3",
     "flask>=3.0.0",
     # Gateway
     "fastapi>=0.115.0",

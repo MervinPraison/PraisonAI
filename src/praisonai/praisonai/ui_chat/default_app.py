@@ -13,6 +13,10 @@ Run:
 import os
 
 import praisonaiui as aiui
+from praisonai.ui._aiui_datastore import PraisonAISessionDataStore
+
+# ── Set up datastore bridge ─────────────────────────────────
+aiui.set_datastore(PraisonAISessionDataStore())
 
 # ── Dashboard style, but no sidebar navigation ─────────────
 aiui.set_style("dashboard")

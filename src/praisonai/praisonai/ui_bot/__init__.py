@@ -1,0 +1,1 @@
+"""UI Bot module - Bot interface with streaming."""
