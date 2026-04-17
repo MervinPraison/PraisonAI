@@ -199,9 +199,9 @@ def test_empty_session_local():
     
     result = agent.retrieve_session()
     
-    # Should return unified schema with "none" status
+    # Should return unified schema with "unknown" status (matching Anthropic)
     assert result["id"] == ""
-    assert result["status"] == "none"
+    assert result["status"] == "unknown"
     assert result["title"] == ""
     assert result["usage"] == {"input_tokens": 0, "output_tokens": 0}
 

@@ -591,9 +591,9 @@ class AnthropicManagedAgent:
             }
         
         session_info = SessionInfo(
-            id=getattr(sess, "id", self._session_id),
-            status=getattr(sess, "status", "unknown"),
-            title=getattr(sess, "title", ""),
+            id=getattr(sess, "id", None) or self._session_id or "",
+            status=getattr(sess, "status", None) or "unknown",
+            title=getattr(sess, "title", None) or "",
             usage=usage_dict if usage_dict else None,
         )
         return session_info.to_dict()

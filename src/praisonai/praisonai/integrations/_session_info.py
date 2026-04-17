@@ -5,7 +5,7 @@ Provides consistent return structure for retrieve_session() across all
 managed agent backends (Anthropic, Local, etc.).
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from dataclasses import dataclass, asdict
 
 
@@ -26,7 +26,7 @@ class SessionInfo:
     title: str = ""
     """Session title/name (empty if not set)"""
     
-    usage: Dict[str, int] = None
+    usage: Optional[Dict[str, int]] = None
     """Token usage tracking with input_tokens and output_tokens"""
     
     def __post_init__(self):
@@ -41,10 +41,9 @@ class SessionInfo:
         if self.usage is None:
             self.usage = {"input_tokens": 0, "output_tokens": 0}
         else:
-            if "input_tokens" not in self.usage:
-                self.usage["input_tokens"] = 0
-            if "output_tokens" not in self.usage:
-                self.usage["output_tokens"] = 0
+            # Use independent checks to ensure both tokens are always present
+            self.usage.setdefault("input_tokens", 0)
+            self.usage.setdefault("output_tokens", 0)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for backward compatibility.
