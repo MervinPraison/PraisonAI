@@ -16,8 +16,44 @@ tests/integration/
 │   └── test_crewai_basic.py     # Basic CrewAI integration tests
 ├── test_base_url_api_base_fix.py # API base URL integration tests
 ├── test_mcp_integration.py      # Model Context Protocol tests
+├── test_managed_real.py         # Real agentic managed agent tests
 └── test_rag_integration.py      # RAG (Retrieval Augmented Generation) tests
 ```
+
+## Real Agentic Tests
+
+### Managed Agents Integration Tests
+Located in `test_managed_real.py`
+
+**IMPORTANT:** These tests make actual LLM API calls and are gated by environment variables.
+
+**Test Coverage:**
+- ✅ Anthropic managed agents with claude-haiku-4-5
+- ✅ Local managed agents with gpt-4o-mini
+- ✅ Multi-turn session persistence
+- ✅ Tool execution in managed environments
+- ✅ Streaming functionality
+- ✅ Usage token tracking
+- ✅ Session ID generation and persistence
+
+**Environment Variables:**
+- `RUN_REAL_AGENTIC=1` - Required to enable these tests
+- `ANTHROPIC_API_KEY` - Required for Anthropic managed agent tests
+- `OPENAI_API_KEY` - Required for local managed agent tests
+
+**Example Usage:**
+```bash
+# Run all real agentic tests (requires API keys)
+RUN_REAL_AGENTIC=1 pytest src/praisonai/tests/integration/test_managed_real.py -v
+
+# Run only Anthropic tests
+RUN_REAL_AGENTIC=1 PRAISONAI_TEST_PROVIDERS=anthropic pytest src/praisonai/tests/integration/test_managed_real.py::test_anthropic_managed_real -v
+
+# Run only local/OpenAI tests
+RUN_REAL_AGENTIC=1 PRAISONAI_TEST_PROVIDERS=openai pytest src/praisonai/tests/integration/test_managed_real.py::test_local_managed_real_openai -v
+```
+
+**Expected Output:** Each test prints the full LLM response for human verification, along with usage statistics and session IDs.
 
 ## Framework Integration Tests
 
@@ -139,6 +175,7 @@ python -m pytest tests/integration/autogen/test_autogen_basic.py::TestAutoGenInt
 ### Feature Integration Tests
 - **RAG**: Tests Retrieval Augmented Generation functionality
 - **MCP**: Tests Model Context Protocol integration
+- **Managed Agents**: Real agentic tests for managed agent backends (Anthropic & Local)
 - **Base URL/API**: Tests API base configuration and URL handling
 
 ## Test Dependencies
@@ -153,6 +190,12 @@ pip install pyautogen
 pip install crewai
 ```
 
+### Required for Managed Agent Real Tests:
+```bash
+pip install anthropic>=0.94.0  # For Anthropic managed agents
+pip install litellm>=1.81.0    # For local managed agents
+```
+
 ### Required for all integration tests:
 ```bash
 pip install pytest pytest-asyncio
@@ -160,19 +203,28 @@ pip install pytest pytest-asyncio
 
 ## Mock Strategy
 
-All integration tests use comprehensive mocking to avoid:
+Most integration tests use comprehensive mocking to avoid:
 - ❌ Real API calls (expensive and unreliable)
 - ❌ Network dependencies 
 - ❌ Rate limiting issues
 - ❌ Environment-specific failures
 
-**Mocking Pattern:**
+**Standard Mocking Pattern:**
 ```python
 @patch('litellm.completion')
 def test_framework_integration(self, mock_completion, mock_framework_completion):
     mock_completion.return_value = mock_framework_completion
     # Test logic here
 ```
+
+**Exception: Real Agentic Tests**
+
+The managed agent real tests (`test_managed_real.py`) are intentionally **NOT mocked** because they are designed to verify end-to-end LLM functionality. These tests:
+- ✅ Make actual API calls to verify real behavior
+- ✅ Are gated by `RUN_REAL_AGENTIC=1` environment variable
+- ✅ Require actual API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY)
+- ✅ Print full LLM responses for human verification
+- ✅ Test real token usage, session management, and tool execution
 
 ## Expected Test Outcomes
 
