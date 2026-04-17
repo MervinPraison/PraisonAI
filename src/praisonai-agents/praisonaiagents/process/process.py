@@ -46,7 +46,7 @@ class Process:
         self.task_retry_counter: Dict[str, int] = {} # Initialize retry counter
         self.workflow_finished = False # ADDED: Workflow finished flag
         self.workflow_cancelled = False # ADDED: Workflow cancellation flag for timeout
-        self._state_lock_init = threading.Lock()  # Thread lock for async lock creation
+        self._state_lock_init = threading.Lock()  # Thread lock for synchronous shared-state updates
         self._state_lock = None # Lazy-initialized async lock for shared state protection
         
         # Resolve verbose from output= param (takes precedence) or legacy verbose= param

@@ -62,6 +62,24 @@ class _AgentServerRegistry:
             if port not in self._endpoints:
                 self._endpoints[port] = {}
             self._endpoints[port][path] = endpoint_id
+
+    def reserve_route(self, port: int, path: str, endpoint_id: str) -> tuple[str, Optional[str]]:
+        """Atomically reserve a unique route path for a port and register it."""
+        with self._lock:
+            if port not in self._endpoints:
+                self._endpoints[port] = {}
+
+            original_path = path
+            while path in self._endpoints[port]:
+                path = f"{original_path}_{str(uuid.uuid4())[:6]}"
+
+            self._endpoints[port][path] = endpoint_id
+            return path, (original_path if path != original_path else None)
+
+    def list_routes(self, port: int) -> List[str]:
+        """Return a snapshot list of registered routes for a port."""
+        with self._lock:
+            return list(self._endpoints.get(port, {}).keys())
     
     def is_server_started(self, port: int) -> bool:
         """Check if server is started for this port."""
@@ -1737,7 +1755,7 @@ class AgentTeam:
                 async def root():
                     return {
                         "message": f"Welcome to PraisonAI Agents API on port {port}. See /docs for usage.",
-                        "endpoints": list(_server_registry._endpoints.get(port, {}).keys())
+                        "endpoints": _server_registry.list_routes(port)
                     }
                 
                 # Add healthcheck endpoint
@@ -1745,27 +1763,21 @@ class AgentTeam:
                 async def healthcheck():
                     return {
                         "status": "ok", 
-                        "endpoints": list(_server_registry._endpoints.get(port, {}).keys())
+                        "endpoints": _server_registry.list_routes(port)
                     }
             
             # Normalize path to ensure it starts with /
             if not path.startswith('/'):
                 path = f'/{path}'
                 
-            # Check if path is already registered for this port
-            if port in _server_registry._endpoints and path in _server_registry._endpoints[port]:
-                logging.warning(f"Path '{path}' is already registered on port {port}. Please use a different path.")
-                print(f"⚠️ Warning: Path '{path}' is already registered on port {port}.")
-                # Use a modified path to avoid conflicts
-                original_path = path
-                instance_id = str(uuid.uuid4())[:6]
-                path = f"{path}_{instance_id}"
+            # Generate a unique ID for this agent group's endpoint and reserve route atomically
+            endpoint_id = str(uuid.uuid4())
+            path, original_path = _server_registry.reserve_route(port, path, endpoint_id)
+            if original_path is not None:
+                logging.warning(f"Path '{original_path}' is already registered on port {port}. Please use a different path.")
+                print(f"⚠️ Warning: Path '{original_path}' is already registered on port {port}.")
                 logging.warning(f"Using '{path}' instead of '{original_path}'")
                 print(f"🔄 Using '{path}' instead")
-            
-            # Generate a unique ID for this agent group's endpoint and register
-            endpoint_id = str(uuid.uuid4())
-            _server_registry.register_route(port, path, endpoint_id)
             
             # Define the endpoint handler
             @app.post(path)
@@ -1904,7 +1916,7 @@ class AgentTeam:
                 print(f"✅ FastAPI server started at http://{host}:{port}")
                 print(f"📚 API documentation available at http://{host}:{port}/docs")
                 
-            endpoints = list(_server_registry._endpoints.get(port, {}).keys())
+            endpoints = _server_registry.list_routes(port)
             print(f"🔌 Registered HTTP endpoints on port {port}: {', '.join(endpoints)}")
             
             # Get the stack frame to check if this is the last launch() call in the script
