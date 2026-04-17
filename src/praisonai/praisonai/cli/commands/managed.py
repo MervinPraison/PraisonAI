@@ -419,8 +419,12 @@ def agents_update(
     if not kwargs:
         typer.echo("Nothing to update. Pass --name, --system, or --model.")
         raise typer.Exit(0)
-    updated = client.beta.agents.update(agent_id, **kwargs)
-    typer.echo(f"Updated agent: {updated.id} (v{getattr(updated,'version','')})")
+    try:
+        updated = client.beta.agents.update(agent_id, **kwargs)
+        typer.echo(f"Updated agent: {updated.id} (v{getattr(updated,'version','')})")
+    except Exception as e:
+        typer.echo(f"Error updating agent {agent_id}: {e}", err=True)
+        raise typer.Exit(1)
 
 
 @agents_app.command("delete")

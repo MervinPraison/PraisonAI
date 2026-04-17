@@ -581,23 +581,13 @@ class AnthropicManagedAgent:
             }
         
         # Use unified SessionInfo schema for consistency with Local backend
-        try:
-            from praisonaiagents.managed import SessionInfo
-            session_info = SessionInfo(
-                id=getattr(sess, "id", self._session_id),
-                status=getattr(sess, "status", None),
-                usage=usage_dict
-            )
-            return session_info.to_dict()
-        except ImportError:
-            # Fallback to old format if SessionInfo not available
-            result: Dict[str, Any] = {
-                "id": getattr(sess, "id", self._session_id),
-                "status": getattr(sess, "status", None),
-            }
-            if usage_dict:
-                result["usage"] = usage_dict
-            return result
+        from praisonaiagents.managed import SessionInfo
+        session_info = SessionInfo(
+            id=getattr(sess, "id", self._session_id),
+            status=getattr(sess, "status", None),
+            usage=usage_dict
+        )
+        return session_info.to_dict()
 
     # ------------------------------------------------------------------
     # list_sessions — ManagedBackendProtocol

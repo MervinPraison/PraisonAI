@@ -536,13 +536,11 @@ class LocalManagedAgent:
         """Install packages via compute provider."""
         if not self._compute_instance_id:
             # Provision compute instance if needed
-            from praisonaiagents.managed.protocols import ComputeConfig
-            config = ComputeConfig(
+            await self.provision_compute(
                 packages={"pip": pip_pkgs},
                 image="python:3.12-slim",
                 working_dir=self._cfg.get("working_dir", "/workspace")
             )
-            await self.provision_compute(config=config)
         else:
             # Install on existing instance
             import shlex
