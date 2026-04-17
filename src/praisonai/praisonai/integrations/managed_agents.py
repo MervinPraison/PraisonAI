@@ -583,22 +583,38 @@ class AnthropicManagedAgent:
     # retrieve_session — ManagedBackendProtocol
     # ------------------------------------------------------------------
     def retrieve_session(self) -> Dict[str, Any]:
-        """Retrieve current session metadata and usage from the API."""
+        """Retrieve current session metadata and usage from the API.
+        
+        Returns unified SessionInfo schema with all fields always present:
+        - id: Session ID
+        - status: Session status (idle, running, error, etc.)
+        - title: Session title/name
+        - usage: Token usage with input_tokens and output_tokens
+        """
+        from ._session_info import SessionInfo
+        
         if not self._session_id:
-            return {}
+            return SessionInfo().to_dict()
+        
         client = self._get_client()
         sess = client.beta.sessions.retrieve(self._session_id)
-        result: Dict[str, Any] = {
-            "id": getattr(sess, "id", self._session_id),
-            "status": getattr(sess, "status", None),
-        }
+        
+        # Extract usage information
         usage = getattr(sess, "usage", None)
+        usage_dict = {}
         if usage:
-            result["usage"] = {
+            usage_dict = {
                 "input_tokens": getattr(usage, "input_tokens", 0),
                 "output_tokens": getattr(usage, "output_tokens", 0),
             }
-        return result
+        
+        session_info = SessionInfo(
+            id=getattr(sess, "id", None) or self._session_id or "",
+            status=getattr(sess, "status", None) or "unknown",
+            title=getattr(sess, "title", None) or "",
+            usage=usage_dict if usage_dict else None,
+        )
+        return session_info.to_dict()
 
     # ------------------------------------------------------------------
     # list_sessions — ManagedBackendProtocol

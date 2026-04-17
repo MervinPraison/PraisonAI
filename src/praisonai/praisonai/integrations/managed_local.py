@@ -880,16 +880,28 @@ class LocalManagedAgent:
     # retrieve_session / list_sessions — ManagedBackendProtocol
     # ------------------------------------------------------------------
     def retrieve_session(self) -> Dict[str, Any]:
-        """Retrieve current session metadata."""
+        """Retrieve current session metadata.
+        
+        Returns unified SessionInfo schema with all fields always present:
+        - id: Session ID
+        - status: Session status (idle, running, error, etc.)
+        - title: Session title/name  
+        - usage: Token usage with input_tokens and output_tokens
+        """
+        from ._session_info import SessionInfo
+        
         self._sync_usage()
-        return {
-            "id": self._session_id,
-            "status": "idle" if self._session_id else "none",
-            "usage": {
+        
+        session_info = SessionInfo(
+            id=self._session_id or "",
+            status="idle" if self._session_id else "unknown",
+            title="",  # Local agent doesn't track titles
+            usage={
                 "input_tokens": self.total_input_tokens,
                 "output_tokens": self.total_output_tokens,
-            },
-        }
+            }
+        )
+        return session_info.to_dict()
 
     def list_sessions(self, **kwargs) -> List[Dict[str, Any]]:
         """List all sessions created in this backend instance."""
