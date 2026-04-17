@@ -50,17 +50,7 @@ _DEFAULT_TOOLS = [
     "search_web",
 ]
 
-TOOL_ALIAS_MAP = {
-    "bash": "execute_command",
-    "read": "read_file",
-    "write": "write_file",
-    "edit": "write_file",
-    "glob": "list_files",
-    "grep": "execute_command",
-    "web_fetch": "web_crawl",
-    "search": "search_web",
-    "web_search": "search_web",
-}
+from ._tool_aliases import TOOL_ALIAS_MAP
 
 
 @dataclass
