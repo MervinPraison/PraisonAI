@@ -16,13 +16,13 @@ class TestToolAliasConsistency(TestCase):
     def test_tool_alias_single_source_of_truth(self):
         """Assert module-level identity - both modules use the same dict object."""
         # Import the shared mapping
-        from praisonai.praisonai.integrations._tool_aliases import TOOL_ALIAS_MAP as shared_map
+        from praisonai.integrations._tool_aliases import TOOL_ALIAS_MAP as shared_map
         
         # Import the mapping as used in managed_agents.py
-        from praisonai.praisonai.integrations.managed_agents import TOOL_ALIAS_MAP as agents_map
+        from praisonai.integrations.managed_agents import TOOL_ALIAS_MAP as agents_map
         
         # Import the mapping as used in managed_local.py
-        from praisonai.praisonai.integrations.managed_local import TOOL_ALIAS_MAP as local_map
+        from praisonai.integrations.managed_local import TOOL_ALIAS_MAP as local_map
         
         # Assert all three are the same object (module-level identity)
         assert shared_map is agents_map, "managed_agents.py should import the shared TOOL_ALIAS_MAP"
@@ -31,7 +31,7 @@ class TestToolAliasConsistency(TestCase):
     
     def test_known_aliases_stable(self):
         """Lock in the final mapping so future changes need deliberate test updates."""
-        from praisonai.praisonai.integrations._tool_aliases import TOOL_ALIAS_MAP
+        from praisonai.integrations._tool_aliases import TOOL_ALIAS_MAP
         
         # Expected stable mapping based on consolidation decisions
         expected_mapping = {
@@ -56,7 +56,7 @@ class TestToolAliasConsistency(TestCase):
     
     def test_resolved_conflicts(self):
         """Verify that previously conflicting mappings are resolved consistently."""
-        from praisonai.praisonai.integrations._tool_aliases import TOOL_ALIAS_MAP
+        from praisonai.integrations._tool_aliases import TOOL_ALIAS_MAP
         
         # Test conflict resolutions based on issue analysis:
         
@@ -74,7 +74,7 @@ class TestToolAliasConsistency(TestCase):
     
     def test_backward_compatibility(self):
         """Verify that functions using the alias map maintain their signatures."""
-        from praisonai.praisonai.integrations.managed_agents import map_managed_tools
+        from praisonai.integrations.managed_agents import map_managed_tools
         
         # Test function signature and behavior is preserved
         test_tools = ["bash", "grep", "web_fetch", "unknown_tool", "web_search"]
@@ -88,7 +88,7 @@ class TestToolAliasConsistency(TestCase):
         import inspect
         
         # Check managed_agents.py doesn't have TOOL_MAPPING anymore
-        from praisonai.praisonai import integrations
+        from praisonai import integrations
         managed_agents_module = integrations.managed_agents
         
         # TOOL_MAPPING should not exist as a module-level variable
@@ -97,7 +97,7 @@ class TestToolAliasConsistency(TestCase):
         )
         
         # Check that managed_local.py source doesn't contain local definition
-        import praisonai.praisonai.integrations.managed_local as managed_local_module
+        import praisonai.integrations.managed_local as managed_local_module
         source = inspect.getsource(managed_local_module)
         
         # Should not have a local TOOL_ALIAS_MAP definition
