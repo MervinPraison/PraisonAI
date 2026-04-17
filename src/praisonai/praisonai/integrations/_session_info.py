@@ -31,12 +31,20 @@ class SessionInfo:
     
     def __post_init__(self):
         """Ensure usage field has proper defaults."""
+        if self.id is None:
+            self.id = ""
+        if self.status is None:
+            self.status = "unknown"
+        if self.title is None:
+            self.title = ""
+
         if self.usage is None:
             self.usage = {"input_tokens": 0, "output_tokens": 0}
-        elif "input_tokens" not in self.usage:
-            self.usage["input_tokens"] = 0
-        elif "output_tokens" not in self.usage:
-            self.usage["output_tokens"] = 0
+        else:
+            if "input_tokens" not in self.usage:
+                self.usage["input_tokens"] = 0
+            if "output_tokens" not in self.usage:
+                self.usage["output_tokens"] = 0
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for backward compatibility.

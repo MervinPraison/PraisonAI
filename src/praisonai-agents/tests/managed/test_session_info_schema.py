@@ -47,6 +47,11 @@ def test_session_info_partial_usage():
     assert info.usage["input_tokens"] == 0
     assert info.usage["output_tokens"] == 200
 
+    # Test empty usage dict gets both defaults
+    info = SessionInfo(usage={})
+    assert info.usage["input_tokens"] == 0
+    assert info.usage["output_tokens"] == 0
+
 
 def test_session_info_complete():
     """Test SessionInfo with all fields provided."""
@@ -199,6 +204,21 @@ def test_empty_session_local():
     assert result["status"] == "none"
     assert result["title"] == ""
     assert result["usage"] == {"input_tokens": 0, "output_tokens": 0}
+
+
+def test_empty_session_local_none_id():
+    """Test LocalManagedAgent.retrieve_session normalizes None session id to empty string."""
+    from praisonai.integrations.managed_local import LocalManagedAgent
+
+    agent = LocalManagedAgent()
+    agent._session_id = None
+    agent.total_input_tokens = 0
+    agent.total_output_tokens = 0
+
+    result = agent.retrieve_session()
+
+    assert result["id"] == ""
+    assert result["status"] == "none"
 
 
 if __name__ == "__main__":

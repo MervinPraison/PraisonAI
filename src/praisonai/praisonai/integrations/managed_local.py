@@ -704,7 +704,7 @@ class LocalManagedAgent:
         self._sync_usage()
         
         session_info = SessionInfo(
-            id=self._session_id,
+            id=self._session_id or "",
             status="idle" if self._session_id else "none",
             title="",  # Local agent doesn't track titles
             usage={
