@@ -1070,6 +1070,9 @@ Methods:
 * <code title="cli">praisonai train llm <a href="./src/praisonai/praisonai/cli/commands/train.py">--help</a></code>
 * <code title="cli">praisonai train show <a href="./src/praisonai/praisonai/cli/commands/train.py">--help</a></code>
 * <code title="cli">praisonai train train-callback <a href="./src/praisonai/praisonai/cli/commands/train.py">--help</a></code>
+* <code title="cli">praisonai ui agents <a href="./src/praisonai/praisonai/cli/commands/ui.py">--help</a></code>
+* <code title="cli">praisonai ui bot <a href="./src/praisonai/praisonai/cli/commands/ui.py">--help</a></code>
+* <code title="cli">praisonai ui realtime <a href="./src/praisonai/praisonai/cli/commands/ui.py">--help</a></code>
 * <code title="cli">praisonai ui ui <a href="./src/praisonai/praisonai/cli/commands/ui.py">--help</a></code>
 * <code title="cli">praisonai unified unified <a href="./src/praisonai/praisonai/cli/commands/unified.py">--help</a></code>
 * <code title="cli">praisonai up logs <a href="./src/praisonai/praisonai/cli/commands/up.py">--help</a></code>
