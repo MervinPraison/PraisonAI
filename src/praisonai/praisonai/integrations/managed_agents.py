@@ -259,7 +259,7 @@ class AnthropicManagedAgent:
     # ------------------------------------------------------------------
     # Event processing helpers
     # ------------------------------------------------------------------
-    def _process_events(self, client, session_id, stream, *, collect: bool = True, stream_live: bool = False):
+    def _process_events(self, client, session_id, stream, *, collect: bool = True, stream_live: bool = False, emitter=None):
         """Walk the SSE stream and return (text_parts, tool_log).
 
         Handles:
@@ -272,11 +272,14 @@ class AnthropicManagedAgent:
 
         Args:
             stream_live: If True, print text chunks to stdout as they arrive.
+            emitter: ContextTraceEmitter for trace events.
         """
         import sys as _sys
+        import time
 
         text_parts: List[str] = []
         tool_log: List[str] = []
+        tool_start_times = {}  # Track tool start times for duration calculation
 
         for event in stream:
             etype = getattr(event, "type", None)
@@ -292,11 +295,20 @@ class AnthropicManagedAgent:
 
             elif etype == "agent.tool_use":
                 name = getattr(event, "name", "unknown")
+                tool_id = getattr(event, "id", "")
+                tool_input = getattr(event, "input", {})
+                
                 tool_log.append(name)
                 logger.debug("[managed] tool_use: %s", name)
                 if stream_live:
                     _sys.stdout.write(f"\n[Using tool: {name}]\n")
                     _sys.stdout.flush()
+
+                # Emit tool_call_start event
+                if emitter:
+                    agent_name = self._cfg.get("name", "Agent")
+                    emitter.tool_call_start(agent_name, name, tool_input)
+                    tool_start_times[tool_id] = time.time()
 
                 # Handle tool confirmation (always_ask policy)
                 if getattr(event, "needs_confirmation", False):
@@ -304,8 +316,8 @@ class AnthropicManagedAgent:
                     if self.on_tool_confirmation:
                         info = {
                             "name": name,
-                            "input": getattr(event, "input", {}),
-                            "tool_use_id": getattr(event, "id", None),
+                            "input": tool_input,
+                            "tool_use_id": tool_id,
                         }
                         approved = self.on_tool_confirmation(info)
                     # Send confirmation back
@@ -313,10 +325,18 @@ class AnthropicManagedAgent:
                         session_id,
                         events=[{
                             "type": "user.tool_confirmation",
-                            "tool_use_id": getattr(event, "id", ""),
+                            "tool_use_id": tool_id,
                             "allowed": approved,
                         }],
                     )
+
+                # Emit synthetic tool_call_end since Anthropic doesn't provide a direct end event
+                # We emit this immediately after the tool_use event for now
+                if emitter and tool_id in tool_start_times:
+                    duration_ms = (time.time() - tool_start_times[tool_id]) * 1000
+                    agent_name = self._cfg.get("name", "Agent")
+                    emitter.tool_call_end(agent_name, name, duration_ms=duration_ms)
+                    del tool_start_times[tool_id]
 
             elif etype == "agent.custom_tool_use":
                 tool_name = getattr(event, "name", "custom_tool")
@@ -355,8 +375,12 @@ class AnthropicManagedAgent:
             # Usage tracking (from event.usage or span.model_usage)
             usage = getattr(event, "usage", None) or getattr(event, "model_usage", None)
             if usage:
-                self.total_input_tokens += getattr(usage, "input_tokens", 0)
-                self.total_output_tokens += getattr(usage, "output_tokens", 0)
+                in_t = getattr(usage, "input_tokens", 0)
+                out_t = getattr(usage, "output_tokens", 0)
+                if isinstance(in_t, int):
+                    self.total_input_tokens += in_t
+                if isinstance(out_t, int):
+                    self.total_output_tokens += out_t
 
         if tool_log:
             logger.info("[managed] tools used: %s", tool_log)
@@ -382,28 +406,60 @@ class AnthropicManagedAgent:
                          (token-by-token streaming). The full text is still returned.
         """
         import sys
+        
+        # Get context emitter (zero-overhead when no emitter is installed)
+        try:
+            from praisonaiagents.trace.context_events import get_context_emitter
+            emitter = get_context_emitter()
+        except ImportError:
+            emitter = None
 
         client = self._get_client()
         session_id = self._ensure_session()
+        agent_name = self._cfg.get("name", "Agent")
 
-        with client.beta.sessions.events.stream(session_id) as stream:
-            client.beta.sessions.events.send(
-                session_id,
-                events=[{
-                    "type": "user.message",
-                    "content": [{"type": "text", "text": prompt}],
-                }],
-            )
-            text_parts, _ = self._process_events(
-                client, session_id, stream, collect=True,
-                stream_live=stream_live,
-            )
+        # Emit agent_start event
+        if emitter:
+            emitter.agent_start(agent_name, {
+                "input": prompt,
+                "goal": self._cfg.get("system", self.instructions)
+            })
 
-        if stream_live:
-            sys.stdout.write("\n")
-            sys.stdout.flush()
+        try:
+            with client.beta.sessions.events.stream(session_id) as stream:
+                client.beta.sessions.events.send(
+                    session_id,
+                    events=[{
+                        "type": "user.message",
+                        "content": [{"type": "text", "text": prompt}],
+                    }],
+                )
+                text_parts, _ = self._process_events(
+                    client, session_id, stream, collect=True,
+                    stream_live=stream_live, emitter=emitter,
+                )
 
-        return "".join(text_parts)
+            if stream_live:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+
+            full_response = "".join(text_parts)
+            
+            # Emit llm_response event for aggregated text
+            if emitter and full_response:
+                emitter.llm_response(
+                    agent_name, 
+                    response_content=full_response,
+                    prompt_tokens=self.total_input_tokens,
+                    completion_tokens=self.total_output_tokens
+                )
+
+            return full_response
+        
+        finally:
+            # Emit agent_end event
+            if emitter:
+                emitter.agent_end(agent_name)
 
     # ------------------------------------------------------------------
     # stream() — ManagedBackendProtocol
