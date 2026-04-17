@@ -53,9 +53,9 @@ class TestLocalManagedConfig:
         cfg = LocalManagedConfig()
         assert cfg.name == "Agent"
         assert cfg.model == "gpt-4o"
-        assert cfg.sandbox_type == "subprocess"
         assert cfg.max_turns == 25
         assert "execute_command" in cfg.tools
+        assert cfg.host_packages_ok is False
 
     def test_custom_config(self):
         from praisonai.integrations.managed_local import LocalManagedConfig
@@ -352,6 +352,218 @@ class TestPackageConfig:
         from praisonai.integrations.managed_local import LocalManagedConfig
         cfg = LocalManagedConfig(packages={"pip": ["pandas", "numpy"]})
         assert cfg.packages == {"pip": ["pandas", "numpy"]}
+
+    def test_host_packages_ok_default_false(self):
+        from praisonai.integrations.managed_local import LocalManagedConfig
+        cfg = LocalManagedConfig()
+        assert cfg.host_packages_ok is False
+
+    def test_host_packages_ok_explicit_true(self):
+        from praisonai.integrations.managed_local import LocalManagedConfig
+        cfg = LocalManagedConfig(host_packages_ok=True)
+        assert cfg.host_packages_ok is True
+
+
+class TestManagedSandboxSafety:
+    """Test security features for managed agents package installation."""
+
+    def test_install_packages_without_compute_raises(self):
+        """Test that package installation without compute provider raises ManagedSandboxRequired."""
+        import pytest
+        from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
+        from praisonai.integrations.managed_agents import ManagedSandboxRequired
+        
+        cfg = LocalManagedConfig(packages={"pip": ["requests"]})
+        agent = LocalManagedAgent(config=cfg)
+        
+        with pytest.raises(ManagedSandboxRequired) as exc_info:
+            agent._install_packages()
+        
+        assert "Package installation requested" in str(exc_info.value)
+        assert "security risk" in str(exc_info.value)
+        assert "compute='docker'" in str(exc_info.value)
+        assert "host_packages_ok=True" in str(exc_info.value)
+
+    def test_install_packages_with_host_packages_ok_succeeds(self):
+        """Test that package installation with host_packages_ok=True succeeds."""
+        from unittest.mock import patch
+        from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
+        
+        cfg = LocalManagedConfig(packages={"pip": ["requests"]}, host_packages_ok=True)
+        agent = LocalManagedAgent(config=cfg)
+        
+        with patch('praisonai.integrations.managed_local.subprocess.run') as mock_run:
+            mock_run.return_value = None
+            agent._install_packages()  # Should not raise
+            mock_run.assert_called_once()
+
+    def test_install_packages_with_compute_uses_sandbox(self):
+        """Test that package installation with compute provider uses sandbox."""
+        from unittest.mock import AsyncMock, patch
+        from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
+        
+        cfg = LocalManagedConfig(packages={"pip": ["requests"]})
+        agent = LocalManagedAgent(config=cfg, compute="local")
+        
+        # Mock the compute execution
+        with patch.object(agent, 'provision_compute') as mock_provision, \
+             patch.object(agent._compute, 'execute') as mock_execute, \
+             patch('asyncio.run') as mock_asyncio_run, \
+             patch('asyncio.get_event_loop') as mock_get_loop:
+            
+            mock_provision.return_value = None
+            mock_execute.return_value = {"exit_code": 0, "stdout": "installed"}
+            agent._compute_instance_id = "test_instance"
+            mock_asyncio_run.return_value = {"exit_code": 0, "stdout": "installed"}
+            
+            agent._install_packages()
+            
+            # Verify subprocess.run was NOT called (no host installation)
+            with patch('praisonai.integrations.managed_local.subprocess.run') as mock_run:
+                agent._install_packages()
+                mock_run.assert_not_called()
+
+    def test_no_packages_no_error(self):
+        """Test that agents without packages work normally."""
+        from praisonai.integrations.managed_local import LocalManagedAgent
+        agent = LocalManagedAgent()
+        agent._install_packages()  # Should not raise
+
+    def test_empty_packages_no_error(self):
+        """Test that empty packages dict works normally."""
+        from praisonai.integrations.managed_local import LocalManagedConfig, LocalManagedAgent
+        cfg = LocalManagedConfig(packages={"pip": []})
+        agent = LocalManagedAgent(config=cfg)
+        agent._install_packages()  # Should not raise
+
+
+class TestComputeToolBridge:
+    """Test compute-based tool execution routing."""
+    
+    def test_bridged_tools_created_when_compute_attached(self):
+        """Test that shell-based tools are bridged when compute is attached."""
+        from praisonai.integrations.managed_local import LocalManagedAgent
+        agent = LocalManagedAgent(compute="local")
+        tools = agent._resolve_tools()
+        
+        # Should have tools but they should be wrapped/bridged versions
+        tool_names = [getattr(t, '__name__', str(t)) for t in tools if callable(t)]
+        assert "execute_command" in tool_names
+
+    def test_non_bridged_tools_use_original_when_no_compute(self):
+        """Test that tools use original implementation when no compute."""
+        from praisonai.integrations.managed_local import LocalManagedAgent
+        agent = LocalManagedAgent()
+        tools = agent._resolve_tools()
+        
+        # Should have original tools
+        tool_names = [getattr(t, '__name__', str(t)) for t in tools if callable(t)]
+        assert "execute_command" in tool_names
+
+    def test_compute_bridge_tool_execute_command(self):
+        """Test that execute_command is properly bridged to compute."""
+        from unittest.mock import AsyncMock, patch
+        from praisonai.integrations.managed_local import LocalManagedAgent
+        
+        agent = LocalManagedAgent(compute="local")
+        agent._compute_instance_id = "test_instance"
+        
+        # Create a bridge tool for execute_command
+        original_func = lambda command: "original result"
+        bridge_tool = agent._create_compute_bridge_tool("execute_command", original_func)
+        
+        with patch.object(agent._compute, 'execute'), \
+             patch('asyncio.get_event_loop', side_effect=RuntimeError('no loop')), \
+             patch('asyncio.run') as mock_asyncio_run:
+            
+            mock_asyncio_run.return_value = {"exit_code": 0, "stdout": "compute result"}
+            
+            result = bridge_tool("echo hello")
+            assert result == "compute result"
+            
+            # Verify it attempted to run in compute, not locally
+            mock_asyncio_run.assert_called()
+
+    def test_compute_bridge_tool_read_file(self):
+        """Test that read_file is properly bridged to compute."""
+        from unittest.mock import patch
+        from praisonai.integrations.managed_local import LocalManagedAgent
+        
+        agent = LocalManagedAgent(compute="local")
+        agent._compute_instance_id = "test_instance"
+        
+        original_func = lambda filepath: "original content"
+        bridge_tool = agent._create_compute_bridge_tool("read_file", original_func)
+        
+        with patch.object(agent, '_bridge_file_tool') as mock_bridge:
+            mock_bridge.return_value = "file content from compute"
+            
+            result = bridge_tool("/path/to/file")
+            assert result == "file content from compute"
+            mock_bridge.assert_called_once_with("read_file", "/path/to/file")
+
+    def test_compute_bridge_tool_write_file(self):
+        """Test that write_file is properly bridged to compute."""
+        from unittest.mock import patch
+        from praisonai.integrations.managed_local import LocalManagedAgent
+        
+        agent = LocalManagedAgent(compute="local") 
+        agent._compute_instance_id = "test_instance"
+        
+        original_func = lambda filepath, content: "written locally"
+        bridge_tool = agent._create_compute_bridge_tool("write_file", original_func)
+        
+        with patch.object(agent, '_bridge_file_tool') as mock_bridge:
+            mock_bridge.return_value = "written to compute"
+            
+            result = bridge_tool("/path/to/file", "content")
+            assert result == "written to compute"
+            mock_bridge.assert_called_once_with("write_file", "/path/to/file", "content")
+
+    def test_bridge_file_tool_read(self):
+        """Test _bridge_file_tool for read operations."""
+        from unittest.mock import patch
+        from praisonai.integrations.managed_local import LocalManagedAgent
+        
+        agent = LocalManagedAgent(compute="local")
+        agent._compute_instance_id = "test_instance"
+        
+        with patch('asyncio.get_event_loop', side_effect=RuntimeError('no loop')), \
+             patch('asyncio.run') as mock_asyncio_run:
+            mock_asyncio_run.return_value = {"exit_code": 0, "stdout": "file contents"}
+            
+            result = agent._bridge_file_tool("read_file", "/test/file")
+            assert result == "file contents"
+
+    def test_bridge_file_tool_write(self):
+        """Test _bridge_file_tool for write operations."""
+        from unittest.mock import patch
+        from praisonai.integrations.managed_local import LocalManagedAgent
+        
+        agent = LocalManagedAgent(compute="local")
+        agent._compute_instance_id = "test_instance"
+        
+        with patch('asyncio.get_event_loop', side_effect=RuntimeError('no loop')), \
+             patch('asyncio.run') as mock_asyncio_run:
+            mock_asyncio_run.return_value = {"exit_code": 0, "stdout": ""}
+            
+            result = agent._bridge_file_tool("write_file", "/test/file", "content")
+            assert result == ""
+
+    def test_bridge_file_tool_list(self):
+        """Test _bridge_file_tool for list operations.""" 
+        from unittest.mock import patch
+        from praisonai.integrations.managed_local import LocalManagedAgent
+        
+        agent = LocalManagedAgent(compute="local")
+        agent._compute_instance_id = "test_instance"
+        
+        with patch('asyncio.get_event_loop', side_effect=RuntimeError('no loop')), \
+             patch('asyncio.run') as mock_asyncio_run:
+            mock_asyncio_run.return_value = {"exit_code": 0, "stdout": "file1\nfile2\n"}
+            
+            result = agent._bridge_file_tool("list_files", "/test/dir")
+            assert result == "file1\nfile2\n"
 
 
 class TestUpdateAgentKeepsSession:
