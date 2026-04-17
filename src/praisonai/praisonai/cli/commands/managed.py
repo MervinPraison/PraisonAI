@@ -211,6 +211,32 @@ def managed_multi(
         typer.echo(f"Output tokens: {managed.total_output_tokens}")
 
 
+@sessions_app.command("delete")
+def sessions_delete(
+    session_id: str = typer.Argument(..., help="Session ID to delete (sesn_01...)"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt"),
+):
+    """Delete a managed session.
+
+    Example:
+        praisonai managed sessions delete sesn_01AbCdEf
+        praisonai managed sessions delete sesn_01AbCdEf --force
+    """
+    if not force:
+        confirm = typer.confirm(f"Are you sure you want to delete session {session_id}?")
+        if not confirm:
+            typer.echo("Cancelled.")
+            return
+
+    try:
+        client = _get_client()
+        client.beta.sessions.delete(session_id)
+        typer.echo(f"Deleted session: {session_id}")
+    except Exception as e:
+        typer.echo(f"Error deleting session: {e}", err=True)
+        raise typer.Exit(1)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # sessions sub-commands
 # ─────────────────────────────────────────────────────────────────────────────
@@ -397,6 +423,32 @@ def agents_update(
     typer.echo(f"Updated agent: {updated.id} (v{getattr(updated,'version','')})")
 
 
+@agents_app.command("delete")
+def agents_delete(
+    agent_id: str = typer.Argument(..., help="Agent ID to delete (agent_01...)"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt"),
+):
+    """Delete a managed agent.
+
+    Example:
+        praisonai managed agents delete agent_01AbCdEf
+        praisonai managed agents delete agent_01AbCdEf --force
+    """
+    if not force:
+        confirm = typer.confirm(f"Are you sure you want to delete agent {agent_id}?")
+        if not confirm:
+            typer.echo("Cancelled.")
+            return
+
+    try:
+        client = _get_client()
+        client.beta.agents.delete(agent_id)
+        typer.echo(f"Deleted agent: {agent_id}")
+    except Exception as e:
+        typer.echo(f"Error deleting agent: {e}", err=True)
+        raise typer.Exit(1)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # envs sub-commands
 # ─────────────────────────────────────────────────────────────────────────────
@@ -439,6 +491,68 @@ def envs_get(
     cfg = getattr(e, "config", None)
     if cfg:
         typer.echo(f"Config: {cfg}")
+
+
+@envs_app.command("update")
+def envs_update(
+    env_id: str = typer.Argument(..., help="Environment ID to update (env_01...)"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="New environment name"),
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="New environment config (JSON)"),
+):
+    """Update a managed environment.
+
+    Example:
+        praisonai managed envs update env_01AbCdEf --name "Updated Env"
+        praisonai managed envs update env_01AbCdEf --config '{"packages": ["numpy"]}'
+    """
+    client = _get_client()
+    kwargs = {}
+    if name:
+        kwargs["name"] = name
+    if config:
+        import json
+        try:
+            kwargs["config"] = json.loads(config)
+        except json.JSONDecodeError as e:
+            typer.echo(f"Error parsing config JSON: {e}", err=True)
+            raise typer.Exit(1)
+    
+    if not kwargs:
+        typer.echo("No update fields provided. Use --name or --config.", err=True)
+        raise typer.Exit(1)
+    
+    try:
+        updated = client.beta.environments.update(env_id, **kwargs)
+        typer.echo(f"Updated environment: {updated.id}")
+    except Exception as e:
+        typer.echo(f"Error updating environment: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@envs_app.command("delete")
+def envs_delete(
+    env_id: str = typer.Argument(..., help="Environment ID to delete (env_01...)"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt"),
+):
+    """Delete a managed environment.
+
+    Example:
+        praisonai managed envs delete env_01AbCdEf
+        praisonai managed envs delete env_01AbCdEf --force
+    """
+    if not force:
+        confirm = typer.confirm(f"Are you sure you want to delete environment {env_id}?")
+        if not confirm:
+            typer.echo("Cancelled.")
+            return
+
+    try:
+        client = _get_client()
+        client.beta.environments.delete(env_id)
+        typer.echo(f"Deleted environment: {env_id}")
+    except Exception as e:
+        typer.echo(f"Error deleting environment: {e}", err=True)
+        raise typer.Exit(1)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

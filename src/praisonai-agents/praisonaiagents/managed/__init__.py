@@ -25,7 +25,16 @@ from .protocols import (
     ComputeConfig,
     InstanceInfo,
     InstanceStatus,
+    SessionInfo,
 )
+
+# Lazy re-export of ManagedBackendProtocol from agent.protocols
+# Following AGENTS.md protocol-driven design principles
+def __getattr__(name: str):
+    if name == "ManagedBackendProtocol":
+        from ..agent.protocols import ManagedBackendProtocol
+        return ManagedBackendProtocol
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 __all__ = [
     "ManagedEvent",
@@ -41,4 +50,6 @@ __all__ = [
     "ComputeConfig",
     "InstanceInfo",
     "InstanceStatus",
+    "SessionInfo",
+    "ManagedBackendProtocol",  # Lazy re-export from agent.protocols
 ]

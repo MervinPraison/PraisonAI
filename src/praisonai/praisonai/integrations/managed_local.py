@@ -38,6 +38,15 @@ from typing import (
     Optional,
 )
 
+
+class ManagedSandboxRequired(Exception):
+    """Raised when sandbox execution is required but not available.
+    
+    This prevents dangerous host-side operations like package installation
+    when compute providers are configured but not properly wired.
+    """
+    pass
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_SYSTEM = "You are a helpful coding assistant."
@@ -83,6 +92,9 @@ class LocalManagedConfig:
     env: Dict[str, str] = field(default_factory=dict)
     packages: Optional[Dict[str, List[str]]] = None
     networking: Dict[str, Any] = field(default_factory=lambda: {"type": "unrestricted"})
+    
+    # ── Safety fields ──
+    host_packages_ok: bool = False  # Allow host package installation (UNSAFE)
 
     # ── Session fields ──
     session_title: str = "PraisonAI local session"
@@ -451,21 +463,89 @@ class LocalManagedAgent:
                 self.provider = saved_cfg["provider"]
 
     def _install_packages(self) -> None:
-        """Install packages specified in config before agent starts."""
+        """Install packages specified in config before agent starts.
+        
+        Uses compute provider if available, otherwise installs on host only if
+        host_packages_ok=True to prevent accidental host pollution.
+        """
         packages = self._cfg.get("packages")
         if not packages:
             return
 
         pip_pkgs = packages.get("pip", []) if isinstance(packages, dict) else []
-        if pip_pkgs:
-            cmd = [sys.executable, "-m", "pip", "install", "-q"] + pip_pkgs
-            logger.info("[local_managed] installing pip packages: %s", pip_pkgs)
+        if not pip_pkgs:
+            return
+            
+        # If compute provider is available, use it
+        if self._compute is not None:
+            # Use sandbox_type from config
+            sandbox_type = self._cfg.get("sandbox_type", "subprocess")
+            logger.info("[local_managed] installing packages via compute provider (%s): %s", sandbox_type, pip_pkgs)
             try:
-                subprocess.run(cmd, check=True, capture_output=True, timeout=120)
-            except subprocess.CalledProcessError as e:
-                logger.warning("[local_managed] pip install failed: %s", e.stderr)
-            except subprocess.TimeoutExpired:
-                logger.warning("[local_managed] pip install timed out")
+                import asyncio
+                # Run async operation in sync context
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # We're in async context, need to run in executor
+                    import threading
+                    result = [None]
+                    exception = [None]
+                    
+                    def run_install():
+                        try:
+                            new_loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(new_loop)
+                            result[0] = new_loop.run_until_complete(self._install_via_compute(pip_pkgs))
+                        except Exception as e:
+                            exception[0] = e
+                        finally:
+                            new_loop.close()
+                    
+                    thread = threading.Thread(target=run_install)
+                    thread.start()
+                    thread.join()
+                    
+                    if exception[0]:
+                        raise exception[0]
+                else:
+                    loop.run_until_complete(self._install_via_compute(pip_pkgs))
+            except Exception as e:
+                logger.warning("[local_managed] compute package install failed: %s", e)
+                # Fall through to host installation if allowed
+        
+        # Host installation - only if explicitly allowed
+        if not self._cfg.get("host_packages_ok", False):
+            raise ManagedSandboxRequired(
+                f"Package installation requires sandbox execution. "
+                f"Either configure a compute provider or set host_packages_ok=True. "
+                f"Packages: {pip_pkgs}"
+            )
+            
+        # Host installation (UNSAFE)
+        cmd = [sys.executable, "-m", "pip", "install", "-q"] + pip_pkgs
+        logger.warning("[local_managed] installing pip packages on HOST (UNSAFE): %s", pip_pkgs)
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, timeout=120)
+        except subprocess.CalledProcessError as e:
+            logger.warning("[local_managed] pip install failed: %s", e.stderr)
+        except subprocess.TimeoutExpired:
+            logger.warning("[local_managed] pip install timed out")
+            
+    async def _install_via_compute(self, pip_pkgs: List[str]) -> None:
+        """Install packages via compute provider."""
+        if not self._compute_instance_id:
+            # Provision compute instance if needed
+            from praisonaiagents.managed.protocols import ComputeConfig
+            config = ComputeConfig(
+                packages={"pip": pip_pkgs},
+                image="python:3.12-slim",
+                working_dir=self._cfg.get("working_dir", "/workspace")
+            )
+            await self.provision_compute(config=config)
+        else:
+            # Install on existing instance
+            cmd = f"pip install -q {' '.join(pip_pkgs)}"
+            await self.execute_in_compute(cmd, timeout=120)
 
     def _ensure_agent(self) -> Any:
         """Create or return the inner PraisonAI Agent."""
@@ -497,7 +577,8 @@ class LocalManagedAgent:
         self._inner_agent = Agent(**agent_kwargs)
         self.agent_id = self.agent_id or f"agent_{uuid.uuid4().hex[:12]}"
         self.environment_id = self.environment_id or f"env_{uuid.uuid4().hex[:12]}"
-        logger.info("[local_managed] agent created: %s model=%s", self.agent_id, model)
+        logger.info("[local_managed] agent created: %s model=%s sandbox=%s", 
+                   self.agent_id, model, self._cfg.get("sandbox_type", "subprocess"))
         return self._inner_agent
 
     def _ensure_session(self) -> str:
@@ -691,16 +772,31 @@ class LocalManagedAgent:
     # retrieve_session / list_sessions — ManagedBackendProtocol
     # ------------------------------------------------------------------
     def retrieve_session(self) -> Dict[str, Any]:
-        """Retrieve current session metadata."""
+        """Retrieve current session metadata using unified SessionInfo schema."""
         self._sync_usage()
-        return {
-            "id": self._session_id,
-            "status": "idle" if self._session_id else "none",
-            "usage": {
-                "input_tokens": self.total_input_tokens,
-                "output_tokens": self.total_output_tokens,
-            },
-        }
+        
+        # Use unified SessionInfo schema for consistency with Anthropic backend
+        try:
+            from praisonaiagents.managed import SessionInfo
+            session_info = SessionInfo(
+                id=self._session_id or "",
+                status="idle" if self._session_id else "none",
+                usage={
+                    "input_tokens": self.total_input_tokens,
+                    "output_tokens": self.total_output_tokens,
+                } if self._session_id else None
+            )
+            return session_info.to_dict()
+        except ImportError:
+            # Fallback to old format if SessionInfo not available
+            return {
+                "id": self._session_id or "",
+                "status": "idle" if self._session_id else "none",
+                "usage": {
+                    "input_tokens": self.total_input_tokens,
+                    "output_tokens": self.total_output_tokens,
+                } if self._session_id else None,
+            }
 
     def list_sessions(self, **kwargs) -> List[Dict[str, Any]]:
         """List all sessions created in this backend instance."""

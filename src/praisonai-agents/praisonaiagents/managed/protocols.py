@@ -86,6 +86,36 @@ class InstanceInfo:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class SessionInfo:
+    """Unified session information schema for all managed backends.
+    
+    Provides a consistent interface for session metadata across
+    Anthropic Managed Agents and Local Managed Agents.
+    """
+    id: str
+    status: Optional[str] = None
+    usage: Optional[Dict[str, int]] = None
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "SessionInfo":
+        """Create SessionInfo from backend-specific dict."""
+        return cls(
+            id=data["id"],
+            status=data.get("status"),
+            usage=data.get("usage")
+        )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dict format expected by ManagedBackendProtocol."""
+        result = {"id": self.id}
+        if self.status is not None:
+            result["status"] = self.status
+        if self.usage is not None:
+            result["usage"] = self.usage
+        return result
+
+
 @runtime_checkable
 class ComputeProviderProtocol(Protocol):
     """Protocol for compute backends that host managed agent sandboxes.

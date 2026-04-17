@@ -565,22 +565,39 @@ class AnthropicManagedAgent:
     # retrieve_session — ManagedBackendProtocol
     # ------------------------------------------------------------------
     def retrieve_session(self) -> Dict[str, Any]:
-        """Retrieve current session metadata and usage from the API."""
+        """Retrieve current session metadata and usage from the API using unified schema."""
         if not self._session_id:
             return {}
         client = self._get_client()
         sess = client.beta.sessions.retrieve(self._session_id)
-        result: Dict[str, Any] = {
-            "id": getattr(sess, "id", self._session_id),
-            "status": getattr(sess, "status", None),
-        }
+        
+        # Build usage dict if available
+        usage_dict = None
         usage = getattr(sess, "usage", None)
         if usage:
-            result["usage"] = {
+            usage_dict = {
                 "input_tokens": getattr(usage, "input_tokens", 0),
                 "output_tokens": getattr(usage, "output_tokens", 0),
             }
-        return result
+        
+        # Use unified SessionInfo schema for consistency with Local backend
+        try:
+            from praisonaiagents.managed import SessionInfo
+            session_info = SessionInfo(
+                id=getattr(sess, "id", self._session_id),
+                status=getattr(sess, "status", None),
+                usage=usage_dict
+            )
+            return session_info.to_dict()
+        except ImportError:
+            # Fallback to old format if SessionInfo not available
+            result: Dict[str, Any] = {
+                "id": getattr(sess, "id", self._session_id),
+                "status": getattr(sess, "status", None),
+            }
+            if usage_dict:
+                result["usage"] = usage_dict
+            return result
 
     # ------------------------------------------------------------------
     # list_sessions — ManagedBackendProtocol
