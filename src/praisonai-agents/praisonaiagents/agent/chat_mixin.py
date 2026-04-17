@@ -76,7 +76,17 @@ class ChatMixin:
             if hasattr(response, 'choices') and response.choices:
                 choice = response.choices[0]
                 if hasattr(choice, 'message') and hasattr(choice.message, 'content'):
-                    return choice.message.content
+                    content = choice.message.content
+                    if content:
+                        return content
+                    # Tool-call turn: surface tool_calls summary instead of None
+                    tool_calls = getattr(choice.message, 'tool_calls', None)
+                    if tool_calls:
+                        try:
+                            names = [getattr(tc.function, 'name', '?') for tc in tool_calls]
+                            return f"[tool_calls: {', '.join(names)}]"
+                        except Exception:
+                            pass
         except (AttributeError, IndexError, TypeError):
             pass
         

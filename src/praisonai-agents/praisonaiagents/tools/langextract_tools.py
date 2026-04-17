@@ -78,15 +78,12 @@ def langextract_extract(
                 "document_id": document_id
             }
         
-        # Create AnnotatedDocument
-        document = lx.AnnotatedDocument(
-            document_id=document_id,
-            text=text
-        )
-        
         # Process extractions if provided
-        extractions = extractions or []
-        for i, extraction_text in enumerate(extractions):
+        extractions_list = extractions or []
+        extraction_objects = []
+        added_count = 0
+        
+        for i, extraction_text in enumerate(extractions_list):
             if not extraction_text.strip():
                 continue
                 
@@ -97,19 +94,30 @@ def langextract_extract(
                 if pos == -1:
                     break
                 
-                # Create extraction
+                # Create extraction with proper CharInterval
                 extraction = lx.data.Extraction(
                     extraction_class=f"extraction_{i}",
                     extraction_text=extraction_text,
-                    char_interval=[pos, pos + len(extraction_text)],
+                    char_interval=lx.data.CharInterval(
+                        start_pos=pos,
+                        end_pos=pos + len(extraction_text)
+                    ),
                     attributes={
                         "index": i,
                         "original_text": extraction_text,
                         "tool": "langextract_extract"
                     }
                 )
-                document.add_extraction(extraction)
+                extraction_objects.append(extraction)
+                added_count += 1
                 start_pos = pos + 1
+        
+        # Create AnnotatedDocument with extractions
+        document = lx.data.AnnotatedDocument(
+            document_id=document_id,
+            text=text,
+            extractions=extraction_objects
+        )
         
         # Determine output path
         if not output_path:
@@ -120,26 +128,44 @@ def langextract_extract(
                 f"langextract_{document_id}.html"
             )
         
-        # Render HTML
-        html_content = lx.render.render_doc_as_html(
-            document,
-            title=f"Agent Analysis - {document_id}"
+        # Save as JSONL first, then render HTML
+        import tempfile
+        import os
+        
+        # Create temporary JSONL file
+        jsonl_dir = tempfile.gettempdir()
+        jsonl_path = os.path.join(jsonl_dir, f"langextract_{document_id}.jsonl")
+        
+        lx.io.save_annotated_documents(
+            [document],
+            output_name=os.path.basename(jsonl_path),
+            output_dir=jsonl_dir
         )
+        
+        # Generate HTML using visualize
+        html = lx.visualize(jsonl_path)
+        html_content = html.data if hasattr(html, 'data') else html
         
         # Write HTML file
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
+            
+        # Clean up temporary JSONL
+        try:
+            os.remove(jsonl_path)
+        except OSError:
+            pass
         
         # Auto-open if requested
         if auto_open:
             import webbrowser
-            import os
-            webbrowser.open(f"file://{os.path.abspath(output_path)}")
+            from pathlib import Path
+            webbrowser.open(Path(output_path).resolve().as_uri())
         
         return {
             "success": True,
             "html_path": output_path,
-            "extractions_count": len(extractions),
+            "extractions_count": added_count,
             "document_id": document_id,
             "error": None
         }
@@ -155,7 +181,7 @@ def langextract_extract(
 
 
 @tool
-@require_approval("File operations require approval for security")
+@require_approval(risk_level="high")
 def langextract_render_file(
     file_path: str,
     extractions: Optional[List[str]] = None,
