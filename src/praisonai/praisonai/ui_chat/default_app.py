@@ -14,6 +14,14 @@ import os
 
 import praisonaiui as aiui
 
+# ── Wire PraisonAI native sessions into aiui dashboard ─────
+try:
+    from praisonai.ui._aiui_datastore import PraisonAISessionDataStore
+    aiui.set_datastore(PraisonAISessionDataStore())
+except ImportError:
+    # aiui or praisonaiagents not available - sessions won't persist
+    pass
+
 # ── Dashboard style, but no sidebar navigation ─────────────
 aiui.set_style("dashboard")
 aiui.set_dashboard(sidebar=False, page_header=False)
