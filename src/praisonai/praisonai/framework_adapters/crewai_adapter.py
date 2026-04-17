@@ -45,11 +45,12 @@ class CrewAIAdapter(BaseFrameworkAdapter):
         
         # Use scoped telemetry disabling instead of global patching
         with scoped_telemetry_disable(Telemetry):
+            # For now, use simplified CrewAI execution
             agents = {}
             tasks = []
             
             # Create agents
-            for agent_name, agent_details in config.get('agents', {}).items():
+            for agent_name, agent_details in config.get('roles', {}).items():
                 agent = Agent(
                     role=agent_details.get('role', agent_name),
                     goal=self._format_template(agent_details.get('goal', ''), topic=topic),
@@ -60,7 +61,7 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                 agents[agent_name] = agent
             
             # Create tasks
-            for agent_name, agent_details in config.get('agents', {}).items():
+            for agent_name, agent_details in config.get('roles', {}).items():
                 for task_name, task_details in agent_details.get('tasks', {}).items():
                     task = Task(
                         description=self._format_template(task_details['description'], topic=topic),

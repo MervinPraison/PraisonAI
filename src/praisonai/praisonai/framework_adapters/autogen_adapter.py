@@ -43,12 +43,64 @@ class AutoGenAdapter(BaseFrameworkAdapter):
         import autogen
         
         logger.info("Starting AutoGen v0.2 execution...")
-        # Implementation would go here based on the existing logic
-        # This is a simplified version for the refactor
-        result = "AutoGen v0.2 execution completed"
-        logger.info("AutoGen v0.2 execution completed")
         
+        llm_config_dict = {"config_list": llm_config}
+        
+        # Set up user proxy agent
+        user_proxy = autogen.UserProxyAgent(
+            name="User",
+            human_input_mode="NEVER",
+            is_termination_msg=lambda x: (x.get("content") or "").rstrip().rstrip(".").lower().endswith("terminate") or "TERMINATE" in (x.get("content") or ""),
+            code_execution_config={
+                "work_dir": "coding",
+                "use_docker": False,
+            }
+        )
+        
+        agents = {}
+        tasks = []
+        
+        # Create agents from config
+        for role, details in config.get('roles', {}).items():
+            agent_name = self._format_template(details['role'], topic=topic)
+            agent_goal = self._format_template(details['goal'], topic=topic)
+            
+            # Create AutoGen assistant agent
+            agents[role] = autogen.AssistantAgent(
+                name=agent_name,
+                llm_config=llm_config_dict,
+                system_message=self._format_template(details['backstory'], topic=topic) + 
+                             ". Must Reply \"TERMINATE\" in the end when everything is done.",
+            )
+            
+            # Prepare tasks
+            for task_name, task_details in details.get('tasks', {}).items():
+                description_filled = self._format_template(task_details['description'], topic=topic)
+                
+                chat_task = {
+                    "recipient": agents[role],
+                    "message": description_filled,
+                    "summary_method": "last_msg",
+                }
+                tasks.append(chat_task)
+        
+        # Execute tasks
+        response = user_proxy.initiate_chats(tasks)
+        result = "### AutoGen v0.2 Output ###\n" + (response[-1].summary if hasattr(response[-1], 'summary') else "")
+        
+        logger.info("AutoGen v0.2 execution completed")
         return result
+    
+    def _format_template(self, template: str, **kwargs) -> str:
+        """Safely format template string with given kwargs."""
+        try:
+            return template.format(**kwargs)
+        except KeyError as e:
+            logger.warning(f"Template formatting failed for key {e}, returning original template")
+            return template
+        except Exception as e:
+            logger.warning(f"Template formatting error: {e}, returning original template")
+            return template
 
 
 class AutoGenV4Adapter(BaseFrameworkAdapter):
@@ -80,21 +132,11 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
         if not self.is_available():
             raise ImportError("AutoGen v0.4 is not available. Install with: pip install autogen-agentchat autogen-ext")
             
-        # Import AutoGen v0.4 only when needed
-        from autogen_agentchat.agents import AssistantAgent
-        from autogen_ext.models.openai import OpenAIChatCompletionClient
-        from autogen_agentchat.teams import RoundRobinGroupChat
-        from autogen_agentchat.conditions import TextMentionTermination, MaxMessageTermination
-        from autogen_agentchat.messages import TextMessage
-        from autogen_core import CancellationToken
-        
         logger.info("Starting AutoGen v0.4 execution...")
-        # Implementation would go here based on the existing logic
-        # This is a simplified version for the refactor
-        result = "AutoGen v0.4 execution completed"
-        logger.info("AutoGen v0.4 execution completed")
-        
-        return result
+        # For now, return a proper error message instead of delegating
+        # TODO: Implement full AutoGen v0.4 adapter logic
+        logger.warning("AutoGen v0.4 adapter is not yet fully implemented")
+        return "### AutoGen v0.4 Output ###\nAutoGen v0.4 adapter is not yet fully implemented. Please use 'autogen' framework for AutoGen v0.2 support."
 
 
 class AG2Adapter(BaseFrameworkAdapter):
@@ -128,9 +170,7 @@ class AG2Adapter(BaseFrameworkAdapter):
             raise ImportError("AG2 is not available. Install with: pip install ag2")
             
         logger.info("Starting AG2 execution...")
-        # Implementation would go here based on the existing logic
-        # This is a simplified version for the refactor
-        result = "AG2 execution completed"
-        logger.info("AG2 execution completed")
-        
-        return result
+        # For now, return a proper error message instead of delegating
+        # TODO: Implement full AG2 adapter logic
+        logger.warning("AG2 adapter is not yet fully implemented")
+        return "### AG2 Output ###\nAG2 adapter is not yet fully implemented. Please use 'autogen' framework for AutoGen/AG2 support."

@@ -23,6 +23,34 @@ from .framework_adapters import (
 )
 from .tool_registry import ToolRegistry
 
+# Import availability flags
+try:
+    from .inbuilt_tools import PRAISONAI_TOOLS_AVAILABLE, CREWAI_AVAILABLE, AUTOGEN_AVAILABLE
+except ImportError:
+    PRAISONAI_TOOLS_AVAILABLE = False
+    CREWAI_AVAILABLE = False
+    AUTOGEN_AVAILABLE = False
+
+# Import BaseTool for tools handling
+BaseTool = None
+try:
+    from praisonai_tools import BaseTool
+except ImportError:
+    try:
+        from praisonai.tools import BaseTool
+    except ImportError:
+        pass
+
+# Check for additional framework availability
+AG2_AVAILABLE = False
+PRAISONAI_AVAILABLE = False
+try:
+    import importlib.util
+    AG2_AVAILABLE = importlib.util.find_spec("ag2") is not None
+    PRAISONAI_AVAILABLE = importlib.util.find_spec("praisonaiagents") is not None
+except ImportError:
+    pass
+
 # Registry of available adapters (lazy-loaded)
 FRAMEWORK_ADAPTERS = {
     "crewai": CrewAIAdapter,
@@ -290,7 +318,7 @@ class AgentsGenerator:
             return {name: obj() for name, obj in inspect.getmembers(module, 
                 lambda x: inspect.isclass(x) and (
                     x.__module__.startswith('langchain_community.tools') or 
-                    (PRAISONAI_TOOLS_AVAILABLE and issubclass(x, BaseTool))
+                    (PRAISONAI_TOOLS_AVAILABLE and BaseTool and issubclass(x, BaseTool))
                 ) and x is not BaseTool)}
         except ImportError as e:
             self.logger.warning(f"Error loading tools from {module_path}: {e}")
@@ -444,7 +472,7 @@ class AgentsGenerator:
             
             # Add tools from class names
             for tool_class in self.tools:
-                if isinstance(tool_class, type) and issubclass(tool_class, BaseTool):
+                if isinstance(tool_class, type) and BaseTool and issubclass(tool_class, BaseTool):
                     tool_name = tool_class.__name__
                     tools_dict[tool_name] = tool_class()
                     self.logger.debug(f"Added tool: {tool_name}")
@@ -489,10 +517,14 @@ class AgentsGenerator:
         except ImportError:
             pass
             
-        # Use the framework adapter
-        if not self.framework_adapter.is_available():
-            # Re-get the adapter since framework may have changed for AutoGen
+        # Update framework adapter if framework changed (e.g., AutoGen version selection)
+        if framework != self.framework:
+            self.framework = framework
             self.framework_adapter = self._get_framework_adapter(framework)
+            
+        # Final availability check
+        if not self.framework_adapter.is_available():
+            raise ImportError(f"Framework '{framework}' is not available. Please install the required dependencies.")
             
         self.logger.info(f"Using framework: {framework}")
         return self.framework_adapter.run(config, self.config_list, topic)
