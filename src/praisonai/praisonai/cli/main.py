@@ -726,7 +726,10 @@ class PraisonAI:
             if args.ui == "gradio":
                 self.create_gradio_interface()
             elif args.ui == "chainlit":
-                self.create_chainlit_interface()
+                # Deprecation warning and route to new aiui agents interface
+                print("\n\033[93mWARNING: --ui chainlit is deprecated and will be removed in a future release.\033[0m")
+                print("Launching the new aiui-based agents interface instead...")
+                self.create_aiui_agents_interface()
             else:
                 # Modify code to allow default UI
                 AgentsGenerator = _get_agents_generator()
@@ -5295,6 +5298,27 @@ Now, {final_instruction.lower()}:"""
             _get_chainlit_run()([realtime_ui_path])
         else:
             print("ERROR: Realtime UI is not installed. Please install it with 'pip install \"praisonai[realtime]\"' to use the realtime UI.")
+
+    def create_aiui_agents_interface(self):
+        """
+        Create an aiui-based agents interface (replaces Chainlit).
+        
+        Routes to the new `praisonai ui agents` subcommand.
+        """
+        try:
+            from praisonai.cli.commands.ui import _launch_aiui_app
+            print("🤖 Launching PraisonAI Agents Dashboard (aiui)...")
+            _launch_aiui_app(
+                app_dir="ui_agents",
+                default_app_name="ui_agents",
+                port=8082,  # Use same port as old Chainlit agents
+                host="0.0.0.0",
+                app_file=None,
+                reload=False,
+                ui_name="Agents Dashboard"
+            )
+        except ImportError:
+            print("ERROR: PraisonAI UI (aiui) is not installed. Please install it with 'pip install \"praisonai[ui]\"' to use the agents dashboard.")
 
     def handle_context_command(self, url: str, goal: str, auto_analyze: bool = False) -> str:
         """
