@@ -896,6 +896,7 @@ Methods:
 * <code title="cli">praisonai lsp start <a href="./src/praisonai/praisonai/cli/commands/lsp.py">--help</a></code>
 * <code title="cli">praisonai lsp status <a href="./src/praisonai/praisonai/cli/commands/lsp.py">--help</a></code>
 * <code title="cli">praisonai lsp stop <a href="./src/praisonai/praisonai/cli/commands/lsp.py">--help</a></code>
+* <code title="cli">praisonai managed delete <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
 * <code title="cli">praisonai managed get <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
 * <code title="cli">praisonai managed list <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
 * <code title="cli">praisonai managed managed-callback <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
