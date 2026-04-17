@@ -201,24 +201,34 @@ class TestPraisonAISessionDataStore:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_list_sessions_empty(self):
-        """Test listing sessions when none exist."""
+    async def test_list_sessions_delegates_to_store(self):
+        """Test listing sessions delegates to store when available."""
         mock_store = Mock()
+        mock_store.list_sessions.return_value = [
+            {"session_id": "a", "created_at": 1, "message_count": 3},
+            {"session_id": "b", "created_at": 2, "message_count": 5},
+        ]
         adapter = PraisonAISessionDataStore(store=mock_store)
         
         result = await adapter.list_sessions()
         
-        # Current implementation returns empty list
-        # This is a limitation that would need core SDK enhancement
+        assert len(result) == 2
+        assert result[0]["session_id"] == "a"
+        assert result[1]["session_id"] == "b"
+        mock_store.list_sessions.assert_called_once_with(limit=50)
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_store_without_list(self):
+        """Test listing sessions when store doesn't support listing."""
+        # Custom SessionStoreProtocol impls don't require list_sessions
+        mock_store = Mock(spec=["add_message", "get_chat_history",
+                               "clear_session", "delete_session", "session_exists"])
+        adapter = PraisonAISessionDataStore(store=mock_store)
+        
+        result = await adapter.list_sessions()
+        
         assert result == []
 
 
-def test_import_fallback():
-    """Test that module handles missing dependencies gracefully."""
-    # This test verifies the import fallbacks work correctly
-    # The actual adapter requires praisonaiagents to be installed
-    try:
-        from praisonai.ui._aiui_datastore import BaseDataStore
-    except ImportError:
-        # If aiui is not available, BaseDataStore should be a fallback class
-        pass
+# Removed test_import_fallback - was a no-op test that passed regardless of behavior
+# After Blocker 1 fix, imports now fail loudly instead of falling back silently

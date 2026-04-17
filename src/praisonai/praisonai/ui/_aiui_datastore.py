@@ -5,23 +5,29 @@ the aiui dashboard's Sessions page. No Chainlit required.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any, Optional
 
+logger = logging.getLogger(__name__)
+
+# Fail loudly on missing optional dependencies per AGENTS.md §4.2
 try:
     from praisonaiui.datastore import BaseDataStore
-except ImportError:
-    # Fallback for when aiui is not installed
-    class BaseDataStore:
-        pass
+except ImportError as e:
+    raise ImportError(
+        "praisonaiui is required for PraisonAISessionDataStore. "
+        "Install with: pip install 'praisonai[ui]'"
+    ) from e
 
 try:
     from praisonaiagents.session import SessionStoreProtocol
     from praisonaiagents.session import get_hierarchical_session_store
-except ImportError:
-    # Fallback when praisonaiagents not available
-    SessionStoreProtocol = None
-    get_hierarchical_session_store = None
+except ImportError as e:
+    raise ImportError(
+        "praisonaiagents is required for PraisonAISessionDataStore. "
+        "Install with: pip install praisonaiagents"
+    ) from e
 
 
 class PraisonAISessionDataStore(BaseDataStore):
@@ -29,12 +35,6 @@ class PraisonAISessionDataStore(BaseDataStore):
     
     def __init__(self, store: Optional[SessionStoreProtocol] = None):
         """Initialize with an optional session store, defaults to hierarchical store."""
-        if get_hierarchical_session_store is None:
-            raise ImportError(
-                "praisonaiagents is required for PraisonAISessionDataStore. "
-                "Install with: pip install praisonaiagents"
-            )
-        
         self._store = store or get_hierarchical_session_store()
 
     def _new_id(self) -> str:
@@ -43,11 +43,17 @@ class PraisonAISessionDataStore(BaseDataStore):
 
     async def list_sessions(self) -> list[dict[str, Any]]:
         """List all available sessions."""
-        # The SessionStoreProtocol doesn't have a list method,
-        # so we'll need to work around this limitation
-        # For now, return empty list - this would need enhancement
-        # in the core SDK to support session listing
-        return []
+        # Check if store supports listing (DefaultSessionStore/HierarchicalSessionStore do)
+        list_fn = getattr(self._store, "list_sessions", None)
+        if list_fn is None:
+            return []  # Protocol implementation doesn't support listing
+        
+        try:
+            # DefaultSessionStore/HierarchicalSessionStore return list[dict]
+            return list_fn(limit=50) or []
+        except Exception:
+            logger.exception("Failed to list sessions")
+            return []
 
     async def get_session(self, session_id: str) -> Optional[dict[str, Any]]:
         """Get a specific session by ID."""
@@ -61,7 +67,7 @@ class PraisonAISessionDataStore(BaseDataStore):
                 "messages": chat_history or [],
             }
         except Exception:
-            # Session might exist but be corrupted
+            logger.exception("Failed to load session %s", session_id)
             return None
 
     async def create_session(self, session_id: Optional[str] = None) -> dict[str, Any]:
@@ -78,6 +84,7 @@ class PraisonAISessionDataStore(BaseDataStore):
         try:
             return self._store.delete_session(session_id)
         except Exception:
+            logger.exception("Failed to delete session %s", session_id)
             return False
 
     async def add_message(self, session_id: str, message: dict[str, Any]):
@@ -97,4 +104,5 @@ class PraisonAISessionDataStore(BaseDataStore):
         try:
             return self._store.get_chat_history(session_id) or []
         except Exception:
+            logger.exception("Failed to load messages for session %s", session_id)
             return []
