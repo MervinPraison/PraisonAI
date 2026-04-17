@@ -108,18 +108,17 @@ def load_external_agent_settings_from_chainlit(
             loader = None
     
     if loader is not None:
-        # Check for legacy key first
-        if _parse_setting_bool(loader("claude_code_enabled")):
-            settings["claude_enabled"] = True
+        legacy_claude = _parse_setting_bool(loader("claude_code_enabled"))
         
-        # Load all current toggles from persistent storage
+        # Load all current toggles from persistent storage first
         for toggle_id in EXTERNAL_AGENTS:
             persistent_value = loader(toggle_id)
-            if persistent_value:  # non-empty string
-                value = _parse_setting_bool(persistent_value)
-                # Don't let a False persistent value override a legacy True
-                if not (toggle_id == "claude_enabled" and settings.get(toggle_id) and not value):
-                    settings[toggle_id] = value
+            if persistent_value:  # non-empty string means explicitly stored
+                settings[toggle_id] = _parse_setting_bool(persistent_value)
+        
+        # Apply legacy migration only where no explicit value was stored
+        if legacy_claude and not loader("claude_enabled"):
+            settings["claude_enabled"] = True
     
     # Load from session (may override persistent settings)
     # Check for legacy key in session

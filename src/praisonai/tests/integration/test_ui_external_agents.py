@@ -10,6 +10,10 @@ from unittest.mock import patch, MagicMock
 import sys
 import os
 
+# Mark most tests as unit tests to bypass provider gating
+# Only TestRealAgenticIntegration is truly integration-level
+pytestmark = pytest.mark.unit
+
 # Add src path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../"))
 
@@ -154,6 +158,7 @@ class TestAvailabilityGating:
 
 
 @pytest.mark.integration
+@pytest.mark.provider_google  # Only this class needs provider gating
 class TestRealAgenticIntegration:
     """Real agentic tests - requires actual integrations to be available."""
     
