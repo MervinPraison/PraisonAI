@@ -511,11 +511,14 @@ class TestManagedAgent:
         assert info["usage"]["output_tokens"] == 200
 
     def test_retrieve_session_no_session(self):
-        """retrieve_session with no session returns empty dict."""
+        """retrieve_session with no session returns SessionInfo defaults (per #1429 unified schema)."""
         from praisonai.integrations.managed_agents import ManagedAgent
 
         m = ManagedAgent(api_key="test-key")
-        assert m.retrieve_session() == {}
+        info = m.retrieve_session()
+        assert info["id"] == ""
+        assert info["status"] == "unknown"
+        assert info["usage"] == {"input_tokens": 0, "output_tokens": 0}
 
     def test_list_sessions(self):
         """list_sessions should return list of session dicts."""
