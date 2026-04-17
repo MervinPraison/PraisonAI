@@ -79,6 +79,20 @@ def render(
     # Set up trace emitter for the duration of the run
     emitter = TraceEmitter(sink=sink, enabled=True)
     set_default_emitter(emitter)
+
+    # Also bridge the context emitter so real agent runtime events
+    # (agent_start/end, tool_call_*, llm_response) are captured.
+    from praisonai.observability.langextract import LangextractSink
+    
+    def warn_handler(msg: str):
+        # Warn user about bridge failure since this command specifically generates traces
+        typer.echo(f"Warning: {msg}", err=True)
+        
+    LangextractSink.bridge_context_events(
+        sink=sink,
+        session_id="praisonai-langextract-render",
+        warn_callback=warn_handler
+    )
     
     try:
         # Run the workflow

@@ -63,10 +63,23 @@ def _setup_langextract_observability(*, verbose: bool = False) -> None:
         # Ensure sink is closed on exit to write the trace file
         atexit.register(sink.close)
         
-        # Set up action-level trace emitter
+        # Set up action-level trace emitter (covers RouterAgent / PlanningAgent)
         emitter = TraceEmitter(sink=sink, enabled=True)
         set_default_emitter(emitter)
-        
+
+        # Bridge the context emitter so regular Agent.start / tool calls / LLM
+        # responses are captured as well.  Without this, typical single-agent
+        # flows produce an empty trace (no agent_start/end, no tool events).
+        def warn_handler(msg: str):
+            if verbose:
+                typer.echo(f"Warning: {msg}", err=True)
+                
+        LangextractSink.bridge_context_events(
+            sink=sink,
+            session_id="praisonai-cli",
+            warn_callback=warn_handler
+        )
+
     except ImportError:
         # Gracefully degrade if langextract not installed
         if verbose:
