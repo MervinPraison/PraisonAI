@@ -64,6 +64,12 @@ class Process:
         
         logging.debug(f"Verbose mode: {self._verbose}")
 
+    async def _get_state_lock(self):
+        """Get or create the async state lock (must be called from async context)."""
+        if self._state_lock is None:
+            self._state_lock = asyncio.Lock()
+        return self._state_lock
+
     def _create_llm_instance(self):
         """Create and return a configured LLM instance for manager tasks."""
         return LLM(model=self.manager_llm, temperature=0.7)
@@ -608,12 +614,9 @@ Subtask: {st.name}
                     break
 
             # Reset completed task to "not started" so it can run again (atomic operation)
-            # Atomic state lock initialization
-            if self._state_lock is None:
-                with self._state_lock_init:
-                    if self._state_lock is None:  # Double-checked locking pattern
-                        self._state_lock = asyncio.Lock()
-            async with self._state_lock:
+            # Get async state lock (created within async context)
+            lock = await self._get_state_lock()
+            async with lock:
                 if self.tasks[task_id].status == "completed":
                     # Never reset loop tasks, decision tasks, or their subtasks if rerun is False
                     subtask_name = self.tasks[task_id].name
