@@ -7,10 +7,13 @@ directory structure, and real command execution.
 
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 import pytest
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture
@@ -31,7 +34,7 @@ class TestSetupIntegration:
         
         # Run setup command in non-interactive mode
         cmd = [
-            "python", "-m", "praisonai", "setup",
+            sys.executable, "-m", "praisonai", "setup",
             "--non-interactive",
             "--provider", "openai",
             "--api-key", "sk-integration-test",
@@ -44,7 +47,7 @@ class TestSetupIntegration:
             capture_output=True,
             text=True,
             timeout=30,
-            cwd="/home/runner/work/PraisonAI/PraisonAI/src/praisonai"
+            cwd=PROJECT_ROOT,
         )
         
         # Check command succeeded
@@ -62,14 +65,14 @@ class TestSetupIntegration:
 
     def test_setup_help_output(self):
         """Test that setup --help works."""
-        cmd = ["python", "-m", "praisonai", "setup", "--help"]
+        cmd = [sys.executable, "-m", "praisonai", "setup", "--help"]
         
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=10,
-            cwd="/home/runner/work/PraisonAI/PraisonAI/src/praisonai"
+            cwd=PROJECT_ROOT,
         )
         
         assert result.returncode == 0
@@ -81,7 +84,7 @@ class TestSetupIntegration:
         env["PRAISONAI_HOME"] = str(temp_praison_home)
         
         cmd = [
-            "python", "-m", "praisonai", "setup",
+            sys.executable, "-m", "praisonai", "setup",
             "--non-interactive",
             "--provider", "ollama",
             "--model", "llama3.2"
@@ -93,7 +96,7 @@ class TestSetupIntegration:
             capture_output=True,
             text=True,
             timeout=30,
-            cwd="/home/runner/work/PraisonAI/PraisonAI/src/praisonai"
+            cwd=PROJECT_ROOT,
         )
         
         assert result.returncode == 0
@@ -119,7 +122,7 @@ class TestSetupIntegration:
         env["PRAISONAI_HOME"] = str(temp_praison_home)
         
         base_cmd = [
-            "python", "-m", "praisonai", "setup",
+            sys.executable, "-m", "praisonai", "setup",
             "--non-interactive",
             "--provider", "openai",
             "--model", "gpt-4o-mini"
@@ -133,7 +136,7 @@ class TestSetupIntegration:
             capture_output=True,
             text=True,
             timeout=30,
-            cwd="/home/runner/work/PraisonAI/PraisonAI/src/praisonai"
+            cwd=PROJECT_ROOT,
         )
         assert result1.returncode == 0
         
@@ -145,7 +148,7 @@ class TestSetupIntegration:
             capture_output=True,
             text=True,
             timeout=30,
-            cwd="/home/runner/work/PraisonAI/PraisonAI/src/praisonai"
+            cwd=PROJECT_ROOT,
         )
         assert result2.returncode == 0
         

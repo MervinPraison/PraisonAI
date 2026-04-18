@@ -6,6 +6,7 @@ file writing, idempotency, and provider matrix.
 """
 
 import os
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -67,7 +68,8 @@ class TestSetupCommand:
         assert env_file.exists()
         
         # Check file permissions (should be 600)
-        assert oct(env_file.stat().st_mode)[-3:] == "600"
+        if os.name != "nt" and not sys.platform.startswith("win"):
+            assert oct(env_file.stat().st_mode)[-3:] == "600"
         
         # Check file contents
         env_content = env_file.read_text()
@@ -226,9 +228,10 @@ class TestSetupCommand:
         
         env_file = temp_praison_home / ".env"
         # Check that file is readable only by owner (600 permissions)
-        stat_mode = env_file.stat().st_mode
-        # Last 3 octal digits should be 600
-        assert oct(stat_mode)[-3:] == "600"
+        if os.name != "nt" and not sys.platform.startswith("win"):
+            stat_mode = env_file.stat().st_mode
+            # Last 3 octal digits should be 600
+            assert oct(stat_mode)[-3:] == "600"
 
     def test_setup_with_existing_env_var(self, temp_praison_home):
         """Test setup when API key already exists in environment."""

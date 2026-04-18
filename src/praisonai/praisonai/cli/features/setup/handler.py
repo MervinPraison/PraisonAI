@@ -63,9 +63,12 @@ class SetupHandler(CommandHandler):
     
     def _create_directories(self, praison_home: Path, output) -> None:
         """Create the ~/.praisonai directory structure."""
-        praison_home.mkdir(parents=True, exist_ok=True)
-        (praison_home / "logs").mkdir(exist_ok=True)
-        (praison_home / "sessions").mkdir(exist_ok=True)
+        praison_home.mkdir(parents=True, exist_ok=True, mode=0o700)
+        (praison_home / "logs").mkdir(exist_ok=True, mode=0o700)
+        (praison_home / "sessions").mkdir(exist_ok=True, mode=0o700)
+        praison_home.chmod(0o700)
+        (praison_home / "logs").chmod(0o700)
+        (praison_home / "sessions").chmod(0o700)
         output.print_success(f"Created directory structure at {praison_home}")
     
     def _run_non_interactive(
@@ -100,13 +103,21 @@ class SetupHandler(CommandHandler):
         default_model = provider_info[2]
         
         # Validate API key requirement
-        if env_key and not api_key:
-            output.print_error(f"API key is required for {provider_name}")
-            return 1
+        if env_key:
+            api_key = api_key or os.getenv(env_key)
+            if not api_key:
+                output.print_error(
+                    f"API key is required for {provider_name}; pass --api-key or set {env_key}"
+                )
+                return 1
         
         # Use default model if not specified
         if not model:
-            model = default_model
+            if default_model:
+                model = default_model
+            else:
+                output.print_error("Model is required for custom provider")
+                return 1
         
         # Write configuration
         env_vars = {}
@@ -124,7 +135,7 @@ class SetupHandler(CommandHandler):
         
         output.print_success("Setup complete")
         output.console.print(f"Configuration saved to {praison_home}")
-        output.console.print(f'Try: [cyan]praisonai "Say hello in one sentence"[/cyan]')
+        output.console.print('Try: [cyan]praisonai "Say hello in one sentence"[/cyan]')
         
         return 0
     
@@ -189,7 +200,7 @@ class SetupHandler(CommandHandler):
                     env_vars[env_key] = api_key
         
         # Model selection
-        output.console.print(f"\n[bold]3. Choose default model:[/bold]")
+        output.console.print("\n[bold]3. Choose default model:[/bold]")
         if default_model:
             model = Prompt.ask(
                 f"Default model for {provider_name}",
@@ -199,7 +210,7 @@ class SetupHandler(CommandHandler):
             model = Prompt.ask("Enter model name")
         
         # Telemetry consent
-        output.console.print(f"\n[bold]4. Telemetry settings:[/bold]")
+        output.console.print("\n[bold]4. Telemetry settings:[/bold]")
         output.console.print("Anonymous usage data helps improve PraisonAI.")
         output.console.print("No personal data or API keys are collected.")
         enable_telemetry = Confirm.ask(
@@ -208,7 +219,7 @@ class SetupHandler(CommandHandler):
         )
         
         # Starter YAML
-        output.console.print(f"\n[bold]5. Create starter configuration:[/bold]")
+        output.console.print("\n[bold]5. Create starter configuration:[/bold]")
         create_starter = Confirm.ask(
             "Create a starter agents.yaml file in current directory?",
             default=False
@@ -225,17 +236,17 @@ class SetupHandler(CommandHandler):
         self._save_config(praison_home, config, output)
         
         if create_starter:
-            self._create_starter_yaml(output)
+            self._create_starter_yaml(output, model)
         
         # Success message
-        output.console.print(f"\n[bold green]✅ Setup complete![/bold green]")
+        output.console.print("\n[bold green]✅ Setup complete![/bold green]")
         output.console.print(f"Configuration saved to {praison_home}")
         
-        output.console.print(f"\n[bold]Next steps:[/bold]")
-        output.console.print(f'• Test: [cyan]praisonai "Say hello in one sentence"[/cyan]')
-        output.console.print(f'• Chat: [cyan]praisonai chat[/cyan]')
-        output.console.print(f'• Help: [cyan]praisonai --help[/cyan]')
-        output.console.print(f'• Docs: [cyan]praisonai doctor[/cyan]')
+        output.console.print("\n[bold]Next steps:[/bold]")
+        output.console.print('• Test: [cyan]praisonai "Say hello in one sentence"[/cyan]')
+        output.console.print("• Chat: [cyan]praisonai chat[/cyan]")
+        output.console.print("• Help: [cyan]praisonai --help[/cyan]")
+        output.console.print("• Docs: [cyan]praisonai doctor[/cyan]")
         
         return 0
     
@@ -267,7 +278,11 @@ class SetupHandler(CommandHandler):
         env_content = "\n".join(lines) + "\n"
         
         # Write with secure permissions
-        env_file.write_text(env_content)
+        def secure_opener(path, flags):
+            return os.open(path, flags, 0o600)
+
+        with env_file.open("w", encoding="utf-8", opener=secure_opener) as file:
+            file.write(env_content)
         env_file.chmod(0o600)
         
         output.print_success(f"Environment configuration saved to {env_file}")
@@ -296,14 +311,14 @@ class SetupHandler(CommandHandler):
         
         output.print_success(f"Configuration saved to {config_file}")
     
-    def _create_starter_yaml(self, output) -> None:
+    def _create_starter_yaml(self, output, model: str) -> None:
         """Create a starter agents.yaml file in the current directory."""
         agents_file = Path.cwd() / "agents.yaml"
         
         if agents_file.exists():
-            output.print_warning(f"agents.yaml already exists, skipping creation")
+            output.print_warning("agents.yaml already exists, skipping creation")
             return
         
-        agents_file.write_text(AGENTS_TEMPLATE)
+        agents_file.write_text(AGENTS_TEMPLATE.replace("gpt-4o-mini", model))
         output.print_success(f"Starter agents.yaml created at {agents_file}")
-        output.console.print(f"Run [cyan]praisonai workflow run --file agents.yaml[/cyan] to test it")
+        output.console.print("Run [cyan]praisonai workflow run --file agents.yaml[/cyan] to test it")

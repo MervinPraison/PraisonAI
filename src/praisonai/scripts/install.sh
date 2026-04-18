@@ -616,7 +616,7 @@ run_onboarding() {
     fi
     
     # Check if TTY is available (required for interactive setup)
-    if ! [ -e /dev/tty ]; then
+    if ! [ -e /dev/tty ] || ! [ -t 1 ]; then
         log_info "No TTY available — skipping onboarding. Run 'praisonai setup' later."
         return 0
     fi
@@ -629,19 +629,18 @@ run_onboarding() {
     
     log_step "Starting interactive setup wizard..."
     
-    # Determine python command
-    local py="$PYTHON_CMD"
-    if [[ -n "$venv_dir" ]] && [[ "$SKIP_VENV" != "1" ]]; then
+    # Prefer venv python, then user-specified, then system python3
+    local py=""
+    if [[ -n "$venv_dir" && "$SKIP_VENV" != "1" && -x "$venv_dir/bin/python" ]]; then
         py="$venv_dir/bin/python"
-    fi
-    
-    # Fallback to system python if venv python doesn't exist
-    if [[ ! -x "$py" ]]; then
+    elif [[ -n "$PYTHON_CMD" ]] && command -v "$PYTHON_CMD" >/dev/null 2>&1; then
+        py="$PYTHON_CMD"
+    else
         py="python3"
     fi
     
     # Run the setup wizard
-    if "$py" -m praisonai setup < /dev/tty; then
+    if "$py" -m praisonai setup < /dev/tty > /dev/tty 2> /dev/tty; then
         log_success "Setup wizard completed successfully!"
         echo ""
         echo -e "${BOLD}${GREEN}You're all set! 🎉${NC}"

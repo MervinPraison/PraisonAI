@@ -306,11 +306,17 @@ class PraisonAIConfigError(PraisonAIError):
         agent_id: str = "unknown",
         run_id: Optional[str] = None,
         is_retryable: bool = False,  # Config errors need user intervention
+        remediation_hint: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None
     ):
         context = context or {}
         if config_key:
             context.update({"config_key": config_key})
+            if remediation_hint is None:
+                remediation_hint = f"Set {config_key} or run the setup wizard before retrying."
+        if remediation_hint:
+            context["remediation_hint"] = remediation_hint
+            message = f"{message} Remediation: {remediation_hint}"
         
         super().__init__(
             message,
@@ -321,6 +327,7 @@ class PraisonAIConfigError(PraisonAIError):
             context=context
         )
         self.config_key = config_key
+        self.remediation_hint = remediation_hint
 
 
 # Specialized handoff errors (maintain backward compatibility)
@@ -372,5 +379,6 @@ __all__ = [
     "HandoffError",
     "HandoffCycleError", 
     "HandoffDepthError", 
-    "HandoffTimeoutError"
+    "HandoffTimeoutError",
+    "PraisonAIConfigError"
 ]

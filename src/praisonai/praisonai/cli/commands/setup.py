@@ -149,18 +149,24 @@ def setup_reset(
     """Reset setup configuration."""
     output = get_output_controller()
     
-    if not ENV_FILE.exists():
+    praison_home = get_praison_home()
+    env_file = praison_home / ".env"
+    config_file = praison_home / "config.yaml"
+    files_to_remove = [path for path in (env_file, config_file) if path.exists()]
+
+    if not files_to_remove:
         output.print_info("No setup configuration to reset.")
         return
     
     if not force:
-        confirm = typer.confirm(f"Reset configuration at {ENV_FILE}?")
+        confirm = typer.confirm(f"Reset configuration at {praison_home}?")
         if not confirm:
             output.print_info("Reset cancelled.")
             return
     
     try:
-        ENV_FILE.unlink()
+        for path in files_to_remove:
+            path.unlink()
         output.print_success("Configuration reset successfully.")
         output.console.print("Run [cyan]praisonai setup[/cyan] to configure again.")
     except Exception as e:

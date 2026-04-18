@@ -460,6 +460,18 @@ function Invoke-Onboarding {
         return
     }
     
+    # Skip onboarding if NoPrompt environment variable is set
+    if ($env:PRAISONAI_NO_PROMPT) {
+        Write-Info "Skipping onboarding (PRAISONAI_NO_PROMPT set)"
+        return
+    }
+    
+    # Check for interactive session
+    if (-not [Environment]::UserInteractive -or [Console]::IsInputRedirected) {
+        Write-Info "Non-interactive session detected, skipping onboarding"
+        return
+    }
+    
     Write-Step "Starting interactive setup wizard..."
     
     # Determine python command
@@ -474,13 +486,18 @@ function Invoke-Onboarding {
     }
     
     try {
-        # Run the setup wizard
         & $pythonCmd -m praisonai setup
+        $wizardExit = $LASTEXITCODE
+    } catch {
+        $wizardExit = 1
+    }
+
+    if ($wizardExit -eq 0) {
         Write-Success "Setup wizard completed successfully!"
         Write-Host ""
         Write-Host "You're all set! 🎉" -ForegroundColor Green
         Write-Host ""
-    } catch {
+    } else {
         Write-Warning "Setup wizard failed or was cancelled."
         Write-Host ""
         Write-Host "Don't worry! You can run the setup wizard anytime with:" -ForegroundColor Yellow
