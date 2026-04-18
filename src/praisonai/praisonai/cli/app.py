@@ -281,6 +281,7 @@ def register_commands():
     from .commands.diag import app as diag_app
     from .commands.doctor import app as doctor_app
     from .commands.setup import app as setup_app
+    from .commands.onboard import app as onboard_app
     from .commands.obs import app as obs_app
     from .commands.acp import app as acp_app
     from .commands.mcp import app as mcp_app
@@ -361,6 +362,7 @@ def register_commands():
     app.add_typer(diag_app, name="diag", help="Diagnostics export")
     app.add_typer(doctor_app, name="doctor", help="Health checks and diagnostics")
     app.add_typer(setup_app, name="setup", help="Interactive onboarding / configuration wizard")
+    app.add_typer(onboard_app, name="onboard", help="Messaging bot onboarding wizard")
     app.add_typer(obs_app, name="obs", help="Observability diagnostics and management")
     app.add_typer(acp_app, name="acp", help="Agent Client Protocol server")
     app.add_typer(mcp_app, name="mcp", help="MCP server management")

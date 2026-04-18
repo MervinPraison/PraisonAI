@@ -35,6 +35,9 @@ def get_daemon_status() -> Dict[str, Any]:
     elif plat == "launchd":
         from .launchd import get_status
         return get_status()
+    elif plat == "windows":
+        from .windows import get_status
+        return get_status()
     return {"installed": False, "running": False, "platform": plat, "error": "Unsupported platform"}
 
 
@@ -47,6 +50,9 @@ def install_daemon(config_path: str = "bot.yaml", **kwargs: Any) -> Dict[str, An
     elif plat == "launchd":
         from .launchd import install
         return install(config_path=config_path, **kwargs)
+    elif plat == "windows":
+        from .windows import install
+        return install(config_path=config_path, **kwargs)
     return {"ok": False, "error": f"Unsupported platform: {plat}"}
 
 
@@ -58,5 +64,8 @@ def uninstall_daemon() -> Dict[str, Any]:
         return uninstall()
     elif plat == "launchd":
         from .launchd import uninstall
+        return uninstall()
+    elif plat == "windows":
+        from .windows import uninstall
         return uninstall()
     return {"ok": False, "error": f"Unsupported platform: {plat}"}

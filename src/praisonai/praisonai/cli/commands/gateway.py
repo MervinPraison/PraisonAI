@@ -38,17 +38,51 @@ def gateway_start(
 def gateway_status(
     host: str = typer.Option("127.0.0.1", "--host", help="Gateway host"),
     port: int = typer.Option(8765, "--port", help="Gateway port"),
+    daemon_only: bool = typer.Option(False, "--daemon-only", help="Show only daemon status"),
 ):
-    """Check gateway status.
+    """Check gateway status and daemon service status.
 
     Examples:
         praisonai gateway status
         praisonai gateway status --port 9000
+        praisonai gateway status --daemon-only
     """
     from ..features.gateway import GatewayHandler
-
-    handler = GatewayHandler()
-    handler.status(host=host, port=port)
+    from praisonai.daemon import get_daemon_status
+    from ..output.console import get_output_controller
+    
+    output = get_output_controller()
+    
+    # Show daemon status
+    try:
+        daemon_status = get_daemon_status()
+        platform = daemon_status.get("platform", "unknown")
+        installed = daemon_status.get("installed", False)
+        running = daemon_status.get("running", False)
+        
+        if installed:
+            if running:
+                output.print_success(f"Daemon service: Running ({platform})")
+            else:
+                output.print_warning(f"Daemon service: Installed but not running ({platform})")
+        else:
+            output.print_info(f"Daemon service: Not installed ({platform})")
+            
+        if daemon_status.get("pid"):
+            output.print_info(f"Process ID: {daemon_status['pid']}")
+        if daemon_status.get("error"):
+            output.print_warning(f"Daemon error: {daemon_status['error']}")
+            
+    except Exception as e:
+        output.print_error(f"Error checking daemon status: {str(e)}")
+    
+    # Show gateway server status if not daemon-only
+    if not daemon_only:
+        try:
+            handler = GatewayHandler()
+            handler.status(host=host, port=port)
+        except Exception as e:
+            output.print_error(f"Error checking gateway server status: {str(e)}")
 
 
 @app.command("channels")
@@ -111,6 +145,116 @@ def gateway_channels(
             platform = ch_cfg.get("platform", "unknown")
             has_token = "set" if ch_cfg.get("token") else "missing"
             print(f"{name:<20} {platform:<12} {has_token:<12}")
+
+
+@app.command("install")
+def gateway_install(
+    config: str = typer.Option("bot.yaml", "--config", help="Path to bot.yaml"),
+    start: bool = typer.Option(True, "--start/--no-start", help="Start after install"),
+):
+    """Install the gateway as an OS daemon (LaunchAgent / systemd).
+    
+    Examples:
+        praisonai gateway install
+        praisonai gateway install --config my-bot.yaml --no-start
+    """
+    from praisonai.daemon import install_daemon
+    from ..output.console import get_output_controller
+    
+    output = get_output_controller()
+    
+    try:
+        result = install_daemon(config_path=config)
+        if result.get("ok"):
+            output.print_success(result.get("message", "Service installed successfully"))
+            if start:
+                output.print_info("Starting the service...")
+                from praisonai.daemon import get_daemon_status
+                status = get_daemon_status()
+                if status.get("running"):
+                    output.print_success("Service is now running")
+                else:
+                    output.print_warning("Service installed but not running. Check system logs.")
+        else:
+            error = result.get("error", "Installation failed")
+            output.print_error(f"Installation failed: {error}")
+            raise typer.Exit(1)
+    except Exception as e:
+        output.print_error(f"Installation error: {str(e)}")
+        raise typer.Exit(1)
+
+
+@app.command("uninstall")
+def gateway_uninstall():
+    """Uninstall the gateway daemon service.
+    
+    Examples:
+        praisonai gateway uninstall
+    """
+    from praisonai.daemon import uninstall_daemon
+    from ..output.console import get_output_controller
+    
+    output = get_output_controller()
+    
+    try:
+        result = uninstall_daemon()
+        if result.get("ok"):
+            output.print_success(result.get("message", "Service uninstalled successfully"))
+        else:
+            error = result.get("error", "Uninstallation failed")
+            output.print_error(f"Uninstallation failed: {error}")
+            raise typer.Exit(1)
+    except Exception as e:
+        output.print_error(f"Uninstallation error: {str(e)}")
+        raise typer.Exit(1)
+
+
+@app.command("logs")
+def gateway_logs(
+    lines: int = typer.Option(50, "-n", help="Number of log lines to show"),
+):
+    """Show daemon service logs.
+    
+    Examples:
+        praisonai gateway logs
+        praisonai gateway logs -n 100
+    """
+    from praisonai.daemon import _detect_platform
+    from ..output.console import get_output_controller
+    import subprocess
+    import sys
+    
+    output = get_output_controller()
+    plat = _detect_platform()
+    
+    try:
+        if plat == "systemd":
+            from praisonai.daemon.systemd import get_logs
+            logs = get_logs(lines=lines)
+            if logs:
+                print(logs)
+            else:
+                output.print_warning("No logs found or service not installed")
+        elif plat == "launchd":
+            from praisonai.daemon.launchd import get_logs
+            logs = get_logs(lines=lines)
+            if logs:
+                print(logs)
+            else:
+                output.print_warning("No logs found or service not installed")
+        elif plat == "windows":
+            from praisonai.daemon.windows import get_logs
+            logs = get_logs(lines=lines)
+            if logs:
+                print(logs)
+            else:
+                output.print_warning("No logs found")
+        else:
+            output.print_error(f"Unsupported platform: {plat}")
+            raise typer.Exit(1)
+    except Exception as e:
+        output.print_error(f"Error reading logs: {str(e)}")
+        raise typer.Exit(1)
 
 
 @app.command("send")
@@ -205,9 +349,12 @@ Manage the gateway server: praisonai gateway <command>
 
 [bold]Commands:[/bold]
   [green]start[/green]       Start the gateway server
-  [green]status[/green]      Check gateway status
+  [green]status[/green]      Check gateway and daemon status
   [green]channels[/green]    List channels from gateway.yaml
   [green]send[/green]        Send a test message to a channel
+  [green]install[/green]     Install as OS daemon service
+  [green]uninstall[/green]   Uninstall daemon service
+  [green]logs[/green]        Show daemon service logs
 
 [bold]Multi-Bot Mode:[/bold]
   praisonai gateway start --config gateway.yaml
