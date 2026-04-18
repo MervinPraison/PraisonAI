@@ -296,10 +296,19 @@ function Install-PraisonAI {
     if ($VenvPath -and (Test-Path "$VenvPath\Scripts\pip.exe")) {
         $pipExe = "$VenvPath\Scripts\pip.exe"
     } else {
-        $pythonParts = $PythonCmd -split " "
-        $pipExe = $pythonParts[0]
-        if ($pythonParts.Length -gt 1) {
-            $pipArgs += $pythonParts[1..($pythonParts.Length-1)]
+        if (Test-Path $PythonCmd) {
+            $pipExe = $PythonCmd
+        } else {
+            $parseErrors = $null
+            $tokens = [System.Management.Automation.PSParser]::Tokenize($PythonCmd, [ref]$parseErrors)
+            if ($parseErrors -or -not $tokens) {
+                $parseErrorText = if ($parseErrors) { ($parseErrors | Out-String).Trim() } else { "Unknown parse error" }
+                throw "Invalid Python command: $PythonCmd. $parseErrorText"
+            }
+            $pipExe = $tokens[0].Content
+            if ($tokens.Count -ge 2) {
+                $pipArgs += @($tokens[1..($tokens.Count-1)] | ForEach-Object { $_.Content })
+            }
         }
         $pipArgs += @("-m", "pip")
     }

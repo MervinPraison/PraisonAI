@@ -182,8 +182,7 @@ class TestSetupCommand:
         mock_getpass.return_value = "sk-interactive123"
         mock_confirm.side_effect = [True, False]  # Enable telemetry, no starter YAML
 
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("OPENAI_API_KEY", None)
+        with patch.dict(os.environ, {"OPENAI_API_KEY": ""}, clear=False):
             result = runner.invoke(app)
         
         assert result.exit_code == 0
