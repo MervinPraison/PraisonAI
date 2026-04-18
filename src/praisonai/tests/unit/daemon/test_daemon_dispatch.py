@@ -92,7 +92,7 @@ def test_get_daemon_status_routes_to_systemd(mock_systemd_status, mock_detect):
 
 
 @patch('praisonai.daemon.windows.subprocess.run')
-def test_windows_scheduled_task_uses_cmd_with_working_dir(mock_run):
+def test_windows_scheduled_task_command_is_well_formed(mock_run):
     """Test Windows scheduled task command format is valid."""
     mock_run.return_value = MagicMock(stdout="ok")
 
@@ -102,5 +102,6 @@ def test_windows_scheduled_task_uses_cmd_with_working_dir(mock_run):
     assert result["ok"] is True
     cmd = mock_run.call_args.args[0]
     assert "/SD" not in cmd
+    assert "/TR" in cmd
     tr_value = cmd[cmd.index("/TR") + 1]
-    assert tr_value.startswith('cmd /c "cd /d ')
+    assert "--config" in tr_value

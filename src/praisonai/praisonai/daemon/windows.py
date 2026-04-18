@@ -50,20 +50,17 @@ def _create_scheduled_task(config_path: str) -> Dict[str, Any]:
     """Create a Windows Scheduled Task for the bot."""
     python = _python_executable()
     abs_config = os.path.abspath(config_path)
-    working_dir = os.path.dirname(abs_config) or os.getcwd()
-    escaped_working_dir = working_dir.replace('"', '""')
-    escaped_python = python.replace('"', '""')
-    escaped_config = abs_config.replace('"', '""')
+    # list2cmdline ensures Windows-safe escaping for command args (including config path).
+    task_command = subprocess.list2cmdline(
+        [python, "-m", "praisonai", "bot", "start", "--config", abs_config]
+    )
     
     # Build schtasks command
     cmd = [
         "schtasks", "/Create",
         "/TN", TASK_NAME,
         "/SC", "ONLOGON",
-        "/TR", (
-            f'cmd /c "cd /d ""{escaped_working_dir}"" && '
-            f'""{escaped_python}"" -m praisonai bot start --config ""{escaped_config}"""'
-        ),
+        "/TR", task_command,
         "/RL", "LIMITED",
         "/F"  # Force overwrite if exists
     ]
