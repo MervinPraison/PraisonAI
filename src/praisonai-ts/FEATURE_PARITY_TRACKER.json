@@ -1,17 +1,17 @@
 {
   "version": "1.5.87",
-  "lastUpdated": "2026-04-17",
+  "lastUpdated": "2026-04-18",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 328,
+    "pythonCoreFeatures": 329,
     "pythonWrapperFeatures": 99,
     "typescriptFeatures": 1192,
-    "gapCount": 36,
+    "gapCount": 37,
     "priorityP0": 1,
     "priorityP1": 0,
     "priorityP2": 0,
-    "priorityP3": 35
+    "priorityP3": 36
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -187,6 +187,7 @@
       "PluginParseError",
       "PluginProtocol",
       "PluginsConfig",
+      "PraisonAIConfigError",
       "PraisonAIError",
       "PraisonConfig",
       "PromptExpanderAgent",
@@ -596,6 +597,7 @@
         "NetworkError",
         "ObservabilityEventType",
         "ObservabilityHooks",
+        "PraisonAIConfigError",
         "PraisonAIError",
         "SessionErrorEvent",
         "SessionIdleEvent",
@@ -4951,6 +4953,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "PraisonAIConfigError",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "PraisonAIError",

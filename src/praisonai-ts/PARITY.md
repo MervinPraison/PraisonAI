@@ -1,20 +1,20 @@
 # Feature Parity Tracker
 
-> **Version:** 1.5.87 | **Last Updated:** 2026-04-17
+> **Version:** 1.5.87 | **Last Updated:** 2026-04-18
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 328 |
+| Python Core Features | 329 |
 | Python Wrapper Features | 99 |
 | TypeScript Features | 1192 |
-| **Gap Count** | **36** |
+| **Gap Count** | **37** |
 | P0 (Critical) | 1 |
 | P1 (High) | 0 |
 | P2 (Medium) | 0 |
-| P3 (Low) | 35 |
+| P3 (Low) | 36 |
 
 ## Gap Matrix
 
@@ -147,7 +147,7 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (179 done, 35 todo)
+### P3_Advanced (179 done, 36 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -176,6 +176,7 @@
 | `NetworkError` | ✅ | ❌ | low | ⏳ TODO |
 | `ObservabilityEventType` | ✅ | ❌ | high | ⏳ TODO |
 | `ObservabilityHooks` | ✅ | ❌ | high | ⏳ TODO |
+| `PraisonAIConfigError` | ✅ | ❌ | low | ⏳ TODO |
 | `PraisonAIError` | ✅ | ❌ | low | ⏳ TODO |
 | `SessionErrorEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `SessionIdleEvent` | ✅ | ❌ | high | ⏳ TODO |
@@ -524,7 +525,7 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (42 exports)</summary>
+<summary><strong>other</strong> (43 exports)</summary>
 
 ```python
 from praisonaiagents import AgentMessageEvent, Agents, AsyncLearnProtocol, AutonomyConfig, BudgetExceededError, CustomToolUseEvent, DoomLoopDetector, ErrorContextProtocol, EscalationPipeline, EscalationStage...
