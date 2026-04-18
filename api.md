@@ -772,6 +772,7 @@ Methods:
 * <code title="cli">praisonai bot bot-callback <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
 * <code title="cli">praisonai bot discord <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
 * <code title="cli">praisonai bot email <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
+* <code title="cli">praisonai bot install-daemon <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
 * <code title="cli">praisonai bot slack <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
 * <code title="cli">praisonai bot start <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
 * <code title="cli">praisonai bot telegram <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
@@ -865,9 +866,12 @@ Methods:
 * <code title="cli">praisonai flow version <a href="./src/praisonai/praisonai/cli/commands/flow.py">--help</a></code>
 * <code title="cli">praisonai gateway channels <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway gateway-callback <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
+* <code title="cli">praisonai gateway install <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
+* <code title="cli">praisonai gateway logs <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway send <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway start <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway status <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
+* <code title="cli">praisonai gateway uninstall <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai github triage <a href="./src/praisonai/praisonai/cli/commands/github.py">--help</a></code>
 * <code title="cli">praisonai hooks add <a href="./src/praisonai/praisonai/cli/commands/hooks.py">--help</a></code>
 * <code title="cli">praisonai hooks list <a href="./src/praisonai/praisonai/cli/commands/hooks.py">--help</a></code>
@@ -932,6 +936,7 @@ Methods:
 * <code title="cli">praisonai n8n push <a href="./src/praisonai/praisonai/cli/commands/n8n.py">--help</a></code>
 * <code title="cli">praisonai n8n test <a href="./src/praisonai/praisonai/cli/commands/n8n.py">--help</a></code>
 * <code title="cli">praisonai obs obs-fallback <a href="./src/praisonai/praisonai/cli/commands/obs.py">--help</a></code>
+* <code title="cli">praisonai onboard onboard-callback <a href="./src/praisonai/praisonai/cli/commands/onboard.py">--help</a></code>
 * <code title="cli">praisonai package install <a href="./src/praisonai/praisonai/cli/commands/package.py">--help</a></code>
 * <code title="cli">praisonai package list <a href="./src/praisonai/praisonai/cli/commands/package.py">--help</a></code>
 * <code title="cli">praisonai package uninstall <a href="./src/praisonai/praisonai/cli/commands/package.py">--help</a></code>
