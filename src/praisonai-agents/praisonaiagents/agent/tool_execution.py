@@ -202,25 +202,19 @@ class ToolExecutionMixin:
                     with with_injection_context(state):
                         return self._execute_tool_impl(function_name, arguments)
                 
-                # Use explicit executor lifecycle to actually bound execution time
-                executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                # Use reusable executor to prevent resource leaks
+                if not hasattr(self, '_tool_executor'):
+                    self._tool_executor = concurrent.futures.ThreadPoolExecutor(
+                        max_workers=2, thread_name_prefix=f"tool-{self.name}"
+                    )
+                
+                future = self._tool_executor.submit(ctx.run, execute_with_context)
                 try:
-                    future = executor.submit(ctx.run, execute_with_context)
-                    try:
-                        result = future.result(timeout=tool_timeout)
-                    except concurrent.futures.TimeoutError:
-                        # Cancel and shutdown immediately to avoid blocking
-                        future.cancel()
-                        executor.shutdown(wait=False, cancel_futures=True)
-                        logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
-                        result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True}
-                    else:
-                        # Normal completion - shutdown gracefully
-                        executor.shutdown(wait=False)
-                finally:
-                    # Ensure executor is always cleaned up
-                    if not executor._shutdown:
-                        executor.shutdown(wait=False)
+                    result = future.result(timeout=tool_timeout)
+                except concurrent.futures.TimeoutError:
+                    future.cancel()
+                    logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
+                    result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True}
             else:
                 with with_injection_context(state):
                     result = self._execute_tool_impl(function_name, arguments)

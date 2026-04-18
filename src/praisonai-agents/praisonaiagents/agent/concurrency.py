@@ -86,7 +86,7 @@ class ConcurrencyRegistry:
     def acquire_sync(self, agent_name: str) -> None:
         """Synchronous acquire — for non-async code paths.
         
-        Note: This creates/reuses an event loop internally.
+        Uses a proper sync-to-async bridge to avoid private attribute manipulation.
         Prefer async acquire() when possible.
         """
         sem = self._get_semaphore(agent_name)
@@ -94,18 +94,24 @@ class ConcurrencyRegistry:
             return
         try:
             asyncio.get_running_loop()
-            # If we're in an async context, we can't block
-            # Just try_acquire or no-op with warning
-            if not sem._value > 0:
-                logger.warning(
-                    f"Sync acquire for '{agent_name}' while async loop running and semaphore full. "
-                    f"Consider using async acquire() instead."
-                )
-            # Decrement manually for sync context
-            sem._value = max(0, sem._value - 1)
+            # We're inside an async loop — cannot block. Run acquire in a thread
+            # with its own loop to go through the semaphore's proper acquire path.
+            import concurrent.futures
+            def _acquire_in_new_loop():
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(sem.acquire())
+                finally:
+                    loop.close()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                pool.submit(_acquire_in_new_loop).result(timeout=30)
         except RuntimeError:
-            # No running loop — safe to use asyncio.run
-            asyncio.get_event_loop().run_until_complete(sem.acquire())
+            # No running loop — safe to create one
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(sem.acquire())
+            finally:
+                loop.close()
 
     def release(self, agent_name: str) -> None:
         """Release concurrency slot for agent. No-op if unlimited."""
