@@ -281,7 +281,7 @@ class SetupHandler(CommandHandler):
         def secure_opener(path, flags):
             return os.open(path, flags, 0o600)
 
-        with env_file.open("w", encoding="utf-8", opener=secure_opener) as file:
+        with open(env_file, "w", encoding="utf-8", opener=secure_opener) as file:
             file.write(env_content)
         env_file.chmod(0o600)
         

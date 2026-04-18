@@ -7,13 +7,20 @@ Tests that install.sh with a seeded .env token triggers praisonai onboard.
 import os
 import tempfile
 import subprocess
+from pathlib import Path
 from unittest.mock import patch
 import pytest
 
 
+# Resolve install.sh relative to this test file so it works in any checkout.
+SCRIPT_PATH = (
+    Path(__file__).resolve().parents[2] / "scripts" / "install.sh"
+)
+
+
 def test_install_sh_mentions_bot_onboarding():
     """Test that install.sh mentions bot onboarding in dry-run mode."""
-    script_path = "/home/runner/work/PraisonAI/PraisonAI/src/praisonai/scripts/install.sh"
+    script_path = str(SCRIPT_PATH)
     
     # Check that the function exists in the script
     with open(script_path, 'r') as f:
@@ -27,7 +34,7 @@ def test_install_sh_mentions_bot_onboarding():
 
 def test_bot_onboarding_function_logic():
     """Test the logic of the bot onboarding function."""
-    script_path = "/home/runner/work/PraisonAI/PraisonAI/src/praisonai/scripts/install.sh"
+    script_path = str(SCRIPT_PATH)
     
     with open(script_path, 'r') as f:
         content = f.read()
@@ -50,7 +57,7 @@ def test_bot_onboarding_function_logic():
 
 def test_install_sh_has_no_syntax_errors():
     """Test that install.sh has no basic syntax errors."""
-    script_path = "/home/runner/work/PraisonAI/PraisonAI/src/praisonai/scripts/install.sh"
+    script_path = str(SCRIPT_PATH)
     
     # Simple syntax validation - check for basic shell syntax issues
     with open(script_path, 'r') as f:
