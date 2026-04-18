@@ -51,7 +51,7 @@ def _generate_plist(config_path: str) -> str:
         <string>{python}</string>
         <string>-m</string>
         <string>praisonai</string>
-        <string>bot</string>
+        <string>gateway</string>
         <string>start</string>
         <string>--config</string>
         <string>{abs_config}</string>

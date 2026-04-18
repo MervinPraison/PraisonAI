@@ -41,7 +41,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory={working_dir}
-ExecStart={python} -m praisonai bot start --config {abs_config}
+ExecStart={python} -m praisonai gateway start --config {abs_config}
 Restart=always
 RestartSec=5
 Environment=PATH={os.environ.get('PATH', '/usr/bin')}

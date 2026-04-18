@@ -42,7 +42,7 @@ def _generate_startup_script(config_path: str) -> str:
     return f"""@echo off
 REM PraisonAI Bot Startup Script
 cd /d "{os.path.dirname(abs_config)}"
-"{python}" -m praisonai bot start --config "{abs_config}"
+"{python}" -m praisonai gateway start --config "{abs_config}"
 """
 
 
@@ -52,7 +52,7 @@ def _create_scheduled_task(config_path: str) -> Dict[str, Any]:
     abs_config = os.path.abspath(config_path)
     # list2cmdline ensures Windows-safe escaping for command args (including config path).
     task_command = subprocess.list2cmdline(
-        [python, "-m", "praisonai", "bot", "start", "--config", abs_config]
+        [python, "-m", "praisonai", "gateway", "start", "--config", abs_config]
     )
     
     # Build schtasks command
