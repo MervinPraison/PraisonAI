@@ -10,7 +10,6 @@ This is an internal module — end users import the concrete classes.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Set
 
@@ -125,15 +124,5 @@ async def classify_with_llm(
 
 def sync_wrapper(async_fn, timeout: float):
     """Run *async_fn* (a coroutine) synchronously, handling nested loops."""
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    if loop and loop.is_running():
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(asyncio.run, async_fn)
-            return future.result(timeout=timeout + 10)
-    else:
-        return asyncio.run(async_fn)
+    from .._async_bridge import run_sync
+    return run_sync(async_fn, timeout=timeout)

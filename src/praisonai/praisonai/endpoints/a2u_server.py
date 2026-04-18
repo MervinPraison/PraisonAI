@@ -175,11 +175,12 @@ class A2UEventBus:
                 # Schedule in running loop
                 asyncio.ensure_future(self.publish(event, stream_name))
                 return len(self._streams.get(stream_name, set()))
-            else:
-                return loop.run_until_complete(self.publish(event, stream_name))
         except RuntimeError:
-            # No event loop, create one
-            return asyncio.run(self.publish(event, stream_name))
+            pass
+        
+        # Use safe bridge for sync execution
+        from .._async_bridge import run_sync
+        return run_sync(self.publish(event, stream_name))
     
     async def get_events(
         self,

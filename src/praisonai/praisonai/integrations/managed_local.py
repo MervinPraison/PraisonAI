@@ -351,11 +351,8 @@ class LocalManagedAgent:
             """Compute-bridged tool wrapper."""
             # Auto-provision compute if needed
             if self._compute_instance_id is None:
-                try:
-                    loop = asyncio.get_event_loop()
-                    loop.run_until_complete(self.provision_compute())
-                except RuntimeError:
-                    asyncio.run(self.provision_compute())
+                from .._async_bridge import run_sync
+                run_sync(self.provision_compute())
             
             if tool_name == "execute_command":
                 # For execute_command, directly route to compute
@@ -364,15 +361,10 @@ class LocalManagedAgent:
                     return "Error: No command specified"
                 
                 try:
-                    try:
-                        loop = asyncio.get_event_loop()
-                        result = loop.run_until_complete(
-                            self._compute.execute(self._compute_instance_id, command)
-                        )
-                    except RuntimeError:
-                        result = asyncio.run(
-                            self._compute.execute(self._compute_instance_id, command)
-                        )
+                    from .._async_bridge import run_sync
+                    result = run_sync(
+                        self._compute.execute(self._compute_instance_id, command)
+                    )
                     
                     # Format result similar to local execute_command
                     if result.get("exit_code", 0) == 0:
@@ -433,15 +425,10 @@ class LocalManagedAgent:
             return f"Error: Unsupported bridged tool: {tool_name}"
         
         try:
-            try:
-                loop = asyncio.get_event_loop()
-                result = loop.run_until_complete(
-                    self._compute.execute(self._compute_instance_id, command)
-                )
-            except RuntimeError:
-                result = asyncio.run(
-                    self._compute.execute(self._compute_instance_id, command)
-                )
+            from .._async_bridge import run_sync
+            result = run_sync(
+                self._compute.execute(self._compute_instance_id, command)
+            )
             
             if result.get("exit_code", 0) == 0:
                 return result.get("stdout", "")
@@ -623,30 +610,18 @@ class LocalManagedAgent:
         
         # Auto-provision compute if not done yet
         if self._compute_instance_id is None:
-            try:
-                import asyncio
-                loop = asyncio.get_event_loop()
-                loop.run_until_complete(self.provision_compute())
-            except RuntimeError:
-                # No event loop, create one
-                asyncio.run(self.provision_compute())
+            from .._async_bridge import run_sync
+            run_sync(self.provision_compute())
         
         pip_cmd = "python -m pip install -q " + " ".join(f'"{pkg}"' for pkg in pip_pkgs)
         logger.info("[local_managed] installing pip packages in compute: %s", pip_pkgs)
         
         try:
             # Run installation synchronously in compute
-            import asyncio
-            try:
-                loop = asyncio.get_event_loop()
-                result = loop.run_until_complete(
-                    self._compute.execute(self._compute_instance_id, pip_cmd, timeout=120)
-                )
-            except RuntimeError:
-                # No event loop, create one
-                result = asyncio.run(
-                    self._compute.execute(self._compute_instance_id, pip_cmd, timeout=120)
-                )
+            from .._async_bridge import run_sync
+            result = run_sync(
+                self._compute.execute(self._compute_instance_id, pip_cmd, timeout=120)
+            )
             
             if result.get("exit_code", 0) == 0:
                 logger.info("[local_managed] compute pip install completed")
