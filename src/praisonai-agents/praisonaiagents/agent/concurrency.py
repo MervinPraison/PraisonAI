@@ -87,18 +87,14 @@ class ConcurrencyRegistry:
         """Synchronous acquire — for non-async code paths.
         
         Prefer async acquire() when possible.
+        If called while an event loop is already running in the current thread,
+        this method raises RuntimeError to avoid deadlock.
         """
         sem = self._get_semaphore(agent_name)
         if sem is None:
             return
         try:
             asyncio.get_running_loop()
-            # Running loop in current thread: blocking here can deadlock.
-            logger.warning(
-                f"acquire_sync('{agent_name}') called with a running event loop; "
-                "use async acquire() in async contexts."
-            )
-            return
         except RuntimeError:
             # No running loop — safe to create one
             loop = asyncio.new_event_loop()
@@ -106,6 +102,11 @@ class ConcurrencyRegistry:
                 loop.run_until_complete(sem.acquire())
             finally:
                 loop.close()
+        else:
+            raise RuntimeError(
+                f"acquire_sync('{agent_name}') cannot be called with a running event loop; "
+                "use async acquire() in async contexts."
+            )
 
     def release(self, agent_name: str) -> None:
         """Release concurrency slot for agent. No-op if unlimited."""

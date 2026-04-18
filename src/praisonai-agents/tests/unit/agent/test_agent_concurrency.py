@@ -109,10 +109,15 @@ class TestConcurrencyLimiting:
 
     @pytest.mark.asyncio
     async def test_sync_acquire_running_loop_noop(self):
-        """Sync acquire in async context should not block event loop."""
+        """Sync acquire in async context should fail fast without changing state."""
         from praisonaiagents.agent.concurrency import ConcurrencyRegistry
         reg = ConcurrencyRegistry()
         reg.set_limit("loop_agent", 1)
         await reg.acquire("loop_agent")
-        reg.acquire_sync("loop_agent")
+        with pytest.raises(RuntimeError, match="running event loop"):
+            reg.acquire_sync("loop_agent")
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(reg.acquire("loop_agent"), timeout=0.05)
+        reg.release("loop_agent")
+        await asyncio.wait_for(reg.acquire("loop_agent"), timeout=0.05)
         reg.release("loop_agent")
