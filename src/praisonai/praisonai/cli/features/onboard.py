@@ -424,7 +424,24 @@ class OnboardWizard:
         console.print(f"  [green]✓[/green] Written to {self.config_path}")
 
         # Step 6: Optional daemon install
-        if Confirm.ask("\nInstall as background service (daemon)?", default=False):
+        # Guard: refuse to install a daemon that has no tokens — it would loop
+        # in a crash-restart cycle. List the platforms missing tokens so the
+        # user can rerun onboard once they have them.
+        missing_tokens = [
+            PLATFORMS[p]["name"]
+            for p in self.selected_platforms
+            if p not in self.tokens
+        ]
+        if missing_tokens:
+            console.print(
+                f"\n  [yellow]⚠[/yellow] Skipping daemon install — missing token(s) for: "
+                f"[bold]{', '.join(missing_tokens)}[/bold]."
+            )
+            console.print(
+                "  [dim]Re-run [cyan]praisonai onboard[/cyan] once you have the token(s) and "
+                "the service will be installed automatically.[/dim]"
+            )
+        elif Confirm.ask("\nInstall as background service (daemon)?", default=True):
             try:
                 from praisonai.daemon import install_daemon
                 result = install_daemon(config_path=self.config_path)
@@ -435,15 +452,15 @@ class OnboardWizard:
             except Exception as e:
                 console.print(f"  [red]✗[/red] {str(e)[:200]}")
 
-        # Done
+        # Done — commands referenced here must exist in `praisonai --help`.
         console.print(Panel(
             f"[bold green]Setup complete![/bold green]\n\n"
             f"Start your bot:\n"
             f"  [cyan]praisonai bot start --config {self.config_path}[/cyan]\n\n"
             f"Check health:\n"
             f"  [cyan]praisonai doctor[/cyan]\n\n"
-            f"View status:\n"
-            f"  [cyan]praisonai bot status[/cyan]",
+            f"View gateway status:\n"
+            f"  [cyan]praisonai gateway status[/cyan]",
             title="✅ Done",
             border_style="green",
         ))

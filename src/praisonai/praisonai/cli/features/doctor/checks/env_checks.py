@@ -96,7 +96,16 @@ def check_praisonaiagents_package(config: DoctorConfig) -> CheckResult:
     """Check praisonaiagents package is installed."""
     try:
         import praisonaiagents
-        version = getattr(praisonaiagents, "__version__", "unknown")
+        # praisonaiagents does not expose __version__ at module level yet, so
+        # prefer importlib.metadata (which reads the installed dist-info) and
+        # fall back to the attribute for forward-compat.
+        version = getattr(praisonaiagents, "__version__", None)
+        if not version:
+            try:
+                from importlib.metadata import version as _pkg_version
+                version = _pkg_version("praisonaiagents")
+            except Exception:
+                version = "unknown"
         return CheckResult(
             id="praisonaiagents_package",
             title="PraisonAI Agents Package",
