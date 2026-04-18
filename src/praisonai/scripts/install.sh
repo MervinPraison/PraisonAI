@@ -654,6 +654,60 @@ run_onboarding() {
     fi
 }
 
+# Offer bot onboarding after setup
+maybe_offer_bot_onboarding() {
+    local venv_dir="$1"
+    
+    # Only run after praisonai setup completed interactively
+    [[ "$NO_ONBOARD" == "1" ]] && return 0
+    [[ "$NO_PROMPT" == "1" ]] && return 0
+    [[ "$DRY_RUN" == "1" ]] && return 0
+    [ -e /dev/tty ] || return 0
+    
+    local env_file="$HOME/.praisonai/.env"
+    [[ -f "$env_file" ]] || return 0
+    
+    # Only if any messaging token already present (user set up bots elsewhere)
+    # OR if user opts in interactively
+    local has_token=0
+    for tok in TELEGRAM_BOT_TOKEN DISCORD_BOT_TOKEN SLACK_BOT_TOKEN WHATSAPP_ACCESS_TOKEN; do
+        grep -qE "^${tok}=..+" "$env_file" 2>/dev/null && has_token=1 && break
+    done
+    
+    # Prefer venv python, then user-specified, then system python3
+    local py=""
+    if [[ -n "$venv_dir" && "$SKIP_VENV" != "1" && -x "$venv_dir/bin/python" ]]; then
+        py="$venv_dir/bin/python"
+    elif [[ -n "$PYTHON_CMD" ]] && command -v "$PYTHON_CMD" >/dev/null 2>&1; then
+        py="$PYTHON_CMD"
+    else
+        py="python3"
+    fi
+    
+    if [[ "$has_token" == "1" ]]; then
+        log_info "Detected a messaging token — launching bot onboarding..."
+        if "$py" -m praisonai onboard < /dev/tty > /dev/tty 2> /dev/tty; then
+            log_success "Bot onboarding completed!"
+        else
+            log_warn "Bot onboarding skipped or failed."
+        fi
+    else
+        # Offer it; default NO so quiet installs stay quiet
+        echo ""
+        echo -ne "${CYAN}Set up a messaging bot now? [y/N] ${NC}"
+        read -r yn < /dev/tty || yn=""
+        case "$yn" in 
+            [yY]*) 
+                if "$py" -m praisonai onboard < /dev/tty > /dev/tty 2> /dev/tty; then
+                    log_success "Bot onboarding completed!"
+                else
+                    log_warn "Bot onboarding skipped or failed."
+                fi
+                ;;
+        esac
+    fi
+}
+
 # Main installation function
 main() {
     parse_args "$@"
@@ -692,6 +746,9 @@ main() {
     
     # Run interactive onboarding
     run_onboarding "$venv_dir"
+    
+    # Offer bot onboarding
+    maybe_offer_bot_onboarding "$venv_dir"
     
     # Print next steps
     print_next_steps "$venv_dir"

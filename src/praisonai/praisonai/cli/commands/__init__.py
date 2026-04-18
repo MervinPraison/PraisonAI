@@ -21,6 +21,7 @@ __all__ = [
     'diag_app',
     'doctor_app',
     'setup_app',
+    'onboard_app',
     'acp_app',
     'mcp_app',
     'rag_app',
@@ -76,6 +77,9 @@ def __getattr__(name: str):
     elif name == 'setup_app':
         from .setup import app as setup_app
         return setup_app
+    elif name == 'onboard_app':
+        from .onboard import app as onboard_app
+        return onboard_app
     elif name == 'acp_app':
         from .acp import app as acp_app
         return acp_app

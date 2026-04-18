@@ -438,6 +438,43 @@ def bot_agentmail(
     )
 
 
+@app.command("install-daemon")
+def bot_install_daemon(
+    config: str = typer.Option("bot.yaml", "--config", help="Path to bot.yaml"),
+    start: bool = typer.Option(True, "--start/--no-start", help="Start after install"),
+):
+    """Install bot as OS daemon service (alias for 'praisonai gateway install').
+    
+    Examples:
+        praisonai bot install-daemon
+        praisonai bot install-daemon --config my-bot.yaml --no-start
+    """
+    from praisonai.daemon import install_daemon
+    from ..output.console import get_output_controller
+    
+    output = get_output_controller()
+    
+    try:
+        result = install_daemon(config_path=config)
+        if result.get("ok"):
+            output.print_success(result.get("message", "Service installed successfully"))
+            if start:
+                output.print_info("Starting the service...")
+                from praisonai.daemon import get_daemon_status
+                status = get_daemon_status()
+                if status.get("running"):
+                    output.print_success("Service is now running")
+                else:
+                    output.print_warn("Service installed but not running. Check system logs.")
+        else:
+            error = result.get("error", "Installation failed")
+            output.print_error(f"Installation failed: {error}")
+            raise typer.Exit(1)
+    except Exception as e:
+        output.print_error(f"Installation error: {str(e)}")
+        raise typer.Exit(1)
+
+
 @app.callback(invoke_without_command=True)
 def bot_callback(ctx: typer.Context):
     """Show bot help if no subcommand provided."""
@@ -454,6 +491,9 @@ Start a bot on any platform with: praisonai bot <platform>
   [green]whatsapp[/green]    WhatsApp Cloud API or Web mode (QR scan)
   [green]email[/green]       Email via IMAP/SMTP
   [green]agentmail[/green]   AgentMail API (API-first email for AI agents)
+
+[bold]Daemon Management:[/bold]
+  [green]install-daemon[/green]   Install bot as OS daemon service (auto-start)
 
 [bold]Capability Options (all platforms):[/bold]
   [yellow]--agent FILE[/yellow]          Agent YAML configuration
