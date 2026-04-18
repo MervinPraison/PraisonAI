@@ -2,7 +2,18 @@
 
 import tempfile
 import os
+import sys
+import pytest
 from unittest.mock import patch, MagicMock
+from praisonaiagents.approval import set_approval_callback, ApprovalDecision
+
+
+@pytest.fixture(autouse=True)
+def _auto_approve_high_risk():
+    """Auto-approve high-risk tools so tests don't block on stdin."""
+    original = set_approval_callback(lambda *a, **kw: ApprovalDecision(approved=True))
+    yield
+    set_approval_callback(original)
 
 
 def test_langextract_extract_smoke_import():
@@ -37,11 +48,8 @@ def test_langextract_extract_empty_text():
     assert result["extractions_count"] == 0
 
 
-@patch('builtins.__import__')
-def test_langextract_extract_with_mock_langextract(mock_import):
+def test_langextract_extract_with_mock_langextract(monkeypatch):
     """Test successful extraction with mocked langextract."""
-    from praisonaiagents.tools.langextract_tools import langextract_extract
-    
     # Mock langextract module
     mock_lx = MagicMock()
     mock_lx.data.CharInterval = MagicMock()
@@ -55,12 +63,10 @@ def test_langextract_extract_with_mock_langextract(mock_import):
     mock_html.data = "<html>test</html>"
     mock_lx.visualize.return_value = mock_html
     
-    def mock_import_func(name, *args, **kwargs):
-        if name == 'langextract':
-            return mock_lx
-        return __import__(name, *args, **kwargs)
+    # Use monkeypatch to set the mock module in sys.modules
+    monkeypatch.setitem(sys.modules, "langextract", mock_lx)
     
-    mock_import.side_effect = mock_import_func
+    from praisonaiagents.tools.langextract_tools import langextract_extract
     
     # Mock file operations
     with patch('builtins.open', create=True) as mock_open:
@@ -85,15 +91,12 @@ def test_langextract_render_file_missing_file():
     """Test behavior when file doesn't exist."""
     from praisonaiagents.tools.langextract_tools import langextract_render_file
     
-    # Mock approval to bypass interactive prompt in tests
-    with patch('praisonaiagents.approval.console_approval_callback') as mock_approval:
-        mock_approval.return_value.approved = True
-        result = langextract_render_file("/nonexistent/file.txt")
-        
-        assert result["success"] is False
-        assert "File not found" in result["error"]
-        assert result["html_path"] is None
-        assert result["extractions_count"] == 0
+    result = langextract_render_file("/nonexistent/file.txt")
+    
+    assert result["success"] is False
+    assert "File not found" in result["error"]
+    assert result["html_path"] is None
+    assert result["extractions_count"] == 0
 
 
 @patch('os.path.exists')
