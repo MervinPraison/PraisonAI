@@ -86,7 +86,6 @@ class ConcurrencyRegistry:
     def acquire_sync(self, agent_name: str) -> None:
         """Synchronous acquire — for non-async code paths.
         
-        Uses a proper sync-to-async bridge to avoid private attribute manipulation.
         Prefer async acquire() when possible.
         """
         sem = self._get_semaphore(agent_name)
@@ -94,17 +93,12 @@ class ConcurrencyRegistry:
             return
         try:
             asyncio.get_running_loop()
-            # We're inside an async loop — cannot block. Run acquire in a thread
-            # with its own loop to go through the semaphore's proper acquire path.
-            import concurrent.futures
-            def _acquire_in_new_loop():
-                loop = asyncio.new_event_loop()
-                try:
-                    loop.run_until_complete(sem.acquire())
-                finally:
-                    loop.close()
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                pool.submit(_acquire_in_new_loop).result(timeout=30)
+            # Running loop in current thread: blocking here can deadlock.
+            logger.warning(
+                f"acquire_sync('{agent_name}') called with a running event loop; "
+                "use async acquire() in async contexts."
+            )
+            return
         except RuntimeError:
             # No running loop — safe to create one
             loop = asyncio.new_event_loop()

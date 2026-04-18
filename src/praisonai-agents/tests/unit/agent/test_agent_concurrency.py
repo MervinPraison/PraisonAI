@@ -106,3 +106,13 @@ class TestConcurrencyLimiting:
         # Sync acquire should work
         reg.acquire_sync("sync_agent")
         reg.release("sync_agent")
+
+    @pytest.mark.asyncio
+    async def test_sync_acquire_running_loop_noop(self):
+        """Sync acquire in async context should not block event loop."""
+        from praisonaiagents.agent.concurrency import ConcurrencyRegistry
+        reg = ConcurrencyRegistry()
+        reg.set_limit("loop_agent", 1)
+        await reg.acquire("loop_agent")
+        reg.acquire_sync("loop_agent")
+        reg.release("loop_agent")
