@@ -297,19 +297,8 @@ class BaseCLIIntegration(ABC):
         
         def tool_func(query: str) -> str:
             """Execute the CLI tool with the given query."""
-            # Use asyncio.run() for clean event loop management
-            # This creates a new event loop, runs the coroutine, and closes it
-            try:
-                # Check if we're already in an async context
-                asyncio.get_running_loop()
-                # If we're in an async context, use ThreadPoolExecutor to avoid nested loop
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, integration.execute(query))
-                    return future.result()
-            except RuntimeError:
-                # No running loop, safe to use asyncio.run()
-                return asyncio.run(integration.execute(query))
+            from .._async_bridge import run_sync
+            return run_sync(integration.execute(query))
         
         # Set function metadata for agent tool registration
         tool_func.__name__ = f"{self.cli_command}_tool"

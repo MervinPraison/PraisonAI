@@ -221,7 +221,9 @@ def _get_autogen():
     import autogen
     return autogen
 
-logging.basicConfig(level=os.environ.get('LOGLEVEL', 'WARNING') or 'WARNING', format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure root logging only at CLI entrypoint
+from .._logging import configure_cli_logging
+configure_cli_logging(os.environ.get('LOGLEVEL', 'WARNING') or 'WARNING')
 logging.getLogger('alembic').setLevel(logging.ERROR)
 logging.getLogger('gradio').setLevel(logging.ERROR)
 logging.getLogger('gradio').setLevel(os.environ.get('GRADIO_LOGLEVEL', 'WARNING'))

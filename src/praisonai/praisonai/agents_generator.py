@@ -174,13 +174,18 @@ class AgentsGenerator:
         self.agent_yaml = agent_yaml
         self.tools = tools or []  # Store tool class names as a list
         self.cli_config = cli_config or {}  # Store CLI configuration overrides
-        self.log_level = log_level or logging.getLogger().getEffectiveLevel()
-        if self.log_level == logging.NOTSET:
-            self.log_level = os.environ.get('LOGLEVEL', 'INFO').upper()
+        # Use namespaced logger - no hot-path basicConfig calls
+        from ._logging import get_logger
+        self.logger = get_logger("agents_generator")
         
-        logging.basicConfig(level=self.log_level, format='%(asctime)s - %(levelname)s - %(message)s')
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(self.log_level)
+        # Set level if provided, but don't mutate root logger
+        if log_level:
+            if isinstance(log_level, str):
+                self.logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
+            else:
+                self.logger.setLevel(log_level)
+        elif os.environ.get('LOGLEVEL'):
+            self.logger.setLevel(getattr(logging, os.environ.get('LOGLEVEL', 'INFO').upper(), logging.INFO))
         
         # Initialize tool registry (replaces globals() pattern)
         self.tool_registry = ToolRegistry()
@@ -238,26 +243,29 @@ class AgentsGenerator:
                 config['config']['lsp'] = cli_config['lsp'] 
                 self.logger.debug(f"CLI override: lsp = {cli_config['lsp']}")
         
-        # Handle agent-level overrides (trust, tool_timeout, planning_tools, autonomy, guardrail, approval)
-        agent_level_fields = ['trust', 'tool_timeout', 'planning_tools', 'autonomy', 'guardrail', 'approval', 'approve_all_tools', 'approval_timeout']
+        # Handle agent-level overrides using unified approach
+        agent_level_fields = ['tool_timeout', 'planning_tools', 'autonomy']
         agent_overrides = {k: v for k, v in cli_config.items() if k in agent_level_fields}
         
-        # Map CLI field names to YAML field names
-        field_mappings = {
-            'guardrail': 'guardrails',  # CLI uses --guardrail, YAML uses guardrails
-            'trust': 'approval'  # --trust maps to approval=True
-        }
-        
-        # Apply field mappings and special handling
-        for cli_field in field_mappings:
-            if cli_field in agent_overrides:
-                value = agent_overrides.pop(cli_field)
-                if cli_field == 'trust' and value:
-                    # --trust flag maps to approval=True for auto-approval
-                    agent_overrides['approval'] = True
-                elif cli_field == 'guardrail':
-                    # --guardrail "description" maps to guardrails config
-                    agent_overrides['guardrails'] = value
+        # Handle approval configuration using unified spec
+        approval_fields = ['trust', 'approval', 'approve_all_tools', 'approval_timeout', 'approve_level']
+        if any(field in cli_config for field in approval_fields):
+            from ._approval_spec import ApprovalSpec
+            
+            # Create a mock args object for CLI parsing
+            class MockArgs:
+                def __init__(self, cli_config):
+                    for field in approval_fields:
+                        setattr(self, field, cli_config.get(field))
+                    self.guardrail = cli_config.get('guardrail')
+            
+            spec = ApprovalSpec.from_cli(MockArgs(cli_config))
+            if spec.enabled:
+                agent_overrides['approval'] = spec.to_dict()
+            
+        # Handle guardrail separately
+        if 'guardrail' in cli_config:
+            agent_overrides['guardrails'] = cli_config['guardrail']
         
         if agent_overrides:
             # Apply to all agents in the config
@@ -761,9 +769,10 @@ class AgentsGenerator:
                 # Close the model client
                 await model_client.close()
         
-        # Run the async function
+        # Run the async function using safe bridge
+        from ._async_bridge import run_sync
         try:
-            return asyncio.run(run_autogen_v4_async())
+            return run_sync(run_autogen_v4_async())
         except Exception as e:
             self.logger.error(f"Error running AutoGen v0.4: {str(e)}")
             return f"### AutoGen v0.4 Error ###\n{str(e)}"
@@ -1192,30 +1201,18 @@ class AgentsGenerator:
                 stream_enabled = cli_config.get('stream', False)
                 stream_metrics = cli_config.get('stream_metrics', False)
             
-            # Reconstruct approval config from potentially scattered settings
-            approval_val = details.get('approval')
-            approve_all = details.get('approve_all_tools')
-            approval_timeout = details.get('approval_timeout')
-            
+            # Use unified approval specification
             approval_config = None
-            if approval_val is not None or approve_all is not None or approval_timeout is not None:
-                if isinstance(approval_val, dict):
-                    approval_dict = approval_val
-                else:
-                    approval_dict = {'backend': approval_val}
-                
-                if approve_all is not None:
-                    approval_dict['approve_all_tools'] = approve_all
-                if approval_timeout is not None:
-                    approval_dict['approval_timeout'] = approval_timeout
-                
+            if 'approval' in details:
+                from ._approval_spec import ApprovalSpec
                 try:
-                    from .cli.features.approval import resolve_approval_config
-                    # Map common YAML fields to resolve_approval_config parameters
-                    approval_config = resolve_approval_config(
-                        backend_name=approval_dict.get('backend') or approval_dict.get('backend_name'),
-                        all_tools=approval_dict.get('approve_all_tools') or approval_dict.get('all_tools', False),
-                        timeout=approval_dict.get('approval_timeout') or approval_dict.get('timeout')
+                    spec = ApprovalSpec.from_yaml(details.get('approval'))
+                    if spec.enabled:
+                        from .cli.features.approval import resolve_approval_config
+                        approval_config = resolve_approval_config(
+                            backend_name=spec.backend,
+                            all_tools=spec.approve_all_tools,
+                            timeout=spec.timeout
                     )
                 except ImportError:
                     # Fallback: Create ApprovalConfig directly if resolve_approval_config isn't available
