@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
 from praisonaiagents.trace.protocol import ActionEvent, ActionEventType, TraceSinkProtocol
+from praisonaiagents.trace.context_events import ContextEvent, ContextEventType, ContextTraceSinkProtocol
 
 
 @dataclass
@@ -304,3 +305,80 @@ class LangfuseSink:
                         self._traces.clear()
                 except Exception:
                     pass
+    
+    def context_sink(self) -> "ContextTraceSinkProtocol":
+        """Return a ContextTraceSinkProtocol that forwards to this sink."""
+        return _ContextToActionBridge(self)
+
+
+class _ContextToActionBridge:
+    """
+    Bridge that implements ContextTraceSinkProtocol and forwards ContextEvent → ActionEvent into LangfuseSink.
+    
+    Maps context-level trace events to action-level events that LangfuseSink can consume.
+    This allows LangfuseSink to receive full lifecycle spans from the core runtime.
+    """
+    
+    def __init__(self, langfuse_sink: LangfuseSink):
+        self._langfuse_sink = langfuse_sink
+    
+    def emit(self, event: ContextEvent) -> None:
+        """Convert ContextEvent to ActionEvent and forward to LangfuseSink."""
+        if not event:
+            return
+        
+        # Map ContextEventType to ActionEventType
+        action_event_type = self._map_context_to_action_type(event.event_type)
+        if action_event_type is None:
+            return  # Skip unmappable events
+        
+        # Convert to ActionEvent
+        action_event = ActionEvent(
+            event_type=action_event_type,
+            timestamp=event.timestamp,
+            agent_id=event.agent_name,  # Use agent_name as agent_id for consistency
+            agent_name=event.agent_name,
+            metadata=event.data,
+            status="completed",  # Default status for context events
+            duration_ms=event.data.get("duration_ms", 0) if event.data else 0,
+        )
+        
+        # Add context-specific fields based on event type
+        if event.event_type == ContextEventType.TOOL_CALL_START:
+            action_event.tool_name = event.data.get("tool_name") if event.data else None
+            action_event.tool_args = event.data.get("tool_args") if event.data else None
+        elif event.event_type == ContextEventType.TOOL_CALL_END:
+            action_event.tool_name = event.data.get("tool_name") if event.data else None
+            action_event.tool_result_summary = event.data.get("tool_result") if event.data else None
+        elif event.event_type == ContextEventType.LLM_RESPONSE:
+            action_event.tool_result_summary = event.data.get("response_content") if event.data else None
+        elif event.event_type in [ContextEventType.AGENT_START, ContextEventType.AGENT_END]:
+            action_event.metadata = {
+                **(event.data if event.data else {}),
+                "input": event.data.get("input") if event.data else None,
+                "output": event.data.get("output") if event.data else None,
+            }
+        
+        # Forward to LangfuseSink
+        self._langfuse_sink.emit(action_event)
+    
+    def _map_context_to_action_type(self, context_type: ContextEventType) -> Optional[str]:
+        """Map ContextEventType to ActionEventType value."""
+        mapping = {
+            ContextEventType.AGENT_START: ActionEventType.AGENT_START.value,
+            ContextEventType.AGENT_END: ActionEventType.AGENT_END.value,
+            ContextEventType.TOOL_CALL_START: ActionEventType.TOOL_START.value,
+            ContextEventType.TOOL_CALL_END: ActionEventType.TOOL_END.value,
+            ContextEventType.LLM_REQUEST: ActionEventType.TOOL_START.value,  # Map LLM calls as tool events
+            ContextEventType.LLM_RESPONSE: ActionEventType.TOOL_END.value,
+            # Skip other event types (memory, knowledge, etc.) as they don't map cleanly
+        }
+        return mapping.get(context_type)
+    
+    def flush(self) -> None:
+        """Forward flush to LangfuseSink."""
+        self._langfuse_sink.flush()
+    
+    def close(self) -> None:
+        """Forward close to LangfuseSink."""
+        self._langfuse_sink.close()
