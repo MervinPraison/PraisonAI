@@ -195,14 +195,18 @@ class TestSetupCommand:
         env_content = env_file.read_text()
         assert "OPENAI_API_KEY=sk-interactive123" in env_content
 
-    def test_setup_missing_required_args(self):
+    def test_setup_missing_required_args(self, monkeypatch):
         """Test that setup fails when required args are missing in non-interactive mode."""
+        # Ensure no provider API key is present in the environment
+        for key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
+            monkeypatch.delenv(key, raising=False)
+
         result = runner.invoke(app, [
             "--non-interactive",
             "--provider", "openai"
             # Missing --api-key
         ])
-        
+
         assert result.exit_code != 0
         assert "API key is required" in result.stdout or "required" in result.stdout
 

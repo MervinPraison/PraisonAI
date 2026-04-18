@@ -110,30 +110,44 @@ lite = [
     # Use: pip install praisonai[lite] for lightweight deployments
 ]
 all = [
-    # Full installation with all main features
-    "aiui>=0.3.100",
-    "gradio>=4.26.0",
-    "flask>=3.0.0",
+    # Full installation — trimmed to what `praisonai onboard` + gateway + core
+    # agent loops actually need out of the box. Heavy UI/science/telemetry
+    # stacks live in their own extras (`[ui]`, `[gradio]`, `[realtime]`,
+    # `[observability]`) so the default install stays lean and every
+    # messaging bot the onboarding wizard offers runs without a second
+    # `pip install`.
+    # Gateway / web surface
     "fastapi>=0.115.0",
     "uvicorn>=0.34.0",
     "sse-starlette>=1.6.0",
+    "websockets>=12.0",
+    # Browser + search tools (agent defaults)
     "tavily-python==0.5.0",
     "crawl4ai>=0.7.0",
     "playwright>=1.47.0",
-    "websockets>=12.0",
-    "plotly>=5.24.0",
-    "yfinance>=0.2.44",
     "ddgs>=9.0.0",
     "psutil>=5.9.0",  # Shell tools
-    # Observability
-    "langfuse>=3.0.0",
+    # Messaging bot SDKs — required by `praisonai onboard` (Telegram, Discord,
+    # Slack, WhatsApp Cloud). Kept in sync with the [bot] extra below.
+    "python-telegram-bot>=20.0",
+    "discord.py>=2.0.0",
+    "slack_sdk>=3.0.0",
+    "slack-bolt>=1.18.0",
+    "brotlicffi>=1.0.0",
+    "aiohttp>=3.8.0",
     # Storage backends
     "redis>=5.0.0",
-    "pymongo>=4.6.0", 
+    "pymongo>=4.6.0",
     "psycopg2-binary>=2.9.0",
     "boto3>=1.35.0",
     # n8n integration
     "httpx>=0.27.0",
+]
+observability = [
+    # Telemetry stack (Langfuse + transitive OpenTelemetry instrumentations).
+    # Opt-in because it pulls 40+ packages. For back-compat the existing
+    # [langfuse] extra (declared above) remains as an alias.
+    "langfuse>=3.0.0",
 ]
 bot = [
     # Dependencies for Telegram, Discord, Slack, and WhatsApp bots
