@@ -135,6 +135,7 @@ all = [
     "slack-bolt>=1.18.0",
     "brotlicffi>=1.0.0",
     "aiohttp>=3.8.0",
+    "aiui>=0.3.100",  # PraisonAI UI — dashboard + chat for onboarded bots
     # Storage backends
     "redis>=5.0.0",
     "pymongo>=4.6.0",
@@ -157,6 +158,7 @@ bot = [
     "slack-bolt>=1.18.0",
     "brotlicffi>=1.0.0",
     "aiohttp>=3.8.0",
+    "aiui>=0.3.100",  # PraisonAI UI — dashboard + chat for onboarded bots
     "ddgs>=9.0.0",  # DuckDuckGo search for agent web tools
     "psutil>=5.9.0",  # Shell tools (execute_command, list_processes, get_system_info)
 ]

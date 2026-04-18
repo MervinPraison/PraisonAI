@@ -75,14 +75,19 @@ def _praison_home() -> Path:
     return Path(override) if override else Path.home() / ".praisonai"
 
 
-def _save_env_vars(env_vars: Dict[str, str]) -> Optional[Path]:
+def _save_env_vars(env_vars: Dict[str, Optional[str]]) -> Optional[Path]:
     """Atomically merge ``env_vars`` into ``~/.praisonai/.env`` (chmod 600).
 
-    Empty/None values are skipped. Existing keys not in ``env_vars`` are
-    preserved. Written with a temp-then-rename to avoid partial writes.
+    - Non-empty string values are written (updating existing keys).
+    - ``None`` values **remove** the key from the file (supports "clear" updates
+      so the user can drop an allowlist or home-channel).
+    - Empty-string values are skipped.
+    Existing keys not referenced in ``env_vars`` are preserved. Written with a
+    temp-then-rename to avoid partial writes.
     """
-    filtered = {k: v for k, v in env_vars.items() if v}
-    if not filtered:
+    updates = {k: v for k, v in env_vars.items() if v}
+    deletes = {k for k, v in env_vars.items() if v is None}
+    if not updates and not deletes:
         return None
 
     env_file = _praison_home() / ".env"
@@ -99,7 +104,9 @@ def _save_env_vars(env_vars: Dict[str, str]) -> Optional[Path]:
             if s and not s.startswith("#") and "=" in s:
                 k, v = s.split("=", 1)
                 existing[k.strip()] = v.strip()
-    existing.update(filtered)
+    existing.update(updates)
+    for k in deletes:
+        existing.pop(k, None)
 
     body = ["# PraisonAI configuration",
             "# Managed by praisonai onboard / setup", ""]
@@ -204,16 +211,45 @@ class OnboardWizard:
                 return
 
         # Step 2: Token configuration (password-hidden; persisted to ~/.praisonai/.env)
+        # Every setting can be updated even if already present — existing values are
+        # shown as masked defaults; press Enter to keep, or type a new value to
+        # overwrite (mirrors hermes-agent setup behaviour).
         console.print("\n[bold]Step 2: Configure tokens[/bold]\n")
-        env_to_save: Dict[str, str] = {}
+        console.print(
+            "  [dim]Press Enter to keep the existing value, or type a new one to update.[/dim]\n"
+        )
+        env_to_save: Dict[str, Optional[str]] = {}
+
+        def _mask(value: str) -> str:
+            if not value:
+                return ""
+            if len(value) <= 6:
+                return "*" * len(value)
+            return f"{value[:2]}{'*' * (len(value) - 4)}{value[-2:]}"
+
         for plat in self.selected_platforms:
             info = PLATFORMS[plat]
             env_var = info["token_env"]
             existing = os.environ.get(env_var, "")
 
             if existing:
-                console.print(f"  [green]✓[/green] {info['name']}: {env_var} already set")
-                self.tokens[plat] = existing
+                console.print(
+                    f"  [green]✓[/green] {info['name']}: {env_var} = [cyan]{_mask(existing)}[/cyan]"
+                )
+                console.print(f"    [dim]{info['token_help']}[/dim]")
+                new_token = Prompt.ask(
+                    f"  Update {info['name']} token? (Enter = keep current)",
+                    password=True,
+                    default="",
+                    show_default=False,
+                )
+                if new_token:
+                    self.tokens[plat] = new_token
+                    os.environ[env_var] = new_token
+                    env_to_save[env_var] = new_token
+                    console.print("  [green]✓[/green] Token updated")
+                else:
+                    self.tokens[plat] = existing
             else:
                 console.print(f"  [dim]{info['token_help']}[/dim]")
                 token = Prompt.ask(
@@ -228,11 +264,28 @@ class OnboardWizard:
                     env_to_save[env_var] = token
                     console.print("  [green]✓[/green] Token captured")
                 else:
-                    console.print(f"  [yellow]⚠[/yellow] No token — you'll need to set {env_var} before starting")
+                    console.print(
+                        f"  [yellow]⚠[/yellow] No token — you'll need to set {env_var} before starting"
+                    )
 
             # Extra env vars (e.g., Slack app token) — also hidden by default
             for extra_env, extra_desc in info.get("extra_env", {}).items():
-                if not os.environ.get(extra_env):
+                existing_extra = os.environ.get(extra_env, "")
+                if existing_extra:
+                    console.print(
+                        f"    [green]✓[/green] {extra_env} = [cyan]{_mask(existing_extra)}[/cyan]"
+                    )
+                    new_extra = Prompt.ask(
+                        f"    Update {extra_desc}? (Enter = keep current)",
+                        password=True,
+                        default="",
+                        show_default=False,
+                    )
+                    if new_extra:
+                        os.environ[extra_env] = new_extra
+                        env_to_save[extra_env] = new_extra
+                        console.print(f"    [green]✓[/green] {extra_env} updated")
+                else:
                     extra_val = Prompt.ask(
                         f"  {extra_desc} ({extra_env})",
                         password=True,
@@ -249,12 +302,37 @@ class OnboardWizard:
             if allowed_env:
                 existing_allow = os.environ.get(allowed_env, "").strip()
                 if existing_allow:
-                    console.print(f"  [green]✓[/green] {allowed_env} already set")
+                    console.print(
+                        f"  [green]✓[/green] {allowed_env} = [cyan]{existing_allow}[/cyan]"
+                    )
+                    console.print(
+                        f"    [dim]{info.get('user_id_help', 'Comma-separated user IDs')}[/dim]"
+                    )
+                    new_allow = Prompt.ask(
+                        f"  Update allowed users for {info['name']}? (Enter = keep, 'clear' = remove)",
+                        default="",
+                        show_default=False,
+                    ).strip()
+                    if new_allow.lower() == "clear":
+                        os.environ.pop(allowed_env, None)
+                        env_to_save[allowed_env] = None
+                        console.print(
+                            "  [yellow]✓ Allowlist cleared — open access restored[/yellow]"
+                        )
+                    elif new_allow:
+                        new_allow = new_allow.replace(" ", "")
+                        os.environ[allowed_env] = new_allow
+                        env_to_save[allowed_env] = new_allow
+                        console.print("  [green]✓[/green] Allowlist updated")
                 else:
-                    console.print(f"  [bold]🔒 Security — restrict who can use your {info['name']} bot[/bold]")
-                    console.print(f"  [dim]{info.get('user_id_help', 'Enter comma-separated user IDs')}[/dim]")
+                    console.print(
+                        f"  [bold]🔒 Security — restrict who can use your {info['name']} bot[/bold]"
+                    )
+                    console.print(
+                        f"  [dim]{info.get('user_id_help', 'Enter comma-separated user IDs')}[/dim]"
+                    )
                     allow_val = Prompt.ask(
-                        f"  Allowed user IDs (comma-separated, empty = open access)",
+                        "  Allowed user IDs (comma-separated, empty = open access)",
                         default="",
                         show_default=False,
                     )
@@ -262,25 +340,39 @@ class OnboardWizard:
                     if allow_val:
                         os.environ[allowed_env] = allow_val
                         env_to_save[allowed_env] = allow_val
-                        console.print(f"  [green]✓[/green] Allowlist saved — only listed users can talk to the bot")
+                        console.print(
+                            "  [green]✓[/green] Allowlist saved — only listed users can talk to the bot"
+                        )
                     else:
                         console.print(
-                            f"  [yellow]⚠  Warning:[/yellow] no allowlist set — anyone who finds your bot can use it."
+                            "  [yellow]⚠  Warning:[/yellow] no allowlist set — anyone who finds your bot can use it."
                         )
 
-                # Home channel (default = first allowed user)
-                if home_env and not os.environ.get(home_env):
+                # Home channel (default = first allowed user) — also updatable
+                if home_env:
+                    existing_home = os.environ.get(home_env, "").strip()
                     first_allowed = ""
                     saved_allow = env_to_save.get(allowed_env, existing_allow)
-                    if saved_allow:
+                    if isinstance(saved_allow, str) and saved_allow:
                         first_allowed = saved_allow.split(",")[0].strip()
+                    default_home = existing_home or first_allowed
+                    if existing_home:
+                        console.print(
+                            f"  [green]✓[/green] {home_env} = [cyan]{existing_home}[/cyan]"
+                        )
+                        prompt_label = (
+                            f"  Update home channel for {info['name']}? (Enter = keep current)"
+                        )
+                    else:
+                        prompt_label = (
+                            f"  Home channel / user ID for proactive messages ({home_env})"
+                        )
                     home_val = Prompt.ask(
-                        f"  Home channel / user ID for proactive messages ({home_env})",
-                        default=first_allowed,
-                        show_default=bool(first_allowed),
-                    )
-                    home_val = home_val.strip()
-                    if home_val:
+                        prompt_label,
+                        default=default_home,
+                        show_default=bool(default_home),
+                    ).strip()
+                    if home_val and home_val != existing_home:
                         os.environ[home_env] = home_val
                         env_to_save[home_env] = home_val
                         console.print(f"  [green]✓[/green] Home channel set to {home_val}")
