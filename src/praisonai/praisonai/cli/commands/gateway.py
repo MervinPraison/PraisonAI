@@ -64,14 +64,14 @@ def gateway_status(
             if running:
                 output.print_success(f"Daemon service: Running ({platform})")
             else:
-                output.print_warn(f"Daemon service: Installed but not running ({platform})")
+                output.print_warning(f"Daemon service: Installed but not running ({platform})")
         else:
             output.print_info(f"Daemon service: Not installed ({platform})")
             
         if daemon_status.get("pid"):
             output.print_info(f"Process ID: {daemon_status['pid']}")
         if daemon_status.get("error"):
-            output.print_warn(f"Daemon error: {daemon_status['error']}")
+            output.print_warning(f"Daemon error: {daemon_status['error']}")
             
     except Exception as e:
         output.print_error(f"Error checking daemon status: {str(e)}")
@@ -174,7 +174,7 @@ def gateway_install(
                 if status.get("running"):
                     output.print_success("Service is now running")
                 else:
-                    output.print_warn("Service installed but not running. Check system logs.")
+                    output.print_warning("Service installed but not running. Check system logs.")
         else:
             error = result.get("error", "Installation failed")
             output.print_error(f"Installation failed: {error}")
@@ -234,21 +234,21 @@ def gateway_logs(
             if logs:
                 print(logs)
             else:
-                output.print_warn("No logs found or service not installed")
+                output.print_warning("No logs found or service not installed")
         elif plat == "launchd":
             from praisonai.daemon.launchd import get_logs
             logs = get_logs(lines=lines)
             if logs:
                 print(logs)
             else:
-                output.print_warn("No logs found or service not installed")
+                output.print_warning("No logs found or service not installed")
         elif plat == "windows":
             from praisonai.daemon.windows import get_logs
             logs = get_logs(lines=lines)
             if logs:
                 print(logs)
             else:
-                output.print_warn("No logs found")
+                output.print_warning("No logs found")
         else:
             output.print_error(f"Unsupported platform: {plat}")
             raise typer.Exit(1)

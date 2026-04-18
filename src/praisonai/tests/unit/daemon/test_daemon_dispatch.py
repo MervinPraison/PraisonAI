@@ -4,9 +4,8 @@ Tests for daemon platform detection and dispatch.
 Tests that _detect_platform returns the correct backend for different platforms.
 """
 
-import platform
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from praisonai.daemon import _detect_platform, install_daemon, uninstall_daemon, get_daemon_status
 
@@ -90,3 +89,18 @@ def test_get_daemon_status_routes_to_systemd(mock_systemd_status, mock_detect):
     
     mock_systemd_status.assert_called_once()
     assert result["installed"] is True
+
+
+@patch('praisonai.daemon.windows.subprocess.run')
+def test_windows_scheduled_task_uses_cmd_with_working_dir(mock_run):
+    """Test Windows scheduled task command format is valid."""
+    mock_run.return_value = MagicMock(stdout="ok")
+
+    from praisonai.daemon.windows import _create_scheduled_task
+    result = _create_scheduled_task(config_path="bot.yaml")
+
+    assert result["ok"] is True
+    cmd = mock_run.call_args.args[0]
+    assert "/SD" not in cmd
+    tr_value = cmd[cmd.index("/TR") + 1]
+    assert tr_value.startswith('cmd /c "cd /d ')

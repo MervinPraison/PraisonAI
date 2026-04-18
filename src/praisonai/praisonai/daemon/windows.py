@@ -51,20 +51,22 @@ def _create_scheduled_task(config_path: str) -> Dict[str, Any]:
     python = _python_executable()
     abs_config = os.path.abspath(config_path)
     working_dir = os.path.dirname(abs_config) or os.getcwd()
+    escaped_working_dir = working_dir.replace('"', '""')
+    escaped_python = python.replace('"', '""')
+    escaped_config = abs_config.replace('"', '""')
     
     # Build schtasks command
     cmd = [
         "schtasks", "/Create",
         "/TN", TASK_NAME,
         "/SC", "ONLOGON",
-        "/TR", f'"{python}" -m praisonai bot start --config "{abs_config}"',
+        "/TR", (
+            f'cmd /c "cd /d ""{escaped_working_dir}"" && '
+            f'""{escaped_python}"" -m praisonai bot start --config ""{escaped_config}"""'
+        ),
         "/RL", "LIMITED",
         "/F"  # Force overwrite if exists
     ]
-    
-    # Add working directory if available
-    if working_dir:
-        cmd.extend(["/SD", working_dir])
     
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)

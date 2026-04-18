@@ -465,7 +465,7 @@ def bot_install_daemon(
                 if status.get("running"):
                     output.print_success("Service is now running")
                 else:
-                    output.print_warn("Service installed but not running. Check system logs.")
+                    output.print_warning("Service installed but not running. Check system logs.")
         else:
             error = result.get("error", "Installation failed")
             output.print_error(f"Installation failed: {error}")
