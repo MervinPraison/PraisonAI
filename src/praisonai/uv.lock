@@ -4478,6 +4478,7 @@ agentops = [
 ]
 all = [
     { name = "aiohttp" },
+    { name = "aiui" },
     { name = "boto3" },
     { name = "brotlicffi" },
     { name = "crawl4ai" },
@@ -4518,6 +4519,7 @@ autogen-v4 = [
 ]
 bot = [
     { name = "aiohttp" },
+    { name = "aiui" },
     { name = "brotlicffi" },
     { name = "ddgs" },
     { name = "discord-py" },
@@ -4663,6 +4665,8 @@ requires-dist = [
     { name = "aiohttp", marker = "extra == 'all'", specifier = ">=3.8.0" },
     { name = "aiohttp", marker = "extra == 'bot'", specifier = ">=3.8.0" },
     { name = "aiohttp", marker = "extra == 'claw'", specifier = ">=3.8.0" },
+    { name = "aiui", marker = "extra == 'all'", specifier = ">=0.3.100" },
+    { name = "aiui", marker = "extra == 'bot'", specifier = ">=0.3.100" },
     { name = "aiui", marker = "extra == 'chat'", specifier = ">=0.3.100" },
     { name = "aiui", marker = "extra == 'code'", specifier = ">=0.3.100" },
     { name = "aiui", marker = "extra == 'realtime'", specifier = ">=0.3.100" },
@@ -4804,7 +4808,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.6.10"
+version = "1.6.11"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },
