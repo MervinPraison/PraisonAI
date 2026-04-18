@@ -78,6 +78,9 @@ __all__ = [
 # ============================================================================
 
 # Global state for plugin system (lazy initialized)
+import threading
+
+_plugins_lock = threading.Lock()
 _plugins_enabled: bool = False
 _enabled_plugin_names: list = None  # None = all, list = specific
 
@@ -108,8 +111,9 @@ def enable(plugins: list = None) -> None:
     """
     global _plugins_enabled, _enabled_plugin_names
     
-    _plugins_enabled = True
-    _enabled_plugin_names = plugins  # None = all, list = specific
+    with _plugins_lock:
+        _plugins_enabled = True
+        _enabled_plugin_names = plugins  # None = all, list = specific
     
     # Get plugin manager and auto-discover
     from .manager import get_plugin_manager
@@ -119,10 +123,14 @@ def enable(plugins: list = None) -> None:
     manager.auto_discover_plugins()
     manager.discover_entry_points()
     
+    # Snapshot the names under lock to avoid TOCTOU
+    with _plugins_lock:
+        target_plugins = list(_enabled_plugin_names) if _enabled_plugin_names is not None else None
+    
     # Enable specific plugins or all
-    if plugins is not None:
+    if target_plugins is not None:
         # Enable only specified plugins
-        for name in plugins:
+        for name in target_plugins:
             manager.enable(name)
     else:
         # Enable all discovered plugins
@@ -158,8 +166,9 @@ def disable(plugins: list = None) -> None:
             manager.disable(name)
     else:
         # Disable all plugins
-        _plugins_enabled = False
-        _enabled_plugin_names = None
+        with _plugins_lock:
+            _plugins_enabled = False
+            _enabled_plugin_names = None
         for plugin_info in manager.list_plugins():
             manager.disable(plugin_info.get("name", ""))
 
@@ -225,10 +234,9 @@ def is_enabled(name: str = None) -> bool:
     Returns:
         True if enabled, False otherwise.
     """
-    global _plugins_enabled
-    
-    if name is None:
-        return _plugins_enabled
+    with _plugins_lock:
+        if name is None:
+            return _plugins_enabled
     
     from .manager import get_plugin_manager
     manager = get_plugin_manager()
