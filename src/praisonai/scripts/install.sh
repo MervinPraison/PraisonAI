@@ -29,6 +29,7 @@ NO_PROMPT="${PRAISONAI_NO_PROMPT:-0}"
 DRY_RUN="${PRAISONAI_DRY_RUN:-0}"
 PYTHON_CMD="${PRAISONAI_PYTHON:-}"
 SKIP_VENV="${PRAISONAI_SKIP_VENV:-0}"
+NO_ONBOARD="${PRAISONAI_NO_ONBOARD:-0}"
 MIN_PYTHON_VERSION="3.10"
 
 # Logging functions - all output to stderr to avoid capturing in $()
@@ -524,14 +525,16 @@ print_help() {
     echo "  --version VERSION    Install specific version (default: latest)"
     echo "  --extras EXTRAS      Install with extras (e.g., ui,chat,code)"
     echo "  --no-venv            Skip virtual environment creation"
+    echo "  --no-onboard         Skip interactive onboarding after install"
     echo "  --python PATH        Use specific Python executable"
     echo "  --dry-run            Print what would happen without making changes"
     echo "  --no-prompt          Skip interactive prompts"
     echo "  -h, --help           Show this help message"
     echo ""
     echo "Environment variables:"
-    echo "  PRAISONAI_VERSION    Specific version to install"
-    echo "  PRAISONAI_EXTRAS     Comma-separated extras"
+    echo "  PRAISONAI_VERSION     Specific version to install"
+    echo "  PRAISONAI_EXTRAS      Comma-separated extras"
+    echo "  PRAISONAI_NO_ONBOARD  Skip interactive onboarding (1 to enable)"
     echo "  PRAISONAI_NO_PROMPT  Skip interactive prompts (1 to enable)"
     echo "  PRAISONAI_DRY_RUN    Print what would happen (1 to enable)"
     echo "  PRAISONAI_PYTHON     Path to Python executable"
@@ -567,6 +570,10 @@ parse_args() {
                 SKIP_VENV="1"
                 shift
                 ;;
+            --no-onboard)
+                NO_ONBOARD="1"
+                shift
+                ;;
             --python)
                 PYTHON_CMD="$2"
                 shift 2
@@ -590,6 +597,61 @@ parse_args() {
                 ;;
         esac
     done
+}
+
+# Run onboarding after successful installation
+run_onboarding() {
+    local venv_dir="$1"
+    
+    # Skip onboarding if requested
+    if [[ "$NO_ONBOARD" == "1" ]]; then
+        log_info "Skipping onboarding (--no-onboard)"
+        return 0
+    fi
+    
+    # Skip onboarding in non-interactive environments
+    if [[ "$NO_PROMPT" == "1" ]]; then
+        log_info "Skipping onboarding (non-interactive mode)"
+        return 0
+    fi
+    
+    # Check if TTY is available (required for interactive setup)
+    if ! [ -e /dev/tty ] || ! [ -t 1 ]; then
+        log_info "No TTY available — skipping onboarding. Run 'praisonai setup' later."
+        return 0
+    fi
+    
+    # Skip onboarding in dry run mode
+    if [[ "$DRY_RUN" == "1" ]]; then
+        log_info "Dry run mode — skipping onboarding"
+        return 0
+    fi
+    
+    log_step "Starting interactive setup wizard..."
+    
+    # Prefer venv python, then user-specified, then system python3
+    local py=""
+    if [[ -n "$venv_dir" && "$SKIP_VENV" != "1" && -x "$venv_dir/bin/python" ]]; then
+        py="$venv_dir/bin/python"
+    elif [[ -n "$PYTHON_CMD" ]] && command -v "$PYTHON_CMD" >/dev/null 2>&1; then
+        py="$PYTHON_CMD"
+    else
+        py="python3"
+    fi
+    
+    # Run the setup wizard
+    if "$py" -m praisonai setup < /dev/tty > /dev/tty 2> /dev/tty; then
+        log_success "Setup wizard completed successfully!"
+        echo ""
+        echo -e "${BOLD}${GREEN}You're all set! 🎉${NC}"
+        echo ""
+    else
+        log_warn "Setup wizard failed or was cancelled."
+        echo ""
+        echo -e "${YELLOW}Don't worry! You can run the setup wizard anytime with:${NC}"
+        echo -e "  ${CYAN}praisonai setup${NC}"
+        echo ""
+    fi
 }
 
 # Main installation function
@@ -627,6 +689,9 @@ main() {
     
     # Verify installation
     verify_installation "$venv_dir"
+    
+    # Run interactive onboarding
+    run_onboarding "$venv_dir"
     
     # Print next steps
     print_next_steps "$venv_dir"

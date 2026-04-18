@@ -181,7 +181,7 @@ def check_openai_api_key(config: DoctorConfig) -> CheckResult:
                 category=CheckCategory.ENVIRONMENT,
                 status=CheckStatus.FAIL,
                 message="OPENAI_API_KEY not configured and no alternative providers found",
-                remediation="Set OPENAI_API_KEY environment variable or configure an alternative provider",
+                remediation="Run 'praisonai setup' to configure API keys, or set OPENAI_API_KEY environment variable",
                 severity=CheckSeverity.HIGH,
             )
 

@@ -212,6 +212,7 @@ _LAZY_IMPORTS = {
     'LLMError': ('praisonaiagents.errors', 'LLMError'),
     'ValidationError': ('praisonaiagents.errors', 'ValidationError'),
     'NetworkError': ('praisonaiagents.errors', 'NetworkError'),
+    'PraisonAIConfigError': ('praisonaiagents.errors', 'PraisonAIConfigError'),
     'ErrorContextProtocol': ('praisonaiagents.errors', 'ErrorContextProtocol'),
     'Heartbeat': ('praisonaiagents.agent.heartbeat', 'Heartbeat'),
     'HeartbeatConfig': ('praisonaiagents.agent.heartbeat', 'HeartbeatConfig'),
