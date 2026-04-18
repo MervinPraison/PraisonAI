@@ -20,7 +20,7 @@ def test_onboard_command_registered():
     assert "onboard" in result.output or "wizard" in result.output
 
 
-@patch("praisonai.cli.commands.onboard.run_onboard")
+@patch("praisonai.cli.features.onboard.run_onboard")
 def test_onboard_calls_wizard(mock_run_onboard):
     """Test that onboard command calls run_onboard."""
     runner = CliRunner()
@@ -31,7 +31,7 @@ def test_onboard_calls_wizard(mock_run_onboard):
     assert result.exit_code == 0
 
 
-@patch("praisonai.cli.commands.onboard.run_onboard")
+@patch("praisonai.cli.features.onboard.run_onboard")
 def test_onboard_handles_keyboard_interrupt(mock_run_onboard):
     """Test that onboard handles KeyboardInterrupt gracefully."""
     mock_run_onboard.side_effect = KeyboardInterrupt()

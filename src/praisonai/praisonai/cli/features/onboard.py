@@ -15,25 +15,36 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import getpass
 import logging
 import os
-from typing import Dict, List
+from pathlib import Path
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Platform info for the wizard
+# Platform info for the wizard.
+# ``allowed_users_env`` / ``home_channel_env`` mirror the hermes/openclaw
+# pattern: a per-platform allowlist of user IDs and a default "home" channel
+# for proactive/cron deliveries.
 PLATFORMS = {
     "telegram": {
         "name": "Telegram",
         "token_env": "TELEGRAM_BOT_TOKEN",
         "token_help": "Get from @BotFather on Telegram: https://t.me/BotFather",
         "install_hint": "pip install python-telegram-bot",
+        "allowed_users_env": "TELEGRAM_ALLOWED_USERS",
+        "home_channel_env": "TELEGRAM_HOME_CHANNEL",
+        "user_id_help": "Find your user ID by messaging @userinfobot on Telegram",
     },
     "discord": {
         "name": "Discord",
         "token_env": "DISCORD_BOT_TOKEN",
         "token_help": "Create at https://discord.com/developers/applications",
         "install_hint": "pip install discord.py",
+        "allowed_users_env": "DISCORD_ALLOWED_USERS",
+        "home_channel_env": "DISCORD_HOME_CHANNEL",
+        "user_id_help": "Enable Developer Mode (Settings > Advanced), right-click your name > Copy User ID",
     },
     "slack": {
         "name": "Slack",
@@ -41,6 +52,9 @@ PLATFORMS = {
         "token_help": "Create at https://api.slack.com/apps",
         "install_hint": "pip install slack-bolt",
         "extra_env": {"SLACK_APP_TOKEN": "App token (xapp-...)"},
+        "allowed_users_env": "SLACK_ALLOWED_USERS",
+        "home_channel_env": "SLACK_HOME_CHANNEL",
+        "user_id_help": "Your Slack member ID (U...). Profile > More > Copy member ID",
     },
     "whatsapp": {
         "name": "WhatsApp",
@@ -48,12 +62,71 @@ PLATFORMS = {
         "token_help": "Get from Meta for Developers: https://developers.facebook.com",
         "install_hint": "pip install aiohttp",
         "extra_env": {"WHATSAPP_PHONE_NUMBER_ID": "Phone number ID"},
+        "allowed_users_env": "WHATSAPP_ALLOWED_USERS",
+        "home_channel_env": "WHATSAPP_HOME_CHANNEL",
+        "user_id_help": "Your WhatsApp phone number in E.164 (e.g. 15551234567, no +)",
     },
 }
 
 
+def _praison_home() -> Path:
+    """Return ``$PRAISONAI_HOME`` or ``~/.praisonai``."""
+    override = os.environ.get("PRAISONAI_HOME")
+    return Path(override) if override else Path.home() / ".praisonai"
+
+
+def _save_env_vars(env_vars: Dict[str, str]) -> Optional[Path]:
+    """Atomically merge ``env_vars`` into ``~/.praisonai/.env`` (chmod 600).
+
+    Empty/None values are skipped. Existing keys not in ``env_vars`` are
+    preserved. Written with a temp-then-rename to avoid partial writes.
+    """
+    filtered = {k: v for k, v in env_vars.items() if v}
+    if not filtered:
+        return None
+
+    env_file = _praison_home() / ".env"
+    try:
+        env_file.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        logger.warning("Could not create %s", env_file.parent)
+        return None
+
+    existing: Dict[str, str] = {}
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            s = line.strip()
+            if s and not s.startswith("#") and "=" in s:
+                k, v = s.split("=", 1)
+                existing[k.strip()] = v.strip()
+    existing.update(filtered)
+
+    body = ["# PraisonAI configuration",
+            "# Managed by praisonai onboard / setup", ""]
+    for k in sorted(existing):
+        body.append(f"{k}={existing[k]}")
+
+    tmp = env_file.with_name(env_file.name + ".tmp")
+    tmp.write_text("\n".join(body) + "\n")
+    try:
+        os.chmod(tmp, 0o600)
+    except OSError:
+        pass
+    os.replace(tmp, env_file)
+    try:
+        os.chmod(env_file, 0o600)
+    except OSError:
+        pass
+    return env_file
+
+
 def _generate_bot_yaml(platforms: List[str], agent_name: str = "assistant", agent_instructions: str = "") -> str:
-    """Generate bot.yaml content."""
+    """Generate bot.yaml content.
+
+    Each channel references its allowlist / home-channel env vars so that
+    the bot config stays in sync with ``~/.praisonai/.env`` without leaking
+    secrets into the yaml file.
+    """
     lines = ["agent:"]
     lines.append(f'  name: "{agent_name}"')
     if agent_instructions:
@@ -67,6 +140,12 @@ def _generate_bot_yaml(platforms: List[str], agent_name: str = "assistant", agen
         lines.append(f"  {plat}:")
         lines.append(f"    token: ${{{env_var}}}")
         lines.append("    group_policy: mention_only")
+        allowed_env = info.get("allowed_users_env")
+        if allowed_env:
+            lines.append(f"    allowed_users: ${{{allowed_env}}}")
+        home_env = info.get("home_channel_env")
+        if home_env:
+            lines.append(f"    home_channel: ${{{home_env}}}")
         if plat == "whatsapp":
             lines.append("    phone_number_id: ${WHATSAPP_PHONE_NUMBER_ID}")
     lines.append("")
@@ -124,8 +203,9 @@ class OnboardWizard:
                 console.print(f"[red]Unknown platform: {plat}[/red]")
                 return
 
-        # Step 2: Token configuration
+        # Step 2: Token configuration (password-hidden; persisted to ~/.praisonai/.env)
         console.print("\n[bold]Step 2: Configure tokens[/bold]\n")
+        env_to_save: Dict[str, str] = {}
         for plat in self.selected_platforms:
             info = PLATFORMS[plat]
             env_var = info["token_env"]
@@ -136,20 +216,79 @@ class OnboardWizard:
                 self.tokens[plat] = existing
             else:
                 console.print(f"  [dim]{info['token_help']}[/dim]")
-                token = Prompt.ask(f"  {info['name']} token ({env_var})")
+                token = Prompt.ask(
+                    f"  {info['name']} token ({env_var})",
+                    password=True,
+                    default="",
+                    show_default=False,
+                )
                 if token:
                     self.tokens[plat] = token
                     os.environ[env_var] = token
-                    console.print("  [green]✓[/green] Token set for this session")
+                    env_to_save[env_var] = token
+                    console.print("  [green]✓[/green] Token captured")
                 else:
                     console.print(f"  [yellow]⚠[/yellow] No token — you'll need to set {env_var} before starting")
 
-            # Extra env vars (e.g., Slack app token)
+            # Extra env vars (e.g., Slack app token) — also hidden by default
             for extra_env, extra_desc in info.get("extra_env", {}).items():
                 if not os.environ.get(extra_env):
-                    extra_val = Prompt.ask(f"  {extra_desc} ({extra_env})", default="")
+                    extra_val = Prompt.ask(
+                        f"  {extra_desc} ({extra_env})",
+                        password=True,
+                        default="",
+                        show_default=False,
+                    )
                     if extra_val:
                         os.environ[extra_env] = extra_val
+                        env_to_save[extra_env] = extra_val
+
+            # Step 2b: Security — allowlist + home channel (mirrors hermes)
+            allowed_env = info.get("allowed_users_env")
+            home_env = info.get("home_channel_env")
+            if allowed_env:
+                existing_allow = os.environ.get(allowed_env, "").strip()
+                if existing_allow:
+                    console.print(f"  [green]✓[/green] {allowed_env} already set")
+                else:
+                    console.print(f"  [bold]🔒 Security — restrict who can use your {info['name']} bot[/bold]")
+                    console.print(f"  [dim]{info.get('user_id_help', 'Enter comma-separated user IDs')}[/dim]")
+                    allow_val = Prompt.ask(
+                        f"  Allowed user IDs (comma-separated, empty = open access)",
+                        default="",
+                        show_default=False,
+                    )
+                    allow_val = allow_val.replace(" ", "")
+                    if allow_val:
+                        os.environ[allowed_env] = allow_val
+                        env_to_save[allowed_env] = allow_val
+                        console.print(f"  [green]✓[/green] Allowlist saved — only listed users can talk to the bot")
+                    else:
+                        console.print(
+                            f"  [yellow]⚠  Warning:[/yellow] no allowlist set — anyone who finds your bot can use it."
+                        )
+
+                # Home channel (default = first allowed user)
+                if home_env and not os.environ.get(home_env):
+                    first_allowed = ""
+                    saved_allow = env_to_save.get(allowed_env, existing_allow)
+                    if saved_allow:
+                        first_allowed = saved_allow.split(",")[0].strip()
+                    home_val = Prompt.ask(
+                        f"  Home channel / user ID for proactive messages ({home_env})",
+                        default=first_allowed,
+                        show_default=bool(first_allowed),
+                    )
+                    home_val = home_val.strip()
+                    if home_val:
+                        os.environ[home_env] = home_val
+                        env_to_save[home_env] = home_val
+                        console.print(f"  [green]✓[/green] Home channel set to {home_val}")
+
+        # Persist everything collected above to ~/.praisonai/.env
+        env_file = _save_env_vars(env_to_save)
+        if env_file:
+            console.print(f"\n  [green]✓[/green] Secrets saved to [cyan]{env_file}[/cyan] (chmod 600)")
 
         # Step 3: Test connection
         console.print("\n[bold]Step 3: Test connection[/bold]\n")
@@ -224,26 +363,55 @@ class OnboardWizard:
         return await bot.probe()
 
     def _run_plain(self) -> None:
-        """Fallback for when rich is not available."""
+        """Fallback for when rich is not available.
+
+        Parity with the rich path: hidden token input via ``getpass``,
+        allowlist + home-channel prompts, and persistence to
+        ``~/.praisonai/.env``.
+        """
         print("\n=== PraisonAI Bot Setup ===\n")
         print("Available platforms: telegram, discord, slack, whatsapp")
         platforms_input = input("Platform(s) [comma-separated, default=telegram]: ").strip() or "telegram"
         self.selected_platforms = [p.strip().lower() for p in platforms_input.split(",")]
 
+        env_to_save: Dict[str, str] = {}
         for plat in self.selected_platforms:
             info = PLATFORMS.get(plat, {})
             env_var = info.get("token_env", f"{plat.upper()}_BOT_TOKEN")
             if not os.environ.get(env_var):
                 print(f"\n  {info.get('token_help', '')}")
-                token = input(f"  {env_var}: ").strip()
+                token = getpass.getpass(f"  {env_var} (hidden): ").strip()
                 if token:
                     os.environ[env_var] = token
+                    env_to_save[env_var] = token
                     self.tokens[plat] = token
 
+            allowed_env = info.get("allowed_users_env")
+            if allowed_env and not os.environ.get(allowed_env):
+                print(f"\n  🔒 {info.get('user_id_help', 'Enter allowed user IDs')}")
+                allow = input("  Allowed user IDs (comma-separated, empty = open): ").strip().replace(" ", "")
+                if allow:
+                    os.environ[allowed_env] = allow
+                    env_to_save[allowed_env] = allow
+                else:
+                    print("  ⚠  No allowlist — anyone who finds your bot can use it.")
+
+            home_env = info.get("home_channel_env")
+            if home_env and not os.environ.get(home_env):
+                first = env_to_save.get(allowed_env, "").split(",")[0].strip() if allowed_env else ""
+                prompt_text = f"  Home channel ({home_env})" + (f" [{first}]: " if first else ": ")
+                home = input(prompt_text).strip() or first
+                if home:
+                    os.environ[home_env] = home
+                    env_to_save[home_env] = home
+
+        env_file = _save_env_vars(env_to_save)
         yaml_content = _generate_bot_yaml(self.selected_platforms)
         with open("bot.yaml", "w") as f:
             f.write(yaml_content)
         print("\n✓ Written to bot.yaml")
+        if env_file:
+            print(f"✓ Secrets saved to {env_file} (chmod 600)")
         print("Start with: praisonai bot start --config bot.yaml")
 
 
