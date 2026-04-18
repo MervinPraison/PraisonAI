@@ -18,13 +18,22 @@ def _setup_langfuse_observability(*, verbose: bool = False) -> None:
     try:
         from praisonai.observability.langfuse import LangfuseSink
         from praisonaiagents.trace.protocol import TraceEmitter, set_default_emitter
+        from praisonaiagents.trace.context_events import ContextTraceEmitter, set_context_emitter
+        import atexit
         
         # Create LangfuseSink (auto-reads env vars)
         sink = LangfuseSink()
         
-        # Set up action-level trace emitter (sufficient for Phase 1)
+        # Set up action-level trace emitter (covers RouterAgent / PlanningAgent)
         emitter = TraceEmitter(sink=sink, enabled=True)
         set_default_emitter(emitter)
+        
+        # Set up context-level trace emitter (captures Agent.start() lifecycle)
+        context_emitter = ContextTraceEmitter(sink=sink.context_sink(), enabled=True)
+        set_context_emitter(context_emitter)
+        
+        # Register atexit close for the sink
+        atexit.register(sink.close)
         
     except ImportError:
         # Gracefully degrade if Langfuse not installed

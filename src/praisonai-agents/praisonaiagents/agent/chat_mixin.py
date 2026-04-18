@@ -457,6 +457,26 @@ Your Goal: {self.goal}"""
         
         return content
 
+    def _extract_llm_response_content(self, response) -> Optional[str]:
+        """Return assistant message text, a tool-call summary, or str(response) as fallback."""
+        if not response:
+            return None
+        try:
+            if hasattr(response, "choices") and response.choices:
+                choice = response.choices[0]
+                msg = getattr(choice, "message", None)
+                if msg is not None:
+                    content = getattr(msg, "content", None)
+                    if content:
+                        return content
+                    tool_calls = getattr(msg, "tool_calls", None) or []
+                    if tool_calls:
+                        names = [getattr(tc.function, "name", "?") for tc in tool_calls]
+                        return f"[tool_calls: {', '.join(names)}]"
+        except (AttributeError, IndexError, TypeError):
+            pass
+        return str(response)
+
     def _process_stream_response(self, messages, temperature, start_time, formatted_tools=None, reasoning_steps=False):
         """Internal helper for streaming response processing with real-time events."""
         if self._openai_client is None:
@@ -572,7 +592,7 @@ Your Goal: {self.goal}"""
             _trace_emitter.llm_response(
                 self.name,
                 duration_ms=_duration_ms,
-                response_content=str(final_response) if final_response else None,
+                response_content=self._extract_llm_response_content(final_response),
                 prompt_tokens=_prompt_tokens,
                 completion_tokens=_completion_tokens,
                 cost_usd=_cost_usd,
