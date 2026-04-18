@@ -289,11 +289,19 @@ function Install-PraisonAI {
     
     Write-Info "Installing PraisonAI..."
     
-    $pipCmd = "$PythonCmd -m pip"
+    $pipExe = $null
+    $pipArgs = @()
     
     # Use venv pip if available
     if ($VenvPath -and (Test-Path "$VenvPath\Scripts\pip.exe")) {
-        $pipCmd = "$VenvPath\Scripts\pip.exe"
+        $pipExe = "$VenvPath\Scripts\pip.exe"
+    } else {
+        $pythonParts = $PythonCmd -split " "
+        $pipExe = $pythonParts[0]
+        if ($pythonParts.Length -gt 1) {
+            $pipArgs += $pythonParts[1..($pythonParts.Length-1)]
+        }
+        $pipArgs += @("-m", "pip")
     }
     
     # Build install package name
@@ -311,15 +319,19 @@ function Install-PraisonAI {
     }
     
     if ($DryRun) {
-        Write-Info "[DRY RUN] Would run: $pipCmd install --upgrade $installPkg"
+        if ($pipArgs.Length -gt 0) {
+            Write-Info "[DRY RUN] Would run: $pipExe $($pipArgs -join ' ') install --upgrade $installPkg"
+        } else {
+            Write-Info "[DRY RUN] Would run: $pipExe install --upgrade $installPkg"
+        }
         return
     }
     
     # Upgrade pip first
-    Invoke-Expression "$pipCmd install --upgrade pip"
+    & $pipExe @pipArgs install --upgrade pip
     
     # Install PraisonAI
-    Invoke-Expression "$pipCmd install --upgrade $installPkg"
+    & $pipExe @pipArgs install --upgrade $installPkg
     
     # Also install wrapper if extras include ui/chat/code
     if ($Extras -match "ui|chat|code") {
@@ -327,7 +339,7 @@ function Install-PraisonAI {
         if ($Version -ne "latest") {
             $wrapperPkg = "praisonai[$Extras]==$Version"
         }
-        Invoke-Expression "$pipCmd install --upgrade $wrapperPkg"
+        & $pipExe @pipArgs install --upgrade $wrapperPkg
     }
     
     Write-Success "PraisonAI installed successfully!"

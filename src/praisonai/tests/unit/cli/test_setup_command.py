@@ -181,8 +181,10 @@ class TestSetupCommand:
         mock_prompt.side_effect = ["1", "gpt-4o-mini"]  # OpenAI, then model
         mock_getpass.return_value = "sk-interactive123"
         mock_confirm.side_effect = [True, False]  # Enable telemetry, no starter YAML
-        
-        result = runner.invoke(app)
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("OPENAI_API_KEY", None)
+            result = runner.invoke(app)
         
         assert result.exit_code == 0
         assert "Setup complete" in result.stdout
