@@ -1219,9 +1219,9 @@ class AgentsGenerator:
                     try:
                         from praisonaiagents.approval.protocols import ApprovalConfig
                         approval_config = ApprovalConfig(
-                            backend=approval_dict.get('backend', None),
-                            all_tools=approval_dict.get('approve_all_tools', approval_dict.get('all_tools', False)),
-                            timeout=approval_dict.get('approval_timeout', approval_dict.get('timeout', 0))
+                            backend=spec.backend,
+                            all_tools=spec.approve_all_tools,
+                            timeout=spec.timeout
                         )
                     except ImportError:
                         # Last resort: disable approval for this agent

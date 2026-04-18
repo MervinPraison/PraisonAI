@@ -10,7 +10,6 @@ This is an internal module — end users import the concrete classes.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Set
 

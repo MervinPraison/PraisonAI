@@ -105,8 +105,14 @@ class ApprovalSpec:
             
             # Handle legacy aliases
             backend = node.get("backend") or node.get("backend_name", "console")
-            approve_all_tools = node.get("approve_all_tools") or node.get("all_tools", False)
-            timeout_val = node.get("timeout") or node.get("approval_timeout")
+            if "approve_all_tools" in node:
+                approve_all_tools = node.get("approve_all_tools")
+            else:
+                approve_all_tools = node.get("all_tools", False)
+            if "timeout" in node:
+                timeout_val = node.get("timeout")
+            else:
+                timeout_val = node.get("approval_timeout")
             
             return cls(
                 enabled=node.get("enabled", True),
