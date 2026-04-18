@@ -1031,6 +1031,10 @@ Methods:
 * <code title="cli">praisonai session list <a href="./src/praisonai/praisonai/cli/commands/session.py">--help</a></code>
 * <code title="cli">praisonai session resume <a href="./src/praisonai/praisonai/cli/commands/session.py">--help</a></code>
 * <code title="cli">praisonai session show <a href="./src/praisonai/praisonai/cli/commands/session.py">--help</a></code>
+* <code title="cli">praisonai setup config <a href="./src/praisonai/praisonai/cli/commands/setup.py">--help</a></code>
+* <code title="cli">praisonai setup reset <a href="./src/praisonai/praisonai/cli/commands/setup.py">--help</a></code>
+* <code title="cli">praisonai setup setup-callback <a href="./src/praisonai/praisonai/cli/commands/setup.py">--help</a></code>
+* <code title="cli">praisonai setup wizard <a href="./src/praisonai/praisonai/cli/commands/setup.py">--help</a></code>
 * <code title="cli">praisonai skills check <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
 * <code title="cli">praisonai skills create <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
 * <code title="cli">praisonai skills eligible <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
