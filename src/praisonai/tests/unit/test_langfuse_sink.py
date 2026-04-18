@@ -495,7 +495,7 @@ class TestContextToActionBridge:
         sink._client.flush.assert_called_once()
         
         bridge.close()
-        # close() calls flush, so reset mock first
+        # close() is idempotent; second call should not flush again
         sink._client.flush.reset_mock()
         bridge.close()
-        sink._client.flush.assert_called_once()
+        sink._client.flush.assert_not_called()
