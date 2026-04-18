@@ -13,6 +13,7 @@ param(
     [string]$Version = "latest",
     [string]$Extras = "",
     [switch]$NoVenv,
+    [switch]$NoOnboard,
     [string]$Python = "",
     [switch]$DryRun,
     [switch]$Help
@@ -22,6 +23,7 @@ param(
 if ($env:PRAISONAI_VERSION) { $Version = $env:PRAISONAI_VERSION }
 if ($env:PRAISONAI_EXTRAS) { $Extras = $env:PRAISONAI_EXTRAS }
 if ($env:PRAISONAI_SKIP_VENV -eq "1") { $NoVenv = $true }
+if ($env:PRAISONAI_NO_ONBOARD -eq "1") { $NoOnboard = $true }
 if ($env:PRAISONAI_PYTHON) { $Python = $env:PRAISONAI_PYTHON }
 if ($env:PRAISONAI_DRY_RUN -eq "1") { $DryRun = $true }
 
@@ -80,16 +82,18 @@ function Show-Help {
     Write-Host "  -Version VERSION    Install specific version (default: latest)"
     Write-Host "  -Extras EXTRAS      Install with extras (e.g., ui,chat,code)"
     Write-Host "  -NoVenv             Skip virtual environment creation"
+    Write-Host "  -NoOnboard          Skip interactive onboarding after install"
     Write-Host "  -Python PATH        Use specific Python executable"
     Write-Host "  -DryRun             Print what would happen without making changes"
     Write-Host "  -Help               Show this help message"
     Write-Host ""
     Write-Host "Environment variables:"
-    Write-Host "  PRAISONAI_VERSION    Specific version to install"
-    Write-Host "  PRAISONAI_EXTRAS     Comma-separated extras"
-    Write-Host "  PRAISONAI_SKIP_VENV  Skip virtual environment (1 to enable)"
-    Write-Host "  PRAISONAI_PYTHON     Path to Python executable"
-    Write-Host "  PRAISONAI_DRY_RUN    Print what would happen (1 to enable)"
+    Write-Host "  PRAISONAI_VERSION     Specific version to install"
+    Write-Host "  PRAISONAI_EXTRAS      Comma-separated extras"
+    Write-Host "  PRAISONAI_SKIP_VENV   Skip virtual environment (1 to enable)"
+    Write-Host "  PRAISONAI_NO_ONBOARD  Skip interactive onboarding (1 to enable)"
+    Write-Host "  PRAISONAI_PYTHON      Path to Python executable"
+    Write-Host "  PRAISONAI_DRY_RUN     Print what would happen (1 to enable)"
     Write-Host ""
     Write-Host "Examples:"
     Write-Host "  # Basic install"
@@ -419,6 +423,51 @@ function Show-NextSteps {
     Write-Host ""
 }
 
+# Run interactive onboarding after installation
+function Invoke-Onboarding {
+    param([string]$VenvPath)
+    
+    # Skip onboarding if requested
+    if ($NoOnboard) {
+        Write-Info "Skipping onboarding (-NoOnboard)"
+        return
+    }
+    
+    # Skip onboarding in dry run mode
+    if ($DryRun) {
+        Write-Info "Dry run mode — skipping onboarding"
+        return
+    }
+    
+    Write-Step "Starting interactive setup wizard..."
+    
+    # Determine python command
+    $pythonCmd = "python"
+    if ($VenvPath -and -not $NoVenv) {
+        $pythonCmd = "$VenvPath\Scripts\python.exe"
+    }
+    
+    # Fallback to system python if venv python doesn't exist
+    if (-not (Test-Path $pythonCmd)) {
+        $pythonCmd = "python"
+    }
+    
+    try {
+        # Run the setup wizard
+        & $pythonCmd -m praisonai setup
+        Write-Success "Setup wizard completed successfully!"
+        Write-Host ""
+        Write-Host "You're all set! 🎉" -ForegroundColor Green
+        Write-Host ""
+    } catch {
+        Write-Warning "Setup wizard failed or was cancelled."
+        Write-Host ""
+        Write-Host "Don't worry! You can run the setup wizard anytime with:" -ForegroundColor Yellow
+        Write-Host "  praisonai setup" -ForegroundColor Cyan
+        Write-Host ""
+    }
+}
+
 # Main
 function Main {
     if ($Help) {
@@ -451,6 +500,9 @@ function Main {
     
     # Verify installation
     Test-Installation $venvPath
+    
+    # Run interactive onboarding
+    Invoke-Onboarding $venvPath
     
     # Show next steps
     Show-NextSteps $venvPath

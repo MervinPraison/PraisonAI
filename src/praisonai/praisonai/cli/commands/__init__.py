@@ -20,6 +20,7 @@ __all__ = [
     'lsp_app',
     'diag_app',
     'doctor_app',
+    'setup_app',
     'acp_app',
     'mcp_app',
     'rag_app',
@@ -72,6 +73,9 @@ def __getattr__(name: str):
     elif name == 'doctor_app':
         from .doctor import app as doctor_app
         return doctor_app
+    elif name == 'setup_app':
+        from .setup import app as setup_app
+        return setup_app
     elif name == 'acp_app':
         from .acp import app as acp_app
         return acp_app
