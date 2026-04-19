@@ -76,6 +76,163 @@ def _unregister_cleanup_handlers(original_sigint, original_sigterm):
     # so we keep the atexit handler but check if process list is empty
 
 
+def _auto_start_services(console, host: str):
+    """Auto-start PraisonAI services like the 'up' command does."""
+    import os
+    import sys
+    
+    # Services to start
+    services = [
+        ("flow", 7860),
+        ("claw", 8082),
+        ("ui", 8081)
+    ]
+    
+    for service_name, service_port in services:
+        # Check if service is already running
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        check_host = "127.0.0.1" if host == "0.0.0.0" else host
+        try:
+            connection_result = sock.connect_ex((check_host, service_port))
+            if connection_result == 0:
+                console.print(f"[yellow]✓ {service_name} already running on port {service_port}[/yellow]")
+                sock.close()
+                continue
+        except OSError:
+            pass
+        finally:
+            sock.close()
+        
+        # Start the service
+        console.print(f"[cyan]Starting {service_name} on port {service_port}...[/cyan]")
+        try:
+            # Create log directory for troubleshooting
+            log_dir = Path.home() / ".praisonai" / "unified" / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_file = log_dir / f"{service_name}.log"
+            
+            log_handle = open(log_file, "a", encoding="utf-8")
+            try:
+                if service_name == "flow":
+                    proc = subprocess.Popen([
+                        sys.executable, "-m", "praisonai", "flow", 
+                        "--port", str(service_port), "--host", host, "--no-open"
+                    ], stdout=log_handle, stderr=subprocess.STDOUT)
+                elif service_name == "claw":
+                    proc = subprocess.Popen([
+                        sys.executable, "-m", "praisonai", "claw",
+                        "--port", str(service_port), "--host", host
+                    ], stdout=log_handle, stderr=subprocess.STDOUT)
+                elif service_name == "ui":
+                    proc = subprocess.Popen([
+                        sys.executable, "-m", "praisonai", "ui",
+                        "--port", str(service_port), "--host", host
+                    ], stdout=log_handle, stderr=subprocess.STDOUT)
+                
+                # Track process for cleanup
+                _ACTIVE_PROCESSES.add(proc)
+                _PROCESS_LOG_HANDLES[proc] = log_handle
+                
+                # Wait briefly for service to start
+                time.sleep(1.5)
+                
+                # Check if process is still alive
+                if proc.poll() is not None:
+                    console.print(f"[red]✗ {service_name} failed to start (exit code: {proc.returncode})[/red]")
+                    console.print(f"[dim]Check log: {log_file}[/dim]")
+                    # Clean up failed process
+                    _ACTIVE_PROCESSES.discard(proc)
+                    if proc in _PROCESS_LOG_HANDLES:
+                        _PROCESS_LOG_HANDLES.pop(proc).close()
+                else:
+                    console.print(f"[green]✓ {service_name} started successfully[/green]")
+            except Exception:
+                log_handle.close()
+                raise
+                    
+        except Exception as e:
+            console.print(f"[red]✗ Failed to start {service_name}: {e}[/red]")
+
+
+def _run_aiui_dashboard(port: int, host: str, console):
+    """Run the aiui dashboard interface."""
+    console.print("[bold green]🦞 Starting aiui Dashboard...[/bold green]")
+    
+    try:
+        # Try to import and run aiui directly
+        import sys
+        import tempfile
+        import os
+        
+        # Create a temporary script for aiui dashboard
+        aiui_script = f'''
+import praisonaiui as aiui
+
+# Configure aiui for dashboard style
+aiui.set_style("dashboard")
+aiui.set_branding(title="PraisonAI Unified Dashboard", logo="🌟")
+
+# Set up pages for unified dashboard
+aiui.set_pages([
+    "chat", "agents", "memory", "knowledge", 
+    "skills", "sessions", "usage", "config", "logs"
+])
+
+# Register a simple reply handler
+@aiui.reply
+async def on_reply(message):
+    return f"Unified Dashboard: {{message.content}}"
+
+# Register a welcome message
+@aiui.welcome
+async def on_welcome():
+    return "Welcome to PraisonAI Unified Dashboard! 🌟"
+
+# Start aiui server
+if __name__ == "__main__":
+    import uvicorn
+    app = aiui.create_app()
+    uvicorn.run(app, host="{host}", port={port})
+'''
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write(aiui_script)
+            temp_script = f.name
+        
+        try:
+            console.print(f"[green]✓ Starting aiui dashboard on {host}:{port}[/green]")
+            
+            # Check if aiui is available first
+            result = subprocess.run([
+                sys.executable, "-c", "import praisonaiui"
+            ], capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                console.print("[red]Error: aiui package not installed.[/red]")
+                console.print("[yellow]Install with: pip install aiui[/yellow]")
+                return False
+            
+            # Run the aiui script
+            subprocess.run([sys.executable, temp_script])
+            
+        finally:
+            # Clean up temp file
+            try:
+                os.unlink(temp_script)
+            except:
+                pass
+        
+    except ImportError:
+        console.print("[red]Error: aiui package not installed.[/red]")
+        console.print("[yellow]Install with: pip install aiui[/yellow]")
+        return False
+    except Exception as e:
+        console.print(f"[red]Error running aiui dashboard: {e}[/red]")
+        return False
+    
+    return True
+
+
 def _generate_dashboard_html(host: str = "localhost") -> str:
     """Generate dashboard HTML with dynamic host configuration."""
     dashboard_html = """<!DOCTYPE html>
@@ -393,6 +550,8 @@ def unified(
     ctx: typer.Context,
     port: int = typer.Option(3000, "--port", "-p", help="Port to run unified dashboard on"),
     host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to (use 0.0.0.0 to expose remotely)"),
+    auto_start: bool = typer.Option(True, "--auto-start/--no-auto-start", help="Auto-start all services"),
+    aiui: bool = typer.Option(False, "--aiui", help="Use aiui dashboard interface (experimental)"),
 ):
     """
     Launch the PraisonAI Unified Dashboard.
@@ -402,21 +561,29 @@ def unified(
     - Claw Dashboard (Full UI) - port 8082  
     - Clean Chat UI - port 8081
     
-    This unified launcher allows you to:
-    1. Create agents visually using Flow Builder
-    2. Chat with agents using the Chat UI
-    3. Manage everything from Claw Dashboard
-    4. Connect external services like Telegram
+    This unified launcher:
+    1. Auto-starts all services by default (like 'praisonai up')
+    2. Creates agents visually using Flow Builder
+    3. Chats with agents using the Chat UI
+    4. Manages everything from Claw Dashboard
+    5. Connects external services like Telegram
+    6. Optionally uses aiui for enhanced dashboard experience
     
     Examples:
-        praisonai dashboard
+        praisonai dashboard                           # Auto-start all services
+        praisonai dashboard --no-auto-start          # Dashboard only (no auto-start)
         praisonai dashboard --port 9000 --host 0.0.0.0
+        praisonai dashboard --aiui                   # Use aiui interface (experimental)
     """
     if ctx.invoked_subcommand is not None:
         return
     
     from rich.console import Console
     console = Console()
+    
+    # Check for aiui mode first
+    if aiui:
+        return _run_aiui_dashboard(port, host, console)
     
     # Import optional dependencies inside function to avoid startup overhead
     try:
@@ -428,6 +595,13 @@ def unified(
         console.print(f"[yellow]Install with: pip install 'praisonai[api]'[/yellow]")
         console.print(f"[dim]Error details: {exc}[/dim]")
         raise typer.Abort()
+    
+    # Auto-start services if enabled
+    if auto_start:
+        console.print("[bold green]🚀 Auto-starting PraisonAI services...[/bold green]")
+        _auto_start_services(console, host)
+        console.print("[green]✅ Auto-start complete[/green]")
+        console.print()
     
     # Register cleanup handlers and save originals for restoration
     original_handlers = _register_cleanup_handlers()
@@ -554,6 +728,8 @@ def unified(
     console.print()
     console.print("[bold green]🌟 Starting PraisonAI Unified Dashboard[/bold green]")
     console.print(f"[dim]Unified interface on {host}:{port}[/dim]")
+    if auto_start:
+        console.print("[dim]Services auto-started and dashboard ready[/dim]")
     console.print("[dim]Access Flow Builder, Claw Dashboard, and Chat UI from one place[/dim]")
     console.print()
     
