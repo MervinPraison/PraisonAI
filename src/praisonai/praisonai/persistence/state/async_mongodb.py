@@ -11,6 +11,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from .base import StateStore
+from ..._async_bridge import run_sync
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,7 @@ class AsyncMongoDBStateStore(StateStore):
     
     def get(self, key: str) -> Optional[Dict[str, Any]]:
         """Sync wrapper for get."""
-        return asyncio.get_event_loop().run_until_complete(self.async_get(key))
+        return run_sync(self.async_get(key))
     
     async def async_set(self, key: str, value: Dict[str, Any], ttl: Optional[int] = None) -> bool:
         """Set state by key with optional TTL asynchronously."""
@@ -124,7 +125,7 @@ class AsyncMongoDBStateStore(StateStore):
     
     def set(self, key: str, value: Dict[str, Any], ttl: Optional[int] = None) -> bool:
         """Sync wrapper for set."""
-        return asyncio.get_event_loop().run_until_complete(self.async_set(key, value, ttl))
+        return run_sync(self.async_set(key, value, ttl))
     
     async def async_delete(self, key: str) -> bool:
         """Delete state by key asynchronously."""
@@ -136,7 +137,7 @@ class AsyncMongoDBStateStore(StateStore):
     
     def delete(self, key: str) -> bool:
         """Sync wrapper for delete."""
-        return asyncio.get_event_loop().run_until_complete(self.async_delete(key))
+        return run_sync(self.async_delete(key))
     
     async def async_exists(self, key: str) -> bool:
         """Check if key exists asynchronously."""
@@ -148,7 +149,7 @@ class AsyncMongoDBStateStore(StateStore):
     
     def exists(self, key: str) -> bool:
         """Sync wrapper for exists."""
-        return asyncio.get_event_loop().run_until_complete(self.async_exists(key))
+        return run_sync(self.async_exists(key))
     
     async def async_list_keys(self, prefix: Optional[str] = None) -> List[str]:
         """List all keys with optional prefix filter asynchronously."""
@@ -167,7 +168,7 @@ class AsyncMongoDBStateStore(StateStore):
     
     def list_keys(self, prefix: Optional[str] = None) -> List[str]:
         """Sync wrapper for list_keys."""
-        return asyncio.get_event_loop().run_until_complete(self.async_list_keys(prefix))
+        return run_sync(self.async_list_keys(prefix))
     
     async def async_clear(self, prefix: Optional[str] = None) -> int:
         """Clear all keys with optional prefix filter asynchronously."""
@@ -183,7 +184,7 @@ class AsyncMongoDBStateStore(StateStore):
     
     def clear(self, prefix: Optional[str] = None) -> int:
         """Sync wrapper for clear."""
-        return asyncio.get_event_loop().run_until_complete(self.async_clear(prefix))
+        return run_sync(self.async_clear(prefix))
     
     async def async_close(self) -> None:
         """Close the connection."""
@@ -197,4 +198,4 @@ class AsyncMongoDBStateStore(StateStore):
     def close(self) -> None:
         """Sync wrapper for close."""
         if self._client:
-            asyncio.get_event_loop().run_until_complete(self.async_close())
+            run_sync(self.async_close())

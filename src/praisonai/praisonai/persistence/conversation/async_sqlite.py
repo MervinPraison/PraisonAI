@@ -12,6 +12,7 @@ import time
 from typing import List, Optional
 
 from .base import ConversationStore, ConversationSession, ConversationMessage, validate_identifier
+from ..._async_bridge import run_sync
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
     
     def create_session(self, session: ConversationSession) -> ConversationSession:
         """Sync wrapper for create_session."""
-        return asyncio.get_event_loop().run_until_complete(
+        return run_sync(
             self.async_create_session(session)
         )
     
@@ -146,7 +147,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
     
     def get_session(self, session_id: str) -> Optional[ConversationSession]:
         """Sync wrapper for get_session."""
-        return asyncio.get_event_loop().run_until_complete(
+        return run_sync(
             self.async_get_session(session_id)
         )
     
@@ -170,7 +171,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
     
     def update_session(self, session: ConversationSession) -> ConversationSession:
         """Sync wrapper for update_session."""
-        return asyncio.get_event_loop().run_until_complete(
+        return run_sync(
             self.async_update_session(session)
         )
     
@@ -189,7 +190,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
     
     def delete_session(self, session_id: str) -> bool:
         """Sync wrapper for delete_session."""
-        return asyncio.get_event_loop().run_until_complete(
+        return run_sync(
             self.async_delete_session(session_id)
         )
     
@@ -247,7 +248,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
         offset: int = 0
     ) -> List[ConversationSession]:
         """Sync wrapper for list_sessions."""
-        return asyncio.get_event_loop().run_until_complete(
+        return run_sync(
             self.async_list_sessions(user_id, agent_id, limit, offset)
         )
     
@@ -271,7 +272,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
     
     def add_message(self, session_id: str, message: ConversationMessage) -> ConversationMessage:
         """Sync wrapper for add_message."""
-        return asyncio.get_event_loop().run_until_complete(
+        return run_sync(
             self.async_add_message(session_id, message)
         )
     
@@ -329,7 +330,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
         after: Optional[float] = None
     ) -> List[ConversationMessage]:
         """Sync wrapper for get_messages."""
-        return asyncio.get_event_loop().run_until_complete(
+        return run_sync(
             self.async_get_messages(session_id, limit, before, after)
         )
     
@@ -355,7 +356,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
     
     def delete_messages(self, session_id: str, message_ids: Optional[List[str]] = None) -> int:
         """Sync wrapper for delete_messages."""
-        return asyncio.get_event_loop().run_until_complete(
+        return run_sync(
             self.async_delete_messages(session_id, message_ids)
         )
     
@@ -369,4 +370,4 @@ class AsyncSQLiteConversationStore(ConversationStore):
     def close(self) -> None:
         """Sync wrapper for close."""
         if self._conn:
-            asyncio.get_event_loop().run_until_complete(self.async_close())
+            run_sync(self.async_close())

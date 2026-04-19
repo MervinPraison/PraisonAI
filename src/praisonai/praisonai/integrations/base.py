@@ -59,9 +59,6 @@ class BaseCLIIntegration(ABC):
                     yield line
     """
     
-    # Class-level cache for availability checks (shared across instances)
-    _availability_cache: Dict[str, bool] = {}
-    
     def __init__(self, workspace: str = ".", timeout: int = 300):
         """
         Initialize the CLI integration.
@@ -72,6 +69,7 @@ class BaseCLIIntegration(ABC):
         """
         self.workspace = workspace
         self.timeout = timeout
+        self._availability: Optional[bool] = None
     
     @property
     @abstractmethod
@@ -91,14 +89,14 @@ class BaseCLIIntegration(ABC):
         """
         Check if the CLI tool is installed and available.
         
-        Uses class-level caching to avoid repeated filesystem checks.
+        Uses instance-level caching to avoid repeated filesystem checks.
         
         Returns:
             bool: True if the CLI is available, False otherwise
         """
-        if self.cli_command not in self._availability_cache:
-            self._availability_cache[self.cli_command] = shutil.which(self.cli_command) is not None
-        return self._availability_cache[self.cli_command]
+        if self._availability is None:
+            self._availability = shutil.which(self.cli_command) is not None
+        return self._availability
     
     @abstractmethod
     async def execute(self, prompt: str, **options) -> str:
