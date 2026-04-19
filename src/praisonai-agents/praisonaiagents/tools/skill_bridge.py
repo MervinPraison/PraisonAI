@@ -1,9 +1,12 @@
 """Skill Import Bridge — migrates OpenClaw-style skill files to PraisonAI tools.
 
-Parses SKILL.md manifests and Python tool definitions from OpenClaw's
-directory structure and converts them into PraisonAI @tool-decorated functions.
+.. deprecated::
+   This module duplicates :mod:`praisonaiagents.skills.discovery` and predates
+   the Agent Skills spec. New code should use ``praisonaiagents.skills``
+   (``SkillManager``, ``discover_skills``). Kept for one release for backward
+   compatibility; scheduled for removal.
 
-Usage::
+Usage (legacy)::
 
     from praisonaiagents.tools.skill_bridge import import_skill, scan_skills
 
@@ -13,6 +16,13 @@ Usage::
     # Scan a skills directory
     report = scan_skills("/path/to/openclaw/skills/")
 """
+
+import warnings as _warnings
+_warnings.warn(
+    "praisonaiagents.tools.skill_bridge is deprecated; use praisonaiagents.skills instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 import ast
 import logging

@@ -187,20 +187,59 @@ class TestValidateMetadata:
         assert len(errors) > 0
         assert any("description" in e.lower() for e in errors)
     
-    def test_unexpected_fields_rejected(self):
-        """Test that unexpected fields are rejected."""
+    def test_unexpected_fields_rejected_strict(self):
+        """Strict mode: unexpected fields produce errors."""
         from praisonaiagents.skills.validator import validate_metadata
-        
+
         metadata = {
             "name": "test-skill",
             "description": "A test skill",
             "unknown-field": "value"
         }
-        
-        errors = validate_metadata(metadata)
-        
+
+        errors = validate_metadata(metadata, strict=True)
+
         assert len(errors) > 0
         assert any("unexpected" in e.lower() or "unknown-field" in e for e in errors)
+
+    def test_unexpected_fields_allowed_lenient_default(self):
+        """Default mode: unknown fields are allowed (spec evolution)."""
+        from praisonaiagents.skills.validator import validate_metadata
+
+        metadata = {
+            "name": "test-skill",
+            "description": "A test skill",
+            "unknown-field": "value",
+        }
+
+        errors = validate_metadata(metadata)
+
+        assert errors == []
+
+    def test_claude_code_extended_fields_accepted(self):
+        """Claude Code frontmatter extensions must validate clean."""
+        from praisonaiagents.skills.validator import validate_metadata
+
+        metadata = {
+            "name": "deploy",
+            "description": "Deploy the app.",
+            "when_to_use": "When the user asks to deploy.",
+            "disable-model-invocation": True,
+            "user-invocable": True,
+            "argument-hint": "[target] [env]",
+            "model": "claude-opus-4",
+            "effort": "high",
+            "context": "fork",
+            "agent": "Explore",
+            "hooks": {"post": "notify"},
+            "paths": ["*.py", "deploy/**"],
+            "shell": "bash",
+            "allowed-tools": "Read Grep",
+        }
+
+        errors = validate_metadata(metadata, strict=True)
+
+        assert errors == [], f"unexpected errors: {errors}"
 
 
 class TestValidate:

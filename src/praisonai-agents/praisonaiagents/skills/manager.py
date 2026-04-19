@@ -6,6 +6,8 @@ from .models import SkillMetadata
 from .discovery import discover_skills
 from .loader import SkillLoader, LoadedSkill
 from .prompt import generate_skills_xml
+from .substitution import render_skill_body
+from .shell_render import render_shell_blocks
 
 
 class SkillManager:
@@ -121,12 +123,82 @@ class SkillManager:
     def get_available_skills(self) -> List[SkillMetadata]:
         """Get metadata for all available skills.
 
-        This is used for system prompt injection.
+        This is used for system prompt injection. Skills with
+        ``disable-model-invocation: true`` are omitted so the LLM never
+        sees them and cannot auto-trigger them.
+        """
+        return [
+            skill.metadata
+            for skill in self._skills.values()
+            if not getattr(skill.properties, "disable_model_invocation", False)
+        ]
+
+    def get_user_invocable_skills(self) -> List[LoadedSkill]:
+        """Return skills the *user* may invoke via slash-commands.
+
+        Skills with ``user-invocable: false`` are excluded.
+        """
+        return [
+            s for s in self._skills.values()
+            if getattr(s.properties, "user_invocable", True)
+        ]
+
+    def get_allowed_tools(self, name: str) -> List[str]:
+        """Return the ``allowed-tools`` list for a skill as a list of names.
+
+        Accepts either a YAML list or a whitespace-separated string (Claude
+        Code accepts both forms). Unknown skill -> ``[]``.
+        """
+        skill = self.get_skill(name)
+        if skill is None:
+            return []
+        raw = getattr(skill.properties, "allowed_tools", None)
+        if raw is None:
+            return []
+        if isinstance(raw, (list, tuple)):
+            return [str(x) for x in raw]
+        if isinstance(raw, str):
+            return raw.split()
+        return []
+
+    def invoke(
+        self,
+        name: str,
+        raw_args: str = "",
+        session_id: Optional[str] = None,
+        shell_exec: bool = False,
+    ) -> Optional[str]:
+        """Render a skill body into a ready-to-send prompt.
+
+        Substitutes ``$ARGUMENTS``, ``$N``, ``${PRAISON_SKILL_DIR}`` and
+        optionally runs ``!`cmd` `` inline shell blocks when ``shell_exec``
+        is True.
 
         Returns:
-            List of SkillMetadata instances
+            Rendered body, or None if the skill does not exist or is not
+            user-invocable.
         """
-        return [skill.metadata for skill in self._skills.values()]
+        skill = self.get_skill(name)
+        if skill is None:
+            return None
+        if not getattr(skill.properties, "user_invocable", True):
+            return None
+        if not skill.is_activated:
+            self.activate(skill)
+        if skill.instructions is None:
+            return None
+        skill_dir = str(skill.properties.path) if skill.properties.path else None
+        body = render_skill_body(
+            skill.instructions,
+            raw_args=raw_args,
+            skill_dir=skill_dir,
+            session_id=session_id,
+        )
+        shell = getattr(skill.properties, "shell", None) or "bash"
+        body = render_shell_blocks(
+            body, enabled=shell_exec, shell=shell, cwd=skill_dir,
+        )
+        return body
 
     def to_prompt(self) -> str:
         """Generate XML prompt for available skills.

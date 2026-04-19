@@ -40,6 +40,13 @@ __all__ = [
     "SkillLoader",
     # Manager
     "SkillManager",
+    # Invocation
+    "render_skill_body",
+    "render_shell_blocks",
+    "load_skill",
+    # Protocols
+    "SkillSourceProtocol",
+    "SkillInvocationPolicyProtocol",
 ]
 
 
@@ -72,5 +79,37 @@ def __getattr__(name: str):
     if name == "SkillManager":
         from .manager import SkillManager
         return SkillManager
-    
+
+    if name == "render_skill_body":
+        from .substitution import render_skill_body
+        return render_skill_body
+
+    if name == "render_shell_blocks":
+        from .shell_render import render_shell_blocks
+        return render_shell_blocks
+
+    if name in ("SkillSourceProtocol", "SkillInvocationPolicyProtocol"):
+        from .protocols import SkillSourceProtocol, SkillInvocationPolicyProtocol
+        return locals()[name]
+
+    if name == "load_skill":
+        # Fixes G12: praisonai.capabilities.skills.skill_load import target.
+        # Returns a LoadedSkill (metadata + activated instructions) by name,
+        # searching provided or default skill directories.
+        from .discovery import discover_skills
+        from .loader import SkillLoader
+
+        def load_skill(skill_name: str, skill_dirs=None):
+            props_list = discover_skills(skill_dirs, include_defaults=True)
+            for props in props_list:
+                if props.name == skill_name and props.path is not None:
+                    loader = SkillLoader()
+                    loaded = loader.load_metadata(str(props.path))
+                    if loaded is not None:
+                        loader.activate(loaded)
+                    return loaded
+            return None
+
+        return load_skill
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

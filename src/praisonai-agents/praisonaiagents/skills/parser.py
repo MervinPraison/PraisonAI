@@ -2,7 +2,6 @@
 
 from pathlib import Path
 from typing import Optional, Tuple
-import re
 
 from .models import ParseError, ValidationError, SkillProperties
 
@@ -63,57 +62,20 @@ def parse_frontmatter(content: str) -> Tuple[dict, str]:
 
 
 def _parse_yaml(yaml_str: str) -> dict:
-    """Parse YAML string to dictionary.
-    
-    Uses a simple parser to avoid strictyaml dependency.
-    Falls back to yaml if available.
-    
-    Args:
-        yaml_str: YAML string to parse
-        
-    Returns:
-        Parsed dictionary
+    """Parse YAML frontmatter to a dictionary.
+
+    Requires PyYAML. Raises ParseError with a clear install hint when
+    PyYAML is missing so extended frontmatter (lists, nested keys, bools)
+    parses correctly.
     """
-    # Try to use PyYAML if available
     try:
-        import yaml
-        return yaml.safe_load(yaml_str) or {}
-    except ImportError:
-        pass
-    
-    # Simple fallback parser for basic YAML
-    result = {}
-    current_key = None
-    current_dict = None
-    
-    for line in yaml_str.strip().split("\n"):
-        if not line.strip():
-            continue
-            
-        # Check for nested dict
-        if line.startswith("  ") and current_dict is not None:
-            match = re.match(r"^\s+(\w+):\s*(.*)$", line)
-            if match:
-                key, value = match.groups()
-                current_dict[key] = value.strip().strip('"').strip("'")
-            continue
-        
-        # Top-level key
-        match = re.match(r"^(\S+):\s*(.*)$", line)
-        if match:
-            key, value = match.groups()
-            value = value.strip()
-            
-            if not value:
-                # Could be start of nested dict
-                result[key] = {}
-                current_key = key
-                current_dict = result[key]
-            else:
-                result[key] = value.strip('"').strip("'")
-                current_dict = None
-    
-    return result
+        import yaml  # type: ignore
+    except ImportError as exc:  # pragma: no cover - env-dependent
+        raise ParseError(
+            "PyYAML is required to parse SKILL.md frontmatter. "
+            "Install it with: pip install PyYAML"
+        ) from exc
+    return yaml.safe_load(yaml_str) or {}
 
 
 def read_properties(skill_dir: Path) -> SkillProperties:
@@ -154,6 +116,13 @@ def read_properties(skill_dir: Path) -> SkillProperties:
     if not isinstance(description, str) or not description.strip():
         raise ValidationError("Field 'description' must be a non-empty string")
 
+    def _coerce_bool(v, default=False):
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            return v.strip().lower() in ("true", "yes", "1", "on")
+        return default
+
     return SkillProperties(
         name=name.strip(),
         description=description.strip(),
@@ -162,4 +131,16 @@ def read_properties(skill_dir: Path) -> SkillProperties:
         allowed_tools=metadata.get("allowed-tools"),
         metadata=metadata.get("metadata") or {},
         path=skill_dir,
+        # Claude Code extensions
+        when_to_use=metadata.get("when_to_use"),
+        disable_model_invocation=_coerce_bool(metadata.get("disable-model-invocation"), False),
+        user_invocable=_coerce_bool(metadata.get("user-invocable"), True),
+        argument_hint=metadata.get("argument-hint"),
+        model=metadata.get("model"),
+        effort=metadata.get("effort"),
+        context=metadata.get("context"),
+        agent=metadata.get("agent"),
+        hooks=metadata.get("hooks") if isinstance(metadata.get("hooks"), dict) else None,
+        paths=metadata.get("paths"),
+        shell=metadata.get("shell"),
     )

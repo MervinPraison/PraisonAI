@@ -80,24 +80,73 @@ def skills_create(
 
 @app.command("install")
 def skills_install(
-    source: str = typer.Argument(..., help="Skill source (path or URL)"),
+    source: str = typer.Argument(..., help="Skill source (local path or https:// git URL)"),
+    dest: str = typer.Option(None, "--dest", "-d", help="Install destination (defaults to ~/.praisonai/skills)"),
 ):
-    """Install a skill."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['skills', 'install', source]
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    """Install a skill from a local path or git URL.
+
+    Local path:  ``praisonai skills install ./my-skill``
+    Git URL:     ``praisonai skills install https://github.com/org/repo``
+    """
+    import shutil
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    from praisonaiagents.paths import get_skills_dir
+    from praisonaiagents.skills import validate as validate_skill
+
+    dest_root = Path(dest).expanduser() if dest else get_skills_dir()
+    dest_root.mkdir(parents=True, exist_ok=True)
+
+    def _install_from_dir(src: Path) -> Path:
+        target = dest_root / src.name
+        if target.exists():
+            typer.echo(f"Error: {target} already exists; remove it first.", err=True)
+            raise typer.Exit(1)
+        shutil.copytree(src, target)
+        return target
+
+    src_path = Path(source).expanduser()
+    installed: Path
+    if source.startswith(("http://", "https://", "git@")):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp) / "clone"
+            proc = subprocess.run(
+                ["git", "clone", "--depth=1", source, str(tmp_path)],
+                capture_output=True, text=True,
+            )
+            if proc.returncode != 0:
+                typer.echo(f"git clone failed: {proc.stderr.strip()}", err=True)
+                raise typer.Exit(1)
+            # If the clone contains a top-level SKILL.md, install as-is.
+            # Otherwise, install each direct subdirectory that looks like a skill.
+            if (tmp_path / "SKILL.md").exists():
+                installed = _install_from_dir(tmp_path)
+            else:
+                installed_any = False
+                for child in tmp_path.iterdir():
+                    if child.is_dir() and (child / "SKILL.md").exists():
+                        _install_from_dir(child)
+                        installed_any = True
+                if not installed_any:
+                    typer.echo("No SKILL.md found in clone.", err=True)
+                    raise typer.Exit(1)
+                typer.echo(f"Installed skills to {dest_root}")
+                return
+    elif src_path.exists() and src_path.is_dir():
+        installed = _install_from_dir(src_path)
+    else:
+        typer.echo(f"Unknown source (not a dir, not a URL): {source}", err=True)
+        raise typer.Exit(1)
+
+    errors = validate_skill(installed)
+    if errors:
+        typer.echo(f"Installed at {installed} but validation found issues:", err=True)
+        for e in errors:
+            typer.echo(f"  - {e}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"Installed: {installed}")
 
 
 @app.command("search")

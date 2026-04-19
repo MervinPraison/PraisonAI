@@ -1236,6 +1236,10 @@ class AgentsGenerator:
                 except ImportError:
                     self.logger.warning("OutputConfig not available, streaming disabled")
             
+            # G16: YAML `skills:` key. Accepts a list of paths, a single path
+            # string, or a full SkillsConfig dict (paths/dirs/auto_discover).
+            agent_skills = details.get('skills')
+
             agent = PraisonAgent(
                 name=role_filled,
                 role=role_filled,
@@ -1252,6 +1256,7 @@ class AgentsGenerator:
                 guardrails=guardrails_config,
                 approval=approval_config,
                 output=output_config,
+                skills=agent_skills,
             )
             
             if self.agent_callback:

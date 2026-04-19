@@ -1052,7 +1052,7 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
         if skills is None:
             _skills_config = None
         elif isinstance(skills, list):
-            _skills_config = SkillsConfig(sources=skills)
+            _skills_config = SkillsConfig(paths=skills)
         elif isinstance(skills, SkillsConfig):
             _skills_config = skills
         else:
@@ -1064,10 +1064,12 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
                 string_mode="path_as_source",
                 default=None,
             )
+        _skills_auto_discover = False
         if _skills_config is not None:
             if isinstance(_skills_config, SkillsConfig):
                 _skills = _skills_config.paths
                 skills_dirs = _skills_config.dirs
+                _skills_auto_discover = bool(_skills_config.auto_discover)
             elif isinstance(_skills_config, list):
                 _skills = _skills_config
         
@@ -1831,6 +1833,7 @@ Your Goal: {self.goal}
         # Agent Skills configuration (lazy loaded for zero performance impact)
         self._skills = _skills
         self._skills_dirs = skills_dirs
+        self._skills_auto_discover = _skills_auto_discover
         self._skill_manager = None  # Lazy loaded
         self._skills_initialized = False
 
@@ -2217,31 +2220,50 @@ Summary:"""
     @property
     def skill_manager(self) -> Optional[Any]:
         """Lazily initialize SkillManager only when skills are accessed."""
-        if self._skill_manager is None and (self._skills or self._skills_dirs):
+        auto_discover = bool(getattr(self, "_skills_auto_discover", False))
+        should_init = self._skill_manager is None and (
+            self._skills or self._skills_dirs or auto_discover
+        )
+        if should_init:
             from ..skills import SkillManager
             self._skill_manager = SkillManager()
-            
+
             # Add explicit skill paths
             if self._skills:
                 for skill_path in self._skills:
                     self._skill_manager.add_skill(skill_path)
-            
-            # Discover skills from directories
+
+            # Discover skills from directories; honour SkillsConfig.auto_discover
+            # by falling back to default locations when requested.
             if self._skills_dirs:
-                self._skill_manager.discover(self._skills_dirs, include_defaults=False)
-            
+                self._skill_manager.discover(
+                    self._skills_dirs,
+                    include_defaults=auto_discover,
+                )
+            elif auto_discover:
+                self._skill_manager.discover(include_defaults=True)
+
             self._skills_initialized = True
-            
+
             # Auto-add skill execution tools if not already present
             self._add_skill_tools()
         return self._skill_manager
     
     def _add_skill_tools(self):
         """Add tools required for skill execution (read_file, run_skill_script).
-        
+
         Uses lazy imports from praisonaiagents.tools to avoid performance impact
         when skills are not used.
+
+        Honours ``PRAISONAI_DISABLE_SKILL_TOOLS=1`` so hosts that do not want
+        the subprocess-backed ``run_skill_script`` tool auto-injected can opt
+        out without touching code.
         """
+        import os as _os
+        if _os.environ.get("PRAISONAI_DISABLE_SKILL_TOOLS") in ("1", "true", "True"):
+            logging.info("Skill helper tools disabled via PRAISONAI_DISABLE_SKILL_TOOLS")
+            return
+
         # Check if tools already include required capabilities
         tool_names = set()
         for tool in self.tools:

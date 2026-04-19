@@ -8,17 +8,26 @@ from .models import SkillMetadata
 from .parser import read_properties
 
 
+# G22: Claude Code-equivalent cap on combined description + when_to_use.
+MAX_COMBINED_DESCRIPTION_CHARS = 1536
+
+
+def _truncate(text: str, limit: int) -> str:
+    if text is None:
+        return ""
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "\u2026"
+
+
 def format_skill_for_prompt(skill: SkillMetadata) -> str:
     """Format a single skill as XML for system prompt.
 
-    Args:
-        skill: SkillMetadata instance
-
-    Returns:
-        XML string for the skill
+    The ``description`` is truncated at 1,536 characters (G22) to keep the
+    system-prompt listing bounded even with large skill libraries.
     """
     name = html.escape(skill.name)
-    description = html.escape(skill.description)
+    description = html.escape(_truncate(skill.description, MAX_COMBINED_DESCRIPTION_CHARS))
     location = html.escape(skill.location)
 
     return f"""  <skill>

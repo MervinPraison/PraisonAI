@@ -97,19 +97,20 @@ def skill_load(
     """
     try:
         from praisonaiagents.skills import load_skill
-        
-        skill = load_skill(skill_name, skill_dirs)
-        
-        if skill:
-            return SkillResult(
-                name=skill.name,
-                description=skill.description,
-                path=str(skill.path) if skill.path else None,
-                instructions=skill.instructions if hasattr(skill, 'instructions') else None,
-                metadata=metadata or {},
-            )
-        
-        return None
+
+        loaded = load_skill(skill_name, skill_dirs)
+
+        if loaded is None:
+            return None
+
+        props = loaded.properties
+        return SkillResult(
+            name=props.name,
+            description=props.description,
+            path=str(props.path) if props.path else None,
+            instructions=loaded.instructions,
+            metadata=metadata or {},
+        )
     except ImportError:
         return None
 

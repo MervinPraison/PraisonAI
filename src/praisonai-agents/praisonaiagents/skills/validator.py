@@ -12,12 +12,25 @@ MAX_DESCRIPTION_LENGTH = 1024
 MAX_COMPATIBILITY_LENGTH = 500
 
 ALLOWED_FIELDS = {
+    # Agent Skills spec (agentskills.io)
     "name",
     "description",
     "license",
     "allowed-tools",
     "metadata",
     "compatibility",
+    # Claude Code extensions (https://docs.claude.com/en/skills)
+    "when_to_use",
+    "disable-model-invocation",
+    "user-invocable",
+    "argument-hint",
+    "model",
+    "effort",
+    "context",
+    "agent",
+    "hooks",
+    "paths",
+    "shell",
 }
 
 
@@ -100,9 +113,18 @@ def _validate_compatibility(compatibility: str) -> List[str]:
     return errors
 
 
-def _validate_metadata_fields(metadata: dict) -> List[str]:
-    """Validate that only allowed fields are present."""
+def _validate_metadata_fields(metadata: dict, strict: bool = False) -> List[str]:
+    """Validate that only allowed fields are present.
+
+    Args:
+        metadata: Parsed frontmatter dict.
+        strict: If True, unknown fields produce errors. If False (default),
+            unknown fields are ignored (spec evolution + vendor extensions).
+    """
     errors = []
+
+    if not strict:
+        return errors
 
     extra_fields = set(metadata.keys()) - ALLOWED_FIELDS
     if extra_fields:
@@ -114,7 +136,7 @@ def _validate_metadata_fields(metadata: dict) -> List[str]:
     return errors
 
 
-def validate_metadata(metadata: dict, skill_dir: Optional[Path] = None) -> List[str]:
+def validate_metadata(metadata: dict, skill_dir: Optional[Path] = None, strict: bool = False) -> List[str]:
     """Validate parsed skill metadata.
 
     This is the core validation function that works on already-parsed metadata,
@@ -128,7 +150,7 @@ def validate_metadata(metadata: dict, skill_dir: Optional[Path] = None) -> List[
         List of validation error messages. Empty list means valid.
     """
     errors = []
-    errors.extend(_validate_metadata_fields(metadata))
+    errors.extend(_validate_metadata_fields(metadata, strict=strict))
 
     if "name" not in metadata:
         errors.append("Missing required field in frontmatter: name")
@@ -146,11 +168,12 @@ def validate_metadata(metadata: dict, skill_dir: Optional[Path] = None) -> List[
     return errors
 
 
-def validate(skill_dir: Path) -> List[str]:
+def validate(skill_dir: Path, strict: bool = False) -> List[str]:
     """Validate a skill directory.
 
     Args:
         skill_dir: Path to the skill directory
+        strict: If True, unknown frontmatter fields produce errors.
 
     Returns:
         List of validation error messages. Empty list means valid.
@@ -173,4 +196,4 @@ def validate(skill_dir: Path) -> List[str]:
     except ParseError as e:
         return [str(e)]
 
-    return validate_metadata(metadata, skill_dir)
+    return validate_metadata(metadata, skill_dir, strict=strict)

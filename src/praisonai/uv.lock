@@ -4808,13 +4808,14 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.6.20"
+version = "1.6.21"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },
     { name = "openai" },
     { name = "posthog" },
     { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "rich" },
 ]
 
@@ -4898,6 +4899,7 @@ requires-dist = [
     { name = "pymongo", marker = "extra == 'mongodb'", specifier = ">=4.6.3" },
     { name = "python-jose", extras = ["cryptography"], marker = "extra == 'auth'", specifier = ">=3.3.0" },
     { name = "python-multipart", marker = "extra == 'auth'", specifier = ">=0.0.6" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich" },
     { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.34.0" },
     { name = "uvicorn", marker = "extra == 'mcp'", specifier = ">=0.34.0" },

@@ -1,11 +1,14 @@
 """Skill discovery and directory scanning."""
 
+import logging
 from pathlib import Path
 from typing import List, Optional
 
 from .parser import find_skill_md, read_properties
 from .models import SkillProperties
 from ..paths import get_skills_dir, get_project_data_dir
+
+logger = logging.getLogger(__name__)
 
 
 def get_default_skill_dirs() -> List[Path]:
@@ -33,6 +36,14 @@ def get_default_skill_dirs() -> List[Path]:
     claude_skills = cwd / ".claude" / "skills"
     if claude_skills.exists() and claude_skills.is_dir():
         dirs.append(claude_skills)
+
+    # G10: Walk ancestor directories for nested `.claude/skills` or
+    # `.praisonai/skills` so monorepo packages pick up workspace skills.
+    for parent in cwd.parents:
+        for sub in (".praisonai/skills", ".claude/skills"):
+            p = parent / sub
+            if p.exists() and p.is_dir() and p not in dirs:
+                dirs.append(p)
 
     # User-level directory (use centralized path)
     user_skills = get_skills_dir()
@@ -98,12 +109,22 @@ def discover_skills(
 
                 try:
                     props = read_properties(item)
-                    skills.append(props)
-                except Exception:
-                    # Skip invalid skills
+                except Exception as exc:
+                    logger.warning(
+                        "Skipping invalid skill %s: %s", item, exc,
+                    )
                     continue
-        except PermissionError:
-            # Skip directories we can't read
+
+                # G9: log collisions so users can see which skill won
+                if any(p.name == props.name for p in skills):
+                    logger.info(
+                        "Skill '%s' at %s shadowed by earlier entry (precedence).",
+                        props.name, item,
+                    )
+                    continue
+                skills.append(props)
+        except PermissionError as exc:
+            logger.warning("Cannot read skills directory %s: %s", parent_dir, exc)
             continue
 
     return skills

@@ -34,9 +34,21 @@ class SkillProperties:
     description: str
     license: Optional[str] = None
     compatibility: Optional[str] = None
-    allowed_tools: Optional[str] = None
+    allowed_tools: Optional[object] = None  # str | list[str]
     metadata: dict = field(default_factory=dict)
     path: Optional[Path] = None
+    # Claude Code extended frontmatter (optional)
+    when_to_use: Optional[str] = None
+    disable_model_invocation: bool = False
+    user_invocable: bool = True
+    argument_hint: Optional[str] = None
+    model: Optional[str] = None
+    effort: Optional[str] = None
+    context: Optional[str] = None  # "fork" or None
+    agent: Optional[str] = None
+    hooks: Optional[dict] = None
+    paths: Optional[object] = None  # list[str] glob patterns
+    shell: Optional[str] = None  # "bash" | "powershell"
 
     def to_dict(self) -> dict:
         """Convert to dictionary, excluding None values and empty metadata."""
@@ -49,6 +61,28 @@ class SkillProperties:
             result["allowed-tools"] = self.allowed_tools
         if self.metadata:
             result["metadata"] = self.metadata
+        if self.when_to_use is not None:
+            result["when_to_use"] = self.when_to_use
+        if self.disable_model_invocation:
+            result["disable-model-invocation"] = True
+        if not self.user_invocable:
+            result["user-invocable"] = False
+        if self.argument_hint is not None:
+            result["argument-hint"] = self.argument_hint
+        if self.model is not None:
+            result["model"] = self.model
+        if self.effort is not None:
+            result["effort"] = self.effort
+        if self.context is not None:
+            result["context"] = self.context
+        if self.agent is not None:
+            result["agent"] = self.agent
+        if self.hooks is not None:
+            result["hooks"] = self.hooks
+        if self.paths is not None:
+            result["paths"] = self.paths
+        if self.shell is not None:
+            result["shell"] = self.shell
         return result
 
 
