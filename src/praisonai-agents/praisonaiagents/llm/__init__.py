@@ -9,8 +9,11 @@ import os
 # Ensure litellm telemetry is disabled before any imports
 os.environ["LITELLM_TELEMETRY"] = "False"
 
+import threading
+
 # Module-level cache for lazy-loaded classes
 _lazy_cache = {}
+_cache_lock = threading.Lock()
 
 
 def __getattr__(name):
@@ -18,14 +21,19 @@ def __getattr__(name):
     if name in _lazy_cache:
         return _lazy_cache[name]
     
-    if name == "LLM":
-        from .llm import LLM
-        _lazy_cache[name] = LLM
-        return LLM
-    elif name == "LLMContextLengthExceededException":
-        from .llm import LLMContextLengthExceededException
-        _lazy_cache[name] = LLMContextLengthExceededException
-        return LLMContextLengthExceededException
+    with _cache_lock:
+        # Double-check after acquiring lock
+        if name in _lazy_cache:
+            return _lazy_cache[name]
+            
+        if name == "LLM":
+            from .llm import LLM
+            _lazy_cache[name] = LLM
+            return LLM
+        elif name == "LLMContextLengthExceededException":
+            from .llm import LLMContextLengthExceededException
+            _lazy_cache[name] = LLMContextLengthExceededException
+            return LLMContextLengthExceededException
     elif name == "OpenAIClient":
         from .openai_client import OpenAIClient
         _lazy_cache[name] = OpenAIClient

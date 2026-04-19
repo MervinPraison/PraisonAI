@@ -2519,6 +2519,86 @@ class AgentTeam:
         self._plan_tasks = self.tasks.copy()
         # Keep plan tasks for results but note original tasks are preserved in _plan_tasks
 
+    # Resource Lifecycle Management
+    def close(self) -> None:
+        """Close all agent resources and cleanup connections.
+        
+        This method ensures proper cleanup of:
+        - Agent resources (connections, file handles)
+        - Shared memory connections (SQLite, ChromaDB, MongoDB)
+        - Context manager resources
+        """
+        from .._logging import get_logger
+        logger = get_logger(__name__)
+        
+        # Close all agents
+        for agent in self.agents:
+            try:
+                if hasattr(agent, 'close') and callable(agent.close):
+                    agent.close()
+                    logger.debug(f"Closed resources for agent: {agent.name}")
+            except Exception as e:
+                logger.warning(f"Agent {getattr(agent, 'name', 'unknown')} cleanup failed: {e}")
+        
+        # Close shared memory resources
+        if hasattr(self, 'shared_memory') and self.shared_memory:
+            try:
+                if hasattr(self.shared_memory, 'close') and callable(self.shared_memory.close):
+                    self.shared_memory.close()
+                    logger.debug("Closed shared memory resources")
+            except Exception as e:
+                logger.warning(f"Shared memory cleanup failed: {e}")
+        
+        # Close context manager if initialized
+        if hasattr(self, '_context_manager') and self._context_manager:
+            try:
+                if hasattr(self._context_manager, 'close') and callable(self._context_manager.close):
+                    self._context_manager.close()
+                    logger.debug("Closed context manager resources")
+            except Exception as e:
+                logger.warning(f"Context manager cleanup failed: {e}")
+
+    def __enter__(self):
+        """Context manager entry point for resource management."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit point - ensures resource cleanup."""
+        self.close()
+
+    async def __aenter__(self):
+        """Async context manager entry point for resource management."""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit point - ensures async resource cleanup."""
+        from .._logging import get_logger
+        logger = get_logger(__name__)
+        
+        # Close all agents async if they support it
+        for agent in self.agents:
+            try:
+                if hasattr(agent, 'aclose') and callable(agent.aclose):
+                    await agent.aclose()
+                    logger.debug(f"Async closed resources for agent: {agent.name}")
+                elif hasattr(agent, 'close') and callable(agent.close):
+                    agent.close()
+                    logger.debug(f"Closed resources for agent: {agent.name}")
+            except Exception as e:
+                logger.warning(f"Agent {getattr(agent, 'name', 'unknown')} async cleanup failed: {e}")
+        
+        # Close shared memory resources (async if supported)
+        if hasattr(self, 'shared_memory') and self.shared_memory:
+            try:
+                if hasattr(self.shared_memory, 'aclose') and callable(self.shared_memory.aclose):
+                    await self.shared_memory.aclose()
+                    logger.debug("Async closed shared memory resources")
+                elif hasattr(self.shared_memory, 'close') and callable(self.shared_memory.close):
+                    self.shared_memory.close()
+                    logger.debug("Closed shared memory resources")
+            except Exception as e:
+                logger.warning(f"Shared memory async cleanup failed: {e}")
+
 # Backward compatibility aliases (silent - no deprecation warnings)
 # AgentTeam is the primary name (v1.0+)
 # AgentManager, Agents, PraisonAIAgents are silent aliases
