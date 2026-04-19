@@ -27,13 +27,19 @@ export default function AgentForm({ agent, onSave, onCancel }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="agent-form-title"
+      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
+    >
       <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl" style={{ background: '#1a1d27', border: '1px solid #2a2d3e' }}>
         <form onSubmit={handleSubmit}>
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: '#2a2d3e' }}>
-            <h2 className="text-lg font-bold text-white">{agent ? 'Edit Agent' : 'New Agent'}</h2>
-            <button type="button" onClick={onCancel} className="p-1.5 rounded-lg hover:bg-white/10 transition-colors text-gray-400">
+            <h2 id="agent-form-title" className="text-lg font-bold text-white">{agent ? 'Edit Agent' : 'New Agent'}</h2>
+            <button type="button" onClick={onCancel} aria-label="Close agent form" className="p-1.5 rounded-lg hover:bg-white/10 transition-colors text-gray-400">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
@@ -86,9 +92,17 @@ export default function AgentForm({ agent, onSave, onCancel }) {
                 <div className="flex flex-wrap gap-3 pt-1">
                   {STATUSES.map(s => (
                     <label key={s} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="status"
+                        value={s}
+                        checked={form.status === s}
+                        onChange={() => set('status', s)}
+                        className="sr-only"
+                      />
                       <div
-                        onClick={() => set('status', s)}
-                        className="w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors cursor-pointer"
+                        aria-hidden="true"
+                        className="w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors"
                         style={{ borderColor: form.status === s ? '#6c63ff' : '#4b5563', background: form.status === s ? '#6c63ff' : 'transparent' }}
                       >
                         {form.status === s && <div className="w-1.5 h-1.5 rounded-full bg-white" />}

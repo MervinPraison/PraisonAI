@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Sidebar from './components/Sidebar'
 import ChatPanel from './components/ChatPanel'
 import AgentDetail from './components/AgentDetail'
@@ -18,10 +18,16 @@ export default function App() {
   const [activity, setActivity] = useState([])
   const [loading, setLoading] = useState(false)
 
+  // Track the current selectedId synchronously so async callbacks can detect stale responses.
+  const selectedIdRef = useRef(selectedId)
+  useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
+
   const fetchAgents = useCallback(async () => {
     try {
       const res = await fetch(`${API}/agents`)
+      if (!res.ok) throw new Error(`Fetch agents failed: ${res.status}`)
       const data = await res.json()
+      if (!Array.isArray(data)) throw new Error('Expected array of agents')
       setAgents(data)
       if (!selectedId && data.length > 0) setSelectedId(data[0].id)
     } catch (e) {
@@ -33,7 +39,9 @@ export default function App() {
     if (!id) return
     try {
       const res = await fetch(`${API}/agents/${id}/history`)
-      setHistory(await res.json())
+      if (!res.ok) return
+      const data = await res.json()
+      if (selectedIdRef.current === id) setHistory(data)
     } catch (e) { console.error(e) }
   }, [])
 
@@ -41,7 +49,9 @@ export default function App() {
     if (!id) return
     try {
       const res = await fetch(`${API}/agents/${id}/activity`)
-      setActivity(await res.json())
+      if (!res.ok) return
+      const data = await res.json()
+      if (selectedIdRef.current === id) setActivity(data)
     } catch (e) { console.error(e) }
   }, [])
 
@@ -69,17 +79,19 @@ export default function App() {
 
   const handleSendMessage = async (message) => {
     if (!selectedId) return
+    const agentId = selectedId  // capture before any await
     setLoading(true)
     try {
-      const res = await fetch(`${API}/agents/${selectedId}/chat`, {
+      const res = await fetch(`${API}/agents/${agentId}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message }),
       })
       if (!res.ok) { await reportError(res, 'Send message'); return }
       const entry = await res.json()
+      if (selectedIdRef.current !== agentId) return  // agent switched while awaiting
       setHistory(prev => [...prev, entry])
-      setActivity(prev => [...entry.activity, ...prev])
+      setActivity(prev => [...(Array.isArray(entry.activity) ? entry.activity : []), ...prev])
     } catch (e) {
       console.error(e)
       window.alert('Network error while sending message.')
@@ -90,45 +102,60 @@ export default function App() {
 
   const handleClearHistory = async () => {
     if (!selectedId) return
-    const res = await fetch(`${API}/agents/${selectedId}/history`, { method: 'DELETE' })
-    if (!res.ok) { await reportError(res, 'Clear history'); return }
-    setHistory([])
-    setActivity([])
+    try {
+      const res = await fetch(`${API}/agents/${selectedId}/history`, { method: 'DELETE' })
+      if (!res.ok) { await reportError(res, 'Clear history'); return }
+      setHistory([])
+      setActivity([])
+    } catch (e) {
+      console.error(e)
+      window.alert('Network error while clearing history.')
+    }
   }
 
   const handleSaveAgent = async (data) => {
-    if (editingAgent) {
-      const res = await fetch(`${API}/agents/${editingAgent.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      })
-      if (!res.ok) { await reportError(res, 'Update agent'); return }
-      const updated = await res.json()
-      setAgents(prev => prev.map(a => a.id === updated.id ? updated : a))
-    } else {
-      const res = await fetch(`${API}/agents`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      })
-      if (!res.ok) { await reportError(res, 'Create agent'); return }
-      const created = await res.json()
-      setAgents(prev => [...prev, created])
-      setSelectedId(created.id)
+    try {
+      if (editingAgent) {
+        const res = await fetch(`${API}/agents/${editingAgent.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        })
+        if (!res.ok) { await reportError(res, 'Update agent'); return }
+        const updated = await res.json()
+        setAgents(prev => prev.map(a => a.id === updated.id ? updated : a))
+      } else {
+        const res = await fetch(`${API}/agents`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        })
+        if (!res.ok) { await reportError(res, 'Create agent'); return }
+        const created = await res.json()
+        setAgents(prev => [...prev, created])
+        setSelectedId(created.id)
+      }
+      setShowForm(false)
+      setEditingAgent(null)
+    } catch (e) {
+      console.error(e)
+      window.alert('Network error while saving agent.')
     }
-    setShowForm(false)
-    setEditingAgent(null)
   }
 
   const handleDeleteAgent = async (id) => {
     if (!window.confirm('Delete this agent?')) return
-    const res = await fetch(`${API}/agents/${id}`, { method: 'DELETE' })
-    if (!res.ok) { await reportError(res, 'Delete agent'); return }
-    setAgents(prev => prev.filter(a => a.id !== id))
-    if (selectedId === id) {
-      const remaining = agents.filter(a => a.id !== id)
-      setSelectedId(remaining.length > 0 ? remaining[0].id : null)
+    try {
+      const res = await fetch(`${API}/agents/${id}`, { method: 'DELETE' })
+      if (!res.ok) { await reportError(res, 'Delete agent'); return }
+      setAgents(prev => prev.filter(a => a.id !== id))
+      if (selectedId === id) {
+        const remaining = agents.filter(a => a.id !== id)
+        setSelectedId(remaining.length > 0 ? remaining[0].id : null)
+      }
+    } catch (e) {
+      console.error(e)
+      window.alert('Network error while deleting agent.')
     }
   }
 
