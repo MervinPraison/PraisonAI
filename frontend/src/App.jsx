@@ -29,11 +29,11 @@ export default function App() {
       const data = await res.json()
       if (!Array.isArray(data)) throw new Error('Expected array of agents')
       setAgents(data)
-      if (!selectedId && data.length > 0) setSelectedId(data[0].id)
+      if (!selectedIdRef.current && data.length > 0) setSelectedId(data[0].id)
     } catch (e) {
       console.error('Failed to fetch agents', e)
     }
-  }, [selectedId])
+  }, [])
 
   const fetchHistory = useCallback(async (id) => {
     if (!id) return
@@ -62,7 +62,7 @@ export default function App() {
       fetchHistory(selectedId)
       fetchActivity(selectedId)
     }
-  }, [selectedId])
+  }, [selectedId, fetchHistory, fetchActivity])
 
   const handleSelectAgent = (id) => {
     setSelectedId(id)
@@ -260,6 +260,7 @@ export default function App() {
       {/* Agent form modal */}
       {showForm && (
         <AgentForm
+          key={editingAgent?.id ?? 'new'}
           agent={editingAgent}
           onSave={handleSaveAgent}
           onCancel={() => { setShowForm(false); setEditingAgent(null) }}

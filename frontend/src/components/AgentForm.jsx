@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 const LLM_MODELS = [
   'gpt-4o-mini',
@@ -10,13 +10,25 @@ const LLM_MODELS = [
 
 const STATUSES = ['active', 'auditing', 'decommissioned']
 
+const defaultForm = (agent) => ({
+  name: agent?.name || '',
+  instructions: agent?.instructions || '',
+  model: agent?.model || agent?.llm || 'gpt-4o-mini',
+  status: agent?.status || 'active',
+})
+
 export default function AgentForm({ agent, onSave, onCancel }) {
-  const [form, setForm] = useState({
-    name: agent?.name || '',
-    instructions: agent?.instructions || '',
-    model: agent?.model || agent?.llm || 'gpt-4o-mini',
-    status: agent?.status || 'active',
-  })
+  const [form, setForm] = useState(() => defaultForm(agent))
+
+  // Re-sync if the parent passes a different agent (e.g. switching edit targets).
+  useEffect(() => { setForm(defaultForm(agent)) }, [agent?.id])
+
+  // Dismiss on Escape key.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onCancel() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
 
   const set = (key, val) => setForm(prev => ({ ...prev, [key]: val }))
 
@@ -33,6 +45,7 @@ export default function AgentForm({ agent, onSave, onCancel }) {
       aria-modal="true"
       aria-labelledby="agent-form-title"
       style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
+      onClick={e => { if (e.target === e.currentTarget) onCancel() }}
     >
       <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl" style={{ background: '#1a1d27', border: '1px solid #2a2d3e' }}>
         <form onSubmit={handleSubmit}>
@@ -79,14 +92,24 @@ export default function AgentForm({ agent, onSave, onCancel }) {
             {/* Model + Status */}
             <div className="grid grid-cols-2 gap-4">
               <Field label="Model">
-                <select
+                <input
+                  type="text"
+                  list="llm-models"
                   value={form.model}
                   onChange={e => set('model', e.target.value)}
+                  placeholder="gpt-4o-mini"
                   className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
                   style={{ background: '#0f1117', border: '1px solid #2a2d3e', color: '#e2e8f0' }}
-                >
-                  {LLM_MODELS.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
+                  onFocus={e => e.target.style.borderColor = '#6c63ff'}
+                  onBlur={e => e.target.style.borderColor = '#2a2d3e'}
+                />
+                <datalist id="llm-models">
+                  {/* Prepend current value if it's not already in the list */}
+                  {!LLM_MODELS.includes(form.model) && form.model && (
+                    <option value={form.model} />
+                  )}
+                  {LLM_MODELS.map(m => <option key={m} value={m} />)}
+                </datalist>
               </Field>
               <Field label="Status">
                 <div className="flex flex-wrap gap-3 pt-1">
