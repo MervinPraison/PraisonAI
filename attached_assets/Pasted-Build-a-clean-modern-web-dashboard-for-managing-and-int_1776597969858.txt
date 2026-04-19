@@ -1,0 +1,168 @@
+Build a clean, modern web dashboard for managing and interacting with AI agents powered by PraisonAI. Use React + Vite for the frontend, and a simple Python FastAPI backend. Keep it simple but functional — no overengineering.
+
+---
+
+## TECH STACK
+- Frontend: React + Vite + TailwindCSS (CDN, no build step for Tailwind)
+- Backend: FastAPI (Python)
+- Storage: JSON files (no database needed yet, keep it simple)
+- API calls: fetch() to the FastAPI backend
+
+---
+
+## PROJECT STRUCTURE
+/backend
+  main.py          # FastAPI app
+  agents_store.json  # persists agent definitions
+  history_store.json # persists conversation history
+
+/frontend
+  index.html
+  src/
+    App.jsx
+    components/
+      Sidebar.jsx
+      AgentList.jsx
+      AgentDetail.jsx
+      ChatPanel.jsx
+      ActivityLog.jsx
+      AgentForm.jsx
+
+---
+
+## BACKEND (FastAPI - main.py)
+
+Create these REST endpoints:
+
+### Agents CRUD
+GET    /agents              → list all agents
+POST   /agents              → create agent
+PUT    /agents/{id}         → update agent
+DELETE /agents/{id}         → delete agent
+GET    /agents/{id}         → get single agent details
+
+### Chat
+POST   /agents/{id}/chat    → send message to agent, returns response + activity log
+GET    /agents/{id}/history → get full conversation history
+DELETE /agents/{id}/history → clear history
+
+### Activity
+GET    /agents/{id}/activity → get activity log (tools used, connections, actions)
+
+Each agent object should look like:
+{
+  "id": "uuid",
+  "name": "string",
+  "role": "string",
+  "instructions": "string",
+  "tools": ["list of tool names"],
+  "connections": ["other agent ids or external APIs"],
+  "llm": "string (e.g. gpt-4o-mini)",
+  "created_at": "timestamp",
+  "status": "active | inactive"
+}
+
+Each chat call should:
+1. Load agent config
+2. Run a PraisonAI agent with that config
+3. Capture stdout/tool calls/actions into an activity log entry
+4. Save message + response + activity to history
+5. Return all of it in one response
+
+---
+
+## FRONTEND LAYOUT
+
+Split into 3 columns:
+
+### LEFT SIDEBAR (narrow)
+- App logo/name "AgentOS"
+- List of all agents (name + status dot green/grey)
+- "+ New Agent" button at bottom
+- Click agent → loads it in center panel
+
+### CENTER PANEL (main)
+Two tabs at top: "Chat" | "Details"
+
+#### Chat tab:
+- Conversation history (bubbles: user right, agent left)
+- Each agent message has a collapsible "Activity" section below it showing:
+  - What tools were called
+  - What external connections were used
+  - Raw output / reasoning steps
+- Input box at bottom + Send button
+- "Clear History" button top right
+
+#### Details tab:
+- Shows agent config (name, role, instructions, LLM, tools, connections)
+- Edit button → opens inline form to modify
+- Shows stats: total messages, last active, tools used count
+
+### RIGHT PANEL (narrower)
+- "Activity Feed" — real-time log of what the selected agent has done
+- Each entry: timestamp, action type (tool_call, api_call, message, error), short description
+- Color coded: blue=tool, green=success, red=error, grey=message
+- Scrollable, newest at top
+
+---
+
+## AGENT FORM (Add/Edit modal or inline)
+Fields:
+- Name (text input)
+- Role (text input, short description)
+- Instructions / System Prompt (large textarea)
+- LLM Model (dropdown: gpt-4o-mini, gpt-4o, claude-3-haiku, claude-sonnet, gemini-flash)
+- Tools (multi-select checkboxes): web_search, code_interpreter, file_reader, calculator, wikipedia
+- Connections (text inputs, add/remove rows): label + URL or agent name
+- Status toggle (active/inactive)
+Save / Cancel buttons
+
+---
+
+## STYLE GUIDE
+- Dark theme (background #0f1117, panels #1a1d27, accent #6c63ff purple)
+- Clean sans-serif font (Inter from Google Fonts)
+- Subtle borders (#2a2d3e)
+- Agent status dot: green (#22c55e) active, grey (#6b7280) inactive
+- Activity log colors: blue (#3b82f6) tool, green (#22c55e) success, red (#ef4444) error
+- Rounded corners (8px), subtle shadows
+- Mobile responsive (sidebar collapses to hamburger on small screens)
+
+---
+
+## SAMPLE DATA
+Pre-populate agents_store.json with 2 example agents so the UI is not empty:
+
+Agent 1:
+- Name: "Research Agent"
+- Role: "Searches the web and summarizes information"
+- Tools: web_search, wikipedia
+- LLM: gpt-4o-mini
+
+Agent 2:
+- Name: "Code Agent"
+- Role: "Writes and explains code"
+- Tools: code_interpreter, calculator
+- LLM: gpt-4o-mini
+
+---
+
+## IMPORTANT CONSTRAINTS
+- No TypeScript (plain JSX only)
+- No Redux (useState/useEffect only)
+- No external UI libraries (just Tailwind utility classes)
+- JSON file storage only (no SQLite, no Postgres)
+- Keep each file under 200 lines if possible, split into components
+- PraisonAI backend calls should use praisonaiagents library
+- Add CORS middleware to FastAPI so frontend can call backend freely
+- Read OPENAI_API_KEY from environment variable (os.environ)
+
+---
+
+## DELIVERABLE
+- Working React frontend that talks to FastAPI backend
+- I can add/edit/delete agents via the UI
+- I can chat with any agent and see what it does
+- History is saved and persists across page refreshes
+- Activity log updates after each interaction
+- README with how to run both frontend and backend

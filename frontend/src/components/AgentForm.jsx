@@ -1,0 +1,247 @@
+import { useState } from 'react'
+
+const AVAILABLE_TOOLS = [
+  { id: 'web_search', label: 'Web Search', icon: '🔍' },
+  { id: 'code_interpreter', label: 'Code Interpreter', icon: '💻' },
+  { id: 'file_reader', label: 'File Reader', icon: '📄' },
+  { id: 'calculator', label: 'Calculator', icon: '🧮' },
+  { id: 'wikipedia', label: 'Wikipedia', icon: '📖' },
+]
+
+const LLM_MODELS = [
+  'gpt-4o-mini',
+  'gpt-4o',
+  'claude-3-haiku',
+  'claude-3-5-sonnet',
+  'gemini-1.5-flash',
+]
+
+export default function AgentForm({ agent, onSave, onCancel }) {
+  const [form, setForm] = useState({
+    name: agent?.name || '',
+    role: agent?.role || '',
+    instructions: agent?.instructions || '',
+    llm: agent?.llm || 'gpt-4o-mini',
+    tools: agent?.tools || [],
+    connections: agent?.connections || [],
+    status: agent?.status || 'active',
+  })
+  const [newConn, setNewConn] = useState('')
+
+  const set = (key, val) => setForm(prev => ({ ...prev, [key]: val }))
+
+  const toggleTool = (toolId) => {
+    set('tools', form.tools.includes(toolId)
+      ? form.tools.filter(t => t !== toolId)
+      : [...form.tools, toolId])
+  }
+
+  const addConnection = () => {
+    if (!newConn.trim()) return
+    set('connections', [...form.connections, newConn.trim()])
+    setNewConn('')
+  }
+
+  const removeConnection = (i) => {
+    set('connections', form.connections.filter((_, idx) => idx !== i))
+  }
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    if (!form.name.trim() || !form.role.trim()) return
+    onSave(form)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}>
+      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl" style={{ background: '#1a1d27', border: '1px solid #2a2d3e' }}>
+        <form onSubmit={handleSubmit}>
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: '#2a2d3e' }}>
+            <h2 className="text-lg font-bold text-white">{agent ? 'Edit Agent' : 'New Agent'}</h2>
+            <button type="button" onClick={onCancel} className="p-1.5 rounded-lg hover:bg-white/10 transition-colors text-gray-400">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <div className="px-6 py-5 space-y-5">
+            {/* Name + Role */}
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Name *">
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={e => set('name', e.target.value)}
+                  placeholder="Research Agent"
+                  required
+                  className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                  style={{ background: '#0f1117', border: '1px solid #2a2d3e', color: '#e2e8f0' }}
+                  onFocus={e => e.target.style.borderColor = '#6c63ff'}
+                  onBlur={e => e.target.style.borderColor = '#2a2d3e'}
+                />
+              </Field>
+              <Field label="Role *">
+                <input
+                  type="text"
+                  value={form.role}
+                  onChange={e => set('role', e.target.value)}
+                  placeholder="Searches the web..."
+                  required
+                  className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                  style={{ background: '#0f1117', border: '1px solid #2a2d3e', color: '#e2e8f0' }}
+                  onFocus={e => e.target.style.borderColor = '#6c63ff'}
+                  onBlur={e => e.target.style.borderColor = '#2a2d3e'}
+                />
+              </Field>
+            </div>
+
+            {/* Instructions */}
+            <Field label="Instructions / System Prompt">
+              <textarea
+                value={form.instructions}
+                onChange={e => set('instructions', e.target.value)}
+                placeholder="You are a helpful assistant that..."
+                rows={4}
+                className="w-full px-3 py-2.5 rounded-lg text-sm outline-none resize-none"
+                style={{ background: '#0f1117', border: '1px solid #2a2d3e', color: '#e2e8f0' }}
+                onFocus={e => e.target.style.borderColor = '#6c63ff'}
+                onBlur={e => e.target.style.borderColor = '#2a2d3e'}
+              />
+            </Field>
+
+            {/* LLM + Status */}
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="LLM Model">
+                <select
+                  value={form.llm}
+                  onChange={e => set('llm', e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                  style={{ background: '#0f1117', border: '1px solid #2a2d3e', color: '#e2e8f0' }}
+                >
+                  {LLM_MODELS.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </Field>
+              <Field label="Status">
+                <div className="flex gap-3 pt-1">
+                  {['active', 'inactive'].map(s => (
+                    <label key={s} className="flex items-center gap-2 cursor-pointer">
+                      <div
+                        onClick={() => set('status', s)}
+                        className="w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors cursor-pointer"
+                        style={{ borderColor: form.status === s ? '#6c63ff' : '#4b5563', background: form.status === s ? '#6c63ff' : 'transparent' }}
+                      >
+                        {form.status === s && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                      </div>
+                      <span className="text-sm" style={{ color: '#d1d5db' }}>{s}</span>
+                    </label>
+                  ))}
+                </div>
+              </Field>
+            </div>
+
+            {/* Tools */}
+            <Field label="Tools">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {AVAILABLE_TOOLS.map(tool => {
+                  const active = form.tools.includes(tool.id)
+                  return (
+                    <button
+                      key={tool.id}
+                      type="button"
+                      onClick={() => toggleTool(tool.id)}
+                      className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all"
+                      style={{
+                        background: active ? 'rgba(108,99,255,0.15)' : '#0f1117',
+                        border: `1px solid ${active ? '#6c63ff' : '#2a2d3e'}`,
+                        color: active ? '#818cf8' : '#9ca3af',
+                      }}
+                    >
+                      <span>{tool.icon}</span>
+                      <span>{tool.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </Field>
+
+            {/* Connections */}
+            <Field label="Connections">
+              <div className="space-y-2">
+                {form.connections.map((conn, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="flex-1 px-3 py-2 rounded-lg text-sm" style={{ background: '#0f1117', border: '1px solid #2a2d3e', color: '#d1d5db' }}>
+                      {conn}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeConnection(i)}
+                      className="p-1.5 rounded-lg hover:bg-red-500/20 transition-colors"
+                      style={{ color: '#ef4444' }}
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newConn}
+                    onChange={e => setNewConn(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addConnection())}
+                    placeholder="Agent name or API URL..."
+                    className="flex-1 px-3 py-2 rounded-lg text-sm outline-none"
+                    style={{ background: '#0f1117', border: '1px solid #2a2d3e', color: '#e2e8f0' }}
+                    onFocus={e => e.target.style.borderColor = '#6c63ff'}
+                    onBlur={e => e.target.style.borderColor = '#2a2d3e'}
+                  />
+                  <button
+                    type="button"
+                    onClick={addConnection}
+                    className="px-3 py-2 rounded-lg text-sm transition-colors"
+                    style={{ background: '#2a2d3e', color: '#d1d5db' }}
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+            </Field>
+          </div>
+
+          {/* Footer */}
+          <div className="flex gap-3 justify-end px-6 py-4 border-t" style={{ borderColor: '#2a2d3e' }}>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-5 py-2.5 rounded-xl text-sm font-medium transition-colors hover:bg-white/5"
+              style={{ border: '1px solid #2a2d3e', color: '#9ca3af' }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2.5 rounded-xl text-sm font-medium transition-all hover:opacity-90 active:scale-95"
+              style={{ background: '#6c63ff', color: 'white' }}
+            >
+              {agent ? 'Save Changes' : 'Create Agent'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+function Field({ label, children }) {
+  return (
+    <div>
+      <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: '#6b7280' }}>
+        {label}
+      </label>
+      {children}
+    </div>
+  )
+}

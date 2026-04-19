@@ -1,0 +1,24 @@
+[
+  {
+    "id": "agent-001",
+    "name": "Research Agent",
+    "role": "Searches the web and summarizes information",
+    "instructions": "You are a research assistant. Search the web and Wikipedia to find accurate, up-to-date information. Summarize findings clearly and concisely. Always cite your sources.",
+    "tools": ["web_search", "wikipedia"],
+    "connections": [],
+    "llm": "gpt-4o-mini",
+    "created_at": "2025-01-01T00:00:00Z",
+    "status": "active"
+  },
+  {
+    "id": "agent-002",
+    "name": "Code Agent",
+    "role": "Writes and explains code",
+    "instructions": "You are a coding assistant. Write clean, well-commented code. Explain how code works step by step. Help debug issues and suggest improvements.",
+    "tools": ["code_interpreter", "calculator"],
+    "connections": [],
+    "llm": "gpt-4o-mini",
+    "created_at": "2025-01-01T00:00:00Z",
+    "status": "active"
+  }
+]

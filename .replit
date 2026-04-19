@@ -10,6 +10,10 @@ packages = ["libxcrypt"]
 localPort = 5000
 externalPort = 80
 
+[[ports]]
+localPort = 8000
+externalPort = 8000
+
 [workflows]
 runButton = "Project"
 
@@ -22,17 +26,33 @@ author = "agent"
 task = "workflow.run"
 args = "Start application"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Backend API"
+
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "python run.py"
 waitForPort = 5000
 
+[[workflows.workflow]]
+name = "Backend API"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python backend/main.py"
+waitForPort = 8000
+
 [workflows.workflow.metadata]
-outputType = "webview"
+outputType = "console"
 
 [deployment]
 deploymentTarget = "autoscale"

@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AgentOS</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%236c63ff'/><text y='.9em' font-size='70' x='15' fill='white'>A</text></svg>" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0f1117',
+              panel: '#1a1d27',
+              accent: '#6c63ff',
+              border: '#2a2d3e',
+              'status-active': '#22c55e',
+              'status-inactive': '#6b7280',
+              'activity-tool': '#3b82f6',
+              'activity-success': '#22c55e',
+              'activity-error': '#ef4444',
+              'activity-message': '#6b7280',
+            },
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      body { background-color: #0f1117; color: #e2e8f0; font-family: 'Inter', sans-serif; }
+      ::-webkit-scrollbar { width: 4px; }
+      ::-webkit-scrollbar-track { background: #1a1d27; }
+      ::-webkit-scrollbar-thumb { background: #2a2d3e; border-radius: 2px; }
+      ::-webkit-scrollbar-thumb:hover { background: #6c63ff; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
