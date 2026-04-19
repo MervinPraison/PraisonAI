@@ -503,6 +503,12 @@ print_next_steps() {
         echo ""
     fi
     
+    echo "  Set up a messaging bot (Telegram / Discord / Slack / WhatsApp):"
+    echo -e "     ${CYAN}praisonai onboard${NC}"
+    echo ""
+    echo "  Open the dashboard UI:"
+    echo -e "     ${CYAN}praisonai claw${NC}    ${BOLD}→${NC} http://127.0.0.1:8082"
+    echo ""
     echo "  Quick start:"
     echo -e "     ${CYAN}python -c \"from praisonaiagents import Agent; Agent(name='test').start('Hello!')\"${NC}"
     echo ""
@@ -654,26 +660,28 @@ run_onboarding() {
     fi
 }
 
-# Offer bot onboarding after setup
+# Offer bot onboarding after setup (always prompts when a TTY is available;
+# default answer is Yes so curl|bash installs finish with a working bot).
 maybe_offer_bot_onboarding() {
     local venv_dir="$1"
-    
-    # Only run after praisonai setup completed interactively
-    [[ "$NO_ONBOARD" == "1" ]] && return 0
-    [[ "$NO_PROMPT" == "1" ]] && return 0
-    [[ "$DRY_RUN" == "1" ]] && return 0
-    [ -e /dev/tty ] || return 0
-    
-    local env_file="$HOME/.praisonai/.env"
-    [[ -f "$env_file" ]] || return 0
-    
-    # Only if any messaging token already present (user set up bots elsewhere)
-    # OR if user opts in interactively
-    local has_token=0
-    for tok in TELEGRAM_BOT_TOKEN DISCORD_BOT_TOKEN SLACK_BOT_TOKEN WHATSAPP_ACCESS_TOKEN; do
-        grep -qE "^${tok}=..+" "$env_file" 2>/dev/null && has_token=1 && break
-    done
-    
+
+    if [[ "$NO_ONBOARD" == "1" ]]; then
+        log_info "Skipping bot onboarding (--no-onboard)"
+        return 0
+    fi
+    if [[ "$NO_PROMPT" == "1" ]]; then
+        log_info "Skipping bot onboarding (non-interactive mode) — run 'praisonai onboard' later"
+        return 0
+    fi
+    if [[ "$DRY_RUN" == "1" ]]; then
+        log_info "Dry run — skipping bot onboarding"
+        return 0
+    fi
+    if ! [ -e /dev/tty ]; then
+        log_info "No TTY available — skipping bot onboarding. Run 'praisonai onboard' later."
+        return 0
+    fi
+
     # Prefer venv python, then user-specified, then system python3
     local py=""
     if [[ -n "$venv_dir" && "$SKIP_VENV" != "1" && -x "$venv_dir/bin/python" ]]; then
@@ -683,29 +691,26 @@ maybe_offer_bot_onboarding() {
     else
         py="python3"
     fi
-    
-    if [[ "$has_token" == "1" ]]; then
-        log_info "Detected a messaging token — launching bot onboarding..."
-        if "$py" -m praisonai onboard < /dev/tty > /dev/tty 2> /dev/tty; then
-            log_success "Bot onboarding completed!"
-        else
-            log_warn "Bot onboarding skipped or failed."
-        fi
-    else
-        # Offer it; default NO so quiet installs stay quiet
-        echo ""
-        echo -ne "${CYAN}Set up a messaging bot now? [y/N] ${NC}"
-        read -r yn < /dev/tty || yn=""
-        case "$yn" in 
-            [yY]*) 
-                if "$py" -m praisonai onboard < /dev/tty > /dev/tty 2> /dev/tty; then
-                    log_success "Bot onboarding completed!"
-                else
-                    log_warn "Bot onboarding skipped or failed."
-                fi
-                ;;
-        esac
-    fi
+
+    # Always prompt so fresh installs discover the onboard wizard too.
+    # Default is Yes — users running the curl|bash installer usually want
+    # to finish end-to-end. They can answer N to skip or pass --no-onboard.
+    echo ""
+    echo -ne "${CYAN}Set up a messaging bot (Telegram / Discord / Slack / WhatsApp) now? [Y/n] ${NC}"
+    local yn=""
+    read -r yn < /dev/tty || yn=""
+    case "$yn" in
+        [nN]*)
+            log_info "Skipped — run 'praisonai onboard' anytime to set up a bot."
+            ;;
+        *)
+            if "$py" -m praisonai onboard < /dev/tty > /dev/tty 2> /dev/tty; then
+                log_success "Bot onboarding completed!"
+            else
+                log_warn "Bot onboarding skipped or failed — you can retry with 'praisonai onboard'."
+            fi
+            ;;
+    esac
 }
 
 # Main installation function

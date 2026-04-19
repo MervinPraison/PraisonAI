@@ -35,22 +35,24 @@ def test_install_sh_mentions_bot_onboarding():
 def test_bot_onboarding_function_logic():
     """Test the logic of the bot onboarding function."""
     script_path = str(SCRIPT_PATH)
-    
+
     with open(script_path, 'r') as f:
         content = f.read()
-    
+
     # Check key environment variable checks
     assert "NO_ONBOARD" in content
     assert "NO_PROMPT" in content
     assert "DRY_RUN" in content
     assert "/dev/tty" in content
-    
-    # Check token detection
-    assert "TELEGRAM_BOT_TOKEN" in content
-    assert "DISCORD_BOT_TOKEN" in content
-    assert "SLACK_BOT_TOKEN" in content
-    assert "WHATSAPP_ACCESS_TOKEN" in content
-    
+
+    # The installer should surface the bot wizard prompt visibly and
+    # mention all supported platforms (not as token env-var checks,
+    # but as part of the user-facing prompt copy).
+    assert "Telegram" in content
+    assert "Discord" in content
+    assert "Slack" in content
+    assert "WhatsApp" in content
+
     # Check the function is called from main
     assert "maybe_offer_bot_onboarding" in content
 
