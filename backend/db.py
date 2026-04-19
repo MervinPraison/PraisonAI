@@ -273,4 +273,6 @@ def list_activity(agent_id: str, limit: int = 100) -> List[Dict]:
     activity: List[Dict] = []
     for entry in reversed(entries):
         activity.extend(entry.get("activity", []))
-    return activity[-limit:]
+        if len(activity) >= limit:
+            break
+    return activity[:limit]
