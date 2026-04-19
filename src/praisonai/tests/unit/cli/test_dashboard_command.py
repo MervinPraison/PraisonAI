@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from rich.console import Console
 
-from praisonai.cli.commands.unified import _run_aiui_dashboard, unified
+from praisonai.cli.commands.dashboard import _run_aiui_dashboard, unified
 
 
 def test_unified_command_has_new_flags():

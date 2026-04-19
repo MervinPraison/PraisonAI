@@ -348,7 +348,7 @@ def register_commands():
     from .commands.sandbox import app as sandbox_app
     from .commands.claw import app as claw_app
     from .commands.flow import app as flow_app
-    from .commands.unified import app as unified_app
+    from .commands.dashboard import app as unified_app
     from .commands.langfuse import app as langfuse_app
     from .commands.langextract import app as langextract_app
     from .commands.port import app as port_app
