@@ -25,6 +25,10 @@
 
 PraisonAI 🦞 — **Hire a 24/7 AI Workforce.** Stop writing boilerplate and start shipping autonomous agents that research, plan, and execute tasks across your apps. From one agent to an entire organization, deployed in 5 lines of code.
 
+```bash
+curl -fsSL https://praison.ai/install.sh | bash
+```
+
 <div align="center">
   <br>
   <a href="https://x.com/elonmusk/status/1893870468249141688" target="_blank">

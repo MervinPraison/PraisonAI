@@ -40,8 +40,18 @@ def main() -> None:
     print("Starting agent...\n")
 
     agent.start(
-        "Create a 6-second title-card animation with the text 'Hello Motion' "
-        "fading in and a cyan underline drawing across. Save as intro.mp4."
+        "Create a short title-card animation.\n"
+        "Steps you MUST follow, in order:\n"
+        "  1. Call write_file with filepath='index.html' and content containing "
+        "     a complete HTML document with GSAP 3.12 from cdnjs, a #stage div "
+        "     with data-duration='3.0', visible text 'Hello Motion' that fades "
+        "     in, and a cyan underline that draws across. The file MUST set "
+        "     window.__timelines = [tl] at the end of its <script> block, and "
+        "     the timeline MUST be created with { paused: true }.\n"
+        "  2. Call lint_composition() and verify ok=True.\n"
+        "  3. Call render_composition(output_name='intro.mp4', fps=30, "
+        "     quality='standard') and report the resulting output_path.\n"
+        "Return the concrete output_path of the MP4 or the exact stderr."
     )
 
     print("\nArtifacts in workspace:")
