@@ -127,6 +127,24 @@ def _save_env_vars(env_vars: Dict[str, Optional[str]]) -> Optional[Path]:
     return env_file
 
 
+def _read_env_value(key: str) -> Optional[str]:
+    """Read a single value from ``~/.praisonai/.env`` (if present)."""
+    env_file = _praison_home() / ".env"
+    if not env_file.exists():
+        return None
+    try:
+        for line in env_file.read_text().splitlines():
+            s = line.strip()
+            if not s or s.startswith("#") or "=" not in s:
+                continue
+            k, v = s.split("=", 1)
+            if k.strip() == key:
+                return v.strip().strip('"').strip("'") or None
+    except OSError:
+        return None
+    return None
+
+
 def _generate_bot_yaml(platforms: List[str], agent_name: str = "assistant", agent_instructions: str = "") -> str:
     """Generate bot.yaml content compatible with BOTH ``praisonai bot start``
     and ``praisonai gateway start``.
@@ -437,6 +455,20 @@ class OnboardWizard:
             default="You are a helpful AI assistant.",
         )
 
+        # Step 4b: Ensure a stable GATEWAY_AUTH_TOKEN is persisted. Without
+        # this the gateway server auto-generates a random token on every
+        # start (see server.py _check_auth), which means the dashboard link
+        # we show in the Done panel would rotate each restart. Persisting
+        # one value to ~/.praisonai/.env keeps clicks working across
+        # daemon restarts.
+        existing_gateway_token = _read_env_value("GATEWAY_AUTH_TOKEN")
+        if not existing_gateway_token:
+            import secrets as _secrets
+            self._gateway_token = _secrets.token_hex(16)
+            _save_env_vars({"GATEWAY_AUTH_TOKEN": self._gateway_token})
+        else:
+            self._gateway_token = existing_gateway_token
+
         # Step 5: Generate config
         console.print("\n[bold]Step 5: Generate configuration[/bold]\n")
         yaml_content = _generate_bot_yaml(
@@ -486,13 +518,23 @@ class OnboardWizard:
                 console.print(f"  [red]✗[/red] {str(e)[:200]}")
 
         # Done — commands referenced here must exist in `praisonai --help`.
+        _host = "127.0.0.1"
+        _port = 8765
+        _tok = getattr(self, "_gateway_token", "")
+        _masked = (_tok[:4] + "…" + _tok[-4:]) if len(_tok) >= 10 else "(set)"
+        _dashboard_url = f"http://{_host}:{_port}/info?token={_tok}" if _tok else f"http://{_host}:{_port}/info"
+        _health_url = f"http://{_host}:{_port}/health"
         console.print(Panel(
             f"[bold green]Setup complete![/bold green]\n\n"
-            f"Start your bot:\n"
+            f"[bold]Dashboard link (with token):[/bold]\n"
+            f"  [cyan]{_dashboard_url}[/cyan]\n"
+            f"  [dim]Token {_masked} stored in ~/.praisonai/.env as GATEWAY_AUTH_TOKEN[/dim]\n\n"
+            f"[bold]Public health (no token):[/bold]\n"
+            f"  [cyan]{_health_url}[/cyan]\n\n"
+            f"[bold]Start your bot (foreground):[/bold]\n"
             f"  [cyan]praisonai bot start --config {self.config_path}[/cyan]\n\n"
-            f"Check health:\n"
-            f"  [cyan]praisonai doctor[/cyan]\n\n"
-            f"View gateway status:\n"
+            f"[bold]Check everything:[/bold]\n"
+            f"  [cyan]praisonai doctor[/cyan]\n"
             f"  [cyan]praisonai gateway status[/cyan]",
             title="✅ Done",
             border_style="green",

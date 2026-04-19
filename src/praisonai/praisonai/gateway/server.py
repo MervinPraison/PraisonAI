@@ -203,12 +203,21 @@ class WebSocketGateway:
         """
         self.config = config or GatewayConfig(host=host, port=port)
         if hasattr(self.config, 'auth_token') and not self.config.auth_token:
-            import secrets
-            self.config.auth_token = secrets.token_hex(16)
-            logger.warning(
-                f"No auth_token provided for Gateway server. Generated temporary token: {self.config.auth_token}. "
-                "For production, set GATEWAY_AUTH_TOKEN."
-            )
+            # Prefer a user-configured token (persisted by `praisonai onboard`
+            # to ~/.praisonai/.env as GATEWAY_AUTH_TOKEN) so the dashboard
+            # URL stays stable across daemon restarts. Only fall back to
+            # generating a random ephemeral token if nothing is set.
+            env_tok = os.environ.get("GATEWAY_AUTH_TOKEN", "").strip()
+            if env_tok:
+                self.config.auth_token = env_tok
+                logger.info("Gateway using GATEWAY_AUTH_TOKEN from environment")
+            else:
+                import secrets
+                self.config.auth_token = secrets.token_hex(16)
+                logger.warning(
+                    f"No auth_token provided for Gateway server. Generated temporary token: {self.config.auth_token}. "
+                    "For production, set GATEWAY_AUTH_TOKEN."
+                )
         
         self._host = self.config.host
         self._port = self.config.port
@@ -267,17 +276,27 @@ class WebSocketGateway:
             return JSONResponse(self.health())
         
         def _check_auth(request) -> Optional[JSONResponse]:
-            """Validate auth token if configured. Returns error response or None."""
+            """Validate auth token if configured. Returns error response or None.
+
+            Accepts either:
+              - ``Authorization: Bearer <token>`` header (preferred for APIs)
+              - ``?token=<token>`` query parameter (so the dashboard URL from
+                ``praisonai onboard`` is clickable in a browser)
+            """
             if not self.config.auth_token:
                 return None
             auth_header = request.headers.get("authorization", "")
-            if not auth_header.startswith("Bearer "):
+            token: str = ""
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:]
+            else:
+                token = request.query_params.get("token", "")
+            if not token:
                 return JSONResponse(
                     {"error": "Authentication required"},
                     status_code=401,
                     headers={"WWW-Authenticate": "Bearer"},
                 )
-            token = auth_header[7:]
             if not secrets.compare_digest(token, self.config.auth_token):
                 return JSONResponse(
                     {"error": "Invalid authentication token"},

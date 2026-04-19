@@ -1270,7 +1270,7 @@ Your Goal: {self.goal}"""
                         task_description=task_description,
                         task_id=task_id,
                         execute_tool_fn=self.execute_tool,
-                        parallel_tool_calls=getattr(self.execution, "parallel_tool_calls", False),
+                        parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
                         reasoning_steps=reasoning_steps,
                         stream=stream
                     )
@@ -1740,7 +1740,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         task_description=task_description,
                         task_id=task_id,
                         execute_tool_fn=self.execute_tool_async,
-                        parallel_tool_calls=getattr(self.execution, "parallel_tool_calls", False),
+                        parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
                         reasoning_steps=reasoning_steps,
                         stream=stream
                     )
@@ -2271,7 +2271,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         task_description=kwargs.get('task_description'),
                         task_id=kwargs.get('task_id'),
                         execute_tool_fn=self.execute_tool,
-                        parallel_tool_calls=getattr(self.execution, "parallel_tool_calls", False)
+                        parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False)
                     ):
                         response_content += chunk
                         yield chunk
