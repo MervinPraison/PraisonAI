@@ -59,6 +59,14 @@ export default function App() {
     setActiveTab('chat')
   }
 
+  const reportError = async (res, action) => {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* body may be empty */ }
+    const msg = `${action} failed (${res.status})${detail ? `: ${detail}` : ''}`
+    console.error(msg)
+    window.alert(msg)
+  }
+
   const handleSendMessage = async (message) => {
     if (!selectedId) return
     setLoading(true)
@@ -68,11 +76,13 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message }),
       })
+      if (!res.ok) { await reportError(res, 'Send message'); return }
       const entry = await res.json()
       setHistory(prev => [...prev, entry])
       setActivity(prev => [...entry.activity, ...prev])
     } catch (e) {
       console.error(e)
+      window.alert('Network error while sending message.')
     } finally {
       setLoading(false)
     }
@@ -80,8 +90,10 @@ export default function App() {
 
   const handleClearHistory = async () => {
     if (!selectedId) return
-    await fetch(`${API}/agents/${selectedId}/history`, { method: 'DELETE' })
+    const res = await fetch(`${API}/agents/${selectedId}/history`, { method: 'DELETE' })
+    if (!res.ok) { await reportError(res, 'Clear history'); return }
     setHistory([])
+    setActivity([])
   }
 
   const handleSaveAgent = async (data) => {
@@ -91,6 +103,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       })
+      if (!res.ok) { await reportError(res, 'Update agent'); return }
       const updated = await res.json()
       setAgents(prev => prev.map(a => a.id === updated.id ? updated : a))
     } else {
@@ -99,6 +112,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       })
+      if (!res.ok) { await reportError(res, 'Create agent'); return }
       const created = await res.json()
       setAgents(prev => [...prev, created])
       setSelectedId(created.id)
@@ -109,7 +123,8 @@ export default function App() {
 
   const handleDeleteAgent = async (id) => {
     if (!window.confirm('Delete this agent?')) return
-    await fetch(`${API}/agents/${id}`, { method: 'DELETE' })
+    const res = await fetch(`${API}/agents/${id}`, { method: 'DELETE' })
+    if (!res.ok) { await reportError(res, 'Delete agent'); return }
     setAgents(prev => prev.filter(a => a.id !== id))
     if (selectedId === id) {
       const remaining = agents.filter(a => a.id !== id)

@@ -1,23 +1,18 @@
+const STATUS_STYLE = {
+  active:        { dot: '#22c55e', bg: 'rgba(34,197,94,0.15)',  text: '#22c55e' },
+  auditing:      { dot: '#f59e0b', bg: 'rgba(245,158,11,0.15)', text: '#f59e0b' },
+  decommissioned:{ dot: '#6b7280', bg: 'rgba(107,114,128,0.15)', text: '#9ca3af' },
+}
+
+const statusStyle = (s) => STATUS_STYLE[s] ?? STATUS_STYLE.decommissioned
+
 export default function AgentDetail({ agent, history, onEdit, onDelete }) {
   const totalMessages = history.length
   const lastActive = history.length > 0
     ? new Date(history[history.length - 1].timestamp).toLocaleString()
     : 'Never'
 
-  const toolsUsed = new Set()
-  history.forEach(entry => {
-    entry.activity?.forEach(a => {
-      if (a.type === 'tool') toolsUsed.add(a.description)
-    })
-  })
-
-  const TOOL_ICONS = {
-    web_search: '🔍',
-    wikipedia: '📖',
-    code_interpreter: '💻',
-    file_reader: '📄',
-    calculator: '🧮',
-  }
+  const style = statusStyle(agent.status)
 
   return (
     <div className="h-full overflow-y-auto px-6 py-6">
@@ -29,12 +24,12 @@ export default function AgentDetail({ agent, history, onEdit, onDelete }) {
           </div>
           <div>
             <h2 className="text-xl font-bold text-white">{agent.name}</h2>
-            <p className="text-sm mt-0.5" style={{ color: '#9ca3af' }}>{agent.role}</p>
+            <p className="text-sm mt-0.5" style={{ color: '#9ca3af' }}>{agent.model}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <span className={`px-2.5 py-1 rounded-full text-xs font-medium`}
-            style={{ background: agent.status === 'active' ? 'rgba(34,197,94,0.15)' : 'rgba(107,114,128,0.15)', color: agent.status === 'active' ? '#22c55e' : '#6b7280' }}>
+          <span className="px-2.5 py-1 rounded-full text-xs font-medium"
+            style={{ background: style.bg, color: style.text }}>
             {agent.status}
           </span>
           <button
@@ -55,10 +50,11 @@ export default function AgentDetail({ agent, history, onEdit, onDelete }) {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         {[
-          { label: 'Total Messages', value: totalMessages },
-          { label: 'Tools Used', value: toolsUsed.size },
+          { label: 'Messages', value: totalMessages },
+          { label: 'Generation', value: agent.generation ?? 1 },
+          { label: 'Token Spend', value: (agent.token_spend ?? 0).toLocaleString() },
           { label: 'Last Active', value: lastActive, small: true },
         ].map(stat => (
           <div key={stat.label} className="rounded-xl p-4" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}>
@@ -77,46 +73,41 @@ export default function AgentDetail({ agent, history, onEdit, onDelete }) {
 
       {/* Config */}
       <div className="grid grid-cols-2 gap-4 mb-4">
-        <Section title="LLM Model">
+        <Section title="Model">
           <span className="inline-block px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: 'rgba(108,99,255,0.15)', color: '#818cf8', border: '1px solid rgba(108,99,255,0.2)' }}>
-            {agent.llm}
+            {agent.model}
           </span>
         </Section>
         <Section title="Status">
           <span className="inline-flex items-center gap-2 text-sm" style={{ color: '#d1d5db' }}>
-            <span className="w-2 h-2 rounded-full" style={{ background: agent.status === 'active' ? '#22c55e' : '#6b7280' }} />
+            <span className="w-2 h-2 rounded-full" style={{ background: style.dot }} />
             {agent.status}
           </span>
         </Section>
       </div>
 
-      {/* Tools */}
-      <Section title="Tools">
-        {agent.tools.length === 0 ? (
-          <p className="text-sm" style={{ color: '#6b7280' }}>No tools configured</p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {agent.tools.map(tool => (
-              <span key={tool} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm" style={{ background: '#0f1117', border: '1px solid #2a2d3e', color: '#d1d5db' }}>
-                <span>{TOOL_ICONS[tool] || '🔧'}</span>
-                {tool}
-              </span>
-            ))}
-          </div>
-        )}
-      </Section>
+      {/* Performance */}
+      {(agent.performance_score !== null && agent.performance_score !== undefined) && (
+        <Section title="Performance Score">
+          <p className="text-sm" style={{ color: '#d1d5db' }}>
+            {Number(agent.performance_score).toFixed(3)}
+          </p>
+        </Section>
+      )}
 
-      {/* Connections */}
-      {agent.connections.length > 0 && (
-        <Section title="Connections">
-          <div className="space-y-2">
-            {agent.connections.map((conn, i) => (
-              <div key={i} className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg" style={{ background: '#0f1117', border: '1px solid #2a2d3e', color: '#d1d5db' }}>
-                <span style={{ color: '#6b7280' }}>→</span>
-                {conn}
-              </div>
-            ))}
-          </div>
+      {/* Lineage */}
+      {agent.parent_id && (
+        <Section title="Parent Agent">
+          <p className="text-sm font-mono" style={{ color: '#9ca3af' }}>{agent.parent_id}</p>
+        </Section>
+      )}
+
+      {/* Exit summary (only relevant for decommissioned) */}
+      {agent.exit_summary && (
+        <Section title="Exit Summary">
+          <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: '#d1d5db' }}>
+            {agent.exit_summary}
+          </p>
         </Section>
       )}
     </div>

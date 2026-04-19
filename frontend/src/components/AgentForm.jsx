@@ -1,13 +1,5 @@
 import { useState } from 'react'
 
-const AVAILABLE_TOOLS = [
-  { id: 'web_search', label: 'Web Search', icon: '🔍' },
-  { id: 'code_interpreter', label: 'Code Interpreter', icon: '💻' },
-  { id: 'file_reader', label: 'File Reader', icon: '📄' },
-  { id: 'calculator', label: 'Calculator', icon: '🧮' },
-  { id: 'wikipedia', label: 'Wikipedia', icon: '📖' },
-]
-
 const LLM_MODELS = [
   'gpt-4o-mini',
   'gpt-4o',
@@ -16,39 +8,21 @@ const LLM_MODELS = [
   'gemini-1.5-flash',
 ]
 
+const STATUSES = ['active', 'auditing', 'decommissioned']
+
 export default function AgentForm({ agent, onSave, onCancel }) {
   const [form, setForm] = useState({
     name: agent?.name || '',
-    role: agent?.role || '',
     instructions: agent?.instructions || '',
-    llm: agent?.llm || 'gpt-4o-mini',
-    tools: agent?.tools || [],
-    connections: agent?.connections || [],
+    model: agent?.model || agent?.llm || 'gpt-4o-mini',
     status: agent?.status || 'active',
   })
-  const [newConn, setNewConn] = useState('')
 
   const set = (key, val) => setForm(prev => ({ ...prev, [key]: val }))
 
-  const toggleTool = (toolId) => {
-    set('tools', form.tools.includes(toolId)
-      ? form.tools.filter(t => t !== toolId)
-      : [...form.tools, toolId])
-  }
-
-  const addConnection = () => {
-    if (!newConn.trim()) return
-    set('connections', [...form.connections, newConn.trim()])
-    setNewConn('')
-  }
-
-  const removeConnection = (i) => {
-    set('connections', form.connections.filter((_, idx) => idx !== i))
-  }
-
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!form.name.trim() || !form.role.trim()) return
+    if (!form.name.trim()) return
     onSave(form)
   }
 
@@ -67,35 +41,20 @@ export default function AgentForm({ agent, onSave, onCancel }) {
           </div>
 
           <div className="px-6 py-5 space-y-5">
-            {/* Name + Role */}
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Name *">
-                <input
-                  type="text"
-                  value={form.name}
-                  onChange={e => set('name', e.target.value)}
-                  placeholder="Research Agent"
-                  required
-                  className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
-                  style={{ background: '#0f1117', border: '1px solid #2a2d3e', color: '#e2e8f0' }}
-                  onFocus={e => e.target.style.borderColor = '#6c63ff'}
-                  onBlur={e => e.target.style.borderColor = '#2a2d3e'}
-                />
-              </Field>
-              <Field label="Role *">
-                <input
-                  type="text"
-                  value={form.role}
-                  onChange={e => set('role', e.target.value)}
-                  placeholder="Searches the web..."
-                  required
-                  className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
-                  style={{ background: '#0f1117', border: '1px solid #2a2d3e', color: '#e2e8f0' }}
-                  onFocus={e => e.target.style.borderColor = '#6c63ff'}
-                  onBlur={e => e.target.style.borderColor = '#2a2d3e'}
-                />
-              </Field>
-            </div>
+            {/* Name */}
+            <Field label="Name *">
+              <input
+                type="text"
+                value={form.name}
+                onChange={e => set('name', e.target.value)}
+                placeholder="Research Agent"
+                required
+                className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                style={{ background: '#0f1117', border: '1px solid #2a2d3e', color: '#e2e8f0' }}
+                onFocus={e => e.target.style.borderColor = '#6c63ff'}
+                onBlur={e => e.target.style.borderColor = '#2a2d3e'}
+              />
+            </Field>
 
             {/* Instructions */}
             <Field label="Instructions / System Prompt">
@@ -111,12 +70,12 @@ export default function AgentForm({ agent, onSave, onCancel }) {
               />
             </Field>
 
-            {/* LLM + Status */}
+            {/* Model + Status */}
             <div className="grid grid-cols-2 gap-4">
-              <Field label="LLM Model">
+              <Field label="Model">
                 <select
-                  value={form.llm}
-                  onChange={e => set('llm', e.target.value)}
+                  value={form.model}
+                  onChange={e => set('model', e.target.value)}
                   className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
                   style={{ background: '#0f1117', border: '1px solid #2a2d3e', color: '#e2e8f0' }}
                 >
@@ -124,8 +83,8 @@ export default function AgentForm({ agent, onSave, onCancel }) {
                 </select>
               </Field>
               <Field label="Status">
-                <div className="flex gap-3 pt-1">
-                  {['active', 'inactive'].map(s => (
+                <div className="flex flex-wrap gap-3 pt-1">
+                  {STATUSES.map(s => (
                     <label key={s} className="flex items-center gap-2 cursor-pointer">
                       <div
                         onClick={() => set('status', s)}
@@ -140,75 +99,6 @@ export default function AgentForm({ agent, onSave, onCancel }) {
                 </div>
               </Field>
             </div>
-
-            {/* Tools */}
-            <Field label="Tools">
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {AVAILABLE_TOOLS.map(tool => {
-                  const active = form.tools.includes(tool.id)
-                  return (
-                    <button
-                      key={tool.id}
-                      type="button"
-                      onClick={() => toggleTool(tool.id)}
-                      className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all"
-                      style={{
-                        background: active ? 'rgba(108,99,255,0.15)' : '#0f1117',
-                        border: `1px solid ${active ? '#6c63ff' : '#2a2d3e'}`,
-                        color: active ? '#818cf8' : '#9ca3af',
-                      }}
-                    >
-                      <span>{tool.icon}</span>
-                      <span>{tool.label}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            </Field>
-
-            {/* Connections */}
-            <Field label="Connections">
-              <div className="space-y-2">
-                {form.connections.map((conn, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <span className="flex-1 px-3 py-2 rounded-lg text-sm" style={{ background: '#0f1117', border: '1px solid #2a2d3e', color: '#d1d5db' }}>
-                      {conn}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => removeConnection(i)}
-                      className="p-1.5 rounded-lg hover:bg-red-500/20 transition-colors"
-                      style={{ color: '#ef4444' }}
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-                ))}
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newConn}
-                    onChange={e => setNewConn(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addConnection())}
-                    placeholder="Agent name or API URL..."
-                    className="flex-1 px-3 py-2 rounded-lg text-sm outline-none"
-                    style={{ background: '#0f1117', border: '1px solid #2a2d3e', color: '#e2e8f0' }}
-                    onFocus={e => e.target.style.borderColor = '#6c63ff'}
-                    onBlur={e => e.target.style.borderColor = '#2a2d3e'}
-                  />
-                  <button
-                    type="button"
-                    onClick={addConnection}
-                    className="px-3 py-2 rounded-lg text-sm transition-colors"
-                    style={{ background: '#2a2d3e', color: '#d1d5db' }}
-                  >
-                    Add
-                  </button>
-                </div>
-              </div>
-            </Field>
           </div>
 
           {/* Footer */}
