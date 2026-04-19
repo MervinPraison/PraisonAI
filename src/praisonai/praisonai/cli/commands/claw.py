@@ -41,7 +41,14 @@ def _ensure_default_app() -> Path:
 def claw(
     ctx: typer.Context,
     port: int = typer.Option(8082, "--port", "-p", help="Port to run dashboard on"),
-    host: str = typer.Option("0.0.0.0", "--host", help="Host to bind to"),
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help=(
+            "Host to bind to (default: 127.0.0.1 — loopback only). "
+            "Pass 0.0.0.0 to expose on the LAN; see docs for auth setup."
+        ),
+    ),
     app_file: Optional[str] = typer.Option(
         None, "--app", "-a", help="Custom app.py file (default: ~/.praisonai/claw/app.py)"
     ),
@@ -88,7 +95,18 @@ def claw(
         cmd.append("--reload")
 
     print(f"\n🦞 PraisonAI Dashboard starting at http://{host}:{port}")
-    print(f"   App: {resolved}\n")
+    print(f"   App: {resolved}")
+    # Warn if the user has opted into LAN exposure. The dashboard has no
+    # built-in auth at the URL layer (see AuthConfig in praisonaiui), so
+    # binding to a non-loopback address without extra guarding is risky.
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print(
+            "\n\033[93m⚠  WARNING:\033[0m "
+            f"Dashboard is bound to {host} — reachable from other hosts on your network.\n"
+            "   The dashboard has no URL-level auth. For multi-user / remote use,\n"
+            "   put it behind a reverse proxy or set praisonaiui AUTH_ENFORCE=true."
+        )
+    print("")
 
     try:
         subprocess.run(cmd, check=True)
