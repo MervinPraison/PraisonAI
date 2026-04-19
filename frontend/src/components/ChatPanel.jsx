@@ -103,7 +103,7 @@ export default function ChatPanel({ agent, history, loading, onSend, onClearHist
               🤖
             </div>
             <p className="font-medium text-gray-300">{agent.name}</p>
-            <p className="text-sm mt-1">{agent.role}</p>
+            <p className="text-sm mt-1">{agent.model}</p>
             <p className="text-xs mt-3 max-w-xs">Send a message to start the conversation</p>
           </div>
         )}

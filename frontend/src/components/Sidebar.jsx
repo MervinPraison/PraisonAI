@@ -41,14 +41,14 @@ export default function Sidebar({ agents, selectedId, onSelect, onNewAgent, onCl
             >
               <div
                 className="w-2 h-2 rounded-full shrink-0 mt-0.5"
-                style={{ background: agent.status === 'active' ? '#22c55e' : '#6b7280' }}
+                style={{ background: agent.status === 'active' ? '#22c55e' : agent.status === 'auditing' ? '#f59e0b' : '#6b7280' }}
               />
               <div className="flex-1 min-w-0">
                 <p className={`text-sm font-medium truncate ${selectedId === agent.id ? 'text-white' : 'text-gray-300 group-hover:text-white'}`}>
                   {agent.name}
                 </p>
                 <p className="text-xs truncate mt-0.5" style={{ color: '#6b7280' }}>
-                  {agent.role}
+                  {agent.model}
                 </p>
               </div>
             </button>

@@ -173,9 +173,9 @@ export default function App() {
             {selectedAgent ? (
               <>
                 <div className="flex items-center gap-2 flex-1">
-                  <div className={`w-2 h-2 rounded-full shrink-0 ${selectedAgent.status === 'active' ? 'bg-status-active' : 'bg-status-inactive'}`} style={{ background: selectedAgent.status === 'active' ? '#22c55e' : '#6b7280' }} />
+                  <div className="w-2 h-2 rounded-full shrink-0" style={{ background: selectedAgent.status === 'active' ? '#22c55e' : selectedAgent.status === 'auditing' ? '#f59e0b' : '#6b7280' }} />
                   <span className="font-semibold truncate">{selectedAgent.name}</span>
-                  <span className="text-sm text-gray-400 truncate hidden sm:block">— {selectedAgent.role}</span>
+                  <span className="text-sm text-gray-400 truncate hidden sm:block">— {selectedAgent.model}</span>
                 </div>
                 <div className="flex gap-1 ml-2">
                   <button
