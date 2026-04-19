@@ -816,6 +816,7 @@ Methods:
 * <code title="cli">praisonai context show <a href="./src/praisonai/praisonai/cli/commands/context.py">--help</a></code>
 * <code title="cli">praisonai context stats <a href="./src/praisonai/praisonai/cli/commands/context.py">--help</a></code>
 * <code title="cli">praisonai context tail <a href="./src/praisonai/praisonai/cli/commands/context.py">--help</a></code>
+* <code title="cli">praisonai dashboard unified <a href="./src/praisonai/praisonai/cli/commands/dashboard.py">--help</a></code>
 * <code title="cli">praisonai debug acp <a href="./src/praisonai/praisonai/cli/commands/debug.py">--help</a></code>
 * <code title="cli">praisonai debug debug-callback <a href="./src/praisonai/praisonai/cli/commands/debug.py">--help</a></code>
 * <code title="cli">praisonai debug interactive <a href="./src/praisonai/praisonai/cli/commands/debug.py">--help</a></code>
@@ -1086,7 +1087,6 @@ Methods:
 * <code title="cli">praisonai ui bot <a href="./src/praisonai/praisonai/cli/commands/ui.py">--help</a></code>
 * <code title="cli">praisonai ui realtime <a href="./src/praisonai/praisonai/cli/commands/ui.py">--help</a></code>
 * <code title="cli">praisonai ui ui <a href="./src/praisonai/praisonai/cli/commands/ui.py">--help</a></code>
-* <code title="cli">praisonai unified unified <a href="./src/praisonai/praisonai/cli/commands/unified.py">--help</a></code>
 * <code title="cli">praisonai up logs <a href="./src/praisonai/praisonai/cli/commands/up.py">--help</a></code>
 * <code title="cli">praisonai up status <a href="./src/praisonai/praisonai/cli/commands/up.py">--help</a></code>
 * <code title="cli">praisonai up up-start <a href="./src/praisonai/praisonai/cli/commands/up.py">--help</a></code>
