@@ -25,7 +25,7 @@ def __getattr__(name):
         # Double-check after acquiring lock
         if name in _lazy_cache:
             return _lazy_cache[name]
-            
+
         if name == "LLM":
             from .llm import LLM
             _lazy_cache[name] = LLM
@@ -34,131 +34,132 @@ def __getattr__(name):
             from .llm import LLMContextLengthExceededException
             _lazy_cache[name] = LLMContextLengthExceededException
             return LLMContextLengthExceededException
-    elif name == "OpenAIClient":
-        from .openai_client import OpenAIClient
-        _lazy_cache[name] = OpenAIClient
-        return OpenAIClient
-    elif name == "get_openai_client":
-        from .openai_client import get_openai_client
-        _lazy_cache[name] = get_openai_client
-        return get_openai_client
-    elif name == "ChatCompletionMessage":
-        from .openai_client import ChatCompletionMessage
-        _lazy_cache[name] = ChatCompletionMessage
-        return ChatCompletionMessage
-    elif name == "Choice":
-        from .openai_client import Choice
-        _lazy_cache[name] = Choice
-        return Choice
-    elif name == "CompletionTokensDetails":
-        from .openai_client import CompletionTokensDetails
-        _lazy_cache[name] = CompletionTokensDetails
-        return CompletionTokensDetails
-    elif name == "PromptTokensDetails":
-        from .openai_client import PromptTokensDetails
-        _lazy_cache[name] = PromptTokensDetails
-        return PromptTokensDetails
-    elif name == "CompletionUsage":
-        from .openai_client import CompletionUsage
-        _lazy_cache[name] = CompletionUsage
-        return CompletionUsage
-    elif name == "ChatCompletion":
-        from .openai_client import ChatCompletion
-        _lazy_cache[name] = ChatCompletion
-        return ChatCompletion
-    elif name == "ToolCall":
-        from .openai_client import ToolCall
-        _lazy_cache[name] = ToolCall
-        return ToolCall
-    elif name == "process_stream_chunks":
-        from .openai_client import process_stream_chunks
-        _lazy_cache[name] = process_stream_chunks
-        return process_stream_chunks
-    elif name == "supports_structured_outputs":
-        from .model_capabilities import supports_structured_outputs
-        _lazy_cache[name] = supports_structured_outputs
-        return supports_structured_outputs
-    elif name == "supports_streaming_with_tools":
-        from .model_capabilities import supports_streaming_with_tools
-        _lazy_cache[name] = supports_streaming_with_tools
-        return supports_streaming_with_tools
-    elif name == "ModelRouter":
-        from .model_router import ModelRouter
-        _lazy_cache[name] = ModelRouter
-        return ModelRouter
-    elif name == "ModelProfile":
-        from .model_router import ModelProfile
-        _lazy_cache[name] = ModelProfile
-        return ModelProfile
-    elif name == "TaskComplexity":
-        from .model_router import TaskComplexity
-        _lazy_cache[name] = TaskComplexity
-        return TaskComplexity
-    elif name == "create_routing_agent":
-        from .model_router import create_routing_agent
-        _lazy_cache[name] = create_routing_agent
-        return create_routing_agent
-    elif name == "RateLimiter":
-        from .rate_limiter import RateLimiter
-        _lazy_cache[name] = RateLimiter
-        return RateLimiter
-    elif name == "TokenUsage":
-        from .llm import TokenUsage
-        _lazy_cache[name] = TokenUsage
-        return TokenUsage
-    elif name == "LLMProviderProtocol":
-        from .protocols import LLMProviderProtocol
-        _lazy_cache[name] = LLMProviderProtocol
-        return LLMProviderProtocol
-    elif name == "ModelCapabilitiesProtocol":
-        from .protocols import ModelCapabilitiesProtocol
-        _lazy_cache[name] = ModelCapabilitiesProtocol
-        return ModelCapabilitiesProtocol
-    elif name == "LLMRateLimiterProtocol":
-        from .protocols import LLMRateLimiterProtocol
-        _lazy_cache[name] = LLMRateLimiterProtocol
-        return LLMRateLimiterProtocol
-    elif name == "LLMFailoverProtocol":
-        from .protocols import LLMFailoverProtocol
-        _lazy_cache[name] = LLMFailoverProtocol
-        return LLMFailoverProtocol
-    elif name == "LLMProviderError":
-        from .protocols import LLMProviderError
-        _lazy_cache[name] = LLMProviderError
-        return LLMProviderError
-    elif name == "RateLimitError":
-        from .protocols import RateLimitError
-        _lazy_cache[name] = RateLimitError
-        return RateLimitError
-    elif name == "ModelNotAvailableError":
-        from .protocols import ModelNotAvailableError
-        _lazy_cache[name] = ModelNotAvailableError
-        return ModelNotAvailableError
-    elif name == "ContextLengthExceededError":
-        from .protocols import ContextLengthExceededError
-        _lazy_cache[name] = ContextLengthExceededError
-        return ContextLengthExceededError
-    elif name == "UnifiedLLMProtocol":
-        from .protocols import UnifiedLLMProtocol
-        _lazy_cache[name] = UnifiedLLMProtocol
-        return UnifiedLLMProtocol
-    elif name == "LiteLLMAdapter":
-        from .unified_adapters import LiteLLMAdapter
-        _lazy_cache[name] = LiteLLMAdapter
-        return LiteLLMAdapter
-    elif name == "OpenAIAdapter":
-        from .unified_adapters import OpenAIAdapter
-        _lazy_cache[name] = OpenAIAdapter
-        return OpenAIAdapter
-    elif name == "UnifiedLLMDispatcher":
-        from .unified_adapters import UnifiedLLMDispatcher
-        _lazy_cache[name] = UnifiedLLMDispatcher
-        return UnifiedLLMDispatcher
-    elif name == "create_llm_dispatcher":
-        from .unified_adapters import create_llm_dispatcher
-        _lazy_cache[name] = create_llm_dispatcher
-        return create_llm_dispatcher
-    
+
+        elif name == "OpenAIClient":
+            from .openai_client import OpenAIClient
+            _lazy_cache[name] = OpenAIClient
+            return OpenAIClient
+        elif name == "get_openai_client":
+            from .openai_client import get_openai_client
+            _lazy_cache[name] = get_openai_client
+            return get_openai_client
+        elif name == "ChatCompletionMessage":
+            from .openai_client import ChatCompletionMessage
+            _lazy_cache[name] = ChatCompletionMessage
+            return ChatCompletionMessage
+        elif name == "Choice":
+            from .openai_client import Choice
+            _lazy_cache[name] = Choice
+            return Choice
+        elif name == "CompletionTokensDetails":
+            from .openai_client import CompletionTokensDetails
+            _lazy_cache[name] = CompletionTokensDetails
+            return CompletionTokensDetails
+        elif name == "PromptTokensDetails":
+            from .openai_client import PromptTokensDetails
+            _lazy_cache[name] = PromptTokensDetails
+            return PromptTokensDetails
+        elif name == "CompletionUsage":
+            from .openai_client import CompletionUsage
+            _lazy_cache[name] = CompletionUsage
+            return CompletionUsage
+        elif name == "ChatCompletion":
+            from .openai_client import ChatCompletion
+            _lazy_cache[name] = ChatCompletion
+            return ChatCompletion
+        elif name == "ToolCall":
+            from .openai_client import ToolCall
+            _lazy_cache[name] = ToolCall
+            return ToolCall
+        elif name == "process_stream_chunks":
+            from .openai_client import process_stream_chunks
+            _lazy_cache[name] = process_stream_chunks
+            return process_stream_chunks
+        elif name == "supports_structured_outputs":
+            from .model_capabilities import supports_structured_outputs
+            _lazy_cache[name] = supports_structured_outputs
+            return supports_structured_outputs
+        elif name == "supports_streaming_with_tools":
+            from .model_capabilities import supports_streaming_with_tools
+            _lazy_cache[name] = supports_streaming_with_tools
+            return supports_streaming_with_tools
+        elif name == "ModelRouter":
+            from .model_router import ModelRouter
+            _lazy_cache[name] = ModelRouter
+            return ModelRouter
+        elif name == "ModelProfile":
+            from .model_router import ModelProfile
+            _lazy_cache[name] = ModelProfile
+            return ModelProfile
+        elif name == "TaskComplexity":
+            from .model_router import TaskComplexity
+            _lazy_cache[name] = TaskComplexity
+            return TaskComplexity
+        elif name == "create_routing_agent":
+            from .model_router import create_routing_agent
+            _lazy_cache[name] = create_routing_agent
+            return create_routing_agent
+        elif name == "RateLimiter":
+            from .rate_limiter import RateLimiter
+            _lazy_cache[name] = RateLimiter
+            return RateLimiter
+        elif name == "TokenUsage":
+            from .llm import TokenUsage
+            _lazy_cache[name] = TokenUsage
+            return TokenUsage
+        elif name == "LLMProviderProtocol":
+            from .protocols import LLMProviderProtocol
+            _lazy_cache[name] = LLMProviderProtocol
+            return LLMProviderProtocol
+        elif name == "ModelCapabilitiesProtocol":
+            from .protocols import ModelCapabilitiesProtocol
+            _lazy_cache[name] = ModelCapabilitiesProtocol
+            return ModelCapabilitiesProtocol
+        elif name == "LLMRateLimiterProtocol":
+            from .protocols import LLMRateLimiterProtocol
+            _lazy_cache[name] = LLMRateLimiterProtocol
+            return LLMRateLimiterProtocol
+        elif name == "LLMFailoverProtocol":
+            from .protocols import LLMFailoverProtocol
+            _lazy_cache[name] = LLMFailoverProtocol
+            return LLMFailoverProtocol
+        elif name == "LLMProviderError":
+            from .protocols import LLMProviderError
+            _lazy_cache[name] = LLMProviderError
+            return LLMProviderError
+        elif name == "RateLimitError":
+            from .protocols import RateLimitError
+            _lazy_cache[name] = RateLimitError
+            return RateLimitError
+        elif name == "ModelNotAvailableError":
+            from .protocols import ModelNotAvailableError
+            _lazy_cache[name] = ModelNotAvailableError
+            return ModelNotAvailableError
+        elif name == "ContextLengthExceededError":
+            from .protocols import ContextLengthExceededError
+            _lazy_cache[name] = ContextLengthExceededError
+            return ContextLengthExceededError
+        elif name == "UnifiedLLMProtocol":
+            from .protocols import UnifiedLLMProtocol
+            _lazy_cache[name] = UnifiedLLMProtocol
+            return UnifiedLLMProtocol
+        elif name == "LiteLLMAdapter":
+            from .unified_adapters import LiteLLMAdapter
+            _lazy_cache[name] = LiteLLMAdapter
+            return LiteLLMAdapter
+        elif name == "OpenAIAdapter":
+            from .unified_adapters import OpenAIAdapter
+            _lazy_cache[name] = OpenAIAdapter
+            return OpenAIAdapter
+        elif name == "UnifiedLLMDispatcher":
+            from .unified_adapters import UnifiedLLMDispatcher
+            _lazy_cache[name] = UnifiedLLMDispatcher
+            return UnifiedLLMDispatcher
+        elif name == "create_llm_dispatcher":
+            from .unified_adapters import create_llm_dispatcher
+            _lazy_cache[name] = create_llm_dispatcher
+            return create_llm_dispatcher
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
