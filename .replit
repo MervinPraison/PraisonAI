@@ -1,6 +1,7 @@
 modules = ["python-3.12", "nodejs-20", "rust-stable", "bash"]
 [agent]
 expertMode = true
+integrations = ["github:1.0.0"]
 
 [nix]
 channel = "stable-25_05"
