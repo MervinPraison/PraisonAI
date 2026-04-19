@@ -7,7 +7,14 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+
+try:
+    from . import db as agentdb  # package import (uvicorn backend.main:app)
+except ImportError:  # pragma: no cover - script execution fallback
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import db as agentdb  # type: ignore
 
 app = FastAPI(title="AgentOS API")
 
@@ -20,20 +27,7 @@ app.add_middleware(
 )
 
 BASE_DIR = os.path.dirname(__file__)
-AGENTS_FILE = os.path.join(BASE_DIR, "agents_store.json")
 HISTORY_FILE = os.path.join(BASE_DIR, "history_store.json")
-
-
-def load_agents() -> List[Dict]:
-    if not os.path.exists(AGENTS_FILE):
-        return []
-    with open(AGENTS_FILE) as f:
-        return json.load(f)
-
-
-def save_agents(agents: List[Dict]) -> None:
-    with open(AGENTS_FILE, "w") as f:
-        json.dump(agents, f, indent=2)
 
 
 def load_history() -> Dict:
@@ -48,39 +42,64 @@ def save_history(history: Dict) -> None:
         json.dump(history, f, indent=2)
 
 
+@app.on_event("startup")
+def _startup() -> None:
+    agentdb.init_db()
+
+
 class AgentCreate(BaseModel):
+    # Accept unknown legacy fields (role, tools, connections) without error.
+    # `protected_namespaces=()` silences Pydantic v2 warnings about the
+    # `model` field name colliding with its protected namespace.
+    model_config = ConfigDict(extra="ignore", protected_namespaces=())
+
     name: str
-    role: str
     instructions: str = ""
-    tools: List[str] = []
-    connections: List[str] = []
-    llm: str = "gpt-4o-mini"
+    model: Optional[str] = None
+    llm: Optional[str] = None  # legacy alias for `model`
     status: str = "active"
+    generation: int = 1
+    parent_id: Optional[str] = None
+    performance_score: Optional[float] = None
+    token_spend: int = 0
+    exit_summary: Optional[str] = None
 
 
 class AgentUpdate(BaseModel):
+    model_config = ConfigDict(extra="ignore", protected_namespaces=())
+
     name: Optional[str] = None
-    role: Optional[str] = None
     instructions: Optional[str] = None
-    tools: Optional[List[str]] = None
-    connections: Optional[List[str]] = None
-    llm: Optional[str] = None
+    model: Optional[str] = None
+    llm: Optional[str] = None  # legacy alias for `model`
     status: Optional[str] = None
+    generation: Optional[int] = None
+    parent_id: Optional[str] = None
+    performance_score: Optional[float] = None
+    token_spend: Optional[int] = None
+    exit_summary: Optional[str] = None
 
 
 class ChatMessage(BaseModel):
     message: str
 
 
+def _validate_status(status: str) -> None:
+    if status not in agentdb.ALLOWED_STATUS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"status must be one of {sorted(agentdb.ALLOWED_STATUS)}",
+        )
+
+
 @app.get("/agents")
 def list_agents():
-    return load_agents()
+    return agentdb.list_agents()
 
 
 @app.get("/agents/{agent_id}")
 def get_agent(agent_id: str):
-    agents = load_agents()
-    agent = next((a for a in agents if a["id"] == agent_id), None)
+    agent = agentdb.get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     return agent
@@ -88,42 +107,47 @@ def get_agent(agent_id: str):
 
 @app.post("/agents", status_code=201)
 def create_agent(data: AgentCreate):
-    agents = load_agents()
-    agent = {
+    _validate_status(data.status)
+    if data.parent_id and not agentdb.get_agent(data.parent_id):
+        raise HTTPException(status_code=400, detail="parent_id does not exist")
+    record = {
         "id": f"agent-{uuid.uuid4().hex[:8]}",
         "name": data.name,
-        "role": data.role,
         "instructions": data.instructions,
-        "tools": data.tools,
-        "connections": data.connections,
-        "llm": data.llm,
+        "model": data.model or data.llm or "gpt-4o-mini",
         "status": data.status,
-        "created_at": datetime.utcnow().isoformat() + "Z",
+        "generation": data.generation,
+        "parent_id": data.parent_id,
+        "performance_score": data.performance_score,
+        "token_spend": data.token_spend,
+        "exit_summary": data.exit_summary,
     }
-    agents.append(agent)
-    save_agents(agents)
-    return agent
+    return agentdb.create_agent(record)
 
 
 @app.put("/agents/{agent_id}")
 def update_agent(agent_id: str, data: AgentUpdate):
-    agents = load_agents()
-    idx = next((i for i, a in enumerate(agents) if a["id"] == agent_id), None)
-    if idx is None:
+    fields = data.model_dump(exclude_none=True)
+    # Legacy `llm` alias -> `model`
+    if "llm" in fields and "model" not in fields:
+        fields["model"] = fields["llm"]
+    fields.pop("llm", None)
+
+    if "status" in fields:
+        _validate_status(fields["status"])
+    if fields.get("parent_id") and not agentdb.get_agent(fields["parent_id"]):
+        raise HTTPException(status_code=400, detail="parent_id does not exist")
+
+    updated = agentdb.update_agent(agent_id, fields)
+    if updated is None:
         raise HTTPException(status_code=404, detail="Agent not found")
-    for field, value in data.model_dump(exclude_none=True).items():
-        agents[idx][field] = value
-    save_agents(agents)
-    return agents[idx]
+    return updated
 
 
 @app.delete("/agents/{agent_id}", status_code=204)
 def delete_agent(agent_id: str):
-    agents = load_agents()
-    new_agents = [a for a in agents if a["id"] != agent_id]
-    if len(new_agents) == len(agents):
+    if not agentdb.delete_agent(agent_id):
         raise HTTPException(status_code=404, detail="Agent not found")
-    save_agents(new_agents)
     history = load_history()
     history.pop(agent_id, None)
     save_history(history)
@@ -131,24 +155,22 @@ def delete_agent(agent_id: str):
 
 @app.post("/agents/{agent_id}/chat")
 def chat_with_agent(agent_id: str, body: ChatMessage):
-    agents = load_agents()
-    agent = next((a for a in agents if a["id"] == agent_id), None)
+    agent = agentdb.get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    activity = []
+    activity: List[Dict] = []
     response_text = ""
 
     api_key = os.environ.get("OPENAI_API_KEY", "")
     if api_key:
         try:
             from praisonaiagents import Agent
-            activity.append(_log("tool", f"Initializing {agent['llm']} agent"))
+            activity.append(_log("tool", f"Initializing {agent['model']} agent"))
             pa_agent = Agent(
                 name=agent["name"],
-                role=agent["role"],
                 instructions=agent["instructions"],
-                llm=agent["llm"],
+                llm=agent["model"],
             )
             activity.append(_log("tool", "Running agent inference"))
             result = pa_agent.start(body.message)
@@ -212,13 +234,10 @@ def _log(action_type: str, description: str) -> Dict:
 
 def _demo_response(agent: Dict, message: str) -> str:
     name = agent.get("name", "Agent")
-    role = agent.get("role", "assistant")
-    tools = agent.get("tools", [])
-    tool_str = ", ".join(tools) if tools else "no tools"
     return (
-        f"Hi! I'm {name}, a {role}. "
+        f"Hi! I'm {name}. "
         f"You asked: \"{message}\"\n\n"
-        f"I have access to: {tool_str}. "
+        f"I'm running on {agent.get('model', 'unknown model')}. "
         f"To enable real AI responses, set your OPENAI_API_KEY environment variable."
     )
 
