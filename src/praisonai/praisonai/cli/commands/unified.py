@@ -10,6 +10,7 @@ import subprocess
 import sys
 import atexit
 import signal
+import json
 from pathlib import Path
 from types import FrameType
 from typing import Set, TextIO
@@ -78,9 +79,7 @@ def _unregister_cleanup_handlers(original_sigint, original_sigterm):
 
 def _auto_start_services(console, host: str):
     """Auto-start PraisonAI services like the 'up' command does."""
-    import os
-    import sys
-    
+
     # Services to start
     services = [
         ("flow", 7860),
@@ -160,7 +159,6 @@ def _run_aiui_dashboard(port: int, host: str, console):
     
     try:
         # Try to import and run aiui directly
-        import sys
         import tempfile
         import os
         
@@ -192,7 +190,7 @@ async def on_welcome():
 if __name__ == "__main__":
     import uvicorn
     app = aiui.create_app()
-    uvicorn.run(app, host="{host}", port={port})
+    uvicorn.run(app, host={json.dumps(host)}, port={int(port)})
 '''
 
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
@@ -213,7 +211,7 @@ if __name__ == "__main__":
                 return False
             
             # Run the aiui script
-            subprocess.run([sys.executable, temp_script])
+            subprocess.run([sys.executable, temp_script], check=True)
             
         finally:
             # Clean up temp file
@@ -225,6 +223,9 @@ if __name__ == "__main__":
     except ImportError:
         console.print("[red]Error: aiui package not installed.[/red]")
         console.print("[yellow]Install with: pip install aiui[/yellow]")
+        return False
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]aiui dashboard exited with code {e.returncode}[/red]")
         return False
     except Exception as e:
         console.print(f"[red]Error running aiui dashboard: {e}[/red]")
