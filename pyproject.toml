@@ -1,0 +1,15 @@
+[project]
+name = "repl-nix-workspace"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "aiosqlite>=0.22.1",
+    "fastapi>=0.136.0",
+    "httpx>=0.28.1",
+    "passlib[bcrypt]>=1.7.4",
+    "pydantic[email]>=2.13.2",
+    "pyjwt>=2.12.1",
+    "sqlalchemy>=2.0.49",
+    "uvicorn>=0.44.0",
+]
