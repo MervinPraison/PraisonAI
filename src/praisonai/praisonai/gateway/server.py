@@ -1030,15 +1030,26 @@ class WebSocketGateway:
 
     @staticmethod
     def _substitute_env_vars(value: str) -> str:
-        """Replace ${VAR_NAME} patterns with environment variable values."""
+        """Replace ``${VAR_NAME}`` patterns with environment variable values.
+
+        Previously, missing env vars returned the literal ``${VAR_NAME}`` which
+        caused downstream APIs (e.g. Telegram) to receive a broken token
+        string and fail with opaque 404s. We now substitute missing vars with
+        an **empty string** so the schema validator's required-field checks
+        (e.g. ``token`` must be truthy) trip cleanly instead.
+        """
         if not isinstance(value, str):
             return value
         def _replacer(match):
             var_name = match.group(1)
             env_val = os.environ.get(var_name)
             if env_val is None:
-                logger.warning(f"Environment variable {var_name} not set")
-                return match.group(0)
+                logger.warning(
+                    f"Environment variable {var_name} not set "
+                    f"— substituting empty string. "
+                    f"Run `praisonai onboard` or set it in ~/.praisonai/.env."
+                )
+                return ""
             return env_val
         return re.sub(r'\$\{([^}]+)\}', _replacer, value)
 

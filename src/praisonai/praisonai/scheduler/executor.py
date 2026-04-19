@@ -222,13 +222,26 @@ class ScheduledAgentExecutor:
                 if delivery else None
             )
 
-            # Build chat kwargs
+            # Build chat kwargs — only pass session_id if the agent
+            # actually accepts it (Core SDK's Agent.chat signature does
+            # not currently expose session_id; older assumption caused a
+            # TypeError on every scheduled job).
+            import inspect as _inspect
             chat_kwargs: Dict[str, Any] = {}
-            if session_target == "main" and session_id:
-                chat_kwargs["session_id"] = session_id
-            else:
-                # Isolated mode: use a cron-specific session
-                chat_kwargs["session_id"] = f"cron_{job.id}"
+            try:
+                chat_params = _inspect.signature(agent.chat).parameters
+            except (TypeError, ValueError):  # C-callable or builtin
+                chat_params = {}
+            supports_session_id = (
+                "session_id" in chat_params
+                or any(p.kind == _inspect.Parameter.VAR_KEYWORD
+                       for p in chat_params.values())
+            )
+            if supports_session_id:
+                if session_target == "main" and session_id:
+                    chat_kwargs["session_id"] = session_id
+                else:
+                    chat_kwargs["session_id"] = f"cron_{job.id}"
 
             result = await asyncio.to_thread(
                 agent.chat, message, **chat_kwargs,

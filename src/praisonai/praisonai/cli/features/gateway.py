@@ -8,9 +8,53 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
+import os
+from pathlib import Path
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _load_praisonai_env_file() -> Dict[str, str]:
+    """Load ``~/.praisonai/.env`` into ``os.environ`` (without overwriting).
+
+    Daemons launched by ``launchd`` / ``systemd`` don't inherit the user's
+    shell env and don't auto-source dotfiles, so secrets written by
+    ``praisonai onboard`` (e.g. ``TELEGRAM_BOT_TOKEN``) are missing when
+    the gateway starts in the background. We load them here so the
+    YAML ``${VAR}`` substitution in ``GatewayServer.load_gateway_config``
+    resolves correctly.
+
+    Existing ``os.environ`` values take precedence (so user-set shell
+    vars always win). Returns the dict of keys we loaded (for logging).
+    """
+    env_path = Path(os.environ.get("PRAISONAI_ENV_FILE")
+                    or (Path.home() / ".praisonai" / ".env"))
+    loaded: Dict[str, str] = {}
+    if not env_path.exists():
+        return loaded
+    try:
+        for raw in env_path.read_text().splitlines():
+            s = raw.strip()
+            if not s or s.startswith("#") or "=" not in s:
+                continue
+            k, v = s.split("=", 1)
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if not k:
+                continue
+            if k in os.environ:
+                continue  # don't clobber existing env
+            os.environ[k] = v
+            loaded[k] = v
+    except OSError as exc:
+        logger.warning("Could not read %s: %s", env_path, exc)
+    if loaded:
+        logger.info(
+            "Loaded %d env var(s) from %s: %s",
+            len(loaded), env_path, ", ".join(sorted(loaded.keys())),
+        )
+    return loaded
 
 
 class GatewayHandler:
@@ -34,6 +78,28 @@ class GatewayHandler:
             agent_file: Optional path to agent configuration file
             config_file: Optional path to gateway.yaml for multi-bot mode
         """
+        # Ensure INFO-level logs surface to bot-stdout.log / bot-stderr.log
+        # when running under launchd / systemd. Many key lifecycle events
+        # (bot start, channel routing, scheduler tick, retries) are already
+        # emitted via `logger.info()` — they just weren't visible with the
+        # default WARNING root level. Only configure if nothing is set yet,
+        # so users/embedders keep control.
+        _root = logging.getLogger()
+        if not _root.handlers:
+            logging.basicConfig(
+                level=logging.INFO,
+                format="%(asctime)s %(name)s %(levelname)s %(message)s",
+            )
+        if _root.level > logging.INFO or _root.level == logging.NOTSET:
+            _root.setLevel(logging.INFO)
+
+        # Load ~/.praisonai/.env BEFORE any config parsing or ${VAR}
+        # substitution — daemons don't inherit shell env.
+        _load_praisonai_env_file()
+        logger.info(
+            "Gateway starting (host=%s port=%s config=%s agents=%s)",
+            host, port, config_file or "-", agent_file or "-",
+        )
         try:
             from praisonai.gateway import WebSocketGateway
             from praisonaiagents.gateway import GatewayConfig
