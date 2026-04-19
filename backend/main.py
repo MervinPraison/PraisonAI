@@ -25,9 +25,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AgentOS API", lifespan=lifespan)
 
+allowed_origins = os.environ.get("AGENTOS_CORS_ORIGINS", "http://localhost:5173").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -39,7 +41,7 @@ def _now_iso() -> str:
 
 
 class AgentCreate(BaseModel):
-    # Accept unknown legacy fields (role, tools, connections) without error.
+    # Accept fields for frontend compatibility.
     # `protected_namespaces=()` silences Pydantic v2 warnings about the
     # `model` field name colliding with its protected namespace.
     model_config = ConfigDict(extra="ignore", protected_namespaces=())
@@ -54,6 +56,9 @@ class AgentCreate(BaseModel):
     performance_score: Optional[float] = None
     token_spend: int = 0
     exit_summary: Optional[str] = None
+    role: Optional[str] = None
+    tools: List[str] = []
+    connections: List[str] = []
 
 
 class AgentUpdate(BaseModel):
@@ -69,6 +74,9 @@ class AgentUpdate(BaseModel):
     performance_score: Optional[float] = None
     token_spend: Optional[int] = None
     exit_summary: Optional[str] = None
+    role: Optional[str] = None
+    tools: Optional[List[str]] = None
+    connections: Optional[List[str]] = None
 
 
 class ChatMessage(BaseModel):
@@ -112,6 +120,9 @@ def create_agent(data: AgentCreate):
         "performance_score": data.performance_score,
         "token_spend": data.token_spend,
         "exit_summary": data.exit_summary,
+        "role": data.role,
+        "tools": data.tools,
+        "connections": data.connections,
     }
     return agentdb.create_agent(record)
 

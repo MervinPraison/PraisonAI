@@ -48,7 +48,7 @@ export default function AgentForm({ agent, onSave, onCancel }) {
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!form.name.trim() || !form.role.trim()) return
+    if (!form.name.trim()) return
     onSave(form)
   }
 
@@ -82,7 +82,7 @@ export default function AgentForm({ agent, onSave, onCancel }) {
                   onBlur={e => e.target.style.borderColor = '#2a2d3e'}
                 />
               </Field>
-              <Field label="Role *">
+              <Field label="Role">
                 <input
                   type="text"
                   value={form.role}
@@ -125,7 +125,7 @@ export default function AgentForm({ agent, onSave, onCancel }) {
               </Field>
               <Field label="Status">
                 <div className="flex gap-3 pt-1">
-                  {['active', 'inactive'].map(s => (
+                  {['active', 'auditing', 'decommissioned'].map(s => (
                     <label key={s} className="flex items-center gap-2 cursor-pointer">
                       <div
                         onClick={() => set('status', s)}

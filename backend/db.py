@@ -26,6 +26,9 @@ CREATE TABLE IF NOT EXISTS agents (
     performance_score REAL,
     token_spend INTEGER NOT NULL DEFAULT 0,
     exit_summary TEXT,
+    role TEXT,
+    tools TEXT DEFAULT '[]',
+    connections TEXT DEFAULT '[]',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -65,6 +68,15 @@ def _row_to_dict(row: sqlite3.Row) -> Dict:
     d = dict(row)
     # Legacy alias so existing frontend/clients that read `llm` still work.
     d["llm"] = d["model"]
+    # Parse JSON fields
+    try:
+        d["tools"] = json.loads(d.get("tools") or "[]")
+    except (json.JSONDecodeError, TypeError):
+        d["tools"] = []
+    try:
+        d["connections"] = json.loads(d.get("connections") or "[]")
+    except (json.JSONDecodeError, TypeError):
+        d["connections"] = []
     return d
 
 
@@ -96,8 +108,8 @@ def _migrate_from_json(conn: sqlite3.Connection) -> None:
             """
             INSERT OR IGNORE INTO agents
             (id, name, instructions, model, status, generation, parent_id,
-             performance_score, token_spend, exit_summary, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, 1, NULL, NULL, 0, NULL, ?, ?)
+             performance_score, token_spend, exit_summary, role, tools, connections, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 1, NULL, NULL, 0, NULL, ?, ?, ?, ?, ?)
             """,
             (
                 a["id"],
@@ -105,6 +117,9 @@ def _migrate_from_json(conn: sqlite3.Connection) -> None:
                 a.get("instructions", ""),
                 a.get("llm") or a.get("model") or "gpt-4o-mini",
                 status,
+                a.get("role"),
+                json.dumps(a.get("tools", [])),
+                json.dumps(a.get("connections", [])),
                 created,
                 created,
             ),
@@ -165,8 +180,8 @@ def create_agent(agent: Dict) -> Dict:
             """
             INSERT INTO agents
             (id, name, instructions, model, status, generation, parent_id,
-             performance_score, token_spend, exit_summary, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             performance_score, token_spend, exit_summary, role, tools, connections, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 agent["id"],
@@ -179,6 +194,9 @@ def create_agent(agent: Dict) -> Dict:
                 agent.get("performance_score"),
                 agent.get("token_spend", 0),
                 agent.get("exit_summary"),
+                agent.get("role"),
+                json.dumps(agent.get("tools", [])),
+                json.dumps(agent.get("connections", [])),
                 now,
                 now,
             ),
@@ -196,6 +214,9 @@ UPDATABLE_FIELDS = {
     "performance_score",
     "token_spend",
     "exit_summary",
+    "role",
+    "tools",
+    "connections",
 }
 
 
@@ -203,6 +224,10 @@ def update_agent(agent_id: str, fields: Dict) -> Optional[Dict]:
     sets = {k: v for k, v in fields.items() if k in UPDATABLE_FIELDS}
     if not sets:
         return get_agent(agent_id)
+    # Serialize JSON fields
+    for k in ["tools", "connections"]:
+        if k in sets and isinstance(sets[k], list):
+            sets[k] = json.dumps(sets[k])
     columns = ", ".join(f"{k} = ?" for k in sets) + ", updated_at = ?"
     values = list(sets.values()) + [_now(), agent_id]
     with get_conn() as conn:
@@ -273,4 +298,4 @@ def list_activity(agent_id: str, limit: int = 100) -> List[Dict]:
     activity: List[Dict] = []
     for entry in reversed(entries):
         activity.extend(entry.get("activity", []))
-    return activity[-limit:]
+    return activity[:limit]

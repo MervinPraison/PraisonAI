@@ -29,30 +29,40 @@ export default function App() {
     }
   }, [selectedId])
 
-  const fetchHistory = useCallback(async (id) => {
+  const fetchHistory = useCallback(async (id, signal) => {
     if (!id) return
     try {
-      const res = await fetch(`${API}/agents/${id}/history`)
-      setHistory(await res.json())
-    } catch (e) { console.error(e) }
+      const res = await fetch(`${API}/agents/${id}/history`, { signal })
+      if (!res.ok) return
+      const data = await res.json()
+      setHistory(data)
+    } catch (e) { 
+      if (e.name !== 'AbortError') console.error(e) 
+    }
   }, [])
 
-  const fetchActivity = useCallback(async (id) => {
+  const fetchActivity = useCallback(async (id, signal) => {
     if (!id) return
     try {
-      const res = await fetch(`${API}/agents/${id}/activity`)
-      setActivity(await res.json())
-    } catch (e) { console.error(e) }
+      const res = await fetch(`${API}/agents/${id}/activity`, { signal })
+      if (!res.ok) return
+      const data = await res.json()
+      setActivity(data)
+    } catch (e) { 
+      if (e.name !== 'AbortError') console.error(e) 
+    }
   }, [])
 
   useEffect(() => { fetchAgents() }, [])
 
   useEffect(() => {
     if (selectedId) {
-      fetchHistory(selectedId)
-      fetchActivity(selectedId)
+      const controller = new AbortController()
+      fetchHistory(selectedId, controller.signal)
+      fetchActivity(selectedId, controller.signal)
+      return () => controller.abort()
     }
-  }, [selectedId])
+  }, [selectedId, fetchHistory, fetchActivity])
 
   const handleSelectAgent = (id) => {
     setSelectedId(id)
@@ -68,9 +78,12 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message }),
       })
+      if (!res.ok) {
+        throw new Error(`Chat failed: ${res.status}`)
+      }
       const entry = await res.json()
       setHistory(prev => [...prev, entry])
-      setActivity(prev => [...entry.activity, ...prev])
+      setActivity(prev => [...(entry.activity || []), ...prev])
     } catch (e) {
       console.error(e)
     } finally {
@@ -80,40 +93,59 @@ export default function App() {
 
   const handleClearHistory = async () => {
     if (!selectedId) return
-    await fetch(`${API}/agents/${selectedId}/history`, { method: 'DELETE' })
-    setHistory([])
+    try {
+      const res = await fetch(`${API}/agents/${selectedId}/history`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(`Clear history failed: ${res.status}`)
+      setHistory([])
+      setActivity([])
+    } catch (e) {
+      console.error(e)
+    }
   }
 
   const handleSaveAgent = async (data) => {
-    if (editingAgent) {
-      const res = await fetch(`${API}/agents/${editingAgent.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      })
-      const updated = await res.json()
-      setAgents(prev => prev.map(a => a.id === updated.id ? updated : a))
-    } else {
-      const res = await fetch(`${API}/agents`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      })
-      const created = await res.json()
-      setAgents(prev => [...prev, created])
-      setSelectedId(created.id)
+    try {
+      if (editingAgent) {
+        const res = await fetch(`${API}/agents/${editingAgent.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        })
+        if (!res.ok) throw new Error(`Update agent failed: ${res.status}`)
+        const updated = await res.json()
+        setAgents(prev => prev.map(a => a.id === updated.id ? updated : a))
+      } else {
+        const res = await fetch(`${API}/agents`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        })
+        if (!res.ok) throw new Error(`Create agent failed: ${res.status}`)
+        const created = await res.json()
+        setAgents(prev => [...prev, created])
+        setSelectedId(created.id)
+      }
+      setShowForm(false)
+      setEditingAgent(null)
+    } catch (e) {
+      console.error(e)
+      alert('Could not save agent. Please try again.')
     }
-    setShowForm(false)
-    setEditingAgent(null)
   }
 
   const handleDeleteAgent = async (id) => {
     if (!window.confirm('Delete this agent?')) return
-    await fetch(`${API}/agents/${id}`, { method: 'DELETE' })
-    setAgents(prev => prev.filter(a => a.id !== id))
-    if (selectedId === id) {
-      const remaining = agents.filter(a => a.id !== id)
-      setSelectedId(remaining.length > 0 ? remaining[0].id : null)
+    try {
+      const res = await fetch(`${API}/agents/${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(`Delete agent failed: ${res.status}`)
+      setAgents(prev => prev.filter(a => a.id !== id))
+      if (selectedId === id) {
+        const remaining = agents.filter(a => a.id !== id)
+        setSelectedId(remaining.length > 0 ? remaining[0].id : null)
+      }
+    } catch (e) {
+      console.error(e)
+      alert('Could not delete agent. Please try again.')
     }
   }
 

@@ -92,11 +92,11 @@ export default function AgentDetail({ agent, history, onEdit, onDelete }) {
 
       {/* Tools */}
       <Section title="Tools">
-        {agent.tools.length === 0 ? (
+        {(agent.tools?.length ?? 0) === 0 ? (
           <p className="text-sm" style={{ color: '#6b7280' }}>No tools configured</p>
         ) : (
           <div className="flex flex-wrap gap-2">
-            {agent.tools.map(tool => (
+            {(agent.tools || []).map(tool => (
               <span key={tool} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm" style={{ background: '#0f1117', border: '1px solid #2a2d3e', color: '#d1d5db' }}>
                 <span>{TOOL_ICONS[tool] || '🔧'}</span>
                 {tool}
@@ -107,10 +107,10 @@ export default function AgentDetail({ agent, history, onEdit, onDelete }) {
       </Section>
 
       {/* Connections */}
-      {agent.connections.length > 0 && (
+      {(agent.connections?.length ?? 0) > 0 && (
         <Section title="Connections">
           <div className="space-y-2">
-            {agent.connections.map((conn, i) => (
+            {(agent.connections || []).map((conn, i) => (
               <div key={i} className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg" style={{ background: '#0f1117', border: '1px solid #2a2d3e', color: '#d1d5db' }}>
                 <span style={{ color: '#6b7280' }}>→</span>
                 {conn}
