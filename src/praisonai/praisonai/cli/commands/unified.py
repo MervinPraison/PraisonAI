@@ -77,24 +77,72 @@ def _unregister_cleanup_handlers(original_sigint, original_sigterm):
     # so we keep the atexit handler but check if process list is empty
 
 
-def _auto_start_services(console, host: str):
-    """Auto-start PraisonAI services like the 'up' command does."""
+def _spawn_service(service_name: str, service_port: int, host: str, log_handle):
+    """Spawn a single service with proper command configuration."""
+    # Service configuration: [command, extra_flags]
+    service_config = {
+        "flow": ["flow", ["--no-open"]],
+        "claw": ["claw", []],
+        "ui": ["ui", []]
+    }
+    
+    if service_name not in service_config:
+        raise ValueError(f"Unknown service: {service_name}")
+    
+    command, extra_flags = service_config[service_name]
+    argv = [sys.executable, "-m", "praisonai", command, "--port", str(service_port), "--host", host] + extra_flags
+    
+    return subprocess.Popen(argv, stdout=log_handle, stderr=subprocess.STDOUT)
 
-    # Services to start
+
+def _wait_for_service_ready(service_name: str, proc: subprocess.Popen, service_port: int, host: str, log_file: Path, console, timeout: int = 15) -> bool:
+    """Wait for service to be ready with proper readiness check."""
+    check_host = _resolve_check_host(host)
+    deadline = time.time() + timeout
+    
+    while time.time() < deadline:
+        # Check if process crashed
+        if proc.poll() is not None:
+            console.print(f"[red]✗ {service_name} crashed during startup (exit code: {proc.returncode})[/red]")
+            console.print(f"[dim]Check log: {log_file}[/dim]")
+            return False
+        
+        # Check if service is accepting connections
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            if sock.connect_ex((check_host, service_port)) == 0:
+                return True
+        except OSError:
+            pass
+        finally:
+            sock.close()
+        
+        time.sleep(0.5)
+    
+    console.print(f"[red]✗ {service_name} did not become ready within {timeout} seconds[/red]")
+    console.print(f"[dim]Check log: {log_file}[/dim]")
+    return False
+
+
+def _auto_start_services(console, host: str) -> bool:
+    """Auto-start PraisonAI services with proper readiness checks."""
     services = [
         ("flow", 7860),
         ("claw", 8082),
         ("ui", 8081)
     ]
     
+    success_count = 0
+    
     for service_name, service_port in services:
         # Check if service is already running
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        check_host = "127.0.0.1" if host == "0.0.0.0" else host
+        check_host = _resolve_check_host(host)
         try:
             connection_result = sock.connect_ex((check_host, service_port))
             if connection_result == 0:
                 console.print(f"[yellow]✓ {service_name} already running on port {service_port}[/yellow]")
+                success_count += 1
                 sock.close()
                 continue
         except OSError:
@@ -104,6 +152,8 @@ def _auto_start_services(console, host: str):
         
         # Start the service
         console.print(f"[cyan]Starting {service_name} on port {service_port}...[/cyan]")
+        log_handle = None
+        proc = None
         try:
             # Create log directory for troubleshooting
             log_dir = Path.home() / ".praisonai" / "unified" / "logs"
@@ -111,62 +161,70 @@ def _auto_start_services(console, host: str):
             log_file = log_dir / f"{service_name}.log"
             
             log_handle = open(log_file, "a", encoding="utf-8")
-            try:
-                if service_name == "flow":
-                    proc = subprocess.Popen([
-                        sys.executable, "-m", "praisonai", "flow", 
-                        "--port", str(service_port), "--host", host, "--no-open"
-                    ], stdout=log_handle, stderr=subprocess.STDOUT)
-                elif service_name == "claw":
-                    proc = subprocess.Popen([
-                        sys.executable, "-m", "praisonai", "claw",
-                        "--port", str(service_port), "--host", host
-                    ], stdout=log_handle, stderr=subprocess.STDOUT)
-                elif service_name == "ui":
-                    proc = subprocess.Popen([
-                        sys.executable, "-m", "praisonai", "ui",
-                        "--port", str(service_port), "--host", host
-                    ], stdout=log_handle, stderr=subprocess.STDOUT)
-                
-                # Track process for cleanup
+            
+            # Spawn service using shared logic
+            proc = _spawn_service(service_name, service_port, host, log_handle)
+            
+            # Wait for service to be ready
+            if _wait_for_service_ready(service_name, proc, service_port, host, log_file, console):
+                # Track process for cleanup only after successful startup
                 _ACTIVE_PROCESSES.add(proc)
                 _PROCESS_LOG_HANDLES[proc] = log_handle
-                
-                # Wait briefly for service to start
-                time.sleep(1.5)
-                
-                # Check if process is still alive
-                if proc.poll() is not None:
-                    console.print(f"[red]✗ {service_name} failed to start (exit code: {proc.returncode})[/red]")
-                    console.print(f"[dim]Check log: {log_file}[/dim]")
-                    # Clean up failed process
-                    _ACTIVE_PROCESSES.discard(proc)
-                    if proc in _PROCESS_LOG_HANDLES:
-                        _PROCESS_LOG_HANDLES.pop(proc).close()
-                else:
-                    console.print(f"[green]✓ {service_name} started successfully[/green]")
-            except Exception:
-                log_handle.close()
-                raise
+                console.print(f"[green]✓ {service_name} started successfully[/green]")
+                success_count += 1
+                log_handle = None  # Don't close, it's now tracked
+            else:
+                # Clean up failed process
+                if proc and proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                if log_handle:
+                    log_handle.close()
+                    log_handle = None
                     
         except Exception as e:
             console.print(f"[red]✗ Failed to start {service_name}: {e}[/red]")
+            if proc:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+            if log_handle:
+                log_handle.close()
+    
+    return success_count == len(services)
 
 
-def _run_aiui_dashboard(port: int, host: str, console):
-    """Run the aiui dashboard interface."""
+def _run_aiui_dashboard(port: int, host: str, console) -> bool:
+    """Run the aiui dashboard interface using proper CLI entrypoint."""
     console.print("[bold green]🦞 Starting aiui Dashboard...[/bold green]")
     
     try:
-        # Try to import and run aiui directly
         import tempfile
         import os
         
-        # Create a temporary script for aiui dashboard
-        aiui_script = f'''
+        # Check if aiui is available first
+        result = subprocess.run([
+            sys.executable, "-c", "import praisonaiui"
+        ], capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            console.print("[red]Error: aiui package not installed.[/red]")
+            console.print("[yellow]Install with: pip install aiui[/yellow]")
+            return False
+        
+        # Create a temporary script for aiui dashboard based on claw pattern
+        aiui_script = '''import os
 import praisonaiui as aiui
+from praisonai.ui._aiui_datastore import PraisonAISessionDataStore
 
-# Configure aiui for dashboard style
+# Set up datastore bridge
+aiui.set_datastore(PraisonAISessionDataStore())
+
+# Configure dashboard style
 aiui.set_style("dashboard")
 aiui.set_branding(title="PraisonAI Unified Dashboard", logo="🌟")
 
@@ -176,23 +234,21 @@ aiui.set_pages([
     "skills", "sessions", "usage", "config", "logs"
 ])
 
-# Register a simple reply handler
-@aiui.reply
-async def on_reply(message):
-    return f"Unified Dashboard: {{message.content}}"
-
-# Register a welcome message
+# Register a simple welcome message
 @aiui.welcome
 async def on_welcome():
-    return "Welcome to PraisonAI Unified Dashboard! 🌟"
+    await aiui.say("🌟 Welcome to PraisonAI Unified Dashboard!")
+    await aiui.say("Access all your AI services from one interface.")
 
-# Start aiui server
-if __name__ == "__main__":
-    import uvicorn
-    app = aiui.create_app()
-    uvicorn.run(app, host={json.dumps(host)}, port={int(port)})
+# Register basic reply handler
+@aiui.reply
+async def on_reply(message: str, settings: dict | None = None):
+    await aiui.think("Processing...")
+    await aiui.say(f"Unified Dashboard received: {message}")
+    await aiui.say("Use the sidebar to access Flow, Agents, Memory, and more!")
 '''
 
+        # Create temp file safely
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
             f.write(aiui_script)
             temp_script = f.name
@@ -200,38 +256,37 @@ if __name__ == "__main__":
         try:
             console.print(f"[green]✓ Starting aiui dashboard on {host}:{port}[/green]")
             
-            # Check if aiui is available first
-            result = subprocess.run([
-                sys.executable, "-c", "import praisonaiui"
-            ], capture_output=True, text=True)
+            # Use aiui CLI to run the dashboard (NOT create_app)
+            # Try aiui command first, fallback to python -m
+            try:
+                result = subprocess.run([
+                    "aiui", "run", temp_script, "--port", str(port), "--host", host
+                ], check=True)
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                # Fallback to python -m praisonaiui
+                result = subprocess.run([
+                    sys.executable, "-m", "praisonaiui.cli", "run", 
+                    temp_script, "--port", str(port), "--host", host
+                ], check=True)
             
-            if result.returncode != 0:
-                console.print("[red]Error: aiui package not installed.[/red]")
-                console.print("[yellow]Install with: pip install aiui[/yellow]")
-                return False
+            return True
             
-            # Run the aiui script
-            subprocess.run([sys.executable, temp_script], check=True)
-            
+        except subprocess.CalledProcessError as e:
+            console.print(f"[red]aiui dashboard exited with code {e.returncode}[/red]")
+            return False
         finally:
             # Clean up temp file
             try:
                 os.unlink(temp_script)
-            except:
+            except (OSError, FileNotFoundError):
                 pass
         
-    except ImportError:
-        console.print("[red]Error: aiui package not installed.[/red]")
-        console.print("[yellow]Install with: pip install aiui[/yellow]")
-        return False
     except subprocess.CalledProcessError as e:
-        console.print(f"[red]aiui dashboard exited with code {e.returncode}[/red]")
+        console.print(f"[red]aiui dashboard failed with code {e.returncode}[/red]")
         return False
     except Exception as e:
         console.print(f"[red]Error running aiui dashboard: {e}[/red]")
         return False
-    
-    return True
 
 
 def _generate_dashboard_html(host: str = "localhost") -> str:
@@ -582,9 +637,22 @@ def unified(
     from rich.console import Console
     console = Console()
     
-    # Check for aiui mode first
+    # Auto-start services if enabled (before aiui mode)
+    if auto_start:
+        console.print("[bold green]🚀 Auto-starting PraisonAI services...[/bold green]")
+        if not _auto_start_services(console, host):
+            console.print("[yellow]⚠️  Some services failed to start, continuing anyway...[/yellow]")
+        console.print("[green]✅ Auto-start complete[/green]")
+        console.print()
+    
+    # Check for aiui mode
     if aiui:
-        return _run_aiui_dashboard(port, host, console)
+        result = _run_aiui_dashboard(port, host, console)
+        if not result:
+            console.print("[red]Failed to start aiui dashboard, falling back to standard dashboard[/red]")
+            # Continue to standard dashboard instead of exiting
+        else:
+            return  # aiui started successfully, exit
     
     # Import optional dependencies inside function to avoid startup overhead
     try:
@@ -597,10 +665,11 @@ def unified(
         console.print(f"[dim]Error details: {exc}[/dim]")
         raise typer.Abort()
     
-    # Auto-start services if enabled
-    if auto_start:
+    # Auto-start services if not already done for aiui
+    if auto_start and not aiui:
         console.print("[bold green]🚀 Auto-starting PraisonAI services...[/bold green]")
-        _auto_start_services(console, host)
+        if not _auto_start_services(console, host):
+            console.print("[yellow]⚠️  Some services failed to start, dashboard will still work[/yellow]")
         console.print("[green]✅ Auto-start complete[/green]")
         console.print()
     
@@ -643,22 +712,8 @@ def unified(
             log_file = log_dir / f"{service}.log"
             log_handle = open(log_file, "a", encoding="utf-8")
             
-            if service == "flow":
-                # Use praisonai module entrypoint so command resolution matches CLI behavior.
-                proc = subprocess.Popen([
-                    sys.executable, "-m", "praisonai", "flow", 
-                    "--port", str(service_port), "--host", host, "--no-open"
-                ], stdout=log_handle, stderr=subprocess.STDOUT)
-            elif service == "claw":
-                proc = subprocess.Popen([
-                    sys.executable, "-m", "praisonai", "claw",
-                    "--port", str(service_port), "--host", host
-                ], stdout=log_handle, stderr=subprocess.STDOUT)
-            elif service == "ui":
-                proc = subprocess.Popen([
-                    sys.executable, "-m", "praisonai", "ui",
-                    "--port", str(service_port), "--host", host
-                ], stdout=log_handle, stderr=subprocess.STDOUT)
+            # Use shared service spawning logic
+            proc = _spawn_service(service, service_port, host, log_handle)
             
             # Wait for service to start with timeout
             deadline = time.time() + 15
