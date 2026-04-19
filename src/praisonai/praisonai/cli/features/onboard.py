@@ -522,21 +522,20 @@ class OnboardWizard:
                 console.print(f"  [red]✗[/red] {str(e)[:200]}")
 
         # Done — commands referenced here must exist in `praisonai --help`.
-        _host = "127.0.0.1"
-        _port = 8765
         _tok = getattr(self, "_gateway_token", "")
         _masked = (_tok[:4] + "…" + _tok[-4:]) if len(_tok) >= 10 else "(set)"
-        _dashboard_url = f"http://{_host}:{_port}/info?token={_tok}" if _tok else f"http://{_host}:{_port}/info"
-        _health_url = f"http://{_host}:{_port}/health"
+        _health_url = "http://127.0.0.1:8765/health"
+        _info_url = f"http://127.0.0.1:8765/info?token={_tok}" if _tok else "http://127.0.0.1:8765/info"
         console.print(Panel(
             f"[bold green]Setup complete![/bold green]\n\n"
-            f"[bold]Dashboard link (with token):[/bold]\n"
-            f"  [cyan]{_dashboard_url}[/cyan]\n"
-            f"  [dim]Token {_masked} stored in ~/.praisonai/.env as GATEWAY_AUTH_TOKEN[/dim]\n\n"
-            f"[bold]Public health (no token):[/bold]\n"
-            f"  [cyan]{_health_url}[/cyan]\n\n"
+            f"[bold]🦞 Dashboard UI:[/bold]\n"
+            f"  [cyan]praisonai claw[/cyan]          [dim]→ http://127.0.0.1:8082[/dim]\n\n"
             f"[bold]Start your bot (foreground):[/bold]\n"
-            f"  [cyan]praisonai bot start --config {self.config_path}[/cyan]\n\n"
+            f"  [cyan]praisonai bot start[/cyan]\n\n"
+            f"[bold]Gateway endpoints:[/bold]\n"
+            f"  Health (public):  [cyan]{_health_url}[/cyan]\n"
+            f"  Info (authed):    [cyan]{_info_url}[/cyan]\n"
+            f"  [dim]Token {_masked} stored in ~/.praisonai/.env as GATEWAY_AUTH_TOKEN[/dim]\n\n"
             f"[bold]Check everything:[/bold]\n"
             f"  [cyan]praisonai doctor[/cyan]\n"
             f"  [cyan]praisonai gateway status[/cyan]",
