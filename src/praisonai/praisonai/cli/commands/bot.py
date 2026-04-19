@@ -22,20 +22,28 @@ def _common_options():
 
 @app.command("start")
 def bot_start(
-    config: str = typer.Option(..., "--config", "-c", help="Path to bot YAML config file"),
+    config: str = typer.Option(
+        "bot.yaml", "--config", "-c",
+        help="Path to bot YAML config file (defaults to ./bot.yaml if present, else ~/.praisonai/bot.yaml)",
+    ),
 ):
     """Start a bot from a single YAML config file (zero-code).
-    
+
     The config file contains platform, token, and agent settings all in one place.
-    
+    Resolution order when ``--config`` is not given:
+    ``./bot.yaml`` (back-compat) → ``~/.praisonai/bot.yaml`` (canonical).
+
     Examples:
-        praisonai bot start --config bot.yaml
+        praisonai bot start                              # auto-detect
+        praisonai bot start --config ~/.praisonai/bot.yaml
         praisonai bot start -c my-telegram-bot.yaml
     """
+    from .._paths import resolve_bot_config_path
     from ..features.bots_cli import BotHandler
-    
+
+    resolved = resolve_bot_config_path(config)
     handler = BotHandler()
-    handler.start_from_config(config)
+    handler.start_from_config(resolved)
 
 
 @app.command("telegram")
@@ -440,7 +448,10 @@ def bot_agentmail(
 
 @app.command("install-daemon")
 def bot_install_daemon(
-    config: str = typer.Option("bot.yaml", "--config", help="Path to bot.yaml"),
+    config: str = typer.Option(
+        "bot.yaml", "--config",
+        help="Path to bot.yaml (defaults to ./bot.yaml → ~/.praisonai/bot.yaml)",
+    ),
     start: bool = typer.Option(True, "--start/--no-start", help="Start after install"),
 ):
     """Install bot as OS daemon service (alias for 'praisonai gateway install').
@@ -450,9 +461,11 @@ def bot_install_daemon(
         praisonai bot install-daemon --config my-bot.yaml --no-start
     """
     from praisonai.daemon import install_daemon
+    from .._paths import resolve_bot_config_path
     from ..output.console import get_output_controller
     
     output = get_output_controller()
+    config = resolve_bot_config_path(config)
     
     try:
         result = install_daemon(config_path=config)

@@ -149,7 +149,10 @@ def gateway_channels(
 
 @app.command("install")
 def gateway_install(
-    config: str = typer.Option("bot.yaml", "--config", help="Path to bot.yaml"),
+    config: str = typer.Option(
+        "bot.yaml", "--config",
+        help="Path to bot.yaml (defaults to ./bot.yaml → ~/.praisonai/bot.yaml)",
+    ),
     start: bool = typer.Option(True, "--start/--no-start", help="Start after install"),
 ):
     """Install the gateway as an OS daemon (LaunchAgent / systemd).
@@ -159,9 +162,11 @@ def gateway_install(
         praisonai gateway install --config my-bot.yaml --no-start
     """
     from praisonai.daemon import install_daemon
+    from .._paths import resolve_bot_config_path
     from ..output.console import get_output_controller
     
     output = get_output_controller()
+    config = resolve_bot_config_path(config)
     
     try:
         result = install_daemon(config_path=config)

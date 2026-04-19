@@ -477,7 +477,11 @@ class OnboardWizard:
             agent_instructions=self.agent_instructions,
         )
 
-        self.config_path = Prompt.ask("Config file path", default="bot.yaml")
+        from praisonai.cli._paths import default_bot_config_path
+        default_cfg = str(default_bot_config_path())
+        self.config_path = Prompt.ask("Config file path", default=default_cfg)
+        # Ensure parent dir exists (e.g. ~/.praisonai/) before writing.
+        os.makedirs(os.path.dirname(os.path.abspath(self.config_path)) or ".", exist_ok=True)
 
         if os.path.exists(self.config_path):
             if not Confirm.ask(f"  {self.config_path} exists. Overwrite?", default=False):
@@ -591,12 +595,15 @@ class OnboardWizard:
 
         env_file = _save_env_vars(env_to_save)
         yaml_content = _generate_bot_yaml(self.selected_platforms)
-        with open("bot.yaml", "w") as f:
+        from praisonai.cli._paths import default_bot_config_path
+        cfg_path = default_bot_config_path()
+        os.makedirs(cfg_path.parent, exist_ok=True)
+        with open(cfg_path, "w") as f:
             f.write(yaml_content)
-        print("\n✓ Written to bot.yaml")
+        print(f"\n✓ Written to {cfg_path}")
         if env_file:
             print(f"✓ Secrets saved to {env_file} (chmod 600)")
-        print("Start with: praisonai bot start --config bot.yaml")
+        print(f"Start with: praisonai bot start --config {cfg_path}")
 
 
 def run_onboard() -> None:

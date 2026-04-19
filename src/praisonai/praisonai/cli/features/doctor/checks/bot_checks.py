@@ -23,7 +23,8 @@ from ..registry import register_check
 )
 def check_bot_tokens(config: DoctorConfig) -> CheckResult:
     """Check bot token environment variables."""
-    config_path = getattr(config, 'config_file', None) or "bot.yaml"
+    from praisonai.cli._paths import resolve_bot_config_path
+    config_path = getattr(config, 'config_file', None) or resolve_bot_config_path("bot.yaml")
     token_vars = {
         "TELEGRAM_BOT_TOKEN": "Telegram",
         "DISCORD_BOT_TOKEN": "Discord",
@@ -63,7 +64,8 @@ def check_bot_tokens(config: DoctorConfig) -> CheckResult:
 def check_bot_config(config: DoctorConfig) -> CheckResult:
     """Check bot.yaml exists and is valid."""
     start = time.time()
-    config_path = getattr(config, 'config_file', None) or "bot.yaml"
+    from praisonai.cli._paths import resolve_bot_config_path
+    config_path = getattr(config, 'config_file', None) or resolve_bot_config_path("bot.yaml")
     if not os.path.exists(config_path):
         return CheckResult(
             id="bot_config",
@@ -107,7 +109,8 @@ def check_bot_config(config: DoctorConfig) -> CheckResult:
 def check_bot_security(config: DoctorConfig) -> CheckResult:
     """Check bot security configuration for safe defaults."""
     start = time.time()
-    config_path = getattr(config, 'config_file', None) or "bot.yaml"
+    from praisonai.cli._paths import resolve_bot_config_path
+    config_path = getattr(config, 'config_file', None) or resolve_bot_config_path("bot.yaml")
     channel_warnings = []
     global_warnings = []
     
