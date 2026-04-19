@@ -80,8 +80,7 @@ class SurrealDBVectorKnowledgeStore(KnowledgeStore):
             await client.use(self.namespace, self.database)
             return client
         
-        loop = asyncio.get_event_loop()
-        self._client = loop.run_until_complete(connect())
+        self._client = run_sync(connect())
         self._initialized = True
     
     def _run_async(self, coro):

@@ -75,13 +75,7 @@ class SurrealDBConversationStore(ConversationStore):
                 await self._client.signin({"user": self.username, "pass": self.password})
             await self._client.use(self.namespace, self.database)
         
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        loop.run_until_complete(_init())
+        run_sync(_init())
     
     def _run_sync(self, coro):
         """Run async coroutine synchronously."""
