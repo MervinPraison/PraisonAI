@@ -1,9 +1,9 @@
 """AgentOS FastAPI backend."""
-import json
 import os
 import uuid
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,7 +16,14 @@ except ImportError:  # pragma: no cover - script execution fallback
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import db as agentdb  # type: ignore
 
-app = FastAPI(title="AgentOS API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    agentdb.init_db()
+    yield
+
+
+app = FastAPI(title="AgentOS API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -26,25 +33,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-BASE_DIR = os.path.dirname(__file__)
-HISTORY_FILE = os.path.join(BASE_DIR, "history_store.json")
 
-
-def load_history() -> Dict:
-    if not os.path.exists(HISTORY_FILE):
-        return {}
-    with open(HISTORY_FILE) as f:
-        return json.load(f)
-
-
-def save_history(history: Dict) -> None:
-    with open(HISTORY_FILE, "w") as f:
-        json.dump(history, f, indent=2)
-
-
-@app.on_event("startup")
-def _startup() -> None:
-    agentdb.init_db()
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
 
 
 class AgentCreate(BaseModel):
@@ -146,11 +137,9 @@ def update_agent(agent_id: str, data: AgentUpdate):
 
 @app.delete("/agents/{agent_id}", status_code=204)
 def delete_agent(agent_id: str):
+    # chat_history rows cascade via FK ON DELETE CASCADE
     if not agentdb.delete_agent(agent_id):
         raise HTTPException(status_code=404, detail="Agent not found")
-    history = load_history()
-    history.pop(agent_id, None)
-    save_history(history)
 
 
 @app.post("/agents/{agent_id}/chat")
@@ -184,49 +173,36 @@ def chat_with_agent(agent_id: str, body: ChatMessage):
         response_text = _demo_response(agent, body.message)
         activity.append(_log("success", "Demo response generated"))
 
-    history = load_history()
-    if agent_id not in history:
-        history[agent_id] = []
-
     entry = {
         "id": uuid.uuid4().hex[:8],
         "user_message": body.message,
         "agent_response": response_text,
         "activity": activity,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": _now_iso(),
     }
-    history[agent_id].append(entry)
-    save_history(history)
+    agentdb.add_history_entry(agent_id, entry)
     return entry
 
 
 @app.get("/agents/{agent_id}/history")
 def get_history(agent_id: str):
-    history = load_history()
-    return history.get(agent_id, [])
+    return agentdb.list_history(agent_id)
 
 
 @app.delete("/agents/{agent_id}/history", status_code=204)
 def clear_history(agent_id: str):
-    history = load_history()
-    history[agent_id] = []
-    save_history(history)
+    agentdb.clear_history(agent_id)
 
 
 @app.get("/agents/{agent_id}/activity")
 def get_activity(agent_id: str):
-    history = load_history()
-    all_entries = history.get(agent_id, [])
-    activity = []
-    for entry in reversed(all_entries):
-        activity.extend(entry.get("activity", []))
-    return activity[-100:]
+    return agentdb.list_activity(agent_id, limit=100)
 
 
 def _log(action_type: str, description: str) -> Dict:
     return {
         "id": uuid.uuid4().hex[:8],
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": _now_iso(),
         "type": action_type,
         "description": description,
     }

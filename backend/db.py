@@ -1,14 +1,15 @@
-"""SQLite persistence for AgentOS agents."""
+"""SQLite persistence for AgentOS agents and chat history."""
 import json
 import os
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Iterator, List, Optional
 
 BASE_DIR = os.path.dirname(__file__)
 DB_FILE = os.environ.get("AGENTOS_DB", os.path.join(BASE_DIR, "agentos.db"))
 LEGACY_AGENTS_FILE = os.path.join(BASE_DIR, "agents_store.json")
+LEGACY_HISTORY_FILE = os.path.join(BASE_DIR, "history_store.json")
 
 ALLOWED_STATUS = {"active", "auditing", "decommissioned"}
 
@@ -28,6 +29,18 @@ CREATE TABLE IF NOT EXISTS agents (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS chat_history (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    user_message TEXT NOT NULL,
+    agent_response TEXT NOT NULL,
+    activity TEXT NOT NULL DEFAULT '[]',
+    timestamp TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_history_agent_ts
+    ON chat_history(agent_id, timestamp);
 """
 
 
@@ -44,7 +57,8 @@ def get_conn() -> Iterator[sqlite3.Connection]:
 
 
 def _now() -> str:
-    return datetime.utcnow().isoformat() + "Z"
+    # Timezone-aware UTC timestamp, ISO-8601 with trailing Z to match prior shape.
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
 
 
 def _row_to_dict(row: sqlite3.Row) -> Dict:
@@ -60,6 +74,9 @@ def init_db() -> None:
         cur = conn.execute("SELECT COUNT(*) FROM agents")
         if cur.fetchone()[0] == 0:
             _migrate_from_json(conn)
+        cur = conn.execute("SELECT COUNT(*) FROM chat_history")
+        if cur.fetchone()[0] == 0:
+            _migrate_history_from_json(conn)
 
 
 def _migrate_from_json(conn: sqlite3.Connection) -> None:
@@ -92,6 +109,37 @@ def _migrate_from_json(conn: sqlite3.Connection) -> None:
                 created,
             ),
         )
+
+
+def _migrate_history_from_json(conn: sqlite3.Connection) -> None:
+    if not os.path.exists(LEGACY_HISTORY_FILE):
+        return
+    try:
+        with open(LEGACY_HISTORY_FILE) as f:
+            legacy = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(legacy, dict):
+        return
+    for agent_id, entries in legacy.items():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO chat_history
+                (id, agent_id, user_message, agent_response, activity, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    entry.get("id") or os.urandom(4).hex(),
+                    agent_id,
+                    entry.get("user_message", ""),
+                    entry.get("agent_response", ""),
+                    json.dumps(entry.get("activity", [])),
+                    entry.get("timestamp") or _now(),
+                ),
+            )
 
 
 def list_agents() -> List[Dict]:
@@ -170,3 +218,59 @@ def delete_agent(agent_id: str) -> bool:
     with get_conn() as conn:
         cur = conn.execute("DELETE FROM agents WHERE id = ?", (agent_id,))
         return cur.rowcount > 0
+
+
+# ----- chat history --------------------------------------------------------
+
+
+def _row_to_history(row: sqlite3.Row) -> Dict:
+    d = dict(row)
+    try:
+        d["activity"] = json.loads(d.get("activity") or "[]")
+    except json.JSONDecodeError:
+        d["activity"] = []
+    d.pop("agent_id", None)
+    return d
+
+
+def add_history_entry(agent_id: str, entry: Dict) -> Dict:
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO chat_history
+            (id, agent_id, user_message, agent_response, activity, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                entry["id"],
+                agent_id,
+                entry["user_message"],
+                entry["agent_response"],
+                json.dumps(entry.get("activity", [])),
+                entry["timestamp"],
+            ),
+        )
+    return entry
+
+
+def list_history(agent_id: str) -> List[Dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM chat_history WHERE agent_id = ? ORDER BY timestamp ASC",
+            (agent_id,),
+        ).fetchall()
+    return [_row_to_history(r) for r in rows]
+
+
+def clear_history(agent_id: str) -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM chat_history WHERE agent_id = ?", (agent_id,))
+
+
+def list_activity(agent_id: str, limit: int = 100) -> List[Dict]:
+    """Flattened activity across all of an agent's chat entries, newest first, capped."""
+    entries = list_history(agent_id)
+    activity: List[Dict] = []
+    for entry in reversed(entries):
+        activity.extend(entry.get("activity", []))
+    return activity[-limit:]
