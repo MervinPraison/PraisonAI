@@ -155,7 +155,7 @@ def tool_from_skill(path: str):
     """
     from pathlib import Path
     try:
-        from praisonaiagents.skills import load_skill
+        from praisonaiagents.skills import load_skill, render_skill_body
         from praisonaiagents.tools import tool
         
         # Load the skill
@@ -166,22 +166,21 @@ def tool_from_skill(path: str):
         if loaded is None:
             raise ValueError(f"Skill not found at path: {path}")
         
-        # Create the tool function
-        @tool
+        # Create the tool function with proper metadata and argument handling
         def _skill_tool(arguments: str = "") -> str:
             """Execute skill with provided arguments."""
             if loaded.instructions is None:
                 return f"Skill '{skill_name}' has no instructions"
             
-            # Return the skill instructions (could be enhanced to do substitution)
-            return loaded.instructions
+            # Return the skill instructions with argument substitution
+            return render_skill_body(loaded.instructions, arguments)
         
-        # Set function metadata
+        # Create tool with proper metadata during decoration
         safe_name = skill_name.replace('-', '_').replace(' ', '_')
-        _skill_tool.__name__ = f"skill_{safe_name}"
-        _skill_tool.__doc__ = loaded.properties.description or f"Execute {skill_name} skill"
-        
-        return _skill_tool
+        return tool(
+            name=f"skill_{safe_name}",
+            description=loaded.properties.description or f"Execute {skill_name} skill",
+        )(_skill_tool)
         
     except ImportError:
         def _dummy_tool(arguments: str = "") -> str:

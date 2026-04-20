@@ -38,7 +38,7 @@ def format_skill_for_prompt(skill: SkillMetadata) -> str:
   </skill>"""
 
 
-def generate_skills_xml(skills: List[SkillMetadata], working_directory: str = None, budget: Optional[SkillPromptBudget] = None) -> str:
+def generate_skills_xml(skills: List[SkillMetadata], working_directory: str | None = None, budget: SkillPromptBudget | None = None) -> str:
     """Generate XML block for available skills.
 
     Args:

@@ -1050,11 +1050,32 @@ Your Goal: {self.goal}"""
                 from ..approval import get_approval_registry
 
                 registry = get_approval_registry()
-                agent_name = getattr(self, "name", None)
-                for _tn in tool_names:
-                    registry.auto_approve_tool(_tn, agent_name=agent_name)
-        except Exception:  # pragma: no cover - approval is optional
-            pass
+                agent_name = getattr(self, "display_name", getattr(self, "name", None))
+                if agent_name:  # Only approve if we have a stable agent identifier
+                    for _tn in tool_names:
+                        try:
+                            registry.auto_approve_tool(_tn, agent_name=agent_name)
+                        except Exception as exc:  # pragma: no cover - approval is optional
+                            import logging
+                            logging.debug(
+                                "Failed to auto-approve skill tool '%s' for skill '%s' on agent '%s': %s. "
+                                "The skill will continue, but this tool may still require explicit approval.",
+                                _tn,
+                                name,
+                                agent_name,
+                                exc,
+                                exc_info=True,
+                            )
+        except Exception as exc:  # pragma: no cover - approval is optional
+            import logging
+            logging.debug(
+                "Failed to resolve allowed tools for skill '%s' on agent '%s': %s. "
+                "The skill will continue without pre-approving tools.",
+                name,
+                getattr(self, "name", None),
+                exc,
+                exc_info=True,
+            )
         return rendered
 
     def chat(self, prompt: str, temperature: float = 1.0, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None) -> Optional[str]:
