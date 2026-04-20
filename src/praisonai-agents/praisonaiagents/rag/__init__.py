@@ -67,21 +67,28 @@ _LAZY_IMPORTS = {
     "deduplicate_chunks": ("praisonaiagents.rag.context", "deduplicate_chunks"),
 }
 
+import threading
+
 _cache = {}
+_cache_lock = threading.Lock()
 
 
 def __getattr__(name: str):
-    """Lazy load RAG components."""
+    """Lazy load RAG components with thread safety."""
     if name in _cache:
         return _cache[name]
     
     if name in _LAZY_IMPORTS:
-        module_path, attr_name = _LAZY_IMPORTS[name]
-        import importlib
-        module = importlib.import_module(module_path)
-        value = getattr(module, attr_name)
-        _cache[name] = value
-        return value
+        with _cache_lock:
+            # Double-check after acquiring lock
+            if name in _cache:
+                return _cache[name]
+            module_path, attr_name = _LAZY_IMPORTS[name]
+            import importlib
+            module = importlib.import_module(module_path)
+            value = getattr(module, attr_name)
+            _cache[name] = value
+            return value
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

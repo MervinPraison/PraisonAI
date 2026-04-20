@@ -9,6 +9,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from .base import KnowledgeStore, KnowledgeDocument
+from ..._async_bridge import run_sync
 
 logger = logging.getLogger(__name__)
 
@@ -79,14 +80,12 @@ class SurrealDBVectorKnowledgeStore(KnowledgeStore):
             await client.use(self.namespace, self.database)
             return client
         
-        loop = asyncio.get_event_loop()
-        self._client = loop.run_until_complete(connect())
+        self._client = run_sync(connect())
         self._initialized = True
     
     def _run_async(self, coro):
         """Run async coroutine synchronously."""
-        import asyncio
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return run_sync(coro)
     
     def create_collection(
         self,

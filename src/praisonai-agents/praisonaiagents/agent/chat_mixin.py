@@ -233,8 +233,21 @@ Your Goal: {self.goal}"""
         """
         try:
             from ..llm.model_capabilities import supports_structured_outputs
+        except ImportError:
+            return False  # Module genuinely not available — acceptable
+
+        try:
             return supports_structured_outputs(self.llm)
-        except Exception:
+        except Exception as e:
+            logging.warning(
+                "Structured output capability check failed for agent %s (model=%r); "
+                "falling back to prompt-based schema formatting. Check model capability "
+                "configuration and optional provider dependencies: %s",
+                getattr(self, "name", "<unknown>"),
+                self.llm,
+                e,
+                exc_info=True,
+            )
             return False
 
     def _build_messages(self, prompt, temperature=1.0, output_json=None, output_pydantic=None, tools=None, use_native_format=False):
@@ -473,8 +486,11 @@ Your Goal: {self.goal}"""
                     if tool_calls:
                         names = [getattr(tc.function, "name", "?") for tc in tool_calls]
                         return f"[tool_calls: {', '.join(names)}]"
-        except (AttributeError, IndexError, TypeError):
-            pass
+        except (AttributeError, IndexError, TypeError) as e:
+            logging.warning(
+                f"Failed to extract LLM response content (falling back to str): {e}"
+            )
+            # Fallback to str(response) is still fine, but now it's visible
         return str(response)
 
     def _process_stream_response(self, messages, temperature, start_time, formatted_tools=None, reasoning_steps=False):
@@ -510,8 +526,10 @@ Your Goal: {self.goal}"""
                 if _compactor.needs_compaction(messages):
                     try:
                         self._hook_runner.execute_sync(_HookEvent.BEFORE_COMPACTION, None)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
+                        if getattr(self, '_strict_hooks', False):
+                            raise
                     compacted_msgs, _cr = _compactor.compact(messages)
                     messages[:] = compacted_msgs  # in-place update so callers see the change
                     logging.info(
@@ -520,9 +538,13 @@ Your Goal: {self.goal}"""
                     )
                     try:
                         self._hook_runner.execute_sync(_HookEvent.AFTER_COMPACTION, None)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.warning(f"AFTER_COMPACTION hook failed: {e}")
+                        if getattr(self, '_strict_hooks', False):
+                            raise
             except Exception as _ce:
+                if getattr(self, '_strict_hooks', False):
+                    raise
                 logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
 
         # Trigger BEFORE_LLM hook
@@ -1056,7 +1078,6 @@ Your Goal: {self.goal}"""
                         try:
                             registry.auto_approve_tool(_tn, agent_name=agent_name)
                         except Exception as exc:  # pragma: no cover - approval is optional
-                            import logging
                             logging.debug(
                                 "Failed to auto-approve skill tool '%s' for skill '%s' on agent '%s': %s. "
                                 "The skill will continue, but this tool may still require explicit approval.",
@@ -1067,7 +1088,6 @@ Your Goal: {self.goal}"""
                                 exc_info=True,
                             )
         except Exception as exc:  # pragma: no cover - approval is optional
-            import logging
             logging.debug(
                 "Failed to resolve allowed tools for skill '%s' on agent '%s': %s. "
                 "The skill will continue without pre-approving tools.",
@@ -1773,8 +1793,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if _cw.needs_compaction(self.chat_history):
                             try:
                                 await self._hook_runner.execute(_HE.BEFORE_COMPACTION, None)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
+                                if getattr(self, '_strict_hooks', False):
+                                    raise
                             _ch, _cr = _cw.compact(self.chat_history)
                             self.chat_history[:] = _ch
                             logging.info(
@@ -1783,9 +1805,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             )
                             try:
                                 await self._hook_runner.execute(_HE.AFTER_COMPACTION, None)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logging.warning(f"AFTER_COMPACTION hook failed: {e}")
+                                if getattr(self, '_strict_hooks', False):
+                                    raise
                     except Exception as _ce:
+                        if getattr(self, '_strict_hooks', False):
+                            raise
                         logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
 
                 try:

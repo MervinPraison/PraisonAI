@@ -175,6 +175,7 @@ class Handoff:
     # Class-level semaphore for concurrency control
     _semaphore: Optional[asyncio.Semaphore] = None
     _sync_semaphore: Optional[threading.Semaphore] = None
+    _semaphore_lock: threading.Lock = threading.Lock()  # Lock for semaphore initialization
     
     def __init__(
         self,
@@ -461,9 +462,11 @@ class Handoff:
         Returns:
             HandoffResult with response or error
         """
-        # Initialize semaphore if needed
+        # Initialize semaphore if needed (thread-safe)
         if self.config.max_concurrent > 0 and Handoff._semaphore is None:
-            Handoff._semaphore = asyncio.Semaphore(self.config.max_concurrent)
+            with Handoff._semaphore_lock:  # Thread-safe initialization
+                if Handoff._semaphore is None:  # Double-check after acquiring lock
+                    Handoff._semaphore = asyncio.Semaphore(self.config.max_concurrent)
         
         start_time = time.time()
         kwargs = context or {}

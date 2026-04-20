@@ -436,6 +436,7 @@ class AsyncBaseJSONStore:
         self._backend = backend
         self._data: Dict[str, Any] = {}
         self._async_lock: Optional[Any] = None  # Lazy init asyncio.Lock
+        self._async_lock_init: threading.Lock = threading.Lock()  # Thread-safe initialization
         
         if backend is None and create_if_missing:
             self.storage_path.parent.mkdir(parents=True, exist_ok=True)
@@ -445,8 +446,10 @@ class AsyncBaseJSONStore:
     def _get_async_lock(self):
         """Lazy initialize asyncio lock."""
         if self._async_lock is None:
-            import asyncio
-            self._async_lock = asyncio.Lock()
+            with self._async_lock_init:  # Thread-safe initialization
+                if self._async_lock is None:  # Double-check after acquiring lock
+                    import asyncio
+                    self._async_lock = asyncio.Lock()
         return self._async_lock
     
     def _default_data(self) -> Dict[str, Any]:

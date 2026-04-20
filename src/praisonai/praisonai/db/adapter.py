@@ -7,6 +7,7 @@ and the wrapper's persistence layer (PersistenceOrchestrator).
 
 import time
 import logging
+import threading
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -61,41 +62,46 @@ class PraisonAIDB:
         self._state_store = None
         self._knowledge_store = None
         self._initialized = False
+        self._init_lock = threading.Lock()
     
     def _init_stores(self):
         """Lazily initialize stores on first use."""
         if self._initialized:
             return
         
-        # Import persistence layer
-        from ..persistence.factory import (
-            create_conversation_store,
-            create_state_store,
-            create_knowledge_store,
-        )
-        
-        # Initialize conversation store
-        if self._database_url:
-            backend = self._detect_backend(self._database_url)
-            self._conversation_store = create_conversation_store(
-                backend, url=self._database_url, **self._options
+        with self._init_lock:
+            if self._initialized:  # Double-check inside lock
+                return
+            
+            # Import persistence layer
+            from ..persistence.factory import (
+                create_conversation_store,
+                create_state_store,
+                create_knowledge_store,
             )
-        
-        # Initialize state store
-        if self._state_url:
-            backend = self._detect_backend(self._state_url)
-            self._state_store = create_state_store(
-                backend, url=self._state_url, **self._options
-            )
-        
-        # Initialize knowledge store
-        if self._knowledge_url:
-            backend = self._detect_backend(self._knowledge_url)
-            self._knowledge_store = create_knowledge_store(
-                backend, url=self._knowledge_url, **self._options
-            )
-        
-        self._initialized = True
+            
+            # Initialize conversation store
+            if self._database_url:
+                backend = self._detect_backend(self._database_url)
+                self._conversation_store = create_conversation_store(
+                    backend, url=self._database_url, **self._options
+                )
+            
+            # Initialize state store
+            if self._state_url:
+                backend = self._detect_backend(self._state_url)
+                self._state_store = create_state_store(
+                    backend, url=self._state_url, **self._options
+                )
+            
+            # Initialize knowledge store
+            if self._knowledge_url:
+                backend = self._detect_backend(self._knowledge_url)
+                self._knowledge_store = create_knowledge_store(
+                    backend, url=self._knowledge_url, **self._options
+                )
+            
+            self._initialized = True
     
     def _detect_backend(self, url: str) -> str:
         """Detect backend type from URL.

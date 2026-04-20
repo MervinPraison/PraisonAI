@@ -95,13 +95,23 @@ class StorageMixin:
         # Initialize collections
         try:
             self.stm_collection = self.chroma_client.get_collection("short_term_memory")
-        except:
+        except ValueError:  # ChromaDB raises ValueError for missing collections
             self.stm_collection = self.chroma_client.create_collection("short_term_memory")
+        except Exception as e:
+            from .._logging import get_logger
+            logger = get_logger(__name__)
+            logger.error(f"Failed to initialize short_term_memory collection: {e}")
+            raise
             
         try:
             self.ltm_collection = self.chroma_client.get_collection("long_term_memory")
-        except:
+        except ValueError:  # ChromaDB raises ValueError for missing collections
             self.ltm_collection = self.chroma_client.create_collection("long_term_memory")
+        except Exception as e:
+            from .._logging import get_logger
+            logger = get_logger(__name__)
+            logger.error(f"Failed to initialize long_term_memory collection: {e}")
+            raise
     
     def _init_mongodb(self):
         """Initialize MongoDB for storage."""
