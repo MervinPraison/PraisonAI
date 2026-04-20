@@ -11,11 +11,10 @@ from datetime import datetime
 from typing import Optional, Dict, Any, Callable, Union
 from abc import ABC, abstractmethod
 
-logger = logging.getLogger(__name__)
-
-
 # Import shared schedule parser
 from .scheduler.shared import ScheduleParser, backoff_delay, safe_call
+
+logger = logging.getLogger(__name__)
 
 
 class AsyncAgentExecutorInterface(ABC):
@@ -129,7 +128,8 @@ class AsyncAgentScheduler:
         
         Args:
             schedule_expr: Schedule expression (e.g., "hourly", "*/1h", "3600")
-            max_retries: Maximum retry attempts on failure
+            max_retries: Maximum total execution attempts (including the first).
+                A value of 3 means 1 initial attempt + up to 2 retries.
             run_immediately: If True, run agent immediately before starting schedule
             
         Returns:
@@ -211,6 +211,7 @@ class AsyncAgentScheduler:
         Returns:
             Dictionary with execution stats
         """
+        self._ensure_async_primitives()
         async with self._stats_lock:
             return {
                 "is_running": self._is_running,
@@ -263,6 +264,7 @@ class AsyncAgentScheduler:
         async with self._stats_lock:
             self._execution_count += 1
             
+        last_exc: Optional[Exception] = None
         for attempt in range(max_retries):
             try:
                 logger.info(f"Executing agent task (attempt {attempt + 1}/{max_retries})")
@@ -279,6 +281,7 @@ class AsyncAgentScheduler:
                 logger.info("Agent execution cancelled")
                 raise
             except Exception as e:
+                last_exc = e
                 logger.error(f"Agent execution failed on attempt {attempt + 1}: {e}")
                 if attempt < max_retries - 1:
                     # Wait before retry (with cancellation support)
@@ -297,4 +300,8 @@ class AsyncAgentScheduler:
         async with self._stats_lock:
             self._failure_count += 1
             
-        safe_call(self.on_failure, f"Failed after {max_retries} attempts")
+        safe_call(
+            self.on_failure,
+            last_exc if last_exc is not None
+            else RuntimeError(f"Failed after {max_retries} attempts")
+        )

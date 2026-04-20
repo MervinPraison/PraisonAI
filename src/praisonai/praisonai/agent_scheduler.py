@@ -225,6 +225,7 @@ class AgentScheduler:
         """Execute agent with retry logic."""
         self._execution_count += 1
         
+        last_exc: Optional[Exception] = None
         for attempt in range(max_retries):
             try:
                 logger.info(f"Attempt {attempt + 1}/{max_retries}")
@@ -238,6 +239,7 @@ class AgentScheduler:
                 return
                 
             except Exception as e:
+                last_exc = e
                 logger.error(f"Agent execution failed on attempt {attempt + 1}: {e}")
                 
                 if attempt < max_retries - 1:
@@ -247,7 +249,11 @@ class AgentScheduler:
         
         self._failure_count += 1
         logger.error(f"Agent execution failed after {max_retries} attempts")
-        safe_call(self.on_failure, f"Failed after {max_retries} attempts")
+        safe_call(
+            self.on_failure,
+            last_exc if last_exc is not None
+            else RuntimeError(f"Failed after {max_retries} attempts")
+        )
     
     def execute_once(self) -> Any:
         """

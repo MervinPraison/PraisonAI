@@ -44,17 +44,52 @@ class ScheduleParser:
         raise ValueError(f"Unsupported schedule format: {schedule_expr}")
 
 
-def backoff_delay(attempt: int, *, base: float = 2.0, cap: float = 60.0) -> float:
-    """Exponential backoff, capped. Used by both sync & async schedulers."""
-    return min(base ** attempt, cap)
+def backoff_delay(
+    attempt: int,
+    *,
+    base: float = 2.0,
+    initial: float = 30.0,
+    cap: float = 300.0,
+    jitter: float = 0.1,
+) -> float:
+    """Exponential backoff with jitter, capped. Used by both sync & async schedulers."""
+    import random
+    delay = min(max(initial, base ** attempt), cap)
+    # Apply multiplicative jitter to avoid thundering herd
+    return delay * random.uniform(1 - jitter, 1 + jitter)
 
 
 def safe_call(cb, *args) -> None:
-    """Run a user callback without letting it tear the scheduler down."""
+    """Run a user callback without letting it tear the scheduler down.
+
+    Supports both sync and async callables. When called from a running event
+    loop with a coroutine-returning callback, schedules it on the loop; when
+    called from sync code, runs it to completion via asyncio.run.
+    """
     if cb is None:
         return
+    import logging
+    import asyncio
+    import inspect
+    log = logging.getLogger(__name__)
     try:
-        cb(*args)
+        result = cb(*args)
+        if inspect.iscoroutine(result):
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                # No running loop, use asyncio.run
+                try:
+                    asyncio.run(result)
+                except Exception as e:
+                    log.error("Scheduler async callback raised: %s", e)
+            else:
+                # Running loop exists, schedule as task
+                task = loop.create_task(result)
+                task.add_done_callback(
+                    lambda t: t.exception() and log.error(
+                        "Scheduler async callback raised: %s", t.exception()
+                    )
+                )
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).error("Scheduler callback raised: %s", e)
+        log.error("Scheduler callback raised: %s", e)

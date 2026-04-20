@@ -39,7 +39,10 @@ def _ensure_telemetry_defaults() -> None:
         os.getenv("LANGFUSE_PUBLIC_KEY")
         or os.path.exists(os.path.expanduser("~/.praisonai/langfuse.env"))
     )
-    if not langfuse_configured:
+    if langfuse_configured:
+        # Explicitly enable OTEL for Langfuse integration
+        os.environ["OTEL_SDK_DISABLED"] = "false"
+    else:
         os.environ.setdefault("OTEL_SDK_DISABLED", "true")
     os.environ.setdefault("EC_TELEMETRY", "false")  # respect user overrides
     _telemetry_initialized = True
@@ -48,10 +51,9 @@ def _ensure_telemetry_defaults() -> None:
 # Lazy loading for heavy imports
 def __getattr__(name):
     """Lazy load heavy modules to improve import time."""
-    # Only trigger telemetry setup when something observability-related is pulled in
-    if name in {"PraisonAI"}:
-        _ensure_telemetry_defaults()
-        
+    # Ensure telemetry defaults before any lazy import that may touch OTEL.
+    _ensure_telemetry_defaults()
+
     if name == 'PraisonAI':
         from .cli import PraisonAI
         return PraisonAI
