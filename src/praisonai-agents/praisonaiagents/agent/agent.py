@@ -179,13 +179,15 @@ class ServerRegistry:
         self._registered_agents = {}  # Dict of port -> Dict of path -> agent_id  
         self._shared_apps = {}  # Dict of port -> FastAPI app
     
+    # Class-level lock for thread-safe singleton creation
+    _instance_lock = threading.Lock()
+    
     @staticmethod
     def get_default_instance():
         """Get default global registry for backward compatibility."""
         if not hasattr(ServerRegistry, '_default_instance'):
-            import threading
-            # Double-checked locking pattern for thread safety
-            with threading.Lock():
+            # Double-checked locking pattern with shared class-level lock
+            with ServerRegistry._instance_lock:
                 if not hasattr(ServerRegistry, '_default_instance'):
                     ServerRegistry._default_instance = ServerRegistry()
         return ServerRegistry._default_instance

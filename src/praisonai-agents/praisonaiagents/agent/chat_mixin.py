@@ -1061,8 +1061,11 @@ Your Goal: {self.goal}"""
                     except TypeError:
                         # Older registry may not accept tool_name kwarg
                         registry.set_backend(AutoApproveBackend(), agent_name=agent_name)
-        except Exception:  # pragma: no cover - approval is optional
-            pass
+        except Exception as e:  # pragma: no cover - approval is optional
+            from .._logging import get_logger
+            logger = get_logger(__name__)
+            logger.warning(f"Approval system initialization failed for agent {agent_name}: {e}")
+            # Don't raise - approval is optional, but log the failure for debugging
         return rendered
 
     def chat(self, prompt: str, temperature: float = 1.0, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None) -> Optional[str]:
