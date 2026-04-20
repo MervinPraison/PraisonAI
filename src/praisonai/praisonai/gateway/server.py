@@ -971,7 +971,7 @@ class WebSocketGateway:
                 push_status["online_clients"] = presence_mgr.get_online_count()
             redis_pubsub = getattr(self, "_redis_pubsub", None)
             if redis_pubsub is not None:
-                push_status["redis_connected"] = redis_pubsub._client is not None
+                push_status["redis_connected"] = getattr(redis_pubsub, "_client", None) is not None
             result["push"] = push_status
         
         return result
