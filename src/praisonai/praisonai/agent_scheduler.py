@@ -29,52 +29,8 @@ from abc import ABC, abstractmethod
 logger = logging.getLogger(__name__)
 
 
-class ScheduleParser:
-    """Parse schedule expressions into intervals."""
-    
-    @staticmethod
-    def parse(schedule_expr: str) -> int:
-        """
-        Parse schedule expression and return interval in seconds.
-        
-        Supported formats:
-        - "daily" -> 86400 seconds
-        - "hourly" -> 3600 seconds
-        - "*/30m" -> 1800 seconds (every 30 minutes)
-        - "*/1h" -> 3600 seconds (every 1 hour)
-        - "60" -> 60 seconds (plain number)
-        
-        Args:
-            schedule_expr: Schedule expression string
-            
-        Returns:
-            Interval in seconds
-            
-        Raises:
-            ValueError: If schedule format is not supported
-        """
-        schedule_expr = schedule_expr.strip().lower()
-        
-        if schedule_expr == "daily":
-            return 86400
-        elif schedule_expr == "hourly":
-            return 3600
-        elif schedule_expr.isdigit():
-            return int(schedule_expr)
-        elif schedule_expr.startswith("*/"):
-            interval_part = schedule_expr[2:]
-            if interval_part.endswith("m"):
-                minutes = int(interval_part[:-1])
-                return minutes * 60
-            elif interval_part.endswith("h"):
-                hours = int(interval_part[:-1])
-                return hours * 3600
-            elif interval_part.endswith("s"):
-                return int(interval_part[:-1])
-            else:
-                return int(interval_part)
-        else:
-            raise ValueError(f"Unsupported schedule format: {schedule_expr}")
+# Import shared schedule parser
+from .scheduler.shared import ScheduleParser, backoff_delay, safe_call
 
 
 class AgentExecutorInterface(ABC):
@@ -268,7 +224,6 @@ class AgentScheduler:
     def _execute_with_retry(self, max_retries: int):
         """Execute agent with retry logic."""
         self._execution_count += 1
-        success = False
         
         for attempt in range(max_retries):
             try:
@@ -279,27 +234,20 @@ class AgentScheduler:
                 logger.info(f"Result: {result}")
                 
                 self._success_count += 1
-                success = True
-                
-                if self.on_success:
-                    self.on_success(result)
-                    
-                break
+                safe_call(self.on_success, result)
+                return
                 
             except Exception as e:
                 logger.error(f"Agent execution failed on attempt {attempt + 1}: {e}")
                 
                 if attempt < max_retries - 1:
-                    wait_time = 30 * (attempt + 1)  # Exponential backoff
+                    wait_time = backoff_delay(attempt)
                     logger.info(f"Waiting {wait_time}s before retry...")
                     time.sleep(wait_time)
         
-        if not success:
-            self._failure_count += 1
-            logger.error(f"Agent execution failed after {max_retries} attempts")
-            
-            if self.on_failure:
-                self.on_failure(f"Failed after {max_retries} attempts")
+        self._failure_count += 1
+        logger.error(f"Agent execution failed after {max_retries} attempts")
+        safe_call(self.on_failure, f"Failed after {max_retries} attempts")
     
     def execute_once(self) -> Any:
         """
