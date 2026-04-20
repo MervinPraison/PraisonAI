@@ -319,9 +319,9 @@ def route(routes: Dict[str, List], default: Optional[List] = None) -> Route:
     """Create a routing decision point."""
     return Route(routes=routes, default=default)
 
-def parallel(steps: List) -> Parallel:
+def parallel(steps: List, max_workers: Optional[int] = None) -> Parallel:
     """Execute steps in parallel."""
-    return Parallel(steps=steps)
+    return Parallel(steps=steps, max_workers=max_workers)
 
 def loop(step: Any = None, steps: Optional[List[Any]] = None,
          over: Optional[str] = None, from_csv: Optional[str] = None, 
