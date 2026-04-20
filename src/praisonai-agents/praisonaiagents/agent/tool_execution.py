@@ -338,7 +338,18 @@ class ToolExecutionMixin:
         
         # Auto-learning extraction (opt-in via LearnConfig(mode=LearnMode.AGENTIC))
         self._process_auto_learning()
-        
+
+        # Periodic nudge (opt-in via LearnConfig(nudge_interval>0)).
+        # Appends a system note to chat_history so it is visible on the NEXT
+        # LLM call — encourages the agent to persist non-trivial procedures
+        # as skills/memory. No-op when nudge_interval=0 (default).
+        try:
+            nudge = self._maybe_emit_nudge(prompt if isinstance(prompt, str) else str(prompt))
+            if nudge and hasattr(self, "chat_history") and isinstance(self.chat_history, list):
+                self.chat_history.append({"role": "system", "content": nudge.strip()})
+        except Exception:
+            pass
+
         return response
 
     async def _atrigger_after_agent_hook(self, prompt, response, start_time, tools_used=None):
@@ -365,7 +376,15 @@ class ToolExecutionMixin:
         
         # Auto-learning extraction (opt-in via LearnConfig(mode=LearnMode.AGENTIC))
         self._process_auto_learning()
-        
+
+        # Periodic nudge (opt-in via LearnConfig(nudge_interval>0)).
+        try:
+            nudge = self._maybe_emit_nudge(prompt if isinstance(prompt, str) else str(prompt))
+            if nudge and hasattr(self, "chat_history") and isinstance(self.chat_history, list):
+                self.chat_history.append({"role": "system", "content": nudge.strip()})
+        except Exception:
+            pass
+
         return response
 
     def _calculate_llm_cost(self, prompt_tokens: int, completion_tokens: int, response: any = None) -> float:

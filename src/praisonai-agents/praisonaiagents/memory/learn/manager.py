@@ -485,7 +485,7 @@ class LearnManager:
             }
         """
         if not messages:
-            return {"persona": [], "insights": [], "patterns": [], "stored": {}}
+            return {"persona": [], "insights": [], "patterns": [], "improvements": [], "stored": {}}
         
         # Build conversation text
         conversation_text = "\n".join([
@@ -503,12 +503,14 @@ Extract the following (if present):
 1. USER PREFERENCES: Things the user likes, dislikes, prefers, or their style
 2. INSIGHTS: Observations about the user's domain, work, or context
 3. PATTERNS: Recurring behaviors or request patterns
+4. IMPROVEMENTS: Concrete proposals to improve future responses
 
 Return JSON:
 {{
     "persona": ["preference 1", "preference 2"],
     "insights": ["insight 1", "insight 2"],
-    "patterns": ["pattern 1", "pattern 2"]
+    "patterns": ["pattern 1", "pattern 2"],
+    "improvements": ["improvement 1", "improvement 2"]
 }}
 
 Only include items that are clearly evident from the conversation.
@@ -532,10 +534,10 @@ Return empty arrays if nothing is found for a category."""
             elif isinstance(response, dict):
                 extracted = response
             else:
-                extracted = {"persona": [], "insights": [], "patterns": []}
+                extracted = {"persona": [], "insights": [], "patterns": [], "improvements": []}
             
             # Store extracted learnings (unless extract_only)
-            stored = {"persona": 0, "insights": 0, "patterns": 0}
+            stored = {"persona": 0, "insights": 0, "patterns": 0, "improvements": 0}
             
             if not extract_only:
                 for preference in extracted.get("persona", []):
@@ -552,18 +554,24 @@ Return empty arrays if nothing is found for a category."""
                     if pattern and "patterns" in self._stores:
                         self.capture_pattern(pattern, pattern_type="auto_extracted")
                         stored["patterns"] += 1
+                
+                for improvement in extracted.get("improvements", []):
+                    if improvement and "improvements" in self._stores:
+                        self.capture_improvement(improvement, source="auto_extraction")
+                        stored["improvements"] += 1
             
             return {
                 "persona": extracted.get("persona", []),
                 "insights": extracted.get("insights", []),
                 "patterns": extracted.get("patterns", []),
+                "improvements": extracted.get("improvements", []),
                 "stored": stored,
             }
             
         except Exception as e:
             import logging
             logging.warning(f"Failed to extract learnings: {e}")
-            return {"persona": [], "insights": [], "patterns": [], "stored": {}, "error": str(e)}
+            return {"persona": [], "insights": [], "patterns": [], "improvements": [], "stored": {}, "error": str(e)}
     
     async def aprocess_conversation(
         self,
@@ -663,4 +671,4 @@ Return empty arrays if nothing is found for a category."""
         except Exception as e:
             import logging
             logging.warning(f"Failed to extract learnings: {e}")
-            return {"persona": [], "insights": [], "patterns": [], "stored": {}, "error": str(e)}
+            return {"persona": [], "insights": [], "patterns": [], "improvements": [], "stored": {}, "error": str(e)}

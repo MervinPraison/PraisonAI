@@ -47,6 +47,7 @@ __all__ = [
     # Protocols
     "SkillSourceProtocol",
     "SkillInvocationPolicyProtocol",
+    "SkillMutatorProtocol",
 ]
 
 
@@ -88,8 +89,8 @@ def __getattr__(name: str):
         from .shell_render import render_shell_blocks
         return render_shell_blocks
 
-    if name in ("SkillSourceProtocol", "SkillInvocationPolicyProtocol"):
-        from .protocols import SkillSourceProtocol, SkillInvocationPolicyProtocol
+    if name in ("SkillSourceProtocol", "SkillInvocationPolicyProtocol", "SkillMutatorProtocol"):
+        from .protocols import SkillSourceProtocol, SkillInvocationPolicyProtocol, SkillMutatorProtocol
         return locals()[name]
 
     if name == "load_skill":

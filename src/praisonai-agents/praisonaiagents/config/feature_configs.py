@@ -120,6 +120,11 @@ class LearnConfig:
     feedback: bool = False     # Outcome signals
     improvements: bool = False # Self-improvement proposals
     
+    # Nudge mechanism (self-improving agent loop)
+    nudge_interval: int = 0    # 0=disabled; N=nudge every N turns  
+    nudge_min_tool_iters: int = 3  # Only nudge if agent did real work
+    propose_skills: bool = False   # Enable skill_manage tool (propose mode)
+    
     # Learning mode
     mode: Union[str, LearnMode] = LearnMode.DISABLED  # How to extract learnings
     
@@ -144,6 +149,9 @@ class LearnConfig:
             "decisions": self.decisions,
             "feedback": self.feedback,
             "improvements": self.improvements,
+            "nudge_interval": self.nudge_interval,
+            "nudge_min_tool_iters": self.nudge_min_tool_iters,
+            "propose_skills": self.propose_skills,
             "mode": self.mode.value if isinstance(self.mode, LearnMode) else self.mode,
             "scope": self.scope.value if isinstance(self.scope, LearnScope) else self.scope,
             "backend": self.backend.value if isinstance(self.backend, LearnBackend) else self.backend,
