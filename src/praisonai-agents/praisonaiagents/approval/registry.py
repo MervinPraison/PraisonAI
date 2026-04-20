@@ -76,6 +76,9 @@ class ApprovalRegistry:
         self._required_tools: Set[str] = set()
         self._risk_levels: Dict[str, str] = {}
 
+        # Per-agent, per-tool auto-approval (G-A fix)
+        self._agent_tool_auto_approve: Dict[tuple[str | None, str], bool] = {}
+
         # Context variables (per-coroutine / per-thread)
         self._approved_context: contextvars.ContextVar[Set[str]] = contextvars.ContextVar(
             "approved_context", default=set()
@@ -139,6 +142,19 @@ class ApprovalRegistry:
     def get_risk_level(self, tool_name: str) -> Optional[str]:
         return self._risk_levels.get(tool_name)
 
+    # ── Per-tool auto-approval (G-A fix) ─────────────────────────────────
+
+    def auto_approve_tool(self, tool_name: str, agent_name: Optional[str] = None) -> None:
+        """Pre-approve a single tool for an agent (or globally if agent_name is None)."""
+        self._agent_tool_auto_approve[(agent_name, tool_name)] = True
+
+    def is_auto_approved(self, tool_name: str, agent_name: Optional[str] = None) -> bool:
+        """Check if a tool is auto-approved for a specific agent or globally."""
+        return (
+            self._agent_tool_auto_approve.get((agent_name, tool_name), False)
+            or self._agent_tool_auto_approve.get((None, tool_name), False)
+        )
+
     # ── Context helpers ──────────────────────────────────────────────────
 
     def mark_approved(self, tool_name: str) -> None:
@@ -189,6 +205,11 @@ class ApprovalRegistry:
         if self.is_already_approved(tool_name):
             return ApprovalDecision(approved=True, reason="Already approved in context")
 
+        # Check per-tool auto-approval (G-A fix)
+        if self.is_auto_approved(tool_name, agent_name):
+            self.mark_approved(tool_name)
+            return ApprovalDecision(approved=True, reason="Auto-approved (skill)", approver="skill")
+
         # Env auto-approve
         if self.is_env_auto_approve():
             self.mark_approved(tool_name)
@@ -236,6 +257,11 @@ class ApprovalRegistry:
 
         if self.is_already_approved(tool_name):
             return ApprovalDecision(approved=True, reason="Already approved in context")
+
+        # Check per-tool auto-approval (G-A fix)
+        if self.is_auto_approved(tool_name, agent_name):
+            self.mark_approved(tool_name)
+            return ApprovalDecision(approved=True, reason="Auto-approved (skill)", approver="skill")
 
         if self.is_env_auto_approve():
             self.mark_approved(tool_name)

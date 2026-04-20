@@ -48,6 +48,12 @@ __all__ = [
     "SkillSourceProtocol",
     "SkillInvocationPolicyProtocol",
     "SkillMutatorProtocol",
+    "SkillActivationProtocol",
+    # Events
+    "SkillDiscoveredEvent",
+    "SkillActivatedEvent",
+    # Budget
+    "SkillPromptBudget",
 ]
 
 
@@ -92,6 +98,18 @@ def __getattr__(name: str):
     if name in ("SkillSourceProtocol", "SkillInvocationPolicyProtocol", "SkillMutatorProtocol"):
         from .protocols import SkillSourceProtocol, SkillInvocationPolicyProtocol, SkillMutatorProtocol
         return locals()[name]
+
+    if name == "SkillActivationProtocol":
+        from .activation import SkillActivationProtocol
+        return SkillActivationProtocol
+
+    if name in ("SkillDiscoveredEvent", "SkillActivatedEvent"):
+        from .events import SkillDiscoveredEvent, SkillActivatedEvent
+        return locals()[name]
+
+    if name == "SkillPromptBudget":
+        from .budget import SkillPromptBudget
+        return SkillPromptBudget
 
     if name == "load_skill":
         # Fixes G12: praisonai.capabilities.skills.skill_load import target.

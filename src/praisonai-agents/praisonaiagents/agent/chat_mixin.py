@@ -1042,25 +1042,17 @@ Your Goal: {self.goal}"""
         rendered = mgr.invoke(name, raw_args=args)
         if rendered is None:
             return prompt
-        # G6: Best-effort pre-approve any tools declared under
+        # G-A fix: Best-effort pre-approve any tools declared under
         # `allowed-tools` in the skill frontmatter. Non-fatal on error.
         try:
             tool_names = mgr.get_allowed_tools(name)
             if tool_names:
-                from ..approval import get_approval_registry, AutoApproveBackend
+                from ..approval import get_approval_registry
 
                 registry = get_approval_registry()
                 agent_name = getattr(self, "name", None)
                 for _tn in tool_names:
-                    try:
-                        registry.set_backend(
-                            AutoApproveBackend(),
-                            agent_name=agent_name,
-                            tool_name=_tn,
-                        )
-                    except TypeError:
-                        # Older registry may not accept tool_name kwarg
-                        registry.set_backend(AutoApproveBackend(), agent_name=agent_name)
+                    registry.auto_approve_tool(_tn, agent_name=agent_name)
         except Exception:  # pragma: no cover - approval is optional
             pass
         return rendered

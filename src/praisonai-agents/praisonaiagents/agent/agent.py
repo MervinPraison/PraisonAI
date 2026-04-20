@@ -2255,9 +2255,11 @@ Summary:"""
         Uses lazy imports from praisonaiagents.tools to avoid performance impact
         when skills are not used.
 
-        Honours ``PRAISONAI_DISABLE_SKILL_TOOLS=1`` so hosts that do not want
-        the subprocess-backed ``run_skill_script`` tool auto-injected can opt
-        out without touching code.
+        G-E fix: run_skill_script is now safer by default:
+        - PRAISONAI_DISABLE_SKILL_TOOLS=1: disables all skill tools (explicit deny wins)
+        - PRAISONAI_ENABLE_SKILL_TOOLS=1: enables run_skill_script by default
+        - Any loaded skill with 'run_skill_script' in allowed-tools: enables it
+        - Otherwise: only read_file is added (safer default)
         """
         import os as _os
         if _os.environ.get("PRAISONAI_DISABLE_SKILL_TOOLS") in ("1", "true", "True"):
@@ -2272,7 +2274,7 @@ Summary:"""
             elif hasattr(tool, 'name'):
                 tool_names.add(tool.name)
         
-        # Add read_file if not present
+        # Add read_file if not present (low risk, always enabled)
         if 'read_file' not in tool_names:
             try:
                 from ..tools import read_file
@@ -2281,8 +2283,26 @@ Summary:"""
             except ImportError:
                 logging.warning("Could not import read_file tool for skills")
         
-        # Add run_skill_script from skill_tools module
-        if 'run_skill_script' not in tool_names:
+        # G-E fix: run_skill_script safer by default
+        # Only add if explicitly enabled OR any skill declares it in allowed-tools
+        should_add_script_tool = False
+        
+        # Check explicit environment enable
+        if _os.environ.get("PRAISONAI_ENABLE_SKILL_TOOLS") in ("1", "true", "True"):
+            should_add_script_tool = True
+            logging.debug("run_skill_script enabled via PRAISONAI_ENABLE_SKILL_TOOLS")
+        
+        # Check if any loaded skill declares it in allowed-tools
+        if self._skill_manager and not should_add_script_tool:
+            for skill in self._skill_manager.skills:
+                allowed_tools = self._skill_manager.get_allowed_tools(skill.properties.name)
+                if "run_skill_script" in allowed_tools:
+                    should_add_script_tool = True
+                    logging.debug(f"run_skill_script enabled by skill '{skill.properties.name}' allowed-tools")
+                    break
+        
+        # Add run_skill_script if conditions are met
+        if should_add_script_tool and 'run_skill_script' not in tool_names:
             try:
                 from ..tools.skill_tools import create_skill_tools
                 # Create skill tools with current working directory
