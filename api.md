@@ -704,6 +704,7 @@ Methods:
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">astart</a>(content = None, return_dict = False, **kwargs)</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">clean_json_output</a>(output: str) -> str</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">clear_state</a>() -> None</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">close</a>() -> None</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">context_manager</a>()</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">current_plan</a>()</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">default_completion_checker</a>(task, agent_output)</code>
