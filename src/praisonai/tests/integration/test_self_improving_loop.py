@@ -30,6 +30,45 @@ def test_self_improving_agent_loop():
     """
     # Create temporary directory for test isolation
     with tempfile.TemporaryDirectory() as temp_dir:
+        # Create isolated skill mutator for testing
+        from praisonai.tools.skill_manage import BasicSkillMutator
+        test_mutator = BasicSkillMutator(skills_dir=temp_dir)
+        
+        # Create isolated skill_manage tool function
+        def isolated_skill_manage(action, name, content="", old_string="", new_string="", 
+                                file_path="", category="", replace_all=False):
+            """Test version of skill_manage using isolated storage."""
+            action = action.lower()
+            
+            if action == "create":
+                return test_mutator.create(name, content, category or None)
+            elif action == "patch":
+                return test_mutator.patch(name, old_string, new_string, 
+                                        file_path or None, replace_all)
+            elif action == "edit":
+                return test_mutator.edit(name, content)
+            elif action == "delete":
+                return test_mutator.delete(name)
+            elif action == "write_file":
+                return test_mutator.write_file(name, file_path, content)
+            elif action == "remove_file":
+                return test_mutator.remove_file(name, file_path)
+            elif action in ("list", "list_pending"):
+                pending = test_mutator.list_pending()
+                if not pending:
+                    return "📝 No pending skill proposals."
+                result = "📝 Pending skill proposals:\\n"
+                for p in pending:
+                    result += f"  • {p['name']} ({p['action']}) - {p['created_at']}\\n"
+                result += f"\\nUse skill_manage('approve', '<name>') to activate a skill."
+                return result
+            elif action == "approve":
+                return test_mutator.approve(name)
+            elif action == "reject":
+                return test_mutator.reject(name)
+            else:
+                return f"❌ Unknown action '{action}'. Available: create, patch, edit, delete, write_file, remove_file, list, approve, reject"
+
         # Set up agent with self-improving features
         agent = Agent(
             name="learner",
@@ -45,8 +84,8 @@ def test_self_improving_agent_loop():
                 nudge_interval=2,         # Nudge every 2 turns
                 propose_skills=True,      # Enable skill creation
             ),
-            # Provide skill management tool
-            tools=[skill_manage],
+            # Provide isolated skill management tool
+            tools=[isolated_skill_manage],
             # Ensure reproducible test environment
             memory=False,  # Disable memory to avoid test pollution
         )
@@ -91,7 +130,7 @@ def test_self_improving_agent_loop():
         print("\\n=== PHASE 4: Test skill management tool ===")
         
         # Manually test skill creation (simulating agent using the tool)
-        skill_result = skill_manage(
+        skill_result = isolated_skill_manage(
             action="create",
             name="python-project-setup",
             content="""# Python Project Setup

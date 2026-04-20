@@ -82,11 +82,26 @@ version: 1.0.0
               file_path: Optional[str] = None, replace_all: bool = False,
               propose: bool = True) -> str:
         """Patch an existing skill using find-replace."""
+        if not self._is_valid_name(name):
+            return f"❌ Invalid skill name '{name}'. Must be alphanumeric with hyphens/underscores."
+        
+        # Security: Prevent path traversal for file_path
+        if file_path and not self._is_safe_path(file_path):
+            return f"❌ Invalid file path '{file_path}'. Path traversal not allowed."
+        
         skill_path = self._find_skill(name)
         if not skill_path:
             return f"❌ Skill '{name}' not found."
         
         file_to_edit = skill_path / (file_path or "SKILL.md")
+        
+        # Additional security check for file_path
+        if file_path:
+            try:
+                file_to_edit.resolve().relative_to(skill_path.resolve())
+            except ValueError:
+                return f"❌ Invalid file path '{file_path}'. Must be within skill directory."
+        
         if not file_to_edit.exists():
             return f"❌ File '{file_path or 'SKILL.md'}' not found in skill '{name}'."
         
@@ -126,13 +141,24 @@ version: 1.0.0
     
     def edit(self, name: str, content: str, propose: bool = True) -> str:
         """Replace entire skill content."""
+        if not self._is_valid_name(name):
+            return f"❌ Invalid skill name '{name}'. Must be alphanumeric with hyphens/underscores."
+        
+        skill_path = self._find_skill(name)
+        if not skill_path:
+            return f"❌ Skill '{name}' not found."
+        
         if propose:
-            return self.create(name + "_edit", content, propose=True)
+            # For propose mode, save edit proposal
+            edit_info = {
+                "action": "edit",
+                "skill": name,
+                "content": content,
+                "timestamp": datetime.now().isoformat()
+            }
+            self._save_proposal(name, "edit", edit_info)
+            return f"✅ Edit for '{name}' staged for approval."
         else:
-            skill_path = self._find_skill(name)
-            if not skill_path:
-                return f"❌ Skill '{name}' not found."
-            
             try:
                 skill_md = skill_path / "SKILL.md"
                 skill_md.write_text(content)
@@ -143,6 +169,9 @@ version: 1.0.0
     
     def delete(self, name: str, propose: bool = True) -> str:
         """Delete a skill entirely."""
+        if not self._is_valid_name(name):
+            return f"❌ Invalid skill name '{name}'. Must be alphanumeric with hyphens/underscores."
+        
         skill_path = self._find_skill(name)
         if not skill_path:
             return f"❌ Skill '{name}' not found."
@@ -167,11 +196,24 @@ version: 1.0.0
     def write_file(self, name: str, file_path: str, file_content: str,
                    propose: bool = True) -> str:
         """Write a file within a skill directory."""
+        if not self._is_valid_name(name):
+            return f"❌ Invalid skill name '{name}'. Must be alphanumeric with hyphens/underscores."
+        
+        # Security: Prevent path traversal
+        if not self._is_safe_path(file_path):
+            return f"❌ Invalid file path '{file_path}'. Path traversal not allowed."
+        
         skill_path = self._find_skill(name)
         if not skill_path:
             return f"❌ Skill '{name}' not found."
         
         target_file = skill_path / file_path
+        
+        # Additional security check: ensure resolved path is within skill directory
+        try:
+            target_file.resolve().relative_to(skill_path.resolve())
+        except ValueError:
+            return f"❌ Invalid file path '{file_path}'. Must be within skill directory."
         
         if propose:
             file_info = {
@@ -194,11 +236,25 @@ version: 1.0.0
     
     def remove_file(self, name: str, file_path: str, propose: bool = True) -> str:
         """Remove a file from a skill directory."""
+        if not self._is_valid_name(name):
+            return f"❌ Invalid skill name '{name}'. Must be alphanumeric with hyphens/underscores."
+        
+        # Security: Prevent path traversal
+        if not self._is_safe_path(file_path):
+            return f"❌ Invalid file path '{file_path}'. Path traversal not allowed."
+        
         skill_path = self._find_skill(name)
         if not skill_path:
             return f"❌ Skill '{name}' not found."
         
         target_file = skill_path / file_path
+        
+        # Additional security check: ensure resolved path is within skill directory
+        try:
+            target_file.resolve().relative_to(skill_path.resolve())
+        except ValueError:
+            return f"❌ Invalid file path '{file_path}'. Must be within skill directory."
+        
         if not target_file.exists():
             return f"❌ File '{file_path}' not found in skill '{name}'."
         
@@ -250,23 +306,84 @@ version: 1.0.0
     
     def approve(self, name: str) -> str:
         """Approve a pending skill mutation."""
+        if not self._is_valid_name(name):
+            return f"❌ Invalid skill name '{name}'. Must be alphanumeric with hyphens/underscores."
+        
         pending_path = self.pending_dir / name
+        proposal_file = pending_path / ".proposal.json"
+        
         if not pending_path.exists():
             return f"❌ No pending proposal found for '{name}'."
         
         try:
-            # Move from pending to active skills
-            active_path = self.skills_dir / name
-            if active_path.exists():
-                import shutil
-                shutil.rmtree(active_path)  # Remove existing version
-            
-            pending_path.rename(active_path)
-            
-            # Clean up proposal metadata
-            proposal_file = active_path / ".proposal.json"
+            # Check if this is a proposal with metadata
             if proposal_file.exists():
-                proposal_file.unlink()
+                proposal = json.loads(proposal_file.read_text())
+                action = proposal.get("action", "create")
+                
+                if action == "create":
+                    # For create actions, move the entire directory
+                    active_path = self.skills_dir / name
+                    if active_path.exists():
+                        import shutil
+                        shutil.rmtree(active_path)
+                    
+                    pending_path.rename(active_path)
+                    proposal_file = active_path / ".proposal.json"
+                    if proposal_file.exists():
+                        proposal_file.unlink()
+                    
+                elif action in ["patch", "edit", "delete", "write_file", "remove_file"]:
+                    # For other actions, apply the proposed change to the active skill
+                    active_skill_path = self.skills_dir / name
+                    if not active_skill_path.exists():
+                        return f"❌ Cannot approve {action} for non-existent skill '{name}'."
+                    
+                    if action == "patch":
+                        # Apply patch to active skill
+                        file_to_edit = active_skill_path / proposal.get("file", "SKILL.md")
+                        if file_to_edit.exists():
+                            content = file_to_edit.read_text()
+                            if proposal.get("replace_all", False):
+                                new_content = content.replace(proposal["old_string"], proposal["new_string"])
+                            else:
+                                new_content = content.replace(proposal["old_string"], proposal["new_string"], 1)
+                            file_to_edit.write_text(new_content)
+                    
+                    elif action == "edit":
+                        # Replace entire skill content
+                        skill_md = active_skill_path / "SKILL.md"
+                        skill_md.write_text(proposal["content"])
+                    
+                    elif action == "delete":
+                        # Delete the active skill
+                        import shutil
+                        shutil.rmtree(active_skill_path)
+                    
+                    elif action == "write_file":
+                        # Write file to active skill
+                        target_file = active_skill_path / proposal["file_path"]
+                        target_file.parent.mkdir(parents=True, exist_ok=True)
+                        target_file.write_text(proposal["content"])
+                    
+                    elif action == "remove_file":
+                        # Remove file from active skill
+                        target_file = active_skill_path / proposal["file_path"]
+                        if target_file.exists():
+                            target_file.unlink()
+                    
+                    # Clean up pending proposal
+                    import shutil
+                    shutil.rmtree(pending_path)
+                    
+            else:
+                # Legacy: No proposal metadata, treat as create action
+                active_path = self.skills_dir / name
+                if active_path.exists():
+                    import shutil
+                    shutil.rmtree(active_path)
+                
+                pending_path.rename(active_path)
             
             self._log_action("approve", name, False)
             return f"✅ Skill '{name}' approved and activated."
@@ -276,6 +393,9 @@ version: 1.0.0
     
     def reject(self, name: str) -> str:
         """Reject a pending skill mutation."""
+        if not self._is_valid_name(name):
+            return f"❌ Invalid skill name '{name}'. Must be alphanumeric with hyphens/underscores."
+        
         pending_path = self.pending_dir / name
         if not pending_path.exists():
             return f"❌ No pending proposal found for '{name}'."
@@ -295,6 +415,23 @@ version: 1.0.0
         if not name:
             return False
         return name.replace("-", "").replace("_", "").isalnum()
+    
+    def _is_safe_path(self, file_path: str) -> bool:
+        """Check if file path is safe (no path traversal attempts)."""
+        if not file_path:
+            return False
+        
+        # Check for path traversal patterns
+        dangerous_patterns = ["..", "/", "\\", "~"]
+        if any(pattern in file_path for pattern in dangerous_patterns):
+            return False
+        
+        # Must be a simple filename or simple relative path
+        normalized = os.path.normpath(file_path)
+        if normalized != file_path or normalized.startswith("/"):
+            return False
+            
+        return True
     
     def _find_skill(self, name: str) -> Optional[Path]:
         """Find skill in active or pending directories."""
@@ -340,8 +477,15 @@ version: 1.0.0
             pass
 
 
-# Create default global mutator instance
-_default_mutator = BasicSkillMutator()
+# Lazy initialization of default mutator to avoid import-time filesystem work
+_default_mutator = None
+
+def _get_default_mutator() -> BasicSkillMutator:
+    """Get or create the default skill mutator instance."""
+    global _default_mutator
+    if _default_mutator is None:
+        _default_mutator = BasicSkillMutator()
+    return _default_mutator
 
 
 @tool
@@ -387,28 +531,29 @@ def skill_manage(
         skill_manage("approve", "python-debugging")
     """
     action = action.lower()
+    mutator = _get_default_mutator()
     
     if action == "create":
-        return _default_mutator.create(name, content, category or None)
+        return mutator.create(name, content, category or None)
     
     elif action == "patch":
-        return _default_mutator.patch(name, old_string, new_string, 
+        return mutator.patch(name, old_string, new_string, 
                                      file_path or None, replace_all)
     
     elif action == "edit":
-        return _default_mutator.edit(name, content)
+        return mutator.edit(name, content)
     
     elif action == "delete":
-        return _default_mutator.delete(name)
+        return mutator.delete(name)
     
     elif action == "write_file":
-        return _default_mutator.write_file(name, file_path, content)
+        return mutator.write_file(name, file_path, content)
     
     elif action == "remove_file":
-        return _default_mutator.remove_file(name, file_path)
+        return mutator.remove_file(name, file_path)
     
     elif action in ("list", "list_pending"):
-        pending = _default_mutator.list_pending()
+        pending = mutator.list_pending()
         if not pending:
             return "📝 No pending skill proposals."
         
@@ -419,10 +564,10 @@ def skill_manage(
         return result
     
     elif action == "approve":
-        return _default_mutator.approve(name)
+        return mutator.approve(name)
     
     elif action == "reject":
-        return _default_mutator.reject(name)
+        return mutator.reject(name)
     
     else:
         return f"❌ Unknown action '{action}'. Available: create, patch, edit, delete, write_file, remove_file, list, approve, reject"
