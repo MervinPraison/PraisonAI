@@ -233,11 +233,21 @@ Your Goal: {self.goal}"""
         """
         try:
             from ..llm.model_capabilities import supports_structured_outputs
-            return supports_structured_outputs(self.llm)
         except ImportError:
             return False  # Module genuinely not available — acceptable
+
+        try:
+            return supports_structured_outputs(self.llm)
         except Exception as e:
-            logging.warning(f"Structured output capability check failed: {e}")
+            logging.warning(
+                "Structured output capability check failed for agent %s (model=%r); "
+                "falling back to prompt-based schema formatting. Check model capability "
+                "configuration and optional provider dependencies: %s",
+                getattr(self, "name", "<unknown>"),
+                self.llm,
+                e,
+                exc_info=True,
+            )
             return False
 
     def _build_messages(self, prompt, temperature=1.0, output_json=None, output_pydantic=None, tools=None, use_native_format=False):
@@ -533,6 +543,8 @@ Your Goal: {self.goal}"""
                         if getattr(self, '_strict_hooks', False):
                             raise
             except Exception as _ce:
+                if getattr(self, '_strict_hooks', False):
+                    raise
                 logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
 
         # Trigger BEFORE_LLM hook
@@ -1770,8 +1782,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if _cw.needs_compaction(self.chat_history):
                             try:
                                 await self._hook_runner.execute(_HE.BEFORE_COMPACTION, None)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
+                                if getattr(self, '_strict_hooks', False):
+                                    raise
                             _ch, _cr = _cw.compact(self.chat_history)
                             self.chat_history[:] = _ch
                             logging.info(
@@ -1780,9 +1794,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             )
                             try:
                                 await self._hook_runner.execute(_HE.AFTER_COMPACTION, None)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logging.warning(f"AFTER_COMPACTION hook failed: {e}")
+                                if getattr(self, '_strict_hooks', False):
+                                    raise
                     except Exception as _ce:
+                        if getattr(self, '_strict_hooks', False):
+                            raise
                         logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
 
                 try:
