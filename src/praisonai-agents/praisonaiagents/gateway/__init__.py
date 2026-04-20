@@ -18,8 +18,25 @@ from .protocols import (
     GatewayEvent,
     GatewayMessage,
     EventType,
+    # Push protocols and dataclasses
+    PushChannelProtocol,
+    PresenceProtocol,
+    DeliveryGuaranteeProtocol,
+    ChannelInfo,
+    PresenceInfo,
 )
-from .config import GatewayConfig, SessionConfig, ChannelRouteConfig, MultiChannelGatewayConfig
+from .config import (
+    GatewayConfig,
+    SessionConfig,
+    ChannelRouteConfig,
+    MultiChannelGatewayConfig,
+    # Push config
+    PushConfig,
+    RedisConfig,
+    PresenceConfig,
+    DeliveryConfig,
+    PollingConfig,
+)
 
 # Lazy loading cache
 _lazy_cache = {}
@@ -68,11 +85,22 @@ __all__ = [
     "GatewayEvent",
     "GatewayMessage",
     "EventType",
+    # Push protocols (always available)
+    "PushChannelProtocol",
+    "PresenceProtocol",
+    "DeliveryGuaranteeProtocol",
+    "ChannelInfo",
+    "PresenceInfo",
     # Config (always available)
     "GatewayConfig",
     "SessionConfig",
     "ChannelRouteConfig",
     "MultiChannelGatewayConfig",
+    "PushConfig",
+    "RedisConfig",
+    "PresenceConfig",
+    "DeliveryConfig",
+    "PollingConfig",
     # Implementations (lazy loaded from praisonai wrapper)
     "WebSocketGateway",
     "GatewaySession",
