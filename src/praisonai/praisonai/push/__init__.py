@@ -6,4 +6,4 @@ Concrete implementations of protocols defined in
 from .client import PushClient
 from .transports import WebSocketTransport, PollingTransport
 
-__all__ = ["PushClient", "WebSocketTransport", "PollingTransport"]
+__all__ = ["PollingTransport", "PushClient", "WebSocketTransport"]
