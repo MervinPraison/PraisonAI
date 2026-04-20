@@ -1,51 +1,42 @@
+"""Push client public surface.
+
+Concrete implementations live in the `praisonai` wrapper. This module
+re-exports them lazily so user code can keep importing from
+``praisonaiagents.push``.
 """
-Push notification client module for PraisonAI Agents.
-
-Provides a Python SDK for consuming push notifications from
-the PraisonAI gateway's push service.
-
-This module uses lazy loading to avoid importing heavy dependencies
-(websockets, aiohttp) until actually needed.
-"""
-
 from .models import ChannelMessage
+from .protocols import PushTransportProtocol
 
-# Lazy loading cache
-_lazy_cache = {}
+_lazy_cache: dict = {}
 
+_WRAPPER_MAP = {
+    "PushClient":        ("praisonai.push",            "PushClient"),
+    "WebSocketTransport": ("praisonai.push",           "WebSocketTransport"),
+    "PollingTransport":   ("praisonai.push",           "PollingTransport"),
+}
 
 def __getattr__(name: str):
-    """Lazy load PushClient and transports."""
     if name in _lazy_cache:
         return _lazy_cache[name]
-
-    if name == "PushClient":
-        from .client import PushClient
-        _lazy_cache[name] = PushClient
-        return PushClient
-
-    if name == "WebSocketTransport":
-        from .transports import WebSocketTransport
-        _lazy_cache[name] = WebSocketTransport
-        return WebSocketTransport
-
-    if name == "PollingTransport":
-        from .transports import PollingTransport
-        _lazy_cache[name] = PollingTransport
-        return PollingTransport
-
-    if name == "PushTransportProtocol":
-        from .transports import PushTransportProtocol
-        _lazy_cache[name] = PushTransportProtocol
-        return PushTransportProtocol
-
+    if name in _WRAPPER_MAP:
+        mod, attr = _WRAPPER_MAP[name]
+        try:
+            import importlib
+            obj = getattr(importlib.import_module(mod), attr)
+        except ImportError as e:
+            raise ImportError(
+                f"{name} requires the praisonai wrapper package. "
+                "Install with: pip install praisonai"
+            ) from e
+        _lazy_cache[name] = obj
+        return obj
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [
-    "PushClient",
     "ChannelMessage",
+    "PushTransportProtocol",
+    "PushClient",
     "WebSocketTransport",
     "PollingTransport",
-    "PushTransportProtocol",
 ]

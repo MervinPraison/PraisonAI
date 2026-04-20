@@ -12,7 +12,8 @@ import uuid
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Union
 
 from praisonaiagents.gateway.protocols import PresenceInfo
-from .models import ChannelMessage
+from praisonaiagents.push.models import ChannelMessage
+from praisonaiagents.push.protocols import PushTransportProtocol
 
 logger = logging.getLogger(__name__)
 

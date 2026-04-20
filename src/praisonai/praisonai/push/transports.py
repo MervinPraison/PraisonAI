@@ -1,5 +1,5 @@
 """
-Push transport abstractions for PraisonAI Agents.
+Push transport implementations for PraisonAI.
 
 Provides WebSocket and polling transports for the PushClient.
 """
@@ -9,35 +9,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
-
-
-@runtime_checkable
-class PushTransportProtocol(Protocol):
-    """Protocol for push client transports."""
-
-    @property
-    def is_connected(self) -> bool:
-        """Whether the transport is currently connected."""
-        ...
-
-    async def connect(self) -> None:
-        """Establish connection."""
-        ...
-
-    async def disconnect(self) -> None:
-        """Close connection."""
-        ...
-
-    async def send(self, data: Dict[str, Any]) -> None:
-        """Send a JSON message."""
-        ...
-
-    async def receive(self) -> Dict[str, Any]:
-        """Receive a JSON message. Blocks until a message arrives."""
-        ...
 
 
 class WebSocketTransport:
