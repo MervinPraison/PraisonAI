@@ -11,55 +11,10 @@ from datetime import datetime
 from typing import Optional, Dict, Any, Callable, Union
 from abc import ABC, abstractmethod
 
+# Import shared schedule parser
+from .scheduler.shared import ScheduleParser, backoff_delay, safe_call
+
 logger = logging.getLogger(__name__)
-
-
-class AsyncScheduleParser:
-    """Parse schedule expressions into intervals for async execution."""
-    
-    @staticmethod
-    def parse(schedule_expr: str) -> int:
-        """
-        Parse schedule expression and return interval in seconds.
-        
-        Supported formats:
-        - "daily" -> 86400 seconds
-        - "hourly" -> 3600 seconds
-        - "*/30m" -> 1800 seconds (every 30 minutes)
-        - "*/1h" -> 3600 seconds (every 1 hour)
-        - "60" -> 60 seconds (plain number)
-        
-        Args:
-            schedule_expr: Schedule expression string
-            
-        Returns:
-            Interval in seconds
-            
-        Raises:
-            ValueError: If schedule format is not supported
-        """
-        schedule_expr = schedule_expr.strip().lower()
-        
-        if schedule_expr == "daily":
-            return 86400
-        elif schedule_expr == "hourly":
-            return 3600
-        elif schedule_expr.isdigit():
-            return int(schedule_expr)
-        elif schedule_expr.startswith("*/"):
-            interval_part = schedule_expr[2:]
-            if interval_part.endswith("m"):
-                minutes = int(interval_part[:-1])
-                return minutes * 60
-            elif interval_part.endswith("h"):
-                hours = int(interval_part[:-1])
-                return hours * 3600
-            elif interval_part.endswith("s"):
-                return int(interval_part[:-1])
-            else:
-                return int(interval_part)
-        else:
-            raise ValueError(f"Unsupported schedule format: {schedule_expr}")
 
 
 class AsyncAgentExecutorInterface(ABC):
@@ -143,15 +98,24 @@ class AsyncAgentScheduler:
         self.on_failure = on_failure
         
         self._is_running = False
-        self._cancel_event = asyncio.Event()
         self._task_handle: Optional[asyncio.Task] = None
         self._executor = AsyncPraisonAgentExecutor(agent)
         
-        # Thread-safe counters using asyncio.Lock
+        # Counters
         self._execution_count = 0
         self._success_count = 0  
         self._failure_count = 0
-        self._stats_lock = asyncio.Lock()
+        
+        # Created lazily on first async entry — binds to the caller's loop
+        self._cancel_event: Optional[asyncio.Event] = None
+        self._stats_lock: Optional[asyncio.Lock] = None
+        
+    def _ensure_async_primitives(self) -> None:
+        """Create async primitives if they don't exist yet."""
+        if self._cancel_event is None:
+            self._cancel_event = asyncio.Event()
+        if self._stats_lock is None:
+            self._stats_lock = asyncio.Lock()
         
     async def start(
         self,
@@ -164,7 +128,8 @@ class AsyncAgentScheduler:
         
         Args:
             schedule_expr: Schedule expression (e.g., "hourly", "*/1h", "3600")
-            max_retries: Maximum retry attempts on failure
+            max_retries: Maximum total execution attempts (including the first).
+                A value of 3 means 1 initial attempt + up to 2 retries.
             run_immediately: If True, run agent immediately before starting schedule
             
         Returns:
@@ -174,8 +139,10 @@ class AsyncAgentScheduler:
             logger.warning("Scheduler is already running")
             return False
             
+        self._ensure_async_primitives()
+        
         try:
-            interval = AsyncScheduleParser.parse(schedule_expr)
+            interval = ScheduleParser.parse(schedule_expr)
             self._is_running = True
             self._cancel_event.clear()
             
@@ -244,6 +211,7 @@ class AsyncAgentScheduler:
         Returns:
             Dictionary with execution stats
         """
+        self._ensure_async_primitives()
         async with self._stats_lock:
             return {
                 "is_running": self._is_running,
@@ -296,20 +264,16 @@ class AsyncAgentScheduler:
         async with self._stats_lock:
             self._execution_count += 1
             
-        for attempt in range(max_retries + 1):
+        last_exc: Optional[Exception] = None
+        for attempt in range(max_retries):
             try:
-                logger.info(f"Executing agent task (attempt {attempt + 1}/{max_retries + 1})")
+                logger.info(f"Executing agent task (attempt {attempt + 1}/{max_retries})")
                 result = await self._executor.execute(self.task)
                 
                 async with self._stats_lock:
                     self._success_count += 1
                     
-                if self.on_success:
-                    try:
-                        self.on_success(result)
-                    except Exception as e:
-                        logger.error(f"Error in success callback: {e}")
-                        
+                safe_call(self.on_success, result)
                 logger.info("Agent task executed successfully")
                 return
                 
@@ -317,27 +281,27 @@ class AsyncAgentScheduler:
                 logger.info("Agent execution cancelled")
                 raise
             except Exception as e:
+                last_exc = e
                 logger.error(f"Agent execution failed on attempt {attempt + 1}: {e}")
-                if attempt == max_retries:
-                    # Final attempt failed
-                    async with self._stats_lock:
-                        self._failure_count += 1
-                        
-                    if self.on_failure:
-                        try:
-                            self.on_failure(e)
-                        except Exception as callback_error:
-                            logger.error(f"Error in failure callback: {callback_error}")
-                    break
-                else:
+                if attempt < max_retries - 1:
                     # Wait before retry (with cancellation support)
                     try:
                         await asyncio.wait_for(
                             self._cancel_event.wait(), 
-                            timeout=min(2 ** attempt, 60)  # Exponential backoff, max 60s
+                            timeout=backoff_delay(attempt)
                         )
                         # If we get here, cancellation was requested
                         raise asyncio.CancelledError()
                     except asyncio.TimeoutError:
                         # Timeout is expected - continue to retry
                         continue
+        
+        # Final attempt failed
+        async with self._stats_lock:
+            self._failure_count += 1
+            
+        safe_call(
+            self.on_failure,
+            last_exc if last_exc is not None
+            else RuntimeError(f"Failed after {max_retries} attempts")
+        )
