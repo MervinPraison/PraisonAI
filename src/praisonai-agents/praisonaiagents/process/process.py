@@ -67,7 +67,9 @@ class Process:
     async def _get_state_lock(self):
         """Get or create the async state lock (must be called from async context)."""
         if self._state_lock is None:
-            self._state_lock = asyncio.Lock()
+            with self._state_lock_init:  # Use existing threading.Lock for synchronization
+                if self._state_lock is None:  # Double-check after acquiring
+                    self._state_lock = asyncio.Lock()
         return self._state_lock
 
     def _create_llm_instance(self):

@@ -6,6 +6,7 @@ Manages background task execution.
 
 import asyncio
 import logging
+import threading
 from praisonaiagents._logging import get_logger
 from typing import Optional, List, Dict, Any, Callable, Union
 from datetime import datetime
@@ -53,13 +54,16 @@ class BackgroundRunner:
         self._tasks: Dict[str, BackgroundTask] = {}
         # Lazily create asyncio.Semaphore() to avoid Python 3.9 event loop issues
         self._semaphore: Optional[asyncio.Semaphore] = None
+        self._semaphore_lock: threading.Lock = threading.Lock()  # Thread-safe initialization
         self._running = False
         self._cleanup_task: Optional[asyncio.Task] = None
     
     def _get_semaphore(self) -> asyncio.Semaphore:
         """Get or create the semaphore lazily (Python 3.9 compatible)."""
         if self._semaphore is None:
-            self._semaphore = asyncio.Semaphore(self.config.max_concurrent_tasks)
+            with self._semaphore_lock:  # Thread-safe initialization
+                if self._semaphore is None:  # Double-check after acquiring lock
+                    self._semaphore = asyncio.Semaphore(self.config.max_concurrent_tasks)
         return self._semaphore
     
     @property

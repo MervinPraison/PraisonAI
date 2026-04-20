@@ -234,7 +234,10 @@ Your Goal: {self.goal}"""
         try:
             from ..llm.model_capabilities import supports_structured_outputs
             return supports_structured_outputs(self.llm)
-        except Exception:
+        except ImportError:
+            return False  # Module genuinely not available — acceptable
+        except Exception as e:
+            logging.warning(f"Structured output capability check failed: {e}")
             return False
 
     def _build_messages(self, prompt, temperature=1.0, output_json=None, output_pydantic=None, tools=None, use_native_format=False):
@@ -473,8 +476,11 @@ Your Goal: {self.goal}"""
                     if tool_calls:
                         names = [getattr(tc.function, "name", "?") for tc in tool_calls]
                         return f"[tool_calls: {', '.join(names)}]"
-        except (AttributeError, IndexError, TypeError):
-            pass
+        except (AttributeError, IndexError, TypeError) as e:
+            logging.warning(
+                f"Failed to extract LLM response content (falling back to str): {e}"
+            )
+            # Fallback to str(response) is still fine, but now it's visible
         return str(response)
 
     def _process_stream_response(self, messages, temperature, start_time, formatted_tools=None, reasoning_steps=False):
@@ -510,8 +516,10 @@ Your Goal: {self.goal}"""
                 if _compactor.needs_compaction(messages):
                     try:
                         self._hook_runner.execute_sync(_HookEvent.BEFORE_COMPACTION, None)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
+                        if getattr(self, '_strict_hooks', False):
+                            raise
                     compacted_msgs, _cr = _compactor.compact(messages)
                     messages[:] = compacted_msgs  # in-place update so callers see the change
                     logging.info(
@@ -520,8 +528,10 @@ Your Goal: {self.goal}"""
                     )
                     try:
                         self._hook_runner.execute_sync(_HookEvent.AFTER_COMPACTION, None)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.warning(f"AFTER_COMPACTION hook failed: {e}")
+                        if getattr(self, '_strict_hooks', False):
+                            raise
             except Exception as _ce:
                 logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
 

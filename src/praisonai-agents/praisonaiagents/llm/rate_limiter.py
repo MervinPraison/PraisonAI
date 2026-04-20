@@ -24,6 +24,7 @@ Usage:
 import time
 import asyncio
 import logging
+import threading
 from praisonaiagents._logging import get_logger
 from dataclasses import dataclass, field
 from typing import Optional, Callable
@@ -88,6 +89,7 @@ class RateLimiter:
         self._last_update = time.monotonic()
         # Lazily create asyncio.Lock() to avoid Python 3.9 event loop issues
         self._lock = None
+        self._lock_init = threading.Lock()  # Threading lock for async lock initialization
 
         # Token-based limiting
         if self.tokens_per_minute is not None:
@@ -98,6 +100,7 @@ class RateLimiter:
         self._api_tokens_last_update = time.monotonic()
         # Lazily create asyncio.Lock() to avoid Python 3.9 event loop issues
         self._api_tokens_lock = None
+        self._api_tokens_lock_init = threading.Lock()  # Threading lock for async lock initialization
 
         # Default implementations (can be overridden for testing)
         if self._get_time is None:
@@ -110,13 +113,17 @@ class RateLimiter:
     def _get_lock(self) -> asyncio.Lock:
         """Get or create the request lock lazily (Python 3.9 compatible)."""
         if self._lock is None:
-            self._lock = asyncio.Lock()
+            with self._lock_init:  # Thread-safe initialization
+                if self._lock is None:  # Double-check after acquiring lock
+                    self._lock = asyncio.Lock()
         return self._lock
 
     def _get_api_tokens_lock(self) -> asyncio.Lock:
         """Get or create the API tokens lock lazily (Python 3.9 compatible)."""
         if self._api_tokens_lock is None:
-            self._api_tokens_lock = asyncio.Lock()
+            with self._api_tokens_lock_init:  # Thread-safe initialization
+                if self._api_tokens_lock is None:  # Double-check after acquiring lock
+                    self._api_tokens_lock = asyncio.Lock()
         return self._api_tokens_lock
 
     @property
