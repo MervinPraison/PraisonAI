@@ -12,6 +12,7 @@ import time
 from typing import List, Optional
 
 from .base import ConversationStore, ConversationSession, ConversationMessage, validate_identifier
+from ..._async_bridge import run_sync
 
 logger = logging.getLogger(__name__)
 
@@ -161,9 +162,7 @@ class AsyncMySQLConversationStore(ConversationStore):
     
     def create_session(self, session: ConversationSession) -> ConversationSession:
         """Sync wrapper for create_session."""
-        return asyncio.get_event_loop().run_until_complete(
-            self.async_create_session(session)
-        )
+        return run_sync(self.async_create_session(session))
     
     async def async_get_session(self, session_id: str) -> Optional[ConversationSession]:
         """Get a session by ID asynchronously."""
@@ -193,9 +192,7 @@ class AsyncMySQLConversationStore(ConversationStore):
     
     def get_session(self, session_id: str) -> Optional[ConversationSession]:
         """Sync wrapper for get_session."""
-        return asyncio.get_event_loop().run_until_complete(
-            self.async_get_session(session_id)
-        )
+        return run_sync(self.async_get_session(session_id))
     
     async def async_update_session(self, session: ConversationSession) -> ConversationSession:
         """Update an existing session asynchronously."""
@@ -218,9 +215,7 @@ class AsyncMySQLConversationStore(ConversationStore):
     
     def update_session(self, session: ConversationSession) -> ConversationSession:
         """Sync wrapper for update_session."""
-        return asyncio.get_event_loop().run_until_complete(
-            self.async_update_session(session)
-        )
+        return run_sync(self.async_update_session(session))
     
     async def async_delete_session(self, session_id: str) -> bool:
         """Delete a session asynchronously."""
@@ -237,9 +232,7 @@ class AsyncMySQLConversationStore(ConversationStore):
     
     def delete_session(self, session_id: str) -> bool:
         """Sync wrapper for delete_session."""
-        return asyncio.get_event_loop().run_until_complete(
-            self.async_delete_session(session_id)
-        )
+        return run_sync(self.async_delete_session(session_id))
     
     async def async_list_sessions(
         self,
@@ -298,9 +291,7 @@ class AsyncMySQLConversationStore(ConversationStore):
         offset: int = 0
     ) -> List[ConversationSession]:
         """Sync wrapper for list_sessions."""
-        return asyncio.get_event_loop().run_until_complete(
-            self.async_list_sessions(user_id, agent_id, limit, offset)
-        )
+        return run_sync(self.async_list_sessions(user_id, agent_id, limit, offset))
     
     async def async_add_message(self, session_id: str, message: ConversationMessage) -> ConversationMessage:
         """Add a message asynchronously."""
@@ -323,9 +314,7 @@ class AsyncMySQLConversationStore(ConversationStore):
     
     def add_message(self, session_id: str, message: ConversationMessage) -> ConversationMessage:
         """Sync wrapper for add_message."""
-        return asyncio.get_event_loop().run_until_complete(
-            self.async_add_message(session_id, message)
-        )
+        return run_sync(self.async_add_message(session_id, message))
     
     async def async_get_messages(
         self,
@@ -384,9 +373,7 @@ class AsyncMySQLConversationStore(ConversationStore):
         after: Optional[float] = None
     ) -> List[ConversationMessage]:
         """Sync wrapper for get_messages."""
-        return asyncio.get_event_loop().run_until_complete(
-            self.async_get_messages(session_id, limit, before, after)
-        )
+        return run_sync(self.async_get_messages(session_id, limit, before, after))
     
     async def async_delete_messages(self, session_id: str, message_ids: Optional[List[str]] = None) -> int:
         """Delete messages asynchronously."""
@@ -410,9 +397,7 @@ class AsyncMySQLConversationStore(ConversationStore):
     
     def delete_messages(self, session_id: str, message_ids: Optional[List[str]] = None) -> int:
         """Sync wrapper for delete_messages."""
-        return asyncio.get_event_loop().run_until_complete(
-            self.async_delete_messages(session_id, message_ids)
-        )
+        return run_sync(self.async_delete_messages(session_id, message_ids))
     
     async def async_close(self) -> None:
         """Close the connection pool."""
@@ -425,4 +410,4 @@ class AsyncMySQLConversationStore(ConversationStore):
     def close(self) -> None:
         """Sync wrapper for close."""
         if self._pool:
-            asyncio.get_event_loop().run_until_complete(self.async_close())
+            run_sync(self.async_close())

@@ -95,8 +95,7 @@ class ClaudeCodeIntegration(BaseCLIIntegration):
         self.use_sdk = use_sdk and CLAUDE_SDK_AVAILABLE
         self.model = model
         
-        # Session management
-        self._session_active = False
+        # Session management removed - use continue_session parameter explicitly
     
     @property
     def cli_command(self) -> str:
@@ -111,6 +110,8 @@ class ClaudeCodeIntegration(BaseCLIIntegration):
     def _build_command(
         self, 
         prompt: str, 
+        *,
+        output_format: Optional[str] = None,
         continue_session: bool = False,
         **options
     ) -> List[str]:
@@ -119,6 +120,7 @@ class ClaudeCodeIntegration(BaseCLIIntegration):
         
         Args:
             prompt: The prompt to send
+            output_format: Output format override (defaults to self.output_format)
             continue_session: Whether to continue a previous session
             **options: Additional options
             
@@ -130,11 +132,12 @@ class ClaudeCodeIntegration(BaseCLIIntegration):
         # Add print mode flag for non-interactive output
         cmd.append("-p")
         
-        # Add output format
-        cmd.extend(["--output-format", self.output_format])
+        # Add output format (local parameter takes precedence)
+        fmt = output_format or self.output_format
+        cmd.extend(["--output-format", fmt])
         
         # Add continue flag if needed
-        if continue_session or self._session_active:
+        if continue_session:
             cmd.append("--continue")
         
         # Add model if specified
@@ -180,15 +183,15 @@ class ClaudeCodeIntegration(BaseCLIIntegration):
     
     async def _execute_subprocess(self, prompt: str, **options) -> str:
         """Execute using subprocess."""
-        cmd = self._build_command(prompt, **options)
+        output_format = options.pop("output_format", self.output_format)
+        continue_session = options.pop("continue_session", False)
+        
+        cmd = self._build_command(prompt, output_format=output_format, continue_session=continue_session, **options)
         
         output = await self.execute_async(cmd)
         
-        # Mark session as active for continuation
-        self._session_active = True
-        
         # Parse JSON output if applicable
-        if self.output_format == "json":
+        if output_format == "json":
             try:
                 data = json.loads(output)
                 # Extract the main result
@@ -236,26 +239,20 @@ class ClaudeCodeIntegration(BaseCLIIntegration):
         Yields:
             dict: Parsed JSON events from the CLI
         """
-        # Use stream-json format for streaming
-        original_format = self.output_format
-        self.output_format = "stream-json"
+        # Use stream-json format for streaming (local parameter, no instance mutation)
+        cmd = self._build_command(prompt, output_format="stream-json", **options)
         
-        try:
-            cmd = self._build_command(prompt, **options)
-            
-            async for line in self.stream_async(cmd):
-                if line.strip():
-                    try:
-                        event = json.loads(line)
-                        yield event
-                    except json.JSONDecodeError:
-                        yield {"type": "text", "content": line}
-        finally:
-            self.output_format = original_format
+        async for line in self.stream_async(cmd):
+            if line.strip():
+                try:
+                    event = json.loads(line)
+                    yield event
+                except json.JSONDecodeError:
+                    yield {"type": "text", "content": line}
     
     def reset_session(self):
-        """Reset the session state."""
-        self._session_active = False
+        """Reset the session state (deprecated - use continue_session=False in calls)."""
+        pass  # Session state is now stateless
     
     def get_env(self) -> Dict[str, str]:
         """Get environment variables for CLI execution."""

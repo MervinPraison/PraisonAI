@@ -26,6 +26,7 @@ import logging
 import os
 import importlib.util
 import inspect
+import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -54,6 +55,7 @@ class ToolResolver:
         self._local_tools_cache: Dict[str, Callable] = {}
         self._local_tools_loaded: bool = False
         self._praisonai_tools_available: Optional[bool] = None
+        self._local_tools_lock = threading.Lock()
     
     def _load_local_tools(self) -> Dict[str, Callable]:
         """Load tools from local tools.py file.
@@ -67,41 +69,47 @@ class ToolResolver:
         if self._local_tools_loaded:
             return self._local_tools_cache
         
-        self._local_tools_loaded = True
-        
-        # Security: Require explicit opt-in for local tools loading
-        if os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS", "").lower() != "true":
-            logger.debug("Local tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.")
-            return self._local_tools_cache
-        
-        tools_path = Path(self._tools_py_path)
-        if not tools_path.exists():
-            logger.debug(f"No local tools.py found at {tools_path}")
-            return self._local_tools_cache
-        
-        try:
-            spec = importlib.util.spec_from_file_location("tools", str(tools_path))
-            if spec is None or spec.loader is None:
-                logger.warning(f"Could not load spec for {tools_path}")
+        with self._local_tools_lock:
+            if self._local_tools_loaded:  # Double-check inside lock
                 return self._local_tools_cache
             
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
+            # Security: Require explicit opt-in for local tools loading
+            if os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS", "").lower() != "true":
+                logger.debug("Local tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.")
+                self._local_tools_loaded = True
+                return self._local_tools_cache
             
-            # Extract callable functions (not classes, not private)
-            for name, obj in inspect.getmembers(module):
-                if (not name.startswith('_') and 
-                    callable(obj) and 
-                    not inspect.isclass(obj)):
-                    self._local_tools_cache[name] = obj
-                    logger.debug(f"Loaded local tool: {name}")
+            tools_path = Path(self._tools_py_path)
+            if not tools_path.exists():
+                logger.debug(f"No local tools.py found at {tools_path}")
+                self._local_tools_loaded = True
+                return self._local_tools_cache
             
-            logger.info(f"Loaded {len(self._local_tools_cache)} tools from {tools_path}")
+            try:
+                spec = importlib.util.spec_from_file_location("tools", str(tools_path))
+                if spec is None or spec.loader is None:
+                    logger.warning(f"Could not load spec for {tools_path}")
+                    self._local_tools_loaded = True
+                    return self._local_tools_cache
+                
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                
+                # Extract callable functions (not classes, not private)
+                for name, obj in inspect.getmembers(module):
+                    if (not name.startswith('_') and 
+                        callable(obj) and 
+                        not inspect.isclass(obj)):
+                        self._local_tools_cache[name] = obj
+                        logger.debug(f"Loaded local tool: {name}")
+                
+                logger.info(f"Loaded {len(self._local_tools_cache)} tools from {tools_path}")
+                
+            except Exception as e:
+                logger.warning(f"Error loading tools from {tools_path}: {e}")
             
-        except Exception as e:
-            logger.warning(f"Error loading tools from {tools_path}: {e}")
-        
-        return self._local_tools_cache
+            self._local_tools_loaded = True
+            return self._local_tools_cache
     
     def _resolve_from_praisonaiagents(self, name: str) -> Optional[Callable]:
         """Resolve tool from praisonaiagents.tools.TOOL_MAPPINGS.
@@ -367,13 +375,16 @@ class ToolResolver:
 
 # Global resolver instance (lazy initialized)
 _global_resolver: Optional[ToolResolver] = None
+_resolver_lock = threading.Lock()
 
 
 def _get_resolver() -> ToolResolver:
     """Get or create the global resolver instance."""
     global _global_resolver
     if _global_resolver is None:
-        _global_resolver = ToolResolver()
+        with _resolver_lock:
+            if _global_resolver is None:
+                _global_resolver = ToolResolver()
     return _global_resolver
 
 

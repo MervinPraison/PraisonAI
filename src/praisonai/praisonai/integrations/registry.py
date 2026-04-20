@@ -26,6 +26,7 @@ Usage:
     available = await registry.get_available()
 """
 
+import threading
 from typing import Dict, Type, Optional, Any, List
 
 from .base import BaseCLIIntegration
@@ -42,6 +43,7 @@ class ExternalAgentRegistry:
     """
     
     _instance: Optional['ExternalAgentRegistry'] = None
+    _instance_lock = threading.Lock()
     
     def __init__(self):
         """Initialize the registry with built-in integrations."""
@@ -57,7 +59,9 @@ class ExternalAgentRegistry:
             ExternalAgentRegistry: The singleton registry
         """
         if cls._instance is None:
-            cls._instance = cls()
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = cls()
         return cls._instance
     
     def _register_builtin_integrations(self):
