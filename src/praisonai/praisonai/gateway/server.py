@@ -960,15 +960,18 @@ class WebSocketGateway:
             "channels": channel_status,
         }
         
-        # Add push status if enabled
-        if self._push_enabled:
+        # Add push status if enabled (push infra lives in wrapper; guard defensively)
+        if getattr(self, "_push_enabled", False):
             push_status: Dict[str, Any] = {"enabled": True}
-            if self._channel_mgr is not None:
-                push_status["push_channels"] = len(self._channel_mgr.list_channels())
-            if self._presence_mgr is not None:
-                push_status["online_clients"] = self._presence_mgr.get_online_count()
-            if self._redis_pubsub is not None:
-                push_status["redis_connected"] = self._redis_pubsub._client is not None
+            channel_mgr = getattr(self, "_channel_mgr", None)
+            if channel_mgr is not None:
+                push_status["push_channels"] = len(channel_mgr.list_channels())
+            presence_mgr = getattr(self, "_presence_mgr", None)
+            if presence_mgr is not None:
+                push_status["online_clients"] = presence_mgr.get_online_count()
+            redis_pubsub = getattr(self, "_redis_pubsub", None)
+            if redis_pubsub is not None:
+                push_status["redis_connected"] = redis_pubsub._client is not None
             result["push"] = push_status
         
         return result
@@ -1781,90 +1784,6 @@ class WebSocketGateway:
         # Register signal handlers for graceful shutdown using
         # loop.add_signal_handler (async-safe) with signal.signal fallback.
         import signal
-
-        def _request_shutdown():
-            logger.info("Received shutdown signal, stopping gateway...")
-            if self._server:
-                self._server.should_exit = True
-
-        loop = asyncio.get_event_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            try:
-                loop.add_signal_handler(sig, _request_shutdown)
-            except (NotImplementedError, OSError, ValueError):
-                # Fallback for platforms where add_signal_handler is unavailable
-                try:
-                    signal.signal(sig, lambda s, f: _request_shutdown())
-                except (OSError, ValueError):
-                    pass
-
-        try:
-            await _run_all()
-        finally:
-            if self._config_watch_task:
-                self._config_watch_task.cancel()
-            if self._scheduler_task:
-                self._scheduler_task.cancel()
-            await self.stop_channels()
-                except (OSError, ValueError):
-                    pass
-
-        try:
-            await _run_all()
-        finally:
-            if self._config_watch_task:
-                self._config_watch_task.cancel()
-            if self._scheduler_task:
-                self._scheduler_task.cancel()
-            await self.stop_channels()
-        loop = asyncio.get_event_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            try:
-                loop.add_signal_handler(sig, _request_shutdown)
-            except (NotImplementedError, OSError, ValueError):
-                # Fallback for platforms where add_signal_handler is unavailable
-                try:
-                    signal.signal(sig, lambda s, f: _request_shutdown())
-                except (OSError, ValueError):
-                    pass
-
-        try:
-            await _run_all()
-        finally:
-            if self._config_watch_task:
-                self._config_watch_task.cancel()
-            if self._scheduler_task:
-                self._scheduler_task.cancel()
-            await self.stop_channels()
-
-        try:
-            await _run_all()
-        finally:
-            if self._config_watch_task:
-                self._config_watch_task.cancel()
-            if self._scheduler_task:
-                self._scheduler_task.cancel()
-            await self.stop_channels()
-                loop.add_signal_handler(sig, _request_shutdown)
-            except (NotImplementedError, OSError, ValueError):
-                # Fallback for platforms where add_signal_handler is unavailable
-                try:
-                    signal.signal(sig, lambda s, f: _request_shutdown())
-                except (OSError, ValueError):
-                    pass
-
-        try:
-            await _run_all()
-        finally:
-            if self._config_watch_task:
-                self._config_watch_task.cancel()
-            if self._scheduler_task:
-                self._scheduler_task.cancel()
-            await self.stop_channels()
-                self._config_watch_task.cancel()
-            if self._scheduler_task:
-                self._scheduler_task.cancel()
-            await self.stop_channels()
 
         def _request_shutdown():
             logger.info("Received shutdown signal, stopping gateway...")
