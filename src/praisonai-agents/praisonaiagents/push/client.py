@@ -241,8 +241,9 @@ class PushClient:
 
     async def _send(self, data: Dict[str, Any]) -> None:
         """Send a message through the active transport."""
-        if self._transport and self._transport.is_connected:
-            await self._transport.send(data)
+        if not (self._transport and self._transport.is_connected):
+            raise ConnectionError("Push client is not connected")
+        await self._transport.send(data)
 
     async def _receive_loop(self) -> None:
         """Background task that receives and dispatches messages."""
@@ -270,7 +271,7 @@ class PushClient:
                 if msg_type == "_poll_empty":
                     continue
 
-                # Auto-ACK for delivery guarantees
+                # Auto-ACK for delivery guarantees (non-blocking)
                 event_id = data.get("event_id")
                 if event_id and msg_type not in (
                     "ack_received", "nack_received", "channel.subscribed",
@@ -278,15 +279,18 @@ class PushClient:
                     "channel.list", "presence.heartbeat_ack", "presence.list",
                     "joined", "left", "error",
                 ):
-                    await self._send({"type": "message_ack", "event_id": event_id})
+                    asyncio.create_task(self._send({"type": "message_ack", "event_id": event_id}))
 
-                # Dispatch channel messages
+                # Dispatch channel messages (non-blocking)
                 channel = data.get("channel")
                 if channel and msg_type in ("channel_message",):
                     msg = ChannelMessage.from_event_dict(data)
                     for cb in self._channel_callbacks.get(channel, []):
                         try:
-                            await cb(msg)
+                            if asyncio.iscoroutinefunction(cb):
+                                asyncio.create_task(cb(msg))
+                            else:
+                                cb(msg)
                         except Exception as e:
                             logger.error("Channel callback error: %s", e)
 
@@ -362,12 +366,16 @@ class PushClient:
     async def _switch_to_polling(self) -> None:
         """Switch from WebSocket to HTTP polling transport."""
         from .transports import PollingTransport
+        from urllib.parse import urlparse, urlunparse
 
-        # Derive HTTP URL from WebSocket URL
-        http_url = self._url.replace("ws://", "http://").replace("wss://", "https://")
-        # Remove /ws path suffix if present
-        if http_url.endswith("/ws"):
-            http_url = http_url[:-3]
+        # Derive HTTP URL from WebSocket URL using robust URL parsing
+        parsed = urlparse(self._url)
+        scheme = "https" if parsed.scheme == "wss" else "http"
+        path = parsed.path.rstrip("/")
+        if path.endswith("/ws"):
+            path = path[:-3]
+        
+        http_url = urlunparse(parsed._replace(scheme=scheme, path=path))
 
         self._transport = PollingTransport(http_url, self._auth_token)
         try:

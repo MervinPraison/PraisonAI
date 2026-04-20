@@ -66,11 +66,11 @@ class WebSocketTransport:
             )
 
         url = self._url
+        headers = {}
         if self._auth_token:
-            sep = "&" if "?" in url else "?"
-            url = f"{url}{sep}token={self._auth_token}"
+            headers["Authorization"] = f"Bearer {self._auth_token}"
 
-        self._ws = await websockets.connect(url)
+        self._ws = await websockets.connect(url, extra_headers=headers)
         logger.debug("WebSocket transport connected to %s", self._url)
 
     async def disconnect(self) -> None:
@@ -132,6 +132,7 @@ class PollingTransport:
             json={},
             headers=headers,
         ) as resp:
+            resp.raise_for_status()
             data = await resp.json()
             self._poll_token = data["poll_token"]
             self._client_id = data["client_id"]
@@ -155,29 +156,33 @@ class PollingTransport:
 
         # Map message types to polling endpoints
         if msg_type == "channel.subscribe":
-            await self._session.post(
+            async with self._session.post(
                 f"{self._base_url}/api/push/poll/subscribe",
                 json={"poll_token": self._poll_token, "channel": data.get("channel", "")},
                 headers=headers,
-            )
+            ) as resp:
+                resp.raise_for_status()
         elif msg_type == "channel.unsubscribe":
-            await self._session.post(
+            async with self._session.post(
                 f"{self._base_url}/api/push/poll/unsubscribe",
                 json={"poll_token": self._poll_token, "channel": data.get("channel", "")},
                 headers=headers,
-            )
+            ) as resp:
+                resp.raise_for_status()
         elif msg_type == "message_ack":
-            await self._session.post(
+            async with self._session.post(
                 f"{self._base_url}/api/push/poll/ack",
                 json={"poll_token": self._poll_token, "event_id": data.get("event_id", "")},
                 headers=headers,
-            )
+            ) as resp:
+                resp.raise_for_status()
         elif msg_type == "presence.heartbeat":
-            await self._session.post(
+            async with self._session.post(
                 f"{self._base_url}/api/push/poll/heartbeat",
                 json={"poll_token": self._poll_token, "status": data.get("status", "online")},
                 headers=headers,
-            )
+            ) as resp:
+                resp.raise_for_status()
 
     async def receive(self) -> Dict[str, Any]:
         """Long-poll for the next message."""
@@ -197,6 +202,7 @@ class PollingTransport:
             json={"poll_token": self._poll_token, "timeout": 30},
             headers=headers,
         ) as resp:
+            resp.raise_for_status()
             data = await resp.json()
             messages = data.get("messages", [])
             if messages:
