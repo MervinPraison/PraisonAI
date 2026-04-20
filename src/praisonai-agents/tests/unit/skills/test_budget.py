@@ -21,7 +21,7 @@ def test_skill_prompt_budget_defaults():
     budget = SkillPromptBudget()
     assert budget.max_chars == 4096
     assert budget.max_skills == 50
-    assert budget.strategy == "priority"
+    assert budget.strategy == "fifo"
 
 
 def test_apply_budget_no_skills():

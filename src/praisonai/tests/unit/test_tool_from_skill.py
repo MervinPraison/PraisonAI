@@ -70,35 +70,46 @@ def test_tool_from_skill_nonexistent_path():
         tool_from_skill("/nonexistent/path")
 
 
-def test_tool_from_skill_no_instructions():
-    """Test tool_from_skill when skill has no instructions."""
+def test_tool_from_skill_no_instructions(monkeypatch):
+    """When the loaded skill has a blank body, the tool returns a clear message."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         skill_dir = Path(tmp_dir) / "empty-skill"
         skill_dir.mkdir()
-        
-        # Create skill with frontmatter but no body
-        skill_md = skill_dir / "SKILL.md"
-        skill_md.write_text("""---
-name: empty-skill
-description: Skill with no body
----
-""")
-        
-        # Mock load_skill to return skill with no instructions
-        with patch('praisonai.capabilities.skills.load_skill') as mock_load:
-            mock_skill = type('MockSkill', (), {})()
-            mock_skill.properties = type('Props', (), {'name': 'empty-skill', 'description': 'Empty skill'})()
-            mock_skill.instructions = None
-            mock_load.return_value = mock_skill
-            
-            tool_func = tool_from_skill(str(skill_dir))
-            result = tool_func()
-            assert "has no instructions" in result
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: empty-skill\ndescription: Skill with no body\n---\n"
+        )
 
+        # Force instructions=None by patching the real loader.
+        import praisonaiagents.skills as skills_mod
 
-def test_tool_from_skill_import_fallback():
-    """Test tool_from_skill fallback when imports not available."""
-    with patch('praisonai.capabilities.skills.load_skill', side_effect=ImportError):
-        tool_func = tool_from_skill("/any/path")
+        original_load_skill = skills_mod.load_skill
+
+        def _load_with_no_instructions(name, dirs=None):
+            loaded = original_load_skill(name, dirs)
+            if loaded is not None:
+                loaded.instructions = None
+            return loaded
+
+        monkeypatch.setattr(skills_mod, "load_skill", _load_with_no_instructions)
+
+        tool_func = tool_from_skill(str(skill_dir))
         result = tool_func()
-        assert "Skills not available" in result
+        assert "has no instructions" in result
+
+
+def test_tool_from_skill_import_fallback(monkeypatch):
+    """If praisonaiagents.skills is unavailable, a safe dummy tool is returned."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _blocking_import(name, *args, **kwargs):
+        if name == "praisonaiagents.skills":
+            raise ImportError("simulated missing skills module")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _blocking_import)
+
+    tool_func = tool_from_skill("/any/path")
+    result = tool_func()
+    assert "Skills not available" in result

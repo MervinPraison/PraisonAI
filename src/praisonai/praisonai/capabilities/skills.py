@@ -167,19 +167,26 @@ def tool_from_skill(path: str):
             raise ValueError(f"Skill not found at path: {path}")
         
         # Create the tool function with proper metadata and argument handling
+        safe_name = skill_name.replace('-', '_').replace(' ', '_')
+        description = loaded.properties.description or f"Execute {skill_name} skill"
+
         def _skill_tool(arguments: str = "") -> str:
             """Execute skill with provided arguments."""
             if loaded.instructions is None:
                 return f"Skill '{skill_name}' has no instructions"
-            
+
             # Return the skill instructions with argument substitution
             return render_skill_body(loaded.instructions, arguments)
-        
-        # Create tool with proper metadata during decoration
-        safe_name = skill_name.replace('-', '_').replace(' ', '_')
+
+        # Set dunder metadata BEFORE decoration so @tool / schema generators
+        # and test consumers both see the final identity.
+        _skill_tool.__name__ = f"skill_{safe_name}"
+        _skill_tool.__qualname__ = _skill_tool.__name__
+        _skill_tool.__doc__ = description
+
         return tool(
             name=f"skill_{safe_name}",
-            description=loaded.properties.description or f"Execute {skill_name} skill",
+            description=description,
         )(_skill_tool)
         
     except ImportError:
