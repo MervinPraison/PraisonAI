@@ -132,3 +132,64 @@ async def askill_load(
         metadata=metadata,
         **kwargs
     )
+
+
+def tool_from_skill(path: str):
+    """Convert a skill to a tool function for direct tool registry integration.
+    
+    This adapter allows users who prefer "skill = tool" ergonomics to
+    drop a SKILL.md into an existing tool registry without refactoring.
+    
+    Args:
+        path: Path to the skill directory containing SKILL.md
+        
+    Returns:
+        A function decorated with @tool that renders the skill body
+        
+    Example:
+        # Convert a skill to a tool
+        pdf_tool = tool_from_skill("./skills/pdf-processing")
+        
+        # Add to existing tool registry
+        agent = Agent(tools=[pdf_tool, other_tools])
+    """
+    from pathlib import Path
+    try:
+        from praisonaiagents.skills import load_skill, render_skill_body
+        from praisonaiagents.tools import tool
+        
+        # Load the skill
+        skill_name = Path(path).name
+        skill_dirs = [str(Path(path).parent)]
+        loaded = load_skill(skill_name, skill_dirs)
+        
+        if loaded is None:
+            raise ValueError(f"Skill not found at path: {path}")
+        
+        # Create the tool function with proper metadata and argument handling
+        safe_name = skill_name.replace('-', '_').replace(' ', '_')
+        description = loaded.properties.description or f"Execute {skill_name} skill"
+
+        def _skill_tool(arguments: str = "") -> str:
+            """Execute skill with provided arguments."""
+            if loaded.instructions is None:
+                return f"Skill '{skill_name}' has no instructions"
+
+            # Return the skill instructions with argument substitution
+            return render_skill_body(loaded.instructions, arguments)
+
+        # Set dunder metadata BEFORE decoration so @tool / schema generators
+        # and test consumers both see the final identity.
+        _skill_tool.__name__ = f"skill_{safe_name}"
+        _skill_tool.__qualname__ = _skill_tool.__name__
+        _skill_tool.__doc__ = description
+
+        return tool(
+            name=f"skill_{safe_name}",
+            description=description,
+        )(_skill_tool)
+        
+    except ImportError:
+        def _dummy_tool(arguments: str = "") -> str:
+            return "Skills not available (praisonaiagents not installed)"
+        return _dummy_tool

@@ -1064,30 +1064,38 @@ Your Goal: {self.goal}"""
         rendered = mgr.invoke(name, raw_args=args)
         if rendered is None:
             return prompt
-        # G6: Best-effort pre-approve any tools declared under
+        # G-A fix: Best-effort pre-approve any tools declared under
         # `allowed-tools` in the skill frontmatter. Non-fatal on error.
         try:
             tool_names = mgr.get_allowed_tools(name)
             if tool_names:
-                from ..approval import get_approval_registry, AutoApproveBackend
+                from ..approval import get_approval_registry
 
                 registry = get_approval_registry()
-                agent_name = getattr(self, "name", None)
-                for _tn in tool_names:
-                    try:
-                        registry.set_backend(
-                            AutoApproveBackend(),
-                            agent_name=agent_name,
-                            tool_name=_tn,
-                        )
-                    except TypeError:
-                        # Older registry may not accept tool_name kwarg
-                        registry.set_backend(AutoApproveBackend(), agent_name=agent_name)
-        except Exception as e:  # pragma: no cover - approval is optional
-            from .._logging import get_logger
-            logger = get_logger(__name__)
-            logger.warning(f"Approval system initialization failed for agent {agent_name}: {e}")
-            # Don't raise - approval is optional, but log the failure for debugging
+                agent_name = getattr(self, "display_name", getattr(self, "name", None))
+                if agent_name:  # Only approve if we have a stable agent identifier
+                    for _tn in tool_names:
+                        try:
+                            registry.auto_approve_tool(_tn, agent_name=agent_name)
+                        except Exception as exc:  # pragma: no cover - approval is optional
+                            logging.debug(
+                                "Failed to auto-approve skill tool '%s' for skill '%s' on agent '%s': %s. "
+                                "The skill will continue, but this tool may still require explicit approval.",
+                                _tn,
+                                name,
+                                agent_name,
+                                exc,
+                                exc_info=True,
+                            )
+        except Exception as exc:  # pragma: no cover - approval is optional
+            logging.debug(
+                "Failed to resolve allowed tools for skill '%s' on agent '%s': %s. "
+                "The skill will continue without pre-approving tools.",
+                name,
+                getattr(self, "name", None),
+                exc,
+                exc_info=True,
+            )
         return rendered
 
     def chat(self, prompt: str, temperature: float = 1.0, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None) -> Optional[str]:
