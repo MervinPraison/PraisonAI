@@ -16,6 +16,7 @@ from typing import AsyncIterator, Optional, Dict, Any, Tuple, List
 import asyncio
 import shutil
 import os
+import threading
 
 
 class CLIExecutionError(RuntimeError):
@@ -59,6 +60,11 @@ class BaseCLIIntegration(ABC):
                     yield line
     """
     
+    # Class-level cache for availability checks (shared across instances).
+    # Access is guarded by _availability_cache_lock for thread-safety.
+    _availability_cache: Dict[str, bool] = {}
+    _availability_cache_lock = threading.Lock()
+
     def __init__(self, workspace: str = ".", timeout: int = 300):
         """
         Initialize the CLI integration.
@@ -69,7 +75,6 @@ class BaseCLIIntegration(ABC):
         """
         self.workspace = workspace
         self.timeout = timeout
-        self._availability: Optional[bool] = None
     
     @property
     @abstractmethod
@@ -89,14 +94,20 @@ class BaseCLIIntegration(ABC):
         """
         Check if the CLI tool is installed and available.
         
-        Uses instance-level caching to avoid repeated filesystem checks.
+        Uses class-level caching (guarded by a lock) to avoid repeated
+        filesystem checks across instances and threads.
         
         Returns:
             bool: True if the CLI is available, False otherwise
         """
-        if self._availability is None:
-            self._availability = shutil.which(self.cli_command) is not None
-        return self._availability
+        cmd = self.cli_command
+        cache = BaseCLIIntegration._availability_cache
+        if cmd in cache:
+            return cache[cmd]
+        with BaseCLIIntegration._availability_cache_lock:
+            if cmd not in cache:
+                cache[cmd] = shutil.which(cmd) is not None
+            return cache[cmd]
     
     @abstractmethod
     async def execute(self, prompt: str, **options) -> str:
