@@ -37,6 +37,158 @@ class SessionConfig:
         }
 
 
+# ---------------------------------------------------------------------------
+# Push notification configuration
+# ---------------------------------------------------------------------------
+
+@dataclass
+class RedisConfig:
+    """Redis connection configuration for push service scaling.
+    
+    Attributes:
+        url: Full Redis URL (takes precedence over host/port)
+        host: Redis host
+        port: Redis port
+        db: Redis database number
+        password: Redis password
+        prefix: Key prefix namespace
+        max_connections: Connection pool size
+    """
+    
+    url: Optional[str] = None
+    host: str = "localhost"
+    port: int = 6379
+    db: int = 0
+    password: Optional[str] = None
+    prefix: str = "praison:push:"
+    max_connections: int = 20
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary (hides sensitive data)."""
+        return {
+            "url": "***" if self.url else None,
+            "host": self.host,
+            "port": self.port,
+            "db": self.db,
+            "password": "***" if self.password else None,
+            "prefix": self.prefix,
+            "max_connections": self.max_connections,
+        }
+
+
+@dataclass
+class PresenceConfig:
+    """Configuration for presence tracking.
+    
+    Attributes:
+        enabled: Toggle presence tracking
+        heartbeat_interval: Expected heartbeat frequency from clients (seconds)
+        offline_timeout: Mark offline after this many seconds without heartbeat
+        broadcast_changes: Broadcast presence changes to subscribed channels
+    """
+    
+    enabled: bool = True
+    heartbeat_interval: int = 15
+    offline_timeout: int = 45
+    broadcast_changes: bool = True
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "enabled": self.enabled,
+            "heartbeat_interval": self.heartbeat_interval,
+            "offline_timeout": self.offline_timeout,
+            "broadcast_changes": self.broadcast_changes,
+        }
+
+
+@dataclass
+class DeliveryConfig:
+    """Configuration for at-least-once delivery guarantees.
+    
+    Attributes:
+        enabled: Toggle delivery guarantees
+        ack_timeout: Seconds to wait for ACK before retrying
+        max_retries: Maximum retry attempts
+        retry_backoff: Exponential backoff multiplier
+        message_ttl: How long to retain unacknowledged messages (seconds)
+        store_backend: Message store backend ("memory" or "redis")
+    """
+    
+    enabled: bool = True
+    ack_timeout: int = 30
+    max_retries: int = 3
+    retry_backoff: float = 2.0
+    message_ttl: int = 86400
+    store_backend: str = "memory"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "enabled": self.enabled,
+            "ack_timeout": self.ack_timeout,
+            "max_retries": self.max_retries,
+            "retry_backoff": self.retry_backoff,
+            "message_ttl": self.message_ttl,
+            "store_backend": self.store_backend,
+        }
+
+
+@dataclass
+class PollingConfig:
+    """Configuration for HTTP long-polling fallback.
+    
+    Attributes:
+        enabled: Toggle polling fallback
+        long_poll_timeout: Long-poll hang duration (seconds)
+        max_batch_size: Max messages per poll response
+    """
+    
+    enabled: bool = True
+    long_poll_timeout: int = 30
+    max_batch_size: int = 100
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "enabled": self.enabled,
+            "long_poll_timeout": self.long_poll_timeout,
+            "max_batch_size": self.max_batch_size,
+        }
+
+
+@dataclass
+class PushConfig:
+    """Top-level configuration for the push notification service.
+    
+    All push capabilities are opt-in. When enabled=False (default),
+    zero overhead is added to the gateway.
+    
+    Attributes:
+        enabled: Feature toggle (push is opt-in)
+        redis: Redis config for cross-server scaling (None = local-only)
+        presence: Presence tracking settings
+        delivery: Delivery guarantee settings
+        polling: Polling fallback settings
+    """
+    
+    enabled: bool = False
+    redis: Optional[RedisConfig] = None
+    presence: PresenceConfig = field(default_factory=PresenceConfig)
+    delivery: DeliveryConfig = field(default_factory=DeliveryConfig)
+    polling: PollingConfig = field(default_factory=PollingConfig)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "enabled": self.enabled,
+            "redis": self.redis.to_dict() if self.redis else None,
+            "presence": self.presence.to_dict(),
+            "delivery": self.delivery.to_dict(),
+            "polling": self.polling.to_dict(),
+        }
+
+
 @dataclass
 class GatewayConfig:
     """Configuration for the gateway server.
@@ -53,6 +205,7 @@ class GatewayConfig:
         reconnect_timeout: Time to wait for reconnection before closing session
         ssl_cert: Path to SSL certificate (for HTTPS/WSS)
         ssl_key: Path to SSL key
+        push: Push notification service configuration
     """
     
     host: str = "127.0.0.1"
@@ -66,6 +219,7 @@ class GatewayConfig:
     reconnect_timeout: int = 60
     ssl_cert: Optional[str] = None
     ssl_key: Optional[str] = None
+    push: PushConfig = field(default_factory=PushConfig)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary (hides sensitive data)."""
@@ -80,6 +234,7 @@ class GatewayConfig:
             "heartbeat_interval": self.heartbeat_interval,
             "reconnect_timeout": self.reconnect_timeout,
             "ssl_enabled": bool(self.ssl_cert and self.ssl_key),
+            "push": self.push.to_dict(),
         }
     
     @property
