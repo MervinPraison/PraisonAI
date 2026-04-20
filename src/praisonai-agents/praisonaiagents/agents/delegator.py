@@ -9,6 +9,7 @@ import logging
 from praisonaiagents._logging import get_logger
 import asyncio
 import warnings
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Callable
 from enum import Enum
@@ -147,6 +148,7 @@ class SubagentDelegator:
         # Note: asyncio.Semaphore() is created lazily via _get_semaphore() to support
         # Python 3.9 where Semaphore() requires an event loop at creation time.
         self.__semaphore: Optional[asyncio.Semaphore] = None
+        self.__semaphore_lock: threading.Lock = threading.Lock()  # Thread-safe initialization
     
     def _get_semaphore(self) -> asyncio.Semaphore:
         """Get the semaphore, creating it lazily if needed.
@@ -155,7 +157,9 @@ class SubagentDelegator:
         where asyncio.Semaphore() calls get_event_loop() at creation time.
         """
         if self.__semaphore is None:
-            self.__semaphore = asyncio.Semaphore(self.config.max_concurrent_subagents)
+            with self.__semaphore_lock:  # Thread-safe initialization
+                if self.__semaphore is None:  # Double-check after acquiring lock
+                    self.__semaphore = asyncio.Semaphore(self.config.max_concurrent_subagents)
         return self.__semaphore
     
     def get_available_agents(self) -> List[str]:

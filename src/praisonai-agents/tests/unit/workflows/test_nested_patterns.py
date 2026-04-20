@@ -11,7 +11,7 @@ TDD tests for:
 
 import pytest
 from praisonaiagents import Workflow, WorkflowContext, StepResult
-from praisonaiagents.workflows import loop, Loop, parallel, route
+from praisonaiagents.workflows import loop, Loop, Parallel, parallel, route
 
 
 # =============================================================================
@@ -147,6 +147,12 @@ class TestNestedLoops:
 
 class TestNestedParallel:
     """Test parallel inside loop and loop inside parallel."""
+
+    def test_parallel_factory_accepts_max_workers(self):
+        """Test parallel() helper forwards max_workers to Parallel."""
+        p = parallel([lambda ctx: StepResult(output="ok")], max_workers=5)
+        assert isinstance(p, Parallel)
+        assert p.max_workers == 5
     
     def test_parallel_inside_loop(self):
         """Test parallel execution inside a loop."""
