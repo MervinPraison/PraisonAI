@@ -54,8 +54,8 @@ class TestGapG1GatewayToolResolution:
         agent = gw.get_agent("test_agent")
         assert agent is not None
 
-    def test_gateway_agent_has_reflection_enabled_by_default(self):
-        """Gateway agents should have reflection=True by default."""
+    def test_gateway_agent_has_reflection_disabled_by_default(self):
+        """Gateway agents should have reflection=False by default."""
         from praisonai.gateway import WebSocketGateway
         
         gw = WebSocketGateway()
@@ -70,8 +70,8 @@ class TestGapG1GatewayToolResolution:
         
         agent = gw.get_agent("assistant")
         assert agent is not None
-        # self_reflect should be True by default (set via reflection param)
-        assert getattr(agent, "self_reflect", None) is True
+        # self_reflect should be False by default for gateway agents
+        assert getattr(agent, "self_reflect", None) is False
 
     def test_gateway_supports_tool_choice_from_yaml(self):
         """Gateway should store tool_choice from YAML config."""
@@ -94,8 +94,8 @@ class TestGapG1GatewayToolResolution:
         # tool_choice should be stored as _yaml_tool_choice
         assert getattr(agent, "_yaml_tool_choice", None) == "required"
 
-    def test_gateway_supports_reflection_override(self):
-        """Gateway should allow reflection to be disabled via YAML."""
+    def test_gateway_supports_reflection_opt_in(self):
+        """Gateway should allow reflection to be enabled via YAML."""
         from praisonai.gateway import WebSocketGateway
         
         gw = WebSocketGateway()
@@ -103,7 +103,7 @@ class TestGapG1GatewayToolResolution:
         agents_cfg = {
             "simple_agent": {
                 "instructions": "Simple agent",
-                "reflection": False,
+                "reflection": True,
             }
         }
         
@@ -111,7 +111,7 @@ class TestGapG1GatewayToolResolution:
         
         agent = gw.get_agent("simple_agent")
         assert agent is not None
-        assert getattr(agent, "self_reflect", True) is False
+        assert getattr(agent, "self_reflect", False) is True
 
 
 class TestGapG1ToolResolver:
