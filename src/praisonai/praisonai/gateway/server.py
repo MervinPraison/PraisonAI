@@ -1364,7 +1364,34 @@ class WebSocketGateway:
                 logger.warning(f"Default agent '{default_agent_id}' not found for channel '{channel_name}', skipping")
                 continue
 
-            config = BotConfig(token=token)
+            # Extract allowlist configuration from channel config  
+            _raw_allowed = ch_cfg.get("allowed_users") or []
+            if isinstance(_raw_allowed, str):
+                # Env-expanded string like "12345,67890"; split on commas.
+                _raw_allowed = [s.strip() for s in _raw_allowed.split(",") if s.strip()]
+
+            _raw_channels = ch_cfg.get("allowed_channels") or []
+            if isinstance(_raw_channels, str):
+                _raw_channels = [s.strip() for s in _raw_channels.split(",") if s.strip()]
+
+            # Extract group policy setting
+            group_policy = ch_cfg.get("group_policy", "mention_only")
+            mention_required = (group_policy == "mention_only")
+
+            config = BotConfig(
+                token=token,
+                allowed_users=list(_raw_allowed),
+                allowed_channels=list(_raw_channels),
+                mention_required=mention_required,
+            )
+
+            # Warn if no allowlist is configured
+            if not config.allowed_users:
+                logger.warning(
+                    "Channel %r has no allowed_users — bot accepts messages from everyone. "
+                    "Re-run `praisonai onboard` to configure.",
+                    channel_name,
+                )
 
             try:
                 bot = self._create_bot(channel_type, token, default_agent, config, ch_cfg)
