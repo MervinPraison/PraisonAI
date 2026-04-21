@@ -501,25 +501,18 @@ class OnboardWizard:
             # 95% answered Yes anyway. If they really don't want it, they
             # run `praisonai gateway uninstall` afterwards. This keeps the
             # onboarding 'do-the-thing-for-me' feel instead of 'quiz me'.
-            try:
-                from praisonai.daemon import install_daemon
-                result = install_daemon(config_path=self.config_path)
-                if result.get("ok"):
-                    console.print(
-                        f"  [green]✓[/green] {result.get('message', 'Service installed')}"
-                    )
-                else:
-                    console.print(
-                        f"  [red]✗[/red] {result.get('error', 'Install failed')}"
-                    )
-            except Exception as e:
-                console.print(f"  [red]✗[/red] {str(e)[:200]}")
+            daemon_success = self._install_daemon_with_feedback(
+                console.print, self.config_path
+            )
+        
+        if 'daemon_success' not in locals():
+            daemon_success = False
 
         # Done panel. Commands referenced here must exist in `praisonai --help`.
         # OS-aware daemon management hints: non-developers struggle to find
         # launchctl/systemctl invocations themselves, so we surface the exact
-        # line for their platform. Label ``ai.praison.bot`` is defined in
-        # praisonai.daemon.launchd / systemd.
+        # line for their platform. Label ``ai.praison.bot`` is used for launchd,
+        # while ``praisonai-bot`` is used for systemd.
         _tok = getattr(self, "_gateway_token", "")
         _masked = (_tok[:4] + "…" + _tok[-4:]) if len(_tok) >= 10 else "(set)"
         _health_url = "http://127.0.0.1:8765/health"
@@ -533,12 +526,20 @@ class OnboardWizard:
         if _os == "darwin":
             _restart_cmd = "launchctl kickstart -k gui/$(id -u)/ai.praison.bot"
         elif _os == "linux":
-            _restart_cmd = "systemctl --user restart ai.praison.bot"
+            _restart_cmd = "systemctl --user restart praisonai-bot"
+        elif _os == "windows":
+            _restart_cmd = "schtasks /End /TN PraisonAIGateway && schtasks /Run /TN PraisonAIGateway"
         else:
-            _restart_cmd = "praisonai gateway uninstall && praisonai gateway install"
+            _restart_cmd = "praisonai gateway install  # re-run installer"
+        # Adjust headline based on daemon install success
+        daemon_running_text = (
+            "Your bot is now running in the background." if daemon_success
+            else "Configuration complete."
+        )
+        
         console.print(Panel(
             f"[bold green]Setup complete![/bold green] "
-            f"[dim]Your bot is now running in the background.[/dim]\n\n"
+            f"[dim]{daemon_running_text}[/dim]\n\n"
             f"[bold]🦞 Dashboard UI:[/bold]\n"
             f"  [cyan]praisonai claw[/cyan]          [dim]→ http://127.0.0.1:8082[/dim]\n\n"
             f"[bold]Gateway endpoints:[/bold]\n"
@@ -564,6 +565,33 @@ class OnboardWizard:
         bot = Bot(platform, token=self.tokens.get(platform, ""))
         return await bot.probe()
 
+    def _install_daemon_with_feedback(self, print_fn, config_path: str) -> bool:
+        """Install daemon with error handling and feedback. Returns success status."""
+        try:
+            # First check if already installed to make idempotent
+            from praisonai.daemon import get_daemon_status, install_daemon
+            status = get_daemon_status()
+            if status.get("installed") and status.get("running"):
+                print_fn(
+                    "  ✓ Daemon already installed and running"
+                )
+                return True
+            
+            result = install_daemon(config_path=config_path)
+            if result.get("ok"):
+                print_fn(
+                    f"  ✓ {result.get('message', 'Service installed')}"
+                )
+                return True
+            else:
+                print_fn(
+                    f"  ✗ {result.get('error', 'Install failed')}"
+                )
+                return False
+        except Exception as e:
+            print_fn(f"  ✗ {str(e)[:200]}")
+            return False
+
     def _run_plain(self) -> None:
         """Fallback for when rich is not available.
 
@@ -580,7 +608,10 @@ class OnboardWizard:
         for plat in self.selected_platforms:
             info = PLATFORMS.get(plat, {})
             env_var = info.get("token_env", f"{plat.upper()}_BOT_TOKEN")
-            if not os.environ.get(env_var):
+            existing = os.environ.get(env_var)
+            if existing:
+                self.tokens[plat] = existing
+            else:
                 print(f"\n  {info.get('token_help', '')}")
                 token = getpass.getpass(f"  {env_var} (hidden): ").strip()
                 if token:
@@ -614,16 +645,13 @@ class OnboardWizard:
 
         # Parity with rich flow: install daemon by default (no prompt)
         # when every selected platform has a token captured.
-        if self.selected_platforms and all(p in self.tokens for p in self.selected_platforms):
-            try:
-                from praisonai.daemon import install_daemon
-                result = install_daemon(config_path=str(cfg_path))
-                if result.get("ok"):
-                    print(f"✓ {result.get('message', 'Daemon installed')}")
-                else:
-                    print(f"✗ {result.get('error', 'Daemon install failed')}")
-            except Exception as e:
-                print(f"✗ {str(e)[:200]}")
+        if self.selected_platforms and all(
+            p in self.tokens or os.environ.get(
+                PLATFORMS.get(p, {}).get("token_env", f"{p.upper()}_BOT_TOKEN")
+            )
+            for p in self.selected_platforms
+        ):
+            self._install_daemon_with_feedback(print, str(cfg_path))
 
         print("\nNext steps:")
         print("  praisonai gateway status     # check if the daemon is running")
