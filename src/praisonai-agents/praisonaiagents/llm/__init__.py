@@ -159,6 +159,26 @@ def __getattr__(name):
             from .unified_adapters import create_llm_dispatcher
             _lazy_cache[name] = create_llm_dispatcher
             return create_llm_dispatcher
+        elif name == "sanitize_messages":
+            from .sanitize import sanitize_messages
+            _lazy_cache[name] = sanitize_messages
+            return sanitize_messages
+        elif name == "strip_surrogates":
+            from .sanitize import strip_surrogates
+            _lazy_cache[name] = strip_surrogates
+            return strip_surrogates
+        elif name == "sanitize_text":
+            from .sanitize import sanitize_text
+            _lazy_cache[name] = sanitize_text
+            return sanitize_text
+        elif name == "ErrorCategory":
+            from .error_classifier import ErrorCategory
+            _lazy_cache[name] = ErrorCategory
+            return ErrorCategory
+        elif name == "classify_error":
+            from .error_classifier import classify_error
+            _lazy_cache[name] = classify_error
+            return classify_error
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -199,5 +219,12 @@ __all__ = [
     "LLMProviderError",
     "RateLimitError",
     "ModelNotAvailableError",
-    "ContextLengthExceededError"
+    "ContextLengthExceededError",
+    # Sanitization (G6)
+    "sanitize_messages",
+    "strip_surrogates", 
+    "sanitize_text",
+    # Error Classification (G5)
+    "ErrorCategory",
+    "classify_error"
 ]

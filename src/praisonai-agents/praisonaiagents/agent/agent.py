@@ -551,6 +551,7 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
         parallel_tool_calls: bool = False,  # Gap 2: Enable parallel execution of batched LLM tool calls
         learn: Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
         backend: Optional[Any] = None,  # External managed agent backend (e.g., ManagedAgentIntegration)
+        interrupt_controller: Optional['InterruptController'] = None,  # G2: Cooperative cancellation
     ):
         """Initialize an Agent instance.
 
@@ -1458,6 +1459,8 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
         self.instructions = instructions
         # Gap 2: Store parallel tool calls setting for ToolCallExecutor selection
         self.parallel_tool_calls = parallel_tool_calls
+        # G2: Store interrupt controller for cooperative cancellation
+        self.interrupt_controller = interrupt_controller
         # Check for model name in environment variable if not provided
         self._using_custom_llm = False
         # Flag to track if final result has been displayed to prevent duplicates
@@ -3225,6 +3228,20 @@ Summary:"""
                         success=False,
                         output="Task timed out",
                         completion_reason="timeout",
+                        iterations=iterations,
+                        stage=stage,
+                        actions=actions_taken,
+                        duration_seconds=time_module.time() - start_time,
+                        started_at=started_at,
+                    )
+                
+                # G2: Check for interrupt request (cooperative cancellation)
+                if self.interrupt_controller and self.interrupt_controller.is_set():
+                    reason = self.interrupt_controller.reason or "unknown"
+                    return AutonomyResult(
+                        success=False,
+                        output=f"Task interrupted: {reason}",
+                        completion_reason="interrupted",
                         iterations=iterations,
                         stage=stage,
                         actions=actions_taken,

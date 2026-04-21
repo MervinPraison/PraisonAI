@@ -481,6 +481,59 @@ class HierarchicalSessionStore(DefaultSessionStore):
         session.title = title
         return self._save_extended_session(session)
     
+    async def auto_title(self, session_id: str) -> bool:
+        """Generate and set title automatically from first exchange.
+        
+        Args:
+            session_id: Session to generate title for
+            
+        Returns:
+            True if title was generated and set, False otherwise
+        """
+        session = self._load_extended_session(session_id)
+        
+        # Skip if already has a title
+        if session.title and session.title.strip():
+            return False
+            
+        # Need at least one user and one assistant message
+        messages = session.messages
+        if not messages or len(messages) < 2:
+            return False
+            
+        # Find first user message and first assistant response
+        user_msg = None
+        assistant_msg = None
+        
+        for msg in messages:
+            if msg.get("role") == "user" and not user_msg:
+                content = msg.get("content", "")
+                if isinstance(content, str) and content.strip():
+                    user_msg = content
+            elif msg.get("role") == "assistant" and not assistant_msg and user_msg:
+                content = msg.get("content", "")
+                if isinstance(content, str) and content.strip():
+                    assistant_msg = content
+                    break
+        
+        if not user_msg or not assistant_msg:
+            return False
+            
+        try:
+            # Generate title using title module
+            from .title import generate_title_async
+            title = await generate_title_async(user_msg, assistant_msg)
+            
+            if title and title.strip():
+                session.title = title.strip()
+                return self._save_extended_session(session)
+                
+        except Exception:
+            # Title generation failed - not critical
+            pass
+            
+        return False
+    
     def get_extended_session(self, session_id: str) -> ExtendedSessionData:
         """Get extended session data."""
         return self._load_extended_session(session_id)
