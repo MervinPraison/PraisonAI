@@ -3,10 +3,14 @@ Tests for onboard wizard security / key-persistence features.
 
 Covers the competitor-parity additions (see #1454):
 - Allowlist (TELEGRAM_ALLOWED_USERS & siblings) is prompted and persisted
-- Home channel defaults to first allowed user
-- Tokens + allowlist + home channel are written atomically to
-  ``~/.praisonai/.env`` with chmod 600
+- Tokens + allowlist are written atomically to ``~/.praisonai/.env``
+  with chmod 600
 - ``.env`` merging preserves unrelated pre-existing keys
+
+Note: the ``home_channel_env`` field and its matching prompt were removed
+(#1487): no gateway code path consumed the value, and the prompt
+confused non-developer users during bot onboarding. If a proactive
+delivery feature ships later it can reintroduce this on an opt-in basis.
 """
 from __future__ import annotations
 
@@ -27,10 +31,13 @@ from praisonai.cli.features.onboard import (
 def test_all_platforms_declare_security_fields():
     for plat, info in PLATFORMS.items():
         assert "allowed_users_env" in info, f"{plat} missing allowed_users_env"
-        assert "home_channel_env" in info, f"{plat} missing home_channel_env"
         assert "user_id_help" in info, f"{plat} missing user_id_help"
         assert info["allowed_users_env"].endswith("_ALLOWED_USERS")
-        assert info["home_channel_env"].endswith("_HOME_CHANNEL")
+        # ``home_channel_env`` intentionally absent — see module docstring.
+        assert "home_channel_env" not in info, (
+            f"{plat}: home_channel_env should not be re-added without a "
+            f"consumer in the gateway/scheduler path."
+        )
 
 
 def test_praison_home_respects_override(tmp_path, monkeypatch):
@@ -86,11 +93,13 @@ def test_save_env_vars_overwrites_same_key(tmp_path, monkeypatch):
     assert "TELEGRAM_BOT_TOKEN=new" in body
 
 
-def test_generated_bot_yaml_references_allowlist_and_home():
+def test_generated_bot_yaml_references_allowlist():
     y = _generate_bot_yaml(["telegram"], agent_name="assistant")
     assert "token: ${TELEGRAM_BOT_TOKEN}" in y
     assert "allowed_users: ${TELEGRAM_ALLOWED_USERS}" in y
-    assert "home_channel: ${TELEGRAM_HOME_CHANNEL}" in y
+    # home_channel intentionally NOT emitted — no consumer in gateway today.
+    assert "home_channel" not in y
+    assert "HOME_CHANNEL" not in y
 
 
 def test_generated_bot_yaml_for_all_platforms():
