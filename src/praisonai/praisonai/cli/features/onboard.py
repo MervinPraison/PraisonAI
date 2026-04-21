@@ -78,8 +78,8 @@ def _save_env_vars(env_vars: Dict[str, Optional[str]]) -> Optional[Path]:
     """Atomically merge ``env_vars`` into ``~/.praisonai/.env`` (chmod 600).
 
     - Non-empty string values are written (updating existing keys).
-    - ``None`` values **remove** the key from the file (supports "clear" updates
-      so the user can drop an allowlist or home-channel).
+    - ``None`` values **remove** the key from the file (supports "clear" updates,
+      e.g. dropping an allowlist).
     - Empty-string values are skipped.
     Existing keys not referenced in ``env_vars`` are preserved. Written with a
     temp-then-rename to avoid partial writes.
@@ -343,9 +343,8 @@ class OnboardWizard:
                         os.environ[extra_env] = extra_val
                         env_to_save[extra_env] = extra_val
 
-            # Step 2b: Security — allowlist + home channel (mirrors hermes)
+            # Step 2b: Security — allowlist (mirrors hermes)
             allowed_env = info.get("allowed_users_env")
-            home_env = info.get("home_channel_env")
             if allowed_env:
                 existing_allow = os.environ.get(allowed_env, "").strip()
                 if existing_allow:
@@ -468,7 +467,7 @@ class OnboardWizard:
         if os.path.exists(self.config_path):
             if not Confirm.ask(
                 f"  {self.config_path} exists. Overwrite with fresh config?",
-                default=True,
+                default=False,
             ):
                 console.print("  [dim]Kept existing file[/dim]")
                 return
@@ -538,7 +537,7 @@ class OnboardWizard:
         """Fallback for when rich is not available.
 
         Parity with the rich path: hidden token input via ``getpass``,
-        allowlist + home-channel prompts, and persistence to
+        allowlist prompt, and persistence to
         ``~/.praisonai/.env``.
         """
         print("\n=== PraisonAI Bot Setup ===\n")
