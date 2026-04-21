@@ -242,9 +242,11 @@ class StreamEventEmitter:
         for callback in self._callbacks:
             try:
                 callback(event)
-            except Exception:
-                # Don't let callback errors break streaming
-                pass
+            except Exception as e:
+                # Log callback errors but don't let them break streaming
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Streaming callback failed: {e}", exc_info=True)
     
     async def emit_async(self, event: StreamEvent) -> None:
         """
@@ -260,15 +262,21 @@ class StreamEventEmitter:
         for callback in self._callbacks:
             try:
                 callback(event)
-            except Exception:
-                pass
+            except Exception as e:
+                # Log callback errors but don't let them break streaming
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Streaming sync callback failed in async context: {e}", exc_info=True)
         
         # Call async callbacks
         for callback in self._async_callbacks:
             try:
                 await callback(event)
-            except Exception:
-                pass
+            except Exception as e:
+                # Log callback errors but don't let them break streaming
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Streaming async callback failed: {e}", exc_info=True)
     
     @property
     def has_callbacks(self) -> bool:

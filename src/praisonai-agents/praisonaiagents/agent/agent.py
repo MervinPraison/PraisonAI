@@ -1910,13 +1910,24 @@ Your Goal: {self.goal}
     
     @chat_history.setter
     def chat_history(self, value):
-        """Set chat history (updates the underlying async-safe state)."""
-        self.__chat_history_state.value = value
+        """Set chat history (updates the underlying async-safe state with lock)."""
+        with self.__chat_history_state.lock():
+            self.__chat_history_state.value = value
     
     @property
     def _history_lock(self):
         """Get appropriate lock for chat history based on execution context."""
         return self.__chat_history_state
+    
+    def _append_to_chat_history(self, message: dict):
+        """Thread-safe append to chat history using proper locking."""
+        with self._history_lock.lock():
+            self._history_lock.value.append(message)
+    
+    def _truncate_chat_history(self, length: int):
+        """Thread-safe truncation of chat history using proper locking."""
+        with self._history_lock.lock():
+            self._history_lock.value[:] = self._history_lock.value[:length]
 
     @property
     def _cache_lock(self):

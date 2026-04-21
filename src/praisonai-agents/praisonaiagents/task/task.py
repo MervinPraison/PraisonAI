@@ -743,6 +743,7 @@ Context:
         from non-async code.
         """
         import asyncio
+        from ..utils.async_bridge import run_coroutine_from_any_context
         try:
             loop = asyncio.get_running_loop()
             if loop.is_running():
@@ -750,8 +751,8 @@ Context:
             else:
                 loop.run_until_complete(self.execute_callback(task_output))
         except RuntimeError:
-            # If no loop is running in this context
-            asyncio.run(self.execute_callback(task_output))
+            # If no loop is running in this context, use safe bridge
+            run_coroutine_from_any_context(self.execute_callback(task_output))
 
     def _process_guardrail(self, task_output: TaskOutput):
         """Process the guardrail validation for a task output.

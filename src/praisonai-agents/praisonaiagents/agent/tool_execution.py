@@ -346,9 +346,12 @@ class ToolExecutionMixin:
         try:
             nudge = self._maybe_emit_nudge(prompt if isinstance(prompt, str) else str(prompt))
             if nudge and hasattr(self, "chat_history") and isinstance(self.chat_history, list):
-                self.chat_history.append({"role": "system", "content": nudge.strip()})
-        except Exception:
-            pass
+                self._append_to_chat_history({"role": "system", "content": nudge.strip()})
+        except Exception as e:
+            # Log learning nudge failures for debugging
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Learning nudge generation failed: {e}", exc_info=True)
 
         return response
 
@@ -381,9 +384,12 @@ class ToolExecutionMixin:
         try:
             nudge = self._maybe_emit_nudge(prompt if isinstance(prompt, str) else str(prompt))
             if nudge and hasattr(self, "chat_history") and isinstance(self.chat_history, list):
-                self.chat_history.append({"role": "system", "content": nudge.strip()})
-        except Exception:
-            pass
+                self._append_to_chat_history({"role": "system", "content": nudge.strip()})
+        except Exception as e:
+            # Log learning nudge failures for debugging
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Learning nudge generation failed: {e}", exc_info=True)
 
         return response
 

@@ -183,11 +183,13 @@ def require_approval(risk_level: RiskLevel = "high"):
                 mark_approved(tool_name)
                 return func(*args, **kwargs)
             try:
-                try:
-                    asyncio.get_running_loop()
-                    raise RuntimeError("Use sync fallback in async context")
-                except RuntimeError:
-                    decision = asyncio.run(request_approval(tool_name, kwargs))
+                from ..utils.async_bridge import is_async_context, run_coroutine_from_any_context
+                if is_async_context():
+                    # We're in an async context - use sync fallback
+                    decision = console_approval_callback(tool_name, kwargs, risk_level)
+                else:
+                    # Safe to run async approval
+                    decision = run_coroutine_from_any_context(request_approval(tool_name, kwargs))
             except Exception as e:
                 logging.warning(f"Async approval failed, using sync fallback: {e}")
                 decision = console_approval_callback(tool_name, kwargs, risk_level)
