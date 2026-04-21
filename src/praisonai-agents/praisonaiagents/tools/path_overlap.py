@@ -48,6 +48,8 @@ def extract_paths(tool_call: ToolCall) -> List[pathlib.Path]:
     # Look for paths in common argument names
     for arg_name, arg_value in args.items():
         if arg_name in _PATH_ARG_NAMES and isinstance(arg_value, str):
+            if not arg_value.strip():
+                continue
             try:
                 path = pathlib.Path(arg_value).resolve()
                 paths.append(path)

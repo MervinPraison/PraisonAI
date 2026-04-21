@@ -159,7 +159,7 @@ def get_retry_delay(category: ErrorCategory, attempt: int = 1, base_delay: float
     
     if category == ErrorCategory.RATE_LIMIT:
         # Longer delay for rate limits to avoid hitting limits again
-        return min(base_delay * (3 ** (attempt - 1)), 60.0)
+        return min(base_delay * (3 ** attempt), 60.0)
     
     elif category == ErrorCategory.CONTEXT_LIMIT:
         # Short delay for context limits (compression should be tried)
@@ -167,7 +167,7 @@ def get_retry_delay(category: ErrorCategory, attempt: int = 1, base_delay: float
     
     elif category == ErrorCategory.TRANSIENT:
         # Exponential backoff for transient errors
-        return min(base_delay * (2 ** (attempt - 1)), 30.0)
+        return min(base_delay * (2 ** attempt), 30.0)
     
     return 0
 

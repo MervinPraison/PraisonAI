@@ -36,9 +36,9 @@ def strip_surrogates(text: str) -> str:
         return text
     
     try:
-        # Method 1: Encode with surrogatepass, decode with replace
+        # Method 1: Encode with surrogatepass, decode with ignore
         # This converts surrogates to UTF-16, then back to UTF-8 safely
-        return text.encode('utf-16', 'surrogatepass').decode('utf-16', 'replace')
+        return text.encode('utf-16', 'surrogatepass').decode('utf-16', 'ignore')
     except (UnicodeError, LookupError):
         # Fallback: Remove surrogate code points directly
         return re.sub(r'[\uD800-\uDFFF]', '', text)

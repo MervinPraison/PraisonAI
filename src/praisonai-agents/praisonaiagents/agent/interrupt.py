@@ -41,8 +41,9 @@ class InterruptController:
             reason: Human-readable reason for cancellation
         """
         with self._lock:
-            self._reason = reason
-            self._flag.set()
+            if not self._flag.is_set():
+                self._reason = reason
+                self._flag.set()
 
     def clear(self) -> None:
         """Clear the cancellation request."""
