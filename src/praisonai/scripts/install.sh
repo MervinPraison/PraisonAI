@@ -510,12 +510,9 @@ print_next_steps() {
         echo ""
     fi
     
-    # Only suggest 'praisonai onboard' when the user hasn't just completed it.
-    if [[ "$BOT_ONBOARDED" != "1" ]]; then
-        echo "  Set up a messaging bot (Telegram / Discord / Slack / WhatsApp):"
-        echo -e "     ${CYAN}praisonai onboard${NC}"
-        echo ""
-    fi
+    echo "  Set up a messaging bot (Telegram / Discord / Slack / WhatsApp):"
+    echo -e "     ${CYAN}praisonai onboard${NC}"
+    echo ""
     echo "  Open the dashboard UI (localhost only):"
     echo -e "     ${CYAN}praisonai claw${NC}    ${BOLD}→${NC} http://127.0.0.1:8082"
     echo ""
