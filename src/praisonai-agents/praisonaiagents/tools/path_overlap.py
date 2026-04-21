@@ -27,6 +27,13 @@ _WRITE_NAME_HINTS = frozenset({
     "modify", "append"
 })
 
+# Read operation hints - tools that are explicitly read-only
+_READ_NAME_HINTS = frozenset({
+    "read", "get", "fetch", "load", "list", "ls", "search", "find",
+    "query", "select", "scan", "inspect", "view", "show", "describe", 
+    "head", "tail", "cat"
+})
+
 # Argument names that typically contain file paths
 _PATH_ARG_NAMES = frozenset({
     "path", "file_path", "filepath", "dest", "destination", "target",
@@ -49,13 +56,19 @@ def _is_potential_write_tool(function_name: str, arguments: dict) -> bool:
     if function_name in _WRITE_TOOLS:
         return True
     
-    # Check for write hints in function name
     normalized_name = function_name.lower()
+    
+    # Explicit read-like name: never a writer
+    if any(normalized_name.startswith(h + "_") or normalized_name == h for h in _READ_NAME_HINTS):
+        return False
+    
+    # Check for write hints in function name
     if any(hint in normalized_name for hint in _WRITE_NAME_HINTS):
         return True
     
-    # Conservative fallback: if tool has path-like arguments, treat as potential writer
-    if any(arg_name in _PATH_ARG_NAMES for arg_name in arguments.keys()):
+    # Conservative fallback ONLY if there is also a payload-like arg
+    payload_args = {"content", "data", "text", "body", "patch", "diff", "value"}
+    if any(a in _PATH_ARG_NAMES for a in arguments) and any(a in payload_args for a in arguments):
         return True
     
     return False
