@@ -33,6 +33,10 @@ def __getattr__(name):
         from .heartbeat import HeartbeatConfig
         _lazy_cache[name] = HeartbeatConfig
         return HeartbeatConfig
+    if name == 'InterruptController':
+        from .interrupt import InterruptController
+        _lazy_cache[name] = InterruptController
+        return InterruptController
     
     # Specialized agents - lazy loaded (import rich)
     if name == 'ImageAgent':
@@ -194,6 +198,7 @@ __all__ = [
     'BudgetExceededError',
     'Heartbeat',
     'HeartbeatConfig',
+    'InterruptController',
     'ImageAgent',
     'VideoAgent',
     'VideoConfig',

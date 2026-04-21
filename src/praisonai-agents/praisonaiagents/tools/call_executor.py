@@ -138,6 +138,21 @@ class ParallelToolCallExecutor:
             sequential_executor = SequentialToolCallExecutor()
             return sequential_executor.execute_batch(tool_calls, execute_tool_fn)
         
+        # G4: Check for path conflicts - fallback to sequential if conflicts detected
+        try:
+            from .path_overlap import has_write_conflicts
+        except ImportError:
+            logger.warning(
+                "Path conflict detection unavailable; using sequential execution for safety"
+            )
+            sequential_executor = SequentialToolCallExecutor()
+            return sequential_executor.execute_batch(tool_calls, execute_tool_fn)
+
+        if has_write_conflicts(tool_calls):
+            logger.info(f"Path conflicts detected in {len(tool_calls)} tool calls, using sequential execution")
+            sequential_executor = SequentialToolCallExecutor()
+            return sequential_executor.execute_batch(tool_calls, execute_tool_fn)
+        
         def _execute_single_tool(tool_call: ToolCall) -> ToolResult:
             """Execute a single tool call with error handling."""
             try:
