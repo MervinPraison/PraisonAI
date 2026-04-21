@@ -960,15 +960,18 @@ class WebSocketGateway:
             "channels": channel_status,
         }
         
-        # Add push status if enabled
-        if self._push_enabled:
+        # Add push status if enabled (push infra lives in wrapper; guard defensively)
+        if getattr(self, "_push_enabled", False):
             push_status: Dict[str, Any] = {"enabled": True}
-            if self._channel_mgr is not None:
-                push_status["push_channels"] = len(self._channel_mgr.list_channels())
-            if self._presence_mgr is not None:
-                push_status["online_clients"] = self._presence_mgr.get_online_count()
-            if self._redis_pubsub is not None:
-                push_status["redis_connected"] = self._redis_pubsub._client is not None
+            channel_mgr = getattr(self, "_channel_mgr", None)
+            if channel_mgr is not None:
+                push_status["push_channels"] = len(channel_mgr.list_channels())
+            presence_mgr = getattr(self, "_presence_mgr", None)
+            if presence_mgr is not None:
+                push_status["online_clients"] = presence_mgr.get_online_count()
+            redis_pubsub = getattr(self, "_redis_pubsub", None)
+            if redis_pubsub is not None:
+                push_status["redis_connected"] = getattr(redis_pubsub, "_client", None) is not None
             result["push"] = push_status
         
         return result
