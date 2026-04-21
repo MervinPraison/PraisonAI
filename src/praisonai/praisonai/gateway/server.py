@@ -1241,9 +1241,14 @@ class WebSocketGateway:
                     else:
                         logger.warning(f"Tool '{tool_name}' not found for agent '{agent_id}'")
 
-            # Additional agent options from YAML
+            # Additional agent options from YAML.
+            # reflection defaults to False for gateway agents: chat channels
+            # (Telegram/Discord/Slack/WhatsApp) expect sub-second replies, and
+            # self-reflection adds 1-N extra LLM round-trips per message
+            # (~8x latency for short prompts on gpt-4o-mini). Users who want
+            # higher answer quality can opt in with `reflection: true` in YAML.
             tool_choice = agent_def.get("tool_choice", None)
-            reflection = agent_def.get("reflection", True)
+            reflection = agent_def.get("reflection", False)
             allow_delegation = agent_def.get("allow_delegation", False)
 
             # G5: Wire guardrails if config has a matching agent_name or global rule
