@@ -55,7 +55,7 @@ class TestGapG1GatewayToolResolution:
         assert agent is not None
 
     def test_gateway_agent_has_reflection_disabled_by_default(self):
-        """Gateway agents should have reflection=False by default."""
+        """Gateway agents should have reflection=False by default for performance."""
         from praisonai.gateway import WebSocketGateway
         
         gw = WebSocketGateway()
@@ -70,8 +70,8 @@ class TestGapG1GatewayToolResolution:
         
         agent = gw.get_agent("assistant")
         assert agent is not None
-        # self_reflect should be False by default for gateway agents
-        assert getattr(agent, "self_reflect", None) is False
+        # self_reflect should be False by default (set via reflection param)
+        assert getattr(agent, "self_reflect", True) is False
 
     def test_gateway_supports_tool_choice_from_yaml(self):
         """Gateway should store tool_choice from YAML config."""
