@@ -148,12 +148,14 @@ def get_retry_delay(category: ErrorCategory, attempt: int = 1, base_delay: float
         
     Examples:
         >>> get_retry_delay(ErrorCategory.RATE_LIMIT, attempt=1)
-        2.0
+        3.0
         >>> get_retry_delay(ErrorCategory.TRANSIENT, attempt=3)
-        16.0
+        8.0
         >>> get_retry_delay(ErrorCategory.AUTH, attempt=1)
         0
     """
+    attempt = max(1, attempt)
+
     if not should_retry(category):
         return 0
     
