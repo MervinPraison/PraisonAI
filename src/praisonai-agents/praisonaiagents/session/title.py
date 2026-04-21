@@ -41,11 +41,27 @@ def generate_title(
     fallback_title = _create_fallback_title(user_msg, max_length)
     
     try:
-        # Run async version in sync context
-        return asyncio.run(generate_title_async(
-            user_msg, assistant_msg, llm_model, timeout, max_length
-        ))
-    except Exception:
+        # Check if we're already in an event loop
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop - safe to use asyncio.run
+        try:
+            return asyncio.run(generate_title_async(
+                user_msg, assistant_msg, llm_model, timeout, max_length
+            ))
+        except Exception:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.debug("Title generation failed in sync context", exc_info=True)
+            return fallback_title
+    else:
+        # Already in event loop - cannot use asyncio.run
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(
+            "generate_title() called from running event loop; "
+            "use generate_title_async() instead. Returning fallback title."
+        )
         return fallback_title
 
 

@@ -245,6 +245,7 @@ if TYPE_CHECKING:
     from ..context.models import ContextConfig
     from ..context.manager import ContextManager
     from ..knowledge.knowledge import Knowledge
+    from .interrupt import InterruptController
     from ..agent.autonomy import AutonomyConfig
     from ..task.task import Task
     from .handoff import Handoff, HandoffConfig, HandoffResult
@@ -531,7 +532,7 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
         # CONSOLIDATED FEATURE PARAMS (agent-centric API)
         # Each follows: False=disabled, True=defaults, Config=custom
         # ============================================================
-        memory: Optional[Union[bool, str, 'MemoryConfig', 'MemoryManager']] = None,
+        memory: Optional[Union[bool, str, 'MemoryConfig', Any]] = None,
         knowledge: Optional[Union[bool, str, List[str], 'KnowledgeConfig', 'Knowledge']] = None,
         planning: Optional[Union[bool, str, 'PlanningConfig']] = False,
         reflection: Optional[Union[bool, str, 'ReflectionConfig']] = None,
@@ -576,7 +577,7 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
             memory: Memory system configuration. Accepts:
                 - bool: True enables defaults, False disables
                 - MemoryConfig: Custom configuration
-                - MemoryManager: Pre-configured instance
+                - Any: Pre-configured memory instance
             knowledge: Knowledge sources. Accepts:
                 - bool: True enables defaults
                 - List[str]: File paths, URLs, or text content
@@ -2838,6 +2839,19 @@ Summary:"""
                         started_at=started_at,
                     )
                 
+                # G2: Check for interrupt request (cooperative cancellation) - sync version
+                if self.interrupt_controller and self.interrupt_controller.is_set():
+                    reason = self.interrupt_controller.reason or "unknown"
+                    return AutonomyResult(
+                        success=False,
+                        output=f"Task interrupted: {reason}",
+                        completion_reason="interrupted",
+                        iterations=iterations,
+                        stage=stage,
+                        actions=actions_taken,
+                        duration_seconds=time_module.time() - start_time,
+                        started_at=started_at,
+                    )
                 
                 # Execute one turn using the agent's chat method
                 # Always use the original prompt (prompt re-injection)

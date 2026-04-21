@@ -650,11 +650,12 @@ Respond with ONLY a valid JSON tool call in this format:
 
         return any(indicator in error_str or indicator in error_type for indicator in indicators)
 
-    def _classify_error_and_should_retry(self, error: Exception) -> tuple[str, bool, float]:
+    def _classify_error_and_should_retry(self, error: Exception, attempt: int = 1) -> tuple[str, bool, float]:
         """Classify error and determine retry strategy using G5 error classifier.
         
         Args:
             error: Exception to classify
+            attempt: Current attempt number (1-based)
             
         Returns:
             Tuple of (category, should_retry, retry_delay)
@@ -674,8 +675,8 @@ Respond with ONLY a valid JSON tool call in this format:
                 if retry_after:
                     return category.value, True, retry_after
             
-            # Use category-specific delay calculation
-            delay = get_retry_delay(category, attempt=1, base_delay=self._retry_delay)
+            # Use category-specific delay calculation with proper attempt
+            delay = get_retry_delay(category, attempt=attempt, base_delay=self._retry_delay)
             return category.value, True, delay
             
         except ImportError:
@@ -709,17 +710,16 @@ Respond with ONLY a valid JSON tool call in this format:
                 return func(*args, **kwargs)
 
             except Exception as e:
-                if not self._is_rate_limit_error(e):
+                category, can_retry, retry_delay = self._classify_error_and_should_retry(e, attempt + 1)
+                if not can_retry:
                     raise
 
                 last_error = e
                 error_str = str(e)
 
                 if attempt < self._max_retries:
-                    retry_delay = self._parse_retry_delay(error_str)
-
                     logging.warning(
-                        f"Rate limit hit (attempt {attempt + 1}/{self._max_retries + 1}), "
+                        f"{category} error hit (attempt {attempt + 1}/{self._max_retries + 1}), "
                         f"waiting {retry_delay:.1f}s before retry..."
                     )
 
@@ -770,17 +770,16 @@ Respond with ONLY a valid JSON tool call in this format:
                 return await func(*args, **kwargs)
 
             except Exception as e:
-                if not self._is_rate_limit_error(e):
+                category, can_retry, retry_delay = self._classify_error_and_should_retry(e, attempt + 1)
+                if not can_retry:
                     raise
 
                 last_error = e
                 error_str = str(e)
 
                 if attempt < self._max_retries:
-                    retry_delay = self._parse_retry_delay(error_str)
-
                     logging.warning(
-                        f"Rate limit hit (attempt {attempt + 1}/{self._max_retries + 1}), "
+                        f"{category} error hit (attempt {attempt + 1}/{self._max_retries + 1}), "
                         f"waiting {retry_delay:.1f}s before retry..."
                     )
 

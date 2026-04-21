@@ -20,12 +20,45 @@ _WRITE_TOOLS = frozenset({
     "mkdir", "rmdir", "move_file", "copy_file"
 })
 
+# Write operation hints in tool names for detecting custom write tools
+_WRITE_NAME_HINTS = frozenset({
+    "write", "edit", "patch", "create", "save", "update",
+    "delete", "remove", "mkdir", "rmdir", "move", "copy", "persist",
+    "modify", "append"
+})
+
 # Argument names that typically contain file paths
 _PATH_ARG_NAMES = frozenset({
     "path", "file_path", "filepath", "dest", "destination", "target",
     "source", "src", "output", "output_path", "filename", "file",
     "directory", "dir", "folder"
 })
+
+
+def _is_potential_write_tool(function_name: str, arguments: dict) -> bool:
+    """Check if a tool call is potentially a write operation.
+    
+    Args:
+        function_name: Name of the tool function
+        arguments: Tool call arguments
+        
+    Returns:
+        True if the tool might perform write operations
+    """
+    # Check explicit write tools first
+    if function_name in _WRITE_TOOLS:
+        return True
+    
+    # Check for write hints in function name
+    normalized_name = function_name.lower()
+    if any(hint in normalized_name for hint in _WRITE_NAME_HINTS):
+        return True
+    
+    # Conservative fallback: if tool has path-like arguments, treat as potential writer
+    if any(arg_name in _PATH_ARG_NAMES for arg_name in arguments.keys()):
+        return True
+    
+    return False
 
 
 def extract_paths(tool_call: ToolCall) -> List[pathlib.Path]:
@@ -39,8 +72,8 @@ def extract_paths(tool_call: ToolCall) -> List[pathlib.Path]:
     """
     paths = []
     
-    # Only check write tools
-    if tool_call.function_name not in _WRITE_TOOLS:
+    # Check if this tool might perform write operations
+    if not _is_potential_write_tool(tool_call.function_name, tool_call.arguments):
         return paths
     
     args = tool_call.arguments or {}

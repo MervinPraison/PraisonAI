@@ -9,7 +9,14 @@ import re
 from enum import Enum
 from typing import Dict, Tuple, List, Optional
 
-__all__ = ["ErrorCategory", "classify_error", "should_retry", "get_retry_delay"]
+__all__ = [
+    "ErrorCategory",
+    "classify_error", 
+    "should_retry", 
+    "get_retry_delay",
+    "extract_retry_after",
+    "get_error_context",
+]
 
 
 class ErrorCategory(str, Enum):

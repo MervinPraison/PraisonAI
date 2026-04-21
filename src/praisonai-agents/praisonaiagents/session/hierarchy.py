@@ -490,7 +490,10 @@ class HierarchicalSessionStore(DefaultSessionStore):
         Returns:
             True if title was generated and set, False otherwise
         """
-        session = self._load_extended_session(session_id)
+        import asyncio
+        
+        # Load session in thread to avoid blocking event loop
+        session = await asyncio.to_thread(self._load_extended_session, session_id)
         
         # Skip if already has a title
         if session.title and session.title.strip():
@@ -506,12 +509,18 @@ class HierarchicalSessionStore(DefaultSessionStore):
         assistant_msg = None
         
         for msg in messages:
-            if msg.get("role") == "user" and not user_msg:
+            # Handle both SessionMessage dataclass and dict formats
+            if hasattr(msg, 'role'):
+                role = msg.role
+                content = msg.content
+            else:
+                role = msg.get("role")
                 content = msg.get("content", "")
+                
+            if role == "user" and not user_msg:
                 if isinstance(content, str) and content.strip():
                     user_msg = content
-            elif msg.get("role") == "assistant" and not assistant_msg and user_msg:
-                content = msg.get("content", "")
+            elif role == "assistant" and not assistant_msg and user_msg:
                 if isinstance(content, str) and content.strip():
                     assistant_msg = content
                     break
@@ -525,12 +534,18 @@ class HierarchicalSessionStore(DefaultSessionStore):
             title = await generate_title_async(user_msg, assistant_msg)
             
             if title and title.strip():
-                session.title = title.strip()
-                return self._save_extended_session(session)
+                # Reload session to avoid overwriting concurrent updates
+                fresh_session = await asyncio.to_thread(self._load_extended_session, session_id)
+                # Only set title if it's still empty
+                if not fresh_session.title or not fresh_session.title.strip():
+                    fresh_session.title = title.strip()
+                    return await asyncio.to_thread(self._save_extended_session, fresh_session)
                 
-        except Exception:
-            # Title generation failed - not critical
-            pass
+        except Exception as e:
+            # Title generation failed - log with context instead of silent failure
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.debug("Auto title generation failed for session %s: %s", session_id, str(e))
             
         return False
     

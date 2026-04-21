@@ -6,10 +6,35 @@ operations. Follows protocol-driven design with zero overhead when not used.
 """
 
 import threading
-from typing import Optional
+from typing import Optional, Protocol
 from dataclasses import dataclass, field
 
-__all__ = ["InterruptController"]
+__all__ = ["InterruptControllerProtocol", "InterruptController"]
+
+
+class InterruptControllerProtocol(Protocol):
+    """Protocol for interrupt controller extension point."""
+    
+    def request(self, reason: str = "user") -> None:
+        """Request cancellation with optional reason."""
+        ...
+    
+    def clear(self) -> None:
+        """Clear interrupt state."""
+        ...
+    
+    def is_set(self) -> bool:
+        """Check if interrupt was requested."""
+        ...
+    
+    @property
+    def reason(self) -> Optional[str]:
+        """Get interrupt reason if set."""
+        ...
+    
+    def check(self) -> None:
+        """Check for interrupt and raise if set."""
+        ...
 
 
 @dataclass

@@ -44,13 +44,57 @@ def strip_surrogates(text: str) -> str:
         return re.sub(r'[\uD800-\uDFFF]', '', text)
 
 
+def _sanitize_value_recursive(value: Any) -> tuple[Any, bool]:
+    """Recursively sanitize any nested string values in a data structure.
+    
+    Args:
+        value: Value to sanitize (can be dict, list, str, or other)
+        
+    Returns:
+        Tuple of (sanitized_value, changed_flag)
+    """
+    if isinstance(value, str):
+        sanitized = strip_surrogates(value)
+        return sanitized, sanitized != value
+    
+    elif isinstance(value, list):
+        changed = False
+        sanitized_items = []
+        for item in value:
+            sanitized_item, item_changed = _sanitize_value_recursive(item)
+            sanitized_items.append(sanitized_item)
+            changed = changed or item_changed
+        return sanitized_items, changed
+    
+    elif isinstance(value, dict):
+        changed = False
+        sanitized_dict = {}
+        for key, nested_value in value.items():
+            # Sanitize the key if it's a string
+            if isinstance(key, str):
+                sanitized_key = strip_surrogates(key)
+                if sanitized_key != key:
+                    changed = True
+                    key = sanitized_key
+            
+            # Recursively sanitize the value
+            sanitized_value, value_changed = _sanitize_value_recursive(nested_value)
+            sanitized_dict[key] = sanitized_value
+            changed = changed or value_changed
+        return sanitized_dict, changed
+    
+    else:
+        # Return other types unchanged
+        return value, False
+
+
 def sanitize_messages(messages: List[Dict[str, Any]]) -> bool:
     """Sanitize message content in-place, removing problematic Unicode.
     
     Processes all string content in message dictionaries, including:
     - message.content (string or list)  
     - message.name
-    - Any nested string values
+    - Any nested string values (including tool_calls[].function.arguments)
     
     Args:
         messages: List of message dicts to sanitize in-place
@@ -73,39 +117,12 @@ def sanitize_messages(messages: List[Dict[str, Any]]) -> bool:
         if not isinstance(message, dict):
             continue
             
-        # Sanitize content field (most common)
-        if "content" in message:
-            content = message["content"]
-            
-            if isinstance(content, str):
-                sanitized = strip_surrogates(content)
-                if sanitized != content:
-                    message["content"] = sanitized
-                    changed = True
-                    
-            elif isinstance(content, list):
-                # Handle list content (e.g., multimodal messages)
-                for i, item in enumerate(content):
-                    if isinstance(item, dict) and "text" in item:
-                        text = item["text"]
-                        if isinstance(text, str):
-                            sanitized = strip_surrogates(text)
-                            if sanitized != text:
-                                content[i]["text"] = sanitized
-                                changed = True
-                    elif isinstance(item, str):
-                        sanitized = strip_surrogates(item)
-                        if sanitized != item:
-                            content[i] = sanitized
-                            changed = True
-        
-        # Sanitize other string fields
-        for key, value in message.items():
-            if isinstance(value, str) and key != "content":  # Already handled above
-                sanitized = strip_surrogates(value)
-                if sanitized != value:
-                    message[key] = sanitized
-                    changed = True
+        # Recursively sanitize the entire message structure
+        sanitized_message, message_changed = _sanitize_value_recursive(message)
+        if message_changed:
+            message.clear()
+            message.update(sanitized_message)
+            changed = True
     
     return changed
 
