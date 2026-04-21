@@ -66,10 +66,8 @@ PERMISSION_PRESETS = {
     }),
     # "safe" — blocks all dangerous tools (file writes, shell exec, etc.)
     "safe": frozenset(DEFAULT_DANGEROUS_TOOLS.keys()),
-    # "read_only" — blocks dangerous tools + write operations
-    "read_only": frozenset(DEFAULT_DANGEROUS_TOOLS.keys()) | frozenset({
-        "write_file", "copy_file", "move_file",
-    }),
+    # "read_only" — alias of "safe" (blocks all dangerous tools)
+    "read_only": frozenset(DEFAULT_DANGEROUS_TOOLS.keys()),
     # "full" — no restrictions (trust the LLM). Equivalent to "off" env.
     "full": frozenset(),
     # "off" — alias of "full" for the env-var off-switch.
