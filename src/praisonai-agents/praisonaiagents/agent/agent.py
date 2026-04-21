@@ -1756,6 +1756,18 @@ Your Goal: {self.goal}
             self._approval_backend = None
             self._approve_all_tools = False
             self._approval_timeout = 0
+            # No explicit approval kwarg — honour PRAISONAI_TOOL_SAFETY.
+            # Default preset "default" blocks only destructive ops
+            # (delete_*, execute_command, execute_code, kill_process, move/copy)
+            # while leaving read / create / edit tools fully auto-approved.
+            # Users who want the pre-4.6.27 "trust everything" behaviour
+            # export PRAISONAI_TOOL_SAFETY=off. This adds zero Agent kwargs.
+            _safety_env = os.environ.get("PRAISONAI_TOOL_SAFETY", "default").strip().lower()
+            if _safety_env and _safety_env not in ("off", "full", "none", "0", "false"):
+                from ..approval.registry import PERMISSION_PRESETS
+                _preset_deny = PERMISSION_PRESETS.get(_safety_env)
+                if _preset_deny is not None:
+                    self._perm_deny = _preset_deny
         elif isinstance(approval, ApprovalConfig):
             self._approval_backend = approval.backend
             self._approve_all_tools = approval.all_tools
