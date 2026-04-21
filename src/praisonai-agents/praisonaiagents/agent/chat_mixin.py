@@ -1388,11 +1388,11 @@ Your Goal: {self.goal}"""
                     except Exception as e:
                         logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
                         # Rollback chat history on guardrail failure
-                        self.chat_history = self.chat_history[:chat_history_length]
+                        self._truncate_chat_history(chat_history_length)
                         return None
                 except Exception as e:
                     # Rollback chat history if LLM call fails
-                    self.chat_history = self.chat_history[:chat_history_length]
+                    self._truncate_chat_history(chat_history_length)
                     _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
                     return None
             except Exception as e:
@@ -1433,7 +1433,7 @@ Your Goal: {self.goal}"""
                     self.chat_history[-1].get("role") == "user" and 
                     self.chat_history[-1].get("content") == normalized_content):
                 # Add user message to chat history BEFORE LLM call so handoffs can access it
-                self.chat_history.append({"role": "user", "content": normalized_content})
+                self._append_to_chat_history({"role": "user", "content": normalized_content})
                 # Persist user message to DB (OpenAI path)
                 self._persist_message("user", normalized_content)
 
@@ -1477,7 +1477,7 @@ Your Goal: {self.goal}"""
                         response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=stream, task_name=task_name, task_description=task_description, task_id=task_id, response_format=response_format)
                         if not response:
                             # Rollback chat history on response failure
-                            self.chat_history = self.chat_history[:chat_history_length]
+                            self._truncate_chat_history(chat_history_length)
                             return None
 
                         # Handle None content (can happen with tool calls or empty responses)
@@ -1488,7 +1488,7 @@ Your Goal: {self.goal}"""
                         if output_json or output_pydantic:
                             # Add to chat history and return raw response
                             # User message already added before LLM call via _build_messages
-                            self.chat_history.append({"role": "assistant", "content": response_text})
+                            self._append_to_chat_history({"role": "assistant", "content": response_text})
                             # Persist assistant message to DB
                             self._persist_message("assistant", response_text)
                             # Apply guardrail validation even for JSON output
@@ -1500,12 +1500,12 @@ Your Goal: {self.goal}"""
                             except Exception as e:
                                 logging.error(f"Agent {self.name}: Guardrail validation failed for JSON output: {e}")
                                 # Rollback chat history on guardrail failure
-                                self.chat_history = self.chat_history[:chat_history_length]
+                                self._truncate_chat_history(chat_history_length)
                                 return None
 
                         if not self.self_reflect:
                             # User message already added before LLM call via _build_messages
-                            self.chat_history.append({"role": "assistant", "content": response_text})
+                            self._append_to_chat_history({"role": "assistant", "content": response_text})
                             # Persist assistant message to DB (non-reflect path)
                             self._persist_message("assistant", response_text)
                             if self.verbose:
@@ -1521,7 +1521,7 @@ Your Goal: {self.goal}"""
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
                                     # Rollback chat history on guardrail failure
-                                    self.chat_history = self.chat_history[:chat_history_length]
+                                    self._truncate_chat_history(chat_history_length)
                                     return None
                             # Apply guardrail to regular response
                             try:
@@ -1532,7 +1532,7 @@ Your Goal: {self.goal}"""
                             except Exception as e:
                                 logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
                                 # Rollback chat history on guardrail failure
-                                self.chat_history = self.chat_history[:chat_history_length]
+                                self._truncate_chat_history(chat_history_length)
                                 return None
 
                         reflection_prompt = f"""
@@ -1591,7 +1591,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 if self.verbose:
                                     _get_display_functions()['display_self_reflection']("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
                                 # User message already added before LLM call via _build_messages
-                                self.chat_history.append({"role": "assistant", "content": response_text})
+                                self._append_to_chat_history({"role": "assistant", "content": response_text})
                                 # Apply guardrail validation after satisfactory reflection
                                 try:
                                     validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
@@ -1602,7 +1602,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
                                     # Rollback chat history on guardrail failure
-                                    self.chat_history = self.chat_history[:chat_history_length]
+                                    self._truncate_chat_history(chat_history_length)
                                     self._end_run(None, "error", {"error": str(e)})
                                     return None
 
@@ -1611,7 +1611,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 if self.verbose:
                                     _get_display_functions()['display_self_reflection']("Maximum reflection count reached, returning current response", console=self.console)
                                 # User message already added before LLM call via _build_messages
-                                self.chat_history.append({"role": "assistant", "content": response_text})
+                                self._append_to_chat_history({"role": "assistant", "content": response_text})
                                 # Apply guardrail validation after max reflections
                                 try:
                                     validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
@@ -1621,7 +1621,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed after max reflections: {e}")
                                     # Rollback chat history on guardrail failure
-                                    self.chat_history = self.chat_history[:chat_history_length]
+                                    self._truncate_chat_history(chat_history_length)
                                     return None
                             
                             # If not satisfactory and not at max reflections, continue with regeneration
@@ -1648,7 +1648,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # Catch any exceptions that escape the while loop
                 _get_display_functions()['display_error'](f"Unexpected error in chat: {e}", console=self.console)
                 # Rollback chat history
-                self.chat_history = self.chat_history[:chat_history_length]
+                self._truncate_chat_history(chat_history_length)
                 return None
 
     def clean_json_output(self, output: str) -> str:
@@ -1780,7 +1780,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         self.chat_history[-1].get("role") == "user" and 
                         self.chat_history[-1].get("content") == normalized_content):
                     # Add user message to chat history BEFORE LLM call so handoffs can access it
-                    self.chat_history.append({"role": "user", "content": normalized_content})
+                    self._append_to_chat_history({"role": "user", "content": normalized_content})
 
                 # --- Context compaction (async custom LLM path) ---
                 _exec_cfg = getattr(self, 'execution', None)
@@ -1798,7 +1798,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 if getattr(self, '_strict_hooks', False):
                                     raise
                             _ch, _cr = _cw.compact(self.chat_history)
-                            self.chat_history[:] = _ch
+                            self._replace_chat_history(_ch)
                             logging.info(
                                 f"[compaction] {self.name}: {_cr.original_tokens}→{_cr.compacted_tokens} tokens "
                                 f"({_cr.messages_removed} messages removed)"
@@ -1841,7 +1841,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         stream=stream
                     )
 
-                    self.chat_history.append({"role": "assistant", "content": response_text})
+                    self._append_to_chat_history({"role": "assistant", "content": response_text})
 
                     if get_logger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
@@ -1856,11 +1856,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     except Exception as e:
                         logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
                         # Rollback chat history on guardrail failure
-                        self.chat_history = self.chat_history[:chat_history_length]
+                        self._truncate_chat_history(chat_history_length)
                         return None
                 except Exception as e:
                     # Rollback chat history if LLM call fails
-                    self.chat_history = self.chat_history[:chat_history_length]
+                    self._truncate_chat_history(chat_history_length)
                     _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
                     if get_logger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
@@ -1885,7 +1885,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     self.chat_history[-1].get("role") == "user" and 
                     self.chat_history[-1].get("content") == normalized_content):
                 # Add user message to chat history BEFORE LLM call so handoffs can access it
-                self.chat_history.append({"role": "user", "content": normalized_content})
+                self._append_to_chat_history({"role": "user", "content": normalized_content})
 
             # --- Context compaction (async standard OpenAI path) ---
             _exec_cfg2 = getattr(self, 'execution', None)
@@ -2035,8 +2035,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         if self.verbose:
                                             _get_display_functions()['display_self_reflection'](f"Agent {self.name}: Self-reflection with structured output is not supported for custom LLM providers. Skipping reflection.", console=self.console)
                                         # Return the original response without reflection
-                                        self.chat_history.append({"role": "user", "content": original_prompt})
-                                        self.chat_history.append({"role": "assistant", "content": response_text})
+                                        self._append_to_chat_history({"role": "user", "content": original_prompt})
+                                        self._append_to_chat_history({"role": "assistant", "content": response_text})
                                         if get_logger().getEffectiveLevel() == logging.DEBUG:
                                             total_time = time.time() - start_time
                                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
@@ -2102,7 +2102,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         except Exception as e:
                             logging.error(f"Agent {self.name}: Guardrail validation failed for OpenAI client: {e}")
                             # Rollback chat history on guardrail failure
-                            self.chat_history = self.chat_history[:chat_history_length]
+                            self._truncate_chat_history(chat_history_length)
                             return None
                 except Exception as e:
                     _get_display_functions()['display_error'](f"Error in chat completion: {e}")
@@ -2345,7 +2345,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 if not (self.chat_history and 
                         self.chat_history[-1].get("role") == "user" and 
                         self.chat_history[-1].get("content") == normalized_content):
-                    self.chat_history.append({"role": "user", "content": normalized_content})
+                    self._append_to_chat_history({"role": "user", "content": normalized_content})
                 
                 try:
                     # Use the new streaming generator from LLM class
@@ -2374,11 +2374,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Add complete response to chat history
                     if response_content:
-                        self.chat_history.append({"role": "assistant", "content": response_content})
+                        self._append_to_chat_history({"role": "assistant", "content": response_content})
                         
                 except Exception as e:
                     # Rollback chat history on error
-                    self.chat_history = self.chat_history[:chat_history_length]
+                    self._truncate_chat_history(chat_history_length)
                     logging.error(f"Custom LLM streaming error: {e}")
                     raise
                     
@@ -2421,7 +2421,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 if not (self.chat_history and 
                         self.chat_history[-1].get("role") == "user" and 
                         self.chat_history[-1].get("content") == normalized_content):
-                    self.chat_history.append({"role": "user", "content": normalized_content})
+                    self._append_to_chat_history({"role": "user", "content": normalized_content})
                 
                 try:
                     # Check if OpenAI client is available
@@ -2533,7 +2533,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     "function": tc['function']
                                 } for tc in tool_calls_data if tc['id']
                             ]
-                        self.chat_history.append(assistant_message)
+                        self._append_to_chat_history(assistant_message)
                         
                         # Execute tool calls and add results to chat history
                         for tool_call in tool_calls_data:
@@ -2552,7 +2552,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         tool_call_id=tool_call.get('id')
                                     )
                                     # Add tool result to chat history
-                                    self.chat_history.append({
+                                    self._append_to_chat_history({
                                         "role": "tool",
                                         "tool_call_id": tool_call['id'],
                                         "content": str(tool_result)
@@ -2560,7 +2560,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 except Exception as tool_error:
                                     logging.error(f"Tool execution error in streaming: {tool_error}")
                                     # Add error result to chat history
-                                    self.chat_history.append({
+                                    self._append_to_chat_history({
                                         "role": "tool", 
                                         "tool_call_id": tool_call['id'],
                                         "content": f"Error: {str(tool_error)}"
@@ -2568,11 +2568,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     else:
                         # Add complete response to chat history (text-only response)
                         if response_text:
-                            self.chat_history.append({"role": "assistant", "content": response_text})
+                            self._append_to_chat_history({"role": "assistant", "content": response_text})
                         
                 except Exception as e:
                     # Rollback chat history on error
-                    self.chat_history = self.chat_history[:chat_history_length]
+                    self._truncate_chat_history(chat_history_length)
                     logging.error(f"OpenAI streaming error: {e}")
                     # Fall back to simulated streaming
                     response = self.chat(prompt, **kwargs)

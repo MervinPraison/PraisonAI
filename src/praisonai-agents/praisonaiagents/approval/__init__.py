@@ -183,14 +183,21 @@ def require_approval(risk_level: RiskLevel = "high"):
                 mark_approved(tool_name)
                 return func(*args, **kwargs)
             try:
-                try:
-                    asyncio.get_running_loop()
-                    raise RuntimeError("Use sync fallback in async context")
-                except RuntimeError:
-                    decision = asyncio.run(request_approval(tool_name, kwargs))
+                from ..utils.async_bridge import is_async_context, run_coroutine_from_any_context
+                registry = get_approval_registry()
+                if is_async_context():
+                    # We're in an async context - cannot safely use console I/O
+                    raise RuntimeError(
+                        f"Tool '{tool_name}' requires approval but cannot use console I/O from async context. "
+                        f"Configure a non-console approval backend or call from sync context."
+                    )
+                else:
+                    # Safe to run async approval using registry
+                    decision = run_coroutine_from_any_context(request_approval(tool_name, kwargs))
             except Exception as e:
-                logging.warning(f"Async approval failed, using sync fallback: {e}")
-                decision = console_approval_callback(tool_name, kwargs, risk_level)
+                logging.warning(f"Approval request failed: {e}", exc_info=True)
+                # Fail closed - do not fall back to console
+                raise PermissionError(f"Approval request failed for {tool_name}: {e}") from e
             if not decision.approved:
                 raise PermissionError(f"Execution of {tool_name} denied: {decision.reason}")
             mark_approved(tool_name)
