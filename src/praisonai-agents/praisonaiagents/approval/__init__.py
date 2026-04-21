@@ -184,25 +184,20 @@ def require_approval(risk_level: RiskLevel = "high"):
                 return func(*args, **kwargs)
             try:
                 from ..utils.async_bridge import is_async_context, run_coroutine_from_any_context
-                # Always use the configured registry for consistent behavior
                 registry = get_approval_registry()
                 if is_async_context():
-                    # In async context - use registry's sync approval method
-                    if hasattr(registry, 'approve_sync'):
-                        decision = registry.approve_sync(None, tool_name, kwargs)
-                    else:
-                        # Registry doesn't support sync - fail fast with clear error
-                        raise RuntimeError(
-                            f"Approval required for {tool_name} but registry {type(registry).__name__} "
-                            "doesn't support sync approval. Use async tools or configure sync-compatible approval."
-                        )
+                    # We're in an async context - cannot safely use console I/O
+                    raise RuntimeError(
+                        f"Tool '{tool_name}' requires approval but cannot use console I/O from async context. "
+                        f"Configure a non-console approval backend or call from sync context."
+                    )
                 else:
-                    # Not in async context - safe to run async approval
+                    # Safe to run async approval using registry
                     decision = run_coroutine_from_any_context(request_approval(tool_name, kwargs))
             except Exception as e:
-                logging.warning(f"Registry approval failed: {e}", exc_info=True)
-                # Fail closed - rethrow instead of silently falling back
-                raise RuntimeError(f"Approval failed for {tool_name}: {e}") from e
+                logging.warning(f"Approval request failed: {e}", exc_info=True)
+                # Fail closed - do not fall back to console
+                raise PermissionError(f"Approval request failed for {tool_name}: {e}") from e
             if not decision.approved:
                 raise PermissionError(f"Execution of {tool_name} denied: {decision.reason}")
             mark_approved(tool_name)

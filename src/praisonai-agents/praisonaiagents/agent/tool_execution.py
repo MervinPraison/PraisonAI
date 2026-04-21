@@ -17,6 +17,8 @@ import concurrent.futures
 from typing import List, Optional, Any, Dict, Union, TYPE_CHECKING
 from ..errors import ToolExecutionError
 
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     pass
 
@@ -349,9 +351,7 @@ class ToolExecutionMixin:
                 self._append_to_chat_history({"role": "system", "content": nudge.strip()})
         except Exception as e:
             # Log learning nudge failures for debugging
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Learning nudge generation failed: {e}", exc_info=True)
+            logger.warning("Learning nudge generation failed: %s", e, exc_info=True)
 
         return response
 
@@ -387,9 +387,7 @@ class ToolExecutionMixin:
                 self._append_to_chat_history({"role": "system", "content": nudge.strip()})
         except Exception as e:
             # Log learning nudge failures for debugging
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Learning nudge generation failed: {e}", exc_info=True)
+            logger.warning("Learning nudge generation failed: %s", e, exc_info=True)
 
         return response
 

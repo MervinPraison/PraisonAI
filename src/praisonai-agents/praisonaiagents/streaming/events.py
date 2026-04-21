@@ -15,6 +15,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Protocol
 import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class StreamEventType(Enum):
@@ -244,9 +247,7 @@ class StreamEventEmitter:
                 callback(event)
             except Exception as e:
                 # Log callback errors but don't let them break streaming
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(f"Streaming callback failed: {e}", exc_info=True)
+                logger.warning("Streaming callback failed: %s", e, exc_info=True)
     
     async def emit_async(self, event: StreamEvent) -> None:
         """
@@ -264,9 +265,7 @@ class StreamEventEmitter:
                 callback(event)
             except Exception as e:
                 # Log callback errors but don't let them break streaming
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(f"Streaming sync callback failed in async context: {e}", exc_info=True)
+                logger.warning("Streaming sync callback failed in async context: %s", e, exc_info=True)
         
         # Call async callbacks
         for callback in self._async_callbacks:
@@ -274,9 +273,7 @@ class StreamEventEmitter:
                 await callback(event)
             except Exception as e:
                 # Log callback errors but don't let them break streaming
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(f"Streaming async callback failed: {e}", exc_info=True)
+                logger.warning("Streaming async callback failed: %s", e, exc_info=True)
     
     @property
     def has_callbacks(self) -> bool:

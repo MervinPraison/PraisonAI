@@ -321,12 +321,11 @@ class ExecutionMixin:
                             self._session_store.set_gateway_info(sid, gateway_session_id=msid)
                     except Exception as e:
                         # Log session linkage failures for debugging
-                        import logging
-                        logger = logging.getLogger(__name__)
                         logger.warning(
-                            f"Session gateway linkage failed: {e}",
+                            "Session gateway linkage failed: %s",
+                            e,
                             extra={"session_id": sid, "managed_session_id": msid},
-                            exc_info=True
+                            exc_info=True,
                         )
             self._auto_save_session()
         
