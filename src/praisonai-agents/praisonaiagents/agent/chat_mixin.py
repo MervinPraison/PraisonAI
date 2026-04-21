@@ -1798,7 +1798,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 if getattr(self, '_strict_hooks', False):
                                     raise
                             _ch, _cr = _cw.compact(self.chat_history)
-                            self.chat_history[:] = _ch
+                            self._replace_chat_history(_ch)
                             logging.info(
                                 f"[compaction] {self.name}: {_cr.original_tokens}→{_cr.compacted_tokens} tokens "
                                 f"({_cr.messages_removed} messages removed)"

@@ -3,20 +3,42 @@ Async/sync bridge utility for safely running coroutines from any context.
 
 This module provides utilities to safely bridge between async and sync contexts,
 ensuring no RuntimeError: "This event loop is already running" crashes.
+Based on the proven implementation in praisonai/_async_bridge.py.
 """
 
 import asyncio
-import concurrent.futures
 import logging
+import threading
+from concurrent.futures import Future, TimeoutError as FuturesTimeoutError
 from typing import Any, Awaitable, TypeVar
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar('T')
 
+_loop: asyncio.AbstractEventLoop | None = None
+_loop_lock = threading.Lock()
+
+
+def _ensure_background_loop() -> asyncio.AbstractEventLoop:
+    """Ensure a background event loop exists and return it."""
+    global _loop
+    with _loop_lock:
+        if _loop is None or _loop.is_closed():
+            _loop = asyncio.new_event_loop()
+            t = threading.Thread(target=_loop.run_forever, name="praisonaiagents-async", daemon=True)
+            t.start()
+        return _loop
+
+
 def run_coroutine_from_any_context(coro: Awaitable[T], timeout: float = 300) -> T:
     """
     Safely run a coroutine from either sync or async context.
+    
+    This function automatically detects if there's already a running event loop
+    and handles the execution appropriately:
+    - If no loop is running: uses asyncio.run() (fastest path)
+    - If a loop is running: schedules on background loop (safe path)
     
     Args:
         coro: The coroutine to execute
@@ -36,27 +58,19 @@ def run_coroutine_from_any_context(coro: Awaitable[T], timeout: float = 300) -> 
         >>> print(result)  # "hello"
     """
     try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        # No event loop — safe to use asyncio.run()
-        return asyncio.run(coro)
-
-    # Event loop exists — run in a dedicated thread to avoid deadlock
-    # This ensures we never nest event loops or block the current one
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        def _run():
-            new_loop = asyncio.new_event_loop()
-            try:
-                return new_loop.run_until_complete(coro)
-            finally:
-                new_loop.close()
-        
-        future = pool.submit(_run)
+        # Check if we're already in an event loop
+        asyncio.get_running_loop()
+        # If we get here, we're in an async context - use background loop
+        background_loop = _ensure_background_loop()
+        future = asyncio.run_coroutine_threadsafe(coro, background_loop)
         try:
             return future.result(timeout=timeout)
-        except concurrent.futures.TimeoutError:
+        except FuturesTimeoutError as e:
             logger.error(f"Coroutine execution timed out after {timeout}s")
-            raise TimeoutError(f"Coroutine execution timed out after {timeout} seconds")
+            raise TimeoutError(f"Coroutine execution timed out after {timeout} seconds") from e
+    except RuntimeError:
+        # No event loop running - safe to use asyncio.run() directly
+        return asyncio.run(coro)
 
 def is_async_context() -> bool:
     """
