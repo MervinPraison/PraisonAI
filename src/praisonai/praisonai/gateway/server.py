@@ -1180,7 +1180,7 @@ class WebSocketGateway:
         Supports all agent configuration options including:
         - tools: List of tool names to resolve via ToolResolver
         - tool_choice: Tool selection mode ('auto', 'required', 'none')
-        - reflection: Enable reflection/interactive mode (default: True)
+        - reflection: Enable reflection/interactive mode (default: False)
         - allow_delegation: Allow task delegation
         - role: Agent role (CrewAI-style)
         - goal: Agent goal (CrewAI-style)
@@ -1241,9 +1241,15 @@ class WebSocketGateway:
                     else:
                         logger.warning(f"Tool '{tool_name}' not found for agent '{agent_id}'")
 
-            # Additional agent options from YAML
+            # Additional agent options from YAML.
             tool_choice = agent_def.get("tool_choice", None)
-            reflection = agent_def.get("reflection", True)
+            
+            # reflection defaults to False for gateway agents: chat channels
+            # (Telegram/Discord/Slack/WhatsApp) expect sub-second replies, and
+            # self-reflection adds 1-N extra LLM round-trips per message
+            # (~8x latency for short prompts on gpt-4o-mini). Users who want
+            # higher answer quality can opt in with `reflection: true` in YAML.
+            reflection = agent_def.get("reflection", False)
             allow_delegation = agent_def.get("allow_delegation", False)
 
             # G5: Wire guardrails if config has a matching agent_name or global rule
