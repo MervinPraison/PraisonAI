@@ -32,6 +32,13 @@ SKIP_VENV="${PRAISONAI_SKIP_VENV:-0}"
 NO_ONBOARD="${PRAISONAI_NO_ONBOARD:-0}"
 MIN_PYTHON_VERSION="3.10"
 
+# Set to 1 inside maybe_offer_bot_onboarding() when the bot wizard
+# succeeds. The wizard already prints a complete "✅ Done" panel with
+# the dashboard URL, bot-start command, gateway endpoints and doctor
+# hints — so we suppress the installer's own next-steps block to avoid
+# showing a second, partially duplicated summary after it.
+BOT_ONBOARDED=0
+
 # Logging functions - all output to stderr to avoid capturing in $()
 log_info() {
     echo -e "${BLUE}==>${NC} $1" >&2
@@ -503,10 +510,13 @@ print_next_steps() {
         echo ""
     fi
     
-    echo "  Set up a messaging bot (Telegram / Discord / Slack / WhatsApp):"
-    echo -e "     ${CYAN}praisonai onboard${NC}"
-    echo ""
-    echo "  Open the dashboard UI:"
+    # Only suggest 'praisonai onboard' when the user hasn't just completed it.
+    if [[ "$BOT_ONBOARDED" != "1" ]]; then
+        echo "  Set up a messaging bot (Telegram / Discord / Slack / WhatsApp):"
+        echo -e "     ${CYAN}praisonai onboard${NC}"
+        echo ""
+    fi
+    echo "  Open the dashboard UI (localhost only):"
     echo -e "     ${CYAN}praisonai claw${NC}    ${BOLD}→${NC} http://127.0.0.1:8082"
     echo ""
     echo "  Quick start:"
@@ -706,6 +716,7 @@ maybe_offer_bot_onboarding() {
         *)
             if "$py" -m praisonai onboard < /dev/tty > /dev/tty 2> /dev/tty; then
                 log_success "Bot onboarding completed!"
+                BOT_ONBOARDED=1
             else
                 log_warn "Bot onboarding skipped or failed — you can retry with 'praisonai onboard'."
             fi
@@ -754,9 +765,13 @@ main() {
     
     # Offer bot onboarding
     maybe_offer_bot_onboarding "$venv_dir"
-    
-    # Print next steps
-    print_next_steps "$venv_dir"
+
+    # Print next steps only when the bot wizard did NOT run to completion.
+    # When it did, its "✅ Done" panel is the final and most useful summary,
+    # and appending another next-steps block creates a confusing duplicate.
+    if [[ "$BOT_ONBOARDED" != "1" ]]; then
+        print_next_steps "$venv_dir"
+    fi
 }
 
 # Run main
