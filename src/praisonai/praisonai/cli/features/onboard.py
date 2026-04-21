@@ -494,35 +494,66 @@ class OnboardWizard:
                 "  [dim]Re-run [cyan]praisonai onboard[/cyan] once you have the token(s) and "
                 "the service will be installed automatically.[/dim]"
             )
-        elif Confirm.ask("\nInstall as background service (daemon)?", default=True):
+        else:
+            # Install the daemon by default — no prompt. The previous
+            # "Install as background service (daemon)? [Y/n]" question
+            # confused non-developer users ("what does daemon mean?") and
+            # 95% answered Yes anyway. If they really don't want it, they
+            # run `praisonai gateway uninstall` afterwards. This keeps the
+            # onboarding 'do-the-thing-for-me' feel instead of 'quiz me'.
             try:
                 from praisonai.daemon import install_daemon
                 result = install_daemon(config_path=self.config_path)
                 if result.get("ok"):
-                    console.print(f"  [green]✓[/green] {result.get('message', 'Service installed')}")
+                    console.print(
+                        f"  [green]✓[/green] {result.get('message', 'Service installed')}"
+                    )
                 else:
-                    console.print(f"  [red]✗[/red] {result.get('error', 'Install failed')}")
+                    console.print(
+                        f"  [red]✗[/red] {result.get('error', 'Install failed')}"
+                    )
             except Exception as e:
                 console.print(f"  [red]✗[/red] {str(e)[:200]}")
 
-        # Done — commands referenced here must exist in `praisonai --help`.
+        # Done panel. Commands referenced here must exist in `praisonai --help`.
+        # OS-aware daemon management hints: non-developers struggle to find
+        # launchctl/systemctl invocations themselves, so we surface the exact
+        # line for their platform. Label ``ai.praison.bot`` is defined in
+        # praisonai.daemon.launchd / systemd.
         _tok = getattr(self, "_gateway_token", "")
         _masked = (_tok[:4] + "…" + _tok[-4:]) if len(_tok) >= 10 else "(set)"
         _health_url = "http://127.0.0.1:8765/health"
-        _info_url = f"http://127.0.0.1:8765/info?token={_tok}" if _tok else "http://127.0.0.1:8765/info"
+        _info_url = (
+            f"http://127.0.0.1:8765/info?token={_tok}"
+            if _tok
+            else "http://127.0.0.1:8765/info"
+        )
+        import platform as _platform  # stdlib, free
+        _os = _platform.system().lower()
+        if _os == "darwin":
+            _restart_cmd = "launchctl kickstart -k gui/$(id -u)/ai.praison.bot"
+        elif _os == "linux":
+            _restart_cmd = "systemctl --user restart ai.praison.bot"
+        else:
+            _restart_cmd = "praisonai gateway uninstall && praisonai gateway install"
         console.print(Panel(
-            f"[bold green]Setup complete![/bold green]\n\n"
+            f"[bold green]Setup complete![/bold green] "
+            f"[dim]Your bot is now running in the background.[/dim]\n\n"
             f"[bold]🦞 Dashboard UI:[/bold]\n"
             f"  [cyan]praisonai claw[/cyan]          [dim]→ http://127.0.0.1:8082[/dim]\n\n"
-            f"[bold]Start your bot (foreground):[/bold]\n"
-            f"  [cyan]praisonai bot start[/cyan]\n\n"
             f"[bold]Gateway endpoints:[/bold]\n"
             f"  Health (public):  [cyan]{_health_url}[/cyan]\n"
             f"  Info (authed):    [cyan]{_info_url}[/cyan]\n"
             f"  [dim]Token {_masked} stored in ~/.praisonai/.env as GATEWAY_AUTH_TOKEN[/dim]\n\n"
-            f"[bold]Check everything:[/bold]\n"
-            f"  [cyan]praisonai doctor[/cyan]\n"
-            f"  [cyan]praisonai gateway status[/cyan]",
+            f"[bold]Manage the daemon:[/bold]\n"
+            f"  [cyan]praisonai gateway status[/cyan]     [dim]# is it running?[/dim]\n"
+            f"  [cyan]praisonai gateway logs[/cyan]       [dim]# tail the logs[/dim]\n"
+            f"  [cyan]{_restart_cmd}[/cyan]\n"
+            f"  [cyan]praisonai gateway uninstall[/cyan]  [dim]# remove the daemon[/dim]\n\n"
+            f"[bold]Re-run or reconfigure:[/bold]\n"
+            f"  [cyan]praisonai onboard[/cyan]            [dim]# change tokens / add platforms[/dim]\n"
+            f"  [cyan]praisonai gateway start[/cyan]      [dim]# run in foreground (skip the daemon)[/dim]\n"
+            f"  [cyan]praisonai doctor[/cyan]             [dim]# diagnose the whole stack[/dim]",
             title="✅ Done",
             border_style="green",
         ))
@@ -580,7 +611,25 @@ class OnboardWizard:
         print(f"\n✓ Written to {cfg_path}")
         if env_file:
             print(f"✓ Secrets saved to {env_file} (chmod 600)")
-        print(f"Start with: praisonai bot start --config {cfg_path}")
+
+        # Parity with rich flow: install daemon by default (no prompt)
+        # when every selected platform has a token captured.
+        if self.selected_platforms and all(p in self.tokens for p in self.selected_platforms):
+            try:
+                from praisonai.daemon import install_daemon
+                result = install_daemon(config_path=str(cfg_path))
+                if result.get("ok"):
+                    print(f"✓ {result.get('message', 'Daemon installed')}")
+                else:
+                    print(f"✗ {result.get('error', 'Daemon install failed')}")
+            except Exception as e:
+                print(f"✗ {str(e)[:200]}")
+
+        print("\nNext steps:")
+        print("  praisonai gateway status     # check if the daemon is running")
+        print("  praisonai gateway logs       # see what the bot is doing")
+        print("  praisonai onboard            # change tokens / add platforms")
+        print(f"  praisonai gateway start --config {cfg_path}   # foreground run (no daemon)")
 
 
 def run_onboard() -> None:
