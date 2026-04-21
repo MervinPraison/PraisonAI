@@ -1766,7 +1766,7 @@ Your Goal: {self.goal}
             if _safety_env:
                 from ..approval.registry import PERMISSION_PRESETS
                 _preset_deny = PERMISSION_PRESETS.get(_safety_env)
-                if _preset_deny:
+                if _preset_deny is not None:
                     self._perm_deny = _preset_deny
         elif isinstance(approval, ApprovalConfig):
             self._approval_backend = approval.backend
