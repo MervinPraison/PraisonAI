@@ -93,12 +93,15 @@ def test_explicit_approval_kwarg_overrides_env(monkeypatch):
     assert a._perm_deny == frozenset()
 
 
-def test_unknown_env_value_falls_back_to_no_blocks(monkeypatch):
-    # Defensive: a typo ("sfae") must not silently apply the strictest
-    # preset or crash. It should leave the agent in the no-policy state.
+def test_unknown_env_value_falls_back_to_default_preset(monkeypatch):
+    # Defensive: a typo ("sfae") must not silently disable the default
+    # safety policy. Unknown values should preserve the safe baseline.
     monkeypatch.setenv("PRAISONAI_TOOL_SAFETY", "sfae")
     a = _make_agent()
-    assert a._perm_deny == frozenset()
+    assert "delete_file" in a._perm_deny
+    assert "execute_command" in a._perm_deny
+    assert "write_file" not in a._perm_deny
+    assert "read_file" not in a._perm_deny
 
 
 def test_no_new_agent_kwarg_was_added():
