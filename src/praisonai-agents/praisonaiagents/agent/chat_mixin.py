@@ -2035,7 +2035,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         if self.verbose:
                                             _get_display_functions()['display_self_reflection'](f"Agent {self.name}: Self-reflection with structured output is not supported for custom LLM providers. Skipping reflection.", console=self.console)
                                         # Return the original response without reflection
-                                        self.chat_history.append({"role": "user", "content": original_prompt})
+                                        self._append_to_chat_history({"role": "user", "content": original_prompt})
                                         self._append_to_chat_history({"role": "assistant", "content": response_text})
                                         if get_logger().getEffectiveLevel() == logging.DEBUG:
                                             total_time = time.time() - start_time
@@ -2552,7 +2552,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         tool_call_id=tool_call.get('id')
                                     )
                                     # Add tool result to chat history
-                                    self.chat_history.append({
+                                    self._append_to_chat_history({
                                         "role": "tool",
                                         "tool_call_id": tool_call['id'],
                                         "content": str(tool_result)
@@ -2560,7 +2560,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 except Exception as tool_error:
                                     logging.error(f"Tool execution error in streaming: {tool_error}")
                                     # Add error result to chat history
-                                    self.chat_history.append({
+                                    self._append_to_chat_history({
                                         "role": "tool", 
                                         "tool_call_id": tool_call['id'],
                                         "content": f"Error: {str(tool_error)}"
