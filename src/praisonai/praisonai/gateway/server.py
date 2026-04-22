@@ -254,6 +254,10 @@ class WebSocketGateway:
         self._routing_rules: Dict[str, Dict[str, str]] = {}  # channel_name -> {context -> agent_id}
         self._channel_tasks: List[asyncio.Task] = []
         
+        # Pairing store for channel authorization
+        from .pairing import PairingStore
+        self.pairing_store = PairingStore()
+        
         # Scheduler tick background task
         self._scheduler_task: Optional[asyncio.Task] = None
     
@@ -383,9 +387,13 @@ class WebSocketGateway:
         # or fail if optional deps are missing.
         from .exec_approval import Resolution, get_exec_approval_manager
         from .rate_limiter import AuthRateLimiter
+        from .pairing_routes import create_pairing_routes
 
         _approval_mgr = get_exec_approval_manager()
         _approval_rate = AuthRateLimiter(max_attempts=10, window_seconds=60)
+        
+        # Create pairing routes
+        _pairing_routes = create_pairing_routes(self.pairing_store, _check_auth, _approval_rate)
 
         async def approval_pending(request):
             """GET /api/approval/pending — list pending approval requests."""
@@ -509,6 +517,9 @@ class WebSocketGateway:
             Route("/api/approval/pending", approval_pending, methods=["GET"]),
             Route("/api/approval/resolve", approval_resolve, methods=["POST"]),
             Route("/api/approval/allow-list", approval_allowlist, methods=["GET", "POST", "DELETE"]),
+            Route("/api/pairing/pending", _pairing_routes["pending"], methods=["GET"]),
+            Route("/api/pairing/approve", _pairing_routes["approve"], methods=["POST"]),
+            Route("/api/pairing/revoke", _pairing_routes["revoke"], methods=["POST"]),
             WebSocketRoute("/ws", websocket_endpoint),
         ]
         

@@ -35,6 +35,13 @@ from chainlit.input_widget import TextInput, Switch
 from chainlit.types import ThreadDict
 import chainlit.data as cl_data
 
+# Setup pairing action callbacks  
+try:
+    from praisonai.ui._pairing import setup_pairing_callbacks
+    setup_pairing_callbacks()
+except Exception as e:
+    logger.debug(f"Failed to setup pairing callbacks: {e}")
+
 # Profiling support (optional)
 PROFILING_ENABLED = os.getenv("PRAISON_CHAT_PROFILE", "").lower() in ("1", "true", "yes")
 _profile_data = {}
@@ -518,6 +525,13 @@ async def start():
                 f"**Trust Mode:** Enabled (auto-approve tool executions)\n\n"
                 f"Type your message to get started!"
     ).send()
+    
+    # Setup pairing banner for admin users
+    try:
+        from praisonai.ui._pairing import setup_pairing_banner
+        await setup_pairing_banner()
+    except Exception as e:
+        logger.debug(f"Failed to setup pairing banner: {e}")
     
     _profile_end("on_chat_start")
 
