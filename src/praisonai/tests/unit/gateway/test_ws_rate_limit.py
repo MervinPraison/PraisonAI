@@ -51,7 +51,7 @@ class TestWebSocketRateLimit:
     def test_window_reset(self, mock_time):
         """Rate limit should reset after the window expires."""
         mock_time.return_value = 0
-        limiter = AuthRateLimiter(max_attempts=2, window_seconds=0.1)  # Short window for testing
+        limiter = AuthRateLimiter(max_attempts=2, window_seconds=0.1, lockout_seconds=0.05)  # Short window for testing
         
         # Use up the limit
         assert limiter.allow("ws_upgrade", "192.168.1.100") is True
