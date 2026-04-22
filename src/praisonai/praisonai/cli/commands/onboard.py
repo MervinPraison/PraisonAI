@@ -38,6 +38,8 @@ def onboard_callback(
     if ctx.invoked_subcommand:
         return
     if yes:
+        # Propagate to run_onboard() and any subprocesses it spawns.
+        # Intentionally not restored afterwards: the CLI is a one-shot entrypoint.
         os.environ["PRAISONAI_NO_PROMPT"] = "1"
     try:
         run_onboard()

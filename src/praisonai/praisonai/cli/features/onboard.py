@@ -558,6 +558,7 @@ class OnboardWizard:
         # Guard: refuse to install a daemon that has no tokens — it would loop
         # in a crash-restart cycle. List the platforms missing tokens so the
         # user can rerun onboard once they have them.
+        daemon_success = False
         missing_tokens = [
             PLATFORMS[p]["name"]
             for p in self.selected_platforms
@@ -582,9 +583,6 @@ class OnboardWizard:
             daemon_success = self._install_daemon_with_feedback(
                 console.print, self.config_path
             )
-        
-        if 'daemon_success' not in locals():
-            daemon_success = False
 
         # Done panel. Commands referenced here must exist in `praisonai --help`.
         # OS-aware daemon management hints: non-developers struggle to find
