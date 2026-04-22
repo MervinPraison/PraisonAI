@@ -21,8 +21,15 @@ from ..approval import require_approval
 class FileTools:
     """Tools for file operations including read, write, list, and information."""
     
-    @staticmethod
-    def _validate_path(filepath: str) -> str:
+    def __init__(self, workspace=None):
+        """Initialize FileTools with optional workspace containment.
+        
+        Args:
+            workspace: Optional Workspace instance for path containment
+        """
+        self._workspace = workspace
+    
+    def _validate_path(self, filepath: str) -> str:
         """
         Validate and normalize a file path to prevent path traversal attacks.
         
@@ -35,6 +42,10 @@ class FileTools:
         Raises:
             ValueError: If path contains suspicious patterns
         """
+        # If workspace is configured, use workspace validation
+        if self._workspace is not None:
+            return str(self._workspace.resolve(filepath))
+        
         # Expand ~ to user home directory FIRST (before any validation)
         if filepath.startswith('~'):
             filepath = os.path.expanduser(filepath)
@@ -55,8 +66,7 @@ class FileTools:
         
         return absolute
     
-    @staticmethod
-    def read_file(filepath: str, encoding: str = 'utf-8') -> str:
+    def read_file(self, filepath: str, encoding: str = 'utf-8') -> str:
         """
         Read content from a file.
         
@@ -69,7 +79,7 @@ class FileTools:
         """
         try:
             # Validate path to prevent traversal attacks
-            safe_path = FileTools._validate_path(filepath)
+            safe_path = self._validate_path(filepath)
             with open(safe_path, 'r', encoding=encoding) as f:
                 return f.read()
         except Exception as e:
@@ -77,9 +87,8 @@ class FileTools:
             logging.error(error_msg)
             return error_msg
 
-    @staticmethod
     @require_approval(risk_level="high")
-    def write_file(filepath: str, content: str, encoding: str = 'utf-8') -> bool:
+    def write_file(self, filepath: str, content: str, encoding: str = 'utf-8') -> bool:
         """
         Write content to a file.
         
@@ -93,7 +102,7 @@ class FileTools:
         """
         try:
             # Validate path to prevent traversal attacks
-            safe_path = FileTools._validate_path(filepath)
+            safe_path = self._validate_path(filepath)
             # Create directory if it doesn't exist
             os.makedirs(os.path.dirname(safe_path), exist_ok=True)
             # Auto-coerce non-string content (LLMs sometimes pass dicts/lists)
@@ -110,8 +119,7 @@ class FileTools:
             logging.error(error_msg)
             return False
 
-    @staticmethod
-    def list_files(directory: str, pattern: Optional[str] = None) -> List[Dict[str, Union[str, int]]]:
+    def list_files(self, directory: str, pattern: Optional[str] = None) -> List[Dict[str, Union[str, int]]]:
         """
         List files in a directory with optional pattern matching.
         
@@ -124,7 +132,7 @@ class FileTools:
         """
         try:
             # Validate directory path
-            safe_dir = FileTools._validate_path(directory)
+            safe_dir = self._validate_path(directory)
             path = Path(safe_dir)
             if pattern:
                 files = path.glob(pattern)
@@ -148,8 +156,7 @@ class FileTools:
             logging.error(error_msg)
             return [{'error': error_msg}]
 
-    @staticmethod
-    def get_file_info(filepath: str) -> Dict[str, Union[str, int]]:
+    def get_file_info(self, filepath: str) -> Dict[str, Union[str, int]]:
         """
         Get detailed information about a file.
         
@@ -183,9 +190,8 @@ class FileTools:
             logging.error(error_msg)
             return {'error': error_msg}
 
-    @staticmethod
     @require_approval(risk_level="high")
-    def copy_file(src: str, dst: str) -> bool:
+    def copy_file(self, src: str, dst: str) -> bool:
         """
         Copy a file from source to destination.
         
@@ -198,8 +204,8 @@ class FileTools:
         """
         try:
             # Validate paths to prevent traversal attacks
-            safe_src = FileTools._validate_path(src)
-            safe_dst = FileTools._validate_path(dst)
+            safe_src = self._validate_path(src)
+            safe_dst = self._validate_path(dst)
             # Create destination directory if it doesn't exist
             os.makedirs(os.path.dirname(safe_dst), exist_ok=True)
             shutil.copy2(safe_src, safe_dst)
@@ -209,9 +215,8 @@ class FileTools:
             logging.error(error_msg)
             return False
 
-    @staticmethod
     @require_approval(risk_level="high")
-    def move_file(src: str, dst: str) -> bool:
+    def move_file(self, src: str, dst: str) -> bool:
         """
         Move a file from source to destination.
         
@@ -224,8 +229,8 @@ class FileTools:
         """
         try:
             # Validate paths to prevent traversal attacks
-            safe_src = FileTools._validate_path(src)
-            safe_dst = FileTools._validate_path(dst)
+            safe_src = self._validate_path(src)
+            safe_dst = self._validate_path(dst)
             # Create destination directory if it doesn't exist
             os.makedirs(os.path.dirname(safe_dst), exist_ok=True)
             shutil.move(safe_src, safe_dst)
@@ -235,9 +240,8 @@ class FileTools:
             logging.error(error_msg)
             return False
 
-    @staticmethod
     @require_approval(risk_level="high")
-    def delete_file(filepath: str) -> bool:
+    def delete_file(self, filepath: str) -> bool:
         """
         Delete a file.
         
@@ -249,7 +253,7 @@ class FileTools:
         """
         try:
             # Validate path to prevent traversal attacks
-            safe_path = FileTools._validate_path(filepath)
+            safe_path = self._validate_path(filepath)
             os.remove(safe_path)
             return True
         except Exception as e:
@@ -257,9 +261,9 @@ class FileTools:
             logging.error(error_msg)
             return False
 
-    @staticmethod
     @require_approval(risk_level="medium")
     def download_file(
+        self,
         url: str,
         destination: str,
         timeout: int = 30,
@@ -290,7 +294,7 @@ class FileTools:
         
         try:
             # Validate destination path
-            safe_path = FileTools._validate_path(destination)
+            safe_path = self._validate_path(destination)
             
             # Validate URL to prevent SSRF
             from urllib.parse import urlparse
@@ -361,7 +365,7 @@ class FileTools:
                 "error": error_msg
             }
 
-# Create instance for direct function access
+# Create default instance for direct function access
 _file_tools = FileTools()
 read_file = _file_tools.read_file
 write_file = _file_tools.write_file
@@ -371,6 +375,18 @@ copy_file = _file_tools.copy_file
 move_file = _file_tools.move_file
 delete_file = _file_tools.delete_file
 download_file = _file_tools.download_file
+
+
+def create_file_tools(workspace=None):
+    """Create FileTools instance with optional workspace containment.
+    
+    Args:
+        workspace: Optional Workspace instance for path containment
+        
+    Returns:
+        FileTools instance configured with workspace
+    """
+    return FileTools(workspace=workspace)
 
 if __name__ == "__main__":
     # Example usage

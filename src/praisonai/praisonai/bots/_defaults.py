@@ -12,11 +12,12 @@ from typing import Any, Optional, List
 logger = logging.getLogger(__name__)
 
 
-def apply_bot_smart_defaults(agent: Any, config: Optional[Any] = None) -> Any:
+def apply_bot_smart_defaults(agent: Any, config: Optional[Any] = None, session_key: str = "default") -> Any:
     """Enhance agent with sensible bot defaults if not already configured.
     
     Smart defaults are applied automatically:
-    - Safe tools (search_web, schedule_add/list/remove) if agent has no tools
+    - Workspace containment for file operations
+    - Safe tools (search_web, schedule_add/list/remove, file tools) if agent has no tools
     - Auto-approval for safe tools if config.auto_approve_tools is True
     - Memory enabled if not already set
     
@@ -27,6 +28,7 @@ def apply_bot_smart_defaults(agent: Any, config: Optional[Any] = None) -> Any:
     Args:
         agent: Agent instance to enhance (other types like AgentTeam/AgentFlow are left unchanged)
         config: BotConfig instance with settings like auto_approve_tools, default_tools
+        session_key: Session identifier for workspace resolution
     
     Returns:
         Enhanced agent (same instance, modified in-place)
@@ -73,6 +75,17 @@ def apply_bot_smart_defaults(agent: Any, config: Optional[Any] = None) -> Any:
         }
         logger.debug(f"Bot: injected session history for agent '{getattr(agent, 'name', '?')}'")
     
+    # Setup workspace for file operations containment
+    workspace = None
+    try:
+        from praisonaiagents.workspace import Workspace
+        workspace = Workspace.from_config(config, session_key=session_key)
+        # Store workspace on agent for tool factories to use
+        agent._workspace = workspace
+        logger.debug(f"Bot: configured workspace at {workspace.root} for agent '{getattr(agent, 'name', '?')}'")
+    except Exception as e:
+        logger.warning(f"Failed to setup workspace: {e}")
+    
     # Add default tools if agent has none (unless explicitly set to empty)
     # NOTE: Agent class always initializes tools=[], so we check for empty list
     # Don't inject defaults if user explicitly specified tools: [] in YAML
@@ -84,12 +97,12 @@ def apply_bot_smart_defaults(agent: Any, config: Optional[Any] = None) -> Any:
         
         if default_safe_tools:
             try:
-                resolved_tools = _resolve_tool_names(default_safe_tools)
+                resolved_tools = _resolve_tool_names_with_workspace(default_safe_tools, workspace)
             except (ImportError, AttributeError) as e:
                 logger.warning(f"Failed to resolve default tools: {e}")
                 resolved_tools = []
             if not resolved_tools:
-                resolved_tools = _get_fallback_tools()
+                resolved_tools = _get_fallback_tools_with_workspace(workspace)
             if resolved_tools:
                 agent.tools = resolved_tools
                 logger.debug(
@@ -126,7 +139,8 @@ def _get_default_safe_tools(config: Optional[Any] = None) -> List[str]:
         if config_tools:
             # Filter out known destructive tools unless explicitly allowed
             safe_config_tools = []
-            destructive_tools = {"execute_command", "delete_file", "write_file", "shell_command"}
+            # File tools are now safe due to workspace containment
+            destructive_tools = {"execute_command", "shell_command"}
             
             for tool in config_tools:
                 if tool in destructive_tools:
@@ -139,11 +153,19 @@ def _get_default_safe_tools(config: Optional[Any] = None) -> List[str]:
     return default_safe_tools
 
 
-def _resolve_tool_names(tool_names: List[str]) -> list:
-    """Resolve tool names to actual tool instances using the tool system."""
+def _resolve_tool_names_with_workspace(tool_names: List[str], workspace=None) -> list:
+    """Resolve tool names to actual tool instances with workspace support."""
     try:
         from praisonaiagents.tools.profiles import resolve_profiles
         from praisonaiagents.tools import ToolResolver
+        
+        # Split into workspace-aware and regular tools
+        workspace_tools = {
+            "read_file", "write_file", "edit_file", "list_files", "search_files",
+            "skill_manage", "skills_list", "skill_view",
+            "todo_add", "todo_list", "todo_update",
+            "session_search", "delegate_task"
+        }
         
         # Try profile resolution first (modern approach)
         profile_map = {
@@ -155,9 +177,12 @@ def _resolve_tool_names(tool_names: List[str]) -> list:
         
         profiles = set()
         individual_tools = []
+        workspace_tool_names = []
         
         for tool_name in tool_names:
-            if tool_name in profile_map:
+            if tool_name in workspace_tools:
+                workspace_tool_names.append(tool_name)
+            elif tool_name in profile_map:
                 profiles.add(profile_map[tool_name])
             else:
                 individual_tools.append(tool_name)
@@ -175,6 +200,11 @@ def _resolve_tool_names(tool_names: List[str]) -> list:
             individual_resolved = resolver.resolve_many(individual_tools)
             resolved_tools.extend(individual_resolved)
         
+        # Create workspace-aware tool instances
+        if workspace_tool_names and workspace:
+            workspace_resolved = _create_workspace_tools(workspace_tool_names, workspace)
+            resolved_tools.extend(workspace_resolved)
+        
         return resolved_tools
         
     except (ImportError, AttributeError):
@@ -182,7 +212,76 @@ def _resolve_tool_names(tool_names: List[str]) -> list:
         return []
 
 
-def _get_fallback_tools() -> list:
+def _create_workspace_tools(tool_names: List[str], workspace) -> list:
+    """Create workspace-aware tool instances."""
+    tools = []
+    
+    try:
+        # File tools
+        if any(name in ["read_file", "write_file", "edit_file", "list_files", "search_files"] for name in tool_names):
+            from praisonaiagents.tools.file_tools import create_file_tools
+            file_tools = create_file_tools(workspace=workspace)
+            
+            if "read_file" in tool_names:
+                tools.append(file_tools.read_file)
+            if "write_file" in tool_names:
+                tools.append(file_tools.write_file)
+            if "list_files" in tool_names:
+                tools.append(file_tools.list_files)
+        
+        # Edit tools
+        if any(name in ["edit_file", "search_files"] for name in tool_names):
+            from praisonaiagents.tools.edit_tools import create_edit_tools
+            edit_tools = create_edit_tools(workspace=workspace)
+            
+            if "edit_file" in tool_names:
+                tools.append(edit_tools.edit_file)
+            if "search_files" in tool_names:
+                tools.append(edit_tools.search_files)
+        
+        # Skill management tools  
+        if any(name in ["skill_manage", "skills_list", "skill_view"] for name in tool_names):
+            from praisonaiagents.tools.skill_tools import create_skill_tools
+            skill_tools = create_skill_tools(workspace=workspace)
+            
+            if "skill_manage" in tool_names:
+                tools.append(skill_tools.skill_manage)
+            if "skills_list" in tool_names:
+                tools.append(skill_tools.skills_list)
+            if "skill_view" in tool_names:
+                tools.append(skill_tools.skill_view)
+        
+        # Todo/planning tools
+        if any(name in ["todo_add", "todo_list", "todo_update"] for name in tool_names):
+            from praisonaiagents.tools.todo_tools import create_todo_tools
+            todo_tools = create_todo_tools(workspace=workspace)
+            
+            if "todo_add" in tool_names:
+                tools.append(todo_tools.todo_add)
+            if "todo_list" in tool_names:
+                tools.append(todo_tools.todo_list)
+            if "todo_update" in tool_names:
+                tools.append(todo_tools.todo_update)
+        
+        # Session tools
+        if "session_search" in tool_names:
+            from praisonaiagents.tools.session_tools import create_session_tools
+            session_tools = create_session_tools(workspace=workspace)
+            tools.append(session_tools.session_search)
+        
+        # Delegation tools
+        if "delegate_task" in tool_names:
+            from praisonaiagents.tools.delegation_tools import create_delegation_tools
+            delegation_tools = create_delegation_tools(workspace=workspace)
+            tools.append(delegation_tools.delegate_task)
+                
+    except (ImportError, AttributeError) as e:
+        logger.warning(f"Failed to create workspace tools: {e}")
+    
+    return tools
+
+
+def _get_fallback_tools_with_workspace(workspace=None) -> list:
     """Get fallback tool instances when profile resolution fails."""
     fallback_tools = []
     
@@ -206,5 +305,14 @@ def _get_fallback_tools() -> list:
         fallback_tools.extend([store_memory, search_memory])
     except (ImportError, AttributeError):
         pass
+    
+    # Add workspace-aware file tools as fallback
+    if workspace:
+        try:
+            from praisonaiagents.tools.file_tools import create_file_tools
+            file_tools = create_file_tools(workspace=workspace)
+            fallback_tools.extend([file_tools.read_file, file_tools.write_file, file_tools.list_files])
+        except (ImportError, AttributeError):
+            pass
         
     return fallback_tools

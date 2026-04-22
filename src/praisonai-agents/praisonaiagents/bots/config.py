@@ -49,12 +49,25 @@ class BotConfig:
     group_policy: str = "mention_only"  # respond_all, mention_only, command_only
     
     # Default safe tools (auto-injected for bots with no tools configured)
-    # These are considered safe for auto-approval as they don't write files or execute code
+    # With workspace scoping, file operations are now safe by construction
     default_tools: List[str] = field(default_factory=lambda: [
+        # Web (existing)
         "search_web", "web_crawl",
-        "schedule_add", "schedule_list", "schedule_remove", 
+        # Memory / learning (existing)
         "store_memory", "search_memory",
         "store_learning", "search_learning",
+        # Scheduling (existing)
+        "schedule_add", "schedule_list", "schedule_remove",
+        # Files — NEW (workspace-scoped, safe by construction)
+        "read_file", "write_file", "edit_file", "list_files", "search_files",
+        # Planning — NEW
+        "todo_add", "todo_list", "todo_update",
+        # Skills (self-improving) — NEW
+        "skills_list", "skill_view", "skill_manage",
+        # Delegation — NEW
+        "delegate_task",
+        # Session — NEW
+        "session_search",
     ])
     
     # Auto-approve tool calls (useful for trusted environments)
@@ -74,6 +87,11 @@ class BotConfig:
     # Session TTL in seconds. 0 = disabled (sessions never expire).
     # When set, stale sessions older than this are auto-reaped.
     session_ttl: int = 0
+    
+    # Workspace settings for file operation containment and security
+    workspace_dir: Optional[str] = None  # default: ~/.praisonai/workspaces/<scope>/<session_key>
+    workspace_access: str = "rw"  # "rw" (read-write) | "ro" (read-only) | "none" (copy-on-write sandbox)
+    workspace_scope: str = "session"  # "shared" | "session" | "user" | "agent"
     
     metadata: Dict[str, Any] = field(default_factory=dict)
     
@@ -102,6 +120,9 @@ class BotConfig:
             "ack_emoji": self.ack_emoji,
             "done_emoji": self.done_emoji,
             "session_ttl": self.session_ttl,
+            "workspace_dir": self.workspace_dir,
+            "workspace_access": self.workspace_access,
+            "workspace_scope": self.workspace_scope,
             "metadata": self.metadata,
         }
     
