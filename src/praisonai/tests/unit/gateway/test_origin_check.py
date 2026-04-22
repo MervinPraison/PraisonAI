@@ -5,7 +5,7 @@ Tests the check_origin() function that provides CSWSH (Cross-Site WebSocket Hija
 """
 
 import pytest
-from praisonai.praisonai.gateway.origin_check import check_origin, is_loopback
+from praisonai.gateway.origin_check import check_origin, is_loopback
 
 
 class TestOriginCheck:

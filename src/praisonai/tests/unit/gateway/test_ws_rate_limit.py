@@ -7,7 +7,7 @@ Tests the rate limiting applied to WebSocket upgrade requests.
 import time
 from unittest.mock import AsyncMock, patch, Mock
 import pytest
-from praisonai.praisonai.gateway.rate_limiter import AuthRateLimiter
+from praisonai.gateway.rate_limiter import AuthRateLimiter
 
 
 class TestWebSocketRateLimit:
@@ -47,7 +47,7 @@ class TestWebSocketRateLimit:
         assert limiter.allow("ws_upgrade", "192.168.1.101") is True
         assert limiter.allow("ws_upgrade", "192.168.1.101") is False  # Over limit
 
-    @patch('praisonai.praisonai.gateway.rate_limiter.time.time')
+    @patch('praisonai.gateway.rate_limiter.time.time')
     def test_window_reset(self, mock_time):
         """Rate limit should reset after the window expires."""
         mock_time.return_value = 0
@@ -64,7 +64,7 @@ class TestWebSocketRateLimit:
         # Should be allowed again
         assert limiter.allow("ws_upgrade", "192.168.1.100") is True
 
-    @patch('praisonai.praisonai.gateway.rate_limiter.time.time')
+    @patch('praisonai.gateway.rate_limiter.time.time')
     def test_lockout_duration(self, mock_time):
         """After exceeding limit, should be locked out for the lockout period."""
         mock_time.return_value = 0
@@ -112,7 +112,7 @@ class TestWebSocketRateLimit:
         # Should be allowed again
         assert limiter.allow("ws_upgrade", "192.168.1.100") is True
 
-    @patch('praisonai.praisonai.gateway.rate_limiter.time.time')
+    @patch('praisonai.gateway.rate_limiter.time.time')
     def test_prune_removes_expired_entries(self, mock_time):
         """prune() should remove expired buckets and lockouts."""
         mock_time.return_value = 0
@@ -150,8 +150,8 @@ class TestWebSocketIntegration:
         # This is a simple smoke test to ensure the rate limiter is properly initialized
         # Full WebSocket integration testing would require a test client and more complex setup
         
-        from praisonai.praisonai.gateway.server import WebSocketGateway
-        from praisonai.praisonai.gateway.rate_limiter import AuthRateLimiter
+        from praisonai.gateway.server import WebSocketGateway
+        from praisonai.gateway.rate_limiter import AuthRateLimiter
         
         # Test that gateway can be instantiated (smoke test)
         gateway = WebSocketGateway()
