@@ -7,6 +7,8 @@ Provides configuration dataclasses for bot settings.
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional
 
+from .pairing_types import UnknownUserPolicy
+
 
 @dataclass
 class BotConfig:
@@ -76,11 +78,11 @@ class BotConfig:
     # When set, stale sessions older than this are auto-reaped.
     session_ttl: int = 0
     
-    # Unknown user policy - how to handle users not in allowed_users list
-    # "deny" - silently drop messages (backward compatible default)
-    # "allow" - allow all users (overrides allowed_users)  
-    # "pair" - use pairing flow to get owner approval
-    unknown_user_policy: Literal["deny", "allow", "pair"] = "deny"
+    # Unknown user policy: "deny" (default), "pair", or "allow"
+    unknown_user_policy: UnknownUserPolicy = "deny"
+    
+    # Owner user ID for pairing approvals (platform-specific format)
+    owner_user_id: Optional[str] = None
     
     metadata: Dict[str, Any] = field(default_factory=dict)
     
@@ -110,6 +112,7 @@ class BotConfig:
             "done_emoji": self.done_emoji,
             "session_ttl": self.session_ttl,
             "unknown_user_policy": self.unknown_user_policy,
+            "owner_user_id": "***" if self.owner_user_id else None,
             "metadata": self.metadata,
         }
     

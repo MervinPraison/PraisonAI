@@ -28,6 +28,9 @@ from ._commands import format_status, format_help
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
 from ._ack import AckReactor
+from ._unknown_user import UnknownUserHandler, BotContext
+from ._pairing_ui import PairingUIBuilder, PairingCallbackHandler
+from ..gateway.pairing import PairingStore
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +101,11 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
             ack_emoji=self.config.ack_emoji,
             done_emoji=self.config.done_emoji,
         )
+        
+        # Pairing system
+        self._pairing_store = PairingStore()
+        self._pairing_callback_handler = PairingCallbackHandler(self._pairing_store)
+        self._bot_context: Optional[BotContext] = None
     
     @property
     def is_running(self) -> bool:
@@ -144,6 +152,14 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                 display_name=self._client.user.display_name,
                 is_bot=True,
             )
+            
+            # Initialize bot context for pairing system
+            self._bot_context = BotContext(
+                config=self.config,
+                pairing_store=self._pairing_store,
+                adapter=self
+            )
+            
             self._is_running = True
             logger.info(f"Discord bot started: {self._client.user.name}")
         
@@ -154,12 +170,20 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
             
             bot_message = self._convert_message(message)
             
+            # Add channel type for pairing system
+            bot_message._channel_type = "discord"
+            
             self.fire_message_received(bot_message)
             
-            if not self.config.is_user_allowed(bot_message.sender.user_id if bot_message.sender else ""):
-                return
+            # Check if channel is allowed
             if not self.config.is_channel_allowed(bot_message.channel.channel_id if bot_message.channel else ""):
                 return
+            
+            # Handle unknown users with pairing system
+            if not self.config.is_user_allowed(bot_message.sender.user_id if bot_message.sender else ""):
+                user_allowed = await UnknownUserHandler.handle(bot_message, self._bot_context)
+                if not user_allowed:
+                    return
             
             if bot_message.is_command:
                 command = bot_message.command
@@ -496,3 +520,97 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
             timestamp=message.created_at.timestamp() if message.created_at else 0,
             thread_id=str(message.thread.id) if hasattr(message, "thread") and message.thread else None,
         )
+    
+    # Adapter methods for pairing system
+    async def send_approval_dm(
+        self, 
+        owner_user_id: str, 
+        user_name: str, 
+        code: str, 
+        channel: str,
+        user_id: str
+    ) -> Optional[str]:
+        """Send approval DM to owner with inline buttons."""
+        if not self._client:
+            return None
+        
+        try:
+            import discord
+            
+            components = PairingUIBuilder.create_discord_components(
+                user_name=user_name,
+                code=code,
+                channel=channel,
+                user_id=user_id
+            )
+            
+            # Create view with buttons
+            view = discord.ui.View()
+            
+            # Create buttons from components
+            for row in components:
+                for comp in row["components"]:
+                    button = discord.ui.Button(
+                        style=discord.ButtonStyle.success if comp["style"] == 3 else discord.ButtonStyle.danger,
+                        label=comp["label"],
+                        custom_id=comp["custom_id"]
+                    )
+                    
+                    # Add callback
+                    async def button_callback(interaction, custom_id=comp["custom_id"]):
+                        await self._handle_pairing_interaction(interaction, custom_id)
+                    
+                    button.callback = button_callback
+                    view.add_item(button)
+            
+            user = await self._client.fetch_user(int(owner_user_id))
+            message = await user.send(
+                content=f"**{user_name}** wants to chat. Approve access?",
+                view=view
+            )
+            
+            return str(message.id)
+            
+        except Exception as e:
+            logger.error(f"Failed to send approval DM: {e}")
+            return None
+    
+    async def reply(self, chat_id: str, text: str) -> None:
+        """Reply to a chat/DM with a text message."""
+        if not self._client:
+            return
+        
+        try:
+            if chat_id.isdigit():
+                # DM to user
+                user = await self._client.fetch_user(int(chat_id))
+                await user.send(text)
+            else:
+                # Channel message
+                channel = self._client.get_channel(int(chat_id))
+                if channel:
+                    await channel.send(text)
+        except Exception as e:
+            logger.error(f"Failed to send reply: {e}")
+    
+    async def _handle_pairing_interaction(self, interaction, custom_id: str):
+        """Handle button interaction for pairing approval."""
+        try:
+            # Defer the interaction
+            await interaction.response.defer()
+            
+            # Handle the pairing callback
+            result = await self._pairing_callback_handler.handle_approval_callback(
+                callback_data=custom_id,
+                owner_user_id=str(interaction.user.id),
+                bot_adapter=self
+            )
+            
+            # Edit the message with result
+            await interaction.edit_original_response(
+                content=f"{interaction.message.content}\n\n{result.message}",
+                view=None  # Remove buttons
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to handle pairing interaction: {e}")
