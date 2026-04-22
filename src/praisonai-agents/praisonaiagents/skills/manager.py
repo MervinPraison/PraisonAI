@@ -1,6 +1,9 @@
 """SkillManager for Agent Skills integration."""
 
+import logging
 from typing import List, Optional, Dict
+
+logger = logging.getLogger(__name__)
 
 from .models import SkillMetadata
 from .discovery import discover_skills
@@ -242,6 +245,327 @@ class SkillManager:
 
         self._loader.load_all_resources(skill)
         return True
+
+    def create_skill(self, name: str, content: str, category: str = None) -> dict:
+        """Create a new skill with the given content.
+        
+        Args:
+            name: Skill name (must be valid identifier)
+            content: Skill instructions/content for SKILL.md
+            category: Optional skill category
+            
+        Returns:
+            Dict with success status and skill info
+        """
+        try:
+            # Validate name
+            if not self._validate_skill_name(name):
+                return {"success": False, "error": f"Invalid skill name: {name}"}
+            
+            # Check if skill already exists
+            if name in self._skills:
+                return {"success": False, "error": f"Skill '{name}' already exists"}
+            
+            # Validate content size
+            if len(content) > 100_000:
+                return {"success": False, "error": "Skill content exceeds maximum size (100KB)"}
+            
+            # Create skill directory
+            from .discovery import get_default_skill_directories
+            skill_dirs = get_default_skill_directories()
+            base_dir = skill_dirs[0] if skill_dirs else "~/.praisonai/skills"
+            
+            import os
+            from pathlib import Path
+            base_path = Path(base_dir).expanduser()
+            base_path.mkdir(parents=True, exist_ok=True)
+            
+            skill_path = base_path / name
+            skill_path.mkdir(exist_ok=True)
+            
+            # Write SKILL.md with frontmatter
+            skill_content = f"""---
+name: {name}
+version: 1.0.0
+"""
+            if category:
+                skill_content += f"category: {category}\n"
+            skill_content += f"""description: Generated skill
+author: agent
+---
+
+{content}
+"""
+            
+            skill_file = skill_path / "SKILL.md"
+            self._write_skill_atomically(skill_file, skill_content)
+            
+            # Load the new skill
+            skill = self.add_skill(str(skill_path))
+            if skill:
+                return {"success": True, "skill": skill.properties.name, "path": str(skill_path)}
+            else:
+                return {"success": False, "error": "Failed to load created skill"}
+                
+        except Exception as e:
+            return {"success": False, "error": f"Error creating skill: {str(e)}"}
+    
+    def edit_skill(self, name: str, content: str) -> dict:
+        """Edit an existing skill's content (full rewrite).
+        
+        Args:
+            name: Skill name to edit
+            content: New skill content
+            
+        Returns:
+            Dict with success status
+        """
+        try:
+            skill = self.get_skill(name)
+            if not skill:
+                return {"success": False, "error": f"Skill '{name}' not found"}
+            
+            if not skill.properties.path:
+                return {"success": False, "error": f"Cannot edit skill '{name}' - no path available"}
+            
+            # Validate content size
+            if len(content) > 100_000:
+                return {"success": False, "error": "Skill content exceeds maximum size (100KB)"}
+            
+            # Read existing frontmatter
+            skill_file = skill.properties.path / "SKILL.md"
+            if not skill_file.exists():
+                return {"success": False, "error": f"Skill file not found: {skill_file}"}
+            
+            with open(skill_file, 'r', encoding='utf-8') as f:
+                existing_content = f.read()
+            
+            # Extract frontmatter (preserve verbatim, only strip leading fence)
+            frontmatter = ""
+            if existing_content.startswith('---\n'):
+                parts = existing_content.split('\n---\n', 1)
+                if len(parts) == 2:
+                    fm_body = parts[0].removeprefix('---\n')
+                    frontmatter = f"---\n{fm_body}\n---\n\n"
+            
+            # Write updated content
+            new_content = frontmatter + content
+            self._write_skill_atomically(skill_file, new_content)
+            
+            # Reload the skill
+            skill.instructions = None  # Clear cached content
+            self.activate(skill)
+            
+            return {"success": True, "skill": name}
+            
+        except Exception as e:
+            return {"success": False, "error": f"Error editing skill: {str(e)}"}
+    
+    def patch_skill(self, name: str, old_string: str, new_string: str, 
+                   file_path: str = None, replace_all: bool = False) -> dict:
+        """Apply a patch to a skill using fuzzy find-and-replace.
+        
+        Args:
+            name: Skill name to patch
+            old_string: String to find and replace
+            new_string: Replacement string
+            file_path: Optional relative path within skill (defaults to SKILL.md)
+            replace_all: Replace all occurrences
+            
+        Returns:
+            Dict with success status
+        """
+        try:
+            skill = self.get_skill(name)
+            if not skill:
+                return {"success": False, "error": f"Skill '{name}' not found"}
+            
+            if not skill.properties.path:
+                return {"success": False, "error": f"Cannot patch skill '{name}' - no path available"}
+            
+            # Determine target file
+            if file_path:
+                from pathlib import Path
+                relative_path = Path(file_path)
+                if relative_path.is_absolute() or ".." in relative_path.parts:
+                    return {"success": False, "error": f"Path traversal detected: {file_path}"}
+                target_file = (skill.properties.path / relative_path).resolve()
+                try:
+                    target_file.relative_to(skill.properties.path.resolve())
+                except ValueError:
+                    return {"success": False, "error": f"Path traversal detected: {file_path}"}
+            else:
+                target_file = skill.properties.path / "SKILL.md"
+            
+            if not target_file.exists():
+                return {"success": False, "error": f"File not found: {target_file}"}
+            
+            # Perform fuzzy find and replace
+            with open(target_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Simple string replacement
+            if old_string in content:
+                if replace_all:
+                    new_content = content.replace(old_string, new_string)
+                else:
+                    # Replace only first occurrence
+                    new_content = content.replace(old_string, new_string, 1)
+                
+                self._write_skill_atomically(target_file, new_content)
+                
+                # Clear cached content if SKILL.md was modified
+                if file_path is None or file_path == "SKILL.md":
+                    skill.instructions = None
+                    self.activate(skill)
+                
+                return {"success": True, "skill": name, "replacements": 1}
+            else:
+                return {"success": False, "error": f"String not found: '{old_string[:50]}...'"}
+                
+        except Exception as e:
+            return {"success": False, "error": f"Error patching skill: {str(e)}"}
+    
+    def delete_skill(self, name: str) -> dict:
+        """Delete a skill and its directory.
+        
+        Args:
+            name: Skill name to delete
+            
+        Returns:
+            Dict with success status
+        """
+        try:
+            skill = self.get_skill(name)
+            if not skill:
+                return {"success": False, "error": f"Skill '{name}' not found"}
+            
+            if not skill.properties.path:
+                return {"success": False, "error": f"Cannot delete skill '{name}' - no path available"}
+            
+            # Remove directory first, then update in-memory index.
+            import shutil
+            shutil.rmtree(skill.properties.path)
+            self._skills.pop(name, None)
+            
+            return {"success": True, "skill": name, "path": str(skill.properties.path)}
+            
+        except Exception as e:
+            return {"success": False, "error": f"Error deleting skill: {str(e)}"}
+    
+    def write_skill_file(self, name: str, file_path: str, file_content: str) -> dict:
+        """Write a file within a skill's directory.
+        
+        Args:
+            name: Skill name
+            file_path: Relative path within skill (must be under allowed subdirs)
+            file_content: File content to write
+            
+        Returns:
+            Dict with success status
+        """
+        try:
+            skill = self.get_skill(name)
+            if not skill:
+                return {"success": False, "error": f"Skill '{name}' not found"}
+            
+            if not skill.properties.path:
+                return {"success": False, "error": f"Cannot write to skill '{name}' - no path available"}
+            
+            # Validate file path is in allowed subdirectories
+            from pathlib import Path
+            allowed_subdirs = ['references', 'templates', 'scripts', 'assets']
+            relative_path = Path(file_path)
+            path_parts = relative_path.parts
+            if relative_path.is_absolute() or ".." in path_parts:
+                return {"success": False, "error": f"Path traversal detected: {file_path}"}
+            if not path_parts or path_parts[0] not in allowed_subdirs:
+                return {"success": False, "error": f"File path must be under: {allowed_subdirs}"}
+            
+            # Validate file size
+            if len(file_content) > 1_048_576:  # 1 MB
+                return {"success": False, "error": "File content exceeds maximum size (1MB)"}
+            
+            # Create target file
+            target_file = (skill.properties.path / relative_path).resolve()
+            try:
+                target_file.relative_to(skill.properties.path.resolve())
+            except ValueError:
+                return {"success": False, "error": f"Path traversal detected: {file_path}"}
+            target_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            self._write_skill_atomically(target_file, file_content)
+            
+            return {"success": True, "skill": name, "file": file_path}
+            
+        except Exception as e:
+            return {"success": False, "error": f"Error writing skill file: {str(e)}"}
+    
+    def remove_skill_file(self, name: str, file_path: str) -> dict:
+        """Remove a file from a skill's directory.
+        
+        Args:
+            name: Skill name
+            file_path: Relative path within skill to remove
+            
+        Returns:
+            Dict with success status
+        """
+        try:
+            skill = self.get_skill(name)
+            if not skill:
+                return {"success": False, "error": f"Skill '{name}' not found"}
+            
+            if not skill.properties.path:
+                return {"success": False, "error": f"Cannot remove from skill '{name}' - no path available"}
+            
+            target_file = skill.properties.path / file_path
+            if not target_file.exists():
+                return {"success": False, "error": f"File not found: {file_path}"}
+            
+            # Security check - file must be within skill directory
+            try:
+                target_file.resolve().relative_to(skill.properties.path.resolve())
+            except ValueError:
+                return {"success": False, "error": f"Path traversal detected: {file_path}"}
+            
+            target_file.unlink()
+            
+            return {"success": True, "skill": name, "file": file_path}
+            
+        except Exception as e:
+            return {"success": False, "error": f"Error removing skill file: {str(e)}"}
+    
+    def _validate_skill_name(self, name: str) -> bool:
+        """Validate skill name according to security constraints."""
+        import re
+        if len(name) > 64:
+            return False
+        # Allow letters, numbers, dots, underscores, hyphens
+        return bool(re.match(r'^[a-z0-9][a-z0-9._-]*$', name))
+    
+    def _write_skill_atomically(self, file_path, content: str) -> None:
+        """Write file content atomically using temp file + rename."""
+        import tempfile
+        import os
+        
+        # Create temp file in same directory
+        temp_fd, temp_path = tempfile.mkstemp(
+            dir=file_path.parent, 
+            prefix=f".{file_path.name}.",
+            suffix=".tmp"
+        )
+        
+        try:
+            with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
+                f.write(content)
+            os.replace(temp_path, file_path)
+        except Exception:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                logger.debug("Failed to clean up temp file %s", temp_path, exc_info=True)
+            raise
 
     def clear(self) -> None:
         """Clear all loaded skills."""

@@ -133,14 +133,18 @@ class Bot:
 
     # ── Lifecycle ───────────────────────────────────────────────────
 
-    def _apply_smart_defaults(self, agent: Any) -> Any:
+    def _apply_smart_defaults(self, agent: Any, session_key: str = None) -> Any:
         """Enhance agent with sensible bot defaults if not already configured.
         
         DEPRECATED: Use apply_bot_smart_defaults from ._defaults module directly.
         This method is kept for backward compatibility.
         """
         from ._defaults import apply_bot_smart_defaults
-        return apply_bot_smart_defaults(agent, self._config)
+        # Generate session key if not provided
+        if session_key is None:
+            import uuid
+            session_key = str(uuid.uuid4())[:8]
+        return apply_bot_smart_defaults(agent, self._config, session_key=session_key)
 
     def _build_adapter(self) -> Any:
         """Lazy-resolve and instantiate the platform adapter."""
@@ -149,7 +153,10 @@ class Bot:
         adapter_cls = resolve_adapter(self._platform)
 
         # Apply smart defaults to agent before passing to adapter
-        agent = self._apply_smart_defaults(self._agent)
+        # Generate a session key for workspace isolation
+        import uuid
+        session_key = f"{self._platform}-{str(uuid.uuid4())[:8]}"
+        agent = self._apply_smart_defaults(self._agent, session_key=session_key)
 
         # Build init kwargs for the adapter
         init_kwargs: Dict[str, Any] = {}

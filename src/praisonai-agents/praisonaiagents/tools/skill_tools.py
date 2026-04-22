@@ -16,21 +16,32 @@ from ..approval import require_approval
 
 
 class SkillTools:
-    """Tools for executing Agent Skills scripts."""
+    """Tools for executing Agent Skills scripts and managing skills."""
     
-    def __init__(self, working_directory: str = None):
+    def __init__(self, working_directory: str = None, workspace=None):
         """Initialize SkillTools.
         
         Args:
             working_directory: Base directory for resolving relative paths.
                               Defaults to current working directory.
+            workspace: Optional Workspace instance for path containment
         """
         self._working_directory = working_directory or os.getcwd()
+        self._workspace = workspace
+        self._skill_manager = None
     
     @property
     def working_directory(self) -> str:
         """Get the working directory for path resolution."""
         return self._working_directory
+    
+    @property
+    def skill_manager(self):
+        """Lazily initialize skill manager."""
+        if self._skill_manager is None:
+            from ..skills import SkillManager
+            self._skill_manager = SkillManager()
+        return self._skill_manager
     
     @working_directory.setter
     def working_directory(self, value: str):
@@ -223,6 +234,133 @@ class SkillTools:
             
         except Exception as e:
             return f"Error listing skill scripts: {str(e)}"
+    
+    @require_approval(risk_level="low")
+    def skill_manage(self, action: str, name: str, *, 
+                    content=None, category=None, file_path=None,
+                    file_content=None, old_string=None,
+                    new_string=None, replace_all=False) -> str:
+        """Hermes-compatible skill management tool.
+        
+        Actions: create, edit, patch, delete, write_file, remove_file
+        
+        Args:
+            action: Action to perform
+            name: Skill name
+            content: Skill content (for create/edit)
+            category: Skill category (for create)
+            file_path: File path within skill (for patch/write_file/remove_file)
+            file_content: File content (for write_file)
+            old_string: String to find (for patch)
+            new_string: Replacement string (for patch)
+            replace_all: Replace all occurrences (for patch)
+            
+        Returns:
+            JSON string with result
+        """
+        import json
+        
+        try:
+            self.skill_manager.discover()  # Ensure skills are discovered
+            
+            if action == "create":
+                if not content:
+                    return json.dumps({"success": False, "error": "Content required for create action"})
+                result = self.skill_manager.create_skill(name, content, category)
+                
+            elif action == "edit":
+                if not content:
+                    return json.dumps({"success": False, "error": "Content required for edit action"})
+                result = self.skill_manager.edit_skill(name, content)
+                
+            elif action == "patch":
+                if not old_string or new_string is None:
+                    return json.dumps({"success": False, "error": "old_string and new_string required for patch action"})
+                result = self.skill_manager.patch_skill(name, old_string, new_string, file_path, replace_all)
+                
+            elif action == "delete":
+                result = self.skill_manager.delete_skill(name)
+                
+            elif action == "write_file":
+                if not file_path or not file_content:
+                    return json.dumps({"success": False, "error": "file_path and file_content required for write_file action"})
+                result = self.skill_manager.write_skill_file(name, file_path, file_content)
+                
+            elif action == "remove_file":
+                if not file_path:
+                    return json.dumps({"success": False, "error": "file_path required for remove_file action"})
+                result = self.skill_manager.remove_skill_file(name, file_path)
+                
+            else:
+                return json.dumps({"success": False, "error": f"Unknown action: {action}"})
+            
+            return json.dumps(result, indent=2)
+            
+        except Exception as e:
+            return json.dumps({"success": False, "error": f"Error in skill_manage: {str(e)}"}, indent=2)
+    
+    def skills_list(self) -> str:
+        """List all available skills.
+        
+        Returns:
+            JSON string with skills list
+        """
+        import json
+        
+        try:
+            self.skill_manager.discover()
+            skills = []
+            for skill in self.skill_manager.skills:
+                skills.append({
+                    "name": skill.properties.name,
+                    "description": getattr(skill.properties, 'description', ''),
+                    "version": getattr(skill.properties, 'version', ''),
+                    "category": getattr(skill.properties, 'category', ''),
+                    "path": str(skill.properties.path) if skill.properties.path else None,
+                    "activated": skill.is_activated
+                })
+            
+            return json.dumps({"skills": skills}, indent=2)
+            
+        except Exception as e:
+            return json.dumps({"error": f"Error listing skills: {str(e)}"}, indent=2)
+    
+    def skill_view(self, name: str) -> str:
+        """View details and content of a specific skill.
+        
+        Args:
+            name: Skill name to view
+            
+        Returns:
+            JSON string with skill details
+        """
+        import json
+        
+        try:
+            self.skill_manager.discover()
+            skill = self.skill_manager.get_skill(name)
+            if not skill:
+                return json.dumps({"error": f"Skill '{name}' not found"}, indent=2)
+            
+            # Get skill instructions
+            instructions = self.skill_manager.get_instructions(name)
+            
+            skill_info = {
+                "name": skill.properties.name,
+                "description": getattr(skill.properties, 'description', ''),
+                "version": getattr(skill.properties, 'version', ''),
+                "category": getattr(skill.properties, 'category', ''),
+                "author": getattr(skill.properties, 'author', ''),
+                "path": str(skill.properties.path) if skill.properties.path else None,
+                "activated": skill.is_activated,
+                "instructions": instructions,
+                "metadata": skill.metadata.__dict__ if skill.metadata else {}
+            }
+            
+            return json.dumps(skill_info, indent=2)
+            
+        except Exception as e:
+            return json.dumps({"error": f"Error viewing skill: {str(e)}"}, indent=2)
 
 
 # Create default instance for direct function access
@@ -273,17 +411,56 @@ def list_skill_scripts(skill_path: str) -> str:
     return _skill_tools.list_skill_scripts(skill_path)
 
 
-def create_skill_tools(working_directory: str = None) -> SkillTools:
+@require_approval(risk_level="low")
+def skill_manage(action: str, name: str, **kwargs) -> str:
+    """Skill management tool (hermes-compatible API).
+    
+    Actions: create, edit, patch, delete, write_file, remove_file
+    
+    Args:
+        action: Action to perform
+        name: Skill name
+        **kwargs: Additional parameters for the action
+        
+    Returns:
+        JSON string with result
     """
-    Create a SkillTools instance with a specific working directory.
+    return _skill_tools.skill_manage(action, name, **kwargs)
+
+
+def skills_list() -> str:
+    """List all available skills.
+    
+    Returns:
+        JSON string with skills list
+    """
+    return _skill_tools.skills_list()
+
+
+def skill_view(name: str) -> str:
+    """View details and content of a specific skill.
+    
+    Args:
+        name: Skill name to view
+        
+    Returns:
+        JSON string with skill details
+    """
+    return _skill_tools.skill_view(name)
+
+
+def create_skill_tools(working_directory: str = None, workspace=None) -> SkillTools:
+    """
+    Create a SkillTools instance with a specific working directory and workspace.
     
     This is useful when you need to resolve paths relative to a specific
     directory rather than the current working directory.
     
     Args:
         working_directory: Base directory for resolving relative paths
+        workspace: Optional Workspace instance for path containment
         
     Returns:
         SkillTools instance
     """
-    return SkillTools(working_directory)
+    return SkillTools(working_directory, workspace)

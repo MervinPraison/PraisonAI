@@ -252,3 +252,45 @@ description: Skill {name}
             assert len(names) == 2
             assert "skill-a" in names
             assert "skill-b" in names
+
+    def test_patch_skill_rejects_path_traversal(self):
+        """Patch operation should reject traversal paths."""
+        from praisonaiagents.skills.manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skill_dir = Path(tmpdir) / "safe-skill"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text("""---
+name: safe-skill
+description: safe
+---
+content
+""")
+
+            manager = SkillManager()
+            manager.add_skill(str(skill_dir))
+
+            result = manager.patch_skill("safe-skill", "content", "updated", "../outside.md")
+            assert result["success"] is False
+            assert "Path traversal detected" in result["error"]
+
+    def test_write_skill_file_rejects_path_traversal(self):
+        """Write operation should reject traversal paths."""
+        from praisonaiagents.skills.manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skill_dir = Path(tmpdir) / "safe-skill"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text("""---
+name: safe-skill
+description: safe
+---
+content
+""")
+
+            manager = SkillManager()
+            manager.add_skill(str(skill_dir))
+
+            result = manager.write_skill_file("safe-skill", "scripts/../../outside.py", "print('x')")
+            assert result["success"] is False
+            assert "Path traversal detected" in result["error"]
