@@ -172,6 +172,7 @@ Methods:
 * <code title="class BaseTool">BaseTool.<a href="./src/praisonai-agents/praisonaiagents/tools/base.py">validate</a>() -> bool</code>
 * <code title="class BaseTool">BaseTool.<a href="./src/praisonai-agents/praisonaiagents/tools/base.py">validate_class</a>() -> bool</code>
 * <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">__call__</a>(*args, **kwargs) -> Any</code>
+* <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">check_availability</a>() -> tuple[bool, str]</code>
 * <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">injected_params</a>() -> Dict[str, Any]</code>
 * <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">run</a>(**kwargs) -> Any</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">clear</a>() -> None</code>
@@ -179,6 +180,7 @@ Methods:
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">discover_single_file_plugins</a>() -> int</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get</a>(name: str) -> Optional[Union[BaseTool, Callable]]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get_all</a>() -> Dict[str, Union[BaseTool, Callable]]</code>
+* <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_available_tools</a>(context: Optional[Dict[str, Any]] = None) -> List[Union[BaseTool, Callable]]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_base_tools</a>() -> List[BaseTool]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_tools</a>() -> List[str]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">register</a>(tool: Union[BaseTool, Callable], name: Optional[str] = None, overwrite: bool = False) -> None</code>
@@ -873,6 +875,7 @@ Methods:
 * <code title="cli">praisonai gateway gateway-callback <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway install <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway logs <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
+* <code title="cli">praisonai gateway mint-link <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway send <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway start <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway status <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
@@ -945,6 +948,10 @@ Methods:
 * <code title="cli">praisonai package install <a href="./src/praisonai/praisonai/cli/commands/package.py">--help</a></code>
 * <code title="cli">praisonai package list <a href="./src/praisonai/praisonai/cli/commands/package.py">--help</a></code>
 * <code title="cli">praisonai package uninstall <a href="./src/praisonai/praisonai/cli/commands/package.py">--help</a></code>
+* <code title="cli">praisonai pairing approve <a href="./src/praisonai/praisonai/cli/commands/pairing.py">--help</a></code>
+* <code title="cli">praisonai pairing clear <a href="./src/praisonai/praisonai/cli/commands/pairing.py">--help</a></code>
+* <code title="cli">praisonai pairing list <a href="./src/praisonai/praisonai/cli/commands/pairing.py">--help</a></code>
+* <code title="cli">praisonai pairing revoke <a href="./src/praisonai/praisonai/cli/commands/pairing.py">--help</a></code>
 * <code title="cli">praisonai paths show <a href="./src/praisonai/praisonai/cli/commands/paths.py">--help</a></code>
 * <code title="cli">praisonai plugins create <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
 * <code title="cli">praisonai plugins disable <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>

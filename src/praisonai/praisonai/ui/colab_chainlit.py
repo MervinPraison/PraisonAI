@@ -70,12 +70,14 @@ async def start():
         author="System"
     ).send()
 
-# Authentication setup (optional)
-if os.getenv("CHAINLIT_AUTH_SECRET"):
-    @cl.password_auth_callback
-    def auth_callback(username: str, password: str) -> cl.User:
-        # Replace with your authentication logic
-        if username == os.getenv("CHAINLIT_USERNAME", "admin") and \
-           password == os.getenv("CHAINLIT_PASSWORD", "admin"):
-            return cl.User(identifier=username, metadata={"role": "user"})
-        return None 
+# Authentication setup (optional) - bind-aware auth
+if not os.getenv("CHAINLIT_AUTH_SECRET"):
+    import secrets
+    os.environ["CHAINLIT_AUTH_SECRET"] = secrets.token_hex(32)
+    logger.warning("CHAINLIT_AUTH_SECRET not set; generated a random secret for this session.")
+
+from ._auth import register_password_auth
+
+# Determine bind host from CHAINLIT_HOST env var (default: 127.0.0.1)
+bind_host = os.getenv("CHAINLIT_HOST", "127.0.0.1")
+register_password_auth(None, bind_host=bind_host) 

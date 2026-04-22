@@ -5,7 +5,9 @@ Provides configuration dataclasses for bot settings.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
+
+from .pairing_types import UnknownUserPolicy
 
 
 @dataclass
@@ -58,6 +60,8 @@ class BotConfig:
         "store_learning", "search_learning",
         # Scheduling (existing)
         "schedule_add", "schedule_list", "schedule_remove",
+        # Clarify tool (new from main)
+        "clarify",
         # Files — NEW (workspace-scoped, safe by construction)
         "read_file", "write_file", "edit_file", "list_files", "search_files",
         # Planning — NEW
@@ -92,6 +96,19 @@ class BotConfig:
     workspace_access: str = "rw"  # "rw" (read-write) | "ro" (read-only) | "none" (copy-on-write sandbox)
     workspace_scope: str = "session"  # "shared" | "session" | "user" | "agent"
     
+    # Unknown user policy: "deny" (default), "pair", or "allow"
+    unknown_user_policy: UnknownUserPolicy = "deny"
+    
+    # Owner user ID for pairing approvals (platform-specific format)
+    owner_user_id: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.unknown_user_policy not in {"deny", "pair", "allow"}:
+            raise ValueError(
+                f"unknown_user_policy must be one of: deny, pair, allow. Got: {self.unknown_user_policy}"
+            )
+    
+    
     metadata: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -122,6 +139,8 @@ class BotConfig:
             "workspace_dir": self.workspace_dir,
             "workspace_access": self.workspace_access,
             "workspace_scope": self.workspace_scope,
+            "unknown_user_policy": self.unknown_user_policy,
+            "owner_user_id": "***" if self.owner_user_id else None,
             "metadata": self.metadata,
         }
     

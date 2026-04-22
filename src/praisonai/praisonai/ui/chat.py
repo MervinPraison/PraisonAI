@@ -35,6 +35,13 @@ from chainlit.input_widget import TextInput, Switch
 from chainlit.types import ThreadDict
 import chainlit.data as cl_data
 
+# Setup pairing action callbacks  
+try:
+    from praisonai.ui._pairing import setup_pairing_callbacks
+    setup_pairing_callbacks()
+except Exception as e:
+    logger.debug(f"Failed to setup pairing callbacks: {e}")
+
 # Profiling support (optional)
 PROFILING_ENABLED = os.getenv("PRAISON_CHAT_PROFILE", "").lower() in ("1", "true", "yes")
 _profile_data = {}
@@ -195,6 +202,7 @@ def _ensure_env_loaded():
 
 # Auth secret setup (required early)
 import secrets
+_ensure_env_loaded()
 CHAINLIT_AUTH_SECRET = os.getenv("CHAINLIT_AUTH_SECRET")
 if not CHAINLIT_AUTH_SECRET:
     CHAINLIT_AUTH_SECRET = secrets.token_hex(32)
@@ -383,22 +391,12 @@ async def tavily_web_search(query):
         "results": results
     })
 
-# Authentication configuration
-expected_username = os.getenv("CHAINLIT_USERNAME", "admin")
-expected_password = os.getenv("CHAINLIT_PASSWORD", "admin")
+# Authentication configuration - bind-aware auth
+from ._auth import register_password_auth
 
-if expected_username == "admin" and expected_password == "admin":
-    logger.warning("⚠️  Using default admin credentials. Set CHAINLIT_USERNAME and CHAINLIT_PASSWORD environment variables for production.")
-
-@cl.password_auth_callback
-def auth_callback(username: str, password: str):
-    logger.debug(f"Auth attempt: username='{username}', expected='{expected_username}'")
-    if (username, password) == (expected_username, expected_password):
-        logger.info(f"Login successful for user: {username}")
-        return cl.User(identifier=username, metadata={"role": "admin", "provider": "credentials"})
-    else:
-        logger.warning(f"Login failed for user: {username}")
-        return None
+# Determine bind host from CHAINLIT_HOST env var (default: 127.0.0.1)
+bind_host = os.getenv("CHAINLIT_HOST", "127.0.0.1")
+register_password_auth(None, bind_host=bind_host)
 
 def _get_or_create_agent(model_name: str, tools_enabled: bool = True, external_agents_settings: dict = None):
     """Get or create a reusable agent for the session."""
@@ -527,6 +525,13 @@ async def start():
                 f"**Trust Mode:** Enabled (auto-approve tool executions)\n\n"
                 f"Type your message to get started!"
     ).send()
+    
+    # Setup pairing banner for admin users
+    try:
+        from praisonai.ui._pairing import setup_pairing_banner
+        await setup_pairing_banner()
+    except Exception as e:
+        logger.debug(f"Failed to setup pairing banner: {e}")
     
     _profile_end("on_chat_start")
 

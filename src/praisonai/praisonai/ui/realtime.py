@@ -426,17 +426,12 @@ async def on_end():
     if openai_realtime and openai_realtime.is_connected():
         await openai_realtime.disconnect()
 
-@cl.password_auth_callback
-def auth_callback(username: str, password: str):
-    # You can customize this function to use your own authentication logic
-    expected_username = os.getenv("CHAINLIT_USERNAME", "admin")
-    expected_password = os.getenv("CHAINLIT_PASSWORD", "admin")
-    if (username, password) == (expected_username, expected_password):
-        return cl.User(
-            identifier=username, metadata={"role": "ADMIN", "provider": "credentials"}
-        )
-    else:
-        return None
+# Authentication configuration - bind-aware auth
+from ._auth import register_password_auth
+
+# Determine bind host from CHAINLIT_HOST env var (default: 127.0.0.1)
+bind_host = os.getenv("CHAINLIT_HOST", "127.0.0.1")
+register_password_auth(None, bind_host=bind_host)
 
 @cl.on_chat_resume
 async def on_chat_resume(thread: ThreadDict):

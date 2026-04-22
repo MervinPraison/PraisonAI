@@ -224,13 +224,12 @@ async def _consume_stream_events(event_queue: queue.Queue, msg: cl.Message):
 # Chainlit callbacks
 # ---------------------------------------------------------------------------
 
-@cl.password_auth_callback
-def auth_callback(username: str, password: str):
-    expected_user = os.getenv("CHAINLIT_USERNAME", "admin")
-    expected_pass = os.getenv("CHAINLIT_PASSWORD", "admin")
-    if (username, password) == (expected_user, expected_pass):
-        return cl.User(identifier=username, metadata={"role": "admin", "provider": "credentials"})
-    return None
+# Authentication configuration - bind-aware auth
+from ._auth import register_password_auth
+
+# Determine bind host from CHAINLIT_HOST env var (default: 127.0.0.1)
+bind_host = os.getenv("CHAINLIT_HOST", "127.0.0.1")
+register_password_auth(None, bind_host=bind_host)
 
 
 @cl.on_chat_start

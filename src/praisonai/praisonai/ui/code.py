@@ -194,6 +194,7 @@ def _ensure_env_loaded():
 
 # Auth secret setup (required early)
 import secrets
+_ensure_env_loaded()
 CHAINLIT_AUTH_SECRET = os.getenv("CHAINLIT_AUTH_SECRET")
 if not CHAINLIT_AUTH_SECRET:
     CHAINLIT_AUTH_SECRET = secrets.token_hex(32)
@@ -304,21 +305,12 @@ async def tavily_web_search(query):
         "results": results
     })
 
-# Authentication configuration
-expected_username = os.getenv("CHAINLIT_USERNAME", "admin")
-expected_password = os.getenv("CHAINLIT_PASSWORD", "admin")
+# Authentication configuration - bind-aware auth
+from ._auth import register_password_auth
 
-if expected_username == "admin" and expected_password == "admin":
-    logger.warning("⚠️  Using default admin credentials. Set CHAINLIT_USERNAME and CHAINLIT_PASSWORD environment variables for production.")
-
-@cl.password_auth_callback
-def auth_callback(input_username: str, input_password: str):
-    if (input_username, input_password) == (expected_username, expected_password):
-        return cl.User(
-            identifier=input_username, metadata={"role": "ADMIN", "provider": "credentials"}
-        )
-    else:
-        return None
+# Determine bind host from CHAINLIT_HOST env var (default: 127.0.0.1)
+bind_host = os.getenv("CHAINLIT_HOST", "127.0.0.1")
+register_password_auth(None, bind_host=bind_host)
 
 def _get_or_create_agent(model_name: str, tools_enabled: bool = True, external_agents_settings: dict = None):
     """Get or create a reusable agent for the session."""

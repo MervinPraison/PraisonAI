@@ -67,12 +67,14 @@ class FunctionTool(BaseTool):
         func: Callable,
         name: Optional[str] = None,
         description: Optional[str] = None,
-        version: str = "1.0.0"
+        version: str = "1.0.0",
+        availability: Optional[Callable[[], tuple[bool, str]]] = None
     ):
         self._func = func
         self.name = name or func.__name__
         self.description = description or func.__doc__ or f"Tool: {self.name}"
         self.version = version
+        self._availability = availability
         
         # Detect injected parameters
         self._injected_params = get_injected_params(func)
@@ -151,6 +153,21 @@ class FunctionTool(BaseTool):
         # Inject state for any Injected parameters
         kwargs = inject_state_into_kwargs(kwargs, self._injected_params)
         return self._func(*args, **kwargs)
+    
+    def check_availability(self) -> tuple[bool, str]:
+        """Check if this tool is currently available to run.
+        
+        Returns:
+            tuple of (is_available, reason_if_not)
+        """
+        if self._availability:
+            try:
+                return self._availability()
+            except Exception as e:
+                logging.warning(f"Tool {self.name} availability check failed: {e}")
+                return False, f"Availability check failed: {e}"
+        # Default: always available if no check function provided
+        return True, ""
 
 
 def tool(
@@ -158,7 +175,8 @@ def tool(
     *,
     name: Optional[str] = None,
     description: Optional[str] = None,
-    version: str = "1.0.0"
+    version: str = "1.0.0",
+    availability: Optional[Callable[[], tuple[bool, str]]] = None
 ) -> Union[FunctionTool, Callable[[Callable], FunctionTool]]:
     """Decorator to convert a function into a tool.
     
@@ -172,12 +190,17 @@ def tool(
         @tool(name="custom_name", description="Custom description")
         def my_func(x: str) -> str:
             return x
+            
+        @tool(availability=lambda: (bool(os.getenv("API_KEY")), "API_KEY missing"))
+        def my_func(x: str) -> str:
+            return x
     
     Args:
         func: The function to wrap (when used without parentheses)
         name: Override the tool name (default: function name)
         description: Override description (default: function docstring)
         version: Tool version (default: "1.0.0")
+        availability: Function that returns (is_available, reason) tuple
     
     Returns:
         FunctionTool instance that wraps the function
@@ -187,7 +210,8 @@ def tool(
             func=fn,
             name=name,
             description=description,
-            version=version
+            version=version,
+            availability=availability
         )
         
         # Register with global registry if available

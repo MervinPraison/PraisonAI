@@ -20,6 +20,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Literal,
     Optional,
     Protocol,
     Union,
@@ -684,3 +685,76 @@ class DeliveryGuaranteeProtocol(Protocol):
             Number of messages purged
         """
         ...
+
+
+# ---------------------------------------------------------------------------
+# Auth Mode protocols and helpers (bind-aware authentication posture)
+# ---------------------------------------------------------------------------
+
+AuthMode = Literal["local", "token", "password", "trusted-proxy"]
+"""Authentication mode for gateway/UI components.
+
+- "local": Permissive mode for loopback interfaces (127.0.0.1, localhost, ::1)
+- "token": Token-based authentication required (default for external interfaces)  
+- "password": Username/password authentication
+- "trusted-proxy": Authentication handled by upstream proxy
+"""
+
+
+def is_loopback(host: str) -> bool:
+    """Check if a host is a loopback interface.
+    
+    Args:
+        host: Host/IP address to check
+        
+    Returns:
+        True if the host is a loopback address
+        
+    Examples:
+        >>> is_loopback("127.0.0.1")
+        True
+        >>> is_loopback("localhost") 
+        True
+        >>> is_loopback("::1")
+        True
+        >>> is_loopback("0.0.0.0")
+        False
+        >>> is_loopback("192.168.1.1")
+        False
+    """
+    import ipaddress
+    
+    # Handle localhost specially
+    if host in ("localhost", "0:0:0:0:0:0:0:1"):
+        return True
+    
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_loopback
+    except ValueError:
+        # Not a valid IP address (e.g., domain name)
+        return False
+
+
+def resolve_auth_mode(bind_host: str, configured: Optional[AuthMode] = None) -> AuthMode:
+    """Resolve authentication mode based on bind host and explicit configuration.
+    
+    Args:
+        bind_host: Host/IP that the service is bound to
+        configured: Explicitly configured auth mode (takes precedence)
+        
+    Returns:
+        The resolved authentication mode
+        
+    Examples:
+        >>> resolve_auth_mode("127.0.0.1")
+        'local'
+        >>> resolve_auth_mode("0.0.0.0")  
+        'token'
+        >>> resolve_auth_mode("127.0.0.1", "token")
+        'token'
+    """
+    if configured is not None:
+        return configured
+    
+    return "local" if is_loopback(bind_host) else "token"
