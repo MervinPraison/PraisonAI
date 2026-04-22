@@ -1132,7 +1132,7 @@ class PraisonAI:
             # UI command — routes to Typer CLI for clean chat UI (praisonaiui)
             pass
         # chat and code commands are now terminal-native (handled by Typer commands)
-        # They no longer set args.ui = 'chainlit' or open browser
+        # Legacy --ui handling is preserved via the deprecation path above
         
         # Handle --claudecode flag for code command
         if getattr(args, 'claudecode', False):
