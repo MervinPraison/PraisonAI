@@ -8,6 +8,8 @@ import os
 import pytest
 from unittest.mock import patch, MagicMock
 
+pytest.importorskip("chainlit", reason="chainlit is an optional [ui] extra")
+
 from praisonai.ui._auth import register_password_auth, UIStartupError
 
 

@@ -4,12 +4,12 @@ Chainlit UI authentication helper.
 Provides bind-aware auth for Chainlit apps - consolidates duplicated
 password auth callbacks across UI modules.
 """
+from __future__ import annotations
 
 import os
 import logging
 from typing import Optional
 
-import chainlit as cl
 from praisonaiagents.gateway.protocols import AuthMode, is_loopback, resolve_auth_mode
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,7 @@ def register_password_auth(app, *, bind_host: str) -> None:
     Raises:
         UIStartupError: If using default credentials on external interface
     """
+    import chainlit as cl  # lazy — chainlit is in [ui] extra only
     # Get credentials from environment
     expected_username = os.getenv("CHAINLIT_USERNAME", "admin")
     expected_password = os.getenv("CHAINLIT_PASSWORD", "admin")
@@ -63,7 +64,7 @@ def register_password_auth(app, *, bind_host: str) -> None:
     
     # Register the password auth callback
     @cl.password_auth_callback
-    def auth_callback(username: str, password: str) -> Optional[cl.User]:
+    def auth_callback(username: str, password: str) -> Optional["cl.User"]:
         """Password authentication callback."""
         logger.debug("Auth attempt received")
         
