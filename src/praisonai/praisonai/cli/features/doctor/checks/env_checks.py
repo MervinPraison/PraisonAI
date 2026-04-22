@@ -475,7 +475,7 @@ def check_optional_deps(config: DoctorConfig) -> CheckResult:
         ("chromadb", "Knowledge/RAG features"),
         ("mem0ai", "Memory features"),
         ("litellm", "Multi-provider LLM support"),
-        ("chainlit", "Chat UI"),
+        ("praisonaiui", "aiui (Chat/Dashboard UI)"),
         ("gradio", "Gradio UI"),
         ("crawl4ai", "Web crawling"),
         ("tavily", "Tavily search"),

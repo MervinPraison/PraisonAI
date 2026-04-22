@@ -221,9 +221,8 @@ def realtime(
     reload: bool = typer.Option(False, "--reload", "-r", help="Enable auto-reload"),
 ):
     """
-    Launch Realtime Voice Interface (Beta).
+    Launch Realtime Voice Interface.
     
-    Replaces the old Chainlit realtime interface with aiui.
-    Note: Full WebRTC voice is pending PraisonAIUI implementation.
+    Uses aiui's OpenAIRealtimeManager for WebRTC voice conversations.
     """
     _launch_aiui_app("ui_realtime", "ui_realtime", port, host, app_file, reload, "Realtime Voice")

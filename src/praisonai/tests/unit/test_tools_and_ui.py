@@ -193,21 +193,6 @@ class TestUIIntegration:
         assert streamlit_config["page_icon"] == "🤖"
         assert streamlit_config["layout"] == "wide"
     
-    def test_chainlit_app_config(self):
-        """Test Chainlit app configuration."""
-        chainlit_config = {
-            "name": "PraisonAI Agent",
-            "description": "Interact with PraisonAI agents",
-            "author": "PraisonAI Team",
-            "tags": ["ai", "agents", "chat"],
-            "public": False,
-            "authentication": True
-        }
-        
-        assert chainlit_config["name"] == "PraisonAI Agent"
-        assert chainlit_config["authentication"] is True
-        assert "ai" in chainlit_config["tags"]
-    
     def test_ui_agent_wrapper(self, sample_agent_config):
         """Test UI agent wrapper functionality."""
         class UIAgentWrapper:

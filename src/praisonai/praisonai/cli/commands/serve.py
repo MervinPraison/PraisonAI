@@ -10,7 +10,7 @@ Server Types:
 - mcp: MCP server (Model Context Protocol)
 - acp: ACP server (Agent Client Protocol for IDEs)
 - lsp: Language Server Protocol
-- ui: Web UI (Chainlit)
+- ui: Web UI (aiui)
 - rag: RAG query server
 - registry: Package registry server
 - docs: Documentation preview server
@@ -116,7 +116,7 @@ Start any PraisonAI server with: praisonai serve <type>
   [green]mcp[/green]         MCP server for Claude/Cursor (port 8080)
   [green]acp[/green]         Agent Client Protocol for IDEs (STDIO)
   [green]lsp[/green]         Language Server Protocol (STDIO)
-  [green]ui[/green]          Chainlit web interface (port 8082)
+  [green]ui[/green]          aiui web interface (port 8082)
   [green]rag[/green]         RAG query server (port 9000)
   [green]registry[/green]    Package registry server (port 7777)
   [green]docs[/green]        Documentation preview (port 3000)
@@ -351,7 +351,7 @@ def serve_ui(
     port: int = typer.Option(8082, "--port", "-p", help="Port to bind to"),
     ui_type: str = typer.Option("agents", "--type", "-t", help="UI type: agents, chat, code, realtime"),
 ):
-    """Start Chainlit web UI server.
+    """Start aiui web UI server.
     
     Examples:
         praisonai serve ui
@@ -361,8 +361,8 @@ def serve_ui(
     output = get_output_controller()
     
     try:
-        from .ui import _launch_chainlit_ui
-        _launch_chainlit_ui(ui_type, port, host, False)
+        from .ui import _launch_aiui_app
+        _launch_aiui_app(f"ui_{ui_type}", f"ui_{ui_type}", port, host, None, False, ui_type)
     except ImportError as e:
         output.print_error(f"UI module not available: {e}")
         output.print("Install with: pip install praisonai[ui]")

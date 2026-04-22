@@ -27,22 +27,26 @@ def realtime_main(
         praisonai realtime
         praisonai realtime --model gpt-4o --port 9000
     """
-    # Route to new UI realtime subcommand
-    from praisonai.cli.commands.ui import _launch_aiui_app
     import os
     
     if model:
         os.environ["MODEL_NAME"] = model
     
     print("🎤 Launching PraisonAI Realtime Voice Interface...")
-    print("Note: Migrated from Chainlit to aiui. Full WebRTC voice coming soon.")
-    
-    _launch_aiui_app(
-        app_dir="ui_realtime",
-        default_app_name="ui_realtime", 
-        port=port,
-        host="0.0.0.0",
-        app_file=None,
-        reload=False,
-        ui_name="Realtime Voice"
-    )
+    print("Note: Migrated from Chainlit to aiui.")
+
+    try:
+        from praisonai.cli.commands.ui import _launch_aiui_app
+        _launch_aiui_app(
+            app_dir="ui_realtime",
+            default_app_name="ui_realtime",
+            port=port,
+            host="127.0.0.1",
+            app_file=None,
+            reload=False,
+            ui_name="Realtime Voice"
+        )
+    except ImportError:
+        print('\033[91mERROR: Realtime UI is not installed.\033[0m')
+        print('Install with: pip install "praisonai[ui]"')
+        raise typer.Exit(1)
