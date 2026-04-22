@@ -53,9 +53,16 @@ def test_is_non_interactive_false_by_default():
 
 def test_is_non_interactive_true_when_env_set():
     onboard = _import_onboard()
-    for val in ("1", "true", "yes", "on", "TRUE", "Yes"):
-        os.environ["PRAISONAI_NO_PROMPT"] = val
-        assert onboard._is_non_interactive() is True, f"failed for value {val!r}"
+    import io
+    saved = sys.stdin
+    try:
+        sys.stdin = io.StringIO("")
+        sys.stdin.isatty = lambda: True  # isolate env-var branch
+        for val in ("1", "true", "yes", "on", "TRUE", "Yes"):
+            os.environ["PRAISONAI_NO_PROMPT"] = val
+            assert onboard._is_non_interactive() is True, f"failed for value {val!r}"
+    finally:
+        sys.stdin = saved
 
 
 def test_is_non_interactive_false_when_env_explicitly_off():

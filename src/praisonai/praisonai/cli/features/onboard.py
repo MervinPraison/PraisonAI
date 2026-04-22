@@ -39,7 +39,7 @@ def _is_non_interactive() -> bool:
     ``bot.yaml`` simply references the env vars — the user can populate
     them later and re-run ``praisonai onboard --yes`` to finalise setup.
     """
-    if os.environ.get("PRAISONAI_NO_PROMPT", "").strip() in ("1", "true", "yes", "on"):
+    if os.environ.get("PRAISONAI_NO_PROMPT", "").strip().lower() in ("1", "true", "yes", "on"):
         return True
     try:
         if not sys.stdin.isatty():
