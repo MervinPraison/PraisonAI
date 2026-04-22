@@ -10,7 +10,6 @@ import logging
 import os
 from typing import Dict, List, Optional
 
-import chainlit as cl
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +85,8 @@ async def deny_pairing(channel: str, code: str) -> bool:
 
 async def refresh_pending_banner():
     """Display or update the pending pairing banner for admin users."""
+    import chainlit as cl
+    
     # Check if user is admin
     user = cl.user_session.get("user")
     if not user or user.metadata.get("role") != "admin":
@@ -167,9 +168,10 @@ async def refresh_pending_banner():
         cl.user_session.set("pending_banner_id", msg.id)
 
 
-@cl.action_callback("approve_pairing")
-async def on_approve_pairing(action: cl.Action):
+async def on_approve_pairing(action):
     """Handle approval action from banner."""
+    import chainlit as cl
+    
     try:
         # Parse channel:code from action value
         channel, code = action.value.split(":", 1)
@@ -205,9 +207,10 @@ async def on_approve_pairing(action: cl.Action):
         ).send()
 
 
-@cl.action_callback("deny_pairing")
-async def on_deny_pairing(action: cl.Action):
+async def on_deny_pairing(action):
     """Handle denial action from banner."""
+    import chainlit as cl
+    
     try:
         # Parse channel:code from action value
         channel, code = action.value.split(":", 1)
@@ -241,6 +244,19 @@ async def on_deny_pairing(action: cl.Action):
             content=f"❌ Error processing denial: {str(e)}",
             author="System"
         ).send()
+
+
+def setup_pairing_callbacks():
+    """Setup pairing action callbacks (call this at module level after chainlit import)."""
+    import chainlit as cl
+    
+    @cl.action_callback("approve_pairing")
+    async def _approve_callback(action):
+        await on_approve_pairing(action)
+    
+    @cl.action_callback("deny_pairing")
+    async def _deny_callback(action):
+        await on_deny_pairing(action)
 
 
 async def setup_pairing_banner():

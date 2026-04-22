@@ -10,6 +10,9 @@ import tempfile
 import os
 from unittest.mock import Mock, AsyncMock, patch
 
+# Skip if chainlit is not available (optional [ui] extra)
+pytest.importorskip("chainlit", reason="chainlit is an optional [ui] extra")
+
 from praisonai.gateway.pairing import PairingStore
 from praisonai.ui._pairing import (
     get_pending_pairings,
