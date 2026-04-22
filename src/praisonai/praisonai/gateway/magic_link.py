@@ -304,17 +304,18 @@ class MagicLinkStore:
             with self._local_lock:
                 with self._file_lock:
                     entries = self._load_entries()
-                    entries = self._cleanup_expired(entries)
                     
                     entry = entries.get(signed_nonce)
                     if not entry:
-                        # Entry not found, but nonce is valid and not expired
-                        # This shouldn't happen in normal operation, but let's be defensive
+                        # Entry not found
                         return False
                     
-                    # Check TTL using stored expires_at
+                    # Check TTL using stored expires_at (CRITICAL BUG FIX)
                     now = time.time()
                     if now > entry.expires_at:
+                        # Expired - remove from entries and return False
+                        del entries[signed_nonce]
+                        self._save_entries(entries)
                         return False
                     
                     if entry.consumed:

@@ -119,6 +119,7 @@ class TestMagicLinkStore:
             # Third consumption should also fail
             assert not store.consume(nonce)
     
+    @pytest.mark.allow_sleep
     def test_consume_expired_nonce(self):
         """Test that expired nonces are rejected."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -182,6 +183,7 @@ class TestMagicLinkStore:
             assert nonce2 in active
             assert nonce1 not in active
     
+    @pytest.mark.allow_sleep
     def test_cleanup_expired(self):
         """Test cleanup of expired entries."""
         with tempfile.TemporaryDirectory() as tmpdir:
