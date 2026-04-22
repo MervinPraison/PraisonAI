@@ -18,10 +18,72 @@ import asyncio
 import getpass
 import logging
 import os
+import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _is_non_interactive() -> bool:
+    """Return True when the wizard must not block on user input.
+
+    Triggers on either:
+      - ``PRAISONAI_NO_PROMPT=1`` (explicit opt-out; set by the ``--yes``
+        CLI flag and by ``install.sh`` when running non-interactively), or
+      - ``stdin`` is not a TTY (e.g. piped from a script or CI).
+
+    In non-interactive mode every prompt short-circuits to its declared
+    default. Tokens / allowlists already present in the environment are
+    preserved; missing values are left blank and the generated
+    ``bot.yaml`` simply references the env vars — the user can populate
+    them later and re-run ``praisonai onboard --yes`` to finalise setup.
+    """
+    if os.environ.get("PRAISONAI_NO_PROMPT", "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    try:
+        if not sys.stdin.isatty():
+            return True
+    except (AttributeError, ValueError):
+        return True
+    return False
+
+
+def _prompt_ask(prompt_cls: Any, *args, **kwargs) -> str:
+    """Wrapper around ``rich.prompt.Prompt.ask`` that honours non-interactive mode.
+
+    Returns the declared ``default`` (or empty string) without blocking.
+    """
+    if _is_non_interactive():
+        return kwargs.get("default", "") or ""
+    return prompt_cls.ask(*args, **kwargs)
+
+
+def _confirm_ask(confirm_cls: Any, *args, **kwargs) -> bool:
+    """Wrapper around ``rich.prompt.Confirm.ask`` that honours non-interactive mode."""
+    if _is_non_interactive():
+        return bool(kwargs.get("default", False))
+    return confirm_cls.ask(*args, **kwargs)
+
+
+def _plain_input(msg: str, default: str = "") -> str:
+    """Non-blocking ``input()`` replacement for the plain fallback path."""
+    if _is_non_interactive():
+        return default
+    try:
+        return input(msg)
+    except EOFError:
+        return default
+
+
+def _plain_getpass(msg: str) -> str:
+    """Non-blocking ``getpass.getpass()`` replacement for the plain fallback path."""
+    if _is_non_interactive():
+        return ""
+    try:
+        return getpass.getpass(msg)
+    except EOFError:
+        return ""
 
 # Platform info for the wizard. ``allowed_users_env`` is a per-platform
 # allowlist of user IDs used by the channel adapter to restrict inbound
@@ -231,6 +293,8 @@ class OnboardWizard:
 
         console = Console()
 
+        non_interactive = _is_non_interactive()
+
         # Welcome
         console.print(Panel(
             "[bold]Welcome to PraisonAI Bot Setup[/bold]\n\n"
@@ -239,13 +303,20 @@ class OnboardWizard:
             title="🤖 PraisonAI Onboard",
             border_style="blue",
         ))
+        if non_interactive:
+            console.print(
+                "[dim]Non-interactive mode (PRAISONAI_NO_PROMPT=1 or --yes). "
+                "Tokens/allowlists taken from env vars; missing values left blank. "
+                "Existing bot.yaml will be kept (no overwrite).[/dim]"
+            )
 
         # Step 1: Platform selection
         console.print("\n[bold]Step 1: Choose your platform(s)[/bold]\n")
         for key, info in PLATFORMS.items():
             console.print(f"  [cyan]{key}[/cyan] — {info['name']}")
 
-        platforms_input = Prompt.ask(
+        platforms_input = _prompt_ask(
+            Prompt,
             "\nPlatform(s) [comma-separated]",
             default="telegram",
         )
@@ -284,7 +355,8 @@ class OnboardWizard:
                     f"  [green]✓[/green] {info['name']}: {env_var} = [cyan]{_mask(existing)}[/cyan]"
                 )
                 console.print(f"    [dim]{info['token_help']}[/dim]")
-                new_token = Prompt.ask(
+                new_token = _prompt_ask(
+                    Prompt,
                     f"  Update {info['name']} token? (Enter = keep current)",
                     password=True,
                     default="",
@@ -299,7 +371,8 @@ class OnboardWizard:
                     self.tokens[plat] = existing
             else:
                 console.print(f"  [dim]{info['token_help']}[/dim]")
-                token = Prompt.ask(
+                token = _prompt_ask(
+                    Prompt,
                     f"  {info['name']} token ({env_var})",
                     password=True,
                     default="",
@@ -322,7 +395,8 @@ class OnboardWizard:
                     console.print(
                         f"    [green]✓[/green] {extra_env} = [cyan]{_mask(existing_extra)}[/cyan]"
                     )
-                    new_extra = Prompt.ask(
+                    new_extra = _prompt_ask(
+                        Prompt,
                         f"    Update {extra_desc}? (Enter = keep current)",
                         password=True,
                         default="",
@@ -333,7 +407,8 @@ class OnboardWizard:
                         env_to_save[extra_env] = new_extra
                         console.print(f"    [green]✓[/green] {extra_env} updated")
                 else:
-                    extra_val = Prompt.ask(
+                    extra_val = _prompt_ask(
+                        Prompt,
                         f"  {extra_desc} ({extra_env})",
                         password=True,
                         default="",
@@ -354,7 +429,8 @@ class OnboardWizard:
                     console.print(
                         f"    [dim]{info.get('user_id_help', 'Comma-separated user IDs')}[/dim]"
                     )
-                    new_allow = Prompt.ask(
+                    new_allow = _prompt_ask(
+                        Prompt,
                         f"  Update allowed users for {info['name']}? (Enter = keep, 'clear' = remove)",
                         default="",
                         show_default=False,
@@ -377,7 +453,8 @@ class OnboardWizard:
                     console.print(
                         f"  [dim]{info.get('user_id_help', 'Enter comma-separated user IDs')}[/dim]"
                     )
-                    allow_val = Prompt.ask(
+                    allow_val = _prompt_ask(
+                        Prompt,
                         "  Allowed user IDs (comma-separated, empty = open access)",
                         default="",
                         show_default=False,
@@ -465,7 +542,8 @@ class OnboardWizard:
         os.makedirs(os.path.dirname(os.path.abspath(self.config_path)) or ".", exist_ok=True)
 
         if os.path.exists(self.config_path):
-            if not Confirm.ask(
+            if not _confirm_ask(
+                Confirm,
                 f"  {self.config_path} exists. Overwrite with fresh config?",
                 default=False,
             ):
@@ -480,6 +558,7 @@ class OnboardWizard:
         # Guard: refuse to install a daemon that has no tokens — it would loop
         # in a crash-restart cycle. List the platforms missing tokens so the
         # user can rerun onboard once they have them.
+        daemon_success = False
         missing_tokens = [
             PLATFORMS[p]["name"]
             for p in self.selected_platforms
@@ -504,9 +583,6 @@ class OnboardWizard:
             daemon_success = self._install_daemon_with_feedback(
                 console.print, self.config_path
             )
-        
-        if 'daemon_success' not in locals():
-            daemon_success = False
 
         # Done panel. Commands referenced here must exist in `praisonai --help`.
         # OS-aware daemon management hints: non-developers struggle to find
@@ -601,7 +677,10 @@ class OnboardWizard:
         """
         print("\n=== PraisonAI Bot Setup ===\n")
         print("Available platforms: telegram, discord, slack, whatsapp")
-        platforms_input = input("Platform(s) [comma-separated, default=telegram]: ").strip() or "telegram"
+        platforms_input = _plain_input(
+            "Platform(s) [comma-separated, default=telegram]: ",
+            default="telegram",
+        ).strip() or "telegram"
         self.selected_platforms = [p.strip().lower() for p in platforms_input.split(",")]
 
         env_to_save: Dict[str, str] = {}
@@ -613,7 +692,7 @@ class OnboardWizard:
                 self.tokens[plat] = existing
             else:
                 print(f"\n  {info.get('token_help', '')}")
-                token = getpass.getpass(f"  {env_var} (hidden): ").strip()
+                token = _plain_getpass(f"  {env_var} (hidden): ").strip()
                 if token:
                     os.environ[env_var] = token
                     env_to_save[env_var] = token
@@ -622,7 +701,10 @@ class OnboardWizard:
             allowed_env = info.get("allowed_users_env")
             if allowed_env and not os.environ.get(allowed_env):
                 print(f"\n  🔒 {info.get('user_id_help', 'Enter allowed user IDs')}")
-                allow = input("  Allowed user IDs (comma-separated, empty = open): ").strip().replace(" ", "")
+                allow = _plain_input(
+                    "  Allowed user IDs (comma-separated, empty = open): ",
+                    default="",
+                ).strip().replace(" ", "")
                 if allow:
                     os.environ[allowed_env] = allow
                     env_to_save[allowed_env] = allow
