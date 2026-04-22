@@ -1227,6 +1227,10 @@ class WebSocketGateway:
                 instructions = agent_def.get("system_prompt", "") or ""
 
             # Resolve tools from YAML config
+            # Track if tools key was explicitly set (even as empty list) vs omitted
+            tools_key_present = "tools" in agent_def
+            explicit_empty_tools = tools_key_present and not agent_def.get("tools")
+            
             agent_tools = []
             yaml_tool_names = agent_def.get("tools", [])
             if yaml_tool_names and tool_resolver:
@@ -1287,6 +1291,10 @@ class WebSocketGateway:
             # Store tool_choice for later use in chat()
             if tool_choice:
                 agent._yaml_tool_choice = tool_choice
+            
+            # Store explicit empty tools flag to prevent smart defaults injection
+            if explicit_empty_tools:
+                agent._explicit_empty_tools = True
 
             self.register_agent(agent, agent_id=agent_id)
             logger.info(
@@ -1378,12 +1386,30 @@ class WebSocketGateway:
             group_policy = ch_cfg.get("group_policy", "mention_only")
             mention_required = (group_policy == "mention_only")
 
-            config = BotConfig(
+            # Extract auto_approve_tools setting (default True for chat bots)
+            _raw_auto_approve = ch_cfg.get("auto_approve_tools")
+            if _raw_auto_approve is None:
+                auto_approve_tools = True   # SAFE-DEFAULT: safe tools auto-approved in chat
+            elif isinstance(_raw_auto_approve, str):
+                auto_approve_tools = _raw_auto_approve.strip().lower() in ("1", "true", "yes", "on")
+            else:
+                auto_approve_tools = bool(_raw_auto_approve)
+
+            config_kwargs = dict(
                 token=token,
                 allowed_users=list(_raw_allowed),
                 allowed_channels=list(_raw_channels),
                 mention_required=mention_required,
+                auto_approve_tools=auto_approve_tools,
             )
+            
+            # Only pass default_tools when the channel explicitly overrides it,
+            # so BotConfig's own default_factory stays the single source of truth.
+            _raw_yaml_tools = ch_cfg.get("default_tools")
+            if isinstance(_raw_yaml_tools, list):
+                config_kwargs["default_tools"] = _raw_yaml_tools
+            
+            config = BotConfig(**config_kwargs)
 
             # Warn if no allowlist is configured
             if not config.allowed_users:
@@ -1419,6 +1445,24 @@ class WebSocketGateway:
         ch_cfg: Dict[str, Any],
     ) -> Any:
         """Create a bot instance for the given channel type."""
+        # Clone agent to prevent channel-specific settings from leaking between channels
+        import copy
+        agent = copy.deepcopy(agent)
+        
+        # Apply smart defaults to agent (same logic as Bot() wrapper)
+        from praisonai.bots._defaults import apply_bot_smart_defaults
+        agent = apply_bot_smart_defaults(agent, config)
+
+        # Check if agent ended up with zero tools after defaults and warn
+        current_tools = getattr(agent, 'tools', None) or []
+        if not current_tools:
+            logger.warning(
+                "Bot for channel %r started with zero tools — chat will be text-only. "
+                "Check that `praisonaiagents.tools` is installed and that "
+                "`tools: []` is not set explicitly in bot.yaml.",
+                ch_cfg.get('platform', channel_type),
+            )
+
         if channel_type == "telegram":
             from praisonai.bots import TelegramBot
             return TelegramBot(token=token, agent=agent, config=config)

@@ -136,77 +136,11 @@ class Bot:
     def _apply_smart_defaults(self, agent: Any) -> Any:
         """Enhance agent with sensible bot defaults if not already configured.
         
-        Smart defaults are applied automatically:
-        - Safe tools (search_web, schedule_add/list/remove) if agent has no tools
-        - Memory enabled if not already set
-        
-        These defaults make Bot() immediately useful without extra configuration.
-        Users who want full control can pre-configure their agent.
+        DEPRECATED: Use apply_bot_smart_defaults from ._defaults module directly.
+        This method is kept for backward compatibility.
         """
-        if agent is None:
-            return agent
-        
-        # Only enhance Agent instances (not AgentTeam/AgentFlow)
-        agent_cls_name = type(agent).__name__
-        if agent_cls_name not in ("Agent",):
-            return agent
-        
-        # Wire BotConfig.auto_approve_tools → Agent(approval=True)
-        if self._config and getattr(self._config, 'auto_approve_tools', False):
-            if getattr(agent, '_approval_backend', None) is None:
-                from praisonaiagents.approval.backends import AutoApproveBackend
-                agent._approval_backend = AutoApproveBackend()
-                logger.debug(f"Bot: auto_approve_tools enabled for agent '{getattr(agent, 'name', '?')}'")
-        
-        # Wire BotConfig.autonomy → Agent autonomy (if not already enabled)
-        autonomy_val = None
-        if self._config:
-            autonomy_val = getattr(self._config, 'autonomy', None)
-        if autonomy_val and not getattr(agent, 'autonomy_enabled', False):
-            agent._init_autonomy(autonomy_val)
-            logger.debug(f"Bot: autonomy enabled for agent '{getattr(agent, 'name', '?')}'")
-        
-        # Inject session history if agent has no memory configured (zero-dep).
-        # NOTE: No session_id here — BotSessionManager handles per-user
-        # isolation by swapping chat_history before/after each agent.chat().
-        current_memory = getattr(agent, 'memory', None)
-        if current_memory is None:
-            agent.memory = {
-                "history": True,
-                "history_limit": 20,
-            }
-            logger.debug(f"Bot: injected session history for agent '{getattr(agent, 'name', '?')}'")
-        
-        # Add default tools if agent has none
-        current_tools = getattr(agent, 'tools', None) or []
-        if not current_tools:
-            try:
-                from praisonaiagents.tools.profiles import resolve_profiles
-                from praisonaiagents.tools import ToolResolver
-                tool_names = resolve_profiles("web", "schedule", "memory", "learning")
-                resolver = ToolResolver()
-                default_tools = resolver.resolve_many(tool_names)
-                if default_tools:
-                    agent.tools = default_tools
-                    logger.debug(f"Bot: applied {len(default_tools)} default tools (via profiles) to agent '{getattr(agent, 'name', '?')}'")
-            except Exception:
-                # Fallback: hardcoded imports if profiles unavailable
-                try:
-                    from praisonaiagents.tools import (
-                        schedule_add, schedule_list, schedule_remove,
-                    )
-                    default_tools = [schedule_add, schedule_list, schedule_remove]
-                    try:
-                        from praisonaiagents.tools import search_web
-                        default_tools.insert(0, search_web)
-                    except (ImportError, AttributeError):
-                        pass
-                    agent.tools = default_tools
-                    logger.debug(f"Bot: applied default tools (fallback) to agent '{getattr(agent, 'name', '?')}'")
-                except ImportError:
-                    pass  # Tools not available, skip
-        
-        return agent
+        from ._defaults import apply_bot_smart_defaults
+        return apply_bot_smart_defaults(agent, self._config)
 
     def _build_adapter(self) -> Any:
         """Lazy-resolve and instantiate the platform adapter."""

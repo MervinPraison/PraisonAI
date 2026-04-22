@@ -48,16 +48,18 @@ class BotConfig:
     # Group message policy
     group_policy: str = "mention_only"  # respond_all, mention_only, command_only
     
-    # Default tools enabled for all bots
+    # Default safe tools (auto-injected for bots with no tools configured)
+    # These are considered safe for auto-approval as they don't write files or execute code
     default_tools: List[str] = field(default_factory=lambda: [
-        "execute_command", "search_web", "web_crawl",
-        "schedule_add", "schedule_list", "schedule_remove",
+        "search_web", "web_crawl",
+        "schedule_add", "schedule_list", "schedule_remove", 
         "store_memory", "search_memory",
         "store_learning", "search_learning",
     ])
     
     # Auto-approve tool calls (useful for trusted environments)
-    auto_approve_tools: bool = False  # If True, skip confirmation for tool execution
+    # Default to True for chat bots - they can't show CLI approval prompts
+    auto_approve_tools: bool = True  # If True, skip confirmation for safe tool execution
     
     # Inbound message debounce (ms). Coalesces rapid messages from same user.
     # 0 = disabled (default). Recommended: 1000-2000 for chat bots.
