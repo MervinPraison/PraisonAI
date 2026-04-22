@@ -3,22 +3,23 @@
 Loaded by ``praisonai ui realtime`` → ``aiui run app.py``.
 Replaces ui/realtime.py (Chainlit) with aiui implementation.
 
-NOTE: This is a placeholder implementation. Full WebRTC voice realtime
-requires PraisonAIUI WebRTC feature to be implemented.
+Uses aiui's OpenAIRealtimeManager for WebRTC voice functionality.
 
 Requires: pip install "praisonai[ui]"
 """
 
 import os
 import praisonaiui as aiui
+from praisonaiui.features.realtime import OpenAIRealtimeManager
 from praisonai.ui._aiui_datastore import PraisonAISessionDataStore
 
-# ── Set up datastore bridge ─────────────────────────────────
+# ── Set up datastore bridge and realtime manager ───────────
 aiui.set_datastore(PraisonAISessionDataStore())
+aiui.set_realtime_manager(OpenAIRealtimeManager())
 
 # ── Dashboard style ─────────────────────────────────────────
 aiui.set_style("dashboard")
-aiui.set_branding(title="PraisonAI Realtime (Beta)", logo="🎤")
+aiui.set_branding(title="PraisonAI Realtime Voice", logo="🎤")
 aiui.set_theme(preset="red", dark_mode=True, radius="lg")
 aiui.set_pages([
     "chat",
@@ -37,13 +38,14 @@ async def get_starters():
 @aiui.welcome
 async def on_welcome():
     """Welcome with realtime status."""
-    await aiui.say("""🎤 **PraisonAI Realtime Voice Interface (Beta)**
+    await aiui.say("""🎤 **PraisonAI Realtime Voice Interface**
 
-⚠️ **Note**: Full WebRTC voice realtime is pending PraisonAIUI feature implementation.
+Welcome to PraisonAI's voice-powered realtime chat! Use the microphone button to start voice conversations with AI agents.
 
-For now, this provides a text-based interface that simulates realtime interactions.
-
-See: https://github.com/MervinPraison/PraisonAIUI/issues for WebRTC voice realtime status.
+✨ Features:
+- Real-time voice input/output via WebRTC
+- Session persistence across restarts 
+- Dashboard with chat history and usage logs
 """)
 
 # Session-scoped realtime agent cache
@@ -51,7 +53,7 @@ _realtime_cache = {}
 
 @aiui.reply
 async def on_message(message: str):
-    """Handle realtime interactions (text-based for now)."""
+    """Handle realtime interactions via voice or text."""
     session_id = getattr(aiui.current_session, 'id', 'default')
     
     await aiui.think("🎤 Processing realtime request...")
@@ -69,20 +71,16 @@ async def on_message(message: str):
         
         agent = _realtime_cache[session_id]
         
-        # For now, process as text (voice coming in future PraisonAIUI release)
+        # Process the message with the agent
         result = await agent.achat(str(message))
         
-        # Stream response (simulating voice output)
+        # Stream response naturally (aiui handles voice output via WebRTC)
         response_text = str(result) if result else "I'm sorry, I couldn't process that."
         
-        await aiui.say("🔊 **Voice Output Simulation:**\n")
-        
-        # Stream more slowly to simulate speech
+        # Stream tokens for smooth output
         words = response_text.split(" ")
         for i, word in enumerate(words):
             await aiui.stream_token(word + (" " if i < len(words) - 1 else ""))
-        
-        await aiui.say("\n\n*Note: Actual voice I/O will be available when PraisonAIUI WebRTC feature lands.*")
             
     except Exception as e:
         await aiui.say(f"❌ Realtime Error: {e}")

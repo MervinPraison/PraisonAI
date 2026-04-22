@@ -141,33 +141,12 @@ def _get_agents_generator():
     return AgentsGenerator
 
 # Optional module imports with availability checks
-CHAINLIT_AVAILABLE = False
 GRADIO_AVAILABLE = False
 CALL_MODULE_AVAILABLE = False
 CREWAI_AVAILABLE = False
 AUTOGEN_AVAILABLE = False
 PRAISONAI_AVAILABLE = False
 TRAIN_AVAILABLE = False
-try:
-    import importlib.util
-    CHAINLIT_AVAILABLE = importlib.util.find_spec("chainlit") is not None
-except ImportError:
-    pass
-
-def _get_chainlit_run():
-    """Lazy import chainlit to avoid loading .env at startup"""
-    # Create necessary directories and set CHAINLIT_APP_ROOT
-    if "CHAINLIT_APP_ROOT" not in os.environ:
-        chainlit_root = os.path.join(os.path.expanduser("~"), ".praison")
-        os.environ["CHAINLIT_APP_ROOT"] = chainlit_root
-    else:
-        chainlit_root = os.environ["CHAINLIT_APP_ROOT"]
-        
-    os.makedirs(chainlit_root, exist_ok=True)
-    os.makedirs(os.path.join(chainlit_root, ".files"), exist_ok=True)
-    
-    from chainlit.cli import chainlit_run
-    return chainlit_run
 
 # Use find_spec for fast availability checks (no actual import)
 import importlib.util
@@ -581,7 +560,8 @@ class PraisonAI:
         # They no longer open Chainlit browser UI
 
         if getattr(args, 'realtime', False):
-            self.create_realtime_interface()
+            from praisonai.cli.commands.ui import _launch_aiui_app
+            _launch_aiui_app("ui_realtime", "ui_realtime", 8085, "0.0.0.0", None, False, "Realtime Voice")
             return
 
         if getattr(args, 'call', False):
@@ -1238,11 +1218,8 @@ class PraisonAI:
                 sys.exit(0)
 
             elif args.command == 'realtime':
-                if not CHAINLIT_AVAILABLE:
-                    print("[red]ERROR: Realtime UI is not installed. Install with:[/red]")
-                    print("\npip install \"praisonai[realtime]\"\n")
-                    sys.exit(1)
-                self.create_realtime_interface()
+                from praisonai.cli.commands.ui import _launch_aiui_app
+                _launch_aiui_app("ui_realtime", "ui_realtime", 8085, "0.0.0.0", None, False, "Realtime Voice")
                 sys.exit(0)
 
             elif args.command == 'train':
@@ -5189,45 +5166,6 @@ Now, {final_instruction.lower()}:"""
         except KeyboardInterrupt:
             print("\n👋 Server stopped.")
 
-    def create_chainlit_chat_interface(self):
-        """
-        Create a Chainlit interface for the chat application.
-        """
-        if CHAINLIT_AVAILABLE:
-            import praisonai
-            os.environ["CHAINLIT_PORT"] = "8084"
-            root_path = os.path.join(os.path.expanduser("~"), ".praison")
-            if "CHAINLIT_APP_ROOT" not in os.environ:
-                os.environ["CHAINLIT_APP_ROOT"] = root_path
-            chat_ui_path = os.path.join(os.path.dirname(praisonai.__file__), 'ui', 'chat.py')
-            _get_chainlit_run()([chat_ui_path])
-        else:
-            print("ERROR: Chat UI is not installed. Please install it with 'pip install \"praisonai[chat]\"' to use the chat UI.")
-
-    def create_code_interface(self):
-        """
-        Create a Chainlit interface for the code application.
-        """
-        if CHAINLIT_AVAILABLE:
-            import praisonai
-            os.environ["CHAINLIT_PORT"] = "8086"
-            root_path = os.path.join(os.path.expanduser("~"), ".praison")
-            if "CHAINLIT_APP_ROOT" not in os.environ:
-                os.environ["CHAINLIT_APP_ROOT"] = root_path
-            public_folder = os.path.join(os.path.dirname(__file__), 'public')
-            if not os.path.exists(os.path.join(root_path, "public")):
-                if os.path.exists(public_folder):
-                    shutil.copytree(public_folder, os.path.join(root_path, "public"), dirs_exist_ok=True)
-                    logging.info("Public folder copied successfully!")
-                else:
-                    logging.info("Public folder not found in the package.")
-            else:
-                logging.info("Public folder already exists.")
-            code_ui_path = os.path.join(os.path.dirname(praisonai.__file__), 'ui', 'code.py')
-            _get_chainlit_run()([code_ui_path])
-        else:
-            print("ERROR: Code UI is not installed. Please install it with 'pip install \"praisonai[code]\"' to use the code UI.")
-
     def create_gradio_interface(self):
         """
         Create a Gradio interface for generating agents and performing tasks.
@@ -5259,51 +5197,6 @@ Now, {final_instruction.lower()}:"""
             ).launch()
         else:
             print("ERROR: Gradio is not installed. Please install it with 'pip install gradio' to use this feature.")
-
-    def create_chainlit_interface(self):
-        """
-        Create a Chainlit interface for generating agents and performing tasks.
-        """
-        if CHAINLIT_AVAILABLE:
-            import praisonai
-            os.environ["CHAINLIT_PORT"] = "8082"
-            public_folder = os.path.join(os.path.dirname(praisonai.__file__), 'public')
-            if not os.path.exists("public"):
-                if os.path.exists(public_folder):
-                    shutil.copytree(public_folder, 'public', dirs_exist_ok=True)
-                    logging.info("Public folder copied successfully!")
-                else:
-                    logging.info("Public folder not found in the package.")
-            else:
-                logging.info("Public folder already exists.")
-            chainlit_ui_path = os.path.join(os.path.dirname(praisonai.__file__), 'ui', 'agents.py')
-            _get_chainlit_run()([chainlit_ui_path])
-        else:
-            print("ERROR: Chainlit is not installed. Please install it with 'pip install \"praisonai[ui]\"' to use the UI.")
-
-    def create_realtime_interface(self):
-        """
-        Create a Chainlit interface for the realtime voice interaction application.
-        """
-        if CHAINLIT_AVAILABLE:
-            import praisonai
-            os.environ["CHAINLIT_PORT"] = "8088"
-            root_path = os.path.join(os.path.expanduser("~"), ".praison")
-            if "CHAINLIT_APP_ROOT" not in os.environ:
-                os.environ["CHAINLIT_APP_ROOT"] = root_path
-            public_folder = os.path.join(os.path.dirname(praisonai.__file__), 'public')
-            if not os.path.exists(os.path.join(root_path, "public")):
-                if os.path.exists(public_folder):
-                    shutil.copytree(public_folder, os.path.join(root_path, "public"), dirs_exist_ok=True)
-                    logging.info("Public folder copied successfully!")
-                else:
-                    logging.info("Public folder not found in the package.")
-            else:
-                logging.info("Public folder already exists.")
-            realtime_ui_path = os.path.join(os.path.dirname(praisonai.__file__), 'ui', 'realtime.py')
-            _get_chainlit_run()([realtime_ui_path])
-        else:
-            print("ERROR: Realtime UI is not installed. Please install it with 'pip install \"praisonai[realtime]\"' to use the realtime UI.")
 
     def create_aiui_agents_interface(self):
         """

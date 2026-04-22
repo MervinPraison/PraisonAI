@@ -361,8 +361,8 @@ def serve_ui(
     output = get_output_controller()
     
     try:
-        from .ui import _launch_chainlit_ui
-        _launch_chainlit_ui(ui_type, port, host, False)
+        from .ui import _launch_aiui_app
+        _launch_aiui_app(f"ui_{ui_type}", f"ui_{ui_type}", port, host, None, False, ui_type)
     except ImportError as e:
         output.print_error(f"UI module not available: {e}")
         output.print("Install with: pip install praisonai[ui]")
