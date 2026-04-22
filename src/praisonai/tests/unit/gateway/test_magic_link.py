@@ -289,7 +289,7 @@ class TestMagicLinkStore:
             # Note: exact permissions may vary by system, just ensure it's restrictive
             assert permissions in (0o600, 0o644)  # Allow some variation
     
-    @patch('praisonai.gateway.magic_link.FILELOCK_AVAILABLE', False)
+    @patch('praisonai.gateway.magic_link._HAS_FILELOCK', False)
     def test_fallback_without_filelock(self):
         """Test fallback behavior when filelock is not available."""
         with tempfile.TemporaryDirectory() as tmpdir:

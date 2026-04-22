@@ -20,33 +20,34 @@ from typing import Dict, Optional, Union
 logger = logging.getLogger(__name__)
 
 try:
-    import filelock
-    FILELOCK_AVAILABLE = True
+    from filelock import FileLock
+    _HAS_FILELOCK = True
 except ImportError:
-    # Graceful fallback if filelock not available
-    FILELOCK_AVAILABLE = False
-    import threading
+    FileLock = None           # define the name so FileLock(...) below doesn't NameError
+    _HAS_FILELOCK = False
+
+import threading
+
+# Module-level mapping from lock path to shared threading.Lock
+_locks_by_path: Dict[str, threading.Lock] = {}
+_locks_creation_lock = threading.Lock()
+
+class _NullLock:
+    """Fallback implementation using threading.Lock shared by path"""
+    def __init__(self, path: str):
+        self.path = path
+        # Get or create a shared lock for this path
+        with _locks_creation_lock:
+            if path not in _locks_by_path:
+                _locks_by_path[path] = threading.Lock()
+            self._lock = _locks_by_path[path]
     
-    # Module-level mapping from lock path to shared threading.Lock
-    _locks_by_path: Dict[str, threading.Lock] = {}
-    _locks_creation_lock = threading.Lock()
+    def __enter__(self):
+        self._lock.acquire()
+        return self
     
-    class FileLock:
-        """Fallback implementation using threading.Lock shared by path"""
-        def __init__(self, path: str):
-            self.path = path
-            # Get or create a shared lock for this path
-            with _locks_creation_lock:
-                if path not in _locks_by_path:
-                    _locks_by_path[path] = threading.Lock()
-                self._lock = _locks_by_path[path]
-        
-        def __enter__(self):
-            self._lock.acquire()
-            return self
-        
-        def __exit__(self, exc_type, exc_val, exc_tb):
-            self._lock.release()
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._lock.release()
 
 
 @dataclass
@@ -119,10 +120,7 @@ class MagicLinkStore:
         
         # Create file lock
         lock_path = str(self.storage_path) + ".lock"
-        if FILELOCK_AVAILABLE:
-            self._file_lock = filelock.FileLock(lock_path)
-        else:
-            self._file_lock = FileLock(lock_path)
+        self._file_lock = FileLock(lock_path) if _HAS_FILELOCK else _NullLock(lock_path)
     
     def _get_or_create_secret(self) -> str:
         """Get or create a persistent secret key for HMAC signing."""
