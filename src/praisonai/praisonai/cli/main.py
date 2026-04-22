@@ -557,11 +557,15 @@ class PraisonAI:
             return
 
         # chat and code commands are now terminal-native (handled by Typer commands)
-        # They no longer open Chainlit browser UI
 
         if getattr(args, 'realtime', False):
-            from praisonai.cli.commands.ui import _launch_aiui_app
-            _launch_aiui_app("ui_realtime", "ui_realtime", 8085, "0.0.0.0", None, False, "Realtime Voice")
+            try:
+                from praisonai.cli.commands.ui import _launch_aiui_app
+                _launch_aiui_app("ui_realtime", "ui_realtime", 8085, "127.0.0.1", None, False, "Realtime Voice")
+            except ImportError:
+                print("\033[91mERROR: Realtime UI is not installed.\033[0m")
+                print('Install with: pip install "praisonai[ui]"')
+                sys.exit(1)
             return
 
         if getattr(args, 'call', False):
@@ -1218,8 +1222,13 @@ class PraisonAI:
                 sys.exit(0)
 
             elif args.command == 'realtime':
-                from praisonai.cli.commands.ui import _launch_aiui_app
-                _launch_aiui_app("ui_realtime", "ui_realtime", 8085, "0.0.0.0", None, False, "Realtime Voice")
+                try:
+                    from praisonai.cli.commands.ui import _launch_aiui_app
+                    _launch_aiui_app("ui_realtime", "ui_realtime", 8085, "127.0.0.1", None, False, "Realtime Voice")
+                except ImportError:
+                    print("\033[91mERROR: Realtime UI is not installed.\033[0m")
+                    print('Install with: pip install "praisonai[ui]"')
+                    sys.exit(1)
                 sys.exit(0)
 
             elif args.command == 'train':
