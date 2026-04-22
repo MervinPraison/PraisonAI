@@ -153,7 +153,7 @@ class MagicLinkStore:
         """Generate a cryptographically secure nonce."""
         return secrets.token_hex(16)
     
-    def _sign_nonce(self, nonce: str, timestamp: float) -> str:
+    def _sign_nonce(self, nonce: str, timestamp: int) -> str:
         """Sign a nonce with HMAC-SHA256."""
         message = f"{nonce}:{timestamp}".encode()
         signature = hmac.new(
@@ -163,9 +163,11 @@ class MagicLinkStore:
         ).hexdigest()
         return signature
     
-    def _verify_nonce_signature(self, nonce: str, timestamp: float, signature: str) -> bool:
+    def _verify_nonce_signature(self, nonce: str, timestamp: Union[int, float], signature: str) -> bool:
         """Verify a nonce signature."""
-        expected = self._sign_nonce(nonce, timestamp)
+        # Convert to int for consistent signing (timestamp in nonce is always int)
+        int_timestamp = int(timestamp)
+        expected = self._sign_nonce(nonce, int_timestamp)
         return hmac.compare_digest(expected, signature)
     
     def _load_entries(self) -> Dict[str, MagicLinkEntry]:
