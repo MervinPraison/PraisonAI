@@ -613,16 +613,13 @@ if not CHAINLIT_AUTH_SECRET:
     os.environ["CHAINLIT_AUTH_SECRET"] = secrets.token_hex(32)
     logger.warning("CHAINLIT_AUTH_SECRET not set; generated a random secret for this session.")
 
-username_env = os.getenv("CHAINLIT_USERNAME", "admin")
-password_env = os.getenv("CHAINLIT_PASSWORD", "admin")
-
-def simple_auth_callback(u: str, p: str):
-    if (u, p) == (username_env, password_env):
-        return cl.User(identifier=u, metadata={"role": "ADMIN", "provider": "credentials"})
-    return None
-
+# Authentication configuration - bind-aware auth
 if AUTH_PASSWORD_ENABLED:
-    auth_callback = cl.password_auth_callback(simple_auth_callback)
+    from ._auth import register_password_auth
+    
+    # Determine bind host from CHAINLIT_HOST env var (default: 127.0.0.1)
+    bind_host = os.getenv("CHAINLIT_HOST", "127.0.0.1")
+    register_password_auth(None, bind_host=bind_host)
 
 @cl.set_chat_profiles
 async def set_profiles(current_user: cl.User):

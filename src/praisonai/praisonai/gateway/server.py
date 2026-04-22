@@ -202,6 +202,10 @@ class WebSocketGateway:
             config: Optional gateway configuration
         """
         self.config = config or GatewayConfig(host=host, port=port)
+        
+        # Set bind_host for bind-aware authentication
+        self.config.bind_host = self.config.host
+        
         if hasattr(self.config, 'auth_token') and not self.config.auth_token:
             # Prefer a user-configured token (persisted by `praisonai onboard`
             # to ~/.praisonai/.env as GATEWAY_AUTH_TOKEN) so the dashboard
@@ -213,11 +217,20 @@ class WebSocketGateway:
                 logger.info("Gateway using GATEWAY_AUTH_TOKEN from environment")
             else:
                 import secrets
+                from .auth import get_auth_token_fingerprint, save_auth_token_to_env
+                
                 self.config.auth_token = secrets.token_hex(16)
+                fingerprint = get_auth_token_fingerprint(self.config.auth_token)
                 logger.warning(
-                    f"No auth_token provided for Gateway server. Generated temporary token: {self.config.auth_token}. "
+                    f"No auth_token provided for Gateway server. Generated temporary token: {fingerprint}. "
                     "For production, set GATEWAY_AUTH_TOKEN."
                 )
+                
+                # Save to ~/.praisonai/.env for future use
+                try:
+                    save_auth_token_to_env(self.config.auth_token)
+                except Exception as e:
+                    logger.debug(f"Could not save auth token to .env: {e}")
         
         self._host = self.config.host
         self._port = self.config.port
@@ -259,6 +272,10 @@ class WebSocketGateway:
         if self._is_running:
             logger.warning("Gateway already running")
             return
+        
+        # Validate bind-aware auth configuration before starting
+        from .auth import assert_external_bind_safe
+        assert_external_bind_safe(self.config)
         
         try:
             from starlette.applications import Starlette

@@ -210,6 +210,7 @@ class GatewayConfig:
     
     host: str = "127.0.0.1"
     port: int = 8765
+    bind_host: str = "127.0.0.1"
     cors_origins: List[str] = field(default_factory=lambda: [])
     auth_token: Optional[str] = None
     max_connections: int = 1000
