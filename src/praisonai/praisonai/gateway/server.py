@@ -1382,6 +1382,8 @@ class WebSocketGateway:
             _raw_auto_approve = ch_cfg.get("auto_approve_tools")
             if _raw_auto_approve is None:
                 auto_approve_tools = True   # SAFE-DEFAULT: safe tools auto-approved in chat
+            elif isinstance(_raw_auto_approve, str):
+                auto_approve_tools = _raw_auto_approve.strip().lower() in ("1", "true", "yes", "on")
             else:
                 auto_approve_tools = bool(_raw_auto_approve)
 

@@ -216,6 +216,45 @@ async def test_group_policy_mapping(group_policy, expected_mention_required):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("raw_value,expected", [
+    (None, True),
+    (True, True),
+    (False, False),
+    ("true", True),
+    ("1", True),
+    ("yes", True),
+    ("on", True),
+    ("false", False),
+    ("0", False),
+    ("no", False),
+    ("off", False),
+    ("", False),
+])
+async def test_auto_approve_tools_parsing(raw_value, expected):
+    """auto_approve_tools should parse booleans and env-expanded strings safely."""
+    channels_config = {
+        "test": {
+            "token": "test-token",
+        }
+    }
+    if raw_value is not None:
+        channels_config["test"]["auto_approve_tools"] = raw_value
+
+    gateway = create_test_gateway_with_agent()
+    captured_config = None
+
+    def mock_create_bot(channel_type, token, agent, config, ch_cfg):
+        nonlocal captured_config
+        captured_config = config
+        return None
+
+    with patch.object(gateway, "_create_bot", side_effect=mock_create_bot):
+        await gateway.start_channels(channels_config)
+
+    assert captured_config.auto_approve_tools is expected
+
+
+@pytest.mark.asyncio
 async def test_regression_protection_stash_fix_breaks_test():
     """Test that verifies this test fails if the production fix is reverted.
     
