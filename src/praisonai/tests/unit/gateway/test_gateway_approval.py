@@ -137,3 +137,108 @@ async def test_exec_approval_allowlist():
 
     # Pending shouldn't be populated
     assert len(mgr.list_pending()) == 0
+
+
+@pytest.mark.asyncio
+async def test_pending_persists_across_instances():
+    """Pending codes should survive PairingStore recreation (cross-process test)."""
+    import tempfile
+    import os
+    
+    # Create temporary directory for this test
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Instance A generates a code
+        store_a = PairingStore(store_dir=tmpdir, secret="test-secret")
+        code = store_a.generate_code(channel_type="telegram", channel_id="tg_42")
+        assert len(code) == 8
+        
+        # Instance B (simulating CLI in separate process) should see the pending code
+        store_b = PairingStore(store_dir=tmpdir, secret="test-secret")
+        pending = store_b.list_pending()
+        assert len(pending) == 1
+        assert pending[0]["code"] == code
+        assert pending[0]["channel_type"] == "telegram"
+        assert pending[0]["channel_id"] == "tg_42"
+
+
+@pytest.mark.asyncio
+async def test_cli_approve_e2e():
+    """Test CLI pairing approve command end-to-end."""
+    import tempfile
+    from typer.testing import CliRunner
+    from praisonai.cli.commands.pairing import pairing_app
+    
+    runner = CliRunner()
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Seed a PairingStore with a bound code
+        store = PairingStore(store_dir=tmpdir, secret="test-secret")
+        code = store.generate_code(channel_type="telegram", channel_id="tg_test")
+        
+        # Invoke CLI approve (2-arg form, no explicit channel_id)
+        result = runner.invoke(pairing_app, [
+            "approve", "telegram", code, "--store-dir", tmpdir
+        ])
+        
+        # Should succeed
+        assert result.exit_code == 0
+        
+        # Verify the channel is now paired
+        fresh_store = PairingStore(store_dir=tmpdir, secret="test-secret")
+        assert fresh_store.is_paired("tg_test", "telegram") is True
+
+
+@pytest.mark.asyncio
+async def test_cli_approve_invalid_code():
+    """CLI approve should exit non-zero for invalid codes and leave store unchanged."""
+    import tempfile
+    from typer.testing import CliRunner
+    from praisonai.cli.commands.pairing import pairing_app
+    
+    runner = CliRunner()
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create empty store
+        store = PairingStore(store_dir=tmpdir, secret="test-secret")
+        initial_paired = len(store.list_paired())
+        
+        # Try to approve nonexistent code
+        result = runner.invoke(pairing_app, [
+            "approve", "telegram", "deadbeef", "--store-dir", tmpdir
+        ])
+        
+        # Should fail
+        assert result.exit_code != 0
+        assert "invalid" in result.stdout.lower() or "expired" in result.stdout.lower()
+        
+        # Store should be unchanged
+        fresh_store = PairingStore(store_dir=tmpdir, secret="test-secret")
+        assert len(fresh_store.list_paired()) == initial_paired
+
+
+@pytest.mark.asyncio
+async def test_cli_approve_survives_restart():
+    """Generate code, drop instance, create fresh one, approve should succeed."""
+    import tempfile
+    from typer.testing import CliRunner
+    from praisonai.cli.commands.pairing import pairing_app
+    
+    runner = CliRunner()
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Generate code and drop the instance
+        store = PairingStore(store_dir=tmpdir, secret="test-secret")
+        code = store.generate_code(channel_type="telegram", channel_id="tg_restart")
+        del store  # Explicitly drop the instance to simulate restart
+        
+        # Fresh instance should be able to approve the code
+        result = runner.invoke(pairing_app, [
+            "approve", "telegram", code, "--store-dir", tmpdir
+        ])
+        
+        # Should succeed
+        assert result.exit_code == 0
+        
+        # Verify pairing persisted
+        final_store = PairingStore(store_dir=tmpdir, secret="test-secret")
+        assert final_store.is_paired("tg_restart", "telegram") is True

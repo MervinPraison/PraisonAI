@@ -132,6 +132,7 @@ class PairingStore:
                 "channel_id": channel_id,
                 "created_at": time.time(),
             }
+            self._save()  # NEW — persist pending codes
         return code
 
     def verify_and_pair(
@@ -150,6 +151,8 @@ class PairingStore:
         with self._lock:
             self._prune_expired()
             pending = self._pending.pop(code, None)
+            if pending is not None:
+                self._save()  # NEW — persist the pop
 
         if pending is None:
             return False
@@ -224,6 +227,9 @@ class PairingStore:
                 "paired": [
                     asdict(ch) for ch in self._paired.values()
                 ],
+                "pending": [
+                    {"code": c, **info} for c, info in self._pending.items()
+                ],
             }
             # Atomic write: tempfile → rename
             fd, tmp_path = tempfile.mkstemp(
@@ -253,7 +259,11 @@ class PairingStore:
             for entry in data.get("paired", []):
                 ch = PairedChannel(**entry)
                 self._paired[(ch.channel_id, ch.channel_type)] = ch
-            logger.debug("Loaded %d paired channels", len(self._paired))
+            # Load pending codes
+            for entry in data.get("pending", []):
+                code = entry.pop("code")
+                self._pending[code] = entry
+            logger.debug("Loaded %d paired channels, %d pending codes", len(self._paired), len(self._pending))
         except (OSError, json.JSONDecodeError, TypeError) as exc:
             logger.warning("Failed to load pairing store: %s", exc)
 
