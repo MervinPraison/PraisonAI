@@ -35,9 +35,9 @@ class Workspace:
     
     def __post_init__(self):
         """Validate workspace configuration after initialization."""
-        # Ensure root is absolute and normalized
-        if not self.root.is_absolute():
-            object.__setattr__(self, 'root', self.root.resolve())
+        # Always resolve symlinks so containment checks below are consistent
+        # This fixes macOS issues where /tmp -> /private/tmp symlinks break containment
+        object.__setattr__(self, 'root', self.root.resolve())
         
         # Security: refuse root filesystem access
         if str(self.root) in ('/', '\\', 'C:\\'):
@@ -80,9 +80,9 @@ class Workspace:
         if isinstance(path, str):
             path = Path(path)
         
-        # Check for obvious traversal attempts before resolution
-        path_str = str(path)
-        if '..' in path_str:
+        # Reject traversal components (proper part-wise check; substring search
+        # would reject legitimate names like "v1..2.md").
+        if has_traversal_component(str(path)):
             raise ValueError(f"Path traversal detected: {path}")
         
         # If path is absolute, check if it's within workspace
@@ -95,8 +95,10 @@ class Workspace:
         # Security check: ensure resolved path is within workspace
         try:
             resolved.relative_to(self.root)
-        except ValueError:
-            raise ValueError(f"Path escapes workspace: {path} -> {resolved} (workspace: {self.root})")
+        except ValueError as e:
+            raise ValueError(
+                f"Path escapes workspace: {path} -> {resolved} (workspace: {self.root})"
+            ) from e
         
         return resolved
     
