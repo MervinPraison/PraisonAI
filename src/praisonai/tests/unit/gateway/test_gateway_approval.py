@@ -234,7 +234,8 @@ async def test_cli_approve_invalid_code():
         
         # Should fail
         assert result.exit_code != 0
-        assert "invalid" in result.stdout.lower() or "expired" in result.stdout.lower()
+        output = (result.stdout or "") + (result.stderr or "")
+        assert "invalid" in output.lower() or "expired" in output.lower()
         
         # Store should be unchanged (fresh instance uses same secret file)
         fresh_store = PairingStore(store_dir=tmpdir)
