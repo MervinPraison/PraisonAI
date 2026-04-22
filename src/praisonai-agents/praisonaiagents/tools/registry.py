@@ -16,7 +16,7 @@ Usage:
 
 import logging
 import threading
-from typing import Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from .base import BaseTool
 
@@ -150,6 +150,39 @@ class ToolRegistry:
         """List all registered BaseTool instances. Thread-safe."""
         with self._lock:
             return list(self._tools.values())
+    
+    def list_available_tools(self, context: Optional[Dict[str, Any]] = None) -> List[Union[BaseTool, Callable]]:
+        """List only currently available tools (those that pass availability checks).
+        
+        Args:
+            context: Optional context for availability checks (unused currently)
+            
+        Returns:
+            List of available tools (both BaseTool instances and callables)
+        """
+        with self._lock:
+            available = []
+            
+            # Check BaseTool instances
+            for tool in self._tools.values():
+                # Check if tool has availability checking capability
+                if hasattr(tool, 'check_availability'):
+                    try:
+                        is_available, reason = tool.check_availability()
+                        if is_available:
+                            available.append(tool)
+                        elif reason:
+                            logging.debug(f"Tool '{tool.name}' unavailable: {reason}")
+                    except Exception as e:
+                        logging.warning(f"Availability check failed for tool '{tool.name}': {e}")
+                else:
+                    # No availability check = always available
+                    available.append(tool)
+            
+            # Functions are always considered available (no protocol for them currently)
+            available.extend(self._functions.values())
+            
+            return available
     
     def get_all(self) -> Dict[str, Union[BaseTool, Callable]]:
         """Get all registered tools as a dict. Thread-safe."""
@@ -336,3 +369,15 @@ def discover_plugins() -> int:
         Number of plugins loaded
     """
     return get_registry().discover_single_file_plugins()
+
+
+def list_available_tools(context: Optional[Dict[str, Any]] = None) -> List[Union[BaseTool, Callable]]:
+    """List only currently available tools from the global registry.
+    
+    Args:
+        context: Optional context for availability checks
+        
+    Returns:
+        List of available tools
+    """
+    return get_registry().list_available_tools(context)

@@ -40,6 +40,47 @@ def _get_secret() -> str:
     return os.environ.get("PRAISONAI_GATEWAY_SECRET", "") or secrets.token_hex(32)
 
 
+def _load_or_create_secret(store_dir: str) -> bytes:
+    """Persist per-install secret at <store_dir>/.gateway_secret (0600).
+    
+    This ensures HMAC signatures remain consistent across process restarts,
+    allowing pairing codes to work between gateway and CLI processes.
+    """
+    env = os.environ.get("PRAISONAI_GATEWAY_SECRET")
+    if env:
+        return env.encode()
+    
+    os.makedirs(store_dir, exist_ok=True)
+    secret_path = os.path.join(store_dir, ".gateway_secret")
+    
+    if os.path.exists(secret_path):
+        try:
+            with open(secret_path, "rb") as f:
+                secret = f.read().strip()
+            # Warn if file is world-readable
+            import stat
+            mode = stat.S_IMODE(os.stat(secret_path).st_mode)
+            if mode != 0o600:
+                logger.warning(f"Gateway secret file {secret_path} has insecure permissions {oct(mode)}")
+            return secret
+        except (OSError, IOError) as e:
+            logger.warning(f"Failed to read gateway secret from {secret_path}: {e}")
+    
+    # Generate new secret
+    secret = secrets.token_hex(32).encode()
+    try:
+        # Create file with secure permissions (0600)
+        fd = os.open(secret_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(secret)
+        logger.info(f"Generated new gateway secret at {secret_path}")
+    except (OSError, IOError) as e:
+        logger.warning(f"Failed to save gateway secret to {secret_path}: {e}")
+        # Fall back to in-memory secret for this process
+    
+    return secret
+
+
 @dataclass
 class PairedChannel:
     """Record of an authorised external channel."""
@@ -76,11 +117,11 @@ class PairingStore:
     Example::
 
         store = PairingStore()
-        code = store.generate_code(channel_type="slack")
+        code = store.generate_code(channel_type="slack", channel_id="C12345")
         print(f"Enter this code in Slack: {code}")
 
         # Later, when the Slack bot sends the code:
-        ok = store.verify_and_pair(code, channel_id="C12345", channel_type="slack")
+        ok = store.verify_and_pair(code, channel_id=None, channel_type="slack")
         assert ok
 
         # Check if paired
@@ -97,7 +138,7 @@ class PairingStore:
         self._dir = store_dir or _DEFAULT_STORE_DIR
         self._path = os.path.join(self._dir, _DEFAULT_STORE_FILE)
         self._code_ttl = code_ttl
-        self._secret = (secret or _get_secret()).encode()
+        self._secret = secret.encode() if secret else _load_or_create_secret(self._dir)
         self._max_pending = max_pending
         self._lock = threading.Lock()
 
@@ -110,7 +151,7 @@ class PairingStore:
 
     # ── Code lifecycle ────────────────────────────────────────────────
 
-    def generate_code(self, channel_type: str = "unknown") -> str:
+    def generate_code(self, channel_type: str = "unknown", channel_id: Optional[str] = None) -> str:
         """Generate a new 8-char pairing code.
 
         The code is HMAC-signed so the gateway can verify it was not forged.
@@ -129,14 +170,16 @@ class PairingStore:
             self._pending[code] = {
                 "signature": sig,
                 "channel_type": channel_type,
+                "channel_id": channel_id,
                 "created_at": time.time(),
             }
+            self._save()  # NEW — persist pending codes
         return code
 
     def verify_and_pair(
         self,
         code: str,
-        channel_id: str,
+        channel_id: Optional[str],
         channel_type: str,
         label: str = "",
     ) -> bool:
@@ -144,10 +187,13 @@ class PairingStore:
 
         Returns ``True`` on success, ``False`` on invalid / expired code.
         The code is consumed (one-time use) regardless of outcome.
+        If ``channel_id`` is omitted, a channel-bound pending code may provide it.
         """
         with self._lock:
             self._prune_expired()
             pending = self._pending.pop(code, None)
+            if pending is not None:
+                self._save()  # NEW — persist the pop
 
         if pending is None:
             return False
@@ -157,18 +203,26 @@ class PairingStore:
         if not hmac.compare_digest(pending["signature"], expected_sig):
             return False
 
+        pending_channel_id = pending.get("channel_id")
+        if pending_channel_id and channel_id and channel_id != pending_channel_id:
+            return False
+
+        resolved_channel_id = channel_id or pending_channel_id
+        if not resolved_channel_id:
+            return False
+
         paired = PairedChannel(
-            channel_id=channel_id,
+            channel_id=resolved_channel_id,
             channel_type=channel_type,
             paired_at=time.time(),
             label=label,
         )
 
         with self._lock:
-            self._paired[(channel_id, channel_type)] = paired
+            self._paired[(resolved_channel_id, channel_type)] = paired
             self._save()
 
-        logger.info("Channel paired: %s (%s)", channel_id, channel_type)
+        logger.info("Channel paired: %s (%s)", resolved_channel_id, channel_type)
         return True
 
     # ── Query API ─────────────────────────────────────────────────────
@@ -182,6 +236,15 @@ class PairingStore:
         """List all authorised channels."""
         with self._lock:
             return list(self._paired.values())
+
+    def list_pending(self) -> List[dict]:
+        """List all pending pairing codes."""
+        with self._lock:
+            self._prune_expired()
+            return [
+                {"code": code, **info} 
+                for code, info in self._pending.items()
+            ]
 
     def revoke(self, channel_id: str, channel_type: str) -> bool:
         """Revoke a paired channel.  Returns ``True`` if it existed."""
@@ -258,6 +321,9 @@ class PairingStore:
                 "paired": [
                     asdict(ch) for ch in self._paired.values()
                 ],
+                "pending": [
+                    {"code": c, **info} for c, info in self._pending.items()
+                ],
             }
             # Atomic write: tempfile → rename
             fd, tmp_path = tempfile.mkstemp(
@@ -287,7 +353,11 @@ class PairingStore:
             for entry in data.get("paired", []):
                 ch = PairedChannel(**entry)
                 self._paired[(ch.channel_id, ch.channel_type)] = ch
-            logger.debug("Loaded %d paired channels", len(self._paired))
+            # Load pending codes
+            for entry in data.get("pending", []):
+                code = entry.pop("code")
+                self._pending[code] = entry
+            logger.debug("Loaded %d paired channels, %d pending codes", len(self._paired), len(self._pending))
         except (OSError, json.JSONDecodeError, TypeError) as exc:
             logger.warning("Failed to load pairing store: %s", exc)
 

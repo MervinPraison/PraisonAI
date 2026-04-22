@@ -102,6 +102,9 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             done_emoji=self.config.done_emoji,
         )
         
+        # Unknown user handler for pairing flow
+        self._unknown_user_handler = None  # Lazy loaded
+        
         # Audio capabilities (set by BotCapabilities)
         self._stt_enabled: bool = False
         self._auto_tts: bool = False
@@ -109,6 +112,24 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         # Resilience
         self._monitor = None  # Lazy: ConnectionMonitor
         self._stop_event: Optional[asyncio.Event] = None
+    
+    def _get_unknown_user_handler(self):
+        """Lazy load the unknown user handler."""
+        if self._unknown_user_handler is None and self.config.unknown_user_policy == "pair":
+            try:
+                from praisonai.gateway.pairing import PairingStore
+                from praisonai.bots._auth import UnknownUserHandler
+                
+                pairing_store = PairingStore()
+                self._unknown_user_handler = UnknownUserHandler(
+                    self.config, 
+                    pairing_store,
+                    send_message_callback=self.send_message
+                )
+            except ImportError as e:
+                logger.warning(f"Cannot load pairing dependencies: {e}")
+                return None
+        return self._unknown_user_handler
     
     def enable_stt(self, enabled: bool = True) -> None:
         """Enable STT for voice message transcription."""
@@ -180,8 +201,24 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             
             self.fire_message_received(message)
             
-            if not self.config.is_user_allowed(message.sender.user_id if message.sender else ""):
-                return
+            # Handle unknown users according to policy
+            user_allowed = self.config.is_user_allowed(message.sender.user_id if message.sender else "")
+            if not user_allowed:
+                policy = self.config.unknown_user_policy
+                if policy == "allow":
+                    pass  # fall through to channel check
+                elif policy == "pair":
+                    handler = self._get_unknown_user_handler()
+                    if handler is None:
+                        logger.warning(
+                            "unknown_user_policy='pair' but handler unavailable; dropping message"
+                        )
+                        return
+                    action = await handler.handle(message)
+                    if action != "allow":
+                        return
+                else:  # "deny" or anything unknown
+                    return
             if not self.config.is_channel_allowed(message.channel.channel_id if message.channel else ""):
                 return
             

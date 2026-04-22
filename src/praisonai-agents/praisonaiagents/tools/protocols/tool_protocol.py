@@ -136,9 +136,48 @@ class ValidatableToolProtocol(ToolProtocol, Protocol):
         ...
 
 
+@runtime_checkable
+class ToolAvailabilityProtocol(Protocol):
+    """
+    Protocol for tools that support runtime availability checking.
+    
+    This allows tools to indicate whether they can currently run,
+    for example based on API keys, dependencies, or service status.
+    Tools implementing this protocol will only be exposed to the LLM
+    when they report being available.
+    
+    Example:
+        ```python
+        @tool(availability=lambda: (bool(os.getenv("API_KEY")), "API_KEY missing"))
+        def search_web(query: str) -> str:
+            return "Search results..."
+            
+        class MyTool(BaseTool):
+            def check_availability(self) -> tuple[bool, str]:
+                if not self.api_key:
+                    return False, "API key not configured"
+                return True, ""
+        ```
+    """
+    
+    def check_availability(self) -> tuple[bool, str]:
+        """
+        Check if this tool is currently available to run.
+        
+        Called at schema-build time. Must be fast (no I/O).
+        
+        Returns:
+            tuple of (is_available, reason_if_not)
+            - is_available: True if tool can run, False otherwise
+            - reason_if_not: Human-readable reason why tool is unavailable (empty string if available)
+        """
+        ...
+
+
 __all__ = [
     'ToolProtocol',
     'CallableToolProtocol', 
     'AsyncToolProtocol',
     'ValidatableToolProtocol',
+    'ToolAvailabilityProtocol',
 ]

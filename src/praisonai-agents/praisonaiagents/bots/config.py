@@ -5,7 +5,7 @@ Provides configuration dataclasses for bot settings.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 
 @dataclass
@@ -55,6 +55,7 @@ class BotConfig:
         "schedule_add", "schedule_list", "schedule_remove", 
         "store_memory", "search_memory",
         "store_learning", "search_learning",
+        "clarify",
     ])
     
     # Auto-approve tool calls (useful for trusted environments)
@@ -74,6 +75,12 @@ class BotConfig:
     # Session TTL in seconds. 0 = disabled (sessions never expire).
     # When set, stale sessions older than this are auto-reaped.
     session_ttl: int = 0
+    
+    # Unknown user policy - how to handle users not in allowed_users list
+    # "deny" - silently drop messages (backward compatible default)
+    # "allow" - allow all users (overrides allowed_users)  
+    # "pair" - use pairing flow to get owner approval
+    unknown_user_policy: Literal["deny", "allow", "pair"] = "deny"
     
     metadata: Dict[str, Any] = field(default_factory=dict)
     
@@ -102,6 +109,7 @@ class BotConfig:
             "ack_emoji": self.ack_emoji,
             "done_emoji": self.done_emoji,
             "session_ttl": self.session_ttl,
+            "unknown_user_policy": self.unknown_user_policy,
             "metadata": self.metadata,
         }
     
