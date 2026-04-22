@@ -93,7 +93,7 @@ def apply_bot_smart_defaults(agent: Any, config: Optional[Any] = None, session_k
     explicit_empty = getattr(agent, '_explicit_empty_tools', False)
     if not current_tools and not explicit_empty:
         # Use safe defaults (exclude destructive tools like execute_command)
-        default_safe_tools = _get_default_safe_tools(config)
+        default_safe_tools = _get_default_safe_tools(config, workspace=workspace)
         
         if default_safe_tools:
             try:
@@ -113,7 +113,7 @@ def apply_bot_smart_defaults(agent: Any, config: Optional[Any] = None, session_k
     return agent
 
 
-def _get_default_safe_tools(config: Optional[Any] = None) -> List[str]:
+def _get_default_safe_tools(config: Optional[Any] = None, workspace=None) -> List[str]:
     """Get the list of safe tools to inject by default.
     
     Safe tools are those that don't write to filesystem, execute code, or
@@ -139,8 +139,12 @@ def _get_default_safe_tools(config: Optional[Any] = None) -> List[str]:
         if config_tools:
             # Filter out known destructive tools unless explicitly allowed
             safe_config_tools = []
-            # File tools are now safe due to workspace containment
+            # File tools are safe only when a workspace is actually configured.
             destructive_tools = {"execute_command", "shell_command"}
+            if workspace is None:
+                destructive_tools |= {
+                    "write_file", "edit_file", "delete_file", "skill_manage",
+                }
             
             for tool in config_tools:
                 if tool in destructive_tools:

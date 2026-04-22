@@ -29,6 +29,16 @@ class FileTools:
         """
         self._workspace = workspace
     
+    def _require_workspace_access(self, *, write: bool) -> None:
+        """Check workspace access permissions for read/write operations."""
+        if self._workspace is None:
+            return
+        access = getattr(self._workspace, "access", "rw")
+        if access == "none":
+            raise PermissionError("Workspace access is disabled")
+        if write and access != "rw":
+            raise PermissionError(f"Workspace is not writable: access={access!r}")
+
     def _validate_path(self, filepath: str) -> str:
         """
         Validate and normalize a file path to prevent path traversal attacks.
@@ -46,6 +56,7 @@ class FileTools:
         if self._workspace is not None:
             return str(self._workspace.resolve(filepath))
         
+        # Fallback to basic validation (when workspace=None)
         # Expand ~ to user home directory FIRST (before any validation)
         if filepath.startswith('~'):
             filepath = os.path.expanduser(filepath)
@@ -101,6 +112,8 @@ class FileTools:
             bool: True if successful, False otherwise
         """
         try:
+            # Check workspace permissions for write operations
+            self._require_workspace_access(write=True)
             # Validate path to prevent traversal attacks
             safe_path = self._validate_path(filepath)
             # Create directory if it doesn't exist
@@ -135,6 +148,12 @@ class FileTools:
             safe_dir = self._validate_path(directory)
             path = Path(safe_dir)
             if pattern:
+                pattern_path = Path(pattern)
+                if pattern_path.is_absolute() or any(
+                    part == ".." or part.startswith("..")
+                    for part in pattern_path.parts
+                ):
+                    raise ValueError(f"Invalid file pattern: {pattern}")
                 files = path.glob(pattern)
             else:
                 files = path.iterdir()
@@ -203,6 +222,8 @@ class FileTools:
             bool: True if successful, False otherwise
         """
         try:
+            # Check workspace permissions for write operations
+            self._require_workspace_access(write=True)
             # Validate paths to prevent traversal attacks
             safe_src = self._validate_path(src)
             safe_dst = self._validate_path(dst)
@@ -228,6 +249,8 @@ class FileTools:
             bool: True if successful, False otherwise
         """
         try:
+            # Check workspace permissions for write operations
+            self._require_workspace_access(write=True)
             # Validate paths to prevent traversal attacks
             safe_src = self._validate_path(src)
             safe_dst = self._validate_path(dst)
@@ -252,6 +275,8 @@ class FileTools:
             bool: True if successful, False otherwise
         """
         try:
+            # Check workspace permissions for write operations
+            self._require_workspace_access(write=True)
             # Validate path to prevent traversal attacks
             safe_path = self._validate_path(filepath)
             os.remove(safe_path)
@@ -293,6 +318,8 @@ class FileTools:
             }
         
         try:
+            # Check workspace permissions for write operations
+            self._require_workspace_access(write=True)
             # Validate destination path
             safe_path = self._validate_path(destination)
             

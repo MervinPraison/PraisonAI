@@ -1,6 +1,9 @@
 """SkillManager for Agent Skills integration."""
 
+import logging
 from typing import List, Optional, Dict
+
+logger = logging.getLogger(__name__)
 
 from .models import SkillMetadata
 from .discovery import discover_skills
@@ -295,8 +298,7 @@ author: agent
 """
             
             skill_file = skill_path / "SKILL.md"
-            with open(skill_file, 'w', encoding='utf-8') as f:
-                f.write(skill_content)
+            self._write_skill_atomically(skill_file, skill_content)
             
             # Load the new skill
             skill = self.add_skill(str(skill_path))
@@ -338,12 +340,13 @@ author: agent
             with open(skill_file, 'r', encoding='utf-8') as f:
                 existing_content = f.read()
             
-            # Extract frontmatter
+            # Extract frontmatter (preserve verbatim, only strip leading fence)
             frontmatter = ""
             if existing_content.startswith('---\n'):
                 parts = existing_content.split('\n---\n', 1)
                 if len(parts) == 2:
-                    frontmatter = f"---\n{parts[0].replace('---\n', '')}\n---\n\n"
+                    fm_body = parts[0].removeprefix('---\n')
+                    frontmatter = f"---\n{fm_body}\n---\n\n"
             
             # Write updated content
             new_content = frontmatter + content
@@ -440,12 +443,10 @@ author: agent
             if not skill.properties.path:
                 return {"success": False, "error": f"Cannot delete skill '{name}' - no path available"}
             
-            # Remove from memory first
-            del self._skills[name]
-            
-            # Remove directory
+            # Remove directory first, then update in-memory index.
             import shutil
             shutil.rmtree(skill.properties.path)
+            self._skills.pop(name, None)
             
             return {"success": True, "skill": name, "path": str(skill.properties.path)}
             
@@ -558,14 +559,12 @@ author: agent
         try:
             with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
                 f.write(content)
-            # Atomic rename
             os.replace(temp_path, file_path)
-        except:
-            # Clean up temp file if something failed
+        except Exception:
             try:
                 os.unlink(temp_path)
-            except:
-                pass
+            except OSError:
+                logger.debug("Failed to clean up temp file %s", temp_path, exc_info=True)
             raise
 
     def clear(self) -> None:

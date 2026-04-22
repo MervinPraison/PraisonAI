@@ -35,29 +35,19 @@ class SessionTools:
             JSON string with search results
         """
         try:
-            # This is a placeholder implementation
-            # In a real implementation, this would search through stored session data
-            results = {
+            # No session-store backend is wired up yet. Return an empty, honest
+            # result so the LLM cannot incorporate fabricated history.
+            return json.dumps({
+                "success": False,
                 "query": query,
                 "session_id": session_id,
-                "results": [
-                    {
-                        "session_id": "example-session",
-                        "timestamp": "2024-01-01T12:00:00",
-                        "relevance_score": 0.95,
-                        "snippet": f"Found relevant conversation about {query}...",
-                        "context": "This is a placeholder result for session search."
-                    }
-                ],
-                "total_found": 1,
+                "results": [],
+                "total_found": 0,
                 "limit": limit,
-                "note": "This is a placeholder implementation. Session search requires integration with session storage backend."
-            }
-            
-            return json.dumps(results, indent=2)
-            
+                "error": "session_search is not configured: no session storage backend available",
+            }, indent=2)
         except Exception as e:
-            return json.dumps({"error": f"Error searching sessions: {str(e)}"})
+            return json.dumps({"success": False, "error": f"Error searching sessions: {e!s}"})
 
 
 # Create default instance for direct function access

@@ -38,27 +38,16 @@ class DelegationTools:
             JSON string with delegation result
         """
         try:
-            # This is a placeholder implementation
-            # In a real implementation, this would create and manage sub-agents
-            result = {
-                "success": True,
-                "task_id": f"task-{hash(task_description) % 10000:04d}",
+            return json.dumps({
+                "success": False,
                 "task_description": task_description,
                 "agent_type": agent_type,
-                "priority": priority,
-                "timeout": timeout,
-                "status": "delegated",
-                "estimated_completion": "2-5 minutes",
-                "result": f"Successfully delegated task: {task_description}",
-                "note": "This is a placeholder implementation. Task delegation requires integration with sub-agent management system."
-            }
-            
-            return json.dumps(result, indent=2)
-            
+                "error": "delegate_task is not configured: no sub-agent runtime is wired up",
+            }, indent=2)
         except Exception as e:
             return json.dumps({
                 "success": False,
-                "error": f"Error delegating task: {str(e)}"
+                "error": f"Error delegating task: {e!s}"
             })
 
 

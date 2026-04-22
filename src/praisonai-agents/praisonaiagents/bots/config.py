@@ -64,10 +64,9 @@ class BotConfig:
         "todo_add", "todo_list", "todo_update",
         # Skills (self-improving) — NEW
         "skills_list", "skill_view", "skill_manage",
-        # Delegation — NEW
-        "delegate_task",
-        # Session — NEW
-        "session_search",
+        # Delegation & session tools are intentionally NOT auto-injected yet;
+        # their reference implementations are placeholders. Users can opt in
+        # via BotConfig(default_tools=[..., "delegate_task", "session_search"]).
     ])
     
     # Auto-approve tool calls (useful for trusted environments)

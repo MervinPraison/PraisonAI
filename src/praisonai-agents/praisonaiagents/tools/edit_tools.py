@@ -60,6 +60,9 @@ class EditTools:
                 content = f.read()
             
             # Perform replacement
+            if old_string == "":
+                return "Error: old_string must be non-empty"
+                
             if old_string not in content:
                 return f"Error: String not found in file: '{old_string[:50]}...'"
             
