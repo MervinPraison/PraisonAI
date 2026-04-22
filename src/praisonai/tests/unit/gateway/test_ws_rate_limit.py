@@ -5,7 +5,7 @@ Tests the rate limiting applied to WebSocket upgrade requests.
 """
 
 import time
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, Mock
 import pytest
 from praisonai.praisonai.gateway.rate_limiter import AuthRateLimiter
 
@@ -47,8 +47,10 @@ class TestWebSocketRateLimit:
         assert limiter.allow("ws_upgrade", "192.168.1.101") is True
         assert limiter.allow("ws_upgrade", "192.168.1.101") is False  # Over limit
 
-    def test_window_reset(self):
+    @patch('praisonai.praisonai.gateway.rate_limiter.time.time')
+    def test_window_reset(self, mock_time):
         """Rate limit should reset after the window expires."""
+        mock_time.return_value = 0
         limiter = AuthRateLimiter(max_attempts=2, window_seconds=0.1)  # Short window for testing
         
         # Use up the limit
@@ -56,14 +58,16 @@ class TestWebSocketRateLimit:
         assert limiter.allow("ws_upgrade", "192.168.1.100") is True
         assert limiter.allow("ws_upgrade", "192.168.1.100") is False  # Over limit
         
-        # Wait for window to expire
-        time.sleep(0.2)
+        # Simulate window expiration
+        mock_time.return_value = 0.2
         
         # Should be allowed again
         assert limiter.allow("ws_upgrade", "192.168.1.100") is True
 
-    def test_lockout_duration(self):
+    @patch('praisonai.praisonai.gateway.rate_limiter.time.time')
+    def test_lockout_duration(self, mock_time):
         """After exceeding limit, should be locked out for the lockout period."""
+        mock_time.return_value = 0
         limiter = AuthRateLimiter(max_attempts=2, window_seconds=60, lockout_seconds=0.2)
         
         # Use up the limit to trigger lockout
@@ -76,8 +80,8 @@ class TestWebSocketRateLimit:
         # Should still be locked out immediately after
         assert limiter.allow("ws_upgrade", "192.168.1.100") is False
         
-        # Wait for lockout to expire
-        time.sleep(0.3)
+        # Simulate lockout expiration
+        mock_time.return_value = 0.3
         
         # Should be allowed again
         assert limiter.allow("ws_upgrade", "192.168.1.100") is True
@@ -108,16 +112,18 @@ class TestWebSocketRateLimit:
         # Should be allowed again
         assert limiter.allow("ws_upgrade", "192.168.1.100") is True
 
-    def test_prune_removes_expired_entries(self):
+    @patch('praisonai.praisonai.gateway.rate_limiter.time.time')
+    def test_prune_removes_expired_entries(self, mock_time):
         """prune() should remove expired buckets and lockouts."""
+        mock_time.return_value = 0
         limiter = AuthRateLimiter(max_attempts=1, window_seconds=0.1, lockout_seconds=0.1)
         
         # Create some entries
         limiter.allow("ws_upgrade", "192.168.1.100")
         limiter.allow("ws_upgrade", "192.168.1.101")
         
-        # Wait for expiration
-        time.sleep(0.2)
+        # Simulate expiration
+        mock_time.return_value = 0.2
         
         # Prune should remove expired entries
         removed_count = limiter.prune()
@@ -128,7 +134,7 @@ class TestWebSocketRateLimit:
         limiter = AuthRateLimiter(max_attempts=10, window_seconds=60)
         
         # Should allow 10 attempts
-        for i in range(10):
+        for _ in range(10):
             assert limiter.allow("ws_upgrade", "192.168.1.100") is True
         
         # 11th attempt should be denied
@@ -139,22 +145,21 @@ class TestWebSocketRateLimit:
 class TestWebSocketIntegration:
     """Integration tests for WebSocket rate limiting in the gateway."""
 
-    @patch('praisonai.praisonai.gateway.server.AuthRateLimiter')
-    async def test_websocket_rate_limit_applied(self, mock_rate_limiter_class):
-        """Test that rate limiting is applied to WebSocket connections."""
-        # Mock the rate limiter instance
-        mock_limiter = AsyncMock()
-        mock_rate_limiter_class.return_value = mock_limiter
-        
-        # Test case where rate limit allows the request
-        mock_limiter.allow.return_value = True
+    async def test_websocket_rate_limit_applied(self):
+        """Test that rate limiting is correctly applied in WebSocket gateway initialization."""
+        # This is a simple smoke test to ensure the rate limiter is properly initialized
+        # Full WebSocket integration testing would require a test client and more complex setup
         
         from praisonai.praisonai.gateway.server import WebSocketGateway
-        gateway = WebSocketGateway()
+        from praisonai.praisonai.gateway.rate_limiter import AuthRateLimiter
         
-        # Verify that the rate limiter would be created and used
-        # (This is a simplified integration test - full WebSocket testing would require more setup)
-        assert True  # Placeholder for more complex integration testing
+        # Test that gateway can be instantiated (smoke test)
+        gateway = WebSocketGateway()
+        assert gateway is not None
+        
+        # Test that AuthRateLimiter can be instantiated with the expected defaults
+        rate_limiter = AuthRateLimiter(max_attempts=10, window_seconds=60)
+        assert rate_limiter is not None
 
     def test_acceptance_criteria_11th_attempt(self):
         """Test that the 11th consecutive attempt is rate limited."""

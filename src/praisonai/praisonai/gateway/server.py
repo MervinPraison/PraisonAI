@@ -299,16 +299,13 @@ class WebSocketGateway:
         from .origin_check import check_origin, is_loopback, GatewayStartupError
 
         # Validate allowed_origins configuration for external binds
-        try:
-            if not is_loopback(self._host) and not self.config.allowed_origins:
-                raise GatewayStartupError(
-                    f"Gateway is binding to external interface '{self._host}' but no allowed_origins configured. "
-                    "Set GATEWAY_ALLOWED_ORIGINS environment variable or configure allowed_origins in gateway config. "
-                    "Example: GATEWAY_ALLOWED_ORIGINS=\"https://your-ui.example.com,https://localhost:3000\""
-                )
-        except GatewayStartupError:
+        if not is_loopback(self._host) and not self.config.allowed_origins:
             logger.error("Gateway startup failed due to configuration error")
-            raise
+            raise GatewayStartupError(
+                f"Gateway is binding to external interface '{self._host}' but no allowed_origins configured. "
+                "Set GATEWAY_ALLOWED_ORIGINS environment variable or configure allowed_origins in gateway config. "
+                "Example: GATEWAY_ALLOWED_ORIGINS=\"https://your-ui.example.com,https://localhost:3000\""
+            )
         
         try:
             from starlette.applications import Starlette
@@ -405,12 +402,13 @@ class WebSocketGateway:
             # Get client IP for rate limiting
             client_ip = websocket.client.host if websocket.client else "unknown"
 
-            # Rate limiting for WebSocket upgrades
-            if not _ws_upgrade_rate.allow("ws_upgrade", client_ip):
-                retry = _ws_upgrade_rate.time_until_allowed("ws_upgrade", client_ip)
-                await websocket.close(code=4008, reason="Rate limited")
-                logger.warning(f"WebSocket upgrade rate limited for {client_ip} (retry in {retry:.0f}s)")
-                return
+            # Rate limiting for WebSocket upgrades (exempt loopback per acceptance criteria)
+            if not is_loopback(client_ip) and not is_loopback(self._host):
+                if not _ws_upgrade_rate.allow("ws_upgrade", client_ip):
+                    retry = _ws_upgrade_rate.time_until_allowed("ws_upgrade", client_ip)
+                    await websocket.close(code=4008, reason="Rate limited")
+                    logger.warning(f"WebSocket upgrade rate limited for {client_ip} (retry in {retry:.0f}s)")
+                    return
 
             # Origin validation (CSWSH defense)
             origin = websocket.headers.get("origin")

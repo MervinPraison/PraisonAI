@@ -369,6 +369,7 @@ class MultiChannelGatewayConfig:
             host=gw_data.get("host", "127.0.0.1"),
             port=gw_data.get("port", 8765),
             cors_origins=gw_data.get("cors_origins", []),
+            allowed_origins=gw_data.get("allowed_origins", []),
             auth_token=gw_data.get("auth_token"),
             max_connections=gw_data.get("max_connections", 1000),
         )
