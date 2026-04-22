@@ -40,6 +40,47 @@ def _get_secret() -> str:
     return os.environ.get("PRAISONAI_GATEWAY_SECRET", "") or secrets.token_hex(32)
 
 
+def _load_or_create_secret(store_dir: str) -> bytes:
+    """Persist per-install secret at <store_dir>/.gateway_secret (0600).
+    
+    This ensures HMAC signatures remain consistent across process restarts,
+    allowing pairing codes to work between gateway and CLI processes.
+    """
+    env = os.environ.get("PRAISONAI_GATEWAY_SECRET")
+    if env:
+        return env.encode()
+    
+    os.makedirs(store_dir, exist_ok=True)
+    secret_path = os.path.join(store_dir, ".gateway_secret")
+    
+    if os.path.exists(secret_path):
+        try:
+            with open(secret_path, "rb") as f:
+                secret = f.read().strip()
+            # Warn if file is world-readable
+            import stat
+            mode = stat.S_IMODE(os.stat(secret_path).st_mode)
+            if mode != 0o600:
+                logger.warning(f"Gateway secret file {secret_path} has insecure permissions {oct(mode)}")
+            return secret
+        except (OSError, IOError) as e:
+            logger.warning(f"Failed to read gateway secret from {secret_path}: {e}")
+    
+    # Generate new secret
+    secret = secrets.token_hex(32).encode()
+    try:
+        # Create file with secure permissions (0600)
+        fd = os.open(secret_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(secret)
+        logger.info(f"Generated new gateway secret at {secret_path}")
+    except (OSError, IOError) as e:
+        logger.warning(f"Failed to save gateway secret to {secret_path}: {e}")
+        # Fall back to in-memory secret for this process
+    
+    return secret
+
+
 @dataclass
 class PairedChannel:
     """Record of an authorised external channel."""
@@ -97,7 +138,7 @@ class PairingStore:
         self._dir = store_dir or _DEFAULT_STORE_DIR
         self._path = os.path.join(self._dir, _DEFAULT_STORE_FILE)
         self._code_ttl = code_ttl
-        self._secret = (secret or _get_secret()).encode()
+        self._secret = secret.encode() if secret else _load_or_create_secret(self._dir)
         self._max_pending = max_pending
         self._lock = threading.Lock()
 
