@@ -47,16 +47,31 @@ DEFAULT_DANGEROUS_TOOLS: Dict[str, str] = {
 }
 
 # Permission presets — resolved to deny frozensets at Agent.__init__ time.
-# Usage: Agent(approval="safe")
+# Usage: Agent(approval="safe") — or set PRAISONAI_TOOL_SAFETY=<preset>
+# which applies as the default when no ``approval=`` kwarg is passed.
+#
+# ``default`` is the baseline we apply when nothing is configured: it
+# only blocks operations the LLM should never execute unattended —
+# destructive file ops (delete/move/copy) and arbitrary shell/code
+# execution. Read, create and edit stay allowed because those are
+# what 99% of useful agent workflows need. Users who want the old
+# ``trust the LLM with everything`` behaviour pass ``approval="full"``
+# or set ``PRAISONAI_TOOL_SAFETY=off``; users who want stricter
+# controls can opt into ``approval="safe"`` or ``"read_only"``.
 PERMISSION_PRESETS = {
+    # "default" — blocks delete + shell/code exec. Allows read/create/edit.
+    "default": frozenset({
+        "execute_command", "kill_process", "execute_code", "acp_execute_command",
+        "delete_file", "move_file", "copy_file", "acp_delete_file",
+    }),
     # "safe" — blocks all dangerous tools (file writes, shell exec, etc.)
     "safe": frozenset(DEFAULT_DANGEROUS_TOOLS.keys()),
-    # "read_only" — blocks dangerous tools + write operations
-    "read_only": frozenset(DEFAULT_DANGEROUS_TOOLS.keys()) | frozenset({
-        "write_file", "copy_file", "move_file",
-    }),
-    # "full" — no restrictions
+    # "read_only" — alias of "safe" (blocks all dangerous tools)
+    "read_only": frozenset(DEFAULT_DANGEROUS_TOOLS.keys()),
+    # "full" — no restrictions (trust the LLM). Equivalent to "off" env.
     "full": frozenset(),
+    # "off" — alias of "full" for the env-var off-switch.
+    "off": frozenset(),
 }
 
 class ApprovalRegistry:

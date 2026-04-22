@@ -9,6 +9,7 @@ import logging
 from praisonaiagents._logging import get_logger
 import threading
 from typing import Any, Callable, Dict, List, Optional, Set, Union
+from ..utils.async_bridge import run_coroutine_from_any_context
 from dataclasses import dataclass, field
 from .event import Event, EventType
 
@@ -209,13 +210,13 @@ class EventBus:
         for sub in subscribers:
             try:
                 if sub.is_async:
-                    # Schedule async callback
+                    # Schedule async callback safely
                     try:
                         loop = asyncio.get_running_loop()
                         loop.create_task(sub.callback(event))
                     except RuntimeError:
-                        # No running loop, run synchronously
-                        asyncio.run(sub.callback(event))
+                        # No running loop, use safe async bridge
+                        run_coroutine_from_any_context(sub.callback(event))
                 else:
                     sub.callback(event)
             except Exception as e:

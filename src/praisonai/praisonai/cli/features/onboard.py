@@ -23,10 +23,13 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Platform info for the wizard.
-# ``allowed_users_env`` / ``home_channel_env`` mirror the hermes/openclaw
-# pattern: a per-platform allowlist of user IDs and a default "home" channel
-# for proactive/cron deliveries.
+# Platform info for the wizard. ``allowed_users_env`` is a per-platform
+# allowlist of user IDs used by the channel adapter to restrict inbound
+# traffic. We deliberately don't carry a ``home_channel_env`` any more:
+# no code path in the gateway reads ``home_channel`` today (the scheduler
+# uses an explicit DeliveryTarget.channel_id per job), and the prompt
+# confused non-developers. If a proactive-delivery feature ships later
+# it can reintroduce this on an opt-in basis.
 PLATFORMS = {
     "telegram": {
         "name": "Telegram",
@@ -34,7 +37,6 @@ PLATFORMS = {
         "token_help": "Get from @BotFather on Telegram: https://t.me/BotFather",
         "install_hint": "pip install python-telegram-bot",
         "allowed_users_env": "TELEGRAM_ALLOWED_USERS",
-        "home_channel_env": "TELEGRAM_HOME_CHANNEL",
         "user_id_help": "Find your user ID by messaging @userinfobot on Telegram",
     },
     "discord": {
@@ -43,7 +45,6 @@ PLATFORMS = {
         "token_help": "Create at https://discord.com/developers/applications",
         "install_hint": "pip install discord.py",
         "allowed_users_env": "DISCORD_ALLOWED_USERS",
-        "home_channel_env": "DISCORD_HOME_CHANNEL",
         "user_id_help": "Enable Developer Mode (Settings > Advanced), right-click your name > Copy User ID",
     },
     "slack": {
@@ -53,7 +54,6 @@ PLATFORMS = {
         "install_hint": "pip install slack-bolt",
         "extra_env": {"SLACK_APP_TOKEN": "App token (xapp-...)"},
         "allowed_users_env": "SLACK_ALLOWED_USERS",
-        "home_channel_env": "SLACK_HOME_CHANNEL",
         "user_id_help": "Your Slack member ID (U...). Profile > More > Copy member ID",
     },
     "whatsapp": {
@@ -63,7 +63,6 @@ PLATFORMS = {
         "install_hint": "pip install aiohttp",
         "extra_env": {"WHATSAPP_PHONE_NUMBER_ID": "Phone number ID"},
         "allowed_users_env": "WHATSAPP_ALLOWED_USERS",
-        "home_channel_env": "WHATSAPP_HOME_CHANNEL",
         "user_id_help": "Your WhatsApp phone number in E.164 (e.g. 15551234567, no +)",
     },
 }
@@ -79,8 +78,8 @@ def _save_env_vars(env_vars: Dict[str, Optional[str]]) -> Optional[Path]:
     """Atomically merge ``env_vars`` into ``~/.praisonai/.env`` (chmod 600).
 
     - Non-empty string values are written (updating existing keys).
-    - ``None`` values **remove** the key from the file (supports "clear" updates
-      so the user can drop an allowlist or home-channel).
+    - ``None`` values **remove** the key from the file (supports "clear" updates,
+      e.g. dropping an allowlist).
     - Empty-string values are skipped.
     Existing keys not referenced in ``env_vars`` are preserved. Written with a
     temp-then-rename to avoid partial writes.
@@ -196,9 +195,6 @@ def _generate_bot_yaml(platforms: List[str], agent_name: str = "assistant", agen
         allowed_env = info.get("allowed_users_env")
         if allowed_env:
             lines.append(f"    allowed_users: ${{{allowed_env}}}")
-        home_env = info.get("home_channel_env")
-        if home_env:
-            lines.append(f"    home_channel: ${{{home_env}}}")
         if plat == "whatsapp":
             lines.append("    phone_number_id: ${WHATSAPP_PHONE_NUMBER_ID}")
         # Gateway-style routing (ignored by `bot start` which uses top-level routing).
@@ -347,9 +343,8 @@ class OnboardWizard:
                         os.environ[extra_env] = extra_val
                         env_to_save[extra_env] = extra_val
 
-            # Step 2b: Security — allowlist + home channel (mirrors hermes)
+            # Step 2b: Security — allowlist (mirrors hermes)
             allowed_env = info.get("allowed_users_env")
-            home_env = info.get("home_channel_env")
             if allowed_env:
                 existing_allow = os.environ.get(allowed_env, "").strip()
                 if existing_allow:
@@ -399,34 +394,8 @@ class OnboardWizard:
                             "  [yellow]⚠  Warning:[/yellow] no allowlist set — anyone who finds your bot can use it."
                         )
 
-                # Home channel (default = first allowed user) — also updatable
-                if home_env:
-                    existing_home = os.environ.get(home_env, "").strip()
-                    first_allowed = ""
-                    saved_allow = env_to_save.get(allowed_env, existing_allow)
-                    if isinstance(saved_allow, str) and saved_allow:
-                        first_allowed = saved_allow.split(",")[0].strip()
-                    default_home = existing_home or first_allowed
-                    if existing_home:
-                        console.print(
-                            f"  [green]✓[/green] {home_env} = [cyan]{existing_home}[/cyan]"
-                        )
-                        prompt_label = (
-                            f"  Update home channel for {info['name']}? (Enter = keep current)"
-                        )
-                    else:
-                        prompt_label = (
-                            f"  Home channel / user ID for proactive messages ({home_env})"
-                        )
-                    home_val = Prompt.ask(
-                        prompt_label,
-                        default=default_home,
-                        show_default=bool(default_home),
-                    ).strip()
-                    if home_val and home_val != existing_home:
-                        os.environ[home_env] = home_val
-                        env_to_save[home_env] = home_val
-                        console.print(f"  [green]✓[/green] Home channel set to {home_val}")
+                # Home-channel prompt intentionally removed — see PLATFORMS
+                # docstring above. No code path consumes home_channel today.
 
         # Persist everything collected above to ~/.praisonai/.env
         env_file = _save_env_vars(env_to_save)
@@ -448,11 +417,17 @@ class OnboardWizard:
                     console.print(f"[red]✗ {str(e)[:100]}[/red]")
 
         # Step 4: Agent configuration
-        console.print("\n[bold]Step 4: Configure your agent[/bold]\n")
-        self.agent_name = Prompt.ask("Agent name", default="assistant")
-        self.agent_instructions = Prompt.ask(
-            "Agent instructions",
-            default="You are a helpful AI assistant.",
+        #
+        # We no longer ask for an agent name and instructions up-front:
+        # 95% of first-time users pressed Enter through both prompts, and
+        # the remaining 5% are better served editing the generated bot.yaml
+        # afterwards (which also shows them the full schema). Defaults are
+        # already set in __init__.
+        console.print(
+            "\n[bold]Step 4: Agent defaults applied[/bold] "
+            f"[dim](name=[cyan]{self.agent_name}[/cyan], "
+            f"instructions=[cyan]{self.agent_instructions!r}[/cyan] — "
+            "edit bot.yaml to customise)[/dim]"
         )
 
         # Step 4b: Ensure a stable GATEWAY_AUTH_TOKEN is persisted. Without
@@ -470,6 +445,14 @@ class OnboardWizard:
             self._gateway_token = existing_gateway_token
 
         # Step 5: Generate config
+        #
+        # We write to the canonical default path without asking. An earlier
+        # free-text "Config file path" prompt caused real user pain: typing
+        # 'n' (meaning 'no') created a literal file named ``n`` in cwd. The
+        # canonical path is discoverable via ``praisonai doctor`` and is
+        # honoured by both ``praisonai bot start`` and ``praisonai gateway
+        # start`` with zero flags. Overwrite-confirm still guards existing
+        # configs so power users who hand-edited the file aren't surprised.
         console.print("\n[bold]Step 5: Generate configuration[/bold]\n")
         yaml_content = _generate_bot_yaml(
             self.selected_platforms,
@@ -478,19 +461,20 @@ class OnboardWizard:
         )
 
         from praisonai.cli._paths import default_bot_config_path
-        default_cfg = str(default_bot_config_path())
-        self.config_path = Prompt.ask("Config file path", default=default_cfg)
-        # Ensure parent dir exists (e.g. ~/.praisonai/) before writing.
+        self.config_path = str(default_bot_config_path())
         os.makedirs(os.path.dirname(os.path.abspath(self.config_path)) or ".", exist_ok=True)
 
         if os.path.exists(self.config_path):
-            if not Confirm.ask(f"  {self.config_path} exists. Overwrite?", default=False):
-                console.print("  [dim]Skipped[/dim]")
+            if not Confirm.ask(
+                f"  {self.config_path} exists. Overwrite with fresh config?",
+                default=False,
+            ):
+                console.print("  [dim]Kept existing file[/dim]")
                 return
 
         with open(self.config_path, "w") as f:
             f.write(yaml_content)
-        console.print(f"  [green]✓[/green] Written to {self.config_path}")
+        console.print(f"  [green]✓[/green] Written to [cyan]{self.config_path}[/cyan]")
 
         # Step 6: Optional daemon install
         # Guard: refuse to install a daemon that has no tokens — it would loop
@@ -510,35 +494,67 @@ class OnboardWizard:
                 "  [dim]Re-run [cyan]praisonai onboard[/cyan] once you have the token(s) and "
                 "the service will be installed automatically.[/dim]"
             )
-        elif Confirm.ask("\nInstall as background service (daemon)?", default=True):
-            try:
-                from praisonai.daemon import install_daemon
-                result = install_daemon(config_path=self.config_path)
-                if result.get("ok"):
-                    console.print(f"  [green]✓[/green] {result.get('message', 'Service installed')}")
-                else:
-                    console.print(f"  [red]✗[/red] {result.get('error', 'Install failed')}")
-            except Exception as e:
-                console.print(f"  [red]✗[/red] {str(e)[:200]}")
+        else:
+            # Install the daemon by default — no prompt. The previous
+            # "Install as background service (daemon)? [Y/n]" question
+            # confused non-developer users ("what does daemon mean?") and
+            # 95% answered Yes anyway. If they really don't want it, they
+            # run `praisonai gateway uninstall` afterwards. This keeps the
+            # onboarding 'do-the-thing-for-me' feel instead of 'quiz me'.
+            daemon_success = self._install_daemon_with_feedback(
+                console.print, self.config_path
+            )
+        
+        if 'daemon_success' not in locals():
+            daemon_success = False
 
-        # Done — commands referenced here must exist in `praisonai --help`.
+        # Done panel. Commands referenced here must exist in `praisonai --help`.
+        # OS-aware daemon management hints: non-developers struggle to find
+        # launchctl/systemctl invocations themselves, so we surface the exact
+        # line for their platform. Label ``ai.praison.bot`` is used for launchd,
+        # while ``praisonai-bot`` is used for systemd.
         _tok = getattr(self, "_gateway_token", "")
         _masked = (_tok[:4] + "…" + _tok[-4:]) if len(_tok) >= 10 else "(set)"
         _health_url = "http://127.0.0.1:8765/health"
-        _info_url = f"http://127.0.0.1:8765/info?token={_tok}" if _tok else "http://127.0.0.1:8765/info"
+        _info_url = (
+            f"http://127.0.0.1:8765/info?token={_tok}"
+            if _tok
+            else "http://127.0.0.1:8765/info"
+        )
+        import platform as _platform  # stdlib, free
+        _os = _platform.system().lower()
+        if _os == "darwin":
+            _restart_cmd = "launchctl kickstart -k gui/$(id -u)/ai.praison.bot"
+        elif _os == "linux":
+            _restart_cmd = "systemctl --user restart praisonai-bot"
+        elif _os == "windows":
+            _restart_cmd = "schtasks /End /TN PraisonAIGateway && schtasks /Run /TN PraisonAIGateway"
+        else:
+            _restart_cmd = "praisonai gateway install  # re-run installer"
+        # Adjust headline based on daemon install success
+        daemon_running_text = (
+            "Your bot is now running in the background." if daemon_success
+            else "Configuration complete."
+        )
+        
         console.print(Panel(
-            f"[bold green]Setup complete![/bold green]\n\n"
+            f"[bold green]Setup complete![/bold green] "
+            f"[dim]{daemon_running_text}[/dim]\n\n"
             f"[bold]🦞 Dashboard UI:[/bold]\n"
             f"  [cyan]praisonai claw[/cyan]          [dim]→ http://127.0.0.1:8082[/dim]\n\n"
-            f"[bold]Start your bot (foreground):[/bold]\n"
-            f"  [cyan]praisonai bot start[/cyan]\n\n"
             f"[bold]Gateway endpoints:[/bold]\n"
             f"  Health (public):  [cyan]{_health_url}[/cyan]\n"
             f"  Info (authed):    [cyan]{_info_url}[/cyan]\n"
             f"  [dim]Token {_masked} stored in ~/.praisonai/.env as GATEWAY_AUTH_TOKEN[/dim]\n\n"
-            f"[bold]Check everything:[/bold]\n"
-            f"  [cyan]praisonai doctor[/cyan]\n"
-            f"  [cyan]praisonai gateway status[/cyan]",
+            f"[bold]Manage the daemon:[/bold]\n"
+            f"  [cyan]praisonai gateway status[/cyan]     [dim]# is it running?[/dim]\n"
+            f"  [cyan]praisonai gateway logs[/cyan]       [dim]# tail the logs[/dim]\n"
+            f"  [cyan]{_restart_cmd}[/cyan]\n"
+            f"  [cyan]praisonai gateway uninstall[/cyan]  [dim]# remove the daemon[/dim]\n\n"
+            f"[bold]Re-run or reconfigure:[/bold]\n"
+            f"  [cyan]praisonai onboard[/cyan]            [dim]# change tokens / add platforms[/dim]\n"
+            f"  [cyan]praisonai gateway start[/cyan]      [dim]# run in foreground (skip the daemon)[/dim]\n"
+            f"  [cyan]praisonai doctor[/cyan]             [dim]# diagnose the whole stack[/dim]",
             title="✅ Done",
             border_style="green",
         ))
@@ -549,11 +565,38 @@ class OnboardWizard:
         bot = Bot(platform, token=self.tokens.get(platform, ""))
         return await bot.probe()
 
+    def _install_daemon_with_feedback(self, print_fn, config_path: str) -> bool:
+        """Install daemon with error handling and feedback. Returns success status."""
+        try:
+            # First check if already installed to make idempotent
+            from praisonai.daemon import get_daemon_status, install_daemon
+            status = get_daemon_status()
+            if status.get("installed") and status.get("running"):
+                print_fn(
+                    "  ✓ Daemon already installed and running"
+                )
+                return True
+            
+            result = install_daemon(config_path=config_path)
+            if result.get("ok"):
+                print_fn(
+                    f"  ✓ {result.get('message', 'Service installed')}"
+                )
+                return True
+            else:
+                print_fn(
+                    f"  ✗ {result.get('error', 'Install failed')}"
+                )
+                return False
+        except Exception as e:
+            print_fn(f"  ✗ {str(e)[:200]}")
+            return False
+
     def _run_plain(self) -> None:
         """Fallback for when rich is not available.
 
         Parity with the rich path: hidden token input via ``getpass``,
-        allowlist + home-channel prompts, and persistence to
+        allowlist prompt, and persistence to
         ``~/.praisonai/.env``.
         """
         print("\n=== PraisonAI Bot Setup ===\n")
@@ -565,7 +608,10 @@ class OnboardWizard:
         for plat in self.selected_platforms:
             info = PLATFORMS.get(plat, {})
             env_var = info.get("token_env", f"{plat.upper()}_BOT_TOKEN")
-            if not os.environ.get(env_var):
+            existing = os.environ.get(env_var)
+            if existing:
+                self.tokens[plat] = existing
+            else:
                 print(f"\n  {info.get('token_help', '')}")
                 token = getpass.getpass(f"  {env_var} (hidden): ").strip()
                 if token:
@@ -583,14 +629,8 @@ class OnboardWizard:
                 else:
                     print("  ⚠  No allowlist — anyone who finds your bot can use it.")
 
-            home_env = info.get("home_channel_env")
-            if home_env and not os.environ.get(home_env):
-                first = env_to_save.get(allowed_env, "").split(",")[0].strip() if allowed_env else ""
-                prompt_text = f"  Home channel ({home_env})" + (f" [{first}]: " if first else ": ")
-                home = input(prompt_text).strip() or first
-                if home:
-                    os.environ[home_env] = home
-                    env_to_save[home_env] = home
+            # Home-channel prompt intentionally removed — see PLATFORMS
+            # docstring above. No code path consumes home_channel today.
 
         env_file = _save_env_vars(env_to_save)
         yaml_content = _generate_bot_yaml(self.selected_platforms)
@@ -602,7 +642,22 @@ class OnboardWizard:
         print(f"\n✓ Written to {cfg_path}")
         if env_file:
             print(f"✓ Secrets saved to {env_file} (chmod 600)")
-        print(f"Start with: praisonai bot start --config {cfg_path}")
+
+        # Parity with rich flow: install daemon by default (no prompt)
+        # when every selected platform has a token captured.
+        if self.selected_platforms and all(
+            p in self.tokens or os.environ.get(
+                PLATFORMS.get(p, {}).get("token_env", f"{p.upper()}_BOT_TOKEN")
+            )
+            for p in self.selected_platforms
+        ):
+            self._install_daemon_with_feedback(print, str(cfg_path))
+
+        print("\nNext steps:")
+        print("  praisonai gateway status     # check if the daemon is running")
+        print("  praisonai gateway logs       # see what the bot is doing")
+        print("  praisonai onboard            # change tokens / add platforms")
+        print(f"  praisonai gateway start --config {cfg_path}   # foreground run (no daemon)")
 
 
 def run_onboard() -> None:

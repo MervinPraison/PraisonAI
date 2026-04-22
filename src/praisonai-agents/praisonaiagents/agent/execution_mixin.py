@@ -309,8 +309,8 @@ class ExecutionMixin:
         # ── Chat history & session linkage ──
         # Record prompt+response in chat_history so SessionStore/auto_save works
         if result is not None:
-            self.chat_history.append({"role": "user", "content": prompt})
-            self.chat_history.append({"role": "assistant", "content": str(result)})
+            self._append_to_chat_history({"role": "user", "content": prompt})
+            self._append_to_chat_history({"role": "assistant", "content": str(result)})
             # Link managed session ID into SessionStore gateway_session_id
             if hasattr(self.backend, 'managed_session_id'):
                 msid = self.backend.managed_session_id
@@ -319,8 +319,14 @@ class ExecutionMixin:
                         sid = getattr(self, 'auto_save', None) or getattr(self, '_session_id', None)
                         if sid and hasattr(self._session_store, 'set_gateway_info'):
                             self._session_store.set_gateway_info(sid, gateway_session_id=msid)
-                    except Exception:
-                        pass  # Best-effort linkage
+                    except Exception as e:
+                        # Log session linkage failures for debugging
+                        logger.warning(
+                            "Session gateway linkage failed: %s",
+                            e,
+                            extra={"session_id": sid, "managed_session_id": msid},
+                            exc_info=True,
+                        )
             self._auto_save_session()
         
         return result
