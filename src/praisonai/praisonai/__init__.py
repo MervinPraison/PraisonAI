@@ -24,6 +24,10 @@ __all__ = [
     'AnthropicManagedAgent',
     'LocalManagedAgent',
     'LocalManagedConfig',
+    'SandboxedAgent',
+    'SandboxedAgentConfig', 
+    'E2BManagedAgent',
+    'ModalManagedAgent',
 ]
 
 # Telemetry initialization state
@@ -108,6 +112,18 @@ def __getattr__(name):
     elif name == 'LocalManagedConfig':
         from .integrations.managed_local import LocalManagedConfig
         return LocalManagedConfig
+    elif name == 'SandboxedAgent':
+        from .integrations.managed_local import SandboxedAgent
+        return SandboxedAgent
+    elif name == 'SandboxedAgentConfig':
+        from .integrations.managed_local import SandboxedAgentConfig
+        return SandboxedAgentConfig
+    elif name == 'E2BManagedAgent':
+        from .integrations.managed_e2b import E2BManagedAgent
+        return E2BManagedAgent
+    elif name == 'ModalManagedAgent':
+        from .integrations.managed_modal import ModalManagedAgent
+        return ModalManagedAgent
     elif name in ('ManagedConfig', 'ManagedBackendConfig'):
         from .integrations.managed_agents import ManagedConfig
         return ManagedConfig

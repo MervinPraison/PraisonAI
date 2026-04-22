@@ -459,6 +459,7 @@ _LAZY_IMPORTS = {
     
     # Managed backend protocol (implementation + config in praisonai wrapper)
     'ManagedBackendProtocol': ('praisonaiagents.agent.protocols', 'ManagedBackendProtocol'),
+    'ManagedRuntimeProtocol': ('praisonaiagents.managed.protocols', 'ManagedRuntimeProtocol'),
     
     # Managed agent events (provider-agnostic)
     'ManagedEvent': ('praisonaiagents.managed.events', 'ManagedEvent'),

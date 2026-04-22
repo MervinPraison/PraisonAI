@@ -39,6 +39,10 @@ __all__ = [
     'AnthropicManagedAgent',
     'LocalManagedAgent',
     'LocalManagedConfig',
+    'SandboxedAgent',
+    'SandboxedAgentConfig',
+    'E2BManagedAgent',
+    'ModalManagedAgent',
     'ManagedAgentIntegration',  # backward compat alias
     'ManagedBackendConfig',     # backward compat alias
     'get_available_integrations',
@@ -81,6 +85,18 @@ def __getattr__(name):
     elif name == 'LocalManagedConfig':
         from .managed_local import LocalManagedConfig
         return LocalManagedConfig
+    elif name == 'SandboxedAgent':
+        from .managed_local import SandboxedAgent
+        return SandboxedAgent
+    elif name == 'SandboxedAgentConfig':
+        from .managed_local import SandboxedAgentConfig
+        return SandboxedAgentConfig
+    elif name == 'E2BManagedAgent':
+        from .managed_e2b import E2BManagedAgent
+        return E2BManagedAgent
+    elif name == 'ModalManagedAgent':
+        from .managed_modal import ModalManagedAgent
+        return ModalManagedAgent
     elif name in ('ManagedConfig', 'ManagedBackendConfig'):
         from .managed_agents import ManagedConfig
         return ManagedConfig

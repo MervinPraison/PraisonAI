@@ -1,24 +1,37 @@
 """
-Local Managed Agent Backend — provider-agnostic self-hosted managed agents.
+Sandboxed Agent Backend — provider-agnostic agent with sandboxed tool execution.
 
-Replicates the Anthropic Managed Agents experience using any LLM provider
-(OpenAI, Gemini, Ollama, local) with local sandbox execution.
+Agent loop runs locally, but tool execution is bridged to secure compute providers
+(E2B, Modal, Docker, etc.). This provides the safety of remote sandboxes while
+maintaining local control over the LLM loop.
 
 Implements ``ManagedBackendProtocol`` from the Core SDK.
 
 Usage::
 
-    from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
+    # NEW preferred names (SandboxedAgent)
+    from praisonai.integrations.managed_local import SandboxedAgent, SandboxedAgentConfig
     from praisonaiagents import Agent
 
+    sandboxed = SandboxedAgent(
+        config=SandboxedAgentConfig(
+            model="gpt-4o",
+            system="You are a coding assistant.",
+            compute="e2b",  # Tools run in E2B sandbox
+        )
+    )
+    agent = Agent(name="coder", backend=sandboxed)
+    result = agent.start("Create a Python script that prints hello")
+    
+    # OLD names still work (backward compatible)
+    from praisonai.integrations.managed_local import LocalManagedAgent, LocalManagedConfig
+    
     managed = LocalManagedAgent(
         config=LocalManagedConfig(
-            model="gpt-4o",
+            model="gpt-4o", 
             system="You are a coding assistant.",
         )
     )
-    agent = Agent(name="coder", backend=managed)
-    result = agent.start("Create a Python script that prints hello")
 """
 
 import asyncio
@@ -1038,3 +1051,25 @@ class LocalManagedAgent:
                 self._compute_instance_id,
             )
             self._compute_instance_id = None
+
+
+# Backward compatibility aliases (OLD names → NEW names)
+# Support both import styles for smooth migration
+
+# New primary names that communicate the actual behavior
+SandboxedAgent = LocalManagedAgent
+SandboxedAgentConfig = LocalManagedConfig
+
+# Export both old and new names 
+__all__ = [
+    # New preferred names
+    "SandboxedAgent",
+    "SandboxedAgentConfig", 
+    
+    # Old names (backward compatible)
+    "LocalManagedAgent",
+    "LocalManagedConfig",
+    
+    # Other exports
+    "ManagedSandboxRequired",
+]
