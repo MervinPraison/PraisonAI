@@ -214,6 +214,46 @@ def gateway_uninstall():
         raise typer.Exit(1)
 
 
+@app.command("mint-link")
+def gateway_mint_link(
+    ttl: int = typer.Option(600, "--ttl", help="Time-to-live in seconds (default: 600 = 10 minutes)"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Gateway host"),
+    port: int = typer.Option(8765, "--port", help="Gateway port"),
+):
+    """Generate a fresh magic link for gateway authentication.
+    
+    Magic links provide one-click authentication without needing to
+    copy/paste tokens. Links expire after the specified TTL and can
+    only be used once.
+    
+    Examples:
+        praisonai gateway mint-link
+        praisonai gateway mint-link --ttl 300  # 5 minutes
+        praisonai gateway mint-link --port 9000
+    """
+    from ..commands.mint_link import mint_fresh_link
+    from ..output.console import get_output_controller
+    import os
+    
+    output = get_output_controller()
+    
+    try:
+        # Set environment for host/port override
+        os.environ["GATEWAY_HOST"] = host
+        os.environ["GATEWAY_PORT"] = str(port)
+        
+        magic_url = mint_fresh_link(ttl=ttl)
+        
+        output.print_success("Magic link generated:")
+        print(f"\n{magic_url}\n")
+        output.print_info(f"Expires in {ttl} seconds ({ttl//60} minutes)")
+        output.print_info("Link saved to ~/.praisonai/last-link.txt")
+        
+    except Exception as e:
+        output.print_error(f"Failed to generate magic link: {str(e)}")
+        raise typer.Exit(1)
+
+
 @app.command("logs")
 def gateway_logs(
     lines: int = typer.Option(50, "-n", help="Number of log lines to show"),
@@ -360,6 +400,7 @@ Manage the gateway server: praisonai gateway <command>
   [green]install[/green]     Install as OS daemon service
   [green]uninstall[/green]   Uninstall daemon service
   [green]logs[/green]        Show daemon service logs
+  [green]mint-link[/green]   Generate a one-time magic link (options: --ttl, --host, --port)
 
 [bold]Multi-Bot Mode:[/bold]
   praisonai gateway start --config gateway.yaml
