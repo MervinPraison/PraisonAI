@@ -4,7 +4,10 @@ Onboard command group for PraisonAI CLI.
 Provides the bot onboarding wizard command.
 """
 
+import os
+
 import typer
+
 from ..output.console import get_output_controller
 
 app = typer.Typer(help="Messaging bot onboarding (platforms, tokens, daemon)")
@@ -17,10 +20,25 @@ def run_onboard() -> None:
 
 
 @app.callback(invoke_without_command=True)
-def onboard_callback(ctx: typer.Context):
+def onboard_callback(
+    ctx: typer.Context,
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        "--non-interactive",
+        help=(
+            "Non-interactive mode: skip all prompts and accept defaults. "
+            "Tokens/allowlists are taken from existing env vars; missing "
+            "values are left blank. Equivalent to PRAISONAI_NO_PROMPT=1."
+        ),
+    ),
+):
     """Run the bot onboarding wizard."""
     if ctx.invoked_subcommand:
         return
+    if yes:
+        os.environ["PRAISONAI_NO_PROMPT"] = "1"
     try:
         run_onboard()
     except KeyboardInterrupt:
