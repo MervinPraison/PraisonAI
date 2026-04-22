@@ -210,7 +210,7 @@ class GatewayConfig:
     
     host: str = "127.0.0.1"
     port: int = 8765
-    bind_host: str = "127.0.0.1"  # For authentication posture resolution
+    bind_host: str = ""  # Defaults to host for authentication posture resolution
     cors_origins: List[str] = field(default_factory=lambda: [])
     auth_token: Optional[str] = None
     max_connections: int = 1000
@@ -221,6 +221,11 @@ class GatewayConfig:
     ssl_cert: Optional[str] = None
     ssl_key: Optional[str] = None
     push: PushConfig = field(default_factory=PushConfig)
+    
+    def __post_init__(self) -> None:
+        """Set bind_host to host if not explicitly provided."""
+        if not self.bind_host:
+            self.bind_host = self.host
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary (hides sensitive data)."""

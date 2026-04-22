@@ -32,6 +32,7 @@ class TestIsLoopback:
     def test_ipv6_loopback_addresses(self):
         """Test IPv6 loopback addresses are correctly identified."""
         assert is_loopback("::1") is True
+        assert is_loopback("[::1]") is True
         assert is_loopback("0:0:0:0:0:0:0:1") is True
     
     def test_localhost_strings(self):
@@ -167,14 +168,13 @@ class TestGatewayAuthEnforcer:
             expected_token="secret"
         ) is True
     
-    def test_check_request_auth_no_expected_token_allows_all(self):
-        """Test that token mode with no expected token allows all requests."""
-        # This handles the case where validation failed to catch the issue
+    def test_check_request_auth_no_expected_token_fails_closed(self):
+        """Test that token mode with no expected token denies requests."""
         assert self.enforcer.check_request_auth(
             auth_mode="token",
             request_token=None,
             expected_token=None
-        ) is True
+        ) is False
 
 
 class TestAssertExternalBindSafe:

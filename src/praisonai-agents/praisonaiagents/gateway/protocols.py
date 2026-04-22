@@ -723,16 +723,20 @@ def is_loopback(host: str) -> bool:
     
     # Handle common string representations
     host = host.lower().strip()
-    if host in ("localhost", "local"):
+    if host == "localhost":
         return True
+    
+    # Strip brackets from IPv6 literal forms like "[::1]"
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
     
     try:
         import ipaddress
         # Try to parse as IP address
         addr = ipaddress.ip_address(host)
         return addr.is_loopback
-    except (ValueError, ImportError):
-        # Not a valid IP address or ipaddress not available
+    except ValueError:
+        # Not a valid IP literal
         return False
 
 

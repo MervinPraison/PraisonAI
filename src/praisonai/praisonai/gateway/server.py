@@ -279,6 +279,12 @@ class WebSocketGateway:
             logger.warning("Gateway already running")
             return
         
+        # Keep authentication posture aligned with the host Uvicorn will bind
+        if getattr(self.config, "host", None) != self._host:
+            self.config.host = self._host
+        if not getattr(self.config, "bind_host", None) or self.config.bind_host != self._host:
+            self.config.bind_host = self._host
+        
         # Validate authentication configuration before starting
         from .auth import assert_external_bind_safe
         try:

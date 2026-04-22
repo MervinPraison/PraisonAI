@@ -8,6 +8,7 @@ bind-aware authentication posture.
 
 import logging
 import os
+import secrets
 from typing import Optional
 
 # Import protocols from core SDK
@@ -52,6 +53,12 @@ class UIAuthEnforcer:
         """
         is_default_creds = (username == "admin" and password == "admin")
         is_external = not is_loopback(bind_host)
+
+        if is_external and (not username or not password):
+            raise UIStartupError(
+                f"Cannot use empty Chainlit credentials on external interface {bind_host}.\n"
+                f"  Fix: Set non-empty CHAINLIT_USERNAME and CHAINLIT_PASSWORD environment variables"
+            )
         
         if is_default_creds and is_external and not allow_defaults:
             raise UIStartupError(
@@ -68,8 +75,8 @@ class UIAuthEnforcer:
                 )
             else:
                 logger.warning(
-                    f"⚠️  Using default admin/admin credentials on localhost. "
-                    f"Set CHAINLIT_USERNAME and CHAINLIT_PASSWORD for production."
+                    "⚠️  Using default admin/admin credentials on localhost. "
+                    "Set CHAINLIT_USERNAME and CHAINLIT_PASSWORD for production."
                 )
     
     def check_auth_callback(
@@ -92,7 +99,21 @@ class UIAuthEnforcer:
         Returns:
             True if credentials are valid, False otherwise
         """
-        return (provided_username, provided_password) == (expected_username, expected_password)
+        if not all(
+            isinstance(value, str)
+            for value in (
+                provided_username,
+                provided_password,
+                expected_username,
+                expected_password,
+            )
+        ):
+            return False
+
+        return (
+            provided_username == expected_username
+            and secrets.compare_digest(provided_password, expected_password)
+        )
 
 
 def register_password_auth(app, *, bind_host: str) -> None:
@@ -126,12 +147,12 @@ def register_password_auth(app, *, bind_host: str) -> None:
         )
     except UIStartupError as e:
         # Convert to runtime error to prevent startup
-        raise RuntimeError(str(e))
+        raise RuntimeError(str(e)) from e
     
     @cl.password_auth_callback
     def auth_callback(username: str, password: str):
         """Shared password authentication callback."""
-        logger.debug(f"Auth attempt: username='{username}', expected='{expected_username}'")
+        logger.debug("Password auth attempt")
         
         # Use enforcer to check credentials
         is_valid = enforcer.check_auth_callback(
@@ -143,10 +164,10 @@ def register_password_auth(app, *, bind_host: str) -> None:
         )
         
         if is_valid:
-            logger.info(f"Login successful for user: {username}")
+            logger.info("Password auth successful")
             return cl.User(identifier=username, metadata={"role": "admin", "provider": "credentials"})
         else:
-            logger.warning(f"Login failed for user: {username}")
+            logger.warning("Password auth failed")
             return None
     
     return auth_callback

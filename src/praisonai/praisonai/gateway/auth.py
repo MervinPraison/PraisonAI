@@ -99,9 +99,9 @@ class GatewayAuthEnforcer:
         
         if auth_mode == "token":
             if not expected_token:
-                # No token configured, allow (should not happen after validation)
-                logger.warning("Token mode requested but no expected token configured")
-                return True
+                # Fail closed: token mode with no expected token is a misconfiguration
+                logger.error("Token mode requested but no expected token configured; denying request")
+                return False
             
             if not request_token:
                 return False
@@ -128,9 +128,10 @@ def assert_external_bind_safe(config) -> None:
     # Use bind_host if available, otherwise fall back to host
     bind_host = getattr(config, 'bind_host', None) or config.host
     auth_token = getattr(config, 'auth_token', None)
+    configured_mode = getattr(config, 'auth_mode', None)
     
     # Resolve authentication mode based on bind interface
-    auth_mode = resolve_auth_mode(bind_host, configured=None)
+    auth_mode = resolve_auth_mode(bind_host, configured=configured_mode)
     
     # Create enforcer and validate
     enforcer = GatewayAuthEnforcer()
@@ -181,13 +182,15 @@ def ensure_token_env_file(token: str, env_file_path: Optional[str] = None) -> No
         env_file_path = os.path.join(praisonai_dir, ".env")
     
     try:
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(env_file_path), mode=0o700, exist_ok=True)
+        # Ensure directory exists (skip when env_file_path has no directory component)
+        parent = os.path.dirname(env_file_path)
+        if parent:
+            os.makedirs(parent, mode=0o700, exist_ok=True)
         
         # Read existing content
         existing_lines = []
         if os.path.exists(env_file_path):
-            with open(env_file_path, 'r') as f:
+            with open(env_file_path, 'r', encoding='utf-8') as f:
                 existing_lines = f.readlines()
         
         # Check if GATEWAY_AUTH_TOKEN already exists
@@ -202,11 +205,11 @@ def ensure_token_env_file(token: str, env_file_path: Optional[str] = None) -> No
         if not token_line_found:
             existing_lines.append(f"GATEWAY_AUTH_TOKEN={token}\n")
         
-        # Write back to file with secure permissions
-        with open(env_file_path, 'w') as f:
+        # Write atomically with secure permissions from the start
+        fd = os.open(env_file_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
             f.writelines(existing_lines)
-        
-        # Set secure file permissions (owner read/write only)
+        # Defensive chmod in case the file pre-existed with looser perms
         os.chmod(env_file_path, 0o600)
         
         logger.debug(f"Gateway auth token persisted to {env_file_path}")

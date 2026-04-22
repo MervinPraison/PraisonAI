@@ -7,6 +7,7 @@ on external interfaces unless the escape hatch is explicitly enabled.
 
 import pytest
 import os
+import sys
 from unittest.mock import patch, MagicMock
 
 from praisonai.ui._auth import (
@@ -117,75 +118,80 @@ class TestUIAuthEnforcer:
 class TestRegisterPasswordAuth:
     """Test the register_password_auth function."""
     
-    @patch('praisonai.ui._auth.cl')
     @patch.dict(os.environ, {}, clear=True)
-    def test_default_credentials_on_loopback(self, mock_cl):
+    def test_default_credentials_on_loopback(self):
         """Test registration with default credentials on loopback."""
-        # Should not raise
-        register_password_auth(None, bind_host="127.0.0.1")
-        
-        # Should have registered a callback
-        mock_cl.password_auth_callback.assert_called_once()
+        mock_cl = MagicMock()
+        with patch.dict(sys.modules, {"chainlit": mock_cl}):
+            # Should not raise
+            register_password_auth(None, bind_host="127.0.0.1")
+            
+            # Should have registered a callback
+            mock_cl.password_auth_callback.assert_called_once()
     
-    @patch('praisonai.ui._auth.cl')
     @patch.dict(os.environ, {}, clear=True)
-    def test_default_credentials_on_external_raises_error(self, mock_cl):
+    def test_default_credentials_on_external_raises_error(self):
         """Test registration with default credentials on external interface raises error."""
-        with pytest.raises(RuntimeError) as excinfo:
-            register_password_auth(None, bind_host="0.0.0.0")
-        
-        assert "Cannot use default admin/admin credentials on external interface" in str(excinfo.value)
+        mock_cl = MagicMock()
+        with patch.dict(sys.modules, {"chainlit": mock_cl}):
+            with pytest.raises(RuntimeError) as excinfo:
+                register_password_auth(None, bind_host="0.0.0.0")
+            
+            assert "Cannot use default admin/admin credentials on external interface" in str(excinfo.value)
     
-    @patch('praisonai.ui._auth.cl')
     @patch.dict(os.environ, {"PRAISONAI_ALLOW_DEFAULT_CREDS": "1"}, clear=True)
-    def test_default_credentials_on_external_with_escape_hatch(self, mock_cl):
+    def test_default_credentials_on_external_with_escape_hatch(self):
         """Test registration with default credentials on external interface with escape hatch."""
-        # Should not raise with escape hatch
-        register_password_auth(None, bind_host="0.0.0.0")
-        
-        # Should have registered a callback
-        mock_cl.password_auth_callback.assert_called_once()
+        mock_cl = MagicMock()
+        with patch.dict(sys.modules, {"chainlit": mock_cl}):
+            # Should not raise with escape hatch
+            register_password_auth(None, bind_host="0.0.0.0")
+            
+            # Should have registered a callback
+            mock_cl.password_auth_callback.assert_called_once()
     
-    @patch('praisonai.ui._auth.cl')
     @patch.dict(os.environ, {
         "CHAINLIT_USERNAME": "myuser",
         "CHAINLIT_PASSWORD": "mypassword"
     }, clear=True)
-    def test_custom_credentials_on_external(self, mock_cl):
+    def test_custom_credentials_on_external(self):
         """Test registration with custom credentials on external interface."""
-        # Should not raise
-        register_password_auth(None, bind_host="0.0.0.0")
-        
-        # Should have registered a callback
-        mock_cl.password_auth_callback.assert_called_once()
+        mock_cl = MagicMock()
+        with patch.dict(sys.modules, {"chainlit": mock_cl}):
+            # Should not raise
+            register_password_auth(None, bind_host="0.0.0.0")
+            
+            # Should have registered a callback
+            mock_cl.password_auth_callback.assert_called_once()
     
-    @patch('praisonai.ui._auth.cl')
     @patch.dict(os.environ, {
         "CHAINLIT_USERNAME": "myuser",
         "CHAINLIT_PASSWORD": "mypassword"
     }, clear=True)
-    def test_auth_callback_functionality(self, mock_cl):
+    def test_auth_callback_functionality(self):
         """Test that the registered auth callback works correctly."""
-        register_password_auth(None, bind_host="127.0.0.1")
-        
-        # Get the registered callback function
-        callback = mock_cl.password_auth_callback.call_args[0][0]
-        
-        # Mock User class
-        mock_user = MagicMock()
-        mock_cl.User.return_value = mock_user
-        
-        # Test correct credentials
-        result = callback("myuser", "mypassword")
-        assert result == mock_user
-        mock_cl.User.assert_called_with(
-            identifier="myuser",
-            metadata={"role": "admin", "provider": "credentials"}
-        )
-        
-        # Test incorrect credentials
-        result = callback("wrong", "credentials")
-        assert result is None
+        mock_cl = MagicMock()
+        with patch.dict(sys.modules, {"chainlit": mock_cl}):
+            register_password_auth(None, bind_host="127.0.0.1")
+            
+            # Get the registered callback function
+            callback = mock_cl.password_auth_callback.call_args[0][0]
+            
+            # Mock User class
+            mock_user = MagicMock()
+            mock_cl.User.return_value = mock_user
+            
+            # Test correct credentials
+            result = callback("myuser", "mypassword")
+            assert result == mock_user
+            mock_cl.User.assert_called_with(
+                identifier="myuser",
+                metadata={"role": "admin", "provider": "credentials"}
+            )
+            
+            # Test incorrect credentials
+            result = callback("wrong", "credentials")
+            assert result is None
 
 
 class TestEnvironmentVariables:

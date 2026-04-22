@@ -87,17 +87,22 @@ class TestBindAwareAuthEndToEnd:
         # Give it a moment to start and perform validation
         await asyncio.sleep(0.1)
         
+        # If startup already failed (e.g. validation raised), surface it now
+        if start_task.done():
+            # Re-raises any exception stored on the task
+            start_task.result()
+            return
+        
         # Stop the gateway
         if gateway.is_running:
             await gateway.stop()
         
         # Cancel the start task if it's still running
-        if not start_task.done():
-            start_task.cancel()
-            try:
-                await start_task
-            except asyncio.CancelledError:
-                pass
+        start_task.cancel()
+        try:
+            await start_task
+        except asyncio.CancelledError:
+            pass
 
 
 class TestRealAgentExecution:
