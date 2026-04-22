@@ -171,16 +171,19 @@ def _generate_bot_yaml(platforms: List[str], agent_name: str = "assistant", agen
     # Legacy single-agent block — consumed by `bot start`.
     lines.append("agent:")
     lines.append(f'  name: "{agent_name}"')
-    lines.append(f'  instructions: "{instructions}"')
+    lines.append(f'  instructions: "{instructions}. You can search the web, manage schedules, and remember past conversations. Use your tools proactively."')
     lines.append('  model: "gpt-4o-mini"')
+    lines.append("  # tools: []                  # Uncomment to override auto-injected defaults")
+    lines.append("                               # (search_web, schedule_*, store_memory, search_memory, …)")
     lines.append("")
 
     # Multi-agent block — REQUIRED by `gateway start`, ignored by `bot start`.
     lines.append("agents:")
     lines.append(f"  {agent_name}:")
-    lines.append(f'    instructions: "{instructions}"')
+    lines.append(f'    instructions: "{instructions}. You can search the web, manage schedules, and remember past conversations. Use your tools proactively."')
     lines.append('    model: gpt-4o-mini')
     lines.append("    memory: false")
+    lines.append("    # tools: []                # Override auto-injected defaults here")
     lines.append("")
 
     # Channels section — shared by both commands.
@@ -195,6 +198,8 @@ def _generate_bot_yaml(platforms: List[str], agent_name: str = "assistant", agen
         allowed_env = info.get("allowed_users_env")
         if allowed_env:
             lines.append(f"    allowed_users: ${{{allowed_env}}}")
+        lines.append("    # auto_approve_tools: true # Chat bots cannot show CLI approval prompts; safe tools auto-approved by default.")
+        lines.append("                               # Set to false only if you add destructive tools AND have a chat-level approval flow.")
         if plat == "whatsapp":
             lines.append("    phone_number_id: ${WHATSAPP_PHONE_NUMBER_ID}")
         # Gateway-style routing (ignored by `bot start` which uses top-level routing).
