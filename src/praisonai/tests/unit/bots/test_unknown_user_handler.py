@@ -58,7 +58,7 @@ def mock_pairing_store():
 
 def test_unknown_user_handler_deny_policy():
     """Test unknown user handler with deny policy."""
-    config = BotConfig(unknown_user_policy="deny")
+    config = BotConfig(allowed_users=["allowed_user"], unknown_user_policy="deny")
     handler = UnknownUserHandler(config)
     
     message = BotMessage(
@@ -73,7 +73,7 @@ def test_unknown_user_handler_deny_policy():
 
 def test_unknown_user_handler_allow_policy():
     """Test unknown user handler with allow policy."""
-    config = BotConfig(unknown_user_policy="allow")
+    config = BotConfig(allowed_users=["allowed_user"], unknown_user_policy="allow")
     handler = UnknownUserHandler(config)
     
     message = BotMessage(
@@ -107,7 +107,7 @@ def test_unknown_user_handler_allowed_user():
 @pytest.mark.asyncio
 async def test_pairing_flow_not_paired():
     """Test pairing flow for unknown user not yet paired."""
-    config = BotConfig(unknown_user_policy="pair")
+    config = BotConfig(allowed_users=["allowed_user"], unknown_user_policy="pair")
     mock_store = Mock(spec=PairingStore)
     mock_store.is_paired.return_value = False
     mock_store.generate_code.return_value = "ABCD1234"
@@ -123,7 +123,7 @@ async def test_pairing_flow_not_paired():
     result = await handler.handle(message)
     
     assert result == "drop"  # Should drop after sending pairing code
-    mock_store.generate_code.assert_called_once_with(channel_type="telegram")
+    mock_store.generate_code.assert_called_once_with(channel_type="telegram", channel_id="unknown_user")
     send_callback.assert_called_once()
     
     # Check pairing instructions were sent
@@ -135,7 +135,7 @@ async def test_pairing_flow_not_paired():
 @pytest.mark.asyncio
 async def test_pairing_flow_already_paired():
     """Test pairing flow for user who is already paired."""
-    config = BotConfig(unknown_user_policy="pair")
+    config = BotConfig(allowed_users=["allowed_user"], unknown_user_policy="pair")
     mock_store = Mock(spec=PairingStore)
     mock_store.is_paired.return_value = True  # Already paired
     
@@ -155,7 +155,7 @@ async def test_pairing_flow_already_paired():
 @pytest.mark.asyncio
 async def test_rate_limiting():
     """Test rate limiting prevents spam."""
-    config = BotConfig(unknown_user_policy="pair")
+    config = BotConfig(allowed_users=["allowed_user"], unknown_user_policy="pair")
     mock_store = Mock(spec=PairingStore)
     mock_store.is_paired.return_value = False
     mock_store.generate_code.return_value = "CODE123"
@@ -180,7 +180,7 @@ async def test_rate_limiting():
 
 def test_pairing_flow_no_store():
     """Test pairing policy without pairing store falls back to deny."""
-    config = BotConfig(unknown_user_policy="pair")
+    config = BotConfig(allowed_users=["allowed_user"], unknown_user_policy="pair")
     handler = UnknownUserHandler(config, pairing_store=None)  # No store
     
     message = BotMessage(
@@ -195,7 +195,7 @@ def test_pairing_flow_no_store():
 @pytest.mark.asyncio
 async def test_pairing_store_exception():
     """Test handling of pairing store exceptions."""
-    config = BotConfig(unknown_user_policy="pair")
+    config = BotConfig(allowed_users=["allowed_user"], unknown_user_policy="pair")
     mock_store = Mock(spec=PairingStore)
     mock_store.is_paired.return_value = False
     mock_store.generate_code.side_effect = Exception("Store error")
@@ -214,7 +214,7 @@ async def test_pairing_store_exception():
 
 def test_invalid_policy_fallback():
     """Test that invalid policy falls back to deny."""
-    config = BotConfig(unknown_user_policy="invalid_policy")
+    config = BotConfig(allowed_users=["allowed_user"], unknown_user_policy="invalid_policy")
     handler = UnknownUserHandler(config)
     
     message = BotMessage(
@@ -229,7 +229,7 @@ def test_invalid_policy_fallback():
 @pytest.mark.asyncio
 async def test_send_callback_failure():
     """Test handling of send callback failures."""
-    config = BotConfig(unknown_user_policy="pair")
+    config = BotConfig(allowed_users=["allowed_user"], unknown_user_policy="pair")
     mock_store = Mock(spec=PairingStore)
     mock_store.is_paired.return_value = False
     mock_store.generate_code.return_value = "CODE123"

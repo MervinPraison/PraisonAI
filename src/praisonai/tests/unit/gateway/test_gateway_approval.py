@@ -49,6 +49,25 @@ async def test_pairing_store():
     # revoke
     store.revoke(device_id, "test_channel")
 
+
+@pytest.mark.asyncio
+async def test_pairing_store_channel_bound_code():
+    store = PairingStore()
+    code = store.generate_code(channel_type="telegram", channel_id="tg_user_1")
+
+    # Should resolve channel_id from pending code when omitted
+    assert store.verify_and_pair(code, None, "telegram") is True
+    assert store.is_paired("tg_user_1", "telegram") is True
+
+
+@pytest.mark.asyncio
+async def test_pairing_store_rejects_channel_id_mismatch():
+    store = PairingStore()
+    code = store.generate_code(channel_type="telegram", channel_id="tg_user_1")
+
+    # Mismatched explicit channel_id must be rejected
+    assert store.verify_and_pair(code, "tg_user_2", "telegram") is False
+
 @pytest.mark.asyncio
 async def test_exec_approval_manager():
     mgr = ExecApprovalManager()

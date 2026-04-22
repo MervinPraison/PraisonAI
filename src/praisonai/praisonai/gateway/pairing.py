@@ -76,11 +76,11 @@ class PairingStore:
     Example::
 
         store = PairingStore()
-        code = store.generate_code(channel_type="slack")
+        code = store.generate_code(channel_type="slack", channel_id="C12345")
         print(f"Enter this code in Slack: {code}")
 
         # Later, when the Slack bot sends the code:
-        ok = store.verify_and_pair(code, channel_id="C12345", channel_type="slack")
+        ok = store.verify_and_pair(code, channel_id=None, channel_type="slack")
         assert ok
 
         # Check if paired
@@ -110,7 +110,7 @@ class PairingStore:
 
     # ── Code lifecycle ────────────────────────────────────────────────
 
-    def generate_code(self, channel_type: str = "unknown") -> str:
+    def generate_code(self, channel_type: str = "unknown", channel_id: Optional[str] = None) -> str:
         """Generate a new 8-char pairing code.
 
         The code is HMAC-signed so the gateway can verify it was not forged.
@@ -129,6 +129,7 @@ class PairingStore:
             self._pending[code] = {
                 "signature": sig,
                 "channel_type": channel_type,
+                "channel_id": channel_id,
                 "created_at": time.time(),
             }
         return code
@@ -136,7 +137,7 @@ class PairingStore:
     def verify_and_pair(
         self,
         code: str,
-        channel_id: str,
+        channel_id: Optional[str],
         channel_type: str,
         label: str = "",
     ) -> bool:
@@ -144,6 +145,7 @@ class PairingStore:
 
         Returns ``True`` on success, ``False`` on invalid / expired code.
         The code is consumed (one-time use) regardless of outcome.
+        If ``channel_id`` is omitted, a channel-bound pending code may provide it.
         """
         with self._lock:
             self._prune_expired()
@@ -157,18 +159,26 @@ class PairingStore:
         if not hmac.compare_digest(pending["signature"], expected_sig):
             return False
 
+        pending_channel_id = pending.get("channel_id")
+        if pending_channel_id and channel_id and channel_id != pending_channel_id:
+            return False
+
+        resolved_channel_id = channel_id or pending_channel_id
+        if not resolved_channel_id:
+            return False
+
         paired = PairedChannel(
-            channel_id=channel_id,
+            channel_id=resolved_channel_id,
             channel_type=channel_type,
             paired_at=time.time(),
             label=label,
         )
 
         with self._lock:
-            self._paired[(channel_id, channel_type)] = paired
+            self._paired[(resolved_channel_id, channel_type)] = paired
             self._save()
 
-        logger.info("Channel paired: %s (%s)", channel_id, channel_type)
+        logger.info("Channel paired: %s (%s)", resolved_channel_id, channel_type)
         return True
 
     # ── Query API ─────────────────────────────────────────────────────

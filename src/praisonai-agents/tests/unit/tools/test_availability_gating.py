@@ -139,8 +139,11 @@ def test_base_tool_availability_default():
     """Test that BaseTool without availability check is always available."""
     
     class SimpleBaseTool(BaseTool):
+        name = "simple"
+        description = "Simple tool"
+
         def __init__(self):
-            super().__init__(name="simple", description="Simple tool")
+            super().__init__()
             
         def run(self, **kwargs):
             return "result"

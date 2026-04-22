@@ -79,13 +79,8 @@ def approve(platform: str, code: str, channel_id: Optional[str], label: str, sto
     
     PLATFORM: Platform type (telegram, discord, slack, whatsapp)
     CODE: 8-character pairing code
-    CHANNEL_ID: Channel ID (optional, will use code as channel_id if not provided)
+    CHANNEL_ID: Channel ID (optional; omitted when code is channel-bound)
     """
-    # If no channel_id provided, use the code as channel_id
-    # This works for simple cases where the code represents the channel
-    if not channel_id:
-        channel_id = f"user_{code}"
-    
     try:
         store = PairingStore(store_dir=store_dir)
         
