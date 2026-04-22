@@ -1016,11 +1016,43 @@ class AgentTeam:
             if task.status in ["not started", "in progress"]:
                 task_output = await self.aexecute_task(task_id)
                 if task_output and self.completion_checker(task, task_output.raw):
+                    # Run guardrail validation BEFORE marking task complete
+                    if task._guardrail_fn:
+                        try:
+                            guardrail_result = task._process_guardrail(task_output)
+                            if not guardrail_result.success:
+                                if task.retry_count >= task.max_retries:
+                                    raise Exception(
+                                        f"Task failed guardrail validation after {task.max_retries} retries. "
+                                        f"Last error: {guardrail_result.error}"
+                                    )
+                                
+                                task.retry_count += 1
+                                task.status = "in progress"  # Keep task in progress for retry
+                                logger.warning(f"Task {task_id}: Guardrail validation failed (retry {task.retry_count}/{task.max_retries}): {guardrail_result.error}")
+                                retries += 1
+                                continue  # Actually retry the task
+                            
+                            # If guardrail passed and returned a modified result
+                            if guardrail_result.result is not None:
+                                if isinstance(guardrail_result.result, str):
+                                    # Update the task output with the modified result
+                                    task_output.raw = guardrail_result.result
+                                    task.result = task_output
+                                elif hasattr(guardrail_result.result, 'raw'):
+                                    # Replace with the new task output
+                                    task_output = guardrail_result.result
+                                    task.result = task_output
+                            
+                            logger.info(f"Task {task_id}: Guardrail validation passed")
+                        except Exception as e:
+                            logger.error(f"Task {task_id}: Error in guardrail processing: {e}")
+                            # Continue execution even if guardrail fails to avoid breaking the task
+                    
                     task.status = "completed"
                     # Run execute_callback for memory operations
                     try:
-                        # Use the new sync wrapper to avoid pending coroutine issues
-                        task.execute_callback_sync(task_output)
+                        await task.execute_callback(task_output)
                     except Exception as e:
                         logger.error(f"Error executing memory callback for task {task_id}: {e}")
                         logger.exception(e)

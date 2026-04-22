@@ -529,23 +529,77 @@ class Task:
         }
 
     def initialize_memory(self):
-        """Initialize memory if config exists but memory doesn't"""
+        """Synchronous memory initialization with thread-safe locking"""
         if not self.memory and self.config.get('memory_config'):
-            try:
-                from ..memory.memory import Memory
-                logger.info(f"Task {self.id}: Initializing memory from config: {self.config['memory_config']}")
-                self.memory = Memory(config=self.config['memory_config'])
-                logger.info(f"Task {self.id}: Memory initialized successfully")
+            # Thread-safe memory initialization using double-checked locking
+            import threading
+            if not hasattr(self, '_memory_init_lock'):
+                self._memory_init_lock = threading.Lock()
+            
+            with self._memory_init_lock:
+                # Double-check after acquiring lock
+                if not self.memory:
+                    try:
+                        from ..memory.memory import Memory
+                        logger.info(f"Task {self.id}: Initializing memory from config: {self.config['memory_config']}")
+                        self.memory = Memory(config=self.config['memory_config'])
+                        logger.info(f"Task {self.id}: Memory initialized successfully")
 
-                # Verify database was created
-                if os.path.exists(self.config['memory_config']['storage']['path']):
-                    logger.info(f"Task {self.id}: Memory database exists after initialization")
-                else:
-                    logger.error(f"Task {self.id}: Failed to create memory database!")
-                return self.memory
-            except Exception as e:
-                logger.error(f"Task {self.id}: Failed to initialize memory: {e}")
-                logger.exception(e)
+                        # Verify database was created (defensive config access)
+                        storage_path = (
+                            self.config.get('memory_config', {})
+                            .get('storage', {})
+                            .get('path')
+                        )
+                        if storage_path:
+                            if os.path.exists(storage_path):
+                                logger.info(f"Task {self.id}: Memory database exists after initialization")
+                            else:
+                                logger.error(f"Task {self.id}: Failed to create memory database!")
+                    except Exception as e:
+                        logger.error(f"Task {self.id}: Failed to initialize memory: {e}")
+                        logger.exception(e)
+                        return None
+            return self.memory
+        return None
+        
+    async def initialize_memory_async(self):
+        """Async-safe memory initialization with asyncio coordination"""
+        if not self.memory and self.config.get('memory_config'):
+            import asyncio
+            # Initialize async lock once in __init__ if needed
+            if not hasattr(self, '_memory_init_lock_async'):
+                self._memory_init_lock_async = asyncio.Lock()
+            
+            async with self._memory_init_lock_async:
+                # Double-check after acquiring lock
+                if not self.memory:
+                    try:
+                        # Use asyncio.to_thread to avoid blocking the event loop
+                        def create_memory():
+                            from ..memory.memory import Memory
+                            return Memory(config=self.config['memory_config'])
+                        
+                        logger.info(f"Task {self.id}: Initializing memory from config: {self.config['memory_config']}")
+                        self.memory = await asyncio.to_thread(create_memory)
+                        logger.info(f"Task {self.id}: Memory initialized successfully")
+
+                        # Verify database was created (defensive config access)
+                        storage_path = (
+                            self.config.get('memory_config', {})
+                            .get('storage', {})
+                            .get('path')
+                        )
+                        if storage_path:
+                            if os.path.exists(storage_path):
+                                logger.info(f"Task {self.id}: Memory database exists after initialization")
+                            else:
+                                logger.error(f"Task {self.id}: Failed to create memory database!")
+                    except Exception as e:
+                        logger.error(f"Task {self.id}: Failed to initialize memory: {e}")
+                        logger.exception(e)
+                        return None
+            return self.memory
         return None
 
     def store_in_memory(self, content: str, agent_name: str = None, task_id: str = None):
@@ -571,40 +625,12 @@ class Task:
         logger.info(f"Task {self.id}: execute_callback called")
         logger.info(f"Quality check enabled: {self.quality_check}")
 
-        # Process guardrail if configured
-        if self._guardrail_fn:
-            try:
-                guardrail_result = self._process_guardrail(task_output)
-                if not guardrail_result.success:
-                    if self.retry_count >= self.max_retries:
-                        raise Exception(
-                            f"Task failed guardrail validation after {self.max_retries} retries. "
-                            f"Last error: {guardrail_result.error}"
-                        )
-                    
-                    self.retry_count += 1
-                    logger.warning(f"Task {self.id}: Guardrail validation failed (retry {self.retry_count}/{self.max_retries}): {guardrail_result.error}")
-                    # Note: In a real execution, this would trigger a retry, but since this is a callback
-                    # the retry logic would need to be handled at the agent/execution level
-                    return
-                
-                # If guardrail passed and returned a modified result
-                if guardrail_result.result is not None:
-                    if isinstance(guardrail_result.result, str):
-                        # Update the task output with the modified result
-                        task_output.raw = guardrail_result.result
-                    elif isinstance(guardrail_result.result, TaskOutput):
-                        # Replace with the new task output
-                        task_output = guardrail_result.result
-                
-                logger.info(f"Task {self.id}: Guardrail validation passed")
-            except Exception as e:
-                logger.error(f"Task {self.id}: Error in guardrail processing: {e}")
-                # Continue execution even if guardrail fails to avoid breaking the task
+        # Note: Guardrail validation has been moved to the execution path in agents.py
+        # to ensure proper retry behavior. This callback now only handles memory/user callbacks.
 
         # Initialize memory if not already initialized
         if not self.memory:
-            self.memory = self.initialize_memory()
+            self.memory = await self.initialize_memory_async()
 
         logger.info(f"Memory object exists: {self.memory is not None}")
         if self.memory:
@@ -738,21 +764,12 @@ Context:
 
     def execute_callback_sync(self, task_output: TaskOutput) -> None:
         """
-        Synchronous wrapper to ensure that execute_callback is awaited,
-        preventing 'Task was destroyed but pending!' warnings if called
-        from non-async code.
+        Synchronous wrapper that properly awaits execute_callback instead of
+        using fire-and-forget create_task() to prevent lost exceptions.
         """
-        import asyncio
         from ..utils.async_bridge import run_coroutine_from_any_context
-        try:
-            loop = asyncio.get_running_loop()
-            if loop.is_running():
-                loop.create_task(self.execute_callback(task_output))
-            else:
-                loop.run_until_complete(self.execute_callback(task_output))
-        except RuntimeError:
-            # If no loop is running in this context, use safe bridge
-            run_coroutine_from_any_context(self.execute_callback(task_output))
+        # Always use the async bridge for proper exception propagation
+        run_coroutine_from_any_context(self.execute_callback(task_output))
 
     def _process_guardrail(self, task_output: TaskOutput):
         """Process the guardrail validation for a task output.

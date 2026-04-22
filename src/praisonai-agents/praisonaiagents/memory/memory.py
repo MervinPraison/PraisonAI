@@ -1975,6 +1975,15 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
                     logger.debug(f"Error closing registered connection: {e}")
             # Clear the registry
             self._all_connections.clear()
+        
+        # Close MongoDB client if it exists
+        if hasattr(self, 'mongo_client') and self.mongo_client:
+            try:
+                self.mongo_client.close()
+                self.mongo_client = None
+                logger.debug("MongoDB client closed successfully")
+            except Exception as e:
+                logger.warning(f"Error closing MongoDB client: {e}")
     
     def __enter__(self):
         """Allow Memory to be used as a context manager."""

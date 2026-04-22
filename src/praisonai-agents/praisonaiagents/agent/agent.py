@@ -1697,6 +1697,9 @@ Your Goal: {self.goal}
         self.prompt_caching = prompt_caching
         self.claude_memory = claude_memory
         
+        # Initialize closure flag for GC cleanup
+        self._closed = False
+        
         # Session management
         self.auto_save = auto_save  # Session name for auto-saving
         
@@ -4821,8 +4824,21 @@ Answer:"""
         await self.aclose()
     
     def __del__(self):
-        """Destructor safely does nothing to avoid GC pollution in test loops."""
-        pass
+        """Lightweight cleanup that only closes resources if not already closed."""
+        if not getattr(self, '_closed', False):
+            # Only close connections, skip anything that could fail during GC
+            try:
+                memory = getattr(self, "_memory_instance", None)
+                if memory and hasattr(memory, 'close_connections'):
+                    memory.close_connections()
+            except Exception as exc:  # noqa: BLE001 - finalizers must not raise
+                import contextlib
+                with contextlib.suppress(Exception):
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.debug("Agent GC memory cleanup failed: %s", exc)
+            finally:
+                self._closed = True
         
     @property
     def is_closed(self) -> bool:
