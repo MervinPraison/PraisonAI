@@ -5,6 +5,8 @@ Tests the real flow with stub adapters to verify end-to-end functionality.
 """
 
 import pytest
+import tempfile
+import shutil
 from unittest.mock import AsyncMock, MagicMock
 from typing import Dict, List
 
@@ -56,7 +58,8 @@ class TestPairingOwnerDM:
     def setup_method(self):
         """Set up test environment."""
         self.adapter = StubBotAdapter()
-        self.pairing_store = PairingStore()
+        self._pairing_dir = tempfile.mkdtemp(prefix="test_pairing_")
+        self.pairing_store = PairingStore(store_dir=self._pairing_dir)
         self.config = BotConfig(
             unknown_user_policy="pair",
             owner_user_id="owner-123"
@@ -66,6 +69,10 @@ class TestPairingOwnerDM:
             pairing_store=self.pairing_store,
             adapter=self.adapter
         )
+
+    def teardown_method(self):
+        """Clean up test environment."""
+        shutil.rmtree(self._pairing_dir, ignore_errors=True)
     
     def create_test_message(self, user_id: str = "new-user", user_name: str = "Alice") -> BotMessage:
         """Create a test message from an unknown user."""
