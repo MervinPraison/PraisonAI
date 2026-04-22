@@ -59,7 +59,7 @@ def list_cmd(
 def approve(
     platform: str = typer.Argument(..., help="Platform type (telegram, discord, slack, whatsapp)"),
     code: str = typer.Argument(..., help="8-character pairing code"),
-    channel_id: str = typer.Argument(..., help="Channel ID for the pairing"),
+    channel_id: Optional[str] = typer.Argument(None, help="Channel ID for the pairing (optional if code is bound)"),
     label: str = typer.Option("", "--label", help="Optional human-readable label for this pairing"),
     store_dir: Optional[str] = typer.Option(None, "--store-dir", help="Custom pairing store directory"),
 ):
@@ -67,7 +67,7 @@ def approve(
     
     PLATFORM: Platform type (telegram, discord, slack, whatsapp)
     CODE: 8-character pairing code
-    CHANNEL_ID: Channel ID for the pairing
+    CHANNEL_ID: Optional channel ID (auto-resolved from bound code if omitted)
     """
     try:
         store = PairingStore(store_dir=store_dir)

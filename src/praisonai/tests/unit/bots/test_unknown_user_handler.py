@@ -126,7 +126,7 @@ async def test_pairing_flow_not_paired():
     result = await handler.handle(message)
     
     assert result == "drop"  # Should drop after sending pairing code
-    mock_store.generate_code.assert_called_once_with(channel_type="telegram", channel_id="unknown_user")
+    mock_store.generate_code.assert_called_once_with(channel_type="telegram", channel_id="test_chat")
     send_callback.assert_called_once()
     
     # Check pairing instructions were sent

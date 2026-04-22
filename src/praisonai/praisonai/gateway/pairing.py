@@ -193,6 +193,15 @@ class PairingStore:
         with self._lock:
             return list(self._paired.values())
 
+    def list_pending(self) -> List[dict]:
+        """List all pending pairing codes."""
+        with self._lock:
+            self._prune_expired()
+            return [
+                {"code": code, **info} 
+                for code, info in self._pending.items()
+            ]
+
     def revoke(self, channel_id: str, channel_type: str) -> bool:
         """Revoke a paired channel.  Returns ``True`` if it existed."""
         with self._lock:

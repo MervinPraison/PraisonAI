@@ -106,7 +106,7 @@ class UnknownUserHandler:
         
         # Generate pairing code and send to user
         try:
-            code = self.pairing_store.generate_code(channel_type=platform)
+            code = self.pairing_store.generate_code(channel_type=platform, channel_id=channel_id)
             self._rate_limits[channel_id] = now
             
             # Send pairing instructions to user
