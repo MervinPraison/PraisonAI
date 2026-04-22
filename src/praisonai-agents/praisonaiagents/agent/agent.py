@@ -4782,6 +4782,18 @@ Answer:"""
                 system_prompt=system_prompt
             )
             
+            # Check for CLI backend errors
+            if result is None:
+                raise RuntimeError(
+                    f"CLI backend returned no result for agent={self.display_name!r}, "
+                    f"session_id={session_id!r}"
+                )
+            if getattr(result, "error", None):
+                raise RuntimeError(
+                    f"CLI backend failed for agent={self.display_name!r}, "
+                    f"session_id={session_id!r}: {result.error}"
+                )
+            
             # Update chat history with the exchange
             if hasattr(self, '_append_to_chat_history'):
                 self._append_to_chat_history({
@@ -4797,10 +4809,9 @@ Answer:"""
             return result.content if result else None
             
         except Exception as e:
-            logging.error(f"CLI backend execution failed: {e}")
-            # Fallback to standard LLM execution
-            # Return None to let the standard path handle it
-            return None
+            raise RuntimeError(
+                f"CLI backend execution failed for agent={self.display_name!r}: {e}"
+            ) from e
     
     # -------------------------------------------------------------------------
     #                       Resource Lifecycle Management

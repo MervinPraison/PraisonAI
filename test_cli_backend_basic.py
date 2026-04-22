@@ -4,10 +4,12 @@
 import asyncio
 import sys
 import os
+from pathlib import Path
 
 # Add src paths to Python path for testing
-sys.path.insert(0, '/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents')
-sys.path.insert(0, '/home/runner/work/PraisonAI/PraisonAI/src/praisonai')
+repo_root = Path(__file__).resolve().parent
+sys.path.insert(0, str(repo_root / "src" / "praisonai-agents"))
+sys.path.insert(0, str(repo_root / "src" / "praisonai"))
 
 def test_protocols_import():
     """Test that CLI backend protocols can be imported."""
@@ -59,7 +61,7 @@ def test_agent_with_cli_backend():
             cli_backend="claude-code"
         )
         
-        print(f"✓ Agent created with CLI backend")
+        print("✓ Agent created with CLI backend")
         print(f"  Agent name: {agent.name}")
         print(f"  CLI backend configured: {agent._cli_backend is not None}")
         return True
@@ -70,6 +72,13 @@ def test_agent_with_cli_backend():
 async def test_basic_execution():
     """Test basic CLI backend execution (mock)."""
     print("Testing basic CLI backend execution...")
+    
+    # Check if Claude CLI is available
+    import shutil
+    if shutil.which("claude") is None:
+        print("⚠ Claude CLI not installed; skipping execution test")
+        return True
+
     try:
         from praisonai.cli_backends import resolve_cli_backend
         from praisonaiagents import CliSessionBinding
@@ -78,16 +87,17 @@ async def test_basic_execution():
         
         # Test basic structure
         result = await backend.execute("Hello, test!", session=CliSessionBinding(session_id="test"))
-        print(f"✓ CLI backend execution completed")
+        if result.error:
+            print(f"✗ CLI backend returned error: {result.error}")
+            return False
+
+        print("✓ CLI backend execution completed")
         print(f"  Result type: {type(result)}")
-        
-        # Note: This will likely fail because Claude CLI isn't installed in CI
-        # but we can test the structure
         return True
         
     except Exception as e:
-        print(f"✗ CLI backend execution failed (expected if Claude CLI not installed): {e}")
-        return True  # Don't fail test for missing CLI tool
+        print(f"✗ CLI backend execution failed: {e}")
+        return False
 
 def main():
     """Run all tests."""
@@ -131,7 +141,7 @@ def main():
     # Summary
     passed = sum(results)
     total = len(results)
-    print(f"=== Test Summary ===")
+    print("=== Test Summary ===")
     print(f"Passed: {passed}/{total}")
     
     if passed == total:

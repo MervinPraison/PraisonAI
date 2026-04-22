@@ -77,27 +77,26 @@ class UnifiedExecutionMixin:
         _trace_emitter = get_context_emitter()
         _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
         
-        # CLI Backend routing - delegate entire turn if configured
-        if hasattr(self, '_cli_backend') and self._cli_backend is not None:
-            return await self._chat_via_cli_backend(
-                prompt=prompt,
-                temperature=temperature,
-                tools=tools,
-                output_json=output_json,
-                output_pydantic=output_pydantic,
-                reasoning_steps=reasoning_steps,
-                stream=stream,
-                task_name=task_name,
-                task_description=task_description,
-                task_id=task_id,
-                config=config,
-                force_retrieval=force_retrieval,
-                skip_retrieval=skip_retrieval,
-                attachments=attachments,
-                tool_choice=tool_choice
-            )
-        
         try:
+            # CLI Backend routing - delegate entire turn if configured
+            if hasattr(self, '_cli_backend') and self._cli_backend is not None:
+                return await self._chat_via_cli_backend(
+                    prompt=prompt,
+                    temperature=temperature,
+                    tools=tools,
+                    output_json=output_json,
+                    output_pydantic=output_pydantic,
+                    reasoning_steps=reasoning_steps,
+                    stream=stream,
+                    task_name=task_name,
+                    task_description=task_description,
+                    task_id=task_id,
+                    config=config,
+                    force_retrieval=force_retrieval,
+                    skip_retrieval=skip_retrieval,
+                    attachments=attachments,
+                    tool_choice=tool_choice
+                )
             # Apply rate limiter if configured (before any LLM call)
             if hasattr(self, '_rate_limiter') and self._rate_limiter is not None:
                 self._rate_limiter.acquire()

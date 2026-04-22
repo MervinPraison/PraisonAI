@@ -10,6 +10,7 @@ import os
 import json
 import asyncio
 import subprocess
+import copy
 from typing import Optional, List, Dict, Any, AsyncIterator
 
 try:
@@ -77,7 +78,7 @@ class ClaudeCodeBackend:
     
     def __init__(self, config: Optional[CliBackendConfig] = None):
         """Initialize with custom or default configuration."""
-        self.config = config or DEFAULT_CONFIG
+        self.config = copy.deepcopy(config if config is not None else DEFAULT_CONFIG)
     
     async def execute(
         self,
@@ -99,15 +100,36 @@ class ClaudeCodeBackend:
         
         try:
             # Use execute mode (not streaming)
-            result = await self._execute_subprocess(cmd)
+            result = await self._execute_subprocess(
+                cmd,
+                stdin_data=prompt if self.config.input == "stdin" else None
+            )
             
-            # Parse result if JSON output
+            # Parse result based on output format
             if self.config.output == "json":
                 try:
                     data = json.loads(result)
                     content = data.get("content", result)
                 except json.JSONDecodeError:
                     content = result
+            elif self.config.output == "jsonl":
+                content_parts = []
+                for line in result.splitlines():
+                    if not line.strip():
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        content_parts.append(line)
+                        continue
+
+                    value = event.get("content", event.get("data", ""))
+                    if isinstance(value, dict):
+                        value = value.get("text", "")
+                    if value:
+                        content_parts.append(str(value))
+
+                content = "".join(content_parts) or result
             else:
                 content = result
             
@@ -137,10 +159,17 @@ class ClaudeCodeBackend:
         try:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
+                stdin=asyncio.subprocess.PIPE if self.config.input == "stdin" else None,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=self._get_env()
             )
+            
+            # Send prompt to stdin if needed
+            if self.config.input == "stdin" and process.stdin is not None:
+                process.stdin.write(prompt.encode())
+                await process.stdin.drain()
+                process.stdin.close()
             
             async for line in self._read_lines(process.stdout):
                 if line.strip():
@@ -231,16 +260,25 @@ class ClaudeCodeBackend:
         
         return cmd
     
-    async def _execute_subprocess(self, cmd: List[str]) -> str:
+    async def _execute_subprocess(self, cmd: List[str], stdin_data: Optional[str] = None) -> str:
         """Execute subprocess and return stdout."""
         process = await asyncio.create_subprocess_exec(
             *cmd,
+            stdin=asyncio.subprocess.PIPE if stdin_data is not None else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=self._get_env()
         )
         
-        stdout, stderr = await process.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(stdin_data.encode() if stdin_data is not None else None),
+                timeout=self.config.timeout_ms / 1000,
+            )
+        except asyncio.TimeoutError as exc:
+            process.kill()
+            await process.wait()
+            raise TimeoutError(f"Claude CLI timed out after {self.config.timeout_ms}ms") from exc
         
         if process.returncode != 0:
             error_msg = stderr.decode() if stderr else f"Exit code {process.returncode}"

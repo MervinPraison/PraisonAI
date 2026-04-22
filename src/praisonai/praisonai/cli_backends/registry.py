@@ -60,10 +60,19 @@ def resolve_cli_backend(
     # Apply overrides if provided
     if overrides:
         # Merge overrides into backend.config
-        if hasattr(backend, 'config'):
-            for key, value in overrides.items():
-                if hasattr(backend.config, key):
-                    setattr(backend.config, key, value)
+        if not hasattr(backend, 'config'):
+            raise TypeError(f"CLI backend '{backend_id}' does not expose a config object")
+
+        unknown_keys = [key for key in overrides if not hasattr(backend.config, key)]
+        if unknown_keys:
+            available = sorted(vars(backend.config).keys())
+            raise ValueError(
+                f"Unknown override(s) for CLI backend '{backend_id}': {unknown_keys}. "
+                f"Available config fields: {available}"
+            )
+
+        for key, value in overrides.items():
+            setattr(backend.config, key, value)
     
     return backend
 
