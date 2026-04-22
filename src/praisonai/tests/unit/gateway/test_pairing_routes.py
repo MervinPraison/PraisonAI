@@ -319,3 +319,63 @@ class TestCreatePairingRoutes:
         
         for route_name, route_func in routes.items():
             assert callable(route_func), f"Route {route_name} is not callable"
+
+
+class TestRateLimiting:
+    """Test rate limiting functionality."""
+
+    @pytest.fixture
+    def mock_rate_limiter(self):
+        """Mock rate limiter that denies all requests."""
+        limiter = Mock()
+        limiter.allow.return_value = False
+        limiter.time_until_allowed.return_value = 12.4
+        return limiter
+
+    @pytest.fixture
+    def pairing_routes_rate_limited(self, mock_pairing_store, mock_auth_checker, mock_rate_limiter):
+        """Create pairing routes with rate limiting enabled."""
+        return create_pairing_routes(mock_pairing_store, mock_auth_checker, mock_rate_limiter)
+
+    @pytest.fixture
+    def test_app_rate_limited(self, pairing_routes_rate_limited):
+        """Create a test app with rate-limited routes."""
+        app = Starlette(routes=[
+            Route("/api/pairing/pending", pairing_routes_rate_limited["pending"], methods=["GET"]),
+            Route("/api/pairing/approve", pairing_routes_rate_limited["approve"], methods=["POST"]),
+            Route("/api/pairing/revoke", pairing_routes_rate_limited["revoke"], methods=["POST"]),
+        ])
+        return app
+
+    def test_pending_rate_limited(self, test_app_rate_limited):
+        """Test pending endpoint returns 429 when rate limited."""
+        with TestClient(test_app_rate_limited) as client:
+            response = client.get("/api/pairing/pending")
+        
+        assert response.status_code == 429
+        data = response.json()
+        assert data == {"error": "Rate limited", "retry_after_seconds": 12}
+
+    def test_approve_rate_limited(self, test_app_rate_limited):
+        """Test approve endpoint returns 429 when rate limited."""
+        with TestClient(test_app_rate_limited) as client:
+            response = client.post("/api/pairing/approve", json={
+                "channel": "telegram",
+                "code": "TEST1234"
+            })
+        
+        assert response.status_code == 429
+        data = response.json()
+        assert data == {"error": "Rate limited", "retry_after_seconds": 12}
+
+    def test_revoke_rate_limited(self, test_app_rate_limited):
+        """Test revoke endpoint returns 429 when rate limited.""" 
+        with TestClient(test_app_rate_limited) as client:
+            response = client.post("/api/pairing/revoke", json={
+                "channel": "telegram", 
+                "user_id": "12345"
+            })
+        
+        assert response.status_code == 429
+        data = response.json()
+        assert data == {"error": "Rate limited", "retry_after_seconds": 12}

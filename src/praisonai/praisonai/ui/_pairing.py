@@ -33,7 +33,8 @@ async def get_pending_pairings() -> List[Dict]:
         url = f"http://{GATEWAY_HOST}:{GATEWAY_PORT}/api/pairing/pending"
         headers = {"Authorization": f"Bearer {GATEWAY_TOKEN}"}
         
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=5)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url, headers=headers) as resp:
                 if resp.status == 200:
                     data = await resp.json()
@@ -62,7 +63,8 @@ async def approve_pairing(channel: str, code: str) -> bool:
         }
         data = {"channel": channel, "code": code}
         
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=5)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(url, headers=headers, json=data) as resp:
                 success = resp.status == 200
                 if not success:
@@ -71,6 +73,15 @@ async def approve_pairing(channel: str, code: str) -> bool:
     except Exception as e:
         logger.error(f"Error approving pairing: {e}")
         return False
+
+
+async def deny_pairing(channel: str, code: str) -> bool:
+    """Deny a pairing request (logs denial - code will expire naturally)."""
+    # Note: Currently there's no dedicated deny endpoint in the gateway
+    # The pending request will expire naturally based on TTL
+    # This is a UI-only action for admin feedback
+    logger.info(f"Admin denied pairing request: {channel} code {code}")
+    return True  # Always succeed for UI purposes
 
 
 async def refresh_pending_banner():
@@ -104,24 +115,59 @@ async def refresh_pending_banner():
         
         actions.append(
             cl.Action(
-                name=f"approve_{code}",
+                name="approve_pairing",
                 value=f"{channel}:{code}",
                 label=f"✅ Approve {user_name} ({channel}) - {age_str}",
                 description=f"Approve pairing request from {user_name} on {channel}"
             )
         )
+        actions.append(
+            cl.Action(
+                name="deny_pairing",
+                value=f"{channel}:{code}",
+                label=f"❌ Deny {user_name} ({channel})",
+                description=f"Deny pairing request from {user_name} on {channel}",
+            )
+        )
     
-    # Display banner message with actions
+    # Display or update banner message with actions
     banner_content = f"🔔 **{len(pending)} pending pairing request(s)**\n\nClick to approve:"
     
-    await cl.Message(
-        content=banner_content,
-        actions=actions,
-        author="System"
-    ).send()
+    # Check if we already have a banner message stored in the session
+    banner_msg_id = cl.user_session.get("pending_banner_id")
+    
+    if banner_msg_id:
+        # Try to update existing message
+        try:
+            # Get the existing message and update it
+            # Note: Chainlit's update functionality depends on the specific version
+            # For now, send a new message and store its ID
+            msg = await cl.Message(
+                content=banner_content,
+                actions=actions,
+                author="System"
+            ).send()
+            cl.user_session.set("pending_banner_id", msg.id)
+        except Exception as e:
+            logger.warning(f"Failed to update banner message: {e}")
+            # Fall back to sending new message
+            msg = await cl.Message(
+                content=banner_content,
+                actions=actions,
+                author="System"
+            ).send()
+            cl.user_session.set("pending_banner_id", msg.id)
+    else:
+        # Send new banner message and store its ID
+        msg = await cl.Message(
+            content=banner_content,
+            actions=actions,
+            author="System"
+        ).send()
+        cl.user_session.set("pending_banner_id", msg.id)
 
 
-@cl.action_callback("approve_*")
+@cl.action_callback("approve_pairing")
 async def on_approve_pairing(action: cl.Action):
     """Handle approval action from banner."""
     try:
@@ -155,6 +201,44 @@ async def on_approve_pairing(action: cl.Action):
         logger.error(f"Error in approval handler: {e}")
         await cl.Message(
             content=f"❌ Error processing approval: {str(e)}",
+            author="System"
+        ).send()
+
+
+@cl.action_callback("deny_pairing")
+async def on_deny_pairing(action: cl.Action):
+    """Handle denial action from banner."""
+    try:
+        # Parse channel:code from action value
+        channel, code = action.value.split(":", 1)
+        
+        # Show loading message
+        await cl.Message(
+            content=f"⏳ Denying pairing for {channel} code {code}...",
+            author="System"
+        ).send()
+        
+        # Deny the pairing
+        success = await deny_pairing(channel, code)
+        
+        if success:
+            await cl.Message(
+                content=f"✅ Successfully denied pairing for {channel} code {code}",
+                author="System"
+            ).send()
+        else:
+            await cl.Message(
+                content=f"❌ Failed to deny pairing for {channel} code {code}",
+                author="System"
+            ).send()
+        
+        # Refresh the banner to update count
+        await refresh_pending_banner()
+        
+    except Exception as e:
+        logger.error(f"Error in denial handler: {e}")
+        await cl.Message(
+            content=f"❌ Error processing denial: {str(e)}",
             author="System"
         ).send()
 

@@ -203,8 +203,15 @@ class PairingStore:
             
         Returns:
             True if approval successful, False if code invalid/expired
+            
+        Note:
+            Current implementation uses pairing code as temporary channel_id when
+            no user_id is provided. This is a simplified approval flow where admin
+            approval immediately pairs the code. In a full implementation, approval
+            would mark the code as "approved" and actual pairing would happen when
+            the real user presents the code with their user_id.
         """
-        # Use code as channel_id if user_id not provided
+        # Use code as channel_id if user_id not provided (current simple implementation)
         channel_id = user_id or code
         label = user_name or f"User {channel_id}"
         return self.verify_and_pair(code, channel_id, channel_type, label)

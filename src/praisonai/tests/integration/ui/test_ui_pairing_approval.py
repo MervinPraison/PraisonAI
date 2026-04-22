@@ -240,7 +240,22 @@ class TestRefreshPendingBanner:
         # Check message content
         assert "🔔" in mock_message_call[1]["content"]
         assert "1 pending pairing request(s)" in mock_message_call[1]["content"]
-        assert len(mock_message_call[1]["actions"]) == 1
+        
+        # Verify action contract
+        actions = mock_message_call[1]["actions"]
+        assert len(actions) == 2  # Should have both approve and deny actions
+        
+        # Check approve action
+        approve_action = actions[0]
+        assert approve_action.name == "approve_pairing"
+        assert approve_action.value == "telegram:ABCD1234"
+        assert "✅ Approve" in approve_action.label
+        
+        # Check deny action  
+        deny_action = actions[1]
+        assert deny_action.name == "deny_pairing"
+        assert deny_action.value == "telegram:ABCD1234"
+        assert "❌ Deny" in deny_action.label
 
     async def test_banner_multiple_pending(
         self,
@@ -272,7 +287,22 @@ class TestRefreshPendingBanner:
         mock_message_call = mock_chainlit_message.call_args
         
         assert "2 pending pairing request(s)" in mock_message_call[1]["content"]
-        assert len(mock_message_call[1]["actions"]) == 2
+        
+        # Should have 4 actions total (2 pending × 2 actions each)
+        actions = mock_message_call[1]["actions"] 
+        assert len(actions) == 4
+        
+        # Verify first pairing actions
+        assert actions[0].name == "approve_pairing"
+        assert actions[0].value == "telegram:ABCD1234"
+        assert actions[1].name == "deny_pairing" 
+        assert actions[1].value == "telegram:ABCD1234"
+        
+        # Verify second pairing actions
+        assert actions[2].name == "approve_pairing"
+        assert actions[2].value == "slack:EFGH5678"
+        assert actions[3].name == "deny_pairing"
+        assert actions[3].value == "slack:EFGH5678"
 
 
 class TestIntegrationFlow:
