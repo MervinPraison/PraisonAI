@@ -8,6 +8,7 @@ and file-locked JSON persistence for multi-worker safety.
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import time
@@ -15,6 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
 from typing import Dict, Optional, Union
+
+logger = logging.getLogger(__name__)
 
 try:
     import filelock
@@ -24,11 +27,19 @@ except ImportError:
     FILELOCK_AVAILABLE = False
     import threading
     
+    # Module-level mapping from lock path to shared threading.Lock
+    _locks_by_path: Dict[str, threading.Lock] = {}
+    _locks_creation_lock = threading.Lock()
+    
     class FileLock:
-        """Fallback implementation using threading.Lock"""
+        """Fallback implementation using threading.Lock shared by path"""
         def __init__(self, path: str):
             self.path = path
-            self._lock = threading.Lock()
+            # Get or create a shared lock for this path
+            with _locks_creation_lock:
+                if path not in _locks_by_path:
+                    _locks_by_path[path] = threading.Lock()
+                self._lock = _locks_by_path[path]
         
         def __enter__(self):
             self._lock.acquire()
@@ -43,6 +54,7 @@ class MagicLinkEntry:
     """A magic link entry stored in the registry."""
     nonce: str
     created_at: float
+    expires_at: float
     consumed: bool = False
     consumed_at: Optional[float] = None
 
@@ -165,9 +177,16 @@ class MagicLinkStore:
             data = json.loads(self.storage_path.read_text())
             entries = {}
             for nonce, entry_data in data.items():
+                # Handle legacy entries without expires_at field
+                expires_at = entry_data.get("expires_at")
+                if expires_at is None:
+                    # Legacy entry, calculate expires_at from created_at and default_ttl
+                    expires_at = entry_data["created_at"] + self.default_ttl
+                
                 entries[nonce] = MagicLinkEntry(
                     nonce=entry_data["nonce"],
                     created_at=entry_data["created_at"],
+                    expires_at=expires_at,
                     consumed=entry_data.get("consumed", False),
                     consumed_at=entry_data.get("consumed_at"),
                 )
@@ -175,14 +194,19 @@ class MagicLinkStore:
         except (OSError, json.JSONDecodeError, KeyError, ValueError):
             return {}
     
-    def _save_entries(self, entries: Dict[str, MagicLinkEntry]) -> None:
-        """Save entries to storage."""
+    def _save_entries(self, entries: Dict[str, MagicLinkEntry]) -> bool:
+        """Save entries to storage.
+        
+        Returns:
+            True if successfully saved, False if failed
+        """
         try:
             data = {}
             for nonce, entry in entries.items():
                 data[nonce] = {
                     "nonce": entry.nonce,
                     "created_at": entry.created_at,
+                    "expires_at": entry.expires_at,
                     "consumed": entry.consumed,
                     "consumed_at": entry.consumed_at,
                 }
@@ -199,26 +223,20 @@ class MagicLinkStore:
             
             # Atomic rename
             os.replace(temp_path, self.storage_path)
+            return True
             
-        except OSError:
-            pass
+        except OSError as e:
+            logger.error(f"Failed to save magic link entries: {e}")
+            return False
     
     def _cleanup_expired(self, entries: Dict[str, MagicLinkEntry]) -> Dict[str, MagicLinkEntry]:
         """Remove expired entries."""
         now = time.time()
         cleaned = {}
         for nonce, entry in entries.items():
-            # Extract timestamp from the nonce for TTL check (consistent with consume())
-            try:
-                parts = nonce.split(".")
-                if len(parts) == 3:
-                    nonce_timestamp = int(parts[1])
-                    if now - nonce_timestamp <= self.default_ttl:
-                        cleaned[nonce] = entry
-                # If nonce format is invalid, skip entry (it will be cleaned up)
-            except (ValueError, IndexError):
-                # Skip malformed entries
-                pass
+            # Use stored expires_at for TTL check
+            if now <= entry.expires_at:
+                cleaned[nonce] = entry
         return cleaned
     
     def mint(self, ttl: Optional[int] = None) -> str:
@@ -245,12 +263,15 @@ class MagicLinkStore:
                 entries = self._cleanup_expired(entries)
                 
                 # Store the entry
+                expires_at = timestamp + ttl
                 entries[signed_nonce] = MagicLinkEntry(
                     nonce=signed_nonce,
                     created_at=timestamp,
+                    expires_at=expires_at,
                 )
                 
-                self._save_entries(entries)
+                if not self._save_entries(entries):
+                    raise OSError("Failed to persist magic link entry")
         
         return signed_nonce
     
@@ -278,11 +299,6 @@ class MagicLinkStore:
             if not self._verify_nonce_signature(nonce, timestamp, signature):
                 return False
             
-            # Check TTL
-            now = time.time()
-            if now - timestamp > self.default_ttl:
-                return False
-            
             with self._local_lock:
                 with self._file_lock:
                     entries = self._load_entries()
@@ -294,6 +310,11 @@ class MagicLinkStore:
                         # This shouldn't happen in normal operation, but let's be defensive
                         return False
                     
+                    # Check TTL using stored expires_at
+                    now = time.time()
+                    if now > entry.expires_at:
+                        return False
+                    
                     if entry.consumed:
                         return False
                     
@@ -301,7 +322,8 @@ class MagicLinkStore:
                     entry.consumed = True
                     entry.consumed_at = now
                     
-                    self._save_entries(entries)
+                    if not self._save_entries(entries):
+                        return False  # Failed to persist consumed state
                     
             return True
             
@@ -359,7 +381,7 @@ class MagicLinkStore:
                 now = time.time()
                 cleaned = {}
                 for nonce, entry in entries.items():
-                    if (now - entry.created_at <= self.default_ttl and 
+                    if (now <= entry.expires_at and 
                         not entry.consumed):
                         cleaned[nonce] = entry
                 

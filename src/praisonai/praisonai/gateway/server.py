@@ -299,11 +299,17 @@ class WebSocketGateway:
             except ImportError:
                 pass
             
-            # Check loopback bypass for local requests
-            client_host = getattr(request.client, 'host', None) if request.client else None
-            if client_host and client_host in ('127.0.0.1', '::1', 'localhost'):
-                # Allow local requests without auth for development
-                return None
+            # Check loopback bypass for local requests (only if explicitly enabled)
+            allow_loopback = os.environ.get("ALLOW_LOOPBACK_BYPASS", "").lower() in ("true", "1", "yes")
+            if allow_loopback:
+                client_host = getattr(request.client, 'host', None) if request.client else None
+                if client_host and client_host in ('127.0.0.1', '::1', 'localhost'):
+                    # Reject if proxy headers are present (indicates request went through proxy)
+                    proxy_headers = ["x-forwarded-for", "via", "x-real-ip", "x-forwarded-host"]
+                    has_proxy_headers = any(header in request.headers for header in proxy_headers)
+                    if not has_proxy_headers:
+                        # Allow local requests without auth for development
+                        return None
             
             # Fall back to token-based auth
             auth_header = request.headers.get("authorization", "")
@@ -346,10 +352,28 @@ class WebSocketGateway:
             })
         
         async def websocket_endpoint(websocket: WebSocket):
-            # Authenticate WebSocket via query param or first message
+            # Authenticate WebSocket via session cookie or query param
             if self.config.auth_token:
-                ws_token = websocket.query_params.get("token", "")
-                if not secrets.compare_digest(ws_token, self.config.auth_token):
+                authenticated = False
+                
+                # First try cookie-based authentication
+                try:
+                    from .cookie_auth import CookieAuthManager
+                    auth_manager = CookieAuthManager(secret_key=self.config.auth_token)
+                    cookie_header = websocket.headers.get("cookie", "")
+                    token_from_cookie = auth_manager.extract_token_from_cookies(cookie_header)
+                    if token_from_cookie and auth_manager.is_token_valid(token_from_cookie):
+                        authenticated = True
+                except ImportError:
+                    pass
+                
+                # Fall back to query param token authentication
+                if not authenticated:
+                    ws_token = websocket.query_params.get("token", "")
+                    if ws_token and secrets.compare_digest(ws_token, self.config.auth_token):
+                        authenticated = True
+                
+                if not authenticated:
                     await websocket.close(code=4003, reason="Authentication required")
                     return
             

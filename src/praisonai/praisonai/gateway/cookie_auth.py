@@ -5,6 +5,7 @@ Provides secure, HttpOnly JWT cookies for session management
 using itsdangerous (available via Starlette dependency).
 """
 
+import json
 import time
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Union
@@ -77,16 +78,22 @@ class CookieAuthManager:
         if not ITSDANGEROUS_AVAILABLE:
             raise RuntimeError("itsdangerous not available")
         
+        # Validate claims don't contain reserved keys
+        reserved_keys = {"iat", "exp"}
+        if reserved_keys & claims.keys():
+            raise ValueError(f"Claims cannot contain reserved keys: {reserved_keys & claims.keys()}")
+        
         # Add standard claims
+        now = int(time.time())
         payload = {
-            "iat": int(time.time()),
-            "exp": int(time.time()) + self.max_age,
+            "iat": now,
+            "exp": now + self.max_age,
             **claims
         }
         
-        # Convert to string and sign
-        payload_str = ",".join(f"{k}:{v}" for k, v in sorted(payload.items()))
-        return self.signer.sign(payload_str).decode()
+        # Convert to JSON and sign
+        payload_str = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+        return self.signer.sign(payload_str.encode()).decode()
     
     def verify_session(self, token: str) -> Optional[Dict[str, Union[str, int]]]:
         """Verify and decode a session token.
@@ -107,17 +114,8 @@ class CookieAuthManager:
                 max_age=self.max_age
             ).decode()
             
-            # Parse claims
-            claims = {}
-            for pair in payload_str.split(","):
-                if ":" not in pair:
-                    continue
-                key, value = pair.split(":", 1)
-                # Try to parse as int, fallback to string
-                try:
-                    claims[key] = int(value)
-                except ValueError:
-                    claims[key] = value
+            # Parse claims from JSON
+            claims = json.loads(payload_str)
             
             # Check expiration
             exp = claims.get("exp")

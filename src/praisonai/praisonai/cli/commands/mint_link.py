@@ -28,9 +28,8 @@ def mint_fresh_link(ttl: int = 600) -> str:
     """
     try:
         from praisonai.gateway.magic_link import MagicLinkStore
-    except ImportError:
-        print("Error: Magic link functionality not available", file=sys.stderr)
-        sys.exit(1)
+    except ImportError as exc:
+        raise RuntimeError("Magic link functionality not available") from exc
     
     store = MagicLinkStore()
     nonce = store.mint(ttl=ttl)

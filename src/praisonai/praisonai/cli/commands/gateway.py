@@ -400,6 +400,7 @@ Manage the gateway server: praisonai gateway <command>
   [green]install[/green]     Install as OS daemon service
   [green]uninstall[/green]   Uninstall daemon service
   [green]logs[/green]        Show daemon service logs
+  [green]mint-link[/green]   Generate a one-time magic link (options: --ttl, --host, --port)
 
 [bold]Multi-Bot Mode:[/bold]
   praisonai gateway start --config gateway.yaml

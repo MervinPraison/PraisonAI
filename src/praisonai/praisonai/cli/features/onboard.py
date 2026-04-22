@@ -609,11 +609,7 @@ class OnboardWizard:
         _tok = getattr(self, "_gateway_token", "")
         _masked = (_tok[:4] + "…" + _tok[-4:]) if len(_tok) >= 10 else "(set)"
         _health_url = "http://127.0.0.1:8765/health"
-        _info_url = (
-            f"http://127.0.0.1:8765/info?token={_tok}"
-            if _tok
-            else "http://127.0.0.1:8765/info"
-        )
+        _info_url = "http://127.0.0.1:8765/info"
         import platform as _platform  # stdlib, free
         _os = _platform.system().lower()
         if _os == "darwin":
@@ -641,7 +637,8 @@ class OnboardWizard:
             f"[bold]Gateway endpoints:[/bold]\n"
             f"  Health (public):  [cyan]{_health_url}[/cyan]\n"
             f"  Info (authed):    [cyan]{_info_url}[/cyan]\n"
-            f"  [dim]Token {_masked} stored in ~/.praisonai/.env as GATEWAY_AUTH_TOKEN[/dim]\n\n"
+            f"  [dim]Use header: Authorization: Bearer {_masked}[/dim]\n"
+            f"  [dim]Token stored in ~/.praisonai/.env as GATEWAY_AUTH_TOKEN[/dim]\n\n"
             f"[bold]Generate fresh magic links:[/bold]\n"
             f"  [cyan]praisonai gateway mint-link[/cyan]  [dim]# get a new magic link[/dim]\n\n"
             f"[bold]Manage the daemon:[/bold]\n"
