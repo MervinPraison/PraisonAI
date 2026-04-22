@@ -65,13 +65,13 @@ def register_password_auth(app, *, bind_host: str) -> None:
     @cl.password_auth_callback
     def auth_callback(username: str, password: str) -> Optional[cl.User]:
         """Password authentication callback."""
-        logger.debug(f"Auth attempt: username='{username}', expected='{expected_username}'")
+        logger.debug("Auth attempt received")
         
         if (username, password) == (expected_username, expected_password):
-            logger.info(f"Login successful for user: {username}")
+            logger.info("Login successful")
             return cl.User(identifier=username, metadata={"role": "admin", "provider": "credentials"})
         else:
-            logger.warning(f"Login failed for user: {username}")
+            logger.warning("Login failed")
             return None
     
     # Log the registration

@@ -131,7 +131,8 @@ class TestUISecurityScenarios:
     
     @patch.dict(os.environ, {
         "CHAINLIT_USERNAME": "admin",
-        "CHAINLIT_PASSWORD": "admin"
+        "CHAINLIT_PASSWORD": "admin",
+        "PRAISONAI_ALLOW_DEFAULT_CREDS": ""
     })
     def test_accidental_production_deploy_blocked(self):
         """Test accidental production deploy with default creds is blocked."""

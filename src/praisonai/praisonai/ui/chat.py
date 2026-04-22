@@ -195,6 +195,7 @@ def _ensure_env_loaded():
 
 # Auth secret setup (required early)
 import secrets
+_ensure_env_loaded()
 CHAINLIT_AUTH_SECRET = os.getenv("CHAINLIT_AUTH_SECRET")
 if not CHAINLIT_AUTH_SECRET:
     CHAINLIT_AUTH_SECRET = secrets.token_hex(32)

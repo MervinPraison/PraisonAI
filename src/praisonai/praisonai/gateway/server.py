@@ -217,20 +217,22 @@ class WebSocketGateway:
                 logger.info("Gateway using GATEWAY_AUTH_TOKEN from environment")
             else:
                 import secrets
+                from praisonaiagents.gateway.protocols import is_loopback
                 from .auth import get_auth_token_fingerprint, save_auth_token_to_env
-                
-                self.config.auth_token = secrets.token_hex(16)
-                fingerprint = get_auth_token_fingerprint(self.config.auth_token)
-                logger.warning(
-                    f"No auth_token provided for Gateway server. Generated temporary token: {fingerprint}. "
-                    "For production, set GATEWAY_AUTH_TOKEN."
-                )
-                
-                # Save to ~/.praisonai/.env for future use
-                try:
-                    save_auth_token_to_env(self.config.auth_token)
-                except Exception as e:
-                    logger.debug(f"Could not save auth token to .env: {e}")
+
+                if is_loopback(self.config.bind_host):
+                    self.config.auth_token = secrets.token_hex(16)
+                    fingerprint = get_auth_token_fingerprint(self.config.auth_token)
+                    logger.warning(
+                        f"No auth_token provided for Gateway server. Generated temporary token: {fingerprint}. "
+                        "For production, set GATEWAY_AUTH_TOKEN."
+                    )
+
+                    # Save to ~/.praisonai/.env for future use
+                    try:
+                        save_auth_token_to_env(self.config.auth_token)
+                    except Exception as e:
+                        logger.debug(f"Could not save auth token to .env: {e}")
         
         self._host = self.config.host
         self._port = self.config.port
@@ -275,6 +277,9 @@ class WebSocketGateway:
         
         # Validate bind-aware auth configuration before starting
         from .auth import assert_external_bind_safe
+        self.config.host = self._host
+        self.config.port = self._port
+        self.config.bind_host = self._host
         assert_external_bind_safe(self.config)
         
         try:

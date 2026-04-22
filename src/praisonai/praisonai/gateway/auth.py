@@ -32,10 +32,11 @@ def assert_external_bind_safe(config: GatewayConfig) -> None:
         GatewayStartupError: If binding to external interface without auth token
     """
     auth_mode = resolve_auth_mode(config.bind_host)
+    auth_token = config.auth_token.strip() if config.auth_token else ""
     
     if auth_mode == "local":
         # Loopback bind is always safe
-        if not config.auth_token:
+        if not auth_token:
             logger.warning(
                 f"Gateway binding to loopback interface {config.bind_host} without auth token. "
                 f"This is permissive mode - only safe for local development."
@@ -43,7 +44,7 @@ def assert_external_bind_safe(config: GatewayConfig) -> None:
         return
     
     # External bind - require auth token
-    if not config.auth_token:
+    if not auth_token:
         raise GatewayStartupError(
             f"Cannot bind to {config.bind_host} without an auth token.\n"
             f"Fix:  praisonai onboard         (30 seconds, 3 prompts)\n"
@@ -65,7 +66,7 @@ def get_auth_token_fingerprint(token: str) -> str:
     if not token:
         return "gw_****<none>"
     
-    if len(token) < 4:
+    if len(token) <= 4:
         return "gw_****<short>"
     
     return f"gw_****{token[-4:]}"
@@ -110,7 +111,15 @@ def save_auth_token_to_env(token: str, env_file: Optional[str] = None) -> None:
         lines.append(f'GATEWAY_AUTH_TOKEN={token}')
     
     # Write with secure permissions
-    env_path.write_text('\n'.join(lines))
-    env_path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600
+    content = '\n'.join(lines)
+    mode = stat.S_IRUSR | stat.S_IWUSR
+    if env_path.exists():
+        env_path.chmod(mode)
+        env_path.write_text(content, encoding="utf-8")
+    else:
+        fd = os.open(env_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+        with os.fdopen(fd, "w", encoding="utf-8") as file_obj:
+            file_obj.write(content)
+    env_path.chmod(mode)  # 0600
     
     logger.info(f"Auth token saved to {env_path} with secure permissions (mode 0600)")

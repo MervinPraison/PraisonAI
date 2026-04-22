@@ -614,11 +614,12 @@ if not CHAINLIT_AUTH_SECRET:
     logger.warning("CHAINLIT_AUTH_SECRET not set; generated a random secret for this session.")
 
 # Authentication configuration - bind-aware auth
-if AUTH_PASSWORD_ENABLED:
-    from ._auth import register_password_auth
-    
-    # Determine bind host from CHAINLIT_HOST env var (default: 127.0.0.1)
-    bind_host = os.getenv("CHAINLIT_HOST", "127.0.0.1")
+from praisonaiagents.gateway.protocols import is_loopback
+from ._auth import register_password_auth
+
+# Determine bind host from CHAINLIT_HOST env var (default: 127.0.0.1)
+bind_host = os.getenv("CHAINLIT_HOST", "127.0.0.1")
+if AUTH_PASSWORD_ENABLED or not is_loopback(bind_host):
     register_password_auth(None, bind_host=bind_host)
 
 @cl.set_chat_profiles
