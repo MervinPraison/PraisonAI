@@ -382,7 +382,15 @@ author: agent
             
             # Determine target file
             if file_path:
-                target_file = skill.properties.path / file_path
+                from pathlib import Path
+                relative_path = Path(file_path)
+                if relative_path.is_absolute() or ".." in relative_path.parts:
+                    return {"success": False, "error": f"Path traversal detected: {file_path}"}
+                target_file = (skill.properties.path / relative_path).resolve()
+                try:
+                    target_file.relative_to(skill.properties.path.resolve())
+                except ValueError:
+                    return {"success": False, "error": f"Path traversal detected: {file_path}"}
             else:
                 target_file = skill.properties.path / "SKILL.md"
             
@@ -464,8 +472,12 @@ author: agent
                 return {"success": False, "error": f"Cannot write to skill '{name}' - no path available"}
             
             # Validate file path is in allowed subdirectories
+            from pathlib import Path
             allowed_subdirs = ['references', 'templates', 'scripts', 'assets']
-            path_parts = file_path.split('/')
+            relative_path = Path(file_path)
+            path_parts = relative_path.parts
+            if relative_path.is_absolute() or ".." in path_parts:
+                return {"success": False, "error": f"Path traversal detected: {file_path}"}
             if not path_parts or path_parts[0] not in allowed_subdirs:
                 return {"success": False, "error": f"File path must be under: {allowed_subdirs}"}
             
@@ -474,7 +486,11 @@ author: agent
                 return {"success": False, "error": "File content exceeds maximum size (1MB)"}
             
             # Create target file
-            target_file = skill.properties.path / file_path
+            target_file = (skill.properties.path / relative_path).resolve()
+            try:
+                target_file.relative_to(skill.properties.path.resolve())
+            except ValueError:
+                return {"success": False, "error": f"Path traversal detected: {file_path}"}
             target_file.parent.mkdir(parents=True, exist_ok=True)
             
             self._write_skill_atomically(target_file, file_content)

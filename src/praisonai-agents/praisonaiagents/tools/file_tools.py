@@ -168,7 +168,7 @@ class FileTools:
         """
         try:
             # Validate file path
-            safe_path = FileTools._validate_path(filepath)
+            safe_path = self._validate_path(filepath)
             path = Path(safe_path)
             if not path.exists():
                 return {'error': f'File not found: {filepath}'}
