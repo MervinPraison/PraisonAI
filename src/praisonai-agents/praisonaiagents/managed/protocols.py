@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
     Any,
+    AsyncIterator,
     Dict,
     List,
     Optional,
@@ -214,5 +215,137 @@ class ComputeProviderProtocol(Protocol):
 
         Returns:
             List of InstanceInfo for running instances.
+        """
+        ...
+
+
+@runtime_checkable
+class ManagedRuntimeProtocol(Protocol):
+    """Protocol for hosted agent runtime — the agent LOOP runs on remote infra.
+    
+    Separates from ComputeProviderProtocol which only sandboxes tool execution.
+    Here, the entire agent loop (LLM calls, tool calling, event streaming, 
+    memory, session management) runs remotely.
+    
+    This is the protocol that Anthropic Managed Agents, E2B Managed Runtime,
+    Modal Managed Functions, etc. should implement.
+    
+    Example lifecycle::
+    
+        runtime = AnthropicManagedAgent(config=cfg)
+        agent_id = await runtime.create_agent(config)
+        env_id = await runtime.create_environment(config)
+        session_id = await runtime.create_session(agent_id, env_id)
+        
+        # Send user message and stream agent responses
+        await runtime.send_event(session_id, {"type": "user.message", ...})
+        async for event in runtime.stream_events(session_id):
+            if event["type"] == "agent.message":
+                print(event["content"])
+    """
+
+    async def create_agent(self, config: Dict[str, Any]) -> str:
+        """Create agent definition on remote infrastructure.
+        
+        Args:
+            config: Agent configuration (model, system, tools, etc.)
+            
+        Returns:
+            Agent ID assigned by the remote provider
+        """
+        ...
+
+    async def create_environment(self, config: Dict[str, Any]) -> str:
+        """Create environment (container/sandbox) on remote infrastructure.
+        
+        Args:
+            config: Environment configuration (packages, networking, etc.)
+            
+        Returns:
+            Environment ID assigned by the remote provider
+        """
+        ...
+
+    async def create_session(
+        self, 
+        agent_id: str, 
+        environment_id: str, 
+        **kwargs
+    ) -> str:
+        """Create running session (agent-in-environment) on remote infrastructure.
+        
+        Args:
+            agent_id: Agent ID from create_agent()
+            environment_id: Environment ID from create_environment()
+            **kwargs: Additional session config (vault_ids, resources, etc.)
+            
+        Returns:
+            Session ID assigned by the remote provider
+        """
+        ...
+
+    async def send_event(self, session_id: str, event: Dict[str, Any]) -> None:
+        """Send event to running session.
+        
+        Args:
+            session_id: Session ID from create_session()
+            event: Event dict (e.g. {"type": "user.message", "content": [...]})
+        """
+        ...
+
+    async def stream_events(self, session_id: str) -> AsyncIterator[Dict[str, Any]]:
+        """Stream events from running session.
+        
+        Args:
+            session_id: Session ID from create_session()
+            
+        Yields:
+            Event dicts (agent.message, agent.tool_use, session.status_idle, etc.)
+        """
+        ...
+
+    async def interrupt(self, session_id: str) -> None:
+        """Send interrupt signal to running session.
+        
+        Args:
+            session_id: Session ID to interrupt
+        """
+        ...
+
+    async def retrieve_session(self, session_id: str) -> Dict[str, Any]:
+        """Retrieve session metadata and status.
+        
+        Args:
+            session_id: Session ID to retrieve
+            
+        Returns:
+            Session info dict with id, status, title, usage, etc.
+        """
+        ...
+
+    async def list_sessions(self, **filters) -> List[Dict[str, Any]]:
+        """List sessions with optional filtering.
+        
+        Args:
+            **filters: Filter criteria (agent_id, status, limit, etc.)
+            
+        Returns:
+            List of session info dicts
+        """
+        ...
+
+    async def archive_session(self, session_id: str) -> None:
+        """Archive session (preserve but mark inactive).
+        
+        Args:
+            session_id: Session ID to archive
+        """
+        ...
+
+    async def delete_session(self, session_id: str) -> None:
+        """Delete session permanently.
+        
+        Args:
+            session_id: Session ID to delete
         """
         ...
