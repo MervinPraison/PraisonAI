@@ -187,7 +187,11 @@ class AgentsGenerator:
         elif os.environ.get('LOGLEVEL'):
             self.logger.setLevel(getattr(logging, os.environ.get('LOGLEVEL', 'INFO').upper(), logging.INFO))
         
-        # Initialize tool registry (replaces globals() pattern)
+        # Initialize tool resolver (single source of truth for tool resolution)
+        from .tool_resolver import ToolResolver
+        self.tool_resolver = ToolResolver()
+        
+        # Keep tool registry for backward compatibility with autogen adapters
         self.tool_registry = ToolRegistry()
         self.tool_registry.register_builtin_autogen_adapters()
         
@@ -456,27 +460,32 @@ class AgentsGenerator:
         topic = config.get('input', config.get('topic', ''))
         tools_dict = {}
         
-        # Only try to use praisonai_tools if it's available and needed
+        # Use ToolResolver to get available tools (consistent tool resolution)
         if PRAISONAI_TOOLS_AVAILABLE and (CREWAI_AVAILABLE or AUTOGEN_AVAILABLE or PRAISONAI_AVAILABLE or AG2_AVAILABLE):
-            tools_dict = {
-                'CodeDocsSearchTool': CodeDocsSearchTool(),
-                'CSVSearchTool': CSVSearchTool(),
-                'DirectorySearchTool': DirectorySearchTool(),
-                'DOCXSearchTool': DOCXSearchTool(),
-                'DirectoryReadTool': DirectoryReadTool(),
-                'FileReadTool': FileReadTool(),
-                'TXTSearchTool': TXTSearchTool(),
-                'JSONSearchTool': JSONSearchTool(),
-                'MDXSearchTool': MDXSearchTool(),
-                'PDFSearchTool': PDFSearchTool(),
-                'RagTool': RagTool(),
-                'ScrapeElementFromWebsiteTool': ScrapeElementFromWebsiteTool(),
-                'ScrapeWebsiteTool': ScrapeWebsiteTool(),
-                'WebsiteSearchTool': WebsiteSearchTool(),
-                'XMLSearchTool': XMLSearchTool(),
-                'YoutubeChannelSearchTool': YoutubeChannelSearchTool(),
-                'YoutubeVideoSearchTool': YoutubeVideoSearchTool(),
-            }
+            try:
+                # Get available tools from the resolver
+                available_tools = self.tool_resolver.list_available()
+                tools_dict = {}
+                
+                # Standard praisonai-tools tool names
+                standard_tools = [
+                    'CodeDocsSearchTool', 'CSVSearchTool', 'DirectorySearchTool', 'DOCXSearchTool',
+                    'DirectoryReadTool', 'FileReadTool', 'TXTSearchTool', 'JSONSearchTool',
+                    'MDXSearchTool', 'PDFSearchTool', 'RagTool', 'ScrapeElementFromWebsiteTool',
+                    'ScrapeWebsiteTool', 'WebsiteSearchTool', 'XMLSearchTool',
+                    'YoutubeChannelSearchTool', 'YoutubeVideoSearchTool',
+                ]
+                
+                # Resolve only tools that are actually available
+                for tool_name in standard_tools:
+                    if tool_name in available_tools:
+                        resolved_tool = self.tool_resolver.resolve(tool_name)
+                        if resolved_tool is not None:
+                            tools_dict[tool_name] = resolved_tool() if inspect.isclass(resolved_tool) else resolved_tool
+                            
+            except Exception as e:
+                self.logger.debug(f"Error resolving praisonai_tools: {e}")
+                tools_dict = {}
             
             # Add tools from class names
             for tool_class in self.tools:
@@ -1066,9 +1075,7 @@ class AgentsGenerator:
         tasks = []
         tasks_dict = {}
 
-        # Import tool resolver (lazy import to avoid circular deps)
-        from praisonai.tool_resolver import ToolResolver
-        tool_resolver = ToolResolver()
+        # Use existing tool resolver instance
         
         # Load tools from local tools.py (backward compat)
         tools_list = self.load_tools_from_tools_py()
@@ -1144,7 +1151,7 @@ class AgentsGenerator:
                     )
                     
                     if not already_loaded:
-                        resolved_tool = tool_resolver.resolve(tool_name)
+                        resolved_tool = self.tool_resolver.resolve(tool_name)
                         if resolved_tool is not None:
                             agent_tools.append(resolved_tool)
                             self.logger.debug(f"Resolved tool '{tool_name}' for agent {role}")
