@@ -30,6 +30,9 @@ from ._commands import format_status, format_help
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
 from ._ack import AckReactor
+from ._unknown_user import UnknownUserHandler, BotContext
+from ._pairing_ui import PairingUIBuilder, PairingCallbackHandler
+from ..gateway.pairing import PairingStore
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +115,11 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
             done_emoji=self.config.done_emoji,
         )
         
+        # Pairing system
+        self._pairing_store = PairingStore()
+        self._pairing_callback_handler = PairingCallbackHandler(self._pairing_store)
+        self._bot_context: Optional[BotContext] = None
+        
         # Audio capabilities
         self._stt_enabled: bool = False
     
@@ -162,6 +170,13 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
             is_bot=True,
         )
         
+        # Initialize bot context for pairing system
+        self._bot_context = BotContext(
+            config=self.config,
+            pairing_store=self._pairing_store,
+            adapter=self
+        )
+        
         @self._app.event("message")
         async def handle_message(event, say):
             if event.get("bot_id"):
@@ -169,12 +184,22 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
             
             bot_message = self._convert_event_to_message(event)
             
+            # Add channel type for pairing system
+            bot_message._channel_type = "slack"
+            
             self.fire_message_received(bot_message)
             
-            if not self.config.is_user_allowed(bot_message.sender.user_id if bot_message.sender else ""):
-                return
+            # Check if channel is allowed
             if not self.config.is_channel_allowed(bot_message.channel.channel_id if bot_message.channel else ""):
                 return
+            
+            # Handle unknown users with pairing system
+            user_id = bot_message.sender.user_id if bot_message.sender else ""
+            is_explicitly_allowed = bool(self.config.allowed_users) and self.config.is_user_allowed(user_id)
+            if not is_explicitly_allowed:
+                user_allowed = await UnknownUserHandler.handle(bot_message, self._bot_context)
+                if not user_allowed:
+                    return
             
             text = event.get("text", "").strip()
             if text == "/status":
@@ -332,6 +357,47 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                 except Exception as e:
                     logger.error(f"Command handler error: {e}")
                     await respond(f"Error: {str(e)}")
+        
+        # Add block action handler for pairing buttons
+        @self._app.action("pair_approve")
+        @self._app.action("pair_deny")
+        async def handle_block_actions(ack, body, action):
+            await ack()
+            
+            # Extract callback data from button value
+            callback_data = action.get("value")
+            if not callback_data:
+                return
+            
+            # Handle the pairing callback
+            result = await self._pairing_callback_handler.handle_approval_callback(
+                callback_data=callback_data,
+                owner_user_id=body["user"]["id"],
+                bot_adapter=self
+            )
+            
+            # Update the message
+            blocks = body["message"]["blocks"]
+            # Remove the action block
+            blocks = [block for block in blocks if block["type"] != "actions"]
+            # Add result message
+            blocks.append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn", 
+                    "text": result.message
+                }
+            })
+            
+            try:
+                await self._client.chat_update(
+                    channel=body["channel"]["id"],
+                    ts=body["message"]["ts"],
+                    blocks=blocks,
+                    text=body["message"]["text"]
+                )
+            except Exception as e:
+                logger.error(f"Failed to update message: {e}")
         
         self._is_running = True
         logger.info(f"Slack bot started: {self._bot_user.username}")
@@ -602,3 +668,50 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
             timestamp=float(event.get("ts", "0").split(".")[0]) if event.get("ts") else 0,
             thread_id=event.get("thread_ts"),
         )
+    
+    # Adapter methods for pairing system
+    async def send_approval_dm(
+        self, 
+        owner_user_id: str, 
+        user_name: str, 
+        code: str, 
+        channel: str,
+        user_id: str
+    ) -> Optional[str]:
+        """Send approval DM to owner with inline buttons."""
+        if not self._client:
+            return None
+        
+        try:
+            blocks = PairingUIBuilder.create_slack_blocks(
+                user_name=user_name,
+                code=code,
+                channel=channel,
+                user_id=user_id
+            )
+            
+            # Send direct message
+            response = await self._client.chat_postMessage(
+                channel=owner_user_id,
+                text=f"{user_name} wants to chat. Approve access?",
+                blocks=blocks
+            )
+            
+            return response["ts"]
+            
+        except Exception as e:
+            logger.error(f"Failed to send approval DM: {e}")
+            return None
+    
+    async def reply(self, chat_id: str, text: str) -> None:
+        """Reply to a chat/DM with a text message."""
+        if not self._client:
+            return
+        
+        try:
+            await self._client.chat_postMessage(
+                channel=chat_id,
+                text=text
+            )
+        except Exception as e:
+            logger.error(f"Failed to send reply: {e}")

@@ -31,6 +31,9 @@ from ._commands import format_status, format_help
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
 from ._ack import AckReactor
+from ._unknown_user import UnknownUserHandler, BotContext
+from ._pairing_ui import PairingUIBuilder, PairingCallbackHandler
+from ..gateway.pairing import PairingStore
 
 logger = logging.getLogger(__name__)
 
@@ -102,8 +105,10 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             done_emoji=self.config.done_emoji,
         )
         
-        # Unknown user handler for pairing flow
-        self._unknown_user_handler = None  # Lazy loaded
+        # Pairing system
+        self._pairing_store = PairingStore()
+        self._pairing_callback_handler = PairingCallbackHandler(self._pairing_store)
+        self._bot_context: Optional[BotContext] = None
         
         # Audio capabilities (set by BotCapabilities)
         self._stt_enabled: bool = False
@@ -113,23 +118,6 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._monitor = None  # Lazy: ConnectionMonitor
         self._stop_event: Optional[asyncio.Event] = None
     
-    def _get_unknown_user_handler(self):
-        """Lazy load the unknown user handler."""
-        if self._unknown_user_handler is None and self.config.unknown_user_policy == "pair":
-            try:
-                from praisonai.gateway.pairing import PairingStore
-                from praisonai.bots._auth import UnknownUserHandler
-                
-                pairing_store = PairingStore()
-                self._unknown_user_handler = UnknownUserHandler(
-                    self.config, 
-                    pairing_store,
-                    send_message_callback=self.send_message
-                )
-            except ImportError as e:
-                logger.warning(f"Cannot load pairing dependencies: {e}")
-                return None
-        return self._unknown_user_handler
     
     def enable_stt(self, enabled: bool = True) -> None:
         """Enable STT for voice message transcription."""
@@ -158,11 +146,12 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             return
         
         try:
-            from telegram import Update
+            from telegram import Update, InlineKeyboardMarkup
             from telegram.ext import (
                 Application,
                 CommandHandler,
                 MessageHandler,
+                CallbackQueryHandler,
                 filters,
                 ContextTypes,
             )
@@ -174,6 +163,13 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         
         self._application = Application.builder().token(self._token).build()
         self._started_at = time.time()
+        
+        # Initialize bot context for pairing system
+        self._bot_context = BotContext(
+            config=self.config,
+            pairing_store=self._pairing_store,
+            adapter=self
+        )
         
         bot_info = await self._application.bot.get_me()
         self._bot_user = BotUser(
@@ -199,28 +195,22 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             
             message = self._convert_update_to_message(update, override_text=message_text)
             
+            # Add channel type for pairing system
+            message._channel_type = "telegram"
+            
             self.fire_message_received(message)
             
-            # Handle unknown users according to policy
-            user_allowed = self.config.is_user_allowed(message.sender.user_id if message.sender else "")
-            if not user_allowed:
-                policy = self.config.unknown_user_policy
-                if policy == "allow":
-                    pass  # fall through to channel check
-                elif policy == "pair":
-                    handler = self._get_unknown_user_handler()
-                    if handler is None:
-                        logger.warning(
-                            "unknown_user_policy='pair' but handler unavailable; dropping message"
-                        )
-                        return
-                    action = await handler.handle(message)
-                    if action != "allow":
-                        return
-                else:  # "deny" or anything unknown
-                    return
+            # Check if channel is allowed
             if not self.config.is_channel_allowed(message.channel.channel_id if message.channel else ""):
                 return
+            
+            # Handle unknown users with pairing system
+            user_id = message.sender.user_id if message.sender else ""
+            is_explicitly_allowed = bool(self.config.allowed_users) and self.config.is_user_allowed(user_id)
+            if not is_explicitly_allowed:
+                user_allowed = await UnknownUserHandler.handle(message, self._bot_context)
+                if not user_allowed:
+                    return
             
             for handler in self._message_handlers:
                 try:
@@ -332,6 +322,34 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._application.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
         )
+        
+        # Add callback query handler for pairing buttons
+        async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            query = update.callback_query
+            if not query or not query.data:
+                return
+            
+            # Only handle pairing callbacks
+            if not query.data.startswith("pair:"):
+                return
+            
+            # Answer the callback query to stop loading spinner
+            await query.answer()
+            
+            # Handle the pairing callback
+            result = await self._pairing_callback_handler.handle_approval_callback(
+                callback_data=query.data,
+                owner_user_id=str(query.from_user.id),
+                bot_adapter=self
+            )
+            
+            # Update the message with result
+            await query.edit_message_text(
+                text=f"{query.message.text}\n\n{result.message}",
+                parse_mode="Markdown"
+            )
+        
+        self._application.add_handler(CallbackQueryHandler(handle_callback_query))
         
         # Add voice/audio handlers
         self._application.add_handler(
@@ -757,4 +775,53 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             timestamp=msg.date.timestamp() if msg.date else 0,
             thread_id=str(msg.message_thread_id) if msg.message_thread_id else None,
         )
+    
+    # Adapter methods for pairing system
+    async def send_approval_dm(
+        self, 
+        owner_user_id: str, 
+        user_name: str, 
+        code: str, 
+        channel: str,
+        user_id: str
+    ) -> Optional[str]:
+        """Send approval DM to owner with inline buttons."""
+        if not self._application:
+            return None
+        
+        try:
+            from telegram import InlineKeyboardMarkup
+            
+            keyboard = PairingUIBuilder.create_telegram_keyboard(
+                user_name=user_name,
+                code=code, 
+                channel=channel,
+                user_id=user_id
+            )
+            
+            message = await self._application.bot.send_message(
+                chat_id=owner_user_id,
+                text=f"*{user_name}* wants to chat. Approve access?",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup.from_dict(keyboard)
+            )
+            
+            return str(message.message_id)
+            
+        except Exception as e:
+            logger.error(f"Failed to send approval DM: {e}")
+            return None
+    
+    async def reply(self, chat_id: str, text: str) -> None:
+        """Reply to a chat/DM with a text message."""
+        if not self._application:
+            return
+        
+        try:
+            await self._application.bot.send_message(
+                chat_id=chat_id,
+                text=text
+            )
+        except Exception as e:
+            logger.error(f"Failed to send reply: {e}")
 
