@@ -51,7 +51,8 @@ def test_build_command_basic():
     
     assert cmd[0] == "claude"
     assert "-p" in cmd
-    assert "Hello world" in cmd  # Prompt added as argument
+    # With input="stdin" (default), prompt should NOT be in command args
+    assert "Hello world" not in cmd
 
 
 def test_build_command_with_session():

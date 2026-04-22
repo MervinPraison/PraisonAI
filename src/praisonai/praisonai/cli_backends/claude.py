@@ -109,7 +109,7 @@ class ClaudeCodeBackend:
             if self.config.output == "json":
                 try:
                     data = json.loads(result)
-                    content = data.get("content", result)
+                    content = data.get("result", data.get("content", result))
                 except json.JSONDecodeError:
                     content = result
             elif self.config.output == "jsonl":
@@ -155,6 +155,7 @@ class ClaudeCodeBackend:
     async def stream(self, prompt: str, **kwargs) -> AsyncIterator[CliBackendDelta]:
         """Stream response deltas from Claude CLI."""
         cmd = self._build_command(prompt, output_format="stream-json", **kwargs)
+        process = None
         
         try:
             process = await asyncio.create_subprocess_exec(
@@ -171,37 +172,57 @@ class ClaudeCodeBackend:
                 await process.stdin.drain()
                 process.stdin.close()
             
-            async for line in self._read_lines(process.stdout):
-                if line.strip():
-                    try:
-                        event = json.loads(line)
-                        delta_type = event.get("type", "text")
-                        content = event.get("content", event.get("data", ""))
-                        
-                        yield CliBackendDelta(
-                            type=delta_type,
-                            content=str(content),
-                            metadata=event
-                        )
-                    except json.JSONDecodeError:
-                        # Fallback for non-JSON lines
-                        yield CliBackendDelta(
-                            type="text",
-                            content=line,
-                            metadata={}
-                        )
+            # Wrap the reading loop with timeout
+            async def read_stream():
+                async for line in self._read_lines(process.stdout):
+                    if line.strip():
+                        try:
+                            event = json.loads(line)
+                            delta_type = event.get("type", "text")
+                            content = event.get("content", event.get("data", ""))
+                            
+                            yield CliBackendDelta(
+                                type=delta_type,
+                                content=str(content),
+                                metadata=event
+                            )
+                        except json.JSONDecodeError:
+                            # Fallback for non-JSON lines
+                            yield CliBackendDelta(
+                                type="text",
+                                content=line,
+                                metadata={}
+                            )
+                
+                # Wait for process completion
+                await process.wait()
+                
+                if process.returncode != 0:
+                    stderr = await process.stderr.read()
+                    error_msg = stderr.decode() if stderr else f"Process exited {process.returncode}"
+                    yield CliBackendDelta(
+                        type="error",
+                        content=f"Claude CLI error: {error_msg}",
+                        metadata={"return_code": process.returncode}
+                    )
             
-            # Wait for process completion
-            await process.wait()
-            
-            if process.returncode != 0:
-                stderr = await process.stderr.read()
-                error_msg = stderr.decode() if stderr else f"Process exited {process.returncode}"
-                yield CliBackendDelta(
-                    type="error",
-                    content=f"Claude CLI error: {error_msg}",
-                    metadata={"return_code": process.returncode}
-                )
+            # Apply timeout using asyncio.wait_for on the generator
+            try:
+                async for delta in read_stream():
+                    yield delta
+            except asyncio.TimeoutError:
+                raise
+                
+        except asyncio.TimeoutError:
+            # Kill the process if it's still running
+            if process:
+                process.kill()
+                await process.wait()
+            yield CliBackendDelta(
+                type="error",
+                content=f"Claude CLI streaming timed out after {self.config.timeout_ms}ms",
+                metadata={"command": cmd, "timeout": self.config.timeout_ms}
+            )
                 
         except Exception as e:
             yield CliBackendDelta(
@@ -236,7 +257,17 @@ class ClaudeCodeBackend:
         
         # Add session if provided
         if session and session.session_id and self.config.session_mode != "none":
-            if self.config.session_arg:
+            # Check if this is a resume scenario
+            if hasattr(session, 'is_resume') and session.is_resume and self.config.resume_args:
+                # Use resume args and substitute session_id placeholder
+                resume_cmd = []
+                for arg in self.config.resume_args:
+                    if arg == "{session_id}":
+                        resume_cmd.append(session.session_id)
+                    else:
+                        resume_cmd.append(arg)
+                cmd.extend(resume_cmd)
+            elif self.config.session_arg:
                 cmd.extend([self.config.session_arg, session.session_id])
         
         # Add model if specified
@@ -247,7 +278,14 @@ class ClaudeCodeBackend:
         
         # Add system prompt if specified and configured
         if system_prompt and self.config.system_prompt_arg:
-            cmd.extend([self.config.system_prompt_arg, system_prompt])
+            # Honor system_prompt_when setting
+            should_add_system_prompt = True
+            if self.config.system_prompt_when == "first":
+                # Only add system prompt on first turn (not resume)
+                should_add_system_prompt = not (session and hasattr(session, 'is_resume') and session.is_resume)
+            
+            if should_add_system_prompt:
+                cmd.extend([self.config.system_prompt_arg, system_prompt])
         
         # Add images if provided
         if images and self.config.image_arg:
