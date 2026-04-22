@@ -36,12 +36,11 @@ class ClarifyHandler:
         """
         if self.ask_callback:
             try:
-                if hasattr(self.ask_callback, '__call__'):
-                    result = self.ask_callback(question, choices)
-                    # Handle both sync and async callbacks
-                    if hasattr(result, '__await__'):
-                        return await result
-                    return result
+                result = self.ask_callback(question, choices)
+                # Handle both sync and async callbacks
+                if hasattr(result, '__await__'):
+                    return await result
+                return result
             except Exception as e:
                 logger.warning(f"Clarify handler callback failed: {e}")
                 

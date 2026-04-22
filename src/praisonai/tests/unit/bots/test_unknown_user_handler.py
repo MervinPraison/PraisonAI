@@ -56,7 +56,8 @@ def mock_pairing_store():
     return store
 
 
-def test_unknown_user_handler_deny_policy():
+@pytest.mark.asyncio
+async def test_unknown_user_handler_deny_policy():
     """Test unknown user handler with deny policy."""
     config = BotConfig(allowed_users=["allowed_user"], unknown_user_policy="deny")
     handler = UnknownUserHandler(config)
@@ -67,11 +68,12 @@ def test_unknown_user_handler_deny_policy():
     )
     
     # Should drop unknown users
-    result = pytest.helpers.run_async(handler.handle(message))
+    result = await handler.handle(message)
     assert result == "drop"
 
 
-def test_unknown_user_handler_allow_policy():
+@pytest.mark.asyncio
+async def test_unknown_user_handler_allow_policy():
     """Test unknown user handler with allow policy."""
     config = BotConfig(allowed_users=["allowed_user"], unknown_user_policy="allow")
     handler = UnknownUserHandler(config)
@@ -82,11 +84,12 @@ def test_unknown_user_handler_allow_policy():
     )
     
     # Should allow unknown users
-    result = pytest.helpers.run_async(handler.handle(message))
+    result = await handler.handle(message)
     assert result == "allow"
 
 
-def test_unknown_user_handler_allowed_user():
+@pytest.mark.asyncio
+async def test_unknown_user_handler_allowed_user():
     """Test that allowed users are always allowed."""
     config = BotConfig(
         allowed_users=["allowed_user_123"],
@@ -100,7 +103,7 @@ def test_unknown_user_handler_allowed_user():
     )
     
     # Should allow known users regardless of policy
-    result = pytest.helpers.run_async(handler.handle(message))
+    result = await handler.handle(message)
     assert result == "allow"
 
 
@@ -149,7 +152,7 @@ async def test_pairing_flow_already_paired():
     result = await handler.handle(message)
     
     assert result == "allow"  # Should allow already paired users
-    mock_store.is_paired.assert_called_once_with("unknown_user", "telegram")
+    mock_store.is_paired.assert_called_once_with("test_chat", "telegram")
 
 
 @pytest.mark.asyncio
@@ -178,7 +181,8 @@ async def test_rate_limiting():
     assert mock_store.generate_code.call_count == 1  # No additional calls
 
 
-def test_pairing_flow_no_store():
+@pytest.mark.asyncio
+async def test_pairing_flow_no_store():
     """Test pairing policy without pairing store falls back to deny."""
     config = BotConfig(allowed_users=["allowed_user"], unknown_user_policy="pair")
     handler = UnknownUserHandler(config, pairing_store=None)  # No store
@@ -188,7 +192,7 @@ def test_pairing_flow_no_store():
         channel=BotChannel(channel_id="test_chat", channel_type="telegram")
     )
     
-    result = pytest.helpers.run_async(handler.handle(message))
+    result = await handler.handle(message)
     assert result == "drop"
 
 
@@ -212,7 +216,8 @@ async def test_pairing_store_exception():
     assert result == "drop"
 
 
-def test_invalid_policy_fallback():
+@pytest.mark.asyncio
+async def test_invalid_policy_fallback():
     """Test that invalid policy falls back to deny."""
     config = BotConfig(allowed_users=["allowed_user"], unknown_user_policy="invalid_policy")
     handler = UnknownUserHandler(config)
@@ -222,7 +227,7 @@ def test_invalid_policy_fallback():
         channel=BotChannel(channel_id="test_chat", channel_type="telegram")
     )
     
-    result = pytest.helpers.run_async(handler.handle(message))
+    result = await handler.handle(message)
     assert result == "drop"
 
 
@@ -251,19 +256,7 @@ async def test_send_callback_failure():
     mock_store.generate_code.assert_called_once()
 
 
-# Test helper for running async functions in sync tests
-@pytest.fixture(scope="session", autouse=True)
-def pytest_helpers():
-    """Add helper functions to pytest."""
-    import asyncio
-    
-    class Helpers:
-        @staticmethod
-        def run_async(coro):
-            """Run async coroutine in sync test."""
-            return asyncio.get_event_loop().run_until_complete(coro)
-    
-    pytest.helpers = Helpers()
+# All tests now use @pytest.mark.asyncio instead of sync helpers
 
 
 if __name__ == "__main__":

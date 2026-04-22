@@ -204,15 +204,21 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             # Handle unknown users according to policy
             user_allowed = self.config.is_user_allowed(message.sender.user_id if message.sender else "")
             if not user_allowed:
-                # Apply unknown user policy
-                handler = self._get_unknown_user_handler()
-                if handler:
-                    action = await handler.handle(message)
-                    if action == "drop":
+                policy = self.config.unknown_user_policy
+                if policy == "allow":
+                    pass  # fall through to channel check
+                elif policy == "pair":
+                    handler = self._get_unknown_user_handler()
+                    if handler is None:
+                        logger.warning(
+                            "unknown_user_policy='pair' but handler unavailable; dropping message"
+                        )
                         return
-                elif self.config.unknown_user_policy == "deny":
-                    return  # Backward compatible - silently drop
-                # "allow" policy falls through
+                    action = await handler.handle(message)
+                    if action != "allow":
+                        return
+                else:  # "deny" or anything unknown
+                    return
             if not self.config.is_channel_allowed(message.channel.channel_id if message.channel else ""):
                 return
             

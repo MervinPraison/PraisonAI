@@ -362,7 +362,8 @@ __all__ = list(TOOL_MAPPINGS.keys()) + [
     'Injected', 'AgentState',
     'BaseTool', 'ToolResult', 'ToolValidationError', 'validate_tool',
     'tool', 'FunctionTool',
-    'get_registry', 'register_tool', 'get_tool', 'add_tool', 'has_tool', 'remove_tool', 'list_tools', 'ToolRegistry',
+    'get_registry', 'register_tool', 'get_tool', 'add_tool', 'has_tool', 'remove_tool', 
+    'list_tools', 'list_available_tools', 'ToolRegistry',
     'Tools',
     # Validation and retry protocols
     'ValidationResult', 'ToolValidatorProtocol', 'AsyncToolValidatorProtocol', 'PassthroughValidator',

@@ -12,78 +12,79 @@ import logging
 import os
 from typing import Optional
 
-import click
+import typer
 
 from praisonai.gateway.pairing import PairingStore
 
 logger = logging.getLogger(__name__)
 
-
-@click.group()
-def pairing():
-    """Manage bot user pairing."""
-    pass
+app = typer.Typer(help="Manage bot user pairing")
 
 
-@pairing.command()
-@click.option(
-    '--store-dir',
-    default=None,
-    help='Custom pairing store directory'
-)
-def list(store_dir: Optional[str]):
+@app.command("list")
+def list_cmd(
+    store_dir: Optional[str] = typer.Option(
+        None, "--store-dir", help="Custom pairing store directory"
+    )
+):
     """List all paired channels."""
     try:
         store = PairingStore(store_dir=store_dir)
         paired = store.list_paired()
         
         if not paired:
-            click.echo("No paired channels found.")
+            typer.echo("No paired channels found.")
             return
         
-        click.echo(f"Found {len(paired)} paired channels:\n")
+        typer.echo(f"Found {len(paired)} paired channels:\n")
         
         for channel in paired:
             # Format timestamp
             import datetime
             paired_time = datetime.datetime.fromtimestamp(channel.paired_at)
             
-            click.echo(f"Platform: {channel.channel_type}")
-            click.echo(f"Channel:  {channel.channel_id}")
-            click.echo(f"Paired:   {paired_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            typer.echo(f"Platform: {channel.channel_type}")
+            typer.echo(f"Channel:  {channel.channel_id}")
+            typer.echo(f"Paired:   {paired_time.strftime('%Y-%m-%d %H:%M:%S')}")
             if channel.label:
-                click.echo(f"Label:    {channel.label}")
-            click.echo()
+                typer.echo(f"Label:    {channel.label}")
+            typer.echo()
             
     except Exception as e:
-        click.echo(f"Error listing paired channels: {e}", err=True)
-        raise click.ClickException(str(e))
+        typer.echo(f"Error listing paired channels: {e}", err=True)
+        raise typer.Exit(1)
 
 
-@pairing.command()
-@click.argument('platform')
-@click.argument('code')
-@click.argument('channel_id', required=False)
-@click.option(
-    '--label',
-    default='',
-    help='Optional human-readable label for this pairing'
-)
-@click.option(
-    '--store-dir',
-    default=None,
-    help='Custom pairing store directory'
-)
-def approve(platform: str, code: str, channel_id: Optional[str], label: str, store_dir: Optional[str]):
+@app.command()
+def approve(
+    platform: str = typer.Argument(..., help="Platform type (telegram, discord, slack, whatsapp)"),
+    code: str = typer.Argument(..., help="8-character pairing code"),
+    channel_id: str = typer.Argument(..., help="Channel ID for the pairing"),
+    label: str = typer.Option("", "--label", help="Optional human-readable label for this pairing"),
+    store_dir: Optional[str] = typer.Option(None, "--store-dir", help="Custom pairing store directory"),
+):
     """Approve a pairing code.
     
     PLATFORM: Platform type (telegram, discord, slack, whatsapp)
     CODE: 8-character pairing code
-    CHANNEL_ID: Channel ID (optional; omitted when code is channel-bound)
+    CHANNEL_ID: Channel ID for the pairing
     """
     try:
         store = PairingStore(store_dir=store_dir)
         
+        # First check if the code exists and get its details without consuming it
+        pending_pairings = store.list_pending()
+        code_info = None
+        for pairing in pending_pairings:
+            if pairing.get('code') == code:
+                code_info = pairing
+                break
+        
+        if not code_info:
+            typer.echo(f"❌ Invalid or expired code: {code}", err=True)
+            raise typer.Exit(1)
+        
+        # Now verify and pair (this will consume the code)
         success = store.verify_and_pair(
             code=code,
             channel_id=channel_id,
@@ -92,27 +93,24 @@ def approve(platform: str, code: str, channel_id: Optional[str], label: str, sto
         )
         
         if success:
-            click.echo(f"✅ Successfully paired {platform} channel {channel_id}")
+            typer.echo(f"✅ Successfully paired {platform} channel {channel_id}")
             if label:
-                click.echo(f"   Label: {label}")
+                typer.echo(f"   Label: {label}")
         else:
-            click.echo(f"❌ Failed to pair - invalid or expired code: {code}", err=True)
-            raise click.ClickException(f"Invalid code: {code}")
+            typer.echo(f"❌ Failed to pair - invalid or expired code: {code}", err=True)
+            raise typer.Exit(1)
             
     except Exception as e:
-        click.echo(f"Error approving pairing: {e}", err=True)
-        raise click.ClickException(str(e))
+        typer.echo(f"Error approving pairing: {e}", err=True)
+        raise typer.Exit(1)
 
 
-@pairing.command()
-@click.argument('platform')
-@click.argument('channel_id')
-@click.option(
-    '--store-dir',
-    default=None,
-    help='Custom pairing store directory'
-)
-def revoke(platform: str, channel_id: str, store_dir: Optional[str]):
+@app.command()
+def revoke(
+    platform: str = typer.Argument(..., help="Platform type (telegram, discord, slack, whatsapp)"),
+    channel_id: str = typer.Argument(..., help="Channel ID to revoke"),
+    store_dir: Optional[str] = typer.Option(None, "--store-dir", help="Custom pairing store directory"),
+):
     """Revoke a paired channel.
     
     PLATFORM: Platform type (telegram, discord, slack, whatsapp)
@@ -124,31 +122,24 @@ def revoke(platform: str, channel_id: str, store_dir: Optional[str]):
         success = store.revoke(channel_id=channel_id, channel_type=platform)
         
         if success:
-            click.echo(f"✅ Revoked {platform} channel {channel_id}")
+            typer.echo(f"✅ Revoked {platform} channel {channel_id}")
         else:
-            click.echo(f"❌ Channel not found: {platform}/{channel_id}", err=True)
+            typer.echo(f"❌ Channel not found: {platform}/{channel_id}", err=True)
             
     except Exception as e:
-        click.echo(f"Error revoking pairing: {e}", err=True)
-        raise click.ClickException(str(e))
+        typer.echo(f"Error revoking pairing: {e}", err=True)
+        raise typer.Exit(1)
 
 
-@pairing.command()
-@click.option(
-    '--confirm',
-    is_flag=True,
-    help='Skip confirmation prompt'
-)
-@click.option(
-    '--store-dir',
-    default=None,
-    help='Custom pairing store directory'
-)
-def clear(confirm: bool, store_dir: Optional[str]):
+@app.command()
+def clear(
+    confirm: bool = typer.Option(False, "--confirm", help="Skip confirmation prompt"),
+    store_dir: Optional[str] = typer.Option(None, "--store-dir", help="Custom pairing store directory"),
+):
     """Clear all paired channels."""
     if not confirm:
-        if not click.confirm('Are you sure you want to clear ALL paired channels?'):
-            click.echo("Cancelled.")
+        if not typer.confirm('Are you sure you want to clear ALL paired channels?'):
+            typer.echo("Cancelled.")
             return
     
     try:
@@ -156,7 +147,7 @@ def clear(confirm: bool, store_dir: Optional[str]):
         paired = store.list_paired()
         
         if not paired:
-            click.echo("No paired channels to clear.")
+            typer.echo("No paired channels to clear.")
             return
         
         # Revoke each paired channel
@@ -165,12 +156,12 @@ def clear(confirm: bool, store_dir: Optional[str]):
             if store.revoke(channel.channel_id, channel.channel_type):
                 count += 1
         
-        click.echo(f"✅ Cleared {count} paired channels")
+        typer.echo(f"✅ Cleared {count} paired channels")
         
     except Exception as e:
-        click.echo(f"Error clearing paired channels: {e}", err=True)
-        raise click.ClickException(str(e))
+        typer.echo(f"Error clearing paired channels: {e}", err=True)
+        raise typer.Exit(1)
 
 
 if __name__ == '__main__':
-    pairing()
+    app()

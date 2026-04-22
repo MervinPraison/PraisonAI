@@ -82,22 +82,32 @@ class UnknownUserHandler:
             logger.warning("Pairing policy set but no pairing store available")
             return "drop"
         
+        # Use channel_id for pairing, not user_id
+        channel_id = message.channel.channel_id if message.channel else user_id
+        
         # Check if already paired
-        if self.pairing_store.is_paired(user_id, platform):
-            logger.debug(f"User {user_id} already paired for {platform}")
+        if self.pairing_store.is_paired(channel_id, platform):
+            logger.debug(f"Channel {channel_id} already paired for {platform}")
             return "allow"
         
-        # Rate limiting check
+        # Rate limiting check - also key by channel_id
         now = time.time()
-        last_code_time = self._rate_limits.get(user_id, 0)
+        
+        # Evict stale entries to keep the dict bounded
+        cutoff = now - self._rate_limit_window
+        self._rate_limits = {
+            cid: ts for cid, ts in self._rate_limits.items() if ts >= cutoff
+        }
+        
+        last_code_time = self._rate_limits.get(channel_id, 0)
         if now - last_code_time < self._rate_limit_window:
-            logger.debug(f"Rate limited user {user_id} (last code: {now - last_code_time:.1f}s ago)")
+            logger.debug(f"Rate limited channel {channel_id} (last code: {now - last_code_time:.1f}s ago)")
             return "drop"
         
         # Generate pairing code and send to user
         try:
-            code = self.pairing_store.generate_code(channel_type=platform, channel_id=user_id)
-            self._rate_limits[user_id] = now
+            code = self.pairing_store.generate_code(channel_type=platform)
+            self._rate_limits[channel_id] = now
             
             # Send pairing instructions to user
             await self._send_pairing_instructions(message, code, platform)
@@ -126,5 +136,5 @@ class UnknownUserHandler:
             except Exception as e:
                 logger.warning(f"Failed to send pairing instructions: {e}")
         else:
-            logger.warning(f"Cannot send pairing instructions - no callback available")
+            logger.warning("Cannot send pairing instructions - no callback available")
             logger.info(f"Pairing instructions for {message.sender.user_id if message.sender else 'unknown'}: {instructions}")
