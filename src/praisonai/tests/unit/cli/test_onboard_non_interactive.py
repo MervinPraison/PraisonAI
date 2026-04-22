@@ -54,10 +54,12 @@ def test_is_non_interactive_false_by_default():
 def test_is_non_interactive_true_when_env_set():
     onboard = _import_onboard()
     import io
+    class _TTYStdin(io.StringIO):
+        def isatty(self):
+            return True
     saved = sys.stdin
     try:
-        sys.stdin = io.StringIO("")
-        sys.stdin.isatty = lambda: True  # isolate env-var branch
+        sys.stdin = _TTYStdin("")  # isolate env-var branch
         for val in ("1", "true", "yes", "on", "TRUE", "Yes"):
             os.environ["PRAISONAI_NO_PROMPT"] = val
             assert onboard._is_non_interactive() is True, f"failed for value {val!r}"
@@ -78,10 +80,12 @@ def test_is_non_interactive_false_when_env_explicitly_off():
         #
         # To isolate the env branch, monkey-patch isatty temporarily.
         import io
+        class _TTYStdin(io.StringIO):
+            def isatty(self):
+                return True
         saved = sys.stdin
         try:
-            sys.stdin = io.StringIO("")
-            sys.stdin.isatty = lambda: True  # pretend we have a tty
+            sys.stdin = _TTYStdin("")  # pretend we have a tty
             assert onboard._is_non_interactive() is False, f"failed for value {val!r}"
         finally:
             sys.stdin = saved
