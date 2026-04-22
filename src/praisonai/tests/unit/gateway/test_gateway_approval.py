@@ -166,7 +166,7 @@ async def test_cli_approve_e2e():
     """Test CLI pairing approve command end-to-end."""
     import tempfile
     from typer.testing import CliRunner
-    from praisonai.cli.commands.pairing import pairing_app
+    from praisonai.cli.commands.pairing import app as pairing_app
     
     runner = CliRunner()
     
@@ -193,7 +193,7 @@ async def test_cli_approve_invalid_code():
     """CLI approve should exit non-zero for invalid codes and leave store unchanged."""
     import tempfile
     from typer.testing import CliRunner
-    from praisonai.cli.commands.pairing import pairing_app
+    from praisonai.cli.commands.pairing import app as pairing_app
     
     runner = CliRunner()
     
@@ -221,7 +221,7 @@ async def test_cli_approve_survives_restart():
     """Generate code, drop instance, create fresh one, approve should succeed."""
     import tempfile
     from typer.testing import CliRunner
-    from praisonai.cli.commands.pairing import pairing_app
+    from praisonai.cli.commands.pairing import app as pairing_app
     
     runner = CliRunner()
     

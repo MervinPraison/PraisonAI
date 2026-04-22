@@ -93,7 +93,9 @@ def approve(
         )
         
         if success:
-            typer.echo(f"✅ Successfully paired {platform} channel {channel_id}")
+            # Use the actual channel_id from the code info if channel_id was auto-resolved
+            resolved_channel_id = channel_id or code_info.get('channel_id', 'unknown')
+            typer.echo(f"✅ Successfully paired {platform} channel {resolved_channel_id}")
             if label:
                 typer.echo(f"   Label: {label}")
         else:
