@@ -20,6 +20,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Literal,
     Optional,
     Protocol,
     Union,
@@ -682,5 +683,190 @@ class DeliveryGuaranteeProtocol(Protocol):
         
         Returns:
             Number of messages purged
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Authentication protocols and utilities
+# ---------------------------------------------------------------------------
+
+# Type definitions for authentication modes
+AuthMode = Literal["local", "token", "password", "trusted-proxy"]
+
+
+def is_loopback(host: str) -> bool:
+    """Check if a host address is a loopback interface.
+    
+    Supports IPv4 and IPv6 loopback addresses:
+    - 127.0.0.1, localhost (IPv4)
+    - ::1, 0:0:0:0:0:0:0:1 (IPv6)
+    
+    Args:
+        host: Host address to check
+        
+    Returns:
+        True if the host is a loopback address, False otherwise
+        
+    Example:
+        >>> is_loopback("127.0.0.1")
+        True
+        >>> is_loopback("localhost")
+        True
+        >>> is_loopback("0.0.0.0")
+        False
+        >>> is_loopback("192.168.1.1")
+        False
+    """
+    if not host:
+        return False
+    
+    # Handle common string representations
+    host = host.lower().strip()
+    if host in ("localhost", "local"):
+        return True
+    
+    try:
+        import ipaddress
+        # Try to parse as IP address
+        addr = ipaddress.ip_address(host)
+        return addr.is_loopback
+    except (ValueError, ImportError):
+        # Not a valid IP address or ipaddress not available
+        return False
+
+
+def resolve_auth_mode(
+    bind_host: str,
+    configured: Optional[AuthMode] = None
+) -> AuthMode:
+    """Resolve the authentication mode based on bind host and configuration.
+    
+    Single rule: loopback binds default to "local" mode (permissive),
+    external binds default to "token" mode (strict). Explicit configuration
+    always takes precedence.
+    
+    Args:
+        bind_host: The host address the server is binding to
+        configured: Explicitly configured auth mode (overrides default)
+        
+    Returns:
+        The resolved authentication mode
+        
+    Example:
+        >>> resolve_auth_mode("127.0.0.1", None)
+        'local'
+        >>> resolve_auth_mode("0.0.0.0", None)
+        'token'
+        >>> resolve_auth_mode("0.0.0.0", "local")
+        'local'
+    """
+    # Explicit configuration wins
+    if configured:
+        return configured
+    
+    # Default based on bind interface
+    if is_loopback(bind_host):
+        return "local"
+    else:
+        return "token"
+
+
+@runtime_checkable
+class GatewayAuthProtocol(Protocol):
+    """Protocol for gateway authentication validation.
+    
+    Defines the interface for validating authentication requirements
+    based on the resolved auth mode and configuration.
+    """
+    
+    def validate_auth_config(
+        self,
+        auth_mode: AuthMode,
+        bind_host: str,
+        auth_token: Optional[str] = None,
+        **kwargs
+    ) -> None:
+        """Validate that authentication configuration is safe for the bind host.
+        
+        Args:
+            auth_mode: The authentication mode to validate
+            bind_host: The host the server will bind to
+            auth_token: The configured auth token (if any)
+            **kwargs: Additional auth configuration
+            
+        Raises:
+            GatewayStartupError: If configuration is unsafe for external binding
+        """
+        ...
+    
+    def check_request_auth(
+        self,
+        auth_mode: AuthMode,
+        request_token: Optional[str] = None,
+        expected_token: Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """Check if a request satisfies authentication requirements.
+        
+        Args:
+            auth_mode: The current authentication mode
+            request_token: Token provided in the request
+            expected_token: Expected token value
+            **kwargs: Additional request context
+            
+        Returns:
+            True if authentication is satisfied, False otherwise
+        """
+        ...
+
+
+@runtime_checkable
+class UIAuthProtocol(Protocol):
+    """Protocol for UI authentication validation.
+    
+    Defines the interface for validating UI credentials based on
+    bind host and authentication mode.
+    """
+    
+    def validate_credentials_config(
+        self,
+        bind_host: str,
+        username: str,
+        password: str,
+        allow_defaults: bool = False
+    ) -> None:
+        """Validate that UI credentials are safe for the bind host.
+        
+        Args:
+            bind_host: The host the UI server will bind to
+            username: Configured username
+            password: Configured password
+            allow_defaults: Whether to allow default credentials (escape hatch)
+            
+        Raises:
+            UIStartupError: If credentials are unsafe for external binding
+        """
+        ...
+    
+    def check_auth_callback(
+        self,
+        bind_host: str,
+        provided_username: str,
+        provided_password: str,
+        expected_username: str,
+        expected_password: str
+    ) -> bool:
+        """Check if provided credentials are valid for the bind host.
+        
+        Args:
+            bind_host: The host the UI server is bound to
+            provided_username: Username from login attempt
+            provided_password: Password from login attempt
+            expected_username: Expected username
+            expected_password: Expected password
+            
+        Returns:
+            True if credentials are valid, False otherwise
         """
         ...

@@ -210,6 +210,7 @@ class GatewayConfig:
     
     host: str = "127.0.0.1"
     port: int = 8765
+    bind_host: str = "127.0.0.1"  # For authentication posture resolution
     cors_origins: List[str] = field(default_factory=lambda: [])
     auth_token: Optional[str] = None
     max_connections: int = 1000
@@ -226,6 +227,7 @@ class GatewayConfig:
         return {
             "host": self.host,
             "port": self.port,
+            "bind_host": self.bind_host,
             "cors_origins": self.cors_origins,
             "auth_token": "***" if self.auth_token else None,
             "max_connections": self.max_connections,

@@ -201,7 +201,13 @@ class WebSocketGateway:
             port: Port to listen on
             config: Optional gateway configuration
         """
-        self.config = config or GatewayConfig(host=host, port=port)
+        self.config = config or GatewayConfig(host=host, port=port, bind_host=host)
+        
+        # Set bind_host from host if not already set
+        if not hasattr(self.config, 'bind_host') or not self.config.bind_host:
+            self.config.bind_host = self.config.host
+        
+        # Handle authentication token setup
         if hasattr(self.config, 'auth_token') and not self.config.auth_token:
             # Prefer a user-configured token (persisted by `praisonai onboard`
             # to ~/.praisonai/.env as GATEWAY_AUTH_TOKEN) so the dashboard
@@ -212,12 +218,25 @@ class WebSocketGateway:
                 self.config.auth_token = env_tok
                 logger.info("Gateway using GATEWAY_AUTH_TOKEN from environment")
             else:
-                import secrets
-                self.config.auth_token = secrets.token_hex(16)
-                logger.warning(
-                    f"No auth_token provided for Gateway server. Generated temporary token: {self.config.auth_token}. "
-                    "For production, set GATEWAY_AUTH_TOKEN."
-                )
+                from praisonaiagents.gateway.protocols import resolve_auth_mode, is_loopback
+                
+                # Only generate token if we're binding externally
+                auth_mode = resolve_auth_mode(self.config.bind_host, None)
+                if auth_mode == "token" or not is_loopback(self.config.bind_host):
+                    import secrets
+                    self.config.auth_token = secrets.token_hex(16)
+                    
+                    # Log fingerprint instead of raw token
+                    from .auth import log_token_fingerprint, ensure_token_env_file
+                    log_token_fingerprint(self.config.auth_token)
+                    ensure_token_env_file(self.config.auth_token)
+                    
+                    logger.warning(
+                        f"No auth_token provided for Gateway server on {self.config.bind_host}. "
+                        "Generated temporary token. For production, set GATEWAY_AUTH_TOKEN."
+                    )
+                else:
+                    logger.info(f"Gateway running on loopback interface {self.config.bind_host} - no auth token required")
         
         self._host = self.config.host
         self._port = self.config.port
@@ -260,6 +279,14 @@ class WebSocketGateway:
             logger.warning("Gateway already running")
             return
         
+        # Validate authentication configuration before starting
+        from .auth import assert_external_bind_safe
+        try:
+            assert_external_bind_safe(self.config)
+        except Exception as e:
+            logger.error(f"Gateway startup failed: {e}")
+            raise
+        
         try:
             from starlette.applications import Starlette
             from starlette.routing import Route, WebSocketRoute
@@ -276,32 +303,54 @@ class WebSocketGateway:
             return JSONResponse(self.health())
         
         def _check_auth(request) -> Optional[JSONResponse]:
-            """Validate auth token if configured. Returns error response or None.
+            """Validate auth token using bind-aware authentication posture.
 
             Accepts either:
               - ``Authorization: Bearer <token>`` header (preferred for APIs)
               - ``?token=<token>`` query parameter (so the dashboard URL from
                 ``praisonai onboard`` is clickable in a browser)
             """
-            if not self.config.auth_token:
-                return None
+            from praisonaiagents.gateway.protocols import resolve_auth_mode
+            from .auth import GatewayAuthEnforcer
+            
+            # Resolve auth mode based on bind interface
+            bind_host = getattr(self.config, 'bind_host', self.config.host)
+            auth_mode = resolve_auth_mode(bind_host, None)
+            
+            # Use enforcer to check authentication
+            enforcer = GatewayAuthEnforcer()
+            
+            # Extract token from request
             auth_header = request.headers.get("authorization", "")
             token: str = ""
             if auth_header.startswith("Bearer "):
                 token = auth_header[7:]
             else:
                 token = request.query_params.get("token", "")
-            if not token:
-                return JSONResponse(
-                    {"error": "Authentication required"},
-                    status_code=401,
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
-            if not secrets.compare_digest(token, self.config.auth_token):
-                return JSONResponse(
-                    {"error": "Invalid authentication token"},
-                    status_code=403,
-                )
+            
+            # Check authentication
+            is_authenticated = enforcer.check_request_auth(
+                auth_mode=auth_mode,
+                request_token=token,
+                expected_token=self.config.auth_token
+            )
+            
+            if not is_authenticated:
+                if auth_mode == "local":
+                    # Local mode should always pass, but check anyway
+                    return None
+                elif not token:
+                    return JSONResponse(
+                        {"error": "Authentication required"},
+                        status_code=401,
+                        headers={"WWW-Authenticate": "Bearer"},
+                    )
+                else:
+                    return JSONResponse(
+                        {"error": "Invalid authentication token"},
+                        status_code=403,
+                    )
+            
             return None
         
         async def info(request):
@@ -317,12 +366,25 @@ class WebSocketGateway:
             })
         
         async def websocket_endpoint(websocket: WebSocket):
-            # Authenticate WebSocket via query param or first message
-            if self.config.auth_token:
-                ws_token = websocket.query_params.get("token", "")
-                if not secrets.compare_digest(ws_token, self.config.auth_token):
-                    await websocket.close(code=4003, reason="Authentication required")
-                    return
+            # Authenticate WebSocket using bind-aware authentication posture
+            from praisonaiagents.gateway.protocols import resolve_auth_mode
+            from .auth import GatewayAuthEnforcer
+            
+            bind_host = getattr(self.config, 'bind_host', self.config.host)
+            auth_mode = resolve_auth_mode(bind_host, None)
+            enforcer = GatewayAuthEnforcer()
+            
+            # Check authentication
+            ws_token = websocket.query_params.get("token", "")
+            is_authenticated = enforcer.check_request_auth(
+                auth_mode=auth_mode,
+                request_token=ws_token,
+                expected_token=self.config.auth_token
+            )
+            
+            if not is_authenticated:
+                await websocket.close(code=4003, reason="Authentication required")
+                return
             
             await websocket.accept()
             client_id = str(uuid.uuid4())

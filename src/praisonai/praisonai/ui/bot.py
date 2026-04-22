@@ -224,13 +224,14 @@ async def _consume_stream_events(event_queue: queue.Queue, msg: cl.Message):
 # Chainlit callbacks
 # ---------------------------------------------------------------------------
 
-@cl.password_auth_callback
-def auth_callback(username: str, password: str):
-    expected_user = os.getenv("CHAINLIT_USERNAME", "admin")
-    expected_pass = os.getenv("CHAINLIT_PASSWORD", "admin")
-    if (username, password) == (expected_user, expected_pass):
-        return cl.User(identifier=username, metadata={"role": "admin", "provider": "credentials"})
-    return None
+# Authentication using shared bind-aware helper
+from praisonai.ui._auth import register_password_auth
+
+# Determine bind host for authentication posture
+BIND_HOST = os.getenv("CHAINLIT_HOST", "127.0.0.1")
+
+# Register password authentication with bind-aware validation
+register_password_auth(None, bind_host=BIND_HOST)
 
 
 @cl.on_chat_start
