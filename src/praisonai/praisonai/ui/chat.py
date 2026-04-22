@@ -528,6 +528,13 @@ async def start():
                 f"Type your message to get started!"
     ).send()
     
+    # Setup pairing banner for admin users
+    try:
+        from praisonai.ui._pairing import setup_pairing_banner
+        await setup_pairing_banner()
+    except Exception as e:
+        logger.debug(f"Failed to setup pairing banner: {e}")
+    
     _profile_end("on_chat_start")
 
 @cl.on_settings_update

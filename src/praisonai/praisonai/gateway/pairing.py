@@ -192,6 +192,52 @@ class PairingStore:
                 logger.info("Channel revoked: %s (%s)", channel_id, channel_type)
             return removed is not None
 
+    def approve(self, channel_type: str, code: str, user_id: str = "", user_name: str = "") -> bool:
+        """Convenience method for approving a pairing code.
+        
+        Args:
+            channel_type: Channel type (e.g., "telegram", "slack")
+            code: Pairing code to verify
+            user_id: User ID for the channel (optional, uses code if not provided)
+            user_name: Human-readable username (optional)
+            
+        Returns:
+            True if approval successful, False if code invalid/expired
+        """
+        # Use code as channel_id if user_id not provided
+        channel_id = user_id or code
+        label = user_name or f"User {channel_id}"
+        return self.verify_and_pair(code, channel_id, channel_type, label)
+
+    def list_pending(self, channel_type: Optional[str] = None) -> List[Dict[str, str]]:
+        """List pending pairing requests.
+        
+        Args:
+            channel_type: Optional filter by channel type
+            
+        Returns:
+            List of pending requests with channel, code, user info, and age
+        """
+        with self._lock:
+            self._prune_expired()
+            
+            pending_list = []
+            now = time.time()
+            
+            for code, info in self._pending.items():
+                if channel_type and info.get("channel_type") != channel_type:
+                    continue
+                    
+                pending_list.append({
+                    "channel": info.get("channel_type", "unknown"),
+                    "code": code,
+                    "user_id": code,  # Use code as user_id for consistency
+                    "user_name": f"User {code}",
+                    "age_seconds": int(now - info.get("created_at", now)),
+                })
+                
+        return pending_list
+
     # ── Persistence ───────────────────────────────────────────────────
 
     def _save(self) -> None:
