@@ -1038,9 +1038,11 @@ class AgentTeam:
                                 if isinstance(guardrail_result.result, str):
                                     # Update the task output with the modified result
                                     task_output.raw = guardrail_result.result
+                                    task.result = task_output
                                 elif hasattr(guardrail_result.result, 'raw'):
                                     # Replace with the new task output
                                     task_output = guardrail_result.result
+                                    task.result = task_output
                             
                             logger.info(f"Task {task_id}: Guardrail validation passed")
                         except Exception as e:
@@ -1050,8 +1052,7 @@ class AgentTeam:
                     task.status = "completed"
                     # Run execute_callback for memory operations
                     try:
-                        # Use the new sync wrapper to avoid pending coroutine issues
-                        task.execute_callback_sync(task_output)
+                        await task.execute_callback(task_output)
                     except Exception as e:
                         logger.error(f"Error executing memory callback for task {task_id}: {e}")
                         logger.exception(e)

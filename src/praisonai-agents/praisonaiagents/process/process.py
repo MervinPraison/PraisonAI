@@ -393,7 +393,7 @@ class Process:
         # Parse JSON and validate with Pydantic
         return self._parse_manager_instructions(response, ManagerInstructions)
 
-    def _check_all_tasks_completed(self) -> bool:
+    async def _check_all_tasks_completed(self) -> bool:
         """Check if all tasks are completed and handle workflow completion.
         
         Returns:
@@ -401,6 +401,19 @@ class Process:
         """
         if all(task.status == "completed" for task in self.tasks.values()):
             logging.info("All tasks are completed.")
+            await self._set_workflow_finished(True)
+            return True
+        return False
+    
+    def _check_all_tasks_completed_sync(self) -> bool:
+        """Synchronous version of _check_all_tasks_completed.
+        
+        Returns:
+            bool: True if all tasks are completed and workflow should exit, False otherwise.
+        """
+        if all(task.status == "completed" for task in self.tasks.values()):
+            logging.info("All tasks are completed.")
+            # Use direct assignment for sync context
             self.workflow_finished = True
             return True
         return False
@@ -480,7 +493,7 @@ Tasks by type:
             """)
 
             # ADDED: Check if all tasks are completed and set workflow_finished flag
-            if self._check_all_tasks_completed():
+            if await self._check_all_tasks_completed():
                 break  # Exit immediately to prevent task reset
 
             task_id = current_task.id
@@ -1077,7 +1090,7 @@ Tasks by type:
             """)
 
             # ADDED: Check if all tasks are completed and set workflow_finished flag
-            if self._check_all_tasks_completed():
+            if self._check_all_tasks_completed_sync():
                 break  # Exit immediately to prevent task reset
 
 

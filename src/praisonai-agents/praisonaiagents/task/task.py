@@ -529,7 +529,7 @@ class Task:
         }
 
     def initialize_memory(self):
-        """Thread-safe memory initialization with double-checked locking"""
+        """Synchronous memory initialization with thread-safe locking"""
         if not self.memory and self.config.get('memory_config'):
             # Thread-safe memory initialization using double-checked locking
             import threading
@@ -545,11 +545,56 @@ class Task:
                         self.memory = Memory(config=self.config['memory_config'])
                         logger.info(f"Task {self.id}: Memory initialized successfully")
 
-                        # Verify database was created
-                        if os.path.exists(self.config['memory_config']['storage']['path']):
-                            logger.info(f"Task {self.id}: Memory database exists after initialization")
-                        else:
-                            logger.error(f"Task {self.id}: Failed to create memory database!")
+                        # Verify database was created (defensive config access)
+                        storage_path = (
+                            self.config.get('memory_config', {})
+                            .get('storage', {})
+                            .get('path')
+                        )
+                        if storage_path:
+                            if os.path.exists(storage_path):
+                                logger.info(f"Task {self.id}: Memory database exists after initialization")
+                            else:
+                                logger.error(f"Task {self.id}: Failed to create memory database!")
+                    except Exception as e:
+                        logger.error(f"Task {self.id}: Failed to initialize memory: {e}")
+                        logger.exception(e)
+                        return None
+            return self.memory
+        return None
+        
+    async def initialize_memory_async(self):
+        """Async-safe memory initialization with asyncio coordination"""
+        if not self.memory and self.config.get('memory_config'):
+            import asyncio
+            # Initialize async lock once in __init__ if needed
+            if not hasattr(self, '_memory_init_lock_async'):
+                self._memory_init_lock_async = asyncio.Lock()
+            
+            async with self._memory_init_lock_async:
+                # Double-check after acquiring lock
+                if not self.memory:
+                    try:
+                        # Use asyncio.to_thread to avoid blocking the event loop
+                        def create_memory():
+                            from ..memory.memory import Memory
+                            return Memory(config=self.config['memory_config'])
+                        
+                        logger.info(f"Task {self.id}: Initializing memory from config: {self.config['memory_config']}")
+                        self.memory = await asyncio.to_thread(create_memory)
+                        logger.info(f"Task {self.id}: Memory initialized successfully")
+
+                        # Verify database was created (defensive config access)
+                        storage_path = (
+                            self.config.get('memory_config', {})
+                            .get('storage', {})
+                            .get('path')
+                        )
+                        if storage_path:
+                            if os.path.exists(storage_path):
+                                logger.info(f"Task {self.id}: Memory database exists after initialization")
+                            else:
+                                logger.error(f"Task {self.id}: Failed to create memory database!")
                     except Exception as e:
                         logger.error(f"Task {self.id}: Failed to initialize memory: {e}")
                         logger.exception(e)
@@ -585,7 +630,7 @@ class Task:
 
         # Initialize memory if not already initialized
         if not self.memory:
-            self.memory = self.initialize_memory()
+            self.memory = await self.initialize_memory_async()
 
         logger.info(f"Memory object exists: {self.memory is not None}")
         if self.memory:
