@@ -237,15 +237,6 @@ class PairingStore:
         with self._lock:
             return list(self._paired.values())
 
-    def list_pending(self) -> List[dict]:
-        """List all pending pairing codes."""
-        with self._lock:
-            self._prune_expired()
-            return [
-                {"code": code, **info} 
-                for code, info in self._pending.items()
-            ]
-
     def revoke(self, channel_id: str, channel_type: str) -> bool:
         """Revoke a paired channel.  Returns ``True`` if it existed."""
         with self._lock:
@@ -298,11 +289,17 @@ class PairingStore:
                 if channel_type and info.get("channel_type") != channel_type:
                     continue
                     
+                ct = info.get("channel_type", "unknown")
+                cid = info.get("channel_id")
                 pending_list.append({
-                    "channel": info.get("channel_type", "unknown"),
                     "code": code,
-                    "user_id": code,  # Use code as user_id for consistency
-                    "user_name": f"User {code}",
+                    "channel_type": ct,
+                    "channel_id": cid,
+                    "created_at": info.get("created_at", now),
+                    # UI-friendly aliases (used by praisonai.ui._pairing banner)
+                    "channel": ct,
+                    "user_id": cid or code,
+                    "user_name": f"User {cid or code}",
                     "age_seconds": int(now - info.get("created_at", now)),
                 })
                 
