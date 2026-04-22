@@ -5220,7 +5220,7 @@ Now, {final_instruction.lower()}:"""
                 app_dir="ui_agents",
                 default_app_name="ui_agents",
                 port=8082,  # Use same port as old Chainlit agents
-                host="0.0.0.0",
+                host="127.0.0.1",
                 app_file=None,
                 reload=False,
                 ui_name="Agents Dashboard"
