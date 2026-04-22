@@ -178,6 +178,7 @@ class WebSocketGateway:
             host=_substitute(gateway_config.get("host", "127.0.0.1")),
             port=int(gateway_config.get("port", 8765)),
             auth_token=_substitute(gateway_config.get("auth_token")),
+            allowed_origins=gateway_config.get("allowed_origins", []),
             max_connections=int(gateway_config.get("max_connections", 1000)),
             heartbeat_interval=int(gateway_config.get("heartbeat_interval", 30)),
             reconnect_timeout=int(gateway_config.get("reconnect_timeout", 60)),
@@ -234,6 +235,14 @@ class WebSocketGateway:
                     except Exception as e:
                         logger.debug(f"Could not save auth token to .env: {e}")
         
+        # Load allowed origins from environment if not set
+        if hasattr(self.config, 'allowed_origins') and not self.config.allowed_origins:
+            env_origins = os.environ.get("GATEWAY_ALLOWED_ORIGINS", "").strip()
+            if env_origins:
+                # Split by comma and clean up whitespace
+                self.config.allowed_origins = [origin.strip() for origin in env_origins.split(",") if origin.strip()]
+                logger.info(f"Gateway using GATEWAY_ALLOWED_ORIGINS from environment: {self.config.allowed_origins}")
+        
         self._host = self.config.host
         self._port = self.config.port
         
@@ -285,6 +294,18 @@ class WebSocketGateway:
         self.config.port = self._port
         self.config.bind_host = self._host
         assert_external_bind_safe(self.config)
+
+        # Import origin checking functionality
+        from .origin_check import check_origin, is_loopback, GatewayStartupError
+
+        # Validate allowed_origins configuration for external binds
+        if not is_loopback(self._host) and not self.config.allowed_origins:
+            logger.error("Gateway startup failed due to configuration error")
+            raise GatewayStartupError(
+                f"Gateway is binding to external interface '{self._host}' but no allowed_origins configured. "
+                "Set GATEWAY_ALLOWED_ORIGINS environment variable or configure allowed_origins in gateway config. "
+                "Example: GATEWAY_ALLOWED_ORIGINS=\"https://your-ui.example.com,https://localhost:3000\""
+            )
         
         try:
             from starlette.applications import Starlette
@@ -378,6 +399,29 @@ class WebSocketGateway:
             })
         
         async def websocket_endpoint(websocket: WebSocket):
+            # Get client IP for rate limiting
+            client_ip = websocket.client.host if websocket.client else "unknown"
+
+            # Rate limiting for WebSocket upgrades (exempt loopback per acceptance criteria)
+            if not is_loopback(client_ip) and not is_loopback(self._host):
+                if not _ws_upgrade_rate.allow("ws_upgrade", client_ip):
+                    retry = _ws_upgrade_rate.time_until_allowed("ws_upgrade", client_ip)
+                    await websocket.close(code=4008, reason="Rate limited")
+                    logger.warning(f"WebSocket upgrade rate limited for {client_ip} (retry in {retry:.0f}s)")
+                    return
+
+            # Origin validation (CSWSH defense)
+            origin = websocket.headers.get("origin")
+            try:
+                if not check_origin(origin, self.config.allowed_origins, self._host):
+                    await websocket.close(code=4003, reason="Origin not allowed")
+                    logger.warning(f"WebSocket connection rejected: origin '{origin}' not in allowed list")
+                    return
+            except GatewayStartupError as e:
+                await websocket.close(code=4003, reason="Configuration error")
+                logger.error(f"WebSocket connection failed due to configuration error: {e}")
+                return
+
             # Authenticate WebSocket via session cookie or query param
             if self.config.auth_token:
                 authenticated = False
@@ -444,7 +488,8 @@ class WebSocketGateway:
 
         _approval_mgr = get_exec_approval_manager()
         _approval_rate = AuthRateLimiter(max_attempts=10, window_seconds=60)
-        
+        _ws_upgrade_rate = AuthRateLimiter(max_attempts=10, window_seconds=60)
+
         # Create pairing routes
         _pairing_routes = create_pairing_routes(self.pairing_store, _check_auth, _approval_rate)
 

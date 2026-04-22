@@ -197,6 +197,7 @@ class GatewayConfig:
         host: Host to bind to
         port: Port to listen on
         cors_origins: Allowed CORS origins
+        allowed_origins: Allowed origins for WebSocket connections (CSWSH defense)
         auth_token: Optional authentication token
         max_connections: Maximum concurrent connections
         max_sessions_per_agent: Maximum sessions per agent (0 = unlimited)
@@ -212,6 +213,7 @@ class GatewayConfig:
     port: int = 8765
     bind_host: Optional[str] = None
     cors_origins: List[str] = field(default_factory=lambda: [])
+    allowed_origins: List[str] = field(default_factory=lambda: [])
     auth_token: Optional[str] = None
     max_connections: int = 1000
     max_sessions_per_agent: int = 0  # 0 = unlimited
@@ -233,6 +235,7 @@ class GatewayConfig:
             "host": self.host,
             "port": self.port,
             "cors_origins": self.cors_origins,
+            "allowed_origins": self.allowed_origins,
             "auth_token": "***" if self.auth_token else None,
             "max_connections": self.max_connections,
             "max_sessions_per_agent": self.max_sessions_per_agent,
@@ -366,6 +369,7 @@ class MultiChannelGatewayConfig:
             host=gw_data.get("host", "127.0.0.1"),
             port=gw_data.get("port", 8765),
             cors_origins=gw_data.get("cors_origins", []),
+            allowed_origins=gw_data.get("allowed_origins", []),
             auth_token=gw_data.get("auth_token"),
             max_connections=gw_data.get("max_connections", 1000),
         )
