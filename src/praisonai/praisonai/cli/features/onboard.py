@@ -592,6 +592,15 @@ class OnboardWizard:
                 console.print, self.config_path
             )
 
+        # Step 5b: Generate magic link
+        # Generate a magic link for easy access to the gateway dashboard
+        _magic_link_url = "(not available)"
+        try:
+            from praisonai.cli.commands.mint_link import mint_fresh_link
+            _magic_link_url = mint_fresh_link(ttl=600)  # 10 minutes
+        except Exception:
+            pass
+        
         # Done panel. Commands referenced here must exist in `praisonai --help`.
         # OS-aware daemon management hints: non-developers struggle to find
         # launchctl/systemctl invocations themselves, so we surface the exact
@@ -624,12 +633,17 @@ class OnboardWizard:
         console.print(Panel(
             f"[bold green]Setup complete![/bold green] "
             f"[dim]{daemon_running_text}[/dim]\n\n"
+            f"[bold]🔗 Quick Access (magic link - expires in 10 min):[/bold]\n"
+            f"  [cyan]{_magic_link_url}[/cyan]\n"
+            f"  [dim]Click to authenticate instantly (no token needed)[/dim]\n\n"
             f"[bold]🦞 Dashboard UI:[/bold]\n"
             f"  [cyan]praisonai claw[/cyan]          [dim]→ http://127.0.0.1:8082[/dim]\n\n"
             f"[bold]Gateway endpoints:[/bold]\n"
             f"  Health (public):  [cyan]{_health_url}[/cyan]\n"
             f"  Info (authed):    [cyan]{_info_url}[/cyan]\n"
             f"  [dim]Token {_masked} stored in ~/.praisonai/.env as GATEWAY_AUTH_TOKEN[/dim]\n\n"
+            f"[bold]Generate fresh magic links:[/bold]\n"
+            f"  [cyan]praisonai gateway mint-link[/cyan]  [dim]# get a new magic link[/dim]\n\n"
             f"[bold]Manage the daemon:[/bold]\n"
             f"  [cyan]praisonai gateway status[/cyan]     [dim]# is it running?[/dim]\n"
             f"  [cyan]praisonai gateway logs[/cyan]       [dim]# tail the logs[/dim]\n"

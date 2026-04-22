@@ -282,18 +282,47 @@ class WebSocketGateway:
               - ``Authorization: Bearer <token>`` header (preferred for APIs)
               - ``?token=<token>`` query parameter (so the dashboard URL from
                 ``praisonai onboard`` is clickable in a browser)
+              - Cookie-based authentication (praisonai_session cookie)
             """
             if not self.config.auth_token:
                 return None
+            
+            # Check for cookie authentication first
+            try:
+                from .cookie_auth import create_auth_manager_from_env
+                auth_manager = create_auth_manager_from_env()
+                if auth_manager:
+                    cookie_header = request.headers.get("cookie", "")
+                    token_from_cookie = auth_manager.extract_token_from_cookies(cookie_header)
+                    if token_from_cookie and auth_manager.is_token_valid(token_from_cookie):
+                        return None  # Authenticated via cookie
+            except ImportError:
+                pass
+            
+            # Check loopback bypass for local requests
+            client_host = getattr(request.client, 'host', None) if request.client else None
+            if client_host and client_host in ('127.0.0.1', '::1', 'localhost'):
+                # Allow local requests without auth for development
+                return None
+            
+            # Fall back to token-based auth
             auth_header = request.headers.get("authorization", "")
             token: str = ""
             if auth_header.startswith("Bearer "):
                 token = auth_header[7:]
             else:
                 token = request.query_params.get("token", "")
+                if token:
+                    import warnings
+                    warnings.warn(
+                        "DeprecationWarning: Use Sec-WebSocket-Protocol or magic link cookie",
+                        DeprecationWarning,
+                        stacklevel=2
+                    )
+            
             if not token:
                 return JSONResponse(
-                    {"error": "Authentication required"},
+                    {"error": "Authentication required. Please use your magic link."},
                     status_code=401,
                     headers={"WWW-Authenticate": "Bearer"},
                 )
@@ -481,7 +510,84 @@ class WebSocketGateway:
 
             return JSONResponse({"error": "Method not allowed"}, status_code=405)
 
+        # ── Magic Link Authentication ────────────────────────────────────
+        from .magic_link import MagicLinkStore
+        from .cookie_auth import create_auth_manager_from_env
+        from .rate_limiter import AuthRateLimiter
+        
+        # Initialize magic link store and rate limiter
+        _magic_store = MagicLinkStore()
+        _magic_rate = AuthRateLimiter(max_attempts=5, window_seconds=60)
+        
+        async def magic_link_handler(request):
+            """Handle GET /?link=<nonce> magic link authentication."""
+            nonce = request.query_params.get("link", "")
+            if not nonce:
+                # No magic link, redirect to auth required page or return 401
+                return JSONResponse(
+                    {"error": "Authentication required. Get a fresh link: praisonai gateway mint-link"},
+                    status_code=401
+                )
+            
+            client_ip = request.client.host if request.client else "unknown"
+            if not _magic_rate.allow("magic_link", client_ip):
+                retry = _magic_rate.time_until_allowed("magic_link", client_ip)
+                return JSONResponse(
+                    {"error": "Rate limited", "retry_after_seconds": round(retry)},
+                    status_code=429,
+                )
+            
+            # Try to consume the nonce
+            if not _magic_store.consume(nonce):
+                return JSONResponse(
+                    {"error": "This link was already used or has expired. Get a fresh one: praisonai gateway mint-link"},
+                    status_code=401
+                )
+            
+            # Create session cookie
+            try:
+                auth_manager = create_auth_manager_from_env()
+                if not auth_manager:
+                    return JSONResponse(
+                        {"error": "Cookie authentication not available"},
+                        status_code=500
+                    )
+                
+                session_token = auth_manager.create_session(
+                    user_id="gateway_user",
+                    auth_method="magic_link"
+                )
+                
+                # Determine if HTTPS
+                is_https = (
+                    request.headers.get("x-forwarded-proto") == "https" or
+                    request.url.scheme == "https"
+                )
+                
+                cookie_header = auth_manager.create_cookie_header(
+                    session_token,
+                    secure=is_https,
+                    http_only=True,
+                    same_site="Strict"
+                )
+                
+                # Redirect to remove the nonce from URL
+                from starlette.responses import RedirectResponse
+                response = RedirectResponse(
+                    url=str(request.url.replace(query="")),
+                    status_code=302
+                )
+                response.headers["Set-Cookie"] = cookie_header
+                return response
+                
+            except ImportError:
+                return JSONResponse(
+                    {"error": "Cookie authentication dependencies not available"},
+                    status_code=500
+                )
+        
         routes = [
+            Route("/", magic_link_handler, methods=["GET"]),
             Route("/health", health, methods=["GET"]),
             Route("/info", info, methods=["GET"]),
             Route("/api/approval/pending", approval_pending, methods=["GET"]),
