@@ -202,6 +202,13 @@ _LAZY_IMPORTS = {
     'FlowDisplay': ('praisonaiagents.flow_display', 'FlowDisplay'),
     'track_workflow': ('praisonaiagents.flow_display', 'track_workflow'),
     
+    # CLI Backend Protocol (Protocol-driven external CLI integration)
+    'CliBackendProtocol': ('praisonaiagents.cli_backend.protocols', 'CliBackendProtocol'),
+    'CliBackendConfig': ('praisonaiagents.cli_backend.protocols', 'CliBackendConfig'),
+    'CliSessionBinding': ('praisonaiagents.cli_backend.protocols', 'CliSessionBinding'),
+    'CliBackendResult': ('praisonaiagents.cli_backend.protocols', 'CliBackendResult'),
+    'CliBackendDelta': ('praisonaiagents.cli_backend.protocols', 'CliBackendDelta'),
+    
     # Agent classes
     'Agent': ('praisonaiagents.agent.agent', 'Agent'),
     'BudgetExceededError': ('praisonaiagents.errors', 'BudgetExceededError'),
