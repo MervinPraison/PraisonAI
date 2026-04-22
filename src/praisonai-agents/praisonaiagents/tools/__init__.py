@@ -10,7 +10,7 @@ _tools_lazy_cache = {}
 # Export core tool items for organized imports (lightweight)
 from .base import BaseTool, ToolResult, ToolValidationError, validate_tool
 from .decorator import tool, FunctionTool
-from .registry import get_registry, register_tool, get_tool, add_tool, has_tool, remove_tool, list_tools, ToolRegistry
+from .registry import get_registry, register_tool, get_tool, add_tool, has_tool, remove_tool, list_tools, list_available_tools, ToolRegistry
 from .tools import Tools
 
 # Export Injected type directly for easy access
@@ -204,6 +204,13 @@ TOOL_MAPPINGS = {
     'smtp_send_email': ('.email_tools', None),
     'smtp_read_inbox': ('.email_tools', None),
     'email_tools': ('.email_tools', None),
+    
+    # Clarify tool
+    'clarify': ('.clarify', None),  # Direct import of clarify instance
+    'ClarifyTool': ('.clarify', 'ClarifyTool'),
+    'ClarifyHandler': ('.clarify', 'ClarifyHandler'),
+    'create_cli_clarify_handler': ('.clarify', 'create_cli_clarify_handler'),
+    'create_bot_clarify_handler': ('.clarify', 'create_bot_clarify_handler'),
 }
 
 # Tool factory functions - caches classes but creates fresh instances
@@ -311,6 +318,8 @@ def __getattr__(name: str) -> Any:
         module = import_module(module_path, __package__)
         return getattr(module, class_name)
     
+    # Remove the special case since it's now handled by None class_name
+    
     if class_name is None:
         # Direct function import
         module = import_module(module_path, __package__)
@@ -334,7 +343,9 @@ def __getattr__(name: str) -> Any:
             'store_memory', 'search_memory',
             'store_learning', 'search_learning',
             'send_email', 'list_emails', 'read_email', 'reply_email', 'list_inboxes', 'create_inbox',
-            'smtp_send_email', 'smtp_read_inbox'
+            'smtp_send_email', 'smtp_read_inbox',
+            'create_cli_clarify_handler', 'create_bot_clarify_handler',
+            'clarify'
         ]:
             return getattr(module, name)
         if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools', 'github_tools', 'schedule_tools', 'ast_grep_tools', 'email_tools']:

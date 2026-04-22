@@ -9,6 +9,7 @@ from .tool_protocol import (
     CallableToolProtocol,
     AsyncToolProtocol,
     ValidatableToolProtocol,
+    ToolAvailabilityProtocol,
 )
 
 # Lazy import to avoid loading protocols unless needed
@@ -24,5 +25,6 @@ __all__ = [
     "CallableToolProtocol",
     "AsyncToolProtocol",
     "ValidatableToolProtocol",
+    "ToolAvailabilityProtocol",
 ]
 
