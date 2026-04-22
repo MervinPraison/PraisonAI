@@ -34,9 +34,13 @@ def apply_bot_smart_defaults(agent: Any, config: Optional[Any] = None) -> Any:
     if agent is None:
         return agent
     
-    # Only enhance Agent instances (not AgentTeam/AgentFlow)
-    agent_cls_name = type(agent).__name__
-    if agent_cls_name not in ("Agent",):
+    # Only enhance Agent instances (not AgentTeam/AgentFlow). Use isinstance so
+    # user subclasses of Agent also receive smart defaults.
+    try:
+        from praisonaiagents import Agent as _Agent
+    except ImportError:
+        return agent
+    if not isinstance(agent, _Agent):
         return agent
     
     # Wire BotConfig.auto_approve_tools → Agent(approval=True)
@@ -69,32 +73,29 @@ def apply_bot_smart_defaults(agent: Any, config: Optional[Any] = None) -> Any:
         }
         logger.debug(f"Bot: injected session history for agent '{getattr(agent, 'name', '?')}'")
     
-    # Add default tools if agent has none
+    # Add default tools if agent has none (unless explicitly set to empty)
     # NOTE: Agent class always initializes tools=[], so we check for empty list
+    # Don't inject defaults if user explicitly specified tools: [] in YAML
     current_tools = getattr(agent, 'tools', None) or []
-    if not current_tools:
+    explicit_empty = getattr(agent, '_explicit_empty_tools', False)
+    if not current_tools and not explicit_empty:
         # Use safe defaults (exclude destructive tools like execute_command)
         default_safe_tools = _get_default_safe_tools(config)
         
         if default_safe_tools:
             try:
                 resolved_tools = _resolve_tool_names(default_safe_tools)
-                if resolved_tools:
-                    agent.tools = resolved_tools
-                    logger.debug(f"Bot: applied {len(resolved_tools)} default safe tools to agent '{getattr(agent, 'name', '?')}'")
-                else:
-                    # Profile resolution returned empty - try fallback
-                    fallback_tools = _get_fallback_tools()
-                    if fallback_tools:
-                        agent.tools = fallback_tools
-                        logger.debug(f"Bot: applied {len(fallback_tools)} fallback tools to agent '{getattr(agent, 'name', '?')}'")
-            except Exception as e:
+            except (ImportError, AttributeError) as e:
                 logger.warning(f"Failed to resolve default tools: {e}")
-                # Fallback: hardcoded imports if tool resolution fails
-                fallback_tools = _get_fallback_tools()
-                if fallback_tools:
-                    agent.tools = fallback_tools
-                    logger.debug(f"Bot: applied {len(fallback_tools)} fallback tools to agent '{getattr(agent, 'name', '?')}'")
+                resolved_tools = []
+            if not resolved_tools:
+                resolved_tools = _get_fallback_tools()
+            if resolved_tools:
+                agent.tools = resolved_tools
+                logger.debug(
+                    f"Bot: applied {len(resolved_tools)} default tools to agent "
+                    f"'{getattr(agent, 'name', '?')}'"
+                )
     
     return agent
 
@@ -176,7 +177,7 @@ def _resolve_tool_names(tool_names: List[str]) -> list:
         
         return resolved_tools
         
-    except Exception:
+    except (ImportError, AttributeError):
         # Fall back to direct imports if profile resolution fails
         return []
 
