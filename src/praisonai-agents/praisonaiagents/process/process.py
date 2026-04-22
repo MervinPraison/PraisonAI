@@ -238,6 +238,12 @@ class Process:
                         break  # Only include the most recent one
                         
         return context
+    
+    async def _set_workflow_finished(self, value: bool):
+        """Thread-safe setter for workflow_finished flag."""
+        lock = await self._get_state_lock()
+        async with lock:
+            self.workflow_finished = value
 
     def _find_next_not_started_task(self) -> Optional[Task]:
         """Fallback mechanism to find the next 'not started' task."""
@@ -245,9 +251,10 @@ class Process:
         temp_current_task = None
         
         # Clear previous task context before finding next task
+        # NOTE: Fixed to only clear _execution_context instead of mutating descriptions
         for task in self.tasks.values():
-            if hasattr(task, 'description') and 'Input data from previous tasks:' in task.description:
-                task.description = task.description.split('Input data from previous tasks:')[0].strip()
+            if hasattr(task, '_execution_context'):
+                task._execution_context = None
         
         while fallback_attempts < self.max_retries and not temp_current_task:
             fallback_attempts += 1
@@ -488,13 +495,10 @@ Context tasks: {[t.name for t in current_task.context] if current_task.context e
 Description length: {len(current_task.description)}
             """)
 
-            # Build context and set description for this execution pass only
+            # Build context and store separately instead of mutating description
             context = self._build_task_context(current_task)
-            # Store original description if not already stored
-            if not hasattr(current_task, '_original_description'):
-                current_task._original_description = current_task.description
-            # Set description with context for execution; reset after yield to prevent accumulation
-            current_task.description = current_task._original_description + (context if context else "")
+            # Store context in dedicated field instead of concatenating to description
+            current_task._execution_context = context if context else ""
 
             # Skip execution for loop tasks, only process their subtasks
             if current_task.task_type == "loop":
@@ -1162,13 +1166,10 @@ Context tasks: {[t.name for t in current_task.context] if current_task.context e
 Description length: {len(current_task.description)}
             """)
 
-            # Build context and set description for this execution pass only
+            # Build context and store separately instead of mutating description
             context = self._build_task_context(current_task)
-            # Store original description if not already stored
-            if not hasattr(current_task, '_original_description'):
-                current_task._original_description = current_task.description
-            # Set description with context for execution; reset after yield to prevent accumulation
-            current_task.description = current_task._original_description + (context if context else "")
+            # Store context in dedicated field instead of concatenating to description
+            current_task._execution_context = context if context else ""
 
             # Skip execution for loop tasks, only process their subtasks
             if current_task.task_type == "loop":

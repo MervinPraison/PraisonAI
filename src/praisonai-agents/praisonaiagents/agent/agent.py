@@ -4821,8 +4821,15 @@ Answer:"""
         await self.aclose()
     
     def __del__(self):
-        """Destructor safely does nothing to avoid GC pollution in test loops."""
-        pass
+        """Lightweight cleanup that only closes resources if not already closed."""
+        if not getattr(self, '_closed', True):
+            # Only close connections, skip anything that could fail during GC
+            try:
+                memory = getattr(self, "_memory_instance", None)
+                if memory and hasattr(memory, 'close_connections'):
+                    memory.close_connections()
+            except Exception:
+                pass  # Ignore errors during GC cleanup
         
     @property
     def is_closed(self) -> bool:
