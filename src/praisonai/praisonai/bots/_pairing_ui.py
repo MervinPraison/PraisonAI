@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import json
 import logging
+from functools import lru_cache
 from typing import Any, Dict, Optional
 
 from praisonaiagents.bots.pairing_types import PairingApprovalResult
@@ -16,11 +17,12 @@ from praisonaiagents.bots.pairing_types import PairingApprovalResult
 logger = logging.getLogger(__name__)
 
 
+@lru_cache(maxsize=1)
 def _get_callback_secret() -> str:
     """Get HMAC secret for callback payload verification."""
     import os
     import secrets
-    return os.environ.get("PRAISONAI_CALLBACK_SECRET", "") or secrets.token_hex(16)
+    return os.environ.get("PRAISONAI_CALLBACK_SECRET", "") or secrets.token_hex(32)
 
 
 class PairingUIBuilder:
@@ -29,8 +31,8 @@ class PairingUIBuilder:
     @staticmethod
     def create_telegram_keyboard(user_name: str, code: str, channel: str, user_id: str) -> Dict[str, Any]:
         """Create Telegram inline keyboard for approval."""
-        approve_data = f"pair:approve:{channel}:{code}"
-        deny_data = f"pair:deny:{channel}:{code}"
+        approve_data = f"pair:approve:{channel}:{user_id}:{code}"
+        deny_data = f"pair:deny:{channel}:{user_id}:{code}"
         
         # Add HMAC signature to prevent tampering
         secret = _get_callback_secret().encode()
@@ -55,8 +57,8 @@ class PairingUIBuilder:
     @staticmethod
     def create_discord_components(user_name: str, code: str, channel: str, user_id: str) -> list:
         """Create Discord button components for approval."""
-        approve_id = f"pair:approve:{channel}:{code}"
-        deny_id = f"pair:deny:{channel}:{code}"
+        approve_id = f"pair:approve:{channel}:{user_id}:{code}"
+        deny_id = f"pair:deny:{channel}:{user_id}:{code}"
         
         # Add HMAC signature
         secret = _get_callback_secret().encode()
@@ -86,8 +88,8 @@ class PairingUIBuilder:
     @staticmethod
     def create_slack_blocks(user_name: str, code: str, channel: str, user_id: str) -> list:
         """Create Slack block kit for approval."""
-        approve_value = f"pair:approve:{channel}:{code}"
-        deny_value = f"pair:deny:{channel}:{code}"
+        approve_value = f"pair:approve:{channel}:{user_id}:{code}"
+        deny_value = f"pair:deny:{channel}:{user_id}:{code}"
         
         # Add HMAC signature
         secret = _get_callback_secret().encode()
@@ -140,23 +142,24 @@ class PairingCallbackHandler:
         """Parse and verify callback data from button press.
         
         Args:
-            callback_data: Raw callback data (e.g., "pair:approve:telegram:abc123:sig")
+            callback_data: Raw callback data (e.g., "pair:approve:telegram:user123:abc123:sig")
             
         Returns:
             Parsed data dict or None if invalid
         """
         try:
             parts = callback_data.split(":")
-            if len(parts) < 5 or parts[0] != "pair":
+            if len(parts) < 6 or parts[0] != "pair":
                 return None
             
-            action = parts[1]  # approve/deny
-            channel = parts[2]  # telegram/discord/slack
-            code = parts[3]     # pairing code
-            signature = parts[4] # HMAC signature
+            action = parts[1]    # approve/deny
+            channel = parts[2]   # telegram/discord/slack
+            user_id = parts[3]   # original requester user ID
+            code = parts[4]      # pairing code
+            signature = parts[5] # HMAC signature
             
             # Verify signature
-            payload = f"pair:{action}:{channel}:{code}"
+            payload = f"pair:{action}:{channel}:{user_id}:{code}"
             secret = _get_callback_secret().encode()
             expected_sig = hmac.new(secret, payload.encode(), hashlib.sha256).hexdigest()[:8]
             
@@ -166,7 +169,8 @@ class PairingCallbackHandler:
             
             return {
                 "action": action,
-                "channel": channel, 
+                "channel": channel,
+                "user_id": user_id,
                 "code": code
             }
             
@@ -200,12 +204,13 @@ class PairingCallbackHandler:
         action = parsed["action"]
         channel = parsed["channel"]
         code = parsed["code"]
+        requester_user_id = parsed["user_id"]
         
         if action == "approve":
             # Approve the pairing
             success = self.pairing_store.verify_and_pair(
                 code=code,
-                channel_id=owner_user_id,  # This would be the original user_id
+                channel_id=requester_user_id,  # Use original requester's ID
                 channel_type=channel,
                 label=f"Approved by {owner_user_id}"
             )
@@ -214,7 +219,7 @@ class PairingCallbackHandler:
                 # Notify original user
                 try:
                     await bot_adapter.reply(
-                        owner_user_id,  # This should be the original requester
+                        requester_user_id,  # Notify the original requester
                         "You've been approved! Send me a message."
                     )
                 except Exception as e:
@@ -223,7 +228,7 @@ class PairingCallbackHandler:
                 return PairingApprovalResult(
                     success=True,
                     message="✅ Approved",
-                    user_id=owner_user_id,
+                    user_id=requester_user_id,
                     channel=channel
                 )
             else:
@@ -233,8 +238,19 @@ class PairingCallbackHandler:
                 )
                 
         elif action == "deny":
-            # Revoke if was temporarily added, or just ignore
-            # Note: In real implementation, we'd need to track the original user_id
+            # Consume the code to prevent reuse
+            try:
+                # Try to consume the code without pairing by calling verify_and_pair with dummy values
+                # This will consume the code and return False since it won't actually pair
+                self.pairing_store.verify_and_pair(
+                    code=code,
+                    channel_id="__denied__",  # Dummy value that won't be stored
+                    channel_type="__denied__",
+                    label="Denied pairing request"
+                )
+            except Exception as e:
+                logger.error(f"Failed to consume denied code: {e}")
+            
             return PairingApprovalResult(
                 success=True,
                 message="❌ Denied",

@@ -205,7 +205,9 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 return
             
             # Handle unknown users with pairing system
-            if not self.config.is_user_allowed(message.sender.user_id if message.sender else ""):
+            user_id = message.sender.user_id if message.sender else ""
+            is_explicitly_allowed = bool(self.config.allowed_users) and self.config.is_user_allowed(user_id)
+            if not is_explicitly_allowed:
                 user_allowed = await UnknownUserHandler.handle(message, self._bot_context)
                 if not user_allowed:
                     return

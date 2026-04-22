@@ -83,6 +83,12 @@ class BotConfig:
     
     # Owner user ID for pairing approvals (platform-specific format)
     owner_user_id: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.unknown_user_policy not in {"deny", "pair", "allow"}:
+            raise ValueError(
+                f"unknown_user_policy must be one of: deny, pair, allow. Got: {self.unknown_user_policy}"
+            )
     
     metadata: Dict[str, Any] = field(default_factory=dict)
     

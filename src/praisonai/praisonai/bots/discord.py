@@ -180,7 +180,9 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                 return
             
             # Handle unknown users with pairing system
-            if not self.config.is_user_allowed(bot_message.sender.user_id if bot_message.sender else ""):
+            user_id = bot_message.sender.user_id if bot_message.sender else ""
+            is_explicitly_allowed = bool(self.config.allowed_users) and self.config.is_user_allowed(user_id)
+            if not is_explicitly_allowed:
                 user_allowed = await UnknownUserHandler.handle(bot_message, self._bot_context)
                 if not user_allowed:
                     return
@@ -582,14 +584,22 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
         
         try:
             if chat_id.isdigit():
-                # DM to user
-                user = await self._client.fetch_user(int(chat_id))
-                await user.send(text)
-            else:
-                # Channel message
+                # Try channel first, then user, then fetch channel
                 channel = self._client.get_channel(int(chat_id))
                 if channel:
                     await channel.send(text)
+                    return
+                
+                try:
+                    user = await self._client.fetch_user(int(chat_id))
+                    await user.send(text)
+                    return
+                except Exception:
+                    # Last resort: fetch channel
+                    channel = await self._client.fetch_channel(int(chat_id))
+                    await channel.send(text)
+            else:
+                logger.error(f"Invalid chat_id format: {chat_id}")
         except Exception as e:
             logger.error(f"Failed to send reply: {e}")
     

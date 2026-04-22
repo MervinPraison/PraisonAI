@@ -12,7 +12,7 @@ from praisonaiagents.bots import BotMessage, BotUser, BotChannel, MessageType
 from praisonaiagents.bots.config import BotConfig
 from praisonaiagents.bots.pairing_types import PairingApprovalResult
 from praisonai.bots._unknown_user import UnknownUserHandler, BotContext
-from praisonai.bots._pairing_ui import PairingCallbackHandler
+from praisonai.bots._pairing_ui import PairingCallbackHandler, PairingUIBuilder
 from praisonai.gateway.pairing import PairingStore
 
 
@@ -69,7 +69,7 @@ class TestPairingOwnerDM:
     
     def create_test_message(self, user_id: str = "new-user", user_name: str = "Alice") -> BotMessage:
         """Create a test message from an unknown user."""
-        return BotMessage(
+        message = BotMessage(
             message_id="msg-1",
             content="hello",
             message_type=MessageType.TEXT,
@@ -83,8 +83,9 @@ class TestPairingOwnerDM:
                 channel_type="dm"
             ),
             timestamp=1234567890.0,
-            _channel_type="telegram"  # Add channel type for pairing
         )
+        message._channel_type = "telegram"  # Add channel type for pairing
+        return message
     
     async def test_unknown_user_triggers_pairing_request(self):
         """Test that unknown user triggers pairing request to owner."""
@@ -119,19 +120,22 @@ class TestPairingOwnerDM:
         approval_dm = self.adapter.approval_dms[0]
         code = approval_dm["code"]
         
-        # Simulate owner approval
-        callback_handler = PairingCallbackHandler(self.pairing_store)
-        callback_data = f"pair:approve:telegram:{code}:fake_sig"  # Signature check will fail but that's OK for test
-        
-        # We need to bypass signature verification for testing
-        # So let's directly approve via the pairing store
-        success = self.pairing_store.verify_and_pair(
+        # Simulate owner approval using real signed callback
+        keyboard = PairingUIBuilder.create_telegram_keyboard(
+            user_name="Alice",
             code=code,
-            channel_id="new-user",  
-            channel_type="telegram",
-            label="Test approval"
+            channel="telegram",
+            user_id="new-user",
         )
-        assert success
+        callback_data = keyboard["inline_keyboard"][0][0]["callback_data"]  # Get approve button callback
+        
+        callback_handler = PairingCallbackHandler(self.pairing_store)
+        result = await callback_handler.handle_approval_callback(
+            callback_data=callback_data,
+            owner_user_id="owner-123",
+            bot_adapter=self.adapter,
+        )
+        assert result.success
         
         # Now a second message from the same user should be allowed
         message2 = self.create_test_message()

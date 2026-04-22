@@ -84,13 +84,8 @@ class UnknownUserHandler:
         unknown_policy = getattr(bot_ctx.config, 'unknown_user_policy', 'deny')
         
         if unknown_policy == "allow":
-            # Auto-approve and pair the user
-            bot_ctx.pairing_store.verify_and_pair(
-                code="auto", 
-                channel_id=user_id, 
-                channel_type=channel_type,
-                label=f"Auto-approved: {user_name}"
-            )
+            # Auto-approve without creating a persistent pair
+            # Users with "allow" policy don't need to be paired permanently
             return True
             
         elif unknown_policy == "deny":
