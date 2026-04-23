@@ -755,7 +755,7 @@ Methods:
 
 Types:
 ```python
-from praisonai import AgentApp, AgentOS, AnthropicManagedAgent, CloudProvider, DB, Deploy, DeployConfig, DeployType, LocalManagedAgent, LocalManagedConfig, ManagedAgent, ManagedConfig, PraisonAI, __version__
+from praisonai import Agent, AgentApp, AgentOS, AnthropicManagedAgent, CloudProvider, DB, Deploy, DeployConfig, DeployType, LocalManagedAgent, LocalManagedConfig, ManagedAgent, ManagedConfig, PraisonAI, __version__
 ```
 
 # CLI
