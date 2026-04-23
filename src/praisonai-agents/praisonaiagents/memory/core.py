@@ -426,6 +426,7 @@ class MemoryCoreMixin:
             quality_score: Optional pre-calculated quality score
             user_id: Optional user identifier
             auto_promote: Whether to automatically promote to LTM if quality is high
+            **kwargs: Additional provider-specific arguments forwarded to the adapter
             
         Returns:
             The memory ID of the stored content
@@ -442,8 +443,7 @@ class MemoryCoreMixin:
         raw_metadata = metadata.copy() if metadata else {}
         raw_metadata.update({
             "timestamp": datetime.now().isoformat(),
-            "quality_score": quality_score,
-            "memory_type": "short_term"
+            "quality": quality_score,
         })
         if user_id:
             raw_metadata["user_id"] = user_id
@@ -472,7 +472,7 @@ class MemoryCoreMixin:
         # Auto-promote to long-term memory if quality is high (async)
         if auto_promote and quality_score >= 7.5:  # High quality threshold
             try:
-                await self.store_long_term_async(content, clean_metadata, quality_score, user_id)
+                await self.store_long_term_async(content, clean_metadata, quality_score, user_id, **kwargs)
                 self._log_verbose(f"Auto-promoted STM content to LTM (score: {quality_score:.2f})")
             except Exception as e:
                 logging.warning(f"Failed to auto-promote to LTM: {e}")
@@ -485,7 +485,7 @@ class MemoryCoreMixin:
         return memory_id or ""
 
     async def store_long_term_async(self, content: str, metadata: Optional[Dict] = None, quality_score: Optional[float] = None,
-                                  user_id: Optional[str] = None) -> str:
+                                  user_id: Optional[str] = None, **kwargs) -> str:
         """
         Async version of store_long_term to prevent event loop blocking.
         
@@ -494,6 +494,7 @@ class MemoryCoreMixin:
             metadata: Optional metadata dictionary
             quality_score: Optional pre-calculated quality score
             user_id: Optional user identifier
+            **kwargs: Additional provider-specific arguments forwarded to the adapter
             
         Returns:
             The memory ID of the stored content
@@ -506,4 +507,4 @@ class MemoryCoreMixin:
             quality_score = self.compute_quality_score(content, metadata)
         
         # Use sync version in thread to avoid blocking event loop
-        return await asyncio.to_thread(self.store_long_term, content, metadata, quality_score, user_id)
+        return await asyncio.to_thread(self.store_long_term, content, metadata, quality_score, user_id, **kwargs)

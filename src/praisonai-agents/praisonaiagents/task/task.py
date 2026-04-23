@@ -608,9 +608,17 @@ class Task:
         if not self.memory:
             return False
         
-        # Additional checks could be added here
-        # For example, verify database connectivity, etc.
-        return True
+        # Check if memory has required adapters available
+        try:
+            # Check if memory adapter is available for basic operations
+            has_adapter = hasattr(self.memory, 'memory_adapter') and self.memory.memory_adapter is not None
+            # Also check for SQLite fallback
+            has_sqlite = hasattr(self.memory, '_sqlite_adapter') and self.memory._sqlite_adapter is not None
+            
+            return has_adapter or has_sqlite
+        except Exception:
+            # If any error occurs during readiness check, consider memory not ready
+            return False
 
     def store_in_memory(self, content: str, agent_name: str = None, task_id: str = None):
         """Store content in memory with metadata"""
@@ -660,77 +668,77 @@ class Task:
 
         logger.info(f"Task output: {task_output.raw[:100]}...")
 
-        if self.quality_check:
-            if self.memory and self._verify_memory_ready():
-                try:
-                    logger.info(f"Task {self.id}: Starting memory operations")
-                    logger.info(f"Task {self.id}: Calculating quality metrics for output: {task_output.raw[:100]}...")
+        if self.quality_check and self.memory and self._verify_memory_ready():
+            try:
+                logger.info(f"Task {self.id}: Starting memory operations")
+                logger.info(f"Task {self.id}: Calculating quality metrics for output: {task_output.raw[:100]}...")
 
-                    # Get quality metrics from LLM
-                    # Determine which LLM model to use based on agent configuration
-                    llm_model = None
-                    if self.agent:
-                        if getattr(self.agent, '_using_custom_llm', False) and hasattr(self.agent, 'llm_instance'):
-                            # For custom LLM instances (like Ollama)
-                            # Extract the model name from the LLM instance
-                            if hasattr(self.agent.llm_instance, 'model'):
-                                llm_model = self.agent.llm_instance.model
-                            else:
-                                llm_model = "gpt-4o-mini"  # Default fallback
-                        elif hasattr(self.agent, 'llm') and self.agent.llm:
-                            # For standard model strings
-                            llm_model = self.agent.llm
+                # Get quality metrics from LLM
+                # Determine which LLM model to use based on agent configuration
+                llm_model = None
+                if self.agent:
+                    if getattr(self.agent, '_using_custom_llm', False) and hasattr(self.agent, 'llm_instance'):
+                        # For custom LLM instances (like Ollama)
+                        # Extract the model name from the LLM instance
+                        if hasattr(self.agent.llm_instance, 'model'):
+                            llm_model = self.agent.llm_instance.model
+                        else:
+                            llm_model = "gpt-4o-mini"  # Default fallback
+                    elif hasattr(self.agent, 'llm') and self.agent.llm:
+                        # For standard model strings
+                        llm_model = self.agent.llm
 
-                    metrics = self.memory.calculate_quality_metrics(
-                        task_output.raw,
-                        self.expected_output,
-                        llm=llm_model
+                metrics = self.memory.calculate_quality_metrics(
+                    task_output.raw,
+                    self.expected_output,
+                    llm=llm_model
+                )
+                logger.info(f"Task {self.id}: Quality metrics calculated: {metrics}")
+
+                quality_score = metrics.get("accuracy", 0.0)
+                logger.info(f"Task {self.id}: Quality score: {quality_score}")
+
+                # Store in both short and long-term memory with higher threshold
+                logger.info(f"Task {self.id}: Finalizing task output in memory...")
+                self.memory.finalize_task_output(
+                    content=task_output.raw,
+                    agent_name=self.agent.name if self.agent else "Agent",
+                    quality_score=quality_score,
+                    threshold=0.7,  # Only high quality outputs in long-term memory
+                    metrics=metrics,
+                    task_id=self.id
+                )
+                logger.info(f"Task {self.id}: Finalized task output in memory")
+
+                # Store quality metrics separately
+                logger.info(f"Task {self.id}: Storing quality metrics...")
+                self.memory.store_quality(
+                    text=task_output.raw,
+                    quality_score=quality_score,
+                    task_id=self.id,
+                    metrics=metrics
+                )
+
+                # Build context for next tasks
+                if self.next_tasks:
+                    logger.info(f"Task {self.id}: Building context for next tasks...")
+                    context = self.memory.build_context_for_task(
+                        task_descr=task_output.raw,
+                        max_items=5
                     )
-                    logger.info(f"Task {self.id}: Quality metrics calculated: {metrics}")
+                    logger.info(f"Task {self.id}: Built context for next tasks: {len(context)} items")
 
-                    quality_score = metrics.get("accuracy", 0.0)
-                    logger.info(f"Task {self.id}: Quality score: {quality_score}")
-
-                    # Store in both short and long-term memory with higher threshold
-                    logger.info(f"Task {self.id}: Finalizing task output in memory...")
-                    self.memory.finalize_task_output(
-                        content=task_output.raw,
-                        agent_name=self.agent.name if self.agent else "Agent",
-                        quality_score=quality_score,
-                        threshold=0.7,  # Only high quality outputs in long-term memory
-                        metrics=metrics,
-                        task_id=self.id
-                    )
-                    logger.info(f"Task {self.id}: Finalized task output in memory")
-
-                    # Store quality metrics separately
-                    logger.info(f"Task {self.id}: Storing quality metrics...")
-                    self.memory.store_quality(
-                        text=task_output.raw,
-                        quality_score=quality_score,
-                        task_id=self.id,
-                        metrics=metrics
-                    )
-
-                    # Build context for next tasks
-                    if self.next_tasks:
-                        logger.info(f"Task {self.id}: Building context for next tasks...")
-                        context = self.memory.build_context_for_task(
-                            task_descr=task_output.raw,
-                            max_items=5
-                        )
-                        logger.info(f"Task {self.id}: Built context for next tasks: {len(context)} items")
-
-                    logger.info(f"Task {self.id}: Memory operations complete")
-                except Exception as e:
-                    error_msg = f"memory operations: {e}"
-                    self.non_fatal_errors.append(error_msg)
-                    logger.error(f"Task {self.id}: Failed to process memory operations: {e}")
-                    logger.exception(e)  # Print full stack trace
-                    # Continue execution even if memory operations fail
-            else:
-                logger.warning(f"Task {self.id}: Memory not available, skipping memory operations")
-                self.non_fatal_errors.append("memory not available for operations")
+                logger.info(f"Task {self.id}: Memory operations complete")
+            except Exception as e:
+                error_msg = f"memory operations: {e}"
+                self.non_fatal_errors.append(error_msg)
+                logger.error(f"Task {self.id}: Failed to process memory operations: {e}")
+                logger.exception(e)  # Print full stack trace
+                # Continue execution even if memory operations fail
+        elif self.quality_check and self.config.get('memory_config'):
+            # Only log as error if quality_check was enabled AND memory was explicitly requested via config
+            logger.warning(f"Task {self.id}: Memory requested for quality checks but not available, skipping memory operations")
+            self.non_fatal_errors.append("memory requested for quality checks but not available")
 
         # Execute original callback with metadata support
         if self.callback:
