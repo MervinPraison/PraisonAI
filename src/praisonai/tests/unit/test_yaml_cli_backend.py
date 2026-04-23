@@ -28,12 +28,12 @@ roles:
         mock_resolve.return_value = mock_backend
         
         generator = AgentsGenerator(config=yaml_content)
-        agents, tasks = generator.create_agents_and_tasks()
+        agents, _tasks = generator.create_agents_and_tasks()
         
         # Verify agent was created with CLI backend
         assert 'coder' in agents
         agent = agents['coder']
-        assert hasattr(agent, '_cli_backend')
+        assert getattr(agent, '_cli_backend', None) is mock_backend
         
         # Verify CLI backend was resolved correctly
         mock_resolve.assert_called_once_with('claude-code')
@@ -65,12 +65,12 @@ roles:
         mock_resolve.return_value = mock_backend
         
         generator = AgentsGenerator(config=yaml_content)
-        agents, tasks = generator.create_agents_and_tasks()
+        agents, _tasks = generator.create_agents_and_tasks()
         
         # Verify agent was created with CLI backend
         assert 'coder' in agents
         agent = agents['coder']
-        assert hasattr(agent, '_cli_backend')
+        assert getattr(agent, '_cli_backend', None) is mock_backend
         
         # Verify CLI backend was resolved with overrides
         mock_resolve.assert_called_once_with('claude-code', overrides={'timeout_ms': 60000})
@@ -98,7 +98,7 @@ roles:
     
     # Should not raise exception but log warning
     generator = AgentsGenerator(config=yaml_content)
-    agents, tasks = generator.create_agents_and_tasks()
+    agents, _tasks = generator.create_agents_and_tasks()
     
     # Agent should be created without CLI backend
     assert 'coder' in agents
@@ -125,7 +125,7 @@ roles:
     from praisonai.agents_generator import AgentsGenerator
     
     generator = AgentsGenerator(config=yaml_content)
-    agents, tasks = generator.create_agents_and_tasks()
+    agents, _tasks = generator.create_agents_and_tasks()
     
     # Verify agent was created without CLI backend
     assert 'coder' in agents
@@ -153,7 +153,7 @@ roles:
     
     with patch('praisonai.cli_backends.resolve_cli_backend', side_effect=ImportError("CLI backends not available")):
         generator = AgentsGenerator(config=yaml_content)
-        agents, tasks = generator.create_agents_and_tasks()
+        agents, _tasks = generator.create_agents_and_tasks()
         
         # Agent should be created without CLI backend due to import error
         assert 'coder' in agents
@@ -181,7 +181,7 @@ roles:
     
     # Should not raise exception but log warning
     generator = AgentsGenerator(config=yaml_content)
-    agents, tasks = generator.create_agents_and_tasks()
+    agents, _tasks = generator.create_agents_and_tasks()
     
     # Agent should be created without CLI backend due to invalid type
     assert 'coder' in agents

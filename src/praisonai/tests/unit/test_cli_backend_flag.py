@@ -14,11 +14,14 @@ def test_cli_backend_flag_choices():
         
         # Parse help to check choices are included
         with patch('sys.argv', ['praisonai', '--help']):
-            with pytest.raises(SystemExit):
-                with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                with pytest.raises(SystemExit):
                     praison.parse_args()
-                    help_output = mock_stdout.getvalue()
-                    assert '--cli-backend' in help_output
+                help_output = mock_stdout.getvalue()
+
+        assert '--cli-backend' in help_output
+        assert 'claude-code' in help_output
+        assert 'test-backend' in help_output
 
 def test_cli_backend_flag_with_prompt():
     """Test CLI backend flag with direct prompt."""
@@ -40,6 +43,14 @@ def test_cli_backend_flag_with_prompt():
                     args = praison.parse_args()
                     assert args.cli_backend == 'claude-code'
                     assert args.command == 'Hello'
+                    
+                    # Test the full execution path
+                    praison.args = args
+                    result = praison.main()
+                    
+                    assert result == "test result"
+                    mock_handler.assert_called_once()
+                    mock_resolve.assert_called_once_with('claude-code')
 
 def test_mutual_exclusion_cli_backend_external_agent():
     """Test mutual exclusion between --cli-backend and --external-agent."""
@@ -48,21 +59,10 @@ def test_mutual_exclusion_cli_backend_external_agent():
     with patch('praisonai.cli_backends.list_cli_backends', return_value=['claude-code']):
         praison = PraisonAI()
         
-        # Test that both flags trigger error
+        # Test that both flags trigger argparse error
         with patch('sys.argv', ['praisonai', '--cli-backend', 'claude-code', '--external-agent', 'claude', 'Hello']):
-            args = praison.parse_args()
-            args.cli_backend = 'claude-code'
-            args.external_agent = 'claude'
-            
-            # Mock the main method to check for mutual exclusion
-            with patch('sys.exit') as mock_exit:
-                with patch('builtins.print') as mock_print:
-                    praison.args = args
-                    praison.main()
-                    
-                    # Should exit with error
-                    mock_exit.assert_called_once_with(1)
-                    mock_print.assert_called_with("[red]Error: --cli-backend and --external-agent are mutually exclusive[/red]")
+            with pytest.raises(SystemExit):
+                praison.parse_args()
 
 def test_backends_list_command():
     """Test 'praisonai backends list' command."""
