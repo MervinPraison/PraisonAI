@@ -172,46 +172,49 @@ class ClaudeCodeBackend:
                 await process.stdin.drain()
                 process.stdin.close()
             
-            # Wrap the reading loop with timeout
-            async def read_stream():
-                async for line in self._read_lines(process.stdout):
-                    if line.strip():
-                        try:
-                            event = json.loads(line)
-                            delta_type = event.get("type", "text")
-                            content = event.get("content", event.get("data", ""))
-                            
-                            yield CliBackendDelta(
-                                type=delta_type,
-                                content=str(content),
-                                metadata=event
-                            )
-                        except json.JSONDecodeError:
-                            # Fallback for non-JSON lines
-                            yield CliBackendDelta(
-                                type="text",
-                                content=line,
-                                metadata={}
-                            )
+            # Stream with timeout protection
+            timeout_seconds = self.config.timeout_ms / 1000
+            start_time = asyncio.get_event_loop().time()
+            
+            async for line in self._read_lines(process.stdout):
+                # Check timeout on each iteration
+                if asyncio.get_event_loop().time() - start_time > timeout_seconds:
+                    raise TimeoutError(f"Claude CLI streaming timed out after {self.config.timeout_ms}ms")
                 
-                # Wait for process completion
+                if line.strip():
+                    try:
+                        event = json.loads(line)
+                        delta_type = event.get("type", "text")
+                        content = event.get("content", event.get("data", ""))
+                        
+                        yield CliBackendDelta(
+                            type=delta_type,
+                            content=str(content),
+                            metadata=event
+                        )
+                    except json.JSONDecodeError:
+                        # Fallback for non-JSON lines
+                        yield CliBackendDelta(
+                            type="text",
+                            content=line,
+                            metadata={}
+                        )
+            
+            # Wait for process completion with timeout
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5.0)  # Short final wait
+            except asyncio.TimeoutError:
+                process.kill()
                 await process.wait()
                 
-                if process.returncode != 0:
-                    stderr = await process.stderr.read()
-                    error_msg = stderr.decode() if stderr else f"Process exited {process.returncode}"
-                    yield CliBackendDelta(
-                        type="error",
-                        content=f"Claude CLI error: {error_msg}",
-                        metadata={"return_code": process.returncode}
-                    )
-            
-            # Apply timeout using asyncio.wait_for on the generator
-            try:
-                async for delta in read_stream():
-                    yield delta
-            except asyncio.TimeoutError:
-                raise
+            if process.returncode != 0:
+                stderr = await process.stderr.read()
+                error_msg = stderr.decode() if stderr else f"Process exited {process.returncode}"
+                yield CliBackendDelta(
+                    type="error",
+                    content=f"Claude CLI error: {error_msg}",
+                    metadata={"return_code": process.returncode}
+                )
                 
         except asyncio.TimeoutError:
             # Kill the process if it's still running

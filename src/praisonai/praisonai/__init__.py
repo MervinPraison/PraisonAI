@@ -15,6 +15,7 @@ __all__ = [
     'CloudProvider',
     'AgentOS',  # Production deployment platform (v0.14.16+)
     'AgentApp',  # Silent alias for AgentOS (backward compat)
+    'Agent',  # Wrapper Agent with CLI backend string resolution
     'recipe',
     'embed',
     'embedding',
@@ -57,6 +58,9 @@ def __getattr__(name):
     if name == 'PraisonAI':
         from .cli import PraisonAI
         return PraisonAI
+    elif name == 'Agent':
+        from .agent import Agent
+        return Agent
     elif name == 'Deploy':
         from .deploy import Deploy
         return Deploy

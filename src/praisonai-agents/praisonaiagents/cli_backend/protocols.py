@@ -66,6 +66,7 @@ class CliSessionBinding:
     auth_profile_id: Optional[str] = None
     system_prompt_hash: Optional[str] = None
     mcp_config_hash: Optional[str] = None
+    is_resume: bool = False  # Whether this is resuming an existing session
 
 
 @dataclass

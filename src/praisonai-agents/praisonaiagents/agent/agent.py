@@ -4692,13 +4692,18 @@ Answer:"""
     # -------------------------------------------------------------------------
     
     def _resolve_cli_backend(self, cli_backend):
-        """Resolve CLI backend parameter to a CliBackendProtocol instance.
+        """Validate and return CLI backend protocol instance.
         
         Args:
-            cli_backend: String backend ID or CliBackendProtocol instance
+            cli_backend: CliBackendProtocol instance or callable that returns one
             
         Returns:
             CliBackendProtocol instance
+            
+        Note:
+            String backend IDs must be resolved to instances in the wrapper layer
+            before passing to Agent. This maintains proper dependency direction
+            per AGENTS.md (core SDK should not import from wrapper).
         """
         # Import protocols
         try:
@@ -4712,19 +4717,23 @@ Answer:"""
         # If already a protocol instance, return as-is
         if hasattr(cli_backend, 'execute') and hasattr(cli_backend, 'stream'):
             return cli_backend
+            
+        # If callable (factory function), call it to get instance
+        if callable(cli_backend):
+            instance = cli_backend()
+            if hasattr(instance, 'execute') and hasattr(instance, 'stream'):
+                return instance
+            raise TypeError(f"CLI backend factory returned invalid type: {type(instance)}. Expected CliBackendProtocol.")
         
-        # If string, resolve via registry (lazy import wrapper)
+        # String IDs are no longer supported at core level - must be resolved in wrapper
         if isinstance(cli_backend, str):
-            try:
-                from praisonai.cli_backends import resolve_cli_backend
-                return resolve_cli_backend(cli_backend)
-            except ImportError:
-                raise ImportError(
-                    f"CLI backend '{cli_backend}' requested but praisonai wrapper package not installed. "
-                    "Install with: pip install praisonai"
-                )
+            raise TypeError(
+                f"String CLI backend IDs ('{cli_backend}') must be resolved to instances "
+                "in the wrapper layer. Use: praisonai.Agent(cli_backend='claude-code') "
+                "or manually resolve: agent = praisonaiagents.Agent(cli_backend=resolve_cli_backend('claude-code'))"
+            )
         
-        raise TypeError(f"Invalid cli_backend type: {type(cli_backend)}. Expected str or CliBackendProtocol.")
+        raise TypeError(f"Invalid cli_backend type: {type(cli_backend)}. Expected CliBackendProtocol instance or factory callable.")
     
     async def _chat_via_cli_backend(self, prompt: str, **kwargs) -> Optional[str]:
         """Chat implementation using CLI backend delegation.
