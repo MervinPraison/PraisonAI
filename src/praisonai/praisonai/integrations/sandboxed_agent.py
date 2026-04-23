@@ -1,5 +1,8 @@
 """
-Sandboxed Agent Backend — local agent loop with remote tool execution.
+Sandboxed Agent Backend — local agent loop with OPTIONAL tool sandboxing.
+
+Tools are sandboxed when compute= is provided (E2B, Modal, etc.).
+Without compute=, tools run locally. Agent loop always stays local.
 
 Renamed from "LocalManagedAgent" to accurately communicate that only TOOLS
 run in sandbox — the agent loop (LLM calls, event handling, memory) stays local.
@@ -39,10 +42,10 @@ from .managed_local import (
 
 # Re-export for import consistency
 __all__ = [
-    "SandboxedAgent", 
-    "SandboxedAgentConfig",
-    "_translate_anthropic_tools",
     "_build_custom_tool_fn", 
     "_DEFAULT_SYSTEM",
     "_DEFAULT_TOOLS",
+    "_translate_anthropic_tools",
+    "SandboxedAgent",
+    "SandboxedAgentConfig",
 ]

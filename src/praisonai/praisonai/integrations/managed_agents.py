@@ -279,9 +279,9 @@ class AnthropicManagedAgent:
 
         # Accept ManagedConfig dataclass *or* plain dict
         if config is not None and not isinstance(config, dict):
-            # Assume dataclass — convert to dict
-            from dataclasses import asdict
-            self._cfg = asdict(config)
+            # Assume dataclass — preserve nested typed configs; serialize later
+            from dataclasses import fields
+            self._cfg = {f.name: getattr(config, f.name) for f in fields(config)}
         else:
             self._cfg: Dict[str, Any] = config or {}
 
@@ -412,8 +412,13 @@ class AnthropicManagedAgent:
             logger.warning("[managed] archive_agent called but no agent exists")
             return
         client = self._get_client()
+        archived_id = self.agent_id
         client.beta.agents.archive(self.agent_id)
-        logger.info("[managed] agent archived: %s", self.agent_id)
+        # Clear cached state immediately after successful archive
+        self.agent_id = None
+        self.agent_version = None
+        self._session_id = None
+        logger.info("[managed] agent archived: %s", archived_id)
 
     def list_agent_versions(self) -> List[Dict[str, Any]]:
         """List all versions of the current agent."""
@@ -516,8 +521,12 @@ class AnthropicManagedAgent:
             logger.warning("[managed] archive_environment called but no environment exists")
             return
         client = self._get_client()
+        archived_id = self.environment_id
         client.beta.environments.archive(self.environment_id)
-        logger.info("[managed] environment archived: %s", self.environment_id)
+        # Clear cached state
+        self.environment_id = None
+        self._session_id = None
+        logger.info("[managed] environment archived: %s", archived_id)
 
     def delete_environment(self) -> None:
         """Delete the current environment."""
@@ -528,6 +537,7 @@ class AnthropicManagedAgent:
         client.beta.environments.delete(self.environment_id)
         logger.info("[managed] environment deleted: %s", self.environment_id)
         self.environment_id = None
+        self._session_id = None
 
     # ------------------------------------------------------------------
     # Session
@@ -829,6 +839,7 @@ class AnthropicManagedAgent:
         self.environment_id = None
         self._session_id = None
         self._client = None
+        self._vault_manager = None
         self.total_input_tokens = 0
         self.total_output_tokens = 0
 
